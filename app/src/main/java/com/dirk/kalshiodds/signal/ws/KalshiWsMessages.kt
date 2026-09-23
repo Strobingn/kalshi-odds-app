@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.model.TickSource
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -40,6 +41,21 @@ object KalshiWsMessages {
     sealed class Parsed {
         data class Ticker(val tick: MarketTick) : Parsed()
         data class Trade(val tick: MarketTick) : Parsed()
+        data class OrderbookSnapshot(
+            val ticker: String,
+            val yesLevels: List<Pair<Double, Double>>,
+            val noLevels: List<Pair<Double, Double>>,
+            val seq: Int?,
+            val receiveElapsedNanos: Long
+        ) : Parsed()
+        data class OrderbookDelta(
+            val ticker: String,
+            val price: Double,
+            val delta: Double,
+            val side: String,
+            val seq: Int?,
+            val receiveElapsedNanos: Long
+        ) : Parsed()
         data class Subscribed(val sid: Int?, val raw: String) : Parsed()
         data class Error(val code: Int?, val message: String) : Parsed()
         data class Other(val type: String?, val raw: String) : Parsed()
@@ -73,6 +89,12 @@ object KalshiWsMessages {
             "trade" -> {
                 val tick = parseTrade(env.msg, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
                 Parsed.Trade(tick)
+            }
+            "orderbook_snapshot" -> {
+                parseSnapshot(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
+            }
+            "orderbook_delta" -> {
+                parseDelta(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
             }
             "subscribed" -> Parsed.Subscribed(env.sid ?: env.msg?.intField("sid"), raw)
             "error" -> Parsed.Error(
@@ -126,6 +148,60 @@ object KalshiWsMessages {
         )
     }
 
+    fun parseSnapshot(msg: JsonObject?, seq: Int?, receiveElapsedNanos: Long): Parsed.OrderbookSnapshot? {
+        if (msg == null) return null
+        val ticker = msg.stringField("market_ticker") ?: return null
+        val yes = msg.levelArray("yes_dollars_fp", "yes_dollars", "yes")
+        val no = msg.levelArray("no_dollars_fp", "no_dollars", "no")
+        return Parsed.OrderbookSnapshot(
+            ticker = ticker,
+            yesLevels = yes,
+            noLevels = no,
+            seq = seq,
+            receiveElapsedNanos = receiveElapsedNanos
+        )
+    }
+
+    fun parseDelta(msg: JsonObject?, seq: Int?, receiveElapsedNanos: Long): Parsed.OrderbookDelta? {
+        if (msg == null) return null
+        val ticker = msg.stringField("market_ticker") ?: return null
+        val side = msg.stringField("side") ?: return null
+        val price = msg.dollarField("price_dollars", "price") ?: return null
+        val delta = msg.rawDouble("delta_fp", "delta") ?: return null
+        return Parsed.OrderbookDelta(
+            ticker = ticker,
+            price = price,
+            delta = delta,
+            side = side,
+            seq = seq,
+            receiveElapsedNanos = receiveElapsedNanos
+        )
+    }
+
+    private fun JsonObject.levelArray(vararg names: String): List<Pair<Double, Double>> {
+        for (n in names) {
+            val arr = this[n] as? JsonArray ?: continue
+            val out = ArrayList<Pair<Double, Double>>(arr.size)
+            for (el in arr) {
+                val pair = el as? JsonArray ?: continue
+                if (pair.size < 2) continue
+                val pricePrim = pair[0] as? JsonPrimitive ?: continue
+                val sizePrim = pair[1] as? JsonPrimitive ?: continue
+                val priceRaw = pricePrim.doubleOrNull ?: pricePrim.contentOrNull?.toDoubleOrNull() ?: continue
+                val size = sizePrim.doubleOrNull ?: sizePrim.contentOrNull?.toDoubleOrNull() ?: continue
+                val priceText = pricePrim.contentOrNull.orEmpty()
+                val price = if (!priceText.contains('.') && priceRaw > 1.0 && priceRaw <= 100.0) {
+                    priceRaw / 100.0
+                } else {
+                    priceRaw
+                }
+                if (size > 0.0) out += price to size
+            }
+            if (out.isNotEmpty() || arr.isEmpty()) return out
+        }
+        return emptyList()
+    }
+
     private fun JsonObject.stringField(vararg names: String): String? {
         for (n in names) {
             val v = this[n] ?: continue
@@ -150,6 +226,15 @@ object KalshiWsMessages {
     private fun JsonObject.intField(name: String): Int? {
         val v = this[name] as? JsonPrimitive ?: return null
         return v.longOrNull?.toInt() ?: v.contentOrNull?.toIntOrNull()
+    }
+
+    private fun JsonObject.rawDouble(vararg names: String): Double? {
+        for (n in names) {
+            val v = this[n] as? JsonPrimitive ?: continue
+            v.doubleOrNull?.let { return it }
+            v.contentOrNull?.toDoubleOrNull()?.let { return it }
+        }
+        return null
     }
 
     /**

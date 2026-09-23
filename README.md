@@ -18,11 +18,11 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.1.8**
+Package: `com.dirk.kalshiodds` · version **0.1.9**
 
 This release is **read-only**. It does **not** place trades, subscribe to fills/portfolio, or send orders.
 
-## Live signals (v0.1.8)
+## Live signals (v0.1.9)
 
 Event-driven fair-value alerts on crypto ticks.
 
@@ -37,8 +37,8 @@ Event-driven fair-value alerts on crypto ticks.
 
    Handshake headers (required even for public `ticker`): `KALSHI-ACCESS-KEY`, `KALSHI-ACCESS-TIMESTAMP` (ms), `KALSHI-ACCESS-SIGNATURE` over `timestamp + "GET" + "/trade-api/ws/v2"` using RSA-PSS/SHA-256 or Ed25519.
 
-5. The client subscribes to `ticker` (and optionally `trade`) **only for watched crypto markets**.
-6. If keys are missing: fast REST poll continues and the status chip reads **“WS needs API key — using REST”**.
+5. The client subscribes to `ticker`, `orderbook_delta` (snapshot then incremental deltas), and optionally `trade` **only for watched crypto markets**.
+6. If keys are missing: fast REST poll continues and the status chip reads **“WS needs API key — using REST”**. Local book imbalance is then unavailable and that blend weight is dropped.
 
 **Notifications:** channel `diphunter_signal_alerts` (HIGH). Foreground ongoing: `diphunter_live_signals` (LOW). Target path is tick-receive → notify in under 1s while the service is running. Killed-app remote push would need FCM later; this release is **local instant alerts** only.
 
@@ -49,10 +49,10 @@ Event-driven fair-value alerts on crypto ticks.
 3. Probability rule: mid = `(yes_bid + yes_ask) / 2` else `last_price`.
 4. Scoring engine (dedicated tick dispatcher):
 
-   `fairValue = blend(DipHunter TFLite, volume-flow/momentum, related crypto mid)`  
+   `fairValue = blend(DipHunter TFLite, volume-flow, related crypto mid, tick velocity Δmid/Δt, order-book imbalance)`  
    `delta = fairValue − marketMid` (percentage points)
 
-   When `|delta|` crosses the configured threshold (default **5pp**), a `SignalAlert` is emitted (10s debounce per ticker) and a local notification is posted.
+   Velocity uses the last N=16 ticker/trade/REST mids (`Δmid / Δt`, plus short acceleration). Imbalance is `(bidSize − askSize) / (bidSize + askSize)` near mid (3¢ band, else top 3 levels) from the local book. When `|delta|` crosses the configured threshold (default **5pp**), a `SignalAlert` is emitted (10s debounce per ticker) and a local notification is posted.
 
 ## Dip Hunter AI (TFLite)
 
@@ -91,7 +91,7 @@ app/src/main/java/com/dirk/kalshiodds/
   signal/
     config/          DataStore prefs + EncryptedSharedPreferences + default JSON
     ws/              KalshiWsAuth, KalshiWsClient, KalshiWsMessages
-    engine/          ScoringEngine, TickBook
+    engine/          ScoringEngine, TickBook, LocalOrderBook (velocity + imbalance)
     notify/          SignalNotifier (HIGH + LOW channels)
     service/         LiveSignalsService (foreground WS)
     model/           MarketTick, SignalAlert, WsConnectionState

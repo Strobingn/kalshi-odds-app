@@ -65,12 +65,63 @@ class KalshiWsMessagesTest {
     fun subscribeIncludesCryptoTickersOnlyWhenProvided() {
         val body = KalshiWsMessages.subscribe(
             3,
-            listOf("ticker", "trade"),
+            listOf("ticker", "trade", "orderbook_delta"),
             listOf("KXBTC15M-A", "KXETH15M-B")
         )
         assertTrue(body.contains("\"cmd\":\"subscribe\""))
         assertTrue(body.contains("ticker"))
+        assertTrue(body.contains("orderbook_delta"))
         assertTrue(body.contains("KXBTC15M-A"))
         assertTrue(body.contains("KXETH15M-B"))
+    }
+
+    @Test
+    fun parseOrderbookSnapshotDollars() {
+        val raw = """
+            {
+              "type": "orderbook_snapshot",
+              "sid": 2,
+              "seq": 2,
+              "msg": {
+                "market_ticker": "KXBTC15M-26SEP231600-00",
+                "market_id": "9b0f6b43-5b68-4f9f-9f02-9a2d1b8ac1a1",
+                "yes_dollars_fp": [["0.4800", "100.00"], ["0.4700", "50.00"]],
+                "no_dollars_fp": [["0.5000", "80.00"]]
+              }
+            }
+        """.trimIndent()
+        val parsed = KalshiWsMessages.parse(raw, 5L) as KalshiWsMessages.Parsed.OrderbookSnapshot
+        assertEquals("KXBTC15M-26SEP231600-00", parsed.ticker)
+        assertEquals(2, parsed.seq)
+        assertEquals(5L, parsed.receiveElapsedNanos)
+        assertEquals(0.48, parsed.yesLevels[0].first, 1e-6)
+        assertEquals(100.0, parsed.yesLevels[0].second, 1e-6)
+        assertEquals(0.50, parsed.noLevels[0].first, 1e-6)
+        assertEquals(80.0, parsed.noLevels[0].second, 1e-6)
+    }
+
+    @Test
+    fun parseOrderbookDeltaDollars() {
+        val raw = """
+            {
+              "type": "orderbook_delta",
+              "sid": 2,
+              "seq": 3,
+              "msg": {
+                "market_ticker": "KXETH15M-26SEP231645-45",
+                "market_id": "9b0f6b43-5b68-4f9f-9f02-9a2d1b8ac1a1",
+                "price_dollars": "0.9600",
+                "delta_fp": "-54.00",
+                "side": "yes",
+                "ts_ms": 1669149841000
+              }
+            }
+        """.trimIndent()
+        val parsed = KalshiWsMessages.parse(raw, 8L) as KalshiWsMessages.Parsed.OrderbookDelta
+        assertEquals("KXETH15M-26SEP231645-45", parsed.ticker)
+        assertEquals(0.96, parsed.price, 1e-6)
+        assertEquals(-54.0, parsed.delta, 1e-6)
+        assertEquals("yes", parsed.side)
+        assertEquals(3, parsed.seq)
     }
 }

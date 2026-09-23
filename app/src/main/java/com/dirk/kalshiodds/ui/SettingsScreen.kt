@@ -127,7 +127,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
                     "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
-                    "Used only to authenticate the public ticker/trade WebSocket — no portfolio or order channels.",
+                    "Used only to authenticate the public ticker / trade / orderbook_delta WebSocket — no portfolio or order-placement channels.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

@@ -85,6 +85,37 @@ class SignalHub(
         tickScope.launch { processTick(tick, notify = true) }
     }
 
+    fun ingestBookSnapshot(
+        ticker: String,
+        yesLevels: List<Pair<Double, Double>>,
+        noLevels: List<Pair<Double, Double>>,
+        seq: Int?,
+        receiveElapsedNanos: Long
+    ) {
+        tickScope.launch {
+            if (!CryptoMarkets.isCryptoTicker(ticker)) return@launch
+            if (!settings.isWatchedTicker(ticker)) return@launch
+            scoring.applySnapshot(ticker, yesLevels, noLevels, seq)
+            scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+        }
+    }
+
+    fun ingestBookDelta(
+        ticker: String,
+        price: Double,
+        delta: Double,
+        side: String,
+        seq: Int?,
+        receiveElapsedNanos: Long
+    ) {
+        tickScope.launch {
+            if (!CryptoMarkets.isCryptoTicker(ticker)) return@launch
+            if (!settings.isWatchedTicker(ticker)) return@launch
+            scoring.applyDelta(ticker, price, delta, side, seq)
+            scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+        }
+    }
+
     private suspend fun processTick(tick: MarketTick, notify: Boolean) {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return
         if (!settings.isWatchedTicker(tick.ticker)) return
@@ -99,16 +130,18 @@ class SignalHub(
             )
         }
         Log.d(TAG, "tick ticker=${tick.ticker} mid=${tick.midPp} recvNanos=$t0 scoredNanos=$processed src=${tick.source}")
-        if (alert != null && notify) {
-            val posted = if (settings.notificationsEnabled) {
-                withContext(Dispatchers.Main.immediate) { notifier.notify(alert) }
-            } else {
-                elapsedNanos()
-            }
-            val complete = alert.copy(notifyElapsedNanos = posted)
-            _alerts.update { (listOf(complete) + it).take(MAX_ALERTS) }
-            Log.d(TAG, "alert ticker=${alert.ticker} delta=${alert.deltaPp} notifyMs=${complete.latencyToNotifyMs}")
+        if (alert != null && notify) emitAlert(alert)
+    }
+
+    private suspend fun emitAlert(alert: SignalAlert) {
+        val posted = if (settings.notificationsEnabled) {
+            withContext(Dispatchers.Main.immediate) { notifier.notify(alert) }
+        } else {
+            elapsedNanos()
         }
+        val complete = alert.copy(notifyElapsedNanos = posted)
+        _alerts.update { (listOf(complete) + it).take(MAX_ALERTS) }
+        Log.d(TAG, "alert ticker=${alert.ticker} delta=${alert.deltaPp} notifyMs=${complete.latencyToNotifyMs}")
     }
 
     companion object {

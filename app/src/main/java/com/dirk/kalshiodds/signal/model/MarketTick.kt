@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 enum class TickSource {
     WS_TICKER,
     WS_TRADE,
+    WS_ORDERBOOK,
     REST
 }
 
