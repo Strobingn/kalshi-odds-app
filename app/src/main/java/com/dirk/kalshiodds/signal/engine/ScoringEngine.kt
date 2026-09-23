@@ -123,8 +123,8 @@ class ScoringEngine(
     @Volatile
     var external: ExternalSnapshot = ExternalSnapshot()
 
-    private val lastAlertMs = linkedMapOf<String, Long>()
-    private val lastBookScoreMs = linkedMapOf<String, Long>()
+    private val lastAlertMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lastBookScoreMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     fun rememberMeta(ticker: String, closeTimeEpochMs: Long?, volume: Double?, openInterest: Double?) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return

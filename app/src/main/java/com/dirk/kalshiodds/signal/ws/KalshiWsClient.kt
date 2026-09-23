@@ -48,15 +48,15 @@ class KalshiWsClient(
     private var backoffMs = INITIAL_BACKOFF_MS
     private var keyId: String = ""
     private var pem: String = ""
-    private var channels: List<String> = listOf("ticker", "orderbook_delta")
-    private var marketTickers: List<String> = emptyList()
-    private val subscribedSids = mutableListOf<Int>()
+    @Volatile private var channels: List<String> = listOf("ticker", "orderbook_delta")
+    @Volatile private var marketTickers: List<String> = emptyList()
+    private val subscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
 
     fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
         this.keyId = keyId
         this.pem = pem
-        this.channels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }
-        this.marketTickers = marketTickers
+        this.channels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }.toList()
+        this.marketTickers = marketTickers.toList()
         if (running.getAndSet(true)) {
             resubscribe()
             return
@@ -66,8 +66,8 @@ class KalshiWsClient(
     }
 
     fun updateSubscriptions(channels: List<String>, marketTickers: List<String>) {
-        this.channels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }
-        this.marketTickers = marketTickers
+        this.channels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }.toList()
+        this.marketTickers = marketTickers.toList()
         if (running.get() && socket != null) {
             resubscribe()
         }
@@ -79,7 +79,7 @@ class KalshiWsClient(
         reconnectJob = null
         socket?.close(1000, "client stop")
         socket = null
-        onState(State(connected = false, reconnecting = false, host = null, detail = "stopped"))
+        runCatching { onState(State(connected = false, reconnecting = false, host = null, detail = "stopped")) }
     }
 
     private fun connect() {
@@ -96,7 +96,7 @@ class KalshiWsClient(
         }
         val builder = Request.Builder()
             .url(host)
-            .header("User-Agent", "DipHunter/0.2.3 (Android; signals)")
+            .header("User-Agent", "DipHunter/0.2.4 (Android; signals)")
             .header("Accept", "application/json")
         headers.asMap().forEach { (k, v) -> builder.header(k, v) }
         socket?.cancel()
@@ -133,35 +133,41 @@ class KalshiWsClient(
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            backoffMs = INITIAL_BACKOFF_MS
-            val host = webSocket.request().url.toString()
-            onLog("ws open $host")
-            onState(State(connected = true, reconnecting = false, host = host, detail = null))
-            resubscribe()
+            runCatching {
+                backoffMs = INITIAL_BACKOFF_MS
+                val host = webSocket.request().url.toString()
+                onLog("ws open $host")
+                onState(State(connected = true, reconnecting = false, host = host, detail = null))
+                resubscribe()
+            }.onFailure { t ->
+                onLog("onOpen failed: ${t.message}")
+                scheduleReconnect()
+            }
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            val recv = SystemClock.elapsedRealtimeNanos()
-            when (val parsed = KalshiWsMessages.parse(text, recv)) {
+            val recv = runCatching { SystemClock.elapsedRealtimeNanos() }.getOrElse { System.nanoTime() }
+            val parsed = runCatching { KalshiWsMessages.parse(text, recv) }.getOrNull() ?: return
+            when (parsed) {
                 is KalshiWsMessages.Parsed.Ticker -> {
                     if (!CryptoMarkets.isCryptoTicker(parsed.tick.ticker)) return
                     Log.d(TAG, "tick ticker=${parsed.tick.ticker} mid=${parsed.tick.midPp} recvNanos=$recv src=ticker")
-                    onTick(parsed.tick)
+                    runCatching { onTick(parsed.tick) }
                 }
                 is KalshiWsMessages.Parsed.Trade -> {
                     if (!CryptoMarkets.isCryptoTicker(parsed.tick.ticker)) return
                     Log.d(TAG, "tick ticker=${parsed.tick.ticker} mid=${parsed.tick.midPp} recvNanos=$recv src=trade size=${parsed.tick.tradeSize}")
-                    onTick(parsed.tick)
+                    runCatching { onTick(parsed.tick) }
                 }
                 is KalshiWsMessages.Parsed.OrderbookSnapshot -> {
                     if (!CryptoMarkets.isCryptoTicker(parsed.ticker)) return
                     Log.d(TAG, "book snapshot ticker=${parsed.ticker} yes=${parsed.yesLevels.size} no=${parsed.noLevels.size} seq=${parsed.seq}")
-                    onBookSnapshot(parsed)
+                    runCatching { onBookSnapshot(parsed) }
                 }
                 is KalshiWsMessages.Parsed.OrderbookDelta -> {
                     if (!CryptoMarkets.isCryptoTicker(parsed.ticker)) return
                     Log.d(TAG, "book delta ticker=${parsed.ticker} side=${parsed.side} px=${parsed.price} d=${parsed.delta} seq=${parsed.seq}")
-                    onBookDelta(parsed)
+                    runCatching { onBookDelta(parsed) }
                 }
                 is KalshiWsMessages.Parsed.Subscribed -> {
                     parsed.sid?.let { subscribedSids += it }

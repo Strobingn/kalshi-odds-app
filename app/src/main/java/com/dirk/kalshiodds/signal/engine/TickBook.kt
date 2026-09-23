@@ -97,6 +97,17 @@ class TickBook(private val maxPoints: Int = 32) {
     @Synchronized
     fun orderBook(ticker: String): LocalOrderBook? = books[ticker]
 
+    /**
+     * Immutable copy of the local book. UI / TicketBuilder must not iterate
+     * the live TreeMap — WS deltas mutate it on the tick thread.
+     */
+    @Synchronized
+    fun snapshotBook(ticker: String): BookLevelSnapshot? {
+        val book = books[ticker] ?: return null
+        val snap = book.snapshot()
+        return if (snap.isEmpty()) null else snap
+    }
+
     @Synchronized
     fun applySnapshot(
         ticker: String,
@@ -273,26 +284,27 @@ class TickBook(private val maxPoints: Int = 32) {
         return slice.map { it.mid01 } to slice.map { it.nowMs }
     }
 
+    @Synchronized
     fun tickFromBook(
         ticker: String,
         receiveElapsedNanos: Long,
         nowMs: Long = System.currentTimeMillis()
     ): MarketTick? {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
-        val book = synchronized(this) { books[ticker] } ?: return null
+        val book = books[ticker] ?: return null
         val bid = book.bestYesBid()
         val ask = book.bestYesAsk()
         val mid = book.mid01() ?: return null
-        val last = synchronized(this) { lastTickByTicker[ticker] }
+        val last = lastTickByTicker[ticker]
         return MarketTick(
             ticker = ticker,
             series = last?.series ?: CryptoMarkets.inferSeries(ticker),
             yesBid = bid,
             yesAsk = ask,
             lastPrice = last?.lastPrice ?: mid,
-            volume = last?.volume ?: synchronized(this) { volumeByTicker[ticker] },
-            openInterest = last?.openInterest ?: synchronized(this) { oiByTicker[ticker] },
-            closeTimeEpochMs = last?.closeTimeEpochMs ?: synchronized(this) { closeByTicker[ticker] },
+            volume = last?.volume ?: volumeByTicker[ticker],
+            openInterest = last?.openInterest ?: oiByTicker[ticker],
+            closeTimeEpochMs = last?.closeTimeEpochMs ?: closeByTicker[ticker],
             source = TickSource.WS_ORDERBOOK,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = nowMs

@@ -199,19 +199,19 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                     }
                     if (state.settings.watchBtc) {
                         item { SectionHeader("Bitcoin · KXBTC15M") }
-                        marketsOrEmpty(snapshot?.btc.orEmpty())
+                        marketsOrEmpty("btc", snapshot?.btc.orEmpty())
                     }
                     if (state.settings.watchEth) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Ethereum · KXETH15M") }
-                        marketsOrEmpty(snapshot?.eth.orEmpty())
+                        marketsOrEmpty("eth", snapshot?.eth.orEmpty())
                     }
                     if (state.settings.watchSol) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Solana · KXSOL15M") }
-                        marketsOrEmpty(snapshot?.sol.orEmpty())
+                        marketsOrEmpty("sol", snapshot?.sol.orEmpty())
                     }
                     if (snapshot?.extra.orEmpty().isNotEmpty()) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Extra crypto") }
-                        marketsOrEmpty(snapshot?.extra.orEmpty())
+                        marketsOrEmpty("extra", snapshot?.extra.orEmpty())
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
@@ -220,9 +220,12 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
     }
 }
 
-private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(markets: List<MarketUiModel>) {
+private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
+    section: String,
+    markets: List<MarketUiModel>
+) {
     if (markets.isEmpty()) {
-        item {
+        item(key = "empty-$section") {
             Text(
                 text = "No open markets",
                 color = TextSecondary,
@@ -231,7 +234,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(market
             )
         }
     } else {
-        items(markets, key = { it.ticker }) { market ->
+        items(markets, key = { "$section-${it.ticker}" }) { market ->
             MarketCard(market)
         }
     }

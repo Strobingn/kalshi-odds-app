@@ -18,11 +18,11 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.2.3**
+Package: `com.dirk.kalshiodds` · version **0.2.4**
 
-Analysis UI is unchanged. **0.2.3 keeps live odds alive in the background** via a sticky foreground service (no change to trading rules). **0.2.2 added approve-gated limit tickets.** There is no background auto-fire, no set-and-forget trading, and no order on app start. **Not financial advice. High variance — you can lose the full stake.**
+Analysis UI is unchanged. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background** via a sticky foreground service (no change to trading rules). **0.2.2 added approve-gated limit tickets.** There is no background auto-fire, no set-and-forget trading, and no order on app start. **Not financial advice. High variance — you can lose the full stake.**
 
-## Background live odds (v0.2.3)
+## Background live odds (v0.2.3 / crash-hardened 0.2.4)
 
 Android was treating Dip Hunter as a normal Activity: leaving the app or turning the screen off let the process die, which tore down the WebSocket and scoring loop. Live signals now own a persistent foreground service.
 

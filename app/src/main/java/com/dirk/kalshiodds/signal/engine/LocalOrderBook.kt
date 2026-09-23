@@ -13,6 +13,14 @@ import kotlin.math.tanh
  * Also tracks depth near mid, depth decay, and a decaying pulse for
  * sudden quote pulls / large cancel spikes.
  */
+/** Immutable YES/NO rungs copied off the live TreeMap for UI / tickets. */
+data class BookLevelSnapshot(
+    val yes: List<Pair<Double, Double>> = emptyList(),
+    val no: List<Pair<Double, Double>> = emptyList()
+) {
+    fun isEmpty(): Boolean = yes.isEmpty() && no.isEmpty()
+}
+
 class LocalOrderBook {
     data class Pulse(
         /** [-1, 1] — negative = YES-side cancels (bid support withdrawn). */
@@ -168,6 +176,9 @@ class LocalOrderBook {
 
     fun yesLevels(): List<Pair<Double, Double>> = yes.entries.map { it.key to it.value }
     fun noLevels(): List<Pair<Double, Double>> = no.entries.map { it.key to it.value }
+
+    /** Copy rungs so another thread can read them without racing [applyDelta]. */
+    fun snapshot(): BookLevelSnapshot = BookLevelSnapshot(yes = yesLevels(), no = noLevels())
 
     private fun noteQuoteMove() {
         val bid = bestYesBid()

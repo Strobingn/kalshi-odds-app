@@ -61,13 +61,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
 
     private var pollJob: Job? = null
+    private var ticketRebuildJob: Job? = null
     private var currentIntervalMs: Long = BASE_POLL_MS
 
     init {
         ticketSession.onStart()
         viewModelScope.launch {
-            ticketSession.state.collect { tickets ->
-                _state.update { it.copy(tickets = tickets) }
+            runCatching {
+                ticketSession.state.collect { tickets ->
+                    _state.update { it.copy(tickets = tickets) }
+                }
             }
         }
         viewModelScope.launch {
@@ -78,50 +81,62 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
-            repository.cachedSnapshot.collect { cached ->
-                if (cached != null && _state.value.snapshot == null) {
-                    val overlaid = cached.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
-                    _state.update {
-                        it.copy(
-                            snapshot = overlaid,
-                            isLoading = false,
-                            modelScoreLabel = scoreLabel(overlaid)
-                        )
+            runCatching {
+                repository.cachedSnapshot.collect { cached ->
+                    if (cached != null && _state.value.snapshot == null) {
+                        val overlaid = cached.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
+                        _state.update {
+                            it.copy(
+                                snapshot = overlaid,
+                                isLoading = false,
+                                modelScoreLabel = scoreLabel(overlaid)
+                            )
+                        }
                     }
                 }
             }
         }
         viewModelScope.launch {
-            prefs.settings.collectLatest { settings ->
-                hub.settings = settings
-                _state.update { it.copy(settings = settings) }
-                publishSupportState()
-                rebuildTickets()
-                if (settings.liveSignalsEnabled) {
-                    runCatching { LiveSignalsService.start(getApplication()) }
-                    if (!settings.credentialsConfigured) {
-                        hub.setConnection(WsConnectionState.NEEDS_API_KEY)
+            runCatching {
+                prefs.settings.collectLatest { settings ->
+                    hub.settings = settings
+                    _state.update { it.copy(settings = settings) }
+                    publishSupportState()
+                    scheduleRebuildTickets(immediate = true)
+                    if (settings.liveSignalsEnabled) {
+                        runCatching { LiveSignalsService.start(getApplication()) }
+                        if (!settings.credentialsConfigured) {
+                            hub.setConnection(WsConnectionState.NEEDS_API_KEY)
+                        }
+                    } else if (hub.status.value.state != WsConnectionState.IDLE) {
+                        // Service is stopping itself; keep the HUD honest if it is already gone.
+                        hub.setConnection(WsConnectionState.IDLE)
                     }
-                } else if (hub.status.value.state != WsConnectionState.IDLE) {
-                    // Service is stopping itself; keep the HUD honest if it is already gone.
-                    hub.setConnection(WsConnectionState.IDLE)
+                    restartPolling()
                 }
-                restartPolling()
             }
         }
         viewModelScope.launch {
-            hub.status.collect { status -> _state.update { it.copy(signalStatus = status) } }
+            runCatching {
+                hub.status.collect { status -> _state.update { it.copy(signalStatus = status) } }
+            }
         }
         viewModelScope.launch {
-            hub.alerts.collect { alerts -> _state.update { it.copy(recentAlerts = alerts) } }
+            runCatching {
+                hub.alerts.collect { alerts -> _state.update { it.copy(recentAlerts = alerts) } }
+            }
         }
         viewModelScope.launch {
-            hub.scores.collect { scores ->
-                _state.update { s ->
-                    val snap = s.snapshot ?: return@update s
-                    s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+            runCatching {
+                hub.scores.collect { scores ->
+                    runCatching {
+                        _state.update { s ->
+                            val snap = s.snapshot ?: return@update s
+                            s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+                        }
+                        scheduleRebuildTickets()
+                    }
                 }
-                rebuildTickets()
             }
         }
         startPolling()
@@ -146,10 +161,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             while (isActive) {
-                if (_state.value.snapshot == null) {
-                    _state.update { it.copy(isLoading = true) }
+                runCatching {
+                    if (_state.value.snapshot == null) {
+                        _state.update { it.copy(isLoading = true) }
+                    }
+                    applyResult(doRefresh())
                 }
-                applyResult(doRefresh())
                 delay(nextDelayMs())
             }
         }
@@ -199,7 +216,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         publishSupportState()
-        rebuildTickets()
+        scheduleRebuildTickets()
     }
 
     private suspend fun refreshExternal() {
@@ -230,7 +247,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.support.resumeAlerts()
             publishSupportState()
-            rebuildTickets()
+            scheduleRebuildTickets(immediate = true)
         }
     }
 
@@ -265,11 +282,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { ticketSession.cancelWorking(orderId) }
     }
 
+    private fun scheduleRebuildTickets(immediate: Boolean = false) {
+        ticketRebuildJob?.cancel()
+        ticketRebuildJob = viewModelScope.launch {
+            if (!immediate) delay(com.dirk.kalshiodds.signal.service.LiveSignalsPolicy.TICKET_REBUILD_DEBOUNCE_MS)
+            runCatching { rebuildTickets() }
+        }
+    }
+
     private fun rebuildTickets() {
         val s = _state.value
         val markets = s.snapshot?.allMarkets.orEmpty()
         val books = markets.mapNotNull { m ->
-            hub.scoring.book.orderBook(m.ticker)?.let { m.ticker to it }
+            hub.scoring.book.snapshotBook(m.ticker)?.let { m.ticker to it }
         }.toMap()
         val tickets = TicketBuilder.proposeAll(
             markets,

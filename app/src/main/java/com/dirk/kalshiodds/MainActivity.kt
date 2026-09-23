@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
+import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
 import com.dirk.kalshiodds.ui.OddsScreen
 import com.dirk.kalshiodds.ui.OddsViewModel
 import com.dirk.kalshiodds.ui.ScorecardScreen
@@ -74,6 +75,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        LiveSignalsKeepAlive.ensureServiceFromUi(this)
+    }
+
+    override fun onStop() {
+        LiveSignalsKeepAlive.markUiInForeground(false)
+        super.onStop()
     }
 
     private fun requestNotificationPermission() {

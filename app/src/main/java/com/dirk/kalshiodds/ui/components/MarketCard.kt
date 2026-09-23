@@ -128,7 +128,7 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
             if (market.muted && market.muteReason != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    text = market.muteReason!!,
+                    text = market.muteReason.orEmpty(),
                     style = MaterialTheme.typography.labelMedium,
                     color = AccentOrange
                 )

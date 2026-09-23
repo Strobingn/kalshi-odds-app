@@ -259,6 +259,30 @@ class TicketBuilderGateTest {
     }
 
     @Test
+    fun snapshotBookDoesNotThrowAndFeedsAskLevels() {
+        val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+            yes = listOf(0.96 to 200.0),
+            no = listOf(0.96 to 200.0)
+        )
+        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+        val yesAsks = TicketBuilder.askLevels(m, "YES", book)
+        assertEquals(0.04, yesAsks.single().first, 1e-9)
+        assertEquals(200.0, yesAsks.single().second, 1e-9)
+        val quoted = TicketBuilder.quotedSize(m, "YES", book)
+        assertTrue(quoted != null && quoted >= 200.0)
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(ticketRespectGates = true, ticketsEnabled = true, ticketStakeUsd = 5.0),
+            alertsPaused = false,
+            books = mapOf(m.ticker to book),
+            idFactory = { "snap" },
+            nowMs = 1L
+        )
+        val ticket = TicketBuilder.propose(m, ctx)
+        assertTrue(ticket != null)
+        assertEquals(125, ticket!!.contracts)
+    }
+
+    @Test
     fun ticketsDisabledYieldsNothing() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketsEnabled = false, ticketRespectGates = false),
