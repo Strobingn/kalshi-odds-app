@@ -18,7 +18,10 @@ data class SettingsUiState(
     val keyIdDraft: String = "",
     val pemDraft: String = "",
     val credentialMessage: String? = null,
-    val extraRejected: String? = null
+    val extraRejected: String? = null,
+    val bankrollDraft: String = "",
+    val alertsPaused: Boolean = false,
+    val pauseReason: String? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -33,11 +36,26 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 _state.update {
                     it.copy(
                         settings = s,
-                        keyIdDraft = if (it.keyIdDraft.isBlank()) s.apiKeyId else it.keyIdDraft
+                        keyIdDraft = if (it.keyIdDraft.isBlank()) s.apiKeyId else it.keyIdDraft,
+                        bankrollDraft = if (it.bankrollDraft.isBlank()) {
+                            String.format(java.util.Locale.US, "%.0f", s.bankrollUsd)
+                        } else {
+                            it.bankrollDraft
+                        }
                     )
                 }
             }
         }
+        viewModelScope.launch {
+            KalshiOddsApp.from(getApplication()).container.guardrailStore.stateFlow.collect { g ->
+                _state.update { it.copy(alertsPaused = g.paused, pauseReason = g.banner) }
+            }
+        }
+    }
+
+    fun setBankrollDraft(text: String) {
+        _state.update { it.copy(bankrollDraft = text) }
+        text.replace(",", "").toDoubleOrNull()?.let { setBankroll(it) }
     }
 
     fun setWatchBtc(v: Boolean) = viewModelScope.launch { prefs.updateWatchBtc(v) }
@@ -51,6 +69,26 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setMinLiquidity(v: Double) = viewModelScope.launch { prefs.updateMinLiquidity(v) }
     fun setMaxSpreadCents(v: Double) = viewModelScope.launch { prefs.updateMaxSpreadCents(v) }
     fun setHideWeak(v: Boolean) = viewModelScope.launch { prefs.updateHideWeak(v) }
+    fun setBankroll(v: Double) = viewModelScope.launch { prefs.updateBankrollUsd(v) }
+    fun setUseKelly(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(v) }
+    fun setKellyFraction(v: Double) = viewModelScope.launch { prefs.updateKellyFraction(v) }
+    fun setFixedFraction(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(!v) }
+    fun setFixedFractionValue(v: Double) = viewModelScope.launch { prefs.updateFixedFraction(v) }
+    fun setMaxBankrollFraction(v: Double) = viewModelScope.launch { prefs.updateMaxBankrollFraction(v) }
+    fun setFeeRate(v: Double) = viewModelScope.launch { prefs.updateFeeRate(v) }
+    fun setRankByNetEv(v: Boolean) = viewModelScope.launch { prefs.updateRankByNetEv(v) }
+    fun setAutoMute(v: Boolean) = viewModelScope.launch { prefs.updateAutoMute(v) }
+    fun setMuteFloor(v: Double) = viewModelScope.launch { prefs.updateMuteHitRateFloor(v) }
+    fun setStreakPauseN(v: Int) = viewModelScope.launch { prefs.updateStreakPauseN(v) }
+    fun setDrawdownUsd(v: Double) = viewModelScope.launch { prefs.updateDrawdownUsd(v) }
+    fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
+
+    fun resumeAlerts() {
+        viewModelScope.launch {
+            KalshiOddsApp.from(getApplication()).container.support.resumeAlerts()
+            _state.update { it.copy(credentialMessage = "Alerts resumed — streak guard cleared") }
+        }
+    }
 
     fun setExtraText(text: String) {
         val rejected = text.split(',', '\n', ';', ' ')

@@ -49,7 +49,18 @@ data class MarketUiModel(
     val tteRegimeLabel: String? = null,
     val passedFilter: Boolean = true,
     val skipReason: String? = null,
-    val calibrated: Boolean = false
+    val calibrated: Boolean = false,
+    val predictedSide: String? = null,
+    val netEvDollars: Double? = null,
+    val netEdgePp: Double? = null,
+    val suggestedContracts: Int? = null,
+    val sizingNote: String? = null,
+    val muted: Boolean = false,
+    val muteReason: String? = null,
+    val feePerContract: Double? = null,
+    val halfSpread: Double? = null,
+    val spotLabel: String? = null,
+    val adapterReady: Boolean = false
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -139,7 +150,18 @@ fun MarketUiModel.withSignalScore(
         tteRegimeLabel = score.tteRegime.label,
         passedFilter = score.passedFilter,
         skipReason = score.skipReason,
-        calibrated = score.calibrated
+        calibrated = score.calibrated,
+        predictedSide = score.predictedSide,
+        netEvDollars = score.netEvDollars,
+        netEdgePp = score.netEdgePp,
+        suggestedContracts = score.suggestedContracts,
+        sizingNote = score.sizingNote,
+        muted = score.muted,
+        muteReason = score.muteReason,
+        feePerContract = score.feePerContract,
+        halfSpread = score.halfSpread,
+        spotLabel = score.spotLabel,
+        adapterReady = score.adapterReady
     )
 }
 

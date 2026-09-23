@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import com.dirk.kalshiodds.signal.engine.SkipFilter
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -98,10 +99,21 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                 val allMarkets = snapshot?.allMarkets.orEmpty()
                 val ranked = allMarkets
                     .filter { it.edgePp != null }
-                    .filter { SkipFilter.shouldShowOpportunity(it.passedFilter, it.edgePp, state.settings) }
+                    .filter {
+                        SkipFilter.shouldShowOpportunity(
+                            passedFilter = it.passedFilter,
+                            edgePp = it.edgePp,
+                            settings = state.settings,
+                            netEdgePp = it.netEdgePp,
+                            muted = it.muted
+                        )
+                    }
                     .sortedWith(
-                        compareByDescending<MarketUiModel> { it.passedFilter }
-                            .thenByDescending { abs(it.edgePp ?: 0.0) }
+                        compareByDescending<MarketUiModel> { it.passedFilter && !it.muted }
+                            .thenByDescending {
+                                if (state.settings.rankByNetEv) abs(it.netEdgePp ?: it.edgePp ?: 0.0)
+                                else abs(it.edgePp ?: 0.0)
+                            }
                     )
                 val threshold = state.settings.edgeThresholdPp
                 val alertCount = allMarkets.count { it.edgeAlert && it.passedFilter }
@@ -122,7 +134,10 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             modelScoreLabel = state.modelScoreLabel,
                             chipLabel = state.signalStatus.chipLabel(),
                             chipState = state.signalStatus.state,
-                            onOpenScorecard = onOpenScorecard
+                            onOpenScorecard = onOpenScorecard,
+                            pauseBanner = state.pauseBanner,
+                            mutedSummary = state.mutedSummary,
+                            onResumeAlerts = { viewModel.resumeAlerts() }
                         )
                     }
                     if (state.recentAlerts.isNotEmpty()) {
@@ -149,7 +164,11 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                         item { SectionHeader("Ranked opportunities") }
                         item {
                             Text(
-                                text = "Crypto only · filter-cleared · sorted by |fair − mid|. Stance is advisory — no orders.",
+                                text = if (state.settings.rankByNetEv) {
+                                    "Crypto only · ranked by |net EV| after fees/spread. “N contracts max” is advisory — no orders."
+                                } else {
+                                    "Crypto only · ranked by |fair − mid|. Stance is advisory — no orders."
+                                },
                                 style = MaterialTheme.typography.labelMedium,
                                 color = TextSecondary
                             )
@@ -244,7 +263,10 @@ private fun MetaHeader(
     modelScoreLabel: String?,
     chipLabel: String,
     chipState: WsConnectionState,
-    onOpenScorecard: () -> Unit
+    onOpenScorecard: () -> Unit,
+    pauseBanner: String? = null,
+    mutedSummary: String? = null,
+    onResumeAlerts: () -> Unit = {}
 ) {
     val chipColor = when (chipState) {
         WsConnectionState.CONNECTED -> AccentGreen
@@ -287,6 +309,33 @@ private fun MetaHeader(
                 .background(chipColor.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         )
+        pauseBanner?.let { banner ->
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .background(AccentOrange.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Text(
+                    text = banner,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold
+                )
+                Button(onClick = onResumeAlerts, modifier = Modifier.padding(top = 6.dp)) {
+                    Text("Resume alerts")
+                }
+            }
+        }
+        mutedSummary?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelMedium,
+                color = AccentOrange,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        }
         message?.let {
             Text(
                 text = it,

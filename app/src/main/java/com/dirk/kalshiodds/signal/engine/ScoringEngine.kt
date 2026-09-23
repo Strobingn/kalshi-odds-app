@@ -3,7 +3,14 @@ package com.dirk.kalshiodds.signal.engine
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.external.ExternalSnapshot
+import com.dirk.kalshiodds.signal.external.SpotFeatureMath
+import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Calibrator
+import com.dirk.kalshiodds.signal.feedback.Guardrails
+import com.dirk.kalshiodds.signal.feedback.OnlineAdapter
+import com.dirk.kalshiodds.signal.sizing.NetExpectedValue
+import com.dirk.kalshiodds.signal.sizing.PositionSizer
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.TickSource
@@ -29,6 +36,10 @@ import kotlin.math.tanh
  * | Cross-asset lead–lag            |  0.10 | 0.06 | BTC leads ETH/SOL (~3s); reverse when useful |
  * | Depth near mid / decay          |  0.10 | 0.14 | Size in 3¢ band vs 15¢ band |
  * | Quote pull / cancel spike       |  0.10 | 0.14 | Sudden best-quote moves, large cancels |
+ * | External spot / fund / rvol     |  0.08 | 0.06 | Public Binance/Coinbase; drops out if stale |
+ *
+ * When spot is present the row is included and the rest **renormalize**.
+ * [OnlineAdapter] then reweights channels from the user's settlements.
  *
  * Regime nudges (before renormalize): TREND ↑vel/lead-lag; CHOP ↓vel ↑AI;
  * VOL_SPIKE ↑micro ↓AI; QUIET ↑related ↓flow.
@@ -70,7 +81,19 @@ class ScoringEngine(
         val skipReason: String? = null,
         val predictedSide: String = "YES",
         val calibrated: Boolean = false,
-        val spreadDollars: Double? = null
+        val spreadDollars: Double? = null,
+        val netEvDollars: Double? = null,
+        val netEdgePp: Double? = null,
+        val suggestedContracts: Int? = null,
+        val sizingNote: String? = null,
+        val muted: Boolean = false,
+        val muteReason: String? = null,
+        val feePerContract: Double? = null,
+        val halfSpread: Double? = null,
+        val spotLabel: String? = null,
+        val spotPp: Double? = null,
+        val adapterReady: Boolean = false,
+        val featureDevs: Map<String, Double> = emptyMap()
     )
 
     data class BlendWeights(
@@ -81,11 +104,24 @@ class ScoringEngine(
         val imbalance: Double,
         val leadLag: Double,
         val depth: Double,
-        val cancel: Double
+        val cancel: Double,
+        val spot: Double = 0.0
     )
 
     @Volatile
     var calibration: Calibrator.State = Calibrator.State()
+
+    @Volatile
+    var adapter: OnlineAdapter.State = OnlineAdapter.identity()
+
+    @Volatile
+    var allowlist: Allowlist.State = Allowlist.State()
+
+    @Volatile
+    var guardrails: Guardrails.State = Guardrails.identity()
+
+    @Volatile
+    var external: ExternalSnapshot = ExternalSnapshot()
 
     private val lastAlertMs = linkedMapOf<String, Long>()
     private val lastBookScoreMs = linkedMapOf<String, Long>()
@@ -197,7 +233,12 @@ class ScoringEngine(
         val cancelFeat = pulse?.let { (it.cancelSpike + it.quotePull) / 2.0 }
         val cancelAdjPp = cancelFeat?.let { (midPp + 7.0 * it).coerceIn(2.0, 98.0) }
 
-        val w = blendWeights(
+        val spotFeat = external.forSeries(tick.series)
+        val spotAdjPp = SpotFeatureMath.adjustPp(midPp, spotFeat)
+        val spotLabel = SpotFeatureMath.label(spotFeat)
+
+        val adapterState = adapter
+        val baseW = blendWeights(
             tte = tte,
             regime = regime,
             hasAi = aiPp != null,
@@ -206,8 +247,10 @@ class ScoringEngine(
             hasImb = imbAdjPp != null,
             hasLeadLag = leadLagAdjPp != null,
             hasDepth = depthAdjPp != null,
-            hasCancel = cancelAdjPp != null
+            hasCancel = cancelAdjPp != null,
+            hasSpot = spotAdjPp != null
         ) ?: return null
+        val w = OnlineAdapter.scaleBlend(baseW, adapterState)
 
         val rawFair = (
             (aiPp ?: 0.0) * w.ai +
@@ -217,13 +260,57 @@ class ScoringEngine(
                 (imbAdjPp ?: 0.0) * w.imbalance +
                 (leadLagAdjPp ?: 0.0) * w.leadLag +
                 (depthAdjPp ?: 0.0) * w.depth +
-                (cancelAdjPp ?: 0.0) * w.cancel
+                (cancelAdjPp ?: 0.0) * w.cancel +
+                (spotAdjPp ?: 0.0) * w.spot
             ).coerceIn(2.0, 98.0)
 
         val calState = calibration
-        val fair = Calibrator.applyPp(rawFair, calState).coerceIn(2.0, 98.0)
+        val afterTemp = Calibrator.applyPp(rawFair, calState)
+        val fair = OnlineAdapter.applyPp(afterTemp, adapterState).coerceIn(2.0, 98.0)
         val delta = fair - midPp
         val predictedSide = if (delta >= 0) "YES" else "NO"
+
+        val ev = NetExpectedValue.compute(
+            fairYes = fair / 100.0,
+            mid = mid01,
+            spreadDollars = spread,
+            feeRate = settings.feeRate,
+            preferSide = predictedSide
+        )
+        val liquidityObs = listOfNotNull(volume, oi, depthNear).maxOrNull()
+        val size = PositionSizer.suggest(
+            fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
+            contractPrice = ev.contractPrice,
+            bankrollUsd = settings.bankrollUsd,
+            mode = PositionSizer.modeOf(settings.useKelly),
+            kellyFraction = settings.kellyFraction,
+            fixedFraction = settings.fixedFraction,
+            maxFraction = settings.maxBankrollFraction,
+            liquidity = liquidityObs,
+            depthNearMid = depthNear,
+            spreadDollars = spread,
+            maxSpreadCents = settings.maxSpreadCents,
+            netEvPositive = ev.netEv > 0.0
+        )
+
+        val muteReason = if (settings.autoMute) {
+            allowlist.muteReason(tick.series, regime.name, tte.name)
+        } else {
+            null
+        }
+        val muted = muteReason != null
+
+        val featureDevs = OnlineAdapter.FeatureDevs(
+            ai = aiPp?.minus(midPp),
+            flow = flowAdjPp - midPp,
+            related = relatedPp?.minus(midPp),
+            velocity = velAdjPp?.minus(midPp),
+            imbalance = imbAdjPp?.minus(midPp),
+            leadLag = leadLagAdjPp?.minus(midPp),
+            depth = depthAdjPp?.minus(midPp),
+            cancel = cancelAdjPp?.minus(midPp),
+            spot = spotAdjPp?.minus(midPp)
+        ).asMap()
 
         val confidence = confidence(
             aiConfidence = ai?.confidence,
@@ -241,6 +328,11 @@ class ScoringEngine(
             depthNearMid = depthNear,
             settings = settings
         )
+        val passed = filter.passed && !muted
+        val skipReason = when {
+            muted -> muteReason
+            else -> filter.reason
+        }
         val reason = buildReason(
             aiPp = aiPp,
             flow = flow,
@@ -255,7 +347,11 @@ class ScoringEngine(
             regime = regime,
             tte = tte,
             calibrated = calState.ready,
-            passedFilter = filter.passed
+            passedFilter = passed,
+            netEdgePp = ev.netEdgePp,
+            muted = muted,
+            adapterReady = adapterState.ready,
+            spotLabel = spotLabel
         )
         return Score(
             fairValuePp = fair,
@@ -281,11 +377,23 @@ class ScoringEngine(
             regime = regime,
             tteRegime = tte,
             tteSeconds = tteSec,
-            passedFilter = filter.passed,
-            skipReason = filter.reason,
+            passedFilter = passed,
+            skipReason = skipReason,
             predictedSide = predictedSide,
-            calibrated = calState.ready,
-            spreadDollars = spread
+            calibrated = calState.ready || adapterState.ready,
+            spreadDollars = spread,
+            netEvDollars = ev.netEv,
+            netEdgePp = ev.netEdgePp,
+            suggestedContracts = size.contracts,
+            sizingNote = size.reason,
+            muted = muted,
+            muteReason = muteReason,
+            feePerContract = ev.feePerContract,
+            halfSpread = ev.halfSpread,
+            spotLabel = spotLabel,
+            spotPp = spotAdjPp,
+            adapterReady = adapterState.ready,
+            featureDevs = featureDevs
         )
     }
 
@@ -297,7 +405,14 @@ class ScoringEngine(
     ): SignalAlert? {
         val scored = precomputed ?: score(tick, settings, nowMs) ?: return null
         if (!scored.passedFilter) return null
-        if (abs(scored.deltaPp) < settings.edgeThresholdPp) return null
+        if (scored.muted) return null
+        if (guardrails.paused) return null
+        val edgeForAlert = if (settings.rankByNetEv) {
+            scored.netEdgePp ?: scored.deltaPp
+        } else {
+            scored.deltaPp
+        }
+        if (abs(edgeForAlert) < settings.edgeThresholdPp) return null
         val last = lastAlertMs[tick.ticker] ?: 0L
         if (nowMs - last < settings.debounceMs) return null
         lastAlertMs[tick.ticker] = nowMs
@@ -340,7 +455,8 @@ class ScoringEngine(
         hasImb: Boolean,
         hasLeadLag: Boolean,
         hasDepth: Boolean,
-        hasCancel: Boolean
+        hasCancel: Boolean,
+        hasSpot: Boolean = false
     ): BlendWeights? {
         val late = tte == TteRegime.LATE
         var wAi = if (hasAi) if (late) W_AI_LATE else W_AI else 0.0
@@ -351,6 +467,7 @@ class ScoringEngine(
         var wLl = if (hasLeadLag) if (late) W_LEADLAG_LATE else W_LEADLAG else 0.0
         var wDep = if (hasDepth) if (late) W_DEPTH_LATE else W_DEPTH else 0.0
         var wCan = if (hasCancel) if (late) W_CANCEL_LATE else W_CANCEL else 0.0
+        var wSpot = if (hasSpot) if (late) W_SPOT_LATE else W_SPOT else 0.0
 
         when (regime) {
             RegimeTag.TREND -> {
@@ -372,7 +489,7 @@ class ScoringEngine(
             }
         }
 
-        val sum = wAi + wFlow + wRel + wVel + wImb + wLl + wDep + wCan
+        val sum = wAi + wFlow + wRel + wVel + wImb + wLl + wDep + wCan + wSpot
         if (sum < 1e-9) return null
         return BlendWeights(
             ai = wAi / sum,
@@ -382,7 +499,8 @@ class ScoringEngine(
             imbalance = wImb / sum,
             leadLag = wLl / sum,
             depth = wDep / sum,
-            cancel = wCan / sum
+            cancel = wCan / sum,
+            spot = wSpot / sum
         )
     }
 
@@ -422,11 +540,16 @@ class ScoringEngine(
         regime: RegimeTag,
         tte: TteRegime,
         calibrated: Boolean,
-        passedFilter: Boolean
+        passedFilter: Boolean,
+        netEdgePp: Double? = null,
+        muted: Boolean = false,
+        adapterReady: Boolean = false,
+        spotLabel: String? = null
     ): String {
         val parts = mutableListOf<String>()
         parts += "${regime.shortLabel}/${tte.shortLabel}"
         if (calibrated) parts += "cal"
+        if (adapterReady) parts += "adapt"
         if (aiPp != null) {
             parts += String.format(java.util.Locale.US, "AI %.0f%% vs mkt %.0f%%", aiPp, midPp)
         } else {
@@ -454,6 +577,11 @@ class ScoringEngine(
             parts += String.format(java.util.Locale.US, "%s (%.0f%%)", label, relatedPp)
         }
         parts += String.format(java.util.Locale.US, "Δ %+.1fpp (fv %.0f%%)", deltaPp, fairPp)
+        if (netEdgePp != null) {
+            parts += String.format(java.util.Locale.US, "net %+.1fpp", netEdgePp)
+        }
+        if (spotLabel != null) parts += spotLabel
+        if (muted) parts += "muted"
         if (!passedFilter) parts += "filtered"
         return parts.joinToString(" · ")
     }
@@ -476,6 +604,8 @@ class ScoringEngine(
         const val W_LEADLAG_LATE = 0.06
         const val W_DEPTH_LATE = 0.14
         const val W_CANCEL_LATE = 0.14
+        const val W_SPOT = 0.08
+        const val W_SPOT_LATE = 0.06
 
         /** Book deltas update depth immediately; re-score at most this often. */
         const val BOOK_SCORE_MIN_INTERVAL_MS = 250L

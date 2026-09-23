@@ -35,7 +35,9 @@ data class PredictionLogEntry(
     val tteBucket: String? = null,
     val fairValuePp: Double? = null,
     val calibrated: Boolean? = null,
-    val settledAtMs: Long? = null
+    val settledAtMs: Long? = null,
+    /** Blend-channel deviations (featureFair − mid) in pp, for on-device learning. */
+    val featureDevs: Map<String, Double> = emptyMap()
 )
 
 @Serializable
@@ -46,7 +48,8 @@ data class SignalSnapshot(
     val regime: String? = null,
     val tteBucket: String? = null,
     val fairValuePp: Double? = null,
-    val calibrated: Boolean? = null
+    val calibrated: Boolean? = null,
+    val featureDevs: Map<String, Double> = emptyMap()
 )
 
 class PredictionLogStore(private val context: Context) {
@@ -100,7 +103,8 @@ class PredictionLogStore(private val context: Context) {
                     regime = snapshot?.regime ?: prev.regime,
                     tteBucket = snapshot?.tteBucket ?: prev.tteBucket,
                     fairValuePp = snapshot?.fairValuePp ?: prev.fairValuePp,
-                    calibrated = snapshot?.calibrated ?: prev.calibrated
+                    calibrated = snapshot?.calibrated ?: prev.calibrated,
+                    featureDevs = snapshot?.featureDevs?.takeIf { it.isNotEmpty() } ?: prev.featureDevs
                 )
             } else {
                 list.add(
@@ -118,7 +122,8 @@ class PredictionLogStore(private val context: Context) {
                         regime = snapshot?.regime,
                         tteBucket = snapshot?.tteBucket,
                         fairValuePp = snapshot?.fairValuePp,
-                        calibrated = snapshot?.calibrated
+                        calibrated = snapshot?.calibrated,
+                        featureDevs = snapshot?.featureDevs ?: emptyMap()
                     )
                 )
             }

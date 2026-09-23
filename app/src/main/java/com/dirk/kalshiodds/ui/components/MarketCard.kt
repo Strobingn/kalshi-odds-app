@@ -12,19 +12,30 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
@@ -80,7 +91,10 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
             val chips = listOfNotNull(
                 market.regimeTag,
                 market.tteRegimeLabel,
-                if (market.calibrated) "Calibrated" else null
+                if (market.calibrated) "Calibrated" else null,
+                if (market.adapterReady) "Adapter" else null,
+                if (market.muted) "Muted" else null,
+                market.suggestedContracts?.let { "$it contracts max" }
             )
             if (chips.isNotEmpty() || market.edgeAlert) {
                 Spacer(Modifier.height(8.dp))
@@ -97,19 +111,28 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                         )
                     }
                     chips.forEach { chip ->
+                        val mutedChip = chip == "Muted"
+                        val color = if (mutedChip) AccentOrange else AccentBlue
                         Text(
                             text = chip,
                             style = MaterialTheme.typography.labelMedium,
-                            color = AccentBlue,
+                            color = color,
                             fontWeight = FontWeight.SemiBold,
                             modifier = Modifier
-                                .background(AccentBlue.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .background(color.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                 }
             }
-            if (!market.passedFilter && market.skipReason != null) {
+            if (market.muted && market.muteReason != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = market.muteReason!!,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentOrange
+                )
+            } else if (!market.passedFilter && market.skipReason != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "Filtered · ${market.skipReason}",
@@ -187,6 +210,37 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                         color = edgeColor,
                         lineHeight = 32.sp
                     )
+                    market.netEdgePp?.let { net ->
+                        Text(
+                            text = String.format(
+                                Locale.US,
+                                "Net EV %+.1f pp  ·  %+.3f $/ct  ·  fee %.1f¢",
+                                net,
+                                market.netEvDollars ?: 0.0,
+                                (market.feePerContract ?: 0.0) * 100.0
+                            ),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = edgeColor,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    market.suggestedContracts?.let { n ->
+                        Text(
+                            text = "$n contracts max",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = AccentGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                        market.sizingNote?.let { note ->
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextSecondary
+                            )
+                        }
+                    }
                     market.stance?.let { s ->
                         Text(
                             text = s,
@@ -197,13 +251,15 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                         )
                     }
                     Text(
-                        text = "Fair − market (pp). Calibrated when enough settlements. Text only — no orders.",
+                        text = "Fair − market (pp). Net EV subtracts Kalshi-style fee + half-spread. Advisory — no orders.",
                         style = MaterialTheme.typography.labelMedium,
                         color = TextSecondary,
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
             }
+
+            ChecklistBlock(market)
 
             if (!compact) {
                 Spacer(Modifier.height(14.dp))
@@ -252,6 +308,50 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 Metric("Closes", market.closeTimeLocal ?: "—")
             }
         }
+    }
+}
+
+@Composable
+private fun ChecklistBlock(market: MarketUiModel) {
+    val items = PreTradeChecklist.items(market)
+    val clipboard = LocalClipboardManager.current
+    var copied by remember(market.ticker) { mutableStateOf(false) }
+    Spacer(Modifier.height(12.dp))
+    Text(
+        text = "PRE-TRADE CHECKLIST",
+        style = MaterialTheme.typography.labelMedium,
+        color = AccentBlue,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(4.dp))
+    items.forEach { item ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(item.label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Text(
+                item.value,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+    }
+    OutlinedButton(
+        onClick = {
+            clipboard.setText(AnnotatedString(PreTradeChecklist.copyText(market)))
+            copied = true
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp)
+    ) {
+        Icon(Icons.Outlined.ContentCopy, contentDescription = null)
+        Text(
+            if (copied) "Copied" else "Copy checklist",
+            modifier = Modifier.padding(start = 8.dp)
+        )
     }
 }
 

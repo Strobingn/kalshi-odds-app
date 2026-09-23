@@ -18,9 +18,36 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.2.0**
+Package: `com.dirk.kalshiodds` · version **0.2.1**
 
-This release is **read-only**. It does **not** place trades, subscribe to fills/portfolio, or send orders.
+This release is **read-only**. It does **not** place trades, subscribe to fills/portfolio, or send orders. There is no journal UI.
+
+## Decision support (v0.2.1)
+
+Advisory layer on top of the v0.2.0 predictability stack. Still **never** calls Kalshi trade/order endpoints.
+
+1. **Bankroll & size.** Settings: bankroll, Kelly fraction (default quarter-Kelly, 5% cap) or fixed-fraction. Each card shows **“N contracts max”** from edge, price, bankroll, liquidity, and spread. Never executes.
+2. **Net EV after fees/spread.** Kalshi-style taker fee `feeRate × P × (1−P)` (default 7%, configurable) plus half-spread. Ranked opportunities and alerts use **net EV** when that toggle is on; raw edge still shows.
+3. **Series / regime auto-mute.** Rolling 7-day hit rate below a Settings floor (default 40%, ≥8 samples) mutes that series, regime, or TTE window — no alerts, downranked, **Muted** chip. Disable in Settings.
+4. **On-device adapter.** Settlements reweight blend channels (EMA) and fit a slope/intercept on `logit(p)` — not just temperature. Cold start is identity; weights persist in DataStore. No remote training.
+5. **Streak / drawdown guard.** Pause alerts after N wrong in a row (default 4) or after a one-contract P&L-proxy drawdown (default $50). Banner: **alerts paused — streak guard**. Resume in Settings or on the next session.
+6. **External spot features.** Public Binance (spot + 1m klines + USDT-M funding) with Coinbase REST fallback for BTC/ETH/SOL. Timeouts, cache, fail-soft. Market data only — no exchange orders.
+7. **Pre-trade checklist.** Side, suggested size, net EV, confidence, regime, TTE, skip-filter. One-tap copy as plain text.
+
+### Settings knobs (v0.2.1)
+
+| Knob | Default | Role |
+|------|---------|------|
+| Bankroll (USD) | 1000 | Size suggestions only |
+| Kelly / fixed fraction | quarter-Kelly 0.25 | Clip as % of bankroll |
+| Max clip | 5% | Hard cap |
+| Fee rate | 7% | Kalshi-style `P(1-P)` |
+| Rank by net EV | on | Filter/rank after fees+spread |
+| Auto-mute | on | Weak series/regimes |
+| Hit-rate floor | 40% | Mute threshold |
+| Streak N | 4 | Pause after N wrong |
+| Drawdown $ | 50 | Pause on proxy DD |
+| Resume on new session | on | Clear pause at process start |
 
 ## Predictability stack (v0.2.0)
 
@@ -111,7 +138,10 @@ app/src/main/java/com/dirk/kalshiodds/
     config/          DataStore prefs + EncryptedSharedPreferences + default JSON
     ws/              KalshiWsAuth, KalshiWsClient, KalshiWsMessages
     engine/          ScoringEngine, TickBook, LocalOrderBook, MarketRegime, SkipFilter
-    feedback/        Calibrator, ScorecardMetrics
+    feedback/        Calibrator, ScorecardMetrics, OnlineAdapter, Allowlist, Guardrails
+    sizing/          PositionSizer, NetExpectedValue (advisory)
+    external/        Public Binance/Coinbase spot · vol · funding
+    checklist/       Pre-trade checklist + copy text
     notify/          SignalNotifier (HIGH + LOW channels)
     service/         LiveSignalsService (foreground WS)
     model/           MarketTick, SignalAlert, WsConnectionState
@@ -130,6 +160,8 @@ app/src/main/assets/default_signal_config.json
 - Extra **crypto** ticker list (non-crypto values are dropped)
 - Edge threshold (pp), notifications on/off, Live signals on/off
 - Skip filter: min confidence, min liquidity, max spread, hide weak opportunities
+- Bankroll, Kelly / fixed-fraction, fee rate, net-EV ranking
+- Auto-mute floor, streak / drawdown guard, resume
 - Kalshi API Key ID + private key PEM (secure storage)
 
 Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).

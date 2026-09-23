@@ -60,6 +60,22 @@ class SignalHub(
         scoring.calibration = state
     }
 
+    fun applyAdapter(state: com.dirk.kalshiodds.signal.feedback.OnlineAdapter.State) {
+        scoring.adapter = state
+    }
+
+    fun applyAllowlist(state: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
+        scoring.allowlist = state
+    }
+
+    fun applyGuardrails(state: com.dirk.kalshiodds.signal.feedback.Guardrails.State) {
+        scoring.guardrails = state
+    }
+
+    fun applyExternal(snapshot: com.dirk.kalshiodds.signal.external.ExternalSnapshot) {
+        scoring.external = snapshot
+    }
+
     @Volatile
     var settings: SignalSettings = SignalSettings()
 
@@ -182,13 +198,15 @@ class SignalHub(
                     regime = scored.regime.name,
                     tteBucket = scored.tteRegime.name,
                     fairValuePp = scored.fairValuePp,
-                    calibrated = scored.calibrated
+                    calibrated = scored.calibrated,
+                    featureDevs = scored.featureDevs
                 )
             )
         }
     }
 
     private suspend fun emitAlert(alert: SignalAlert) {
+        if (scoring.guardrails.paused) return
         val posted = if (settings.notificationsEnabled) {
             withContext(Dispatchers.Main.immediate) { notifier.notify(alert) }
         } else {
