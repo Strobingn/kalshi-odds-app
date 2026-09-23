@@ -121,7 +121,7 @@ class SignalNotifier(private val context: Context) {
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            nm.deleteNotificationChannel(LiveSignalsPolicy.CHANNEL_LEGACY)
+            runCatching { nm.deleteNotificationChannel(LiveSignalsPolicy.CHANNEL_LEGACY) }
             val alerts = NotificationChannel(
                 CHANNEL_ALERTS,
                 context.getString(R.string.signal_channel_name),

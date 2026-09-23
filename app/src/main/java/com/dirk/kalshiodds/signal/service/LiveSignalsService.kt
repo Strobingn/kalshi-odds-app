@@ -3,7 +3,6 @@ package com.dirk.kalshiodds.signal.service
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -13,6 +12,7 @@ import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.ws.KalshiWsClient
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,42 +24,57 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
  * scoring loop while "Live signals" is on. Survives Activity onStop / process
  * reclaim via START_STICKY, onTaskRemoved restart, and a WorkManager watchdog.
  * Analysis / alerts only — no order channels, no auto-fire.
+ *
+ * Crash contract: startForeground is the first thing in onCreate and is
+ * wrapped; pipeline / WS / notification failures never kill the process.
  */
 class LiveSignalsService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, t ->
+            Log.e(TAG, "pipeline", t)
+        }
+    )
     private var client: KalshiWsClient? = null
     private var pipelineJob: Job? = null
     private var metadataJob: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var explicitStop = false
     @Volatile private var lastTickerCount = 0
+    @Volatile private var foregroundFailed = false
+    @Volatile private var foregroundTypeInUse = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
-        SignalNotifier.ensureChannels(this)
+        // Must be first: startForegroundService timeout is ~5–10s and a throw
+        // here is a process-killing RemoteServiceException.
         promoteToForeground()
-        acquireWakeLock()
+        runCatching { acquireWakeLock() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         promoteToForeground()
+        if (foregroundFailed) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
             return handleExplicitStop()
         }
         explicitStop = false
-        if (pipelineJob == null) {
+        if (pipelineJob == null || pipelineJob?.isActive != true) {
             pipelineJob = scope.launch { runPipeline() }
         }
-        if (metadataJob == null) {
+        if (metadataJob == null || metadataJob?.isActive != true) {
             metadataJob = scope.launch { runMetadataLoop() }
         }
         return START_STICKY
@@ -68,133 +83,174 @@ class LiveSignalsService : Service() {
     private fun handleExplicitStop(): Int {
         explicitStop = true
         LiveSignalsKeepAlive.setEnabled(this, false)
-        // Persist off before onDestroy cancels [scope], otherwise a later
-        // DataStore emission of the stale "on" would restart the service.
         runCatching {
             runBlocking(Dispatchers.IO) {
-                KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
+                withTimeoutOrNull(1_500L) {
+                    KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
+                }
             }
         }
         tearDownPipeline()
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
         stopSelf()
         return START_NOT_STICKY
     }
 
-    private fun promoteToForeground(specialUseOnly: Boolean = false) {
+    private fun promoteToForeground() {
         val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
             .getOrElse { SignalNotifier(this) }
-        val type = foregroundType(specialUseOnly)
-        ServiceCompat.startForeground(
-            this,
-            SignalNotifier.FG_NOTIFICATION_ID,
-            notifier.foregroundNotification(),
-            type
-        )
-    }
-
-    private fun foregroundType(specialUseOnly: Boolean): Int {
-        var type = 0
-        if (Build.VERSION.SDK_INT >= 29 && !specialUseOnly) {
-            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        val notification = runCatching { notifier.foregroundNotification() }.getOrNull() ?: return
+        val types = LiveSignalsPolicy.foregroundServiceTypesToTry(Build.VERSION.SDK_INT)
+        if (types.isEmpty()) {
+            // API 26–28: untyped startForeground.
+            try {
+                @Suppress("DEPRECATION")
+                startForeground(SignalNotifier.FG_NOTIFICATION_ID, notification)
+                foregroundFailed = false
+            } catch (t: Throwable) {
+                Log.e(TAG, "startForeground failed: ${t.message}")
+                foregroundFailed = true
+            }
+            return
         }
-        if (Build.VERSION.SDK_INT >= 34) {
-            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        var started = false
+        for (type in types) {
+            try {
+                ServiceCompat.startForeground(
+                    this,
+                    SignalNotifier.FG_NOTIFICATION_ID,
+                    notification,
+                    type
+                )
+                foregroundTypeInUse = type
+                started = true
+                foregroundFailed = false
+                break
+            } catch (t: Throwable) {
+                Log.w(TAG, "startForeground type=$type failed: ${t.javaClass.simpleName}: ${t.message}")
+            }
         }
-        return type
+        if (!started) {
+            foregroundFailed = true
+            Log.e(TAG, "could not promote to foreground — refusing to crash-loop")
+        }
     }
 
     private suspend fun runPipeline() {
+        try {
+            val container = KalshiOddsApp.from(this).container
+            val hub = container.hub
+            val prefs = container.preferences
+            combine(prefs.settings, hub.watchTickers) { settings, tickers -> settings to tickers }
+                .collectLatest { (settings, tickers) ->
+                    runCatching { applyLiveSettings(settings, tickers) }
+                        .onFailure { Log.e(TAG, "pipeline tick: ${it.message}") }
+                }
+        } catch (t: Throwable) {
+            Log.e(TAG, "runPipeline: ${t.message}")
+        }
+    }
+
+    private fun applyLiveSettings(
+        settings: com.dirk.kalshiodds.signal.config.SignalSettings,
+        tickers: Set<String>
+    ) {
         val container = KalshiOddsApp.from(this).container
         val hub = container.hub
-        val prefs = container.preferences
-        combine(prefs.settings, hub.watchTickers) { settings, tickers -> settings to tickers }
-            .collectLatest { (settings, tickers) ->
-                hub.settings = settings
-                LiveSignalsKeepAlive.setEnabled(this, settings.liveSignalsEnabled)
-                lastTickerCount = tickers.size
-                if (!settings.liveSignalsEnabled) {
-                    explicitStop = true
-                    client?.stop()
-                    client = null
-                    hub.setConnection(WsConnectionState.IDLE, detail = "live signals off")
-                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-                    stopSelf()
-                    return@collectLatest
-                }
-                if (!LiveSignalsPolicy.shouldConnectWs(true, settings.credentialsConfigured)) {
-                    client?.stop()
-                    client = null
-                    hub.wsLive = false
-                    hub.setConnection(WsConnectionState.NEEDS_API_KEY, detail = "WS needs API key — using REST")
-                    updateNotification(needsKey = true)
-                    return@collectLatest
-                }
-                val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades, tickers.filter {
-                    settings.isWatchedTicker(it)
-                })
-                val existing = client
-                if (existing == null) {
-                    hub.setConnection(WsConnectionState.CONNECTING)
-                    updateNotification(reconnecting = true)
-                    val ws = KalshiWsClient(
-                        scope = scope,
-                        onTick = { tick -> hub.ingestTick(tick) },
-                        onBookSnapshot = { snap ->
-                            hub.ingestBookSnapshot(
-                                ticker = snap.ticker,
-                                yesLevels = snap.yesLevels,
-                                noLevels = snap.noLevels,
-                                seq = snap.seq,
-                                receiveElapsedNanos = snap.receiveElapsedNanos
-                            )
-                        },
-                        onBookDelta = { delta ->
-                            hub.ingestBookDelta(
-                                ticker = delta.ticker,
-                                price = delta.price,
-                                delta = delta.delta,
-                                side = delta.side,
-                                seq = delta.seq,
-                                receiveElapsedNanos = delta.receiveElapsedNanos
-                            )
-                        },
-                        onState = { state ->
-                            hub.wsLive = state.connected
-                            val mapped = when {
-                                state.connected -> WsConnectionState.CONNECTED
-                                state.reconnecting -> WsConnectionState.RECONNECTING
-                                state.detail?.contains("auth", ignoreCase = true) == true ->
-                                    WsConnectionState.NEEDS_API_KEY
-                                else -> WsConnectionState.REST_FALLBACK
-                            }
-                            hub.setConnection(mapped, host = state.host, detail = state.detail)
-                            updateNotification(
-                                connected = state.connected,
-                                reconnecting = state.reconnecting,
-                                needsKey = mapped == WsConnectionState.NEEDS_API_KEY
-                            )
-                        },
-                        onLog = { msg -> Log.d(TAG, msg) }
-                    )
-                    client = ws
-                    val (keyId, pem) = prefs.credentialSnapshot()
-                    ws.start(keyId, pem, plan.channels, plan.marketTickers)
-                } else {
-                    existing.updateSubscriptions(plan.channels, plan.marketTickers)
-                }
-            }
+        hub.settings = settings
+        LiveSignalsKeepAlive.setEnabled(this, settings.liveSignalsEnabled)
+        lastTickerCount = tickers.size
+        if (!settings.liveSignalsEnabled) {
+            explicitStop = true
+            client?.stop()
+            client = null
+            hub.setConnection(WsConnectionState.IDLE, detail = "live signals off")
+            runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+            stopSelf()
+            return
+        }
+        if (!LiveSignalsPolicy.shouldConnectWs(true, settings.credentialsConfigured)) {
+            client?.stop()
+            client = null
+            hub.wsLive = false
+            hub.setConnection(WsConnectionState.NEEDS_API_KEY, detail = "WS needs API key — using REST")
+            updateNotification(needsKey = true)
+            return
+        }
+        val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades, tickers.filter {
+            settings.isWatchedTicker(it)
+        })
+        val existing = client
+        if (existing == null) {
+            hub.setConnection(WsConnectionState.CONNECTING)
+            updateNotification(reconnecting = true)
+            val ws = KalshiWsClient(
+                scope = scope,
+                onTick = { tick -> runCatching { hub.ingestTick(tick) } },
+                onBookSnapshot = { snap ->
+                    runCatching {
+                        hub.ingestBookSnapshot(
+                            ticker = snap.ticker,
+                            yesLevels = snap.yesLevels,
+                            noLevels = snap.noLevels,
+                            seq = snap.seq,
+                            receiveElapsedNanos = snap.receiveElapsedNanos
+                        )
+                    }
+                },
+                onBookDelta = { delta ->
+                    runCatching {
+                        hub.ingestBookDelta(
+                            ticker = delta.ticker,
+                            price = delta.price,
+                            delta = delta.delta,
+                            side = delta.side,
+                            seq = delta.seq,
+                            receiveElapsedNanos = delta.receiveElapsedNanos
+                        )
+                    }
+                },
+                onState = { state ->
+                    runCatching {
+                        hub.wsLive = state.connected
+                        val mapped = when {
+                            state.connected -> WsConnectionState.CONNECTED
+                            state.reconnecting -> WsConnectionState.RECONNECTING
+                            state.detail?.contains("auth", ignoreCase = true) == true ->
+                                WsConnectionState.NEEDS_API_KEY
+                            else -> WsConnectionState.REST_FALLBACK
+                        }
+                        hub.setConnection(mapped, host = state.host, detail = state.detail)
+                        updateNotification(
+                            connected = state.connected,
+                            reconnecting = state.reconnecting,
+                            needsKey = mapped == WsConnectionState.NEEDS_API_KEY
+                        )
+                    }
+                },
+                onLog = { msg -> Log.d(TAG, msg) }
+            )
+            client = ws
+            val (keyId, pem) = runCatching { container.preferences.credentialSnapshot() }
+                .getOrElse { "" to "" }
+            ws.start(keyId, pem, plan.channels, plan.marketTickers)
+        } else {
+            existing.updateSubscriptions(plan.channels, plan.marketTickers)
+        }
     }
 
     /**
      * Keep [com.dirk.kalshiodds.signal.SignalHub.watchTickers] fresh after the
      * Activity/ViewModel is gone so orderbook subscriptions do not go stale.
+     * Skipped while the UI is foreground — OddsViewModel already polls, and
+     * a second refresh raced the shared TFLite interpreter.
      */
     private suspend fun runMetadataLoop() {
-        val container = KalshiOddsApp.from(this).container
+        val container = runCatching { KalshiOddsApp.from(this).container }.getOrNull() ?: return
         while (scope.isActive) {
             refreshWakeLock()
-            if (LiveSignalsKeepAlive.isEnabled(this)) {
+            val uiUp = LiveSignalsKeepAlive.isUiInForeground()
+            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp) {
                 runCatching {
                     val settings = container.hub.settings
                     runCatching { container.external.refreshIfStale() }.getOrNull()?.let {
@@ -222,19 +278,35 @@ class LiveSignalsService : Service() {
         val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
             .getOrElse { SignalNotifier(this) }
         val text = LiveSignalsPolicy.foregroundText(connected, reconnecting, needsKey, lastTickerCount)
+        val notification = runCatching { notifier.foregroundNotification(text) }.getOrNull() ?: return
+        val type = if (foregroundTypeInUse != 0) {
+            foregroundTypeInUse
+        } else {
+            LiveSignalsPolicy.foregroundServiceTypesToTry(Build.VERSION.SDK_INT).firstOrNull() ?: 0
+        }
         runCatching {
-            ServiceCompat.startForeground(
-                this,
-                SignalNotifier.FG_NOTIFICATION_ID,
-                notifier.foregroundNotification(text),
-                foregroundType(false)
-            )
+            if (Build.VERSION.SDK_INT >= 29 && type != 0) {
+                ServiceCompat.startForeground(
+                    this,
+                    SignalNotifier.FG_NOTIFICATION_ID,
+                    notification,
+                    type
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                startForeground(SignalNotifier.FG_NOTIFICATION_ID, notification)
+            }
         }
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        if (LiveSignalsPolicy.shouldRestartAfterKill(LiveSignalsKeepAlive.isEnabled(this), explicitStop)) {
+        if (LiveSignalsPolicy.shouldRestartAfterKill(
+                LiveSignalsKeepAlive.isEnabled(this),
+                explicitStop,
+                foregroundFailed
+            )
+        ) {
             LiveSignalsKeepAlive.startService(this)
             LiveSignalsKeepAlive.enqueueSoon(this)
         }
@@ -251,9 +323,14 @@ class LiveSignalsService : Service() {
     }
 
     private fun handleDataSyncTimeout() {
-        // API 35 dataSync time-box. Stay up under specialUse if the user still wants live odds.
-        if (LiveSignalsPolicy.shouldRestartAfterKill(LiveSignalsKeepAlive.isEnabled(this), explicitStop)) {
-            promoteToForeground(specialUseOnly = true)
+        // API 35 dataSync time-box. Re-promote as dataSync; never specialUse.
+        if (LiveSignalsPolicy.shouldRestartAfterKill(
+                LiveSignalsKeepAlive.isEnabled(this),
+                explicitStop,
+                foregroundFailed
+            )
+        ) {
+            promoteToForeground()
         } else {
             stopSelf()
         }
@@ -262,7 +339,8 @@ class LiveSignalsService : Service() {
     override fun onDestroy() {
         val restart = LiveSignalsPolicy.shouldRestartAfterKill(
             LiveSignalsKeepAlive.isEnabled(this),
-            explicitStop
+            explicitStop,
+            foregroundFailed
         )
         tearDownPipeline()
         releaseWakeLock()
@@ -276,7 +354,7 @@ class LiveSignalsService : Service() {
     }
 
     private fun tearDownPipeline() {
-        client?.stop()
+        runCatching { client?.stop() }
         client = null
         pipelineJob?.cancel()
         pipelineJob = null
@@ -296,7 +374,7 @@ class LiveSignalsService : Service() {
     private fun refreshWakeLock() {
         val held = wakeLock
         if (held == null || !held.isHeld) {
-            acquireWakeLock()
+            runCatching { acquireWakeLock() }
             return
         }
         runCatching {

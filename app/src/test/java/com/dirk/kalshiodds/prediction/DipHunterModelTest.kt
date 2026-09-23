@@ -45,6 +45,36 @@ class DipHunterModelTest {
     }
 
     @Test
+    fun concurrentPredictDoesNotThrow() {
+        val model = DipHunterModel(context = null)
+        val now = System.currentTimeMillis()
+        val close = now + 600_000
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val threads = (0 until 8).map { t ->
+            Thread {
+                try {
+                    repeat(40) { i ->
+                        val p = model.predict(
+                            ticker = "KXBTC15M-T$t",
+                            marketMid = 0.40 + (i % 10) * 0.02,
+                            volume = 10_000.0,
+                            closeEpochMs = close,
+                            nowMs = now + i * 50L + t
+                        )
+                        check(p.yes in 0.02..0.98)
+                        check(p.no in 0.02..0.98)
+                    }
+                } catch (e: Throwable) {
+                    errors.add(e)
+                }
+            }
+        }
+        threads.forEach { it.start() }
+        threads.forEach { it.join() }
+        assertTrue(errors.joinToString { it.toString() }, errors.isEmpty())
+    }
+
+    @Test
     fun buildFeaturesMatchesTrainingLayout() {
         val model = DipHunterModel(context = null)
         val now = 1_000_000L

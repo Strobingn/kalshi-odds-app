@@ -29,11 +29,39 @@ object LiveSignalsPolicy {
     /** Android [android.app.Service.START_NOT_STICKY] — user asked us to stay down. */
     const val START_NOT_STICKY = 2
 
+    /**
+     * [android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC].
+     * specialUse is intentionally not used — it crashed startForeground on some
+     * API 34/35 devices when combined with dataSync / missing Play property.
+     */
+    const val FGS_TYPE_DATA_SYNC = 1
+
+    const val TICKET_REBUILD_DEBOUNCE_MS = 300L
+
     fun startCommand(explicitStop: Boolean): Int =
         if (explicitStop) START_NOT_STICKY else START_STICKY
 
-    fun shouldRestartAfterKill(liveEnabled: Boolean, explicitStop: Boolean): Boolean =
-        liveEnabled && !explicitStop
+    /**
+     * Application.onCreate is too early / often still "background" for FGS.
+     * Promote from the Activity / ProcessLifecycleOwner foreground instead.
+     */
+    fun shouldPromoteFromApplicationOnCreate(): Boolean = false
+
+    fun shouldPromoteFromUiForeground(liveEnabled: Boolean): Boolean = liveEnabled
+
+    /**
+     * Types to try in [androidx.core.app.ServiceCompat.startForeground], in order.
+     * Empty on API < 29 (legacy startForeground has no type).
+     */
+    fun foregroundServiceTypesToTry(sdkInt: Int): List<Int> = buildList {
+        if (sdkInt >= 29) add(FGS_TYPE_DATA_SYNC)
+    }
+
+    fun shouldRestartAfterKill(
+        liveEnabled: Boolean,
+        explicitStop: Boolean,
+        foregroundFailed: Boolean = false
+    ): Boolean = liveEnabled && !explicitStop && !foregroundFailed
 
     fun shouldConnectWs(liveEnabled: Boolean, credentialsConfigured: Boolean): Boolean =
         liveEnabled && credentialsConfigured

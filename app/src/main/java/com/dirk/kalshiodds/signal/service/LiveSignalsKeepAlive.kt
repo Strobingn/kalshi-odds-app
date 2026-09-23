@@ -14,14 +14,22 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Sync mirror of the Live-signals toggle plus start/stop helpers.
- * DataStore is async; the process-start path (Application / BOOT / START_STICKY)
- * must know immediately whether to promote a foreground service.
+ * DataStore is async; the UI-foreground path must know immediately whether
+ * to promote a foreground service. Application.onCreate must not start an FGS.
  */
 object LiveSignalsKeepAlive {
     private const val TAG = "DipHunterKeepAlive"
+    private val uiInForeground = AtomicBoolean(false)
+
+    fun isUiInForeground(): Boolean = uiInForeground.get()
+
+    fun markUiInForeground(foreground: Boolean) {
+        uiInForeground.set(foreground)
+    }
 
     fun isEnabled(context: Context): Boolean =
         prefs(context).getBoolean(LiveSignalsPolicy.PREFS_ENABLED_KEY, false)
@@ -30,6 +38,10 @@ object LiveSignalsKeepAlive {
         prefs(context).edit().putBoolean(LiveSignalsPolicy.PREFS_ENABLED_KEY, enabled).commit()
     }
 
+    /**
+     * Safe FGS start. Never throws — [android.app.ForegroundServiceStartNotAllowedException]
+     * and OEM failures are caught so the UI process stays up.
+     */
     fun startService(context: Context) {
         val app = context.applicationContext
         val intent = Intent(app, LiveSignalsService::class.java)
@@ -41,7 +53,7 @@ object LiveSignalsKeepAlive {
                 app.startService(intent)
             }
         } catch (t: Throwable) {
-            Log.w(TAG, "startForegroundService failed: ${t.message}")
+            Log.w(TAG, "startForegroundService failed: ${t.javaClass.simpleName}: ${t.message}")
             enqueueSoon(app)
         }
     }
@@ -59,12 +71,23 @@ object LiveSignalsKeepAlive {
                 app.startService(intent)
             }
         } catch (_: Throwable) {
-            app.stopService(Intent(app, LiveSignalsService::class.java))
+            runCatching { app.stopService(Intent(app, LiveSignalsService::class.java)) }
         }
     }
 
+    /** Start only when the user left Live signals on. Never throws. */
     fun ensureService(context: Context) {
         if (isEnabled(context)) startService(context)
+    }
+
+    /**
+     * UI-visible start. Preferred over [ensureService] from Application.onCreate.
+     */
+    fun ensureServiceFromUi(context: Context) {
+        markUiInForeground(true)
+        if (LiveSignalsPolicy.shouldPromoteFromUiForeground(isEnabled(context))) {
+            startService(context)
+        }
     }
 
     fun enqueueWatchdogs(context: Context) {
@@ -108,6 +131,7 @@ class LiveSignalsWatchdogWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
+        // WorkManager is a background start — KeepAlive swallows FGS-not-allowed.
         LiveSignalsKeepAlive.ensureService(applicationContext)
         return Result.success()
     }

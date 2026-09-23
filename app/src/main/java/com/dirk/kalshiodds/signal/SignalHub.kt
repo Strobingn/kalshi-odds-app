@@ -17,6 +17,7 @@ import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -40,7 +41,11 @@ class SignalHub(
     }.asCoroutineDispatcher()
 ) {
     private val job = SupervisorJob()
-    val tickScope = CoroutineScope(job + tickDispatcher)
+    val tickScope = CoroutineScope(
+        job + tickDispatcher + CoroutineExceptionHandler { _, t ->
+            Log.e(TAG, "tick", t)
+        }
+    )
 
     private val _status = MutableStateFlow(SignalStatus())
     val status: StateFlow<SignalStatus> = _status.asStateFlow()
@@ -105,13 +110,13 @@ class SignalHub(
         tickScope.launch {
             for (m in markets) {
                 if (!settings.isWatchedTicker(m.ticker)) continue
-                processTick(MarketTick.fromUi(m, recv, TickSource.REST), notify = true)
+                runCatching { processTick(MarketTick.fromUi(m, recv, TickSource.REST), notify = true) }
             }
         }
     }
 
     fun ingestTick(tick: MarketTick) {
-        tickScope.launch { processTick(tick, notify = true) }
+        tickScope.launch { runCatching { processTick(tick, notify = true) } }
     }
 
     fun ingestBookSnapshot(
@@ -122,11 +127,13 @@ class SignalHub(
         receiveElapsedNanos: Long
     ) {
         tickScope.launch {
-            if (!CryptoMarkets.isCryptoTicker(ticker)) return@launch
-            if (!settings.isWatchedTicker(ticker)) return@launch
-            scoring.applySnapshot(ticker, yesLevels, noLevels, seq)
-            publishBookScore(ticker, receiveElapsedNanos)
-            scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+            runCatching {
+                if (!CryptoMarkets.isCryptoTicker(ticker)) return@runCatching
+                if (!settings.isWatchedTicker(ticker)) return@runCatching
+                scoring.applySnapshot(ticker, yesLevels, noLevels, seq)
+                publishBookScore(ticker, receiveElapsedNanos)
+                scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+            }
         }
     }
 
@@ -139,11 +146,13 @@ class SignalHub(
         receiveElapsedNanos: Long
     ) {
         tickScope.launch {
-            if (!CryptoMarkets.isCryptoTicker(ticker)) return@launch
-            if (!settings.isWatchedTicker(ticker)) return@launch
-            scoring.applyDelta(ticker, price, delta, side, seq)
-            publishBookScore(ticker, receiveElapsedNanos)
-            scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+            runCatching {
+                if (!CryptoMarkets.isCryptoTicker(ticker)) return@runCatching
+                if (!settings.isWatchedTicker(ticker)) return@runCatching
+                scoring.applyDelta(ticker, price, delta, side, seq)
+                publishBookScore(ticker, receiveElapsedNanos)
+                scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+            }
         }
     }
 

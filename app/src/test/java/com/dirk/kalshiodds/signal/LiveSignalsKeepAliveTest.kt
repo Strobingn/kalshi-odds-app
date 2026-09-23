@@ -95,6 +95,45 @@ class LiveSignalsKeepAliveTest {
     }
 
     @Test
+    fun applicationMustNotPromoteFgsOnCreate() {
+        assertFalse(LiveSignalsPolicy.shouldPromoteFromApplicationOnCreate())
+        assertTrue(LiveSignalsPolicy.shouldPromoteFromUiForeground(liveEnabled = true))
+        assertFalse(LiveSignalsPolicy.shouldPromoteFromUiForeground(liveEnabled = false))
+    }
+
+    @Test
+    fun fgsTypesAreDataSyncOnlyOnApi29Plus() {
+        assertTrue(LiveSignalsPolicy.foregroundServiceTypesToTry(28).isEmpty())
+        assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(29))
+        assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(34))
+        assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(35))
+        assertEquals(1, LiveSignalsPolicy.FGS_TYPE_DATA_SYNC)
+    }
+
+    @Test
+    fun failedForegroundDoesNotRestart() {
+        assertFalse(
+            LiveSignalsPolicy.shouldRestartAfterKill(
+                liveEnabled = true,
+                explicitStop = false,
+                foregroundFailed = true
+            )
+        )
+        assertTrue(
+            LiveSignalsPolicy.shouldRestartAfterKill(
+                liveEnabled = true,
+                explicitStop = false,
+                foregroundFailed = false
+            )
+        )
+    }
+
+    @Test
+    fun ticketRebuildDebounceIsShort() {
+        assertTrue(LiveSignalsPolicy.TICKET_REBUILD_DEBOUNCE_MS in 100L..1_000L)
+    }
+
+    @Test
     fun stopActionAndWatchdogConstantsAreStable() {
         assertEquals(
             "com.dirk.kalshiodds.signal.service.STOP_LIVE_SIGNALS",

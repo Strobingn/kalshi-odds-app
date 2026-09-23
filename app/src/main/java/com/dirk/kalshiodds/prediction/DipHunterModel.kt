@@ -71,6 +71,12 @@ class DipHunterModel(
             ).withEdgeMetrics(edgeThresholdPp)
         }
 
+    /**
+     * TFLite [Interpreter] is not thread-safe. ViewModel REST annotate and the
+     * live WS scoring loop share one instance — concurrent [Interpreter.run]
+     * native-crashes the process mid-session.
+     */
+    @Synchronized
     fun predict(
         ticker: String,
         marketMid: Double,

@@ -3,7 +3,7 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
-import com.dirk.kalshiodds.signal.engine.LocalOrderBook
+import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import java.util.UUID
 
 /**
@@ -15,7 +15,7 @@ object TicketBuilder {
     data class Context(
         val settings: SignalSettings,
         val alertsPaused: Boolean,
-        val books: Map<String, LocalOrderBook> = emptyMap(),
+        val books: Map<String, BookLevelSnapshot> = emptyMap(),
         val idFactory: () -> String = { UUID.randomUUID().toString() },
         val nowMs: Long = System.currentTimeMillis()
     )
@@ -101,18 +101,18 @@ object TicketBuilder {
      * YES asks = local NO bids at `(1 − noPrice)`. NO asks = local YES bids at
      * `(1 − yesPrice)`.
      */
-    fun askLevels(market: MarketUiModel, side: String, book: LocalOrderBook?): List<Pair<Double, Double>> {
+    fun askLevels(market: MarketUiModel, side: String, book: BookLevelSnapshot?): List<Pair<Double, Double>> {
         if (book != null && !book.isEmpty()) {
             return if (side == "YES") {
-                book.noLevels().map { (noPx, size) -> (1.0 - noPx).coerceIn(0.0, 1.0) to size }
+                book.no.map { (noPx, size) -> (1.0 - noPx).coerceIn(0.0, 1.0) to size }
             } else {
-                book.yesLevels().map { (yesPx, size) -> (1.0 - yesPx).coerceIn(0.0, 1.0) to size }
+                book.yes.map { (yesPx, size) -> (1.0 - yesPx).coerceIn(0.0, 1.0) to size }
             }
         }
         return emptyList()
     }
 
-    fun quotedSize(market: MarketUiModel, side: String, book: LocalOrderBook?): Double? {
+    fun quotedSize(market: MarketUiModel, side: String, book: BookLevelSnapshot?): Double? {
         if (book != null && !book.isEmpty()) {
             val levels = askLevels(market, side, book)
             val ask = bestAsk(market, side) ?: return null

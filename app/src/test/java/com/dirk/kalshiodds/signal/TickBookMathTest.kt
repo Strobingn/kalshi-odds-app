@@ -144,6 +144,67 @@ class TickBookMathTest {
         assertEquals(LocalOrderBook.signedImbalance(40.0, 10.0), imb)
     }
 
+    @Test
+    fun snapshotBookIsIsolatedFromLaterDeltas() {
+        val store = TickBook()
+        store.applySnapshot(
+            "KXBTC15M-SNAP",
+            yesLevels = listOf(0.40 to 10.0),
+            noLevels = listOf(0.55 to 12.0),
+            seq = 1
+        )
+        val snap = store.snapshotBook("KXBTC15M-SNAP")
+        assertTrue(snap != null && !snap.isEmpty())
+        store.applyDelta("KXBTC15M-SNAP", price = 0.40, delta = 90.0, side = "yes", seq = 2)
+        // Snapshot must not see the live TreeMap mutation.
+        assertEquals(10.0, snap!!.yes.single { it.first == 0.40 }.second, 1e-9)
+        val live = store.snapshotBook("KXBTC15M-SNAP")!!
+        assertEquals(100.0, live.yes.single { it.first == 0.40 }.second, 1e-9)
+    }
+
+    @Test
+    fun snapshotBookSurvivesConcurrentDeltas() {
+        val store = TickBook()
+        store.applySnapshot(
+            "KXBTC15M-RACE",
+            yesLevels = listOf(0.50 to 5.0),
+            noLevels = listOf(0.49 to 5.0),
+            seq = 1
+        )
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val writers = (0 until 4).map { i ->
+            Thread {
+                try {
+                    repeat(80) { n ->
+                        store.applyDelta(
+                            "KXBTC15M-RACE",
+                            price = 0.50,
+                            delta = if (n % 2 == 0) 1.0 else -1.0,
+                            side = "yes",
+                            seq = 2 + n + i * 80
+                        )
+                    }
+                } catch (t: Throwable) {
+                    errors.add(t)
+                }
+            }
+        }
+        val readers = (0 until 4).map {
+            Thread {
+                try {
+                    repeat(80) {
+                        store.snapshotBook("KXBTC15M-RACE")
+                    }
+                } catch (t: Throwable) {
+                    errors.add(t)
+                }
+            }
+        }
+        (writers + readers).forEach { it.start() }
+        (writers + readers).forEach { it.join() }
+        assertTrue(errors.joinToString { it.toString() }, errors.isEmpty())
+    }
+
     private fun tick(ticker: String, bid: Double, ask: Double) = MarketTick(
         ticker = ticker,
         series = MarketTick.inferSeries(ticker),

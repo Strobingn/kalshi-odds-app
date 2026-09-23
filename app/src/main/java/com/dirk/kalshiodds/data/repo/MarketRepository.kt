@@ -22,6 +22,8 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import retrofit2.HttpException
 
 data class MarketsSnapshot(
@@ -74,6 +76,8 @@ class MarketRepository(
     @Volatile var lastCalibration: Calibrator.State = Calibrator.State()
         private set
 
+    private val refreshMutex = Mutex()
+
     val cachedSnapshot: Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
         payload?.toSnapshot(fromCache = true)
     }
@@ -84,6 +88,16 @@ class MarketRepository(
         watchSol: Boolean = true,
         extraTickers: List<String> = emptyList(),
         edgeThresholdPp: Double = EDGE_ALERT_THRESHOLD_PP
+    ): MarketsSnapshot = refreshMutex.withLock {
+        refreshOnce(watchBtc, watchEth, watchSol, extraTickers, edgeThresholdPp)
+    }
+
+    private suspend fun refreshOnce(
+        watchBtc: Boolean,
+        watchEth: Boolean,
+        watchSol: Boolean,
+        extraTickers: List<String>,
+        edgeThresholdPp: Double
     ): MarketsSnapshot = coroutineScope {
         try {
             val btcDeferred = async {
