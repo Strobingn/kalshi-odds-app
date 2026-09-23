@@ -18,15 +18,30 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.2.1**
+Package: `com.dirk.kalshiodds` · version **0.2.2**
 
-This release is **read-only**. It does **not** place trades, subscribe to fills/portfolio, or send orders. There is no journal UI.
+Analysis UI is unchanged. **0.2.2 adds approve-gated limit tickets only.** There is no background auto-fire, no set-and-forget trading, and no order on app start. **Not financial advice. High variance — you can lose the full stake.**
+
+## Approve-gated tickets (v0.2.2)
+
+Human **Approve** is required for **that** ticket before any order is sent.
+
+1. **Stake.** Default **$5 USD**. Settings may lower it. Raising above $5 requires typing `RAISE`. Hard cap **$25** so this cannot become a large auto-bot.
+2. **Payout gate.** A ticket is proposed only when max settlement payout for the proposed stake is **≥ $100**.
+   - Kalshi binaries settle at **$1.00** per winning contract.
+   - `contracts = floor(stakeUsd / conservativeLimitPrice)`
+   - `maxSettlementPayout = contracts × $1.00`
+   - Propose iff `maxSettlementPayout ≥ $100`
+   - At the $5 default that means a conservative limit **≤ $0.05** (5¢) **and** enough visible size at/under that price. If the ask is too high or the book is too thin, no ticket.
+3. **Quality gates (default ON).** Skip filter, not muted, and alerts not paused by streak/drawdown. Settings can disable these for tickets only.
+4. **Limit only.** GTC limit at the conservative ask. Never a market order. Ticket shows side, ticker, size, estimated fill, max payout, net EV when available.
+5. **Auth.** Uses the Key ID + PEM already in Settings (`EncryptedSharedPreferences`). PEM is never logged. Soft-fail with a clear error. Create: `POST /trade-api/v2/portfolio/events/orders`. Cancel: `DELETE /trade-api/v2/portfolio/events/orders/{order_id}`.
 
 ## Decision support (v0.2.1)
 
 Advisory layer on top of the v0.2.0 predictability stack. Still **never** calls Kalshi trade/order endpoints.
 
-1. **Bankroll & size.** Settings: bankroll, Kelly fraction (default quarter-Kelly, 5% cap) or fixed-fraction. Each card shows **“N contracts max”** from edge, price, bankroll, liquidity, and spread. Never executes.
+1. **Bankroll & size.** Settings: bankroll, Kelly fraction (default quarter-Kelly, 5% cap) or fixed-fraction. Each card shows **“N contracts max”** from edge, price, bankroll, liquidity, and spread. Advisory size is separate from the $5 ticket stake.
 2. **Net EV after fees/spread.** Kalshi-style taker fee `feeRate × P × (1−P)` (default 7%, configurable) plus half-spread. Ranked opportunities and alerts use **net EV** when that toggle is on; raw edge still shows.
 3. **Series / regime auto-mute.** Rolling 7-day hit rate below a Settings floor (default 40%, ≥8 samples) mutes that series, regime, or TTE window — no alerts, downranked, **Muted** chip. Disable in Settings.
 4. **On-device adapter.** Settlements reweight blend channels (EMA) and fit a slope/intercept on `logit(p)` — not just temperature. Cold start is identity; weights persist in DataStore. No remote training.
@@ -122,13 +137,14 @@ adb install -r app/build/outputs/apk/debug/DipHunter-debug.apk
 - REST base: `https://api.elections.kalshi.com/trade-api/v2`
 - WS: `wss://external-api-ws.kalshi.com/trade-api/ws/v2` (elections host as alternate)
 - Public REST (no auth): `GET /markets?series_ticker=KXBTC15M|KXETH15M|KXSOL15M&status=open`
+- Authenticated create (after Approve): `POST /portfolio/events/orders` (V2 bid/ask, GTC limit). Cancel: `DELETE /portfolio/events/orders/{order_id}`.
 - Example tickers: `KXBTC15M-26SEP231600-00`, `KXETH15M-26SEP231645-45`, `KXSOL15M-26SEP231645-45`
 
 ## Project layout
 
 ```
 app/src/main/java/com/dirk/kalshiodds/
-  data/api/          Retrofit KalshiApi + NetworkModule
+  data/api/          Retrofit KalshiApi + authenticated KalshiTradeApi (create/cancel)
   data/dto/          MarketDto / MarketsResponse
   data/local/        DataStore MarketCache (btc/eth/sol/extra)
   data/repo/         MarketRepository (crypto series only)
@@ -140,6 +156,7 @@ app/src/main/java/com/dirk/kalshiodds/
     engine/          ScoringEngine, TickBook, LocalOrderBook, MarketRegime, SkipFilter
     feedback/        Calibrator, ScorecardMetrics, OnlineAdapter, Allowlist, Guardrails
     sizing/          PositionSizer, NetExpectedValue (advisory)
+    trade/           PayoutGate, TicketBuilder, TicketSession (approve-gated)
     external/        Public Binance/Coinbase spot · vol · funding
     checklist/       Pre-trade checklist + copy text
     notify/          SignalNotifier (HIGH + LOW channels)
@@ -162,7 +179,8 @@ app/src/main/assets/default_signal_config.json
 - Skip filter: min confidence, min liquidity, max spread, hide weak opportunities
 - Bankroll, Kelly / fixed-fraction, fee rate, net-EV ranking
 - Auto-mute floor, streak / drawdown guard, resume
-- Kalshi API Key ID + private key PEM (secure storage)
+- Ticket stake ($5 default, $25 hard cap), quality gates for tickets
+- Kalshi API Key ID + private key PEM (secure storage; WS + Approve only)
 
 Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).
 

@@ -124,6 +124,16 @@ object KalshiWsAuth {
     fun signWsHandshake(key: ParsedKey, timestampMs: String): String =
         sign(key, timestampMs + WS_METHOD + WS_PATH)
 
+    /**
+     * REST pre-sign text: `timestamp + METHOD + path`.
+     * [path] must be the full URL path from the API root with no query string
+     * (e.g. `/trade-api/v2/portfolio/events/orders`).
+     */
+    fun signRest(key: ParsedKey, timestampMs: String, method: String, path: String): String {
+        val cleanPath = path.substringBefore('?')
+        return sign(key, timestampMs + method.uppercase() + cleanPath)
+    }
+
     fun handshakeHeaders(keyId: String, pem: String, timestampMs: Long = System.currentTimeMillis()): HandshakeHeaders {
         val key = parsePrivateKey(pem)
         val ts = timestampMs.toString()

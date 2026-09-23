@@ -1,8 +1,8 @@
 package com.dirk.kalshiodds.signal.config
 
 /**
- * Shared defaults for the predictability + decision-support stack.
- * Analysis / alerts only — never used to place orders.
+ * Shared defaults for the predictability + decision-support + ticket stack.
+ * Orders are never placed except via an explicit in-app Approve on a ticket.
  */
 object SignalConstants {
     /** Last ~3 minutes before settlement uses the late-window blend. */
@@ -73,4 +73,36 @@ object SignalConstants {
     const val EXTERNAL_CACHE_MS = 25_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
     const val EXTERNAL_READ_TIMEOUT_MS = 4_000L
+
+    // --- v0.2.2 approve-gated tickets ---
+
+    /** Default USD risked on one approved ticket. */
+    const val DEFAULT_TICKET_STAKE_USD = 5.0
+
+    /**
+     * Soft cap: Settings may lower freely. Raising above this requires an
+     * explicit typed confirmation in Settings.
+     */
+    const val TICKET_STAKE_SOFT_CAP_USD = 5.0
+
+    /** Hard ceiling so this never becomes a large auto-bot. */
+    const val TICKET_STAKE_HARD_CAP_USD = 25.0
+
+    /** Minimum stake the slider / prefs will accept. */
+    const val TICKET_STAKE_MIN_USD = 1.0
+
+    /**
+     * Propose only when max settlement payout for the ticket stake is at
+     * least this many dollars. See [com.dirk.kalshiodds.signal.trade.PayoutGate].
+     */
+    const val DEFAULT_MIN_PAYOUT_USD = 100.0
+
+    /** Each winning binary contract settles at $1.00. */
+    const val CONTRACT_SETTLEMENT_USD = 1.0
+
+    /** Default: skip filter / mute / streak pause still gate tickets. */
+    const val DEFAULT_TICKET_RESPECT_GATES = true
+
+    /** Phrase the user must type to raise stake above the soft cap. */
+    const val TICKET_RAISE_CONFIRM_PHRASE = "RAISE"
 }

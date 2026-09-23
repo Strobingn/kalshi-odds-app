@@ -1,6 +1,8 @@
 package com.dirk.kalshiodds
 
 import android.content.Context
+import com.dirk.kalshiodds.data.api.KalshiTradeClient
+import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.repo.MarketRepository
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import com.dirk.kalshiodds.prediction.PredictionLogStore
@@ -12,6 +14,7 @@ import com.dirk.kalshiodds.signal.feedback.DecisionSupport
 import com.dirk.kalshiodds.signal.feedback.GuardrailStore
 import com.dirk.kalshiodds.signal.feedback.LearnedWeightsStore
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
+import com.dirk.kalshiodds.signal.trade.TicketSession
 
 class AppContainer(context: Context) {
     private val app = context.applicationContext
@@ -30,6 +33,18 @@ class AppContainer(context: Context) {
     )
     val external = ExternalMarketCache()
     val hub = SignalHub(scoring = scoring, notifier = notifier, logStore = logStore)
+    val tradeClient = KalshiTradeClient(
+        api = NetworkModule.tradeApi { preferences.credentialSnapshot() },
+        credentials = { preferences.credentialSnapshot() }
+    )
+    val tickets = TicketSession(
+        placeOrder = { ticket, clientOrderId ->
+            runCatching { tradeClient.createLimit(ticket, clientOrderId) }
+        },
+        cancelOrder = { order ->
+            runCatching { tradeClient.cancel(order) }
+        }
+    )
     val repository = MarketRepository(
         context = app,
         model = model,

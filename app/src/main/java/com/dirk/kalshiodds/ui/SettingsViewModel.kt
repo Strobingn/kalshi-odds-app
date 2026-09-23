@@ -6,7 +6,9 @@ import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.config.SecureCredentialStore
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.trade.PayoutGate
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +23,10 @@ data class SettingsUiState(
     val extraRejected: String? = null,
     val bankrollDraft: String = "",
     val alertsPaused: Boolean = false,
-    val pauseReason: String? = null
+    val pauseReason: String? = null,
+    val pendingRaiseStake: Double? = null,
+    val raiseDraft: String = "",
+    val raiseError: String? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -82,6 +87,43 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setStreakPauseN(v: Int) = viewModelScope.launch { prefs.updateStreakPauseN(v) }
     fun setDrawdownUsd(v: Double) = viewModelScope.launch { prefs.updateDrawdownUsd(v) }
     fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
+    fun setTicketsEnabled(v: Boolean) = viewModelScope.launch { prefs.updateTicketsEnabled(v) }
+    fun setTicketRespectGates(v: Boolean) = viewModelScope.launch { prefs.updateTicketRespectGates(v) }
+
+    /**
+     * Lowering stake (or staying ≤ $5) writes immediately. Raising above the
+     * $5 soft cap opens a typed-confirm dialog. Hard cap is $25.
+     */
+    fun requestTicketStake(raw: Double) {
+        val clipped = PayoutGate.clipStake(raw)
+        val current = _state.value.settings.ticketStakeUsd
+        if (clipped <= current + 1e-9 || !PayoutGate.requiresRaiseConfirm(clipped)) {
+            viewModelScope.launch { prefs.updateTicketStakeUsd(clipped) }
+            _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
+            return
+        }
+        _state.update {
+            it.copy(pendingRaiseStake = clipped, raiseDraft = "", raiseError = null)
+        }
+    }
+
+    fun setRaiseDraft(text: String) = _state.update { it.copy(raiseDraft = text, raiseError = null) }
+
+    fun confirmRaiseStake() {
+        val pending = _state.value.pendingRaiseStake ?: return
+        if (!PayoutGate.raiseConfirmMatches(_state.value.raiseDraft)) {
+            _state.update {
+                it.copy(raiseError = "Type ${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE} to raise above $5")
+            }
+            return
+        }
+        viewModelScope.launch { prefs.updateTicketStakeUsd(pending) }
+        _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
+    }
+
+    fun cancelRaiseStake() {
+        _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
+    }
 
     fun resumeAlerts() {
         viewModelScope.launch {

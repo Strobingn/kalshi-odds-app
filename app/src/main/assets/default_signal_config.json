@@ -23,5 +23,8 @@
   "muteHitRateFloor": 0.40,
   "streakPauseN": 4,
   "drawdownUsd": 50.0,
-  "resumeOnNewSession": true
+  "resumeOnNewSession": true,
+  "ticketsEnabled": true,
+  "ticketStakeUsd": 5.0,
+  "ticketRespectGates": true
 }

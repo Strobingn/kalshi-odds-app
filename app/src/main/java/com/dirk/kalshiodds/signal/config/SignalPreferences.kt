@@ -46,6 +46,9 @@ data class SignalSettings(
     val streakPauseN: Int = SignalConstants.DEFAULT_STREAK_PAUSE_N,
     val drawdownUsd: Double = SignalConstants.DEFAULT_DRAWDOWN_USD,
     val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
+    val ticketsEnabled: Boolean = true,
+    val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
+    val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false
 ) {
@@ -139,6 +142,14 @@ class SignalPreferences(
         it[KEY_DRAWDOWN] = value.coerceIn(5.0, 5_000.0)
     }
     suspend fun updateResumeOnNewSession(value: Boolean) = edit { it[KEY_RESUME_SESSION] = value }
+    suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
+    suspend fun updateTicketStakeUsd(value: Double) = edit {
+        it[KEY_TICKET_STAKE] = value.coerceIn(
+            SignalConstants.TICKET_STAKE_MIN_USD,
+            SignalConstants.TICKET_STAKE_HARD_CAP_USD
+        )
+    }
+    suspend fun updateTicketRespectGates(value: Boolean) = edit { it[KEY_TICKET_GATES] = value }
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
@@ -186,6 +197,9 @@ class SignalPreferences(
             streakPauseN = this[KEY_STREAK_N] ?: def.streakPauseN,
             drawdownUsd = this[KEY_DRAWDOWN] ?: def.drawdownUsd,
             resumeOnNewSession = this[KEY_RESUME_SESSION] ?: def.resumeOnNewSession,
+            ticketsEnabled = this[KEY_TICKETS] ?: def.ticketsEnabled,
+            ticketStakeUsd = this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd,
+            ticketRespectGates = this[KEY_TICKET_GATES] ?: def.ticketRespectGates,
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
         )
@@ -217,6 +231,9 @@ class SignalPreferences(
         private val KEY_STREAK_N = intPreferencesKey("streak_pause_n")
         private val KEY_DRAWDOWN = doublePreferencesKey("drawdown_usd")
         private val KEY_RESUME_SESSION = booleanPreferencesKey("resume_on_new_session")
+        private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
+        private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
+        private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

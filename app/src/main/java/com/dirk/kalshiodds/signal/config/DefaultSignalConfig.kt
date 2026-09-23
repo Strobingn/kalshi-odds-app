@@ -31,7 +31,10 @@ data class DefaultSignalConfig(
     val muteHitRateFloor: Double = SignalConstants.DEFAULT_MUTE_HIT_RATE_FLOOR,
     val streakPauseN: Int = SignalConstants.DEFAULT_STREAK_PAUSE_N,
     val drawdownUsd: Double = SignalConstants.DEFAULT_DRAWDOWN_USD,
-    val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION
+    val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
+    val ticketsEnabled: Boolean = true,
+    val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
+    val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES
 ) {
     companion object {
         const val ASSET_NAME = "default_signal_config.json"

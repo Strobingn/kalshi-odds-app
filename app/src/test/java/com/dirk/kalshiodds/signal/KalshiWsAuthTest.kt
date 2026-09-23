@@ -74,6 +74,36 @@ class KalshiWsAuthTest {
     }
 
     @Test
+    fun signRestUsesMethodAndPathWithoutQuery() {
+        val kpg = KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        val pair = kpg.generateKeyPair()
+        val pem = toPkcs1Pem(pair.private as RSAPrivateCrtKey)
+        val parsed = KalshiWsAuth.parsePrivateKey(pem)
+        val ts = "1703123456789"
+        val path = "/trade-api/v2/portfolio/events/orders"
+        val a = KalshiWsAuth.signRest(parsed, ts, "POST", path)
+        val b = KalshiWsAuth.signRest(parsed, ts, "POST", "$path?market_ticker=X")
+        assertTrue(a.isNotBlank())
+        assertTrue(b.isNotBlank())
+        val pub = org.bouncycastle.crypto.params.RSAKeyParameters(
+            false,
+            (pair.public as java.security.interfaces.RSAPublicKey).modulus,
+            (pair.public as java.security.interfaces.RSAPublicKey).publicExponent
+        )
+        val msg = (ts + "POST" + path).toByteArray(Charsets.UTF_8)
+        fun verify(sigB64: String): Boolean {
+            val verifier = PSSSigner(RSAEngine(), SHA256Digest(), SHA256Digest(), 32)
+            verifier.init(false, pub)
+            verifier.update(msg, 0, msg.size)
+            return verifier.verifySignature(Base64.getDecoder().decode(sigB64))
+        }
+        // RSA-PSS is non-deterministic; both must verify the query-stripped path.
+        assertTrue(verify(a))
+        assertTrue(verify(b))
+    }
+
+    @Test
     fun wsUrlsIncludePrimaryAndElections() {
         assertEquals("wss://external-api-ws.kalshi.com/trade-api/ws/v2", KalshiWsAuth.PRIMARY_WS_URL)
         assertTrue(KalshiWsAuth.WS_URLS.contains(KalshiWsAuth.ELECTIONS_WS_URL))

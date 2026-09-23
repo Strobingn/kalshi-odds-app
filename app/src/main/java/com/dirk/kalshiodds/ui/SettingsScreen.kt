@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -23,6 +24,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -32,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
@@ -72,7 +75,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Text(
-                "Crypto-only analysis. Alerts and scoring never place orders. WTI and other non-crypto markets are ignored.",
+                "Crypto-only analysis plus optional approve-gated tickets. Nothing is sent to Kalshi without an explicit Approve tap on that ticket. WTI and other non-crypto markets are ignored. Not financial advice.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary
             )
@@ -296,6 +299,35 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             )
             ToggleRow("Resume automatically on next session", s.resumeOnNewSession, viewModel::setResumeOnNewSession)
 
+            Section("Trade tickets (approve-gated)")
+            Text(
+                "Default stake \$5. A ticket is proposed only when max settlement payout for that stake is ≥\$100 " +
+                    "(contracts = floor(stake ÷ limit); payout = contracts × \$1). At \$5 that means a conservative " +
+                    "limit ≤5¢ with enough size. Limit orders only — never market. Raising stake above \$5 requires " +
+                    "typing ${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
+                    "High variance: you can lose the full stake.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Show trade tickets", s.ticketsEnabled, viewModel::setTicketsEnabled)
+            Text(
+                String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 25f),
+                onValueChange = { viewModel.requestTicketStake(it.toDouble()) },
+                valueRange = 1f..25f,
+                steps = 23
+            )
+            ToggleRow(
+                "Require skip filter / mute / streak-pause for tickets",
+                s.ticketRespectGates,
+                viewModel::setTicketRespectGates
+            )
+
             Text(
                 "Live signals keep a foreground WebSocket for instant local alerts. " +
                     "Killed-app remote push would need FCM later — this release is local-only. " +
@@ -304,11 +336,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 color = TextSecondary
             )
 
-            Section("Kalshi API key (WS handshake only)")
+            Section("Kalshi API key (WS + approve-gated orders)")
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
                     "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
-                    "Used only to authenticate the public ticker / trade / orderbook_delta WebSocket — no portfolio or order-placement channels.",
+                    "Used for the public ticker / trade / orderbook_delta WebSocket and, after an in-app Approve, " +
+                    "POST /trade-api/v2/portfolio/events/orders (limit only).",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
@@ -347,6 +380,42 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 color = TextSecondary
             )
         }
+    }
+
+    val pending = state.pendingRaiseStake
+    if (pending != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::cancelRaiseStake,
+            title = { Text("Raise ticket stake?") },
+            text = {
+                Column {
+                    Text(
+                        String.format(
+                            Locale.US,
+                            "Default is $5. Type %s to set stake to $%.0f (hard cap $25). This is not auto-trading.",
+                            SignalConstants.TICKET_RAISE_CONFIRM_PHRASE,
+                            pending
+                        )
+                    )
+                    OutlinedTextField(
+                        value = state.raiseDraft,
+                        onValueChange = viewModel::setRaiseDraft,
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = { Text("Type ${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}") },
+                        singleLine = true
+                    )
+                    state.raiseError?.let {
+                        Text(it, color = AccentOrange, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = viewModel::confirmRaiseStake) { Text("Confirm raise") }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::cancelRaiseStake) { Text("Keep $5 max") }
+            }
+        )
     }
 }
 
