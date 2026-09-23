@@ -8,6 +8,7 @@ import com.dirk.kalshiodds.data.local.MarketCache
 import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.toUiModel
+import com.dirk.kalshiodds.prediction.DipHunterModel
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -27,7 +28,8 @@ data class MarketsSnapshot(
 class MarketRepository(
     context: Context,
     private val api: KalshiApi = NetworkModule.api,
-    private val cache: MarketCache = MarketCache(context.applicationContext)
+    private val cache: MarketCache = MarketCache(context.applicationContext),
+    private val model: DipHunterModel = DipHunterModel()
 ) {
 
     val cachedSnapshot: Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
@@ -42,9 +44,11 @@ class MarketRepository(
             val wtiMarkets = wtiDeferred.await().markets
             val now = System.currentTimeMillis()
             cache.write(btcMarkets, wtiMarkets, now)
+            val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now)
+            val wtiUi = model.annotate(wtiMarkets.map { it.toUiModel(SeriesKind.WTI) }, now)
             MarketsSnapshot(
-                btc = btcMarkets.map { it.toUiModel(SeriesKind.BTC) },
-                wti = wtiMarkets.map { it.toUiModel(SeriesKind.WTI) },
+                btc = btcUi,
+                wti = wtiUi,
                 fetchedAtEpochMs = now,
                 fromCache = false,
                 errorMessage = null,
@@ -84,12 +88,15 @@ class MarketRepository(
         fromCache: Boolean,
         errorMessage: String? = null,
         rateLimited: Boolean = false
-    ): MarketsSnapshot = MarketsSnapshot(
-        btc = btc.map { it.toUiModel(SeriesKind.BTC) },
-        wti = wti.map { it.toUiModel(SeriesKind.WTI) },
-        fetchedAtEpochMs = fetchedAtEpochMs,
-        fromCache = fromCache,
-        errorMessage = errorMessage,
-        rateLimited = rateLimited
-    )
+    ): MarketsSnapshot {
+        val now = System.currentTimeMillis()
+        return MarketsSnapshot(
+            btc = model.annotate(btc.map { it.toUiModel(SeriesKind.BTC) }, now),
+            wti = model.annotate(wti.map { it.toUiModel(SeriesKind.WTI) }, now),
+            fetchedAtEpochMs = fetchedAtEpochMs,
+            fromCache = fromCache,
+            errorMessage = errorMessage,
+            rateLimited = rateLimited
+        )
+    }
 }

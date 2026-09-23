@@ -57,14 +57,6 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
-                    market.floorStrike?.let { strike ->
-                        Text(
-                            text = "Floor strike: ${formatNumber(strike)}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     StatusChip(market.status)
@@ -77,40 +69,87 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "DIP HUNTER AI",
+                style = MaterialTheme.typography.labelMedium,
+                color = AccentBlue,
+                fontWeight = FontWeight.Bold
+            )
+            market.aiNote?.let {
+                Text(
+                    text = it + market.aiConfidence?.let { c ->
+                        String.format(Locale.US, " · conf %.0f%%", c * 100)
+                    }.orEmpty(),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
+                )
+            }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 OddsColumn(
-                    label = "YES",
+                    label = "AI YES",
+                    percent = market.aiYesPercent,
+                    bid = null,
+                    ask = null,
+                    accent = AccentGreen,
+                    modifier = Modifier.weight(1f),
+                    big = true
+                )
+                OddsColumn(
+                    label = "AI NO",
+                    percent = market.aiNoPercent,
+                    bid = null,
+                    ask = null,
+                    accent = AccentOrange,
+                    modifier = Modifier.weight(1f),
+                    endAligned = true,
+                    big = true
+                )
+            }
+
+            Spacer(Modifier.height(14.dp))
+            Text(
+                text = "Kalshi market (reference)",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                OddsColumn(
+                    label = "Mkt YES",
                     percent = market.yesProbabilityPercent,
                     bid = market.yesBid,
                     ask = market.yesAsk,
-                    accent = AccentGreen,
-                    modifier = Modifier.weight(1f)
+                    accent = TextSecondary,
+                    modifier = Modifier.weight(1f),
+                    big = false
                 )
                 OddsColumn(
-                    label = "NO",
+                    label = "Mkt NO",
                     percent = market.noProbabilityPercent,
                     bid = market.noBid,
                     ask = market.noAsk,
-                    accent = AccentOrange,
+                    accent = TextSecondary,
                     modifier = Modifier.weight(1f),
-                    endAligned = true
+                    endAligned = true,
+                    big = false
                 )
             }
 
             Spacer(Modifier.height(12.dp))
-
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("Last YES", formatCents(market.lastPrice))
                 Metric("Volume", formatCompact(market.volume))
                 Metric("24h vol", formatCompact(market.volume24h))
+                Metric("Closes", market.closeTimeLocal ?: "—")
             }
-            Spacer(Modifier.height(8.dp))
-            Metric("Closes", market.closeTimeLocal ?: "—")
         }
     }
 }
@@ -123,26 +162,29 @@ private fun OddsColumn(
     ask: Double?,
     accent: androidx.compose.ui.graphics.Color,
     modifier: Modifier = Modifier,
-    endAligned: Boolean = false
+    endAligned: Boolean = false,
+    big: Boolean = true
 ) {
     Column(
         modifier = modifier,
         horizontalAlignment = if (endAligned) Alignment.End else Alignment.Start
     ) {
-        Text("$label odds", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
         Text(
             text = percent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
-            fontSize = 40.sp,
+            fontSize = if (big) 36.sp else 22.sp,
             fontWeight = FontWeight.Bold,
             color = accent,
-            lineHeight = 44.sp
+            lineHeight = if (big) 40.sp else 26.sp
         )
-        Text(
-            text = "Bid ${formatCents(bid)} · Ask ${formatCents(ask)}",
-            style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
-            modifier = Modifier.padding(top = 4.dp)
-        )
+        if (bid != null || ask != null) {
+            Text(
+                text = "Bid ${formatCents(bid)} · Ask ${formatCents(ask)}",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
     }
 }
 
@@ -172,9 +214,6 @@ private fun StatusChip(status: String?) {
 
 private fun formatCents(dollars: Double?): String =
     dollars?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
-
-private fun formatNumber(value: Double): String =
-    String.format(Locale.US, "%,.2f", value)
 
 private fun formatCompact(value: Double?): String {
     if (value == null) return "—"

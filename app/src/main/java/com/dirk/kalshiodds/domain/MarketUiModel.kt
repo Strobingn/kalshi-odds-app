@@ -16,13 +16,20 @@ data class MarketUiModel(
     val noBid: Double?,
     val noAsk: Double?,
     val lastPrice: Double?,
-    /** Implied YES probability 0–100 (mid of bid/ask when both present, else last). */
+    /** Raw Kalshi YES mid 0–100 (secondary display). */
     val yesProbabilityPercent: Double?,
-    /** Implied NO probability 0–100 (mid of NO bid/ask, else 100 − YES when YES known). */
+    /** Raw Kalshi NO mid 0–100 (secondary display). */
     val noProbabilityPercent: Double?,
+    /** Dip Hunter on-device predicted YES 0–100 (primary). */
+    val aiYesPercent: Double? = null,
+    /** Dip Hunter on-device predicted NO 0–100 (primary). */
+    val aiNoPercent: Double? = null,
+    val aiConfidence: Double? = null,
+    val aiNote: String? = null,
     val volume: Double?,
     val volume24h: Double?,
     val closeTimeLocal: String?,
+    val closeTimeEpochMs: Long? = null,
     val status: String?,
     val seriesLabel: String
 )
@@ -63,6 +70,7 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         volume = volumeFp.toDoubleOrNullSafe(),
         volume24h = volume24hFp.toDoubleOrNullSafe(),
         closeTimeLocal = formatCloseTimeLocal(closeTime),
+        closeTimeEpochMs = parseCloseEpochMs(closeTime),
         status = status,
         seriesLabel = series.label
     )
@@ -81,5 +89,14 @@ fun formatCloseTimeLocal(iso: String?): String? {
         localTimeFormatter.format(instant.atZone(ZoneId.systemDefault()))
     } catch (_: Exception) {
         iso
+    }
+}
+
+fun parseCloseEpochMs(iso: String?): Long? {
+    if (iso.isNullOrBlank()) return null
+    return try {
+        Instant.parse(iso).toEpochMilli()
+    } catch (_: Exception) {
+        null
     }
 }
