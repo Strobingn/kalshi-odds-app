@@ -13,12 +13,15 @@ import androidx.core.app.NotificationManagerCompat
 import com.dirk.kalshiodds.MainActivity
 import com.dirk.kalshiodds.R
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.service.LiveSignalsPolicy
+import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Local HIGH-importance alerts. Killed-app remote push would need FCM later;
- * this release posts instantly from the live-signals foreground WS service.
+ * Local HIGH-importance alerts plus the ongoing live-signals foreground notice.
+ * Killed-app remote push would need FCM later; this release posts instantly
+ * from the live-signals foreground WS service.
  */
 class SignalNotifier(private val context: Context) {
 
@@ -63,35 +66,62 @@ class SignalNotifier(private val context: Context) {
         return postedAt
     }
 
-    fun foregroundNotification(): Notification {
+    fun foregroundNotification(text: String = context.getString(R.string.live_signals_fg_text)): Notification {
         ensureChannels(context)
-        val intent = PendingIntent.getActivity(
+        val open = PendingIntent.getActivity(
             context,
             1,
-            Intent(context, MainActivity::class.java),
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val stopIntent = Intent(context, LiveSignalsService::class.java).apply {
+            action = LiveSignalsPolicy.ACTION_STOP
+        }
+        val stopPending = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            PendingIntent.getForegroundService(
+                context,
+                2,
+                stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        } else {
+            PendingIntent.getService(
+                context,
+                2,
+                stopIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+        }
         return NotificationCompat.Builder(context, CHANNEL_FOREGROUND)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(context.getString(R.string.live_signals_fg_title))
-            .setContentText(context.getString(R.string.live_signals_fg_text))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setOngoing(true)
             .setOnlyAlertOnce(true)
-            .setContentIntent(intent)
+            .setSilent(true)
+            .setShowWhen(false)
+            .setContentIntent(open)
+            .addAction(0, context.getString(R.string.live_signals_stop), stopPending)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .build()
     }
 
     companion object {
         const val CHANNEL_ALERTS = "diphunter_signal_alerts"
-        const val CHANNEL_FOREGROUND = "diphunter_live_signals"
+        const val CHANNEL_FOREGROUND = LiveSignalsPolicy.CHANNEL_ONGOING
         const val FG_NOTIFICATION_ID = 1001
         const val EXTRA_TICKER = "signal_ticker"
 
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
+            nm.deleteNotificationChannel(LiveSignalsPolicy.CHANNEL_LEGACY)
             val alerts = NotificationChannel(
                 CHANNEL_ALERTS,
                 context.getString(R.string.signal_channel_name),
@@ -104,10 +134,12 @@ class SignalNotifier(private val context: Context) {
             val fg = NotificationChannel(
                 CHANNEL_FOREGROUND,
                 context.getString(R.string.live_signals_channel_name),
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_DEFAULT
             ).apply {
                 description = context.getString(R.string.live_signals_channel_desc)
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
             nm.createNotificationChannel(alerts)
             nm.createNotificationChannel(fg)

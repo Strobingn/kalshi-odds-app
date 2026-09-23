@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -102,7 +103,10 @@ class SignalPreferences(
         it[KEY_THRESHOLD] = value.coerceIn(0.5, 40.0)
     }
     suspend fun updateNotifications(value: Boolean) = edit { it[KEY_NOTIF] = value }
-    suspend fun updateLiveSignals(value: Boolean) = edit { it[KEY_LIVE] = value }
+    suspend fun updateLiveSignals(value: Boolean) {
+        LiveSignalsKeepAlive.setEnabled(app, value)
+        edit { it[KEY_LIVE] = value }
+    }
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
         it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)

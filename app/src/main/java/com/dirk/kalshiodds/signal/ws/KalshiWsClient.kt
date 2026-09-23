@@ -96,7 +96,7 @@ class KalshiWsClient(
         }
         val builder = Request.Builder()
             .url(host)
-            .header("User-Agent", "DipHunter/0.2.1 (Android; signals)")
+            .header("User-Agent", "DipHunter/0.2.3 (Android; signals)")
             .header("Accept", "application/json")
         headers.asMap().forEach { (k, v) -> builder.header(k, v) }
         socket?.cancel()
