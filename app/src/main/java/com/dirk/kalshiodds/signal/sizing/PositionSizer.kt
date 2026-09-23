@@ -84,7 +84,7 @@ object PositionSizer {
         if (liqCap != null) {
             dollars = min(dollars, liqCap * c)
         }
-        val contracts = floor(dollars / c).toInt().coerceAtLeast(0)
+        val contracts = floor((dollars / c) + 1e-9).toInt().coerceAtLeast(0)
         val used = if (bankroll > 0) (contracts * c) / bankroll else 0.0
         val reason = buildString {
             append(if (mode == Mode.KELLY) "¼-Kelly-style" else "fixed-fraction")
