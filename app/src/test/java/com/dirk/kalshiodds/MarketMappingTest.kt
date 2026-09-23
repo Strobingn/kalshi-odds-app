@@ -15,10 +15,13 @@ class MarketMappingTest {
             title = "BTC up?",
             yesBidDollars = "0.4000",
             yesAskDollars = "0.5000",
+            noBidDollars = "0.5000",
+            noAskDollars = "0.6000",
             lastPriceDollars = "0.1000"
         )
         val ui = dto.toUiModel(SeriesKind.BTC)
         assertEquals(45.0, ui.yesProbabilityPercent!!, 0.001)
+        assertEquals(55.0, ui.noProbabilityPercent!!, 0.001)
     }
 
     @Test
@@ -32,5 +35,6 @@ class MarketMappingTest {
         )
         val ui = dto.toUiModel(SeriesKind.WTI)
         assertEquals(33.0, ui.yesProbabilityPercent!!, 0.001)
+        assertEquals(67.0, ui.noProbabilityPercent!!, 0.001)
     }
 }

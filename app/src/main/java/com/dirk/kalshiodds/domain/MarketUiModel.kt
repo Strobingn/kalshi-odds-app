@@ -13,9 +13,13 @@ data class MarketUiModel(
     val floorStrike: Double?,
     val yesBid: Double?,
     val yesAsk: Double?,
+    val noBid: Double?,
+    val noAsk: Double?,
     val lastPrice: Double?,
     /** Implied YES probability 0–100 (mid of bid/ask when both present, else last). */
     val yesProbabilityPercent: Double?,
+    /** Implied NO probability 0–100 (mid of NO bid/ask, else 100 − YES when YES known). */
+    val noProbabilityPercent: Double?,
     val volume: Double?,
     val volume24h: Double?,
     val closeTimeLocal: String?,
@@ -29,12 +33,19 @@ enum class SeriesKind(val ticker: String, val label: String) {
 }
 
 fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
-    val bid = yesBidDollars.toDoubleOrNullSafe()
-    val ask = yesAskDollars.toDoubleOrNullSafe()
+    val yesBid = yesBidDollars.toDoubleOrNullSafe()
+    val yesAsk = yesAskDollars.toDoubleOrNullSafe()
+    val noBid = noBidDollars.toDoubleOrNullSafe()
+    val noAsk = noAskDollars.toDoubleOrNullSafe()
     val last = lastPriceDollars.toDoubleOrNullSafe()
-    val implied = when {
-        bid != null && ask != null -> (bid + ask) / 2.0
+    val yesImplied = when {
+        yesBid != null && yesAsk != null -> (yesBid + yesAsk) / 2.0
         last != null -> last
+        else -> null
+    }
+    val noImplied = when {
+        noBid != null && noAsk != null -> (noBid + noAsk) / 2.0
+        yesImplied != null -> 1.0 - yesImplied
         else -> null
     }
     return MarketUiModel(
@@ -42,10 +53,13 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         title = title.orEmpty().ifBlank { ticker },
         subtitle = yesSubTitle,
         floorStrike = floorStrike,
-        yesBid = bid,
-        yesAsk = ask,
+        yesBid = yesBid,
+        yesAsk = yesAsk,
+        noBid = noBid,
+        noAsk = noAsk,
         lastPrice = last,
-        yesProbabilityPercent = implied?.times(100.0),
+        yesProbabilityPercent = yesImplied?.times(100.0),
+        noProbabilityPercent = noImplied?.times(100.0),
         volume = volumeFp.toDoubleOrNullSafe(),
         volume24h = volume24hFp.toDoubleOrNullSafe(),
         closeTimeLocal = formatCloseTimeLocal(closeTime),

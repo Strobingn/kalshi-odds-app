@@ -38,44 +38,33 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
         colors = CardDefaults.cardColors(containerColor = Surface)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text(
-                text = market.title,
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            market.subtitle?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-            market.floorStrike?.let { strike ->
-                Text(
-                    text = "Floor strike: ${formatNumber(strike)}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Bottom,
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
             ) {
-                Column {
-                    Text("YES odds", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = market.yesProbabilityPercent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
-                        fontSize = 48.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = AccentGreen,
-                        lineHeight = 52.sp
+                        text = market.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
+                    market.subtitle?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    market.floorStrike?.let { strike ->
+                        Text(
+                            text = "Floor strike: ${formatNumber(strike)}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     StatusChip(market.status)
@@ -90,18 +79,70 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
 
             Spacer(Modifier.height(12.dp))
 
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("Bid", formatCents(market.yesBid))
-                Metric("Ask", formatCents(market.yesAsk))
-                Metric("Last", formatCents(market.lastPrice))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                OddsColumn(
+                    label = "YES",
+                    percent = market.yesProbabilityPercent,
+                    bid = market.yesBid,
+                    ask = market.yesAsk,
+                    accent = AccentGreen,
+                    modifier = Modifier.weight(1f)
+                )
+                OddsColumn(
+                    label = "NO",
+                    percent = market.noProbabilityPercent,
+                    bid = market.noBid,
+                    ask = market.noAsk,
+                    accent = AccentOrange,
+                    modifier = Modifier.weight(1f),
+                    endAligned = true
+                )
             }
-            Spacer(Modifier.height(8.dp))
+
+            Spacer(Modifier.height(12.dp))
+
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Metric("Last YES", formatCents(market.lastPrice))
                 Metric("Volume", formatCompact(market.volume))
                 Metric("24h vol", formatCompact(market.volume24h))
-                Metric("Closes", market.closeTimeLocal ?: "—")
             }
+            Spacer(Modifier.height(8.dp))
+            Metric("Closes", market.closeTimeLocal ?: "—")
         }
+    }
+}
+
+@Composable
+private fun OddsColumn(
+    label: String,
+    percent: Double?,
+    bid: Double?,
+    ask: Double?,
+    accent: androidx.compose.ui.graphics.Color,
+    modifier: Modifier = Modifier,
+    endAligned: Boolean = false
+) {
+    Column(
+        modifier = modifier,
+        horizontalAlignment = if (endAligned) Alignment.End else Alignment.Start
+    ) {
+        Text("$label odds", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(
+            text = percent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
+            fontSize = 40.sp,
+            fontWeight = FontWeight.Bold,
+            color = accent,
+            lineHeight = 44.sp
+        )
+        Text(
+            text = "Bid ${formatCents(bid)} · Ask ${formatCents(ask)}",
+            style = MaterialTheme.typography.labelMedium,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
     }
 }
 
