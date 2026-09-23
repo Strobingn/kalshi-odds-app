@@ -13,8 +13,8 @@ android {
         applicationId = "com.dirk.kalshiodds"
         minSdk = 26
         targetSdk = 35
-        versionCode = 7
-        versionName = "0.1.7"
+        versionCode = 8
+        versionName = "0.1.8"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -44,6 +44,10 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/versions/9/OSGI-INF/MANIFEST.MF"
+            pickFirsts += "META-INF/LICENSE"
+            pickFirsts += "META-INF/LICENSE.md"
+            pickFirsts += "META-INF/NOTICE"
         }
     }
 
@@ -84,8 +88,13 @@ dependencies {
     // On-device ML
     implementation("org.tensorflow:tensorflow-lite:2.14.0")
 
-    // Persistence
+    // Persistence + encrypted API-key storage (never commit secrets)
     implementation("androidx.datastore:datastore-preferences:1.1.1")
+    implementation("androidx.security:security-crypto:1.0.0")
+
+    // Kalshi WS signing: RSA-PSS + Ed25519 PEM
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.78.1")
 
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.10.0")

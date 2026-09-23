@@ -3,10 +3,13 @@ package com.dirk.kalshiodds.data.repo
 import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.api.NetworkModule
+import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.local.CachedMarketsPayload
 import com.dirk.kalshiodds.data.local.MarketCache
-import com.dirk.kalshiodds.domain.SeriesKind
+import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.toUiModel
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import com.dirk.kalshiodds.prediction.PredictionLogStore
@@ -19,17 +22,20 @@ import retrofit2.HttpException
 
 data class MarketsSnapshot(
     val btc: List<MarketUiModel>,
-    val wti: List<MarketUiModel>,
+    val eth: List<MarketUiModel> = emptyList(),
+    val sol: List<MarketUiModel> = emptyList(),
+    val extra: List<MarketUiModel> = emptyList(),
     val fetchedAtEpochMs: Long,
     val fromCache: Boolean,
     val errorMessage: String? = null,
     /** True when Kalshi returned HTTP 429 or 503 — callers should back off. */
     val rateLimited: Boolean = false,
-    /** Scored prediction feedback: correct / total, or null if none yet. */
     val modelScoreCorrect: Int? = null,
     val modelScoreTotal: Int? = null,
     val modelMeanBrier: Double? = null
-)
+) {
+    val allMarkets: List<MarketUiModel> get() = btc + eth + sol + extra
+}
 
 class MarketRepository(
     context: Context,
@@ -48,18 +54,47 @@ class MarketRepository(
         payload?.toSnapshot(fromCache = true)
     }
 
-    suspend fun refresh(): MarketsSnapshot = coroutineScope {
+    suspend fun refresh(
+        watchBtc: Boolean = true,
+        watchEth: Boolean = true,
+        watchSol: Boolean = true,
+        extraTickers: List<String> = emptyList(),
+        edgeThresholdPp: Double = EDGE_ALERT_THRESHOLD_PP
+    ): MarketsSnapshot = coroutineScope {
         try {
-            val btcDeferred = async { api.getMarkets(KalshiApi.SERIES_BTC, status = "open") }
-            val wtiDeferred = async { api.getMarkets(KalshiApi.SERIES_WTI, status = "open") }
-            val btcMarkets = btcDeferred.await().markets
-            val wtiMarkets = wtiDeferred.await().markets
+            val btcDeferred = async {
+                if (watchBtc) api.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
+            }
+            val ethDeferred = async {
+                if (watchEth) api.getMarkets(KalshiApi.SERIES_ETH, status = "open") else null
+            }
+            val solDeferred = async {
+                if (watchSol) api.getMarkets(KalshiApi.SERIES_SOL, status = "open") else null
+            }
+            val extrasDeferred = CryptoMarkets.filterCrypto(extraTickers).map { ticker ->
+                async { fetchExtra(ticker) }
+            }
+            val btcMarkets = btcDeferred.await()?.markets.orEmpty().cryptoOnly()
+            val ethMarkets = ethDeferred.await()?.markets.orEmpty().cryptoOnly()
+            val solMarkets = solDeferred.await()?.markets.orEmpty().cryptoOnly()
+            val seen = (btcMarkets + ethMarkets + solMarkets).map { it.ticker }.toSet()
+            val extraMarkets = extrasDeferred.mapNotNull { it.await() }
+                .cryptoOnly()
+                .filter { it.ticker !in seen }
             val now = System.currentTimeMillis()
-            cache.write(btcMarkets, wtiMarkets, now)
-            val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now)
-            val wtiUi = model.annotate(wtiMarkets.map { it.toUiModel(SeriesKind.WTI) }, now)
+            cache.write(btcMarkets, ethMarkets, solMarkets, extraMarkets, now)
+            val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now, edgeThresholdPp)
+            val ethUi = model.annotate(ethMarkets.map { it.toUiModel(SeriesKind.ETH) }, now, edgeThresholdPp)
+            val solUi = model.annotate(solMarkets.map { it.toUiModel(SeriesKind.SOL) }, now, edgeThresholdPp)
+            val extraUi = model.annotate(
+                extraMarkets.map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
+                now,
+                edgeThresholdPp
+            )
             logPredictions(btcUi, SeriesKind.BTC, now)
-            logPredictions(wtiUi, SeriesKind.WTI, now)
+            logPredictions(ethUi, SeriesKind.ETH, now)
+            logPredictions(solUi, SeriesKind.SOL, now)
+            logPredictions(extraUi, SeriesKind.CRYPTO, now)
             runCatching { scorer.maybeScore(now) }
             val summary = logStore.scoreSummary()
             lastScoreCorrect = if (summary.total > 0) summary.correct else null
@@ -67,7 +102,9 @@ class MarketRepository(
             lastMeanBrier = if (summary.total > 0) summary.meanBrier else null
             MarketsSnapshot(
                 btc = btcUi,
-                wti = wtiUi,
+                eth = ethUi,
+                sol = solUi,
+                extra = extraUi,
                 fetchedAtEpochMs = now,
                 fromCache = false,
                 errorMessage = null,
@@ -88,7 +125,9 @@ class MarketRepository(
             } else {
                 MarketsSnapshot(
                     btc = emptyList(),
-                    wti = emptyList(),
+                    eth = emptyList(),
+                    sol = emptyList(),
+                    extra = emptyList(),
                     fetchedAtEpochMs = 0L,
                     fromCache = false,
                     errorMessage = message,
@@ -101,15 +140,26 @@ class MarketRepository(
         }
     }
 
+    private suspend fun fetchExtra(ticker: String): MarketDto? {
+        if (!CryptoMarkets.isCryptoTicker(ticker)) return null
+        val series = CryptoMarkets.inferSeries(ticker)
+        return runCatching {
+            api.getMarkets(seriesTicker = series, ticker = ticker, limit = 5)
+                .markets.firstOrNull { it.ticker.equals(ticker, ignoreCase = true) }
+                ?.takeIf { CryptoMarkets.isCryptoTicker(it.ticker) }
+        }.getOrNull()
+    }
+
     private suspend fun logPredictions(markets: List<MarketUiModel>, series: SeriesKind, now: Long) {
         for (m in markets) {
+            if (!CryptoMarkets.isCryptoTicker(m.ticker)) continue
             val yesPct = m.aiYesPercent ?: continue
             val noPct = m.aiNoPercent ?: (100.0 - yesPct)
             val midPct = m.yesProbabilityPercent ?: continue
             runCatching {
                 logStore.upsertOpenPrediction(
                     ticker = m.ticker,
-                    series = series.ticker,
+                    series = series.ticker.ifBlank { CryptoMarkets.inferSeries(m.ticker) },
                     predictedYes = yesPct / 100.0,
                     predictedNo = noPct / 100.0,
                     marketMid = midPct / 100.0,
@@ -128,6 +178,9 @@ class MarketRepository(
         return code == 429 || code == 503
     }
 
+    private fun List<MarketDto>.cryptoOnly(): List<MarketDto> =
+        filter { CryptoMarkets.isCryptoTicker(it.ticker) }
+
     private fun CachedMarketsPayload.toSnapshot(
         fromCache: Boolean,
         errorMessage: String? = null,
@@ -135,8 +188,14 @@ class MarketRepository(
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
         return MarketsSnapshot(
-            btc = model.annotate(btc.map { it.toUiModel(SeriesKind.BTC) }, now),
-            wti = model.annotate(wti.map { it.toUiModel(SeriesKind.WTI) }, now),
+            btc = model.annotate(btc.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.BTC) }, now),
+            eth = model.annotate(eth.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.ETH) }, now),
+            sol = model.annotate(sol.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.SOL) }, now),
+            extra = model.annotate(
+                extra.filter { CryptoMarkets.isCryptoTicker(it.ticker) }
+                    .map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
+                now
+            ),
             fetchedAtEpochMs = fetchedAtEpochMs,
             fromCache = fromCache,
             errorMessage = errorMessage,

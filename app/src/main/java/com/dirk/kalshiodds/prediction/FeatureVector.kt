@@ -27,6 +27,7 @@ object FeatureVector {
     const val IDX_NO = 0
     const val IDX_YES = 1
 
+    /** 0 = crypto (BTC/ETH/SOL + peers). 1 = legacy WTI training class — unused at runtime. */
     fun seriesId(ticker: String): Float =
         if (ticker.uppercase().contains("WTI")) 1f else 0f
 

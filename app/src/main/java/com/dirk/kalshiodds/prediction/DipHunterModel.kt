@@ -48,7 +48,11 @@ class DipHunterModel(
         }
     }
 
-    fun annotate(markets: List<MarketUiModel>, nowMs: Long = System.currentTimeMillis()): List<MarketUiModel> =
+    fun annotate(
+        markets: List<MarketUiModel>,
+        nowMs: Long = System.currentTimeMillis(),
+        edgeThresholdPp: Double = com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
+    ): List<MarketUiModel> =
         markets.map { market ->
             val mid01 = (market.yesProbabilityPercent ?: return@map market) / 100.0
             val pred = predict(
@@ -64,7 +68,7 @@ class DipHunterModel(
                 aiNoPercent = pred.no * 100.0,
                 aiConfidence = pred.confidence,
                 aiNote = pred.note
-            ).withEdgeMetrics()
+            ).withEdgeMetrics(edgeThresholdPp)
         }
 
     fun predict(

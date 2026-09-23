@@ -49,7 +49,9 @@ data class MarketUiModel(
 
 enum class SeriesKind(val ticker: String, val label: String) {
     BTC(com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTC, "Bitcoin"),
-    WTI(com.dirk.kalshiodds.data.api.KalshiApi.SERIES_WTI, "WTI Crude")
+    ETH(com.dirk.kalshiodds.data.api.KalshiApi.SERIES_ETH, "Ethereum"),
+    SOL(com.dirk.kalshiodds.data.api.KalshiApi.SERIES_SOL, "Solana"),
+    CRYPTO("", "Crypto")
 }
 
 fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
@@ -94,14 +96,14 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
 }
 
 /** Attach edge / stance / alert after AI annotate. */
-fun MarketUiModel.withEdgeMetrics(): MarketUiModel {
+fun MarketUiModel.withEdgeMetrics(thresholdPp: Double = EDGE_ALERT_THRESHOLD_PP): MarketUiModel {
     val ai = aiYesPercent ?: return this
     val mkt = yesProbabilityPercent ?: return this
     val edge = ai - mkt
-    val alert = abs(edge) >= EDGE_ALERT_THRESHOLD_PP
+    val alert = abs(edge) >= thresholdPp
     val stance = when {
-        edge >= EDGE_ALERT_THRESHOLD_PP -> "Lean YES vs market"
-        edge <= -EDGE_ALERT_THRESHOLD_PP -> "Lean NO vs market"
+        edge >= thresholdPp -> "Lean YES vs market"
+        edge <= -thresholdPp -> "Lean NO vs market"
         abs(edge) >= 2.0 -> if (edge > 0) "Slight YES lean" else "Slight NO lean"
         else -> "No edge"
     }
