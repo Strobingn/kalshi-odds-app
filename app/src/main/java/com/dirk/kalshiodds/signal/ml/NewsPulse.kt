@@ -12,7 +12,7 @@ data class NewsPulseSnapshot(
     val btc: Double = 0.0,
     val eth: Double = 0.0,
     val sol: Double = 0.0,
-    val embedding: FloatArray = FloatArray(DIM),
+    val embedding: FloatArray = FloatArray(NewsPulse.DIM),
     val headlineCount: Int = 0,
     val source: String = "none",
     val fetchedAtMs: Long = 0L

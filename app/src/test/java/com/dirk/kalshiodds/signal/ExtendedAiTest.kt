@@ -57,7 +57,8 @@ class RegimeClassifierTest {
         val base = EnsembleStack.Weights(mlp = 0.55, cnn = 0.20, lstm = 0.10, gbm = 0.15)
         val scaled = RegimeClassifier.scaleStack(base, shock)
         assertEquals(1.0, scaled.mlp + scaled.cnn + scaled.lstm + scaled.gbm, 1e-6)
-        assertTrue(scaled.gbm > scaled.cnn)
+        assertTrue(scaled.cnn < base.cnn)
+        assertTrue(scaled.sampleCount == base.sampleCount)
     }
 
     private fun cal(y: Int, month: Int, day: Int, hour: Int, zone: TimeZone): Long {

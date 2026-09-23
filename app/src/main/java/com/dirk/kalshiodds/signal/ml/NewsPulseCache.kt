@@ -66,9 +66,9 @@ class NewsPulseCache(
             val titles = Regex("<title>(?:<!\\[CDATA\\[)?(.*?)(?:]]>)?</title>", RegexOption.IGNORE_CASE)
                 .findAll(xml)
                 .map { it.groupValues[1].trim() }
-                .filter { it.isNotBlank() && !it.equals("CoinDesk", true) }
+                .filter { it.isNotBlank() }
                 .toList()
-            return titles.drop(1) // channel title
+            return titles.drop(1).filter { !it.equals("CoinDesk", true) }
         }
     }
 }
