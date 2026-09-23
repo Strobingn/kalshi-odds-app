@@ -11,9 +11,13 @@ import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.toUiModel
+import com.dirk.kalshiodds.domain.withSignalScore
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import com.dirk.kalshiodds.prediction.PredictionLogStore
 import com.dirk.kalshiodds.prediction.SettlementScorer
+import com.dirk.kalshiodds.prediction.SignalSnapshot
+import com.dirk.kalshiodds.signal.feedback.Calibrator
+import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -32,9 +36,23 @@ data class MarketsSnapshot(
     val rateLimited: Boolean = false,
     val modelScoreCorrect: Int? = null,
     val modelScoreTotal: Int? = null,
-    val modelMeanBrier: Double? = null
+    val modelMeanBrier: Double? = null,
+    val avgEdgeWhenRight: Double? = null,
+    val avgEdgeWhenWrong: Double? = null
 ) {
     val allMarkets: List<MarketUiModel> get() = btc + eth + sol + extra
+
+    fun overlayScores(
+        scores: Map<String, com.dirk.kalshiodds.signal.engine.ScoringEngine.Score>,
+        thresholdPp: Double
+    ): MarketsSnapshot {
+        if (scores.isEmpty()) return this
+        fun List<MarketUiModel>.apply(): List<MarketUiModel> = map { m ->
+            val s = scores[m.ticker] ?: return@map m
+            m.withSignalScore(s, thresholdPp)
+        }
+        return copy(btc = btc.apply(), eth = eth.apply(), sol = sol.apply(), extra = extra.apply())
+    }
 }
 
 class MarketRepository(
@@ -43,12 +61,17 @@ class MarketRepository(
     private val cache: MarketCache = MarketCache(context.applicationContext),
     private val model: DipHunterModel = DipHunterModel(context.applicationContext),
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
-    private val scorer: SettlementScorer = SettlementScorer(api, logStore)
+    private val scorer: SettlementScorer = SettlementScorer(api, logStore),
+    private val onCalibration: ((Calibrator.State) -> Unit)? = null
 ) {
 
     @Volatile private var lastScoreCorrect: Int? = null
     @Volatile private var lastScoreTotal: Int? = null
     @Volatile private var lastMeanBrier: Double? = null
+    @Volatile private var lastEdgeRight: Double? = null
+    @Volatile private var lastEdgeWrong: Double? = null
+    @Volatile var lastCalibration: Calibrator.State = Calibrator.State()
+        private set
 
     val cachedSnapshot: Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
         payload?.toSnapshot(fromCache = true)
@@ -96,10 +119,7 @@ class MarketRepository(
             logPredictions(solUi, SeriesKind.SOL, now)
             logPredictions(extraUi, SeriesKind.CRYPTO, now)
             runCatching { scorer.maybeScore(now) }
-            val summary = logStore.scoreSummary()
-            lastScoreCorrect = if (summary.total > 0) summary.correct else null
-            lastScoreTotal = if (summary.total > 0) summary.total else null
-            lastMeanBrier = if (summary.total > 0) summary.meanBrier else null
+            refreshScorecard()
             MarketsSnapshot(
                 btc = btcUi,
                 eth = ethUi,
@@ -111,7 +131,9 @@ class MarketRepository(
                 rateLimited = false,
                 modelScoreCorrect = lastScoreCorrect,
                 modelScoreTotal = lastScoreTotal,
-                modelMeanBrier = lastMeanBrier
+                modelMeanBrier = lastMeanBrier,
+                avgEdgeWhenRight = lastEdgeRight,
+                avgEdgeWhenWrong = lastEdgeWrong
             )
         } catch (e: Exception) {
             val rateLimited = isRateLimited(e)
@@ -134,10 +156,26 @@ class MarketRepository(
                     rateLimited = rateLimited,
                     modelScoreCorrect = lastScoreCorrect,
                     modelScoreTotal = lastScoreTotal,
-                    modelMeanBrier = lastMeanBrier
+                    modelMeanBrier = lastMeanBrier,
+                    avgEdgeWhenRight = lastEdgeRight,
+                    avgEdgeWhenWrong = lastEdgeWrong
                 )
             }
         }
+    }
+
+    private suspend fun refreshScorecard() {
+        val entries = logStore.readAll()
+        val fitted = Calibrator.fitEntries(entries)
+        lastCalibration = fitted
+        onCalibration?.invoke(fitted)
+        val summary = logStore.scoreSummary()
+        lastScoreCorrect = if (summary.total > 0) summary.correct else null
+        lastScoreTotal = if (summary.total > 0) summary.total else null
+        lastMeanBrier = if (summary.total > 0) summary.meanBrier else null
+        val card = ScorecardMetrics.compute(entries, calibration = fitted)
+        lastEdgeRight = card.allTime.avgEdgeWhenRight
+        lastEdgeWrong = card.allTime.avgEdgeWhenWrong
     }
 
     private suspend fun fetchExtra(ticker: String): MarketDto? {
@@ -164,7 +202,16 @@ class MarketRepository(
                     predictedNo = noPct / 100.0,
                     marketMid = midPct / 100.0,
                     timestampMs = now,
-                    closeTimeMs = m.closeTimeEpochMs
+                    closeTimeMs = m.closeTimeEpochMs,
+                    snapshot = SignalSnapshot(
+                        predictedSide = if ((m.edgePp ?: 0.0) >= 0) "YES" else "NO",
+                        edgePp = m.edgePp,
+                        confidence = m.aiConfidence,
+                        regime = m.regimeTag,
+                        tteBucket = m.tteRegimeLabel,
+                        fairValuePp = yesPct,
+                        calibrated = m.calibrated
+                    )
                 )
             }
         }
@@ -202,7 +249,9 @@ class MarketRepository(
             rateLimited = rateLimited,
             modelScoreCorrect = lastScoreCorrect,
             modelScoreTotal = lastScoreTotal,
-            modelMeanBrier = lastMeanBrier
+            modelMeanBrier = lastMeanBrier,
+            avgEdgeWhenRight = lastEdgeRight,
+            avgEdgeWhenWrong = lastEdgeWrong
         )
     }
 }

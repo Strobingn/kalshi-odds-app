@@ -115,6 +115,50 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             ToggleRow("Notifications", s.notificationsEnabled, viewModel::setNotifications)
             ToggleRow("Live signals (WS foreground)", s.liveSignalsEnabled, viewModel::setLiveSignals)
             ToggleRow("Subscribe public trades", s.subscribeTrades, viewModel::setSubscribeTrades)
+
+            Section("Skip filter")
+            Text(
+                "Alerts and ranked opportunities require confidence, liquidity, and a tight enough spread. Weak edges that fail are hidden (not alerted).",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            Text(
+                String.format(Locale.US, "Min confidence  %.0f%%", s.minConfidence * 100.0),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.minConfidence.toFloat(),
+                onValueChange = { viewModel.setMinConfidence(it.toDouble()) },
+                valueRange = 0.20f..0.80f,
+                steps = 11
+            )
+            Text(
+                String.format(Locale.US, "Min liquidity  %.0f (volume / OI / near-mid depth)", s.minLiquidity),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.minLiquidity.toFloat().coerceIn(0f, 10_000f),
+                onValueChange = { viewModel.setMinLiquidity(it.toDouble()) },
+                valueRange = 0f..10_000f,
+                steps = 19
+            )
+            Text(
+                String.format(Locale.US, "Max spread  %.0f¢", s.maxSpreadCents),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.maxSpreadCents.toFloat(),
+                onValueChange = { viewModel.setMaxSpreadCents(it.toDouble()) },
+                valueRange = 2f..20f,
+                steps = 17
+            )
+            ToggleRow("Hide weak / filtered from opportunities", s.hideWeakOpportunities, viewModel::setHideWeak)
             Text(
                 "Live signals keep a foreground WebSocket for instant local alerts. " +
                     "Killed-app remote push would need FCM later — this release is local-only. " +

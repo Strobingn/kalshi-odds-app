@@ -1,19 +1,36 @@
 package com.dirk.kalshiodds.signal.engine
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
+import kotlin.math.tanh
+
 /**
  * Local YES/NO depth for one crypto market, rebuilt from Kalshi
  * `orderbook_snapshot` + incremental `orderbook_delta`.
  *
  * YES levels are bids (buy YES). NO levels are bids for NO, equivalent to
  * YES asks at `(1 − noPrice)`. Analysis only — never places orders.
+ *
+ * Also tracks depth near mid, depth decay, and a decaying pulse for
+ * sudden quote pulls / large cancel spikes.
  */
 class LocalOrderBook {
+    data class Pulse(
+        /** [-1, 1] — negative = YES-side cancels (bid support withdrawn). */
+        val cancelSpike: Double = 0.0,
+        /** [-1, 1] — negative = bid pulled; positive = ask pulled. */
+        val quotePull: Double = 0.0
+    )
+
     private val yes = java.util.TreeMap<Double, Double>()
     private val no = java.util.TreeMap<Double, Double>()
     var lastSeq: Int? = null
         private set
     var sawGap: Boolean = false
         private set
+    private var lastBid: Double? = null
+    private var lastAsk: Double? = null
+    private var cancelEma: Double = 0.0
+    private var pullEma: Double = 0.0
 
     fun isEmpty(): Boolean = yes.isEmpty() && no.isEmpty()
 
@@ -22,7 +39,13 @@ class LocalOrderBook {
         no.clear()
         lastSeq = null
         sawGap = false
+        lastBid = null
+        lastAsk = null
+        cancelEma = 0.0
+        pullEma = 0.0
     }
+
+    fun pulse(): Pulse = Pulse(cancelSpike = cancelEma, quotePull = pullEma)
 
     fun replaceSnapshot(
         yesLevels: List<Pair<Double, Double>>,
@@ -35,6 +58,7 @@ class LocalOrderBook {
         for ((price, size) in noLevels) putLevel(no, price, size)
         lastSeq = seq
         sawGap = false
+        noteQuoteMove()
     }
 
     /**
@@ -54,6 +78,14 @@ class LocalOrderBook {
         val next = (book[price] ?: 0.0) + delta
         putLevel(book, price, next)
         if (seq != null) lastSeq = seq
+        if (delta <= -SignalConstants.CANCEL_SPIKE_SIZE) {
+            val signed = if (side.lowercase() == "yes") -1.0 else 1.0
+            val mag = tanh((-delta) / 40.0)
+            cancelEma = (0.72 * cancelEma + 0.28 * signed * mag).coerceIn(-1.0, 1.0)
+        } else {
+            cancelEma *= 0.96
+        }
+        noteQuoteMove()
         return true
     }
 
@@ -105,8 +137,54 @@ class LocalOrderBook {
         return ((bidSize - askSize) / denom).coerceIn(-1.0, 1.0)
     }
 
+    /** Total size (YES bids + implied YES asks) within [bandCents] of mid. */
+    fun depthNearMid(bandCents: Double = SignalConstants.DEPTH_NEAR_CENTS): Double {
+        val mid = mid01() ?: return 0.0
+        val band = (bandCents / 100.0).coerceAtLeast(0.0)
+        var size = 0.0
+        for ((price, qty) in yes) {
+            if (price >= mid - band) size += qty
+        }
+        for ((noPrice, qty) in no) {
+            val yesAsk = 1.0 - noPrice
+            if (yesAsk <= mid + band) size += qty
+        }
+        return size
+    }
+
+    /**
+     * Near-mid size / far-mid size in `[0, 1]`. High = size concentrated
+     * at the touch (better displayed liquidity). Null when the book is empty.
+     */
+    fun depthDecay(
+        nearCents: Double = SignalConstants.DEPTH_NEAR_CENTS,
+        farCents: Double = SignalConstants.DEPTH_FAR_CENTS
+    ): Double? {
+        val far = depthNearMid(farCents)
+        if (far < EPS) return null
+        val near = depthNearMid(nearCents)
+        return (near / far).coerceIn(0.0, 1.0)
+    }
+
     fun yesLevels(): List<Pair<Double, Double>> = yes.entries.map { it.key to it.value }
     fun noLevels(): List<Pair<Double, Double>> = no.entries.map { it.key to it.value }
+
+    private fun noteQuoteMove() {
+        val bid = bestYesBid()
+        val ask = bestYesAsk()
+        var pull = 0.0
+        val prevBid = lastBid
+        val prevAsk = lastAsk
+        if (prevBid != null && bid != null && bid < prevBid - 1e-6) pull -= 1.0
+        if (prevAsk != null && ask != null && ask > prevAsk + 1e-6) pull += 1.0
+        pullEma = if (pull != 0.0) {
+            (0.70 * pullEma + 0.30 * pull).coerceIn(-1.0, 1.0)
+        } else {
+            pullEma * 0.96
+        }
+        lastBid = bid
+        lastAsk = ask
+    }
 
     companion object {
         const val DEFAULT_BAND_CENTS = 3.0

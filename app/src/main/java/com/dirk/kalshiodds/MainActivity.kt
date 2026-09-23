@@ -21,6 +21,8 @@ import androidx.lifecycle.lifecycleScope
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.ui.OddsScreen
 import com.dirk.kalshiodds.ui.OddsViewModel
+import com.dirk.kalshiodds.ui.ScorecardScreen
+import com.dirk.kalshiodds.ui.ScorecardViewModel
 import com.dirk.kalshiodds.ui.SettingsScreen
 import com.dirk.kalshiodds.ui.SettingsViewModel
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
@@ -32,6 +34,7 @@ class MainActivity : ComponentActivity() {
 
     private val oddsViewModel: OddsViewModel by viewModels()
     private val settingsViewModel: SettingsViewModel by viewModels()
+    private val scorecardViewModel: ScorecardViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -53,15 +56,19 @@ class MainActivity : ComponentActivity() {
             KalshiOddsTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var screen by rememberSaveable { mutableStateOf("odds") }
-                    if (screen == "settings") {
-                        SettingsScreen(
+                    when (screen) {
+                        "settings" -> SettingsScreen(
                             viewModel = settingsViewModel,
                             onBack = { screen = "odds" }
                         )
-                    } else {
-                        OddsScreen(
+                        "scorecard" -> ScorecardScreen(
+                            viewModel = scorecardViewModel,
+                            onBack = { screen = "odds" }
+                        )
+                        else -> OddsScreen(
                             viewModel = oddsViewModel,
-                            onOpenSettings = { screen = "settings" }
+                            onOpenSettings = { screen = "settings" },
+                            onOpenScorecard = { screen = "scorecard" }
                         )
                     }
                 }

@@ -18,11 +18,29 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.1.9**
+Package: `com.dirk.kalshiodds` · version **0.2.0**
 
 This release is **read-only**. It does **not** place trades, subscribe to fills/portfolio, or send orders.
 
-## Live signals (v0.1.9)
+## Predictability stack (v0.2.0)
+
+End-to-end analysis upgrades on top of the v0.1.9 crypto WS pipeline. Still **never** calls trade endpoints.
+
+1. **Live settlement feedback + recalibration.** Each watched market stores ticker/series, model P(YES), mid at signal time, predicted side, edge, confidence, regime, TTE bucket. On settle (YES/NO/void) the log is scored. After **20** outcomes a temperature scalar + reliability bins calibrate displayed P(YES) and edge; cold start uses the raw blend.
+2. **Richer microstructure.** Aggressor/taker side (trade feed), depth near mid (3¢) vs depth decay (15¢), quote pulls and large cancel spikes from the local book. Folded into fair value with documented weights in `ScoringEngine`.
+3. **Cross-asset lead–lag.** Time-aligned BTC ↔ ETH/SOL mids. BTC move over the last ~3s (minus 0.4s) vs follower move over the last 0.4s; reverse when the target is BTC.
+4. **Time-to-expiry regimes.** Early window vs last ~3 minutes (`LATE`). Late blend shifts weight from AI/related/lead–lag to velocity, imbalance, depth, and cancels. Cards show `Early window` / `Last 3 min`.
+5. **Confidence + skip filter.** Alerts and ranked opportunities require min confidence (default 45%), min liquidity (volume / OI / near-mid depth, default 500), and max spread (default 8¢). Weak/filtered edges are hidden when **Hide weak** is on (Settings).
+6. **Regime tags.** Vol spike / quiet / trend / chop from recent mid vol + velocity. Shown on cards; they nudge blend weights and confidence.
+7. **Scorecard.** Top-bar assessment icon → daily / rolling 7-day / all-time hit rate, Brier, avg edge when right vs wrong, per-series accuracy, sample count. Calibration status is on that screen.
+
+### How to use the scorecard and new Settings
+
+- Home → **scorecard icon** (or tap the scorecard hint under the HUD).
+- **Settings → Skip filter:** min confidence, min liquidity, max spread, hide-weak toggle.
+- Defaults live in `app/src/main/assets/default_signal_config.json`.
+
+## Live signals (v0.1.9+)
 
 Event-driven fair-value alerts on crypto ticks.
 
@@ -49,10 +67,11 @@ Event-driven fair-value alerts on crypto ticks.
 3. Probability rule: mid = `(yes_bid + yes_ask) / 2` else `last_price`.
 4. Scoring engine (dedicated tick dispatcher):
 
-   `fairValue = blend(DipHunter TFLite, volume-flow, related crypto mid, tick velocity Δmid/Δt, order-book imbalance)`  
-   `delta = fairValue − marketMid` (percentage points)
+   `fairValue = blend(TFLite, volume-flow+aggressor, related mid, velocity, imbalance, lead–lag, depth/decay, cancel/pull)`  
+   then **calibrate** when enough settlements exist.  
+   `delta = calibratedFair − marketMid` (percentage points)
 
-   Velocity uses the last N=16 ticker/trade/REST mids (`Δmid / Δt`, plus short acceleration). Imbalance is `(bidSize − askSize) / (bidSize + askSize)` near mid (3¢ band, else top 3 levels) from the local book. When `|delta|` crosses the configured threshold (default **5pp**), a `SignalAlert` is emitted (10s debounce per ticker) and a local notification is posted.
+   Alerts fire only when `|delta|` ≥ threshold **and** the skip filter passes (10s debounce per ticker).
 
 ## Dip Hunter AI (TFLite)
 
@@ -91,12 +110,13 @@ app/src/main/java/com/dirk/kalshiodds/
   signal/
     config/          DataStore prefs + EncryptedSharedPreferences + default JSON
     ws/              KalshiWsAuth, KalshiWsClient, KalshiWsMessages
-    engine/          ScoringEngine, TickBook, LocalOrderBook (velocity + imbalance)
+    engine/          ScoringEngine, TickBook, LocalOrderBook, MarketRegime, SkipFilter
+    feedback/        Calibrator, ScorecardMetrics
     notify/          SignalNotifier (HIGH + LOW channels)
     service/         LiveSignalsService (foreground WS)
     model/           MarketTick, SignalAlert, WsConnectionState
     SignalHub.kt     tick dispatcher → UI + notifications
-  ui/                OddsScreen, SettingsScreen, ViewModels, MarketCard
+  ui/                OddsScreen, SettingsScreen, ScorecardScreen, ViewModels, MarketCard
   worker/            MarketRefreshWorker (15 min)
   MainActivity.kt
   KalshiOddsApp.kt
@@ -109,9 +129,10 @@ app/src/main/assets/default_signal_config.json
 - Watch toggles: BTC 15m / ETH 15m / SOL 15m
 - Extra **crypto** ticker list (non-crypto values are dropped)
 - Edge threshold (pp), notifications on/off, Live signals on/off
+- Skip filter: min confidence, min liquidity, max spread, hide weak opportunities
 - Kalshi API Key ID + private key PEM (secure storage)
 
-Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off).
+Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).
 
 ## Secrets
 

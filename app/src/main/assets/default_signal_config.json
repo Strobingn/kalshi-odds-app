@@ -7,5 +7,9 @@
   "notificationsEnabled": true,
   "liveSignalsEnabled": false,
   "subscribeTrades": true,
-  "debounceMs": 10000
+  "debounceMs": 10000,
+  "minConfidence": 0.45,
+  "minLiquidity": 500.0,
+  "maxSpreadCents": 8.0,
+  "hideWeakOpportunities": true
 }

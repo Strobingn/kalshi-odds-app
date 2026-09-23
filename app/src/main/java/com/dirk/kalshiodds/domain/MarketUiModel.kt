@@ -44,7 +44,12 @@ data class MarketUiModel(
     val closeTimeLocal: String?,
     val closeTimeEpochMs: Long? = null,
     val status: String?,
-    val seriesLabel: String
+    val seriesLabel: String,
+    val regimeTag: String? = null,
+    val tteRegimeLabel: String? = null,
+    val passedFilter: Boolean = true,
+    val skipReason: String? = null,
+    val calibrated: Boolean = false
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -108,6 +113,34 @@ fun MarketUiModel.withEdgeMetrics(thresholdPp: Double = EDGE_ALERT_THRESHOLD_PP)
         else -> "No edge"
     }
     return copy(edgePp = edge, stance = stance, edgeAlert = alert)
+}
+
+fun MarketUiModel.withSignalScore(
+    score: com.dirk.kalshiodds.signal.engine.ScoringEngine.Score,
+    thresholdPp: Double = EDGE_ALERT_THRESHOLD_PP
+): MarketUiModel {
+    val alert = score.passedFilter && abs(score.deltaPp) >= thresholdPp
+    val stance = when {
+        !score.passedFilter -> "Filtered — ${score.skipReason ?: "weak"}"
+        score.deltaPp >= thresholdPp -> "Lean YES vs market"
+        score.deltaPp <= -thresholdPp -> "Lean NO vs market"
+        abs(score.deltaPp) >= 2.0 -> if (score.deltaPp > 0) "Slight YES lean" else "Slight NO lean"
+        else -> "No edge"
+    }
+    return copy(
+        aiYesPercent = score.fairValuePp,
+        aiNoPercent = (100.0 - score.fairValuePp).coerceIn(2.0, 98.0),
+        aiConfidence = score.confidence,
+        aiNote = score.reason,
+        edgePp = score.deltaPp,
+        stance = stance,
+        edgeAlert = alert,
+        regimeTag = score.regime.label,
+        tteRegimeLabel = score.tteRegime.label,
+        passedFilter = score.passedFilter,
+        skipReason = score.skipReason,
+        calibrated = score.calibrated
+    )
 }
 
 private fun String?.toDoubleOrNullSafe(): Double? =
