@@ -50,7 +50,7 @@ fun OddsScreen(viewModel: OddsViewModel) {
         containerColor = Bg,
         topBar = {
             TopAppBar(
-                title = { Text("Kalshi Odds") },
+                title = { Text("Dip Hunter") },
                 actions = {
                     IconButton(onClick = { viewModel.refresh() }, enabled = !state.isLoading) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")

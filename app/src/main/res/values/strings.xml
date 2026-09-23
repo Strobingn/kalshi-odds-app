@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Kalshi Odds</string>
+    <string name="app_name">Dip Hunter</string>
     <string name="bitcoin_section">Bitcoin (KXBTC15M)</string>
     <string name="wti_section">WTI Crude (KXWTI15M)</string>
     <string name="refresh">Refresh</string>

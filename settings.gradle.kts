@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "KalshiOdds"
+rootProject.name = "DipHunter"
 include(":app")
