@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kalshi Odds</string>
+    <string name="bitcoin_section">Bitcoin (KXBTC15M)</string>
+    <string name="wti_section">WTI Crude (KXWTI15M)</string>
+    <string name="refresh">Refresh</string>
+    <string name="last_updated">Last updated: %1$s</string>
+    <string name="offline_cache">Showing cached data</string>
+    <string name="no_markets">No open markets</string>
+    <string name="error_generic">Could not load markets</string>
+</resources>
