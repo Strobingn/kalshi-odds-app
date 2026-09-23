@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.feedback
 
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.ml.PolicyEval
 import java.time.Instant
 import java.time.ZoneId
 
@@ -38,14 +39,20 @@ object ScorecardMetrics {
         val voidCount: Int,
         val calibrationReady: Boolean,
         val temperature: Double?,
-        val calibrationSamples: Int
+        val calibrationSamples: Int,
+        val policy: PolicyEval.Scorecard? = null
     )
 
     fun compute(
         entries: List<PredictionLogEntry>,
         nowMs: Long = System.currentTimeMillis(),
         calibration: Calibrator.State = Calibrator.State(),
-        zoneId: ZoneId = ZoneId.systemDefault()
+        zoneId: ZoneId = ZoneId.systemDefault(),
+        policyStakeUsd: Double = SignalConstants.DEFAULT_POLICY_EVAL_STAKE_USD,
+        edgeThresholdPp: Double = 5.0,
+        minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
+        requireUncertaintyPass: Boolean = false,
+        maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY
     ): Snapshot {
         val settled = entries.filter { it.outcome.equals("yes", true) || it.outcome.equals("no", true) }
         val voids = entries.count { it.outcome.equals("void", true) }
@@ -66,7 +73,15 @@ object ScorecardMetrics {
             voidCount = voids,
             calibrationReady = calibration.ready,
             temperature = if (calibration.ready) calibration.temperature else null,
-            calibrationSamples = calibration.sampleCount
+            calibrationSamples = calibration.sampleCount,
+            policy = PolicyEval.evaluate(
+                entries = entries,
+                stakeUsd = policyStakeUsd,
+                edgeThresholdPp = edgeThresholdPp,
+                minConfidence = minConfidence,
+                requireUncertaintyPass = requireUncertaintyPass,
+                maxUncertainty = maxUncertainty
+            )
         )
     }
 

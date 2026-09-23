@@ -105,4 +105,20 @@ object SignalConstants {
 
     /** Phrase the user must type to raise stake above the soft cap. */
     const val TICKET_RAISE_CONFIRM_PHRASE = "RAISE"
+
+    // --- v0.3.0 heavy ML (on-device; never unsupervised betting) ---
+
+    /** Master switch. Off = identical 0.2.x MLP blend. */
+    const val DEFAULT_HEAVY_ML = true
+    const val DEFAULT_SEQUENCE_MODEL = true
+    const val DEFAULT_GBM = true
+    const val DEFAULT_UNCERTAINTY_GATE = true
+
+    /**
+     * Max ensemble / MC-dropout stddev (probability units) to high-rank
+     * or propose a ticket. 0.12 ≈ models may disagree by ~12pp.
+     */
+    const val DEFAULT_MAX_UNCERTAINTY = 0.12
+    const val DEFAULT_CONTINUAL_FINETUNE = true
+    const val DEFAULT_POLICY_EVAL_STAKE_USD = 5.0
 }

@@ -28,12 +28,18 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         container.adapterStore.stateFlow,
         container.guardrailStore.stateFlow
     ) { entries, adapter, guard ->
+        val settings = container.hub.settings
         ScorecardUi(
             metrics = ScorecardMetrics.compute(
                 entries = entries,
-                calibration = container.scoring.calibration
+                calibration = container.scoring.calibration,
+                policyStakeUsd = settings.policyEvalStakeUsd,
+                edgeThresholdPp = settings.edgeThresholdPp,
+                minConfidence = settings.minConfidence,
+                requireUncertaintyPass = settings.uncertaintyGateEnabled,
+                maxUncertainty = settings.maxUncertainty
             ),
-            allowlist = Allowlist.evaluate(entries, floor = container.hub.settings.muteHitRateFloor),
+            allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor),
             adapter = adapter,
             guardrails = guard
         )

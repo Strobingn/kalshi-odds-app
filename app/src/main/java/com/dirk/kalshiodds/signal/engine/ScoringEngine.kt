@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.engine
 
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.DipHunterModel
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.external.ExternalSnapshot
 import com.dirk.kalshiodds.signal.external.SpotFeatureMath
@@ -9,6 +10,8 @@ import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.feedback.Guardrails
 import com.dirk.kalshiodds.signal.feedback.OnlineAdapter
+import com.dirk.kalshiodds.signal.ml.HeavyMlRuntime
+import com.dirk.kalshiodds.signal.ml.MicrostructureEncoder
 import com.dirk.kalshiodds.signal.sizing.NetExpectedValue
 import com.dirk.kalshiodds.signal.sizing.PositionSizer
 import com.dirk.kalshiodds.signal.model.MarketTick
@@ -51,6 +54,7 @@ import kotlin.math.tanh
 class ScoringEngine(
     private val model: DipHunterModel = DipHunterModel(context = null),
     val book: TickBook = TickBook(),
+    val heavy: HeavyMlRuntime = HeavyMlRuntime(),
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     data class Score(
@@ -93,7 +97,18 @@ class ScoringEngine(
         val spotLabel: String? = null,
         val spotPp: Double? = null,
         val adapterReady: Boolean = false,
-        val featureDevs: Map<String, Double> = emptyMap()
+        val featureDevs: Map<String, Double> = emptyMap(),
+        val mlpPp: Double? = null,
+        val cnnPp: Double? = null,
+        val lstmPp: Double? = null,
+        val gbmPp: Double? = null,
+        val uncertainty: Double? = null,
+        val uncertaintyPassed: Boolean = true,
+        val timeToMoveSec: Double? = null,
+        val midVolPp: Double? = null,
+        val pFill: Double? = null,
+        val heavyMl: Boolean = false,
+        val ensembleNote: String? = null
     )
 
     data class BlendWeights(
@@ -193,7 +208,69 @@ class ScoringEngine(
                 openInterest = oi ?: 0.0
             )
         }.getOrNull()
-        val aiPp = ai?.yes?.times(100.0)
+        val mlpPp = ai?.yes?.times(100.0)
+        val tteFrac = ((tteSec ?: 900L).toDouble() / 900.0).coerceIn(0.0, 1.0)
+        val spotFeat = external.forSeries(tick.series)
+        val spotRet = spotFeat?.let { it.spotReturn1m ?: it.spotReturn5m }
+        heavy.pushFrame(
+            ticker = tick.ticker,
+            mid = mid01,
+            size = tick.tradeSize ?: 0.0,
+            imbalance = book.imbalance(tick.ticker),
+            aggressor = book.aggressorScore(tick.ticker),
+            spot = spotRet,
+            nowMs = nowMs
+        )
+        val midHist = pts.map { it.mid01 }
+        val volForMl = if (midHist.size >= 3) {
+            val mean = midHist.average()
+            kotlin.math.sqrt(midHist.map { (it - mean) * (it - mean) }.average())
+        } else {
+            0.05
+        }
+        val momForMl = if (midHist.size >= 2) midHist.last() - midHist.first() else 0.0
+        val pulseEarly = book.bookPulse(tick.ticker)
+        val localBook = book.orderBook(tick.ticker)
+        val bookSnap = MicrostructureEncoder.snapshot(
+            bestBid = tick.yesBid,
+            bestAsk = tick.yesAsk,
+            spread = spread,
+            imbalance = book.imbalance(tick.ticker),
+            depthNear = book.depthNearMid(tick.ticker),
+            depthFar = localBook?.depthNearMid(SignalConstants.DEPTH_FAR_CENTS),
+            cancelSpike = pulseEarly?.cancelSpike,
+            quotePull = pulseEarly?.quotePull
+        )
+        val heavyOut = heavy.infer(
+            HeavyMlRuntime.Input(
+                ticker = tick.ticker,
+                series = tick.series,
+                mid = mid01,
+                volume = volume ?: 0.0,
+                openInterest = oi ?: 0.0,
+                tteFrac = tteFrac,
+                tte = tte,
+                spread = spread,
+                imbalance = book.imbalance(tick.ticker),
+                aggressor = book.aggressorScore(tick.ticker),
+                depthQuality = book.depthDecay(tick.ticker),
+                leadLag = book.leadLagScore(tick.series, nowMs),
+                spot = spotRet,
+                mlpYes = ai?.yes,
+                volatility = volForMl,
+                momentum = momForMl,
+                bookSnap = bookSnap,
+                velocityPerSec = vel,
+                mids = midHist,
+                nowMs = nowMs
+            ),
+            settings
+        )
+        val aiPp = if (settings.heavyMlEnabled && heavyOut.usedHeavy) {
+            heavyOut.ensembleYes * 100.0
+        } else {
+            mlpPp
+        }
 
         val aggressor = book.aggressorScore(tick.ticker)
         val rawFlow = book.flowScore(tick.ticker)
@@ -233,7 +310,6 @@ class ScoringEngine(
         val cancelFeat = pulse?.let { (it.cancelSpike + it.quotePull) / 2.0 }
         val cancelAdjPp = cancelFeat?.let { (midPp + 7.0 * it).coerceIn(2.0, 98.0) }
 
-        val spotFeat = external.forSeries(tick.series)
         val spotAdjPp = SpotFeatureMath.adjustPp(midPp, spotFeat)
         val spotLabel = SpotFeatureMath.label(spotFeat)
 
@@ -319,7 +395,13 @@ class ScoringEngine(
             regime = regime,
             tte = tte,
             nTicks = pts.size
-        )
+        ).let { c ->
+            if (settings.heavyMlEnabled && heavyOut.usedHeavy) {
+                (c * (1.0 - 0.45 * (heavyOut.uncertainty / 0.25).coerceIn(0.0, 1.0))).coerceIn(0.10, 0.95)
+            } else {
+                c
+            }
+        }
         val filter = SkipFilter.evaluate(
             confidence = confidence,
             spreadDollars = spread,
@@ -328,9 +410,19 @@ class ScoringEngine(
             depthNearMid = depthNear,
             settings = settings
         )
-        val passed = filter.passed && !muted
+        val uncBlocked = settings.uncertaintyGateEnabled &&
+            settings.heavyMlEnabled &&
+            heavyOut.usedHeavy &&
+            !heavyOut.uncertaintyPassed
+        val passed = filter.passed && !muted && !uncBlocked
         val skipReason = when {
             muted -> muteReason
+            uncBlocked -> String.format(
+                java.util.Locale.US,
+                "uncertainty %.2f > %.2f",
+                heavyOut.uncertainty,
+                settings.maxUncertainty
+            )
             else -> filter.reason
         }
         val reason = buildReason(
@@ -351,7 +443,18 @@ class ScoringEngine(
             netEdgePp = ev.netEdgePp,
             muted = muted,
             adapterReady = adapterState.ready,
-            spotLabel = spotLabel
+            spotLabel = spotLabel,
+            heavyNote = if (settings.heavyMlEnabled) heavyOut.note else null,
+            uncertaintyBlocked = uncBlocked
+        )
+        heavy.rememberInference(
+            ticker = tick.ticker,
+            series = tick.series,
+            tte = tte.name,
+            out = heavyOut,
+            mid = mid01,
+            edgePp = delta,
+            nowMs = nowMs
         )
         return Score(
             fairValuePp = fair,
@@ -393,7 +496,18 @@ class ScoringEngine(
             spotLabel = spotLabel,
             spotPp = spotAdjPp,
             adapterReady = adapterState.ready,
-            featureDevs = featureDevs
+            featureDevs = featureDevs,
+            mlpPp = mlpPp,
+            cnnPp = heavyOut.cnnYes?.times(100.0),
+            lstmPp = heavyOut.lstmYes?.times(100.0),
+            gbmPp = heavyOut.gbmYes?.times(100.0),
+            uncertainty = if (settings.heavyMlEnabled) heavyOut.uncertainty else null,
+            uncertaintyPassed = !uncBlocked,
+            timeToMoveSec = heavyOut.timeToMoveSec,
+            midVolPp = heavyOut.midVol?.times(100.0),
+            pFill = heavyOut.pFill,
+            heavyMl = heavyOut.usedHeavy,
+            ensembleNote = if (settings.heavyMlEnabled) heavyOut.note else null
         )
     }
 
@@ -544,7 +658,9 @@ class ScoringEngine(
         netEdgePp: Double? = null,
         muted: Boolean = false,
         adapterReady: Boolean = false,
-        spotLabel: String? = null
+        spotLabel: String? = null,
+        heavyNote: String? = null,
+        uncertaintyBlocked: Boolean = false
     ): String {
         val parts = mutableListOf<String>()
         parts += "${regime.shortLabel}/${tte.shortLabel}"
@@ -581,7 +697,9 @@ class ScoringEngine(
             parts += String.format(java.util.Locale.US, "net %+.1fpp", netEdgePp)
         }
         if (spotLabel != null) parts += spotLabel
+        if (heavyNote != null) parts += heavyNote
         if (muted) parts += "muted"
+        if (uncertaintyBlocked) parts += "unc-gated"
         if (!passedFilter) parts += "filtered"
         return parts.joinToString(" · ")
     }

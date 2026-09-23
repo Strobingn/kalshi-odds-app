@@ -83,6 +83,7 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
             WindowCard("Today", snap.daily)
             WindowCard("Rolling 7 days", snap.rolling)
             WindowCard("All time", snap.allTime)
+            snap.policy?.let { PolicyCard(it) }
             if (snap.perSeries.isNotEmpty()) {
                 Text(
                     "Per series",
@@ -235,6 +236,40 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
             Stat("Edge if right", stats.avgEdgeWhenRight?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
             Stat("Edge if wrong", stats.avgEdgeWhenWrong?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
         }
+    }
+}
+
+@Composable
+private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecard) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(
+            String.format(Locale.US, "If every alert @ $%.0f", policy.stakeUsd),
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Text(policy.note, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Spacer(Modifier.height(8.dp))
+        PolicyLine("All alerts", policy.allAlerts)
+        Spacer(Modifier.height(6.dp))
+        PolicyLine("Uncertainty-gated", policy.gated)
+    }
+}
+
+@Composable
+private fun PolicyLine(title: String, line: com.dirk.kalshiodds.signal.ml.PolicyEval.Line) {
+    Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onBackground)
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Stat("N", if (line.n == 0) "—" else "${line.hits}/${line.n}")
+        Stat("ROI", line.roi?.let { String.format(Locale.US, "%+.1f%%", it * 100.0) } ?: "—")
+        Stat("P&L", if (line.n == 0) "—" else String.format(Locale.US, "%+.2f", line.totalPnl))
+        Stat("Brier", line.brier?.let { String.format(Locale.US, "%.3f", it) } ?: "—")
     }
 }
 

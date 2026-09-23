@@ -50,6 +50,13 @@ data class SignalSettings(
     val ticketsEnabled: Boolean = true,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
+    val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,
+    val sequenceModelEnabled: Boolean = SignalConstants.DEFAULT_SEQUENCE_MODEL,
+    val gbmEnabled: Boolean = SignalConstants.DEFAULT_GBM,
+    val uncertaintyGateEnabled: Boolean = SignalConstants.DEFAULT_UNCERTAINTY_GATE,
+    val maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY,
+    val continualFineTune: Boolean = SignalConstants.DEFAULT_CONTINUAL_FINETUNE,
+    val policyEvalStakeUsd: Double = SignalConstants.DEFAULT_POLICY_EVAL_STAKE_USD,
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false
 ) {
@@ -154,6 +161,20 @@ class SignalPreferences(
         )
     }
     suspend fun updateTicketRespectGates(value: Boolean) = edit { it[KEY_TICKET_GATES] = value }
+    suspend fun updateHeavyMl(value: Boolean) = edit { it[KEY_HEAVY_ML] = value }
+    suspend fun updateSequenceModel(value: Boolean) = edit { it[KEY_SEQ_MODEL] = value }
+    suspend fun updateGbm(value: Boolean) = edit { it[KEY_GBM] = value }
+    suspend fun updateUncertaintyGate(value: Boolean) = edit { it[KEY_UNC_GATE] = value }
+    suspend fun updateMaxUncertainty(value: Double) = edit {
+        it[KEY_MAX_UNC] = value.coerceIn(0.02, 0.40)
+    }
+    suspend fun updateContinualFineTune(value: Boolean) = edit { it[KEY_FINETUNE] = value }
+    suspend fun updatePolicyEvalStakeUsd(value: Double) = edit {
+        it[KEY_POLICY_STAKE] = value.coerceIn(
+            SignalConstants.TICKET_STAKE_MIN_USD,
+            SignalConstants.TICKET_STAKE_HARD_CAP_USD
+        )
+    }
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
@@ -204,6 +225,13 @@ class SignalPreferences(
             ticketsEnabled = this[KEY_TICKETS] ?: def.ticketsEnabled,
             ticketStakeUsd = this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd,
             ticketRespectGates = this[KEY_TICKET_GATES] ?: def.ticketRespectGates,
+            heavyMlEnabled = this[KEY_HEAVY_ML] ?: def.heavyMlEnabled,
+            sequenceModelEnabled = this[KEY_SEQ_MODEL] ?: def.sequenceModelEnabled,
+            gbmEnabled = this[KEY_GBM] ?: def.gbmEnabled,
+            uncertaintyGateEnabled = this[KEY_UNC_GATE] ?: def.uncertaintyGateEnabled,
+            maxUncertainty = this[KEY_MAX_UNC] ?: def.maxUncertainty,
+            continualFineTune = this[KEY_FINETUNE] ?: def.continualFineTune,
+            policyEvalStakeUsd = this[KEY_POLICY_STAKE] ?: def.policyEvalStakeUsd,
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
         )
@@ -238,6 +266,13 @@ class SignalPreferences(
         private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
+        private val KEY_HEAVY_ML = booleanPreferencesKey("heavy_ml_enabled")
+        private val KEY_SEQ_MODEL = booleanPreferencesKey("sequence_model_enabled")
+        private val KEY_GBM = booleanPreferencesKey("gbm_enabled")
+        private val KEY_UNC_GATE = booleanPreferencesKey("uncertainty_gate_enabled")
+        private val KEY_MAX_UNC = doublePreferencesKey("max_uncertainty")
+        private val KEY_FINETUNE = booleanPreferencesKey("continual_finetune")
+        private val KEY_POLICY_STAKE = doublePreferencesKey("policy_eval_stake_usd")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

@@ -34,7 +34,14 @@ data class DefaultSignalConfig(
     val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
     val ticketsEnabled: Boolean = true,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
-    val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES
+    val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
+    val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,
+    val sequenceModelEnabled: Boolean = SignalConstants.DEFAULT_SEQUENCE_MODEL,
+    val gbmEnabled: Boolean = SignalConstants.DEFAULT_GBM,
+    val uncertaintyGateEnabled: Boolean = SignalConstants.DEFAULT_UNCERTAINTY_GATE,
+    val maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY,
+    val continualFineTune: Boolean = SignalConstants.DEFAULT_CONTINUAL_FINETUNE,
+    val policyEvalStakeUsd: Double = SignalConstants.DEFAULT_POLICY_EVAL_STAKE_USD
 ) {
     companion object {
         const val ASSET_NAME = "default_signal_config.json"

@@ -60,7 +60,17 @@ data class MarketUiModel(
     val feePerContract: Double? = null,
     val halfSpread: Double? = null,
     val spotLabel: String? = null,
-    val adapterReady: Boolean = false
+    val adapterReady: Boolean = false,
+    val uncertainty: Double? = null,
+    val uncertaintyPassed: Boolean = true,
+    val timeToMoveSec: Double? = null,
+    val midVolPp: Double? = null,
+    val pFill: Double? = null,
+    val heavyMl: Boolean = false,
+    val ensembleNote: String? = null,
+    val mlpPp: Double? = null,
+    val cnnPp: Double? = null,
+    val gbmPp: Double? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -161,7 +171,17 @@ fun MarketUiModel.withSignalScore(
         feePerContract = score.feePerContract,
         halfSpread = score.halfSpread,
         spotLabel = score.spotLabel,
-        adapterReady = score.adapterReady
+        adapterReady = score.adapterReady,
+        uncertainty = score.uncertainty,
+        uncertaintyPassed = score.uncertaintyPassed,
+        timeToMoveSec = score.timeToMoveSec,
+        midVolPp = score.midVolPp,
+        pFill = score.pFill,
+        heavyMl = score.heavyMl,
+        ensembleNote = score.ensembleNote,
+        mlpPp = score.mlpPp,
+        cnnPp = score.cnnPp,
+        gbmPp = score.gbmPp
     )
 }
 

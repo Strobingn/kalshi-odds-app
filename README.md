@@ -18,9 +18,39 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.2.4**
+Package: `com.dirk.kalshiodds` · version **0.3.0**
 
-Analysis UI is unchanged. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background** via a sticky foreground service (no change to trading rules). **0.2.2 added approve-gated limit tickets.** There is no background auto-fire, no set-and-forget trading, and no order on app start. **Not financial advice. High variance — you can lose the full stake.**
+**0.3.0 adds on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) on top of the 0.2.x blend. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. **Not financial advice. High variance — you can lose the full stake.**
+
+## Heavy ML (v0.3.0)
+
+Analysis + existing approve-gated tickets only. Heavier models use more CPU/battery — turn them off in Settings to force the 0.2.x MLP blend.
+
+1. **Sequence model.** Temporal CNN + TinyLSTM over the last 1–5 min of mid, size, imbalance, aggressor flow, and spot (30 × 10s bins). The 8-feature MLP stays in the stack.
+2. **GBM second opinion.** Pure-Kotlin tree ensemble on 16 tabular features, stacked with the neural outputs.
+3. **Continual fine-tune + calibration.** Settlement replay updates the YES last layer and ensemble weights. Platt + isotonic per series × TTE regime. Cold start is identity.
+4. **Multi-task heads.** P(YES/NO), time-to-move, mid vol, P(fill at limit) — shown on cards and the checklist.
+5. **Cross-market backbone.** Shared encoder + BTC/ETH/SOL series embeddings for lead–lag transfer.
+6. **Teacher distill.** `python3 ml/train_heavy.py` exports `heavy_ml_student.json` (and optional `diphunter_seq.tflite`). See `ml/DISTILL.md`. Phone stays on the student.
+7. **Uncertainty gate.** Ensemble variance or MC-dropout proxy. Alerts and tickets (when gates are on) require uncertainty ≤ Settings threshold.
+8. **Microstructure embeddings.** 8→4 autoencoder over book snapshots, fed into GBM / scorer.
+9. **Policy eval.** Scorecard counterfactual: simulated ROI / Brier if every alert were taken at stake X (default $5). Not live P&L.
+
+Cold start: if the sequence window is short and the stack has not been fine-tuned, scoring is the **0.2.x blend** (MLP + microstructure). New models drop in as history arrives.
+
+### Settings knobs (v0.3.0)
+
+| Knob | Default | Role |
+|------|---------|------|
+| Heavy ML | on | Master switch. Off = 0.2.x blend |
+| Sequence model | on | Temporal CNN / TinyLSTM |
+| GBM second opinion | on | Tabular booster |
+| Continual fine-tune | on | Last-layer + regime cal from settlements |
+| Uncertainty gate | on | Block alerts / tickets when ensemble disagrees |
+| Max uncertainty | 0.12 | Stddev in probability units |
+| Policy-eval stake | $5 | Scorecard counterfactual size |
+
+Heavier models may increase battery and CPU. Disable Heavy ML (or just the sequence tower) if the phone runs hot.
 
 ## Background live odds (v0.2.3 / crash-hardened 0.2.4)
 
@@ -121,15 +151,15 @@ Event-driven fair-value alerts on crypto ticks.
 3. Probability rule: mid = `(yes_bid + yes_ask) / 2` else `last_price`.
 4. Scoring engine (dedicated tick dispatcher):
 
-   `fairValue = blend(TFLite, volume-flow+aggressor, related mid, velocity, imbalance, lead–lag, depth/decay, cancel/pull)`  
-   then **calibrate** when enough settlements exist.  
+   `fairValue = blend(ensemble(MLP, TCNN, LSTM, GBM), volume-flow+aggressor, related mid, velocity, imbalance, lead–lag, depth/decay, cancel/pull)`  
+   then **calibrate** (global + per series/TTE) when enough settlements exist.  
    `delta = calibratedFair − marketMid` (percentage points)
 
-   Alerts fire only when `|delta|` ≥ threshold **and** the skip filter passes (10s debounce per ticker).
+   Alerts fire only when `|delta|` ≥ threshold, the skip filter passes, **and** uncertainty is below the Settings cap (10s debounce per ticker).
 
 ## Dip Hunter AI (TFLite)
 
-On-device YES/NO prediction via a small **TensorFlow Lite** MLP (`Input(8) → Dense(32) → Dense(16) → Dense(2, softmax)` = `[P(NO), P(YES)]`). Features: see `ml/FEATURES.md`. The historical trainer still includes settled WTI rows; **runtime inference and the live watchlist are crypto-only** (series_id 0).
+On-device YES/NO via the 8-feature **TensorFlow Lite** MLP (`Input(8) → Dense(32) → Dense(16) → Dense(2, softmax)` = `[P(NO), P(YES)]`) **plus** the 0.3.0 sequence/GBM ensemble. Features: see `ml/FEATURES.md`. The historical trainer still includes settled WTI rows; **runtime inference and the live watchlist are crypto-only**.
 
 **Edge hunting:** Dip Hunter edge (AI−market pp), ranked opportunities, stance text (Lean YES/NO — no orders).
 
@@ -166,6 +196,7 @@ app/src/main/java/com/dirk/kalshiodds/
     config/          DataStore prefs + EncryptedSharedPreferences + default JSON
     ws/              KalshiWsAuth, KalshiWsClient, KalshiWsMessages
     engine/          ScoringEngine, TickBook, LocalOrderBook, MarketRegime, SkipFilter
+    ml/              Sequence, TCNN, TinyLSTM, GBM, ensemble, uncertainty, fine-tune, policy eval
     feedback/        Calibrator, ScorecardMetrics, OnlineAdapter, Allowlist, Guardrails
     sizing/          PositionSizer, NetExpectedValue (advisory)
     trade/           PayoutGate, TicketBuilder, TicketSession (approve-gated)
@@ -181,6 +212,9 @@ app/src/main/java/com/dirk/kalshiodds/
   KalshiOddsApp.kt
   AppContainer.kt
 app/src/main/assets/default_signal_config.json
+app/src/main/assets/heavy_ml_student.json
+ml/DISTILL.md            teacher → student weight refresh
+ml/train_heavy.py        export student JSON / optional TFLite
 ```
 
 ## Configuration (Settings + DataStore)
@@ -192,6 +226,7 @@ app/src/main/assets/default_signal_config.json
 - Bankroll, Kelly / fixed-fraction, fee rate, net-EV ranking
 - Auto-mute floor, streak / drawdown guard, resume
 - Ticket stake ($5 default, $25 hard cap), quality gates for tickets
+- Heavy ML, sequence, GBM, uncertainty cap, continual fine-tune, policy-eval stake
 - Kalshi API Key ID + private key PEM (secure storage; WS + Approve only)
 
 Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).

@@ -341,6 +341,45 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             )
             ToggleRow("Resume automatically on next session", s.resumeOnNewSession, viewModel::setResumeOnNewSession)
 
+            Section("Heavy ML (0.3.0)")
+            Text(
+                "Temporal CNN + TinyLSTM + GBM second opinion + shared BTC/ETH/SOL backbone. " +
+                    "Cold start falls back to the 0.2.x MLP blend. Heavier models use more CPU and battery — " +
+                    "turn the master switch off to disable them. Still analysis + approve-gated tickets only; " +
+                    "nothing is ordered without Approve.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Heavy ML (sequence + GBM + ensemble)", s.heavyMlEnabled, viewModel::setHeavyMl)
+            ToggleRow("Sequence model (Temporal CNN / TinyLSTM)", s.sequenceModelEnabled, viewModel::setSequenceModel)
+            ToggleRow("GBM second opinion", s.gbmEnabled, viewModel::setGbm)
+            ToggleRow("Continual fine-tune + regime calibration", s.continualFineTune, viewModel::setContinualFineTune)
+            ToggleRow("Uncertainty gate (alerts / tickets)", s.uncertaintyGateEnabled, viewModel::setUncertaintyGate)
+            Text(
+                String.format(Locale.US, "Max uncertainty  %.2f  (ensemble / MC-dropout std)", s.maxUncertainty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.maxUncertainty.toFloat().coerceIn(0.02f, 0.40f),
+                onValueChange = { viewModel.setMaxUncertainty(it.toDouble()) },
+                valueRange = 0.02f..0.40f,
+                steps = 18
+            )
+            Text(
+                String.format(Locale.US, "Policy-eval stake  $%.0f  (scorecard counterfactual)", s.policyEvalStakeUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.policyEvalStakeUsd.toFloat().coerceIn(1f, 25f),
+                onValueChange = { viewModel.setPolicyEvalStakeUsd(it.toDouble()) },
+                valueRange = 1f..25f,
+                steps = 23
+            )
+
             Section("Trade tickets (approve-gated)")
             Text(
                 "Default stake \$5. A ticket is proposed only when max settlement payout for that stake is ≥\$100 " +

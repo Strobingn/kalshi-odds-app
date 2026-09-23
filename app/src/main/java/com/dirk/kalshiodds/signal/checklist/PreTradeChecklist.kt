@@ -28,11 +28,17 @@ object PreTradeChecklist {
             !market.passedFilter -> market.skipReason ?: "filtered"
             else -> "cleared"
         }
+        val unc = market.uncertainty?.let { String.format(Locale.US, "%.2f%s", it, if (market.uncertaintyPassed) "" else " GATE") } ?: "—"
+        val ttm = market.timeToMoveSec?.let { String.format(Locale.US, "%.0fs", it) } ?: "—"
+        val fill = market.pFill?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         return listOf(
             Item("Side", side),
             Item("Size", size),
             Item("Net EV", net),
             Item("Confidence", conf),
+            Item("Uncertainty", unc),
+            Item("Time-to-move", ttm),
+            Item("P(fill)", fill),
             Item("Regime", regime),
             Item("TTE", tte),
             Item("Skip filter", skip)
@@ -59,6 +65,12 @@ object PreTradeChecklist {
             appendLine("Net EV: $netEv ($netPp)")
             appendLine("Raw edge: $raw")
             appendLine("Confidence: $conf")
+            market.uncertainty?.let {
+                appendLine("Uncertainty: ${String.format(Locale.US, "%.2f", it)}${if (market.uncertaintyPassed) "" else " (gated)"}")
+            }
+            market.timeToMoveSec?.let { appendLine("Time-to-move: ${String.format(Locale.US, "%.0fs", it)}") }
+            market.midVolPp?.let { appendLine("Mid vol: ${String.format(Locale.US, "%.1fpp", it)}") }
+            market.pFill?.let { appendLine("P(fill): ${String.format(Locale.US, "%.0f%%", it * 100.0)}") }
             appendLine("Regime: ${market.regimeTag ?: "—"}")
             appendLine("TTE: ${market.tteRegimeLabel ?: "—"}")
             appendLine("Skip filter: $skip")
