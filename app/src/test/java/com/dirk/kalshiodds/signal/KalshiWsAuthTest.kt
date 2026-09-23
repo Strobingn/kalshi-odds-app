@@ -74,6 +74,21 @@ class KalshiWsAuthTest {
     }
 
     @Test
+    fun signRestUsesMethodAndPathWithoutQuery() {
+        val kpg = KeyPairGenerator.getInstance("RSA")
+        kpg.initialize(2048)
+        val pair = kpg.generateKeyPair()
+        val pem = toPkcs1Pem(pair.private as RSAPrivateCrtKey)
+        val parsed = KalshiWsAuth.parsePrivateKey(pem)
+        val ts = "1703123456789"
+        val path = "/trade-api/v2/portfolio/events/orders"
+        val a = KalshiWsAuth.signRest(parsed, ts, "POST", path)
+        val b = KalshiWsAuth.signRest(parsed, ts, "POST", "$path?market_ticker=X")
+        assertEquals(a, b)
+        assertTrue(a.isNotBlank())
+    }
+
+    @Test
     fun wsUrlsIncludePrimaryAndElections() {
         assertEquals("wss://external-api-ws.kalshi.com/trade-api/ws/v2", KalshiWsAuth.PRIMARY_WS_URL)
         assertTrue(KalshiWsAuth.WS_URLS.contains(KalshiWsAuth.ELECTIONS_WS_URL))

@@ -251,7 +251,7 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                         )
                     }
                     Text(
-                        text = "Fair − market (pp). Net EV subtracts Kalshi-style fee + half-spread. Advisory — no orders.",
+                        text = "Fair − market (pp). Net EV subtracts Kalshi-style fee + half-spread. Analysis stays advisory; tickets need a separate Approve.",
                         style = MaterialTheme.typography.labelMedium,
                         color = TextSecondary,
                         modifier = Modifier.padding(top = 4.dp)

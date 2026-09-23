@@ -42,6 +42,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.ui.components.MarketCard
+import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
@@ -138,6 +139,17 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             pauseBanner = state.pauseBanner,
                             mutedSummary = state.mutedSummary,
                             onResumeAlerts = { viewModel.resumeAlerts() }
+                        )
+                    }
+                    item {
+                        TradeTicketsSection(
+                            tickets = state.tickets,
+                            credentialsConfigured = state.settings.credentialsConfigured,
+                            onReview = { viewModel.openTicketApprove(it) },
+                            onDismiss = { viewModel.dismissTicket(it) },
+                            onApprove = { viewModel.approveTicket(it) },
+                            onCancelApprove = { viewModel.cancelTicketApprove() },
+                            onCancelOrder = { viewModel.cancelWorkingOrder(it) }
                         )
                     }
                     if (state.recentAlerts.isNotEmpty()) {
@@ -371,7 +383,7 @@ private fun MetaHeader(
             )
         }
         Text(
-            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · Dip Hunter AI = TFLite MLP · no auto-trading.",
+            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · approve-gated tickets · no auto-fire.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
             modifier = Modifier.padding(top = 6.dp)

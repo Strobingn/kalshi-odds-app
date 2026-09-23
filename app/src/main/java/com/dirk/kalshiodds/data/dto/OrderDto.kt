@@ -1,0 +1,89 @@
+package com.dirk.kalshiodds.data.dto
+
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+
+/**
+ * Kalshi Trade API v2 create-order body.
+ * POST /trade-api/v2/portfolio/events/orders
+ *
+ * Single-book `bid`/`ask` on the YES leg. `bid` = buy YES; `ask` = sell YES
+ * (economically buy NO at `1 − price`). Prices are fixed-point dollars.
+ */
+@Serializable
+data class CreateOrderV2Request(
+    val ticker: String,
+    val side: String,
+    val count: String,
+    val price: String,
+    @SerialName("time_in_force") val timeInForce: String = "good_till_canceled",
+    @SerialName("self_trade_prevention_type") val selfTradePreventionType: String = "taker_at_cross",
+    @SerialName("client_order_id") val clientOrderId: String,
+    @SerialName("post_only") val postOnly: Boolean = false,
+    @SerialName("cancel_order_on_pause") val cancelOrderOnPause: Boolean = true
+)
+
+@Serializable
+data class CreateOrderV2Response(
+    @SerialName("order_id") val orderId: String? = null,
+    @SerialName("client_order_id") val clientOrderId: String? = null,
+    @SerialName("fill_count") val fillCount: String? = null,
+    @SerialName("remaining_count") val remainingCount: String? = null,
+    @SerialName("average_fill_price") val averageFillPrice: String? = null,
+    @SerialName("average_fee_paid") val averageFeePaid: String? = null,
+    @SerialName("ts_ms") val tsMs: Long? = null,
+    val error: KalshiErrorBody? = null
+)
+
+@Serializable
+data class CancelOrderV2Response(
+    @SerialName("order_id") val orderId: String? = null,
+    @SerialName("client_order_id") val clientOrderId: String? = null,
+    @SerialName("reduced_by") val reducedBy: String? = null,
+    @SerialName("ts_ms") val tsMs: Long? = null,
+    val error: KalshiErrorBody? = null
+)
+
+/**
+ * Legacy POST /trade-api/v2/portfolio/orders (deprecated, still accepted).
+ * Used only as a 404 fallback behind V2.
+ */
+@Serializable
+data class CreateOrderLegacyRequest(
+    val ticker: String,
+    val side: String,
+    val action: String = "buy",
+    val count: Int,
+    @SerialName("yes_price_dollars") val yesPriceDollars: String? = null,
+    @SerialName("no_price_dollars") val noPriceDollars: String? = null,
+    @SerialName("client_order_id") val clientOrderId: String,
+    @SerialName("time_in_force") val timeInForce: String = "good_till_canceled",
+    @SerialName("self_trade_prevention_type") val selfTradePreventionType: String = "taker_at_cross"
+)
+
+@Serializable
+data class CreateOrderLegacyResponse(
+    val order: LegacyOrderBody? = null
+)
+
+@Serializable
+data class LegacyOrderBody(
+    @SerialName("order_id") val orderId: String? = null,
+    @SerialName("client_order_id") val clientOrderId: String? = null,
+    @SerialName("fill_count_fp") val fillCountFp: String? = null,
+    @SerialName("remaining_count_fp") val remainingCountFp: String? = null,
+    @SerialName("yes_price_dollars") val yesPriceDollars: String? = null
+)
+
+@Serializable
+data class CancelOrderLegacyResponse(
+    val order: LegacyOrderBody? = null,
+    @SerialName("reduced_by_fp") val reducedByFp: String? = null
+)
+
+@Serializable
+data class KalshiErrorBody(
+    val code: String? = null,
+    val message: String? = null,
+    val details: String? = null
+)

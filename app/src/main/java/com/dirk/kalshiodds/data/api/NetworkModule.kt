@@ -14,6 +14,7 @@ object NetworkModule {
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
+        encodeDefaults = true
     }
 
     private val okHttp: OkHttpClient by lazy {
@@ -27,7 +28,7 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("Accept", "application/json")
-                    .header("User-Agent", "DipHunter/0.2.1 (Android; Dirk Diggler)")
+                    .header("User-Agent", USER_AGENT)
                     .build()
                 chain.proceed(request)
             }
@@ -42,4 +43,22 @@ object NetworkModule {
             .build()
             .create(KalshiApi::class.java)
     }
+
+    /**
+     * Authenticated trade client. [credentials] returns (keyId, pem) from
+     * EncryptedSharedPreferences. PEM is never logged (BASIC logging only).
+     */
+    fun tradeApi(credentials: () -> Pair<String, String>): KalshiTradeApi {
+        val client = okHttp.newBuilder()
+            .addInterceptor(KalshiAuthInterceptor(credentials))
+            .build()
+        return Retrofit.Builder()
+            .baseUrl(KalshiApi.BASE_URL)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(KalshiTradeApi::class.java)
+    }
+
+    const val USER_AGENT = "DipHunter/0.2.2 (Android; Dirk Diggler)"
 }

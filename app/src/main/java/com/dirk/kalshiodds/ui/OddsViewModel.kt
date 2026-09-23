@@ -11,6 +11,8 @@ import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
+import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.TicketUiState
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
@@ -39,7 +41,8 @@ data class OddsUiState(
     val avgEdgeWhenWrong: Double? = null,
     val alertsPaused: Boolean = false,
     val pauseBanner: String? = null,
-    val mutedSummary: String? = null
+    val mutedSummary: String? = null,
+    val tickets: TicketUiState = TicketUiState()
 )
 
 /**
@@ -52,6 +55,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = container.repository
     private val hub = container.hub
     private val prefs = container.preferences
+    private val ticketSession = container.tickets
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -60,6 +64,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var currentIntervalMs: Long = BASE_POLL_MS
 
     init {
+        ticketSession.onStart()
+        viewModelScope.launch {
+            ticketSession.state.collect { tickets ->
+                _state.update { it.copy(tickets = tickets) }
+            }
+        }
         viewModelScope.launch {
             runCatching {
                 hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
@@ -86,6 +96,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 hub.settings = settings
                 _state.update { it.copy(settings = settings) }
                 publishSupportState()
+                rebuildTickets()
                 if (settings.liveSignalsEnabled) {
                     runCatching { LiveSignalsService.start(getApplication()) }
                     if (!settings.credentialsConfigured) {
@@ -110,6 +121,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     val snap = s.snapshot ?: return@update s
                     s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
                 }
+                rebuildTickets()
             }
         }
         startPolling()
@@ -183,6 +195,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         publishSupportState()
+        rebuildTickets()
     }
 
     private suspend fun refreshExternal() {
@@ -213,7 +226,56 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             container.support.resumeAlerts()
             publishSupportState()
+            rebuildTickets()
         }
+    }
+
+    fun openTicketApprove(ticketId: String) {
+        ticketSession.openApprove(ticketId)
+    }
+
+    fun cancelTicketApprove() {
+        ticketSession.cancelApprove()
+    }
+
+    fun dismissTicket(ticketId: String) {
+        ticketSession.dismiss(ticketId)
+    }
+
+    /**
+     * Explicit Approve for [ticketId] only. Nothing else in this ViewModel
+     * (init, poll, score overlay) ever calls the trade client.
+     */
+    fun approveTicket(ticketId: String) {
+        viewModelScope.launch {
+            val settings = _state.value.settings
+            if (!settings.credentialsConfigured) {
+                ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
+                return@launch
+            }
+            ticketSession.approve(ticketId)
+        }
+    }
+
+    fun cancelWorkingOrder(orderId: String) {
+        viewModelScope.launch { ticketSession.cancelWorking(orderId) }
+    }
+
+    private fun rebuildTickets() {
+        val s = _state.value
+        val markets = s.snapshot?.allMarkets.orEmpty()
+        val books = markets.mapNotNull { m ->
+            hub.scoring.book.orderBook(m.ticker)?.let { m.ticker to it }
+        }.toMap()
+        val tickets = TicketBuilder.proposeAll(
+            markets,
+            TicketBuilder.Context(
+                settings = s.settings,
+                alertsPaused = s.alertsPaused,
+                books = books
+            )
+        )
+        ticketSession.replaceProposals(tickets)
     }
 
     private fun scoreLabel(result: MarketsSnapshot): String? {
