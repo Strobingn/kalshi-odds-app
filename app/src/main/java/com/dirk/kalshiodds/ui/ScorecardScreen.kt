@@ -84,6 +84,7 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
             WindowCard("Rolling 7 days", snap.rolling)
             WindowCard("All time", snap.allTime)
             snap.policy?.let { PolicyCard(it) }
+            ui.extendedLine?.let { ExtendedAiCard(it) }
             if (snap.perSeries.isNotEmpty()) {
                 Text(
                     "Per series",
@@ -259,6 +260,26 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
         PolicyLine("All alerts", policy.allAlerts)
         Spacer(Modifier.height(6.dp))
         PolicyLine("Uncertainty-gated", policy.gated)
+    }
+}
+
+@Composable
+private fun ExtendedAiCard(line: String) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text("Extended AI (advisory)", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(
+            "Learned from settlements — RL sizer never places an order",
+            fontSize = 20.sp,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(line, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground)
     }
 }
 

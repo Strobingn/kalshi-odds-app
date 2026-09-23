@@ -380,6 +380,27 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 steps = 23
             )
 
+            Section("Extended AI (0.3.0 · 10–19)")
+            Text(
+                "On-device regime / anomaly / survival / conformal / meta / path-sim plus advisory RL sizing. " +
+                    "These can raise CPU and battery — turn the master switch off to drop back to Heavy ML + 0.2.x. " +
+                    "RL suggested stake is display-only. Tickets always use the configured \$5 default / caps and still need Approve. " +
+                    "News embeddings fail-soft and cache if the network is down.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Extended AI (master)", s.extendedAiEnabled, viewModel::setExtendedAi)
+            ToggleRow("Regime classifier (session / weekend / news-shock)", s.regimeClassifierEnabled, viewModel::setRegimeClassifier)
+            ToggleRow("Anomaly / spoof gate", s.anomalyGateEnabled, viewModel::setAnomalyGate)
+            ToggleRow("Survival / hazard P(YES | TTE, path)", s.survivalModelEnabled, viewModel::setSurvivalModel)
+            ToggleRow("RL sizer (advisory only — never auto-bets)", s.rlSizerEnabled, viewModel::setRlSizer)
+            ToggleRow("News / social embedding pulse (fail-soft)", s.newsPulseEnabled, viewModel::setNewsPulse)
+            ToggleRow("Rival-flow clustering", s.rivalFlowEnabled, viewModel::setRivalFlow)
+            ToggleRow("Bayesian MM shadow voter", s.bayesianMmEnabled, viewModel::setBayesianMm)
+            ToggleRow("Conformal prediction sets", s.conformalEnabled, viewModel::setConformal)
+            ToggleRow("Meta-label take/skip", s.metaLabelEnabled, viewModel::setMetaLabel)
+            ToggleRow("Synthetic path simulator", s.pathSimEnabled, viewModel::setPathSim)
+
             Section("Trade tickets (approve-gated)")
             Text(
                 "Default stake \$5. A ticket is proposed only when max settlement payout for that stake is ≥\$100 " +

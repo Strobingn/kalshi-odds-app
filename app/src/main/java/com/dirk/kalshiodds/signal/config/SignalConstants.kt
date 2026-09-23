@@ -121,4 +121,18 @@ object SignalConstants {
     const val DEFAULT_MAX_UNCERTAINTY = 0.12
     const val DEFAULT_CONTINUAL_FINETUNE = true
     const val DEFAULT_POLICY_EVAL_STAKE_USD = 5.0
+
+    // --- v0.3.0 extended AI (10–19); advisory / gates only ---
+
+    const val DEFAULT_EXTENDED_AI = true
+    const val DEFAULT_REGIME_CLASSIFIER = true
+    const val DEFAULT_ANOMALY_GATE = true
+    const val DEFAULT_SURVIVAL_MODEL = true
+    const val DEFAULT_RL_SIZER = true
+    const val DEFAULT_NEWS_PULSE = true
+    const val DEFAULT_RIVAL_FLOW = true
+    const val DEFAULT_BAYESIAN_MM = true
+    const val DEFAULT_CONFORMAL = true
+    const val DEFAULT_META_LABEL = true
+    const val DEFAULT_PATH_SIM = true
 }

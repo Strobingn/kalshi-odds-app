@@ -17,7 +17,8 @@ data class ScorecardUi(
     val metrics: ScorecardMetrics.Snapshot,
     val allowlist: Allowlist.State,
     val adapter: OnlineAdapter.State,
-    val guardrails: Guardrails.State
+    val guardrails: Guardrails.State,
+    val extendedLine: String? = null
 )
 
 class ScorecardViewModel(application: Application) : AndroidViewModel(application) {
@@ -41,7 +42,8 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             ),
             allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor),
             adapter = adapter,
-            guardrails = guard
+            guardrails = guard,
+            extendedLine = extendedLine()
         )
     }.stateIn(
         viewModelScope,
@@ -50,7 +52,20 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             metrics = ScorecardMetrics.compute(emptyList(), calibration = container.scoring.calibration),
             allowlist = Allowlist.State(),
             adapter = OnlineAdapter.identity(),
-            guardrails = Guardrails.identity()
+            guardrails = Guardrails.identity(),
+            extendedLine = null
         )
     )
+
+    private fun extendedLine(): String {
+        val ext = container.scoring.extended
+        val news = if (ext.news.headlineCount > 0) {
+            " · news ${ext.news.headlineCount} (${ext.news.source})"
+        } else {
+            ""
+        }
+        return "RL n=${ext.rl.sampleCount} · meta n=${ext.meta.sampleCount} · " +
+            "conformal n=${ext.conformal.scores.size}${if (ext.conformal.ready) " ready" else " cold"}" +
+            news
+    }
 }

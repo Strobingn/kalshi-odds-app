@@ -70,7 +70,22 @@ data class MarketUiModel(
     val ensembleNote: String? = null,
     val mlpPp: Double? = null,
     val cnnPp: Double? = null,
-    val gbmPp: Double? = null
+    val gbmPp: Double? = null,
+    val sessionTag: String? = null,
+    val newsShock: Boolean = false,
+    val anomalyNote: String? = null,
+    val survivalYesPp: Double? = null,
+    val rlStakeUsd: Double? = null,
+    val rlNote: String? = null,
+    val newsLabel: String? = null,
+    val flowNote: String? = null,
+    val mmShadowPp: Double? = null,
+    val conformalSet: String? = null,
+    val conformalAmbiguous: Boolean = false,
+    val metaTake: Boolean? = null,
+    val metaNote: String? = null,
+    val pathSurvive: Double? = null,
+    val extendedNote: String? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -181,7 +196,22 @@ fun MarketUiModel.withSignalScore(
         ensembleNote = score.ensembleNote,
         mlpPp = score.mlpPp,
         cnnPp = score.cnnPp,
-        gbmPp = score.gbmPp
+        gbmPp = score.gbmPp,
+        sessionTag = score.sessionTag,
+        newsShock = score.newsShock,
+        anomalyNote = score.anomalyNote,
+        survivalYesPp = score.survivalYesPp,
+        rlStakeUsd = score.rlStakeUsd,
+        rlNote = score.rlNote,
+        newsLabel = score.newsLabel,
+        flowNote = score.flowNote,
+        mmShadowPp = score.mmShadowPp,
+        conformalSet = score.conformalSet,
+        conformalAmbiguous = score.conformalAmbiguous,
+        metaTake = score.metaTake,
+        metaNote = score.metaNote,
+        pathSurvive = score.pathSurvive,
+        extendedNote = score.extendedNote
     )
 }
 

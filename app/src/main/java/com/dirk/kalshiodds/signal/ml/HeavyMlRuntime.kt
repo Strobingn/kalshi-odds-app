@@ -103,7 +103,11 @@ class HeavyMlRuntime(
         )
     }
 
-    fun infer(input: Input, settings: SignalSettings): Output {
+    fun infer(
+        input: Input,
+        settings: SignalSettings,
+        stackOverride: EnsembleStack.Weights? = null
+    ): Output {
         val mlp = input.mlpYes?.let { MlMath.clip01(it) }
         if (!settings.heavyMlEnabled) {
             return fallback(mlp, input, settings, used = false, note = "0.2.x blend (heavy ML off)")
@@ -170,7 +174,7 @@ class HeavyMlRuntime(
             EnsembleStack.Member("lstm", lstmYes ?: 0.5, enabled = lstmYes != null),
             EnsembleStack.Member("gbm", gbmYes ?: 0.5, enabled = gbmYes != null)
         )
-        val stacked = EnsembleStack.blend(members, stack)
+        val stacked = EnsembleStack.blend(members, stackOverride ?: stack)
         val rawYes = if (stacked.used.isEmpty()) mlp ?: 0.5 else stacked.pYes
         val calYes = RegimeCalibrator.apply(rawYes, input.series, input.tte.name, regimeCal)
         val gate = UncertaintyGate.evaluate(

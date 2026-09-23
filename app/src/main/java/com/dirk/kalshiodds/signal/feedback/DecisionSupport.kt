@@ -3,6 +3,8 @@ package com.dirk.kalshiodds.signal.feedback
 import com.dirk.kalshiodds.prediction.PredictionLogStore
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
+import com.dirk.kalshiodds.signal.ml.ConformalSets
+import com.dirk.kalshiodds.signal.ml.ExtendedAiPersisted
 import com.dirk.kalshiodds.signal.ml.HeavyMlPersisted
 import com.dirk.kalshiodds.signal.ml.HeavyMlStore
 import com.dirk.kalshiodds.signal.ml.RegimeCalibrator
@@ -77,15 +79,35 @@ class DecisionSupport(
                     yesB = stored.yesB
                 )
             }
+            restoreExtended(stored.extended)
         }
         refreshHeavy(entries, settings)
+    }
+
+    private fun restoreExtended(stored: ExtendedAiPersisted) {
+        val ext = scoring.extended
+        if (stored.rlLogits.isNotEmpty()) {
+            ext.rl.restore(stored.rlLogits.toDoubleArray(), stored.rlN)
+        }
+        if (stored.metaW.size == ext.meta.weights.size) {
+            ext.meta.weights = stored.metaW.toDoubleArray()
+            ext.meta.bias = stored.metaB
+            ext.meta.sampleCount = stored.metaN
+        }
+        if (stored.conformalScores.isNotEmpty()) {
+            ext.conformal = ConformalSets.State(
+                scores = stored.conformalScores,
+                quantile = stored.conformalQ,
+                alpha = stored.conformalAlpha
+            )
+        }
+        ext.lastSettledAtMs = stored.lastSettledAtMs
     }
 
     private suspend fun refreshHeavy(
         entries: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
         settings: SignalSettings
     ) {
-        if (!settings.heavyMlEnabled || !settings.continualFineTune) return
         val settled = entries.filter { it.outcome.equals("yes", true) || it.outcome.equals("no", true) }
         val cal = settled.map {
             RegimeCalibrator.Sample(
@@ -110,13 +132,17 @@ class DecisionSupport(
                 edgePp = e.edgePp
             )
         }
-        scoring.heavy.applySettlements(replay, cal, enabled = true)
+        if (settings.heavyMlEnabled && settings.continualFineTune) {
+            scoring.heavy.applySettlements(replay, cal, enabled = true)
+        }
+        scoring.extended.learnFromSettlements(replay, enabled = settings.extendedAiEnabled)
         persistHeavy()
     }
 
     private suspend fun persistHeavy() {
         val store = heavyStore ?: return
         val h = scoring.heavy
+        val e = scoring.extended
         runCatching {
             store.write(
                 HeavyMlPersisted(
@@ -125,7 +151,18 @@ class DecisionSupport(
                     yesW = h.heads.weights.yesW.toList(),
                     yesB = h.heads.weights.yesB,
                     lastSettledAtMs = h.lastSettledAtMs,
-                    replay = h.replay.snapshot()
+                    replay = h.replay.snapshot(),
+                    extended = ExtendedAiPersisted(
+                        rlLogits = e.rl.logits.toList(),
+                        rlN = e.rl.sampleCount,
+                        metaW = e.meta.weights.toList(),
+                        metaB = e.meta.bias,
+                        metaN = e.meta.sampleCount,
+                        conformalScores = e.conformal.scores,
+                        conformalQ = e.conformal.quantile,
+                        conformalAlpha = e.conformal.alpha,
+                        lastSettledAtMs = e.lastSettledAtMs
+                    )
                 )
             )
         }

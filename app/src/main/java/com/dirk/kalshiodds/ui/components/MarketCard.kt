@@ -95,6 +95,11 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 if (market.adapterReady) "Adapter" else null,
                 if (market.heavyMl) "Heavy ML" else null,
                 if (market.uncertainty != null && !market.uncertaintyPassed) "Unc gated" else null,
+                market.sessionTag?.let { "Sess $it" },
+                if (market.newsShock) "News shock" else null,
+                market.anomalyNote,
+                if (market.conformalAmbiguous) "Conformal ?" else market.conformalSet,
+                market.flowNote?.takeIf { it == "smart-flow" },
                 if (market.muted) "Muted" else null,
                 market.suggestedContracts?.let { "$it contracts max" }
             )
@@ -261,6 +266,22 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                             text = note,
                             style = MaterialTheme.typography.labelMedium,
                             color = TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    market.extendedNote?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    market.rlNote?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AccentBlue,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }

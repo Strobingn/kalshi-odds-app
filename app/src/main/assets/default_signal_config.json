@@ -33,5 +33,16 @@
   "uncertaintyGateEnabled": true,
   "maxUncertainty": 0.12,
   "continualFineTune": true,
-  "policyEvalStakeUsd": 5.0
+  "policyEvalStakeUsd": 5.0,
+  "extendedAiEnabled": true,
+  "regimeClassifierEnabled": true,
+  "anomalyGateEnabled": true,
+  "survivalModelEnabled": true,
+  "rlSizerEnabled": true,
+  "newsPulseEnabled": true,
+  "rivalFlowEnabled": true,
+  "bayesianMmEnabled": true,
+  "conformalEnabled": true,
+  "metaLabelEnabled": true,
+  "pathSimEnabled": true
 }

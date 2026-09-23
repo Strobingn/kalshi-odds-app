@@ -383,10 +383,12 @@ class ChecklistTest {
         assertTrue(text.contains("Net EV"))
         assertTrue(text.contains("cleared"))
         val items = PreTradeChecklist.items(market)
-        assertEquals(10, items.size)
+        assertEquals(14, items.size)
         assertEquals("Side", items[0].label)
         assertEquals("YES", items[0].value)
         assertEquals("Uncertainty", items[4].label)
+        assertEquals("Survival P(YES)", items[10].label)
+        assertEquals("RL stake", items[13].label)
     }
 }
 

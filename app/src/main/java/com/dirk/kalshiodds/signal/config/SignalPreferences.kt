@@ -57,6 +57,17 @@ data class SignalSettings(
     val maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY,
     val continualFineTune: Boolean = SignalConstants.DEFAULT_CONTINUAL_FINETUNE,
     val policyEvalStakeUsd: Double = SignalConstants.DEFAULT_POLICY_EVAL_STAKE_USD,
+    val extendedAiEnabled: Boolean = SignalConstants.DEFAULT_EXTENDED_AI,
+    val regimeClassifierEnabled: Boolean = SignalConstants.DEFAULT_REGIME_CLASSIFIER,
+    val anomalyGateEnabled: Boolean = SignalConstants.DEFAULT_ANOMALY_GATE,
+    val survivalModelEnabled: Boolean = SignalConstants.DEFAULT_SURVIVAL_MODEL,
+    val rlSizerEnabled: Boolean = SignalConstants.DEFAULT_RL_SIZER,
+    val newsPulseEnabled: Boolean = SignalConstants.DEFAULT_NEWS_PULSE,
+    val rivalFlowEnabled: Boolean = SignalConstants.DEFAULT_RIVAL_FLOW,
+    val bayesianMmEnabled: Boolean = SignalConstants.DEFAULT_BAYESIAN_MM,
+    val conformalEnabled: Boolean = SignalConstants.DEFAULT_CONFORMAL,
+    val metaLabelEnabled: Boolean = SignalConstants.DEFAULT_META_LABEL,
+    val pathSimEnabled: Boolean = SignalConstants.DEFAULT_PATH_SIM,
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false
 ) {
@@ -175,6 +186,17 @@ class SignalPreferences(
             SignalConstants.TICKET_STAKE_HARD_CAP_USD
         )
     }
+    suspend fun updateExtendedAi(value: Boolean) = edit { it[KEY_EXT_AI] = value }
+    suspend fun updateRegimeClassifier(value: Boolean) = edit { it[KEY_REGIME_CLF] = value }
+    suspend fun updateAnomalyGate(value: Boolean) = edit { it[KEY_ANOMALY] = value }
+    suspend fun updateSurvivalModel(value: Boolean) = edit { it[KEY_SURVIVAL] = value }
+    suspend fun updateRlSizer(value: Boolean) = edit { it[KEY_RL_SIZER] = value }
+    suspend fun updateNewsPulse(value: Boolean) = edit { it[KEY_NEWS] = value }
+    suspend fun updateRivalFlow(value: Boolean) = edit { it[KEY_RIVAL] = value }
+    suspend fun updateBayesianMm(value: Boolean) = edit { it[KEY_BAYES] = value }
+    suspend fun updateConformal(value: Boolean) = edit { it[KEY_CONFORMAL] = value }
+    suspend fun updateMetaLabel(value: Boolean) = edit { it[KEY_META] = value }
+    suspend fun updatePathSim(value: Boolean) = edit { it[KEY_PATH_SIM] = value }
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
@@ -232,6 +254,17 @@ class SignalPreferences(
             maxUncertainty = this[KEY_MAX_UNC] ?: def.maxUncertainty,
             continualFineTune = this[KEY_FINETUNE] ?: def.continualFineTune,
             policyEvalStakeUsd = this[KEY_POLICY_STAKE] ?: def.policyEvalStakeUsd,
+            extendedAiEnabled = this[KEY_EXT_AI] ?: def.extendedAiEnabled,
+            regimeClassifierEnabled = this[KEY_REGIME_CLF] ?: def.regimeClassifierEnabled,
+            anomalyGateEnabled = this[KEY_ANOMALY] ?: def.anomalyGateEnabled,
+            survivalModelEnabled = this[KEY_SURVIVAL] ?: def.survivalModelEnabled,
+            rlSizerEnabled = this[KEY_RL_SIZER] ?: def.rlSizerEnabled,
+            newsPulseEnabled = this[KEY_NEWS] ?: def.newsPulseEnabled,
+            rivalFlowEnabled = this[KEY_RIVAL] ?: def.rivalFlowEnabled,
+            bayesianMmEnabled = this[KEY_BAYES] ?: def.bayesianMmEnabled,
+            conformalEnabled = this[KEY_CONFORMAL] ?: def.conformalEnabled,
+            metaLabelEnabled = this[KEY_META] ?: def.metaLabelEnabled,
+            pathSimEnabled = this[KEY_PATH_SIM] ?: def.pathSimEnabled,
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
         )
@@ -273,6 +306,17 @@ class SignalPreferences(
         private val KEY_MAX_UNC = doublePreferencesKey("max_uncertainty")
         private val KEY_FINETUNE = booleanPreferencesKey("continual_finetune")
         private val KEY_POLICY_STAKE = doublePreferencesKey("policy_eval_stake_usd")
+        private val KEY_EXT_AI = booleanPreferencesKey("extended_ai_enabled")
+        private val KEY_REGIME_CLF = booleanPreferencesKey("regime_classifier_enabled")
+        private val KEY_ANOMALY = booleanPreferencesKey("anomaly_gate_enabled")
+        private val KEY_SURVIVAL = booleanPreferencesKey("survival_model_enabled")
+        private val KEY_RL_SIZER = booleanPreferencesKey("rl_sizer_enabled")
+        private val KEY_NEWS = booleanPreferencesKey("news_pulse_enabled")
+        private val KEY_RIVAL = booleanPreferencesKey("rival_flow_enabled")
+        private val KEY_BAYES = booleanPreferencesKey("bayesian_mm_enabled")
+        private val KEY_CONFORMAL = booleanPreferencesKey("conformal_enabled")
+        private val KEY_META = booleanPreferencesKey("meta_label_enabled")
+        private val KEY_PATH_SIM = booleanPreferencesKey("path_sim_enabled")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

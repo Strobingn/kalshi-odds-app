@@ -20,7 +20,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.0**
 
-**0.3.0 adds on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) on top of the 0.2.x blend. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. **Not financial advice. High variance — you can lose the full stake.**
+**0.3.0 adds on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19** (regime classifier, anomaly/spoof gate, survival, advisory RL sizer, news pulse, rival-flow, Bayesian MM, conformal sets, meta-label, path simulator) on top of the 0.2.x blend. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
 
 ## Heavy ML (v0.3.0)
 
@@ -35,8 +35,18 @@ Analysis + existing approve-gated tickets only. Heavier models use more CPU/batt
 7. **Uncertainty gate.** Ensemble variance or MC-dropout proxy. Alerts and tickets (when gates are on) require uncertainty ≤ Settings threshold.
 8. **Microstructure embeddings.** 8→4 autoencoder over book snapshots, fed into GBM / scorer.
 9. **Policy eval.** Scorecard counterfactual: simulated ROI / Brier if every alert were taken at stake X (default $5). Not live P&L.
+10. **Regime classifier.** Softmax session / weekend / news-shock tags; reweights the ensemble per regime (does not mutate persisted stack weights).
+11. **Anomaly / spoof detector.** Cancel storms, quote stuffing, fake depth — downrank or block.
+12. **Survival / hazard.** P(YES wins | time left, path); votes into fair after ≥8 ticks.
+13. **RL sizer (advisory).** Softmax stake fraction from settlements. Shown on cards / tickets. **Never places an order.** Respects $5 default / $25 hard cap. Ticket stake stays the configured Settings value.
+14. **News / social pulse.** 16-d hash embed + bull/bear lexicon for BTC/ETH/SOL. Fail-soft RSS cache.
+15. **Rival-flow clustering.** Online centroids (mixed / chase / smart-like); boosts when flow aligns.
+16. **Bayesian MM shadow.** Latent fair + inventory from the book; ensemble voter.
+17. **Conformal prediction sets.** Coverage-guaranteed {YES}, {NO}, or {YES,NO}. Hide when ambiguous and the bag is ready.
+18. **Meta-labeling.** Secondary take/skip on top of the primary side. Cold start always takes.
+19. **Synthetic path simulator.** 48×10 Monte Carlo mids; P(edge survives to expiry). Blocks when that probability is <35% and history is warm.
 
-Cold start: if the sequence window is short and the stack has not been fine-tuned, scoring is the **0.2.x blend** (MLP + microstructure). New models drop in as history arrives.
+Cold start: if the sequence window is short and the stack has not been fine-tuned, scoring is the **0.2.x blend** (MLP + microstructure). Extended-AI fair voters join only after ≥8 ticks. Conformal / meta never skip while cold. New models drop in as history arrives.
 
 ### Settings knobs (v0.3.0)
 
@@ -49,8 +59,19 @@ Cold start: if the sequence window is short and the stack has not been fine-tune
 | Uncertainty gate | on | Block alerts / tickets when ensemble disagrees |
 | Max uncertainty | 0.12 | Stddev in probability units |
 | Policy-eval stake | $5 | Scorecard counterfactual size |
+| Extended AI | on | Master switch for capabilities 10–19 |
+| Regime classifier | on | Session / weekend / news-shock reweight |
+| Anomaly / spoof gate | on | Block on cancel-storm / stuffing / fake depth |
+| Survival / hazard | on | P(YES \| TTE, path) voter |
+| RL sizer | on | Advisory stake only — never auto-bets |
+| News pulse | on | Cached headline prior; fail-soft offline |
+| Rival-flow clustering | on | Smart-like flow boost |
+| Bayesian MM shadow | on | Book-implied fair voter |
+| Conformal sets | on | Skip when {YES,NO} and bag is ready |
+| Meta-label take/skip | on | Precision gate after primary side |
+| Path simulator | on | Monte Carlo P(edge survives) |
 
-Heavier models may increase battery and CPU. Disable Heavy ML (or just the sequence tower) if the phone runs hot.
+Heavier models may increase battery and CPU. Disable Heavy ML, Extended AI, or individual pieces if the phone runs hot.
 
 ## Background live odds (v0.2.3 / crash-hardened 0.2.4)
 
@@ -227,6 +248,7 @@ ml/train_heavy.py        export student JSON / optional TFLite
 - Auto-mute floor, streak / drawdown guard, resume
 - Ticket stake ($5 default, $25 hard cap), quality gates for tickets
 - Heavy ML, sequence, GBM, uncertainty cap, continual fine-tune, policy-eval stake
+- Extended AI master + regime / anomaly / survival / RL / news / flow / MM / conformal / meta / path-sim
 - Kalshi API Key ID + private key PEM (secure storage; WS + Approve only)
 
 Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).

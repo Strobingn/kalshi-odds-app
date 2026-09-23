@@ -14,13 +14,27 @@ import kotlinx.serialization.json.Json
 private val Context.heavyMlStore: DataStore<Preferences> by preferencesDataStore(name = "diphunter_heavy_ml")
 
 @Serializable
+data class ExtendedAiPersisted(
+    val rlLogits: List<Double> = emptyList(),
+    val rlN: Int = 0,
+    val metaW: List<Double> = emptyList(),
+    val metaB: Double = 0.2,
+    val metaN: Int = 0,
+    val conformalScores: List<Double> = emptyList(),
+    val conformalQ: Double = 0.5,
+    val conformalAlpha: Double = ConformalSets.DEFAULT_ALPHA,
+    val lastSettledAtMs: Long = 0L
+)
+
+@Serializable
 data class HeavyMlPersisted(
     val stack: EnsembleStack.Weights = EnsembleStack.identity(),
     val regime: RegimeCalibrator.State = RegimeCalibrator.identity(),
     val yesW: List<Float> = emptyList(),
     val yesB: Float = 0f,
     val lastSettledAtMs: Long = 0L,
-    val replay: List<ReplaySample> = emptyList()
+    val replay: List<ReplaySample> = emptyList(),
+    val extended: ExtendedAiPersisted = ExtendedAiPersisted()
 )
 
 /**
