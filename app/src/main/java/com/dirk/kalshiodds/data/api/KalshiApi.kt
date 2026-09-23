@@ -13,7 +13,10 @@ interface KalshiApi {
     @GET("markets")
     suspend fun getMarkets(
         @Query("series_ticker") seriesTicker: String,
-        @Query("status") status: String = "open"
+        @Query("status") status: String = "open",
+        @Query("limit") limit: Int? = null,
+        @Query("cursor") cursor: String? = null,
+        @Query("ticker") ticker: String? = null
     ): MarketsResponse
 
     companion object {

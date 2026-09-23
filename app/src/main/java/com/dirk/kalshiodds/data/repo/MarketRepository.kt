@@ -9,6 +9,8 @@ import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.toUiModel
 import com.dirk.kalshiodds.prediction.DipHunterModel
+import com.dirk.kalshiodds.prediction.PredictionLogStore
+import com.dirk.kalshiodds.prediction.SettlementScorer
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -22,15 +24,25 @@ data class MarketsSnapshot(
     val fromCache: Boolean,
     val errorMessage: String? = null,
     /** True when Kalshi returned HTTP 429 or 503 — callers should back off. */
-    val rateLimited: Boolean = false
+    val rateLimited: Boolean = false,
+    /** Scored prediction feedback: correct / total, or null if none yet. */
+    val modelScoreCorrect: Int? = null,
+    val modelScoreTotal: Int? = null,
+    val modelMeanBrier: Double? = null
 )
 
 class MarketRepository(
     context: Context,
     private val api: KalshiApi = NetworkModule.api,
     private val cache: MarketCache = MarketCache(context.applicationContext),
-    private val model: DipHunterModel = DipHunterModel()
+    private val model: DipHunterModel = DipHunterModel(context.applicationContext),
+    private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
+    private val scorer: SettlementScorer = SettlementScorer(api, logStore)
 ) {
+
+    @Volatile private var lastScoreCorrect: Int? = null
+    @Volatile private var lastScoreTotal: Int? = null
+    @Volatile private var lastMeanBrier: Double? = null
 
     val cachedSnapshot: Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
         payload?.toSnapshot(fromCache = true)
@@ -46,13 +58,23 @@ class MarketRepository(
             cache.write(btcMarkets, wtiMarkets, now)
             val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now)
             val wtiUi = model.annotate(wtiMarkets.map { it.toUiModel(SeriesKind.WTI) }, now)
+            logPredictions(btcUi, SeriesKind.BTC, now)
+            logPredictions(wtiUi, SeriesKind.WTI, now)
+            runCatching { scorer.maybeScore(now) }
+            val summary = logStore.scoreSummary()
+            lastScoreCorrect = if (summary.total > 0) summary.correct else null
+            lastScoreTotal = if (summary.total > 0) summary.total else null
+            lastMeanBrier = if (summary.total > 0) summary.meanBrier else null
             MarketsSnapshot(
                 btc = btcUi,
                 wti = wtiUi,
                 fetchedAtEpochMs = now,
                 fromCache = false,
                 errorMessage = null,
-                rateLimited = false
+                rateLimited = false,
+                modelScoreCorrect = lastScoreCorrect,
+                modelScoreTotal = lastScoreTotal,
+                modelMeanBrier = lastMeanBrier
             )
         } catch (e: Exception) {
             val rateLimited = isRateLimited(e)
@@ -70,7 +92,29 @@ class MarketRepository(
                     fetchedAtEpochMs = 0L,
                     fromCache = false,
                     errorMessage = message,
-                    rateLimited = rateLimited
+                    rateLimited = rateLimited,
+                    modelScoreCorrect = lastScoreCorrect,
+                    modelScoreTotal = lastScoreTotal,
+                    modelMeanBrier = lastMeanBrier
+                )
+            }
+        }
+    }
+
+    private suspend fun logPredictions(markets: List<MarketUiModel>, series: SeriesKind, now: Long) {
+        for (m in markets) {
+            val yesPct = m.aiYesPercent ?: continue
+            val noPct = m.aiNoPercent ?: (100.0 - yesPct)
+            val midPct = m.yesProbabilityPercent ?: continue
+            runCatching {
+                logStore.upsertOpenPrediction(
+                    ticker = m.ticker,
+                    series = series.ticker,
+                    predictedYes = yesPct / 100.0,
+                    predictedNo = noPct / 100.0,
+                    marketMid = midPct / 100.0,
+                    timestampMs = now,
+                    closeTimeMs = m.closeTimeEpochMs
                 )
             }
         }
@@ -96,7 +140,10 @@ class MarketRepository(
             fetchedAtEpochMs = fetchedAtEpochMs,
             fromCache = fromCache,
             errorMessage = errorMessage,
-            rateLimited = rateLimited
+            rateLimited = rateLimited,
+            modelScoreCorrect = lastScoreCorrect,
+            modelScoreTotal = lastScoreTotal,
+            modelMeanBrier = lastMeanBrier
         )
     }
 }

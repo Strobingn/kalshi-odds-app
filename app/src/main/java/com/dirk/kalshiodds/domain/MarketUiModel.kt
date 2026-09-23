@@ -5,6 +5,10 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
+
+/** Absolute edge (AI YES% − Market YES%) threshold for alerts, in percentage points. */
+const val EDGE_ALERT_THRESHOLD_PP = 5.0
 
 data class MarketUiModel(
     val ticker: String,
@@ -26,8 +30,17 @@ data class MarketUiModel(
     val aiNoPercent: Double? = null,
     val aiConfidence: Double? = null,
     val aiNote: String? = null,
+    /** AI YES% − Market YES% in percentage points. */
+    val edgePp: Double? = null,
+    /** Suggested stance text only — never an order. */
+    val stance: String? = null,
+    val edgeAlert: Boolean = false,
+    /** yes_ask − yes_bid in dollars (0–1). */
+    val spreadDollars: Double? = null,
     val volume: Double?,
     val volume24h: Double?,
+    val openInterest: Double? = null,
+    val liquidityDollars: Double? = null,
     val closeTimeLocal: String?,
     val closeTimeEpochMs: Long? = null,
     val status: String?,
@@ -55,6 +68,7 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         yesImplied != null -> 1.0 - yesImplied
         else -> null
     }
+    val spread = if (yesBid != null && yesAsk != null) (yesAsk - yesBid).coerceAtLeast(0.0) else null
     return MarketUiModel(
         ticker = ticker,
         title = title.orEmpty().ifBlank { ticker },
@@ -67,13 +81,31 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         lastPrice = last,
         yesProbabilityPercent = yesImplied?.times(100.0),
         noProbabilityPercent = noImplied?.times(100.0),
+        spreadDollars = spread,
         volume = volumeFp.toDoubleOrNullSafe(),
         volume24h = volume24hFp.toDoubleOrNullSafe(),
+        openInterest = openInterestFp.toDoubleOrNullSafe(),
+        liquidityDollars = liquidityDollars.toDoubleOrNullSafe(),
         closeTimeLocal = formatCloseTimeLocal(closeTime),
         closeTimeEpochMs = parseCloseEpochMs(closeTime),
         status = status,
         seriesLabel = series.label
     )
+}
+
+/** Attach edge / stance / alert after AI annotate. */
+fun MarketUiModel.withEdgeMetrics(): MarketUiModel {
+    val ai = aiYesPercent ?: return this
+    val mkt = yesProbabilityPercent ?: return this
+    val edge = ai - mkt
+    val alert = abs(edge) >= EDGE_ALERT_THRESHOLD_PP
+    val stance = when {
+        edge >= EDGE_ALERT_THRESHOLD_PP -> "Lean YES vs market"
+        edge <= -EDGE_ALERT_THRESHOLD_PP -> "Lean NO vs market"
+        abs(edge) >= 2.0 -> if (edge > 0) "Slight YES lean" else "Slight NO lean"
+        else -> "No edge"
+    }
+    return copy(edgePp = edge, stance = stance, edgeAlert = alert)
 }
 
 private fun String?.toDoubleOrNullSafe(): Double? =

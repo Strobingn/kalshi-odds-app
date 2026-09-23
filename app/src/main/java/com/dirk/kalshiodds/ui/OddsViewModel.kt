@@ -21,7 +21,8 @@ data class OddsUiState(
     val isLoading: Boolean = false,
     val snapshot: MarketsSnapshot? = null,
     val userMessage: String? = null,
-    val pollLabel: String = "Polling ~750ms"
+    val pollLabel: String = "Polling ~750ms",
+    val modelScoreLabel: String? = null
 )
 
 /**
@@ -32,8 +33,7 @@ data class OddsUiState(
  *
  * Base target: 750ms with ±250ms jitter → ~500ms–1000ms.
  * On HTTP 429/503: double the current interval (cap 60s).
- * On success: ease interval back toward base (×0.8 each success) instead of
- * snapping instantly to full speed.
+ * On success: ease interval back toward base (×0.8 each success).
  */
 class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -50,7 +50,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.cachedSnapshot.collect { cached ->
                 if (cached != null && _state.value.snapshot == null) {
-                    _state.update { it.copy(snapshot = cached, isLoading = false) }
+                    _state.update {
+                        it.copy(
+                            snapshot = cached,
+                            isLoading = false,
+                            modelScoreLabel = scoreLabel(cached)
+                        )
+                    }
                 }
             }
         }
@@ -81,7 +87,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (result.rateLimited) {
             currentIntervalMs = min(max(currentIntervalMs * 2, INITIAL_BACKOFF_MS), MAX_BACKOFF_MS)
         } else if (result.errorMessage == null) {
-            // Gradually speed back up toward the fast base interval.
             currentIntervalMs = max((currentIntervalMs * 4) / 5, BASE_POLL_MS)
         }
         val pollLabel = if (currentIntervalMs > BASE_POLL_MS + JITTER_MS) {
@@ -99,9 +104,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     result.errorMessage != null -> result.errorMessage
                     else -> null
                 },
-                pollLabel = pollLabel
+                pollLabel = pollLabel,
+                modelScoreLabel = scoreLabel(result)
             )
         }
+    }
+
+    private fun scoreLabel(result: MarketsSnapshot): String? {
+        val c = result.modelScoreCorrect ?: return null
+        val total = result.modelScoreTotal ?: return null
+        if (total <= 0) return null
+        val brier = result.modelMeanBrier?.let { String.format(java.util.Locale.US, " · Brier %.3f", it) }.orEmpty()
+        return "Model score: $c/$total correct$brier"
     }
 
     private fun nextDelayMs(): Long {
@@ -111,7 +125,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
-        /** Target cadence when the API is healthy (~500–1000ms with jitter). */
         const val BASE_POLL_MS = 750L
         const val JITTER_MS = 250L
         const val MIN_POLL_MS = 500L

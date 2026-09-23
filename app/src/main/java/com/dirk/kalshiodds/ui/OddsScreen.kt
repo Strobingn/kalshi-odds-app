@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -29,17 +30,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.theme.AccentBlue
+import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.Bg
 import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,6 +82,12 @@ fun OddsScreen(viewModel: OddsViewModel) {
                     CircularProgressIndicator(color = AccentBlue)
                 }
             } else {
+                val allMarkets = (snapshot?.btc.orEmpty() + snapshot?.wti.orEmpty())
+                val ranked = allMarkets
+                    .filter { it.edgePp != null }
+                    .sortedByDescending { abs(it.edgePp ?: 0.0) }
+                val alertCount = allMarkets.count { it.edgeAlert }
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -89,8 +100,36 @@ fun OddsScreen(viewModel: OddsViewModel) {
                             fetchedAtEpochMs = snapshot?.fetchedAtEpochMs ?: 0L,
                             fromCache = snapshot?.fromCache == true,
                             message = state.userMessage,
-                            pollLabel = state.pollLabel
+                            pollLabel = state.pollLabel,
+                            modelScoreLabel = state.modelScoreLabel
                         )
+                    }
+                    if (alertCount > 0) {
+                        item {
+                            Text(
+                                text = "⚡ Edge alert: $alertCount market(s) with |AI−market| ≥ ${EDGE_ALERT_THRESHOLD_PP.toInt()}pp",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = AccentGreen,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AccentGreen.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            )
+                        }
+                    }
+                    if (ranked.isNotEmpty()) {
+                        item { SectionHeader("Ranked opportunities") }
+                        item {
+                            Text(
+                                text = "Sorted by |Dip Hunter edge| — best mispricings first. Stance is advisory only.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextSecondary
+                            )
+                        }
+                        items(ranked.take(8), key = { "rank-${it.ticker}" }) { market ->
+                            MarketCard(market, compact = true)
+                        }
                     }
                     item { SectionHeader("Bitcoin · KXBTC15M") }
                     marketsOrEmpty(snapshot?.btc.orEmpty())
@@ -131,7 +170,13 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
-private fun MetaHeader(fetchedAtEpochMs: Long, fromCache: Boolean, message: String?, pollLabel: String) {
+private fun MetaHeader(
+    fetchedAtEpochMs: Long,
+    fromCache: Boolean,
+    message: String?,
+    pollLabel: String,
+    modelScoreLabel: String?
+) {
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth(),
@@ -164,7 +209,22 @@ private fun MetaHeader(fetchedAtEpochMs: Long, fromCache: Boolean, message: Stri
             )
         }
         Text(
-            text = "YES YES % = mid(bid, ask) when both present, else last price. Auto-refresh every 15 min. NO odds. Auto-refresh ~1.5s with jitter; backs off on 429/503.",
+            text = pollLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+        modelScoreLabel?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.labelMedium,
+                color = AccentBlue,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        Text(
+            text = "DIP HUNTER AI = TFLite MLP · Edge = AI YES − Market YES · Poll ~500–1000ms (backs off on 429/503). No auto-trading.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
             modifier = Modifier.padding(top = 6.dp)

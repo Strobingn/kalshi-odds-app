@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui.components
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -16,9 +17,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
@@ -27,13 +30,15 @@ import com.dirk.kalshiodds.ui.theme.Border
 import com.dirk.kalshiodds.ui.theme.Surface
 import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import kotlin.math.abs
 
 @Composable
-fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
+fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Boolean = false) {
+    val alertBorder = if (market.edgeAlert) AccentGreen else Border
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, Border, RoundedCornerShape(16.dp)),
+            .border(if (market.edgeAlert) 2.dp else 1.dp, alertBorder, RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = Surface)
     ) {
@@ -67,6 +72,19 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
+            }
+
+            if (market.edgeAlert) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "⚡ Edge alert ≥ ${EDGE_ALERT_THRESHOLD_PP.toInt()}pp",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .background(AccentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                )
             }
 
             Spacer(Modifier.height(10.dp))
@@ -112,42 +130,94 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier) {
                 )
             }
 
-            Spacer(Modifier.height(14.dp))
-            Text(
-                text = "Kalshi market (reference)",
-                style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                OddsColumn(
-                    label = "Mkt YES",
-                    percent = market.yesProbabilityPercent,
-                    bid = market.yesBid,
-                    ask = market.yesAsk,
-                    accent = TextSecondary,
-                    modifier = Modifier.weight(1f),
-                    big = false
+            // Edge panel
+            market.edgePp?.let { edge ->
+                Spacer(Modifier.height(12.dp))
+                val edgeColor = when {
+                    abs(edge) >= EDGE_ALERT_THRESHOLD_PP -> AccentGreen
+                    abs(edge) >= 2.0 -> AccentBlue
+                    else -> TextSecondary
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(edgeColor.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                ) {
+                    Text(
+                        text = "Dip Hunter edge",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextSecondary
+                    )
+                    Text(
+                        text = String.format(Locale.US, "%+.1f pp", edge),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = edgeColor,
+                        lineHeight = 32.sp
+                    )
+                    market.stance?.let { s ->
+                        Text(
+                            text = s,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = edgeColor,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    Text(
+                        text = "AI YES − Market YES (percentage points). Text only — no orders.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+
+            if (!compact) {
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = "Kalshi market (reference)",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
                 )
-                OddsColumn(
-                    label = "Mkt NO",
-                    percent = market.noProbabilityPercent,
-                    bid = market.noBid,
-                    ask = market.noAsk,
-                    accent = TextSecondary,
-                    modifier = Modifier.weight(1f),
-                    endAligned = true,
-                    big = false
-                )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    OddsColumn(
+                        label = "Mkt YES",
+                        percent = market.yesProbabilityPercent,
+                        bid = market.yesBid,
+                        ask = market.yesAsk,
+                        accent = TextSecondary,
+                        modifier = Modifier.weight(1f),
+                        big = false
+                    )
+                    OddsColumn(
+                        label = "Mkt NO",
+                        percent = market.noProbabilityPercent,
+                        bid = market.noBid,
+                        ask = market.noAsk,
+                        accent = TextSecondary,
+                        modifier = Modifier.weight(1f),
+                        endAligned = true,
+                        big = false
+                    )
+                }
             }
 
             Spacer(Modifier.height(12.dp))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Metric("Spread", market.spreadDollars?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—")
                 Metric("Volume", formatCompact(market.volume))
+                Metric("OI", formatCompact(market.openInterest))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric("24h vol", formatCompact(market.volume24h))
+                Metric("Liquidity", market.liquidityDollars?.let { formatCompact(it) } ?: "—")
                 Metric("Closes", market.closeTimeLocal ?: "—")
             }
         }
@@ -160,7 +230,7 @@ private fun OddsColumn(
     percent: Double?,
     bid: Double?,
     ask: Double?,
-    accent: androidx.compose.ui.graphics.Color,
+    accent: Color,
     modifier: Modifier = Modifier,
     endAligned: Boolean = false,
     big: Boolean = true

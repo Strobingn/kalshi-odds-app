@@ -25,6 +25,21 @@ Package: `com.dirk.kalshiodds`
 
 This MVP is **read-only**. It does **not** place trades and does **not** call authenticated endpoints.
 
+
+## Dip Hunter AI (TFLite)
+
+On-device proprietary YES/NO prediction via a small **TensorFlow Lite** MLP:
+
+- Architecture: `Input(8) → Dense(32, ReLU) → Dense(16, ReLU) → Dense(2, softmax)` with output order **[P(NO), P(YES)]**
+- Features (see `ml/FEATURES.md`): mid, volume_norm, time-to-expiry fraction, volatility, momentum, mean reversion, series id, open-interest norm — standardized with `feature_scaler.json`
+- Trained offline on Kalshi **settled** KXBTC15M / KXWTI15M markets + 1-minute candlesticks (`ml/train_diphunter.py`)
+- Bundled assets: `diphunter.tflite`, `feature_scaler.json`; embedded Kotlin fallback weights if TFLite fails to load
+- **Feedback loop:** logs predictions (DataStore), matches settled `result`, scores accuracy + Brier; UI shows `Model score: X/Y correct` when samples exist
+
+**Edge hunting (v0.1.7+):** Dip Hunter edge (AI−market pp), ranked opportunities by |edge|, spread/OI/liquidity on cards, ≥5pp edge alerts + stance text (Lean YES/NO — no orders), model score HUD with Brier after settlements.
+
+Retrain: `/workspace/tflite-train/bin/python ml/train_diphunter.py && /workspace/tflite-train/bin/python ml/export_fallback_kt.py`
+
 ## Open in Android Studio
 
 1. Install [Android Studio](https://developer.android.com/studio) (Hedgehog / Koala / later) with Android SDK **35** (or 34+) and a JDK 17+.
@@ -38,12 +53,12 @@ This MVP is **read-only**. It does **not** place trades and does **not** call au
 ```bash
 # optional: export ANDROID_HOME=~/Android/Sdk
 ./gradlew :app:assembleDebug
-adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/DipHunter-debug.apk
 ```
 
 ### Note about this Linux box
 
-On the creation machine, OpenJDK 21 + Android SDK Platform 35 were installed under `/workspace/android-sdk`, and **`./gradlew :app:assembleDebug` succeeded**. Debug APK: `app/build/outputs/apk/debug/app-debug.apk`.
+On the creation machine, OpenJDK 21 + Android SDK Platform 35 were installed under `/workspace/android-sdk`, and **`./gradlew :app:assembleDebug` succeeded**. Debug APK: `app/build/outputs/apk/debug/DipHunter-debug.apk`.
 
 On your own machine, open the project in Android Studio (or set `sdk.dir` in `local.properties`) and sync/run. Do not commit `local.properties`.
 

@@ -57,3 +57,4 @@ Thumbs.db
 *.log
 *.swp
 *~
+ml/train_log.txt

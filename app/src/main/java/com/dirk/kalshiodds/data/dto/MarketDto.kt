@@ -5,7 +5,7 @@ import kotlinx.serialization.Serializable
 
 /**
  * Kalshi public Trade API v2 market list response.
- * Fields match GET /markets?series_ticker=...&status=open
+ * Fields match GET /markets?series_ticker=...&status=open|settled
  */
 @Serializable
 data class MarketsResponse(
@@ -25,8 +25,12 @@ data class MarketDto(
     @SerialName("last_price_dollars") val lastPriceDollars: String? = null,
     @SerialName("volume_fp") val volumeFp: String? = null,
     @SerialName("volume_24h_fp") val volume24hFp: String? = null,
+    @SerialName("open_interest_fp") val openInterestFp: String? = null,
+    @SerialName("liquidity_dollars") val liquidityDollars: String? = null,
     @SerialName("close_time") val closeTime: String? = null,
     val status: String? = null,
+    /** Settled markets: "yes" or "no". */
+    val result: String? = null,
     @SerialName("floor_strike") val floorStrike: Double? = null,
     @SerialName("event_ticker") val eventTicker: String? = null
 )
