@@ -14,14 +14,12 @@ class SecureCredentialStore(context: Context) {
 
     private val prefs: SharedPreferences = createPrefs(context.applicationContext)
 
-    @Volatile
     var apiKeyId: String
         get() = prefs.getString(KEY_ID, "").orEmpty()
         set(value) {
             prefs.edit().putString(KEY_ID, value.trim()).apply()
         }
 
-    @Volatile
     var privateKeyPem: String
         get() = prefs.getString(KEY_PEM, "").orEmpty()
         set(value) {

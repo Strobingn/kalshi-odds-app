@@ -2,9 +2,10 @@ package com.dirk.kalshiodds.signal.config
 
 import android.content.Context
 import com.dirk.kalshiodds.domain.CryptoMarkets
-import org.json.JSONArray
-import org.json.JSONObject
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
+@Serializable
 data class DefaultSignalConfig(
     val watchBtc: Boolean = true,
     val watchEth: Boolean = true,
@@ -19,6 +20,12 @@ data class DefaultSignalConfig(
     companion object {
         const val ASSET_NAME = "default_signal_config.json"
 
+        private val json = Json {
+            ignoreUnknownKeys = true
+            isLenient = true
+            coerceInputValues = true
+        }
+
         fun load(context: Context?): DefaultSignalConfig {
             if (context == null) return DefaultSignalConfig()
             return runCatching {
@@ -27,26 +34,9 @@ data class DefaultSignalConfig(
             }.getOrElse { DefaultSignalConfig() }
         }
 
-        fun parse(json: String): DefaultSignalConfig {
-            val obj = JSONObject(json)
-            val extras = mutableListOf<String>()
-            val arr: JSONArray? = obj.optJSONArray("extraTickers")
-            if (arr != null) {
-                for (i in 0 until arr.length()) {
-                    extras += arr.optString(i).trim()
-                }
-            }
-            return DefaultSignalConfig(
-                watchBtc = obj.optBoolean("watchBtc", true),
-                watchEth = obj.optBoolean("watchEth", true),
-                watchSol = obj.optBoolean("watchSol", true),
-                extraTickers = CryptoMarkets.filterCrypto(extras),
-                edgeThresholdPp = obj.optDouble("edgeThresholdPp", 5.0),
-                notificationsEnabled = obj.optBoolean("notificationsEnabled", true),
-                liveSignalsEnabled = obj.optBoolean("liveSignalsEnabled", false),
-                subscribeTrades = obj.optBoolean("subscribeTrades", true),
-                debounceMs = obj.optLong("debounceMs", 10_000L)
-            )
+        fun parse(raw: String): DefaultSignalConfig {
+            val decoded = json.decodeFromString<DefaultSignalConfig>(raw)
+            return decoded.copy(extraTickers = CryptoMarkets.filterCrypto(decoded.extraTickers))
         }
     }
 }
