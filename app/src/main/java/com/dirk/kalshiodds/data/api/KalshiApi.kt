@@ -22,6 +22,10 @@ interface KalshiApi {
     companion object {
         const val BASE_URL = "https://api.elections.kalshi.com/trade-api/v2/"
         const val SERIES_BTC = "KXBTC15M"
+        const val SERIES_ETH = "KXETH15M"
+        const val SERIES_SOL = "KXSOL15M"
+        /** @deprecated Removed from the live watchlist — crypto-only app. Kept so old cache/tests compile. */
+        @Deprecated("WTI dropped — Dip Hunter is crypto-only")
         const val SERIES_WTI = "KXWTI15M"
     }
 }

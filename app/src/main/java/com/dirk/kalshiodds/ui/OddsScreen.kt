@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -33,11 +34,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
+import com.dirk.kalshiodds.ui.theme.AccentOrange
+import com.dirk.kalshiodds.ui.theme.AccentRed
 import com.dirk.kalshiodds.ui.theme.Bg
 import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.time.Instant
@@ -48,7 +52,7 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OddsScreen(viewModel: OddsViewModel) {
+fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -57,6 +61,9 @@ fun OddsScreen(viewModel: OddsViewModel) {
             TopAppBar(
                 title = { Text("Dip Hunter") },
                 actions = {
+                    IconButton(onClick = onOpenSettings) {
+                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                    }
                     IconButton(onClick = { viewModel.refresh() }, enabled = !state.isLoading) {
                         Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                     }
@@ -82,10 +89,11 @@ fun OddsScreen(viewModel: OddsViewModel) {
                     CircularProgressIndicator(color = AccentBlue)
                 }
             } else {
-                val allMarkets = (snapshot?.btc.orEmpty() + snapshot?.wti.orEmpty())
+                val allMarkets = snapshot?.allMarkets.orEmpty()
                 val ranked = allMarkets
                     .filter { it.edgePp != null }
                     .sortedByDescending { abs(it.edgePp ?: 0.0) }
+                val threshold = state.settings.edgeThresholdPp
                 val alertCount = allMarkets.count { it.edgeAlert }
 
                 LazyColumn(
@@ -101,13 +109,21 @@ fun OddsScreen(viewModel: OddsViewModel) {
                             fromCache = snapshot?.fromCache == true,
                             message = state.userMessage,
                             pollLabel = state.pollLabel,
-                            modelScoreLabel = state.modelScoreLabel
+                            modelScoreLabel = state.modelScoreLabel,
+                            chipLabel = state.signalStatus.chipLabel(),
+                            chipState = state.signalStatus.state
                         )
+                    }
+                    if (state.recentAlerts.isNotEmpty()) {
+                        item { SectionHeader("Recent signals") }
+                        items(state.recentAlerts.take(8), key = { "sig-${it.id}" }) { alert ->
+                            SignalRow(alert)
+                        }
                     }
                     if (alertCount > 0) {
                         item {
                             Text(
-                                text = "⚡ Edge alert: $alertCount market(s) with |AI−market| ≥ ${EDGE_ALERT_THRESHOLD_PP.toInt()}pp",
+                                text = "⚡ Edge alert: $alertCount crypto market(s) with |AI−market| ≥ ${threshold.toInt()}pp",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = AccentGreen,
                                 fontWeight = FontWeight.Bold,
@@ -122,7 +138,7 @@ fun OddsScreen(viewModel: OddsViewModel) {
                         item { SectionHeader("Ranked opportunities") }
                         item {
                             Text(
-                                text = "Sorted by |Dip Hunter edge| — best mispricings first. Stance is advisory only.",
+                                text = "Crypto only · sorted by |Dip Hunter edge|. Stance is advisory — no orders.",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = TextSecondary
                             )
@@ -131,10 +147,22 @@ fun OddsScreen(viewModel: OddsViewModel) {
                             MarketCard(market, compact = true)
                         }
                     }
-                    item { SectionHeader("Bitcoin · KXBTC15M") }
-                    marketsOrEmpty(snapshot?.btc.orEmpty())
-                    item { Spacer(Modifier.height(8.dp)); SectionHeader("WTI Crude · KXWTI15M") }
-                    marketsOrEmpty(snapshot?.wti.orEmpty())
+                    if (state.settings.watchBtc) {
+                        item { SectionHeader("Bitcoin · KXBTC15M") }
+                        marketsOrEmpty(snapshot?.btc.orEmpty())
+                    }
+                    if (state.settings.watchEth) {
+                        item { Spacer(Modifier.height(8.dp)); SectionHeader("Ethereum · KXETH15M") }
+                        marketsOrEmpty(snapshot?.eth.orEmpty())
+                    }
+                    if (state.settings.watchSol) {
+                        item { Spacer(Modifier.height(8.dp)); SectionHeader("Solana · KXSOL15M") }
+                        marketsOrEmpty(snapshot?.sol.orEmpty())
+                    }
+                    if (snapshot?.extra.orEmpty().isNotEmpty()) {
+                        item { Spacer(Modifier.height(8.dp)); SectionHeader("Extra crypto") }
+                        marketsOrEmpty(snapshot?.extra.orEmpty())
+                    }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
             }
@@ -160,6 +188,29 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(market
 }
 
 @Composable
+private fun SignalRow(alert: SignalAlert) {
+    val color = if (alert.deltaPp >= 0) AccentGreen else AccentOrange
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(alert.ticker, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground)
+            Text(
+                String.format(Locale.US, "%+.1f pp", alert.deltaPp),
+                style = MaterialTheme.typography.titleMedium,
+                color = color,
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Text(alert.reason, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(alert.stance, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
 private fun SectionHeader(title: String) {
     Text(
         text = title,
@@ -175,8 +226,18 @@ private fun MetaHeader(
     fromCache: Boolean,
     message: String?,
     pollLabel: String,
-    modelScoreLabel: String?
+    modelScoreLabel: String?,
+    chipLabel: String,
+    chipState: WsConnectionState
 ) {
+    val chipColor = when (chipState) {
+        WsConnectionState.CONNECTED -> AccentGreen
+        WsConnectionState.RECONNECTING, WsConnectionState.CONNECTING -> AccentOrange
+        WsConnectionState.NEEDS_API_KEY -> AccentOrange
+        WsConnectionState.ERROR -> AccentRed
+        WsConnectionState.REST_FALLBACK -> AccentBlue
+        WsConnectionState.IDLE -> TextSecondary
+    }
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth(),
@@ -200,6 +261,16 @@ private fun MetaHeader(
                 )
             }
         }
+        Text(
+            text = chipLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = chipColor,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .padding(top = 8.dp)
+                .background(chipColor.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
+                .padding(horizontal = 10.dp, vertical = 4.dp)
+        )
         message?.let {
             Text(
                 text = it,
@@ -224,7 +295,7 @@ private fun MetaHeader(
             )
         }
         Text(
-            text = "DIP HUNTER AI = TFLite MLP · Edge = AI YES − Market YES · Poll ~500–1000ms (backs off on 429/503). No auto-trading.",
+            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · Dip Hunter AI = TFLite MLP · no auto-trading.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
             modifier = Modifier.padding(top = 6.dp)

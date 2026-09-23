@@ -19,7 +19,7 @@ class MarketRefreshWorker(
     override suspend fun doWork(): Result {
         return try {
             val snapshot = MarketRepository(applicationContext).refresh()
-            if (snapshot.errorMessage != null && !snapshot.fromCache && snapshot.btc.isEmpty() && snapshot.wti.isEmpty()) {
+            if (snapshot.errorMessage != null && !snapshot.fromCache && snapshot.allMarkets.isEmpty()) {
                 Result.retry()
             } else {
                 Result.success()

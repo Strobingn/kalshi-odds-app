@@ -1,0 +1,11 @@
+{
+  "watchBtc": true,
+  "watchEth": true,
+  "watchSol": true,
+  "extraTickers": [],
+  "edgeThresholdPp": 5.0,
+  "notificationsEnabled": true,
+  "liveSignalsEnabled": false,
+  "subscribeTrades": true,
+  "debounceMs": 10000
+}

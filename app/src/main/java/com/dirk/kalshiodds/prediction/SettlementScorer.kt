@@ -58,8 +58,5 @@ class SettlementScorer(
     }
 
     private fun inferSeries(ticker: String): String =
-        when {
-            ticker.uppercase().contains("WTI") -> KalshiApi.SERIES_WTI
-            else -> KalshiApi.SERIES_BTC
-        }
+        com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
 }
