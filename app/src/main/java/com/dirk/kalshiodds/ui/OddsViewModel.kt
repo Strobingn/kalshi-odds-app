@@ -102,8 +102,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     if (!settings.credentialsConfigured) {
                         hub.setConnection(WsConnectionState.NEEDS_API_KEY)
                     }
-                } else {
-                    LiveSignalsService.stop(getApplication())
+                } else if (hub.status.value.state != WsConnectionState.IDLE) {
+                    // Service is stopping itself; keep the HUD honest if it is already gone.
                     hub.setConnection(WsConnectionState.IDLE)
                 }
                 restartPolling()
@@ -125,6 +125,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         startPolling()
+    }
+
+    fun setLiveSignals(enabled: Boolean) {
+        viewModelScope.launch { prefs.updateLiveSignals(enabled) }
     }
 
     fun refresh() {

@@ -22,6 +22,7 @@ import androidx.compose.material.icons.filled.Settings
 import com.dirk.kalshiodds.signal.engine.SkipFilter
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Switch
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -127,6 +128,13 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
+                        LiveSignalsCard(
+                            enabled = state.settings.liveSignalsEnabled,
+                            connection = state.signalStatus.state,
+                            onToggle = viewModel::setLiveSignals
+                        )
+                    }
+                    item {
                         MetaHeader(
                             fetchedAtEpochMs = snapshot?.fetchedAtEpochMs ?: 0L,
                             fromCache = snapshot?.fromCache == true,
@@ -225,6 +233,51 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(market
     } else {
         items(markets, key = { it.ticker }) { market ->
             MarketCard(market)
+        }
+    }
+}
+
+@Composable
+private fun LiveSignalsCard(
+    enabled: Boolean,
+    connection: WsConnectionState,
+    onToggle: (Boolean) -> Unit
+) {
+    val accent = when {
+        !enabled -> TextSecondary
+        connection == WsConnectionState.CONNECTED -> AccentGreen
+        connection == WsConnectionState.RECONNECTING || connection == WsConnectionState.CONNECTING -> AccentOrange
+        else -> AccentBlue
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(accent.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f).padding(end = 12.dp)) {
+                Text(
+                    "Live signals",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    if (enabled) {
+                        "On — WebSocket stays up when you leave the app. Leave the “DipHunter live signals” notification allowed."
+                    } else {
+                        "Off — odds stop shortly after you switch apps or turn the screen off."
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
+                )
+            }
+            Switch(checked = enabled, onCheckedChange = onToggle)
         }
     }
 }

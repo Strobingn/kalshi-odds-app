@@ -18,9 +18,21 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.2.2**
+Package: `com.dirk.kalshiodds` · version **0.2.3**
 
-Analysis UI is unchanged. **0.2.2 adds approve-gated limit tickets only.** There is no background auto-fire, no set-and-forget trading, and no order on app start. **Not financial advice. High variance — you can lose the full stake.**
+Analysis UI is unchanged. **0.2.3 keeps live odds alive in the background** via a sticky foreground service (no change to trading rules). **0.2.2 added approve-gated limit tickets.** There is no background auto-fire, no set-and-forget trading, and no order on app start. **Not financial advice. High variance — you can lose the full stake.**
+
+## Background live odds (v0.2.3)
+
+Android was treating Dip Hunter as a normal Activity: leaving the app or turning the screen off let the process die, which tore down the WebSocket and scoring loop. Live signals now own a persistent foreground service.
+
+**How to keep it alive**
+
+1. Turn **Live signals** on (home screen card or Settings). Leave it on.
+2. Allow the ongoing **“DipHunter live signals”** notification. Do not swipe it away or deny notification permission.
+3. Optional on aggressive OEMs: Settings → **Allow background** → set Dip Hunter battery usage to **Unrestricted**.
+
+The service restarts after process death (`START_STICKY`), after swipe-from-recents (`stopWithTask=false` + `onTaskRemoved`), after reboot / app update, and via a 15-minute WorkManager watchdog. Trading is unchanged: tickets still need an in-app **Approve**.
 
 ## Approve-gated tickets (v0.2.2)
 
@@ -159,8 +171,8 @@ app/src/main/java/com/dirk/kalshiodds/
     trade/           PayoutGate, TicketBuilder, TicketSession (approve-gated)
     external/        Public Binance/Coinbase spot · vol · funding
     checklist/       Pre-trade checklist + copy text
-    notify/          SignalNotifier (HIGH + LOW channels)
-    service/         LiveSignalsService (foreground WS)
+    notify/          SignalNotifier (HIGH alerts + ongoing FGS)
+    service/         LiveSignalsService + keep-alive / boot / battery prompt
     model/           MarketTick, SignalAlert, WsConnectionState
     SignalHub.kt     tick dispatcher → UI + notifications
   ui/                OddsScreen, SettingsScreen, ScorecardScreen, ViewModels, MarketCard

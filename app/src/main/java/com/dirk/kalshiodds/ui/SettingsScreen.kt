@@ -31,10 +31,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.service.BatteryExemption
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
@@ -47,6 +51,10 @@ import java.util.Locale
 fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
+    val context = LocalContext.current
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.refreshBatteryStatus()
+    }
 
     Scaffold(
         containerColor = Bg,
@@ -79,6 +87,41 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary
             )
+
+            Section("Live signals")
+            Text(
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Live signals (keep odds alive)", s.liveSignalsEnabled, viewModel::setLiveSignals)
+            Text(
+                if (s.liveSignalsEnabled) {
+                    "Running. Leave the ongoing notification in place. Swiping the app away will not stop it."
+                } else {
+                    "Stopped. The OS will close the live pipeline shortly after the app is backgrounded."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (s.liveSignalsEnabled) AccentGreen else AccentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Dip Hunter battery usage to Unrestricted. This never auto-trades.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            Text(
+                if (state.batteryUnrestricted) {
+                    "Battery: unrestricted — good for background live odds."
+                } else {
+                    "Battery: restricted — the OS may still stop live odds."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (state.batteryUnrestricted) AccentGreen else AccentOrange
+            )
+            OutlinedButton(onClick = { BatteryExemption.openPrompt(context) }) {
+                Text(if (state.batteryUnrestricted) "Open battery settings" else "Allow background")
+            }
 
             Section("Watch series")
             ToggleRow("Bitcoin · KXBTC15M", s.watchBtc, viewModel::setWatchBtc)
@@ -116,7 +159,6 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 
             Section("Alerts")
             ToggleRow("Notifications", s.notificationsEnabled, viewModel::setNotifications)
-            ToggleRow("Live signals (WS foreground)", s.liveSignalsEnabled, viewModel::setLiveSignals)
             ToggleRow("Subscribe public trades", s.subscribeTrades, viewModel::setSubscribeTrades)
 
             Section("Skip filter")
@@ -328,14 +370,6 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 viewModel::setTicketRespectGates
             )
 
-            Text(
-                "Live signals keep a foreground WebSocket for instant local alerts. " +
-                    "Killed-app remote push would need FCM later — this release is local-only. " +
-                    "Without an API key the app stays on fast REST and shows “WS needs API key — using REST”.",
-                style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
-            )
-
             Section("Kalshi API key (WS + approve-gated orders)")
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
@@ -375,7 +409,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 
             Spacer(Modifier.height(24.dp))
             Text(
-                "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals (LOW). WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2",
+                "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

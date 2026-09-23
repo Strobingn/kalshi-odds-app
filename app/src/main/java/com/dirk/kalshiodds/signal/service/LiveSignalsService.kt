@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.dirk.kalshiodds.KalshiOddsApp
@@ -17,45 +18,90 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
- * Foreground service that keeps the Kalshi ticker + orderbook WebSocket alive
- * while "Live signals" is enabled. Analysis / alerts only — no order channels.
+ * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
+ * scoring loop while "Live signals" is on. Survives Activity onStop / process
+ * reclaim via START_STICKY, onTaskRemoved restart, and a WorkManager watchdog.
+ * Analysis / alerts only — no order channels, no auto-fire.
  */
 class LiveSignalsService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var client: KalshiWsClient? = null
-    private var bindJob: Job? = null
+    private var pipelineJob: Job? = null
+    private var metadataJob: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    @Volatile private var explicitStop = false
+    @Volatile private var lastTickerCount = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         SignalNotifier.ensureChannels(this)
-        val notifier = KalshiOddsApp.from(this).container.notifier
-        startInForeground(notifier)
+        promoteToForeground()
+        acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val container = KalshiOddsApp.from(this).container
-        startInForeground(container.notifier)
-        if (bindJob == null) {
-            bindJob = scope.launch { runPipeline() }
+        promoteToForeground()
+        if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
+            return handleExplicitStop()
+        }
+        explicitStop = false
+        if (pipelineJob == null) {
+            pipelineJob = scope.launch { runPipeline() }
+        }
+        if (metadataJob == null) {
+            metadataJob = scope.launch { runMetadataLoop() }
         }
         return START_STICKY
     }
 
-    private fun startInForeground(notifier: SignalNotifier) {
-        val type = if (Build.VERSION.SDK_INT >= 29) {
-            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-        } else {
-            0
+    private fun handleExplicitStop(): Int {
+        explicitStop = true
+        LiveSignalsKeepAlive.setEnabled(this, false)
+        // Persist off before onDestroy cancels [scope], otherwise a later
+        // DataStore emission of the stale "on" would restart the service.
+        runCatching {
+            runBlocking(Dispatchers.IO) {
+                KalshiOddsApp.from(this@LiveSignalsService).container.preferences.updateLiveSignals(false)
+            }
         }
-        ServiceCompat.startForeground(this, SignalNotifier.FG_NOTIFICATION_ID, notifier.foregroundNotification(), type)
+        tearDownPipeline()
+        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        return START_NOT_STICKY
+    }
+
+    private fun promoteToForeground(specialUseOnly: Boolean = false) {
+        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
+            .getOrElse { SignalNotifier(this) }
+        val type = foregroundType(specialUseOnly)
+        ServiceCompat.startForeground(
+            this,
+            SignalNotifier.FG_NOTIFICATION_ID,
+            notifier.foregroundNotification(),
+            type
+        )
+    }
+
+    private fun foregroundType(specialUseOnly: Boolean): Int {
+        var type = 0
+        if (Build.VERSION.SDK_INT >= 29 && !specialUseOnly) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+        }
+        if (Build.VERSION.SDK_INT >= 34) {
+            type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        }
+        return type
     }
 
     private suspend fun runPipeline() {
@@ -65,29 +111,32 @@ class LiveSignalsService : Service() {
         combine(prefs.settings, hub.watchTickers) { settings, tickers -> settings to tickers }
             .collectLatest { (settings, tickers) ->
                 hub.settings = settings
+                LiveSignalsKeepAlive.setEnabled(this, settings.liveSignalsEnabled)
+                lastTickerCount = tickers.size
                 if (!settings.liveSignalsEnabled) {
+                    explicitStop = true
                     client?.stop()
                     client = null
                     hub.setConnection(WsConnectionState.IDLE, detail = "live signals off")
+                    ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
                     stopSelf()
                     return@collectLatest
                 }
-                if (!settings.credentialsConfigured) {
+                if (!LiveSignalsPolicy.shouldConnectWs(true, settings.credentialsConfigured)) {
                     client?.stop()
                     client = null
                     hub.wsLive = false
                     hub.setConnection(WsConnectionState.NEEDS_API_KEY, detail = "WS needs API key — using REST")
+                    updateNotification(needsKey = true)
                     return@collectLatest
                 }
-                val wanted = tickers.filter { settings.isWatchedTicker(it) }
-                val channels = buildList {
-                    add("ticker")
-                    if (wanted.isNotEmpty()) add("orderbook_delta")
-                    if (settings.subscribeTrades) add("trade")
-                }
+                val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades, tickers.filter {
+                    settings.isWatchedTicker(it)
+                })
                 val existing = client
                 if (existing == null) {
                     hub.setConnection(WsConnectionState.CONNECTING)
+                    updateNotification(reconnecting = true)
                     val ws = KalshiWsClient(
                         scope = scope,
                         onTick = { tick -> hub.ingestTick(tick) },
@@ -120,40 +169,153 @@ class LiveSignalsService : Service() {
                                 else -> WsConnectionState.REST_FALLBACK
                             }
                             hub.setConnection(mapped, host = state.host, detail = state.detail)
+                            updateNotification(
+                                connected = state.connected,
+                                reconnecting = state.reconnecting,
+                                needsKey = mapped == WsConnectionState.NEEDS_API_KEY
+                            )
                         },
                         onLog = { msg -> Log.d(TAG, msg) }
                     )
                     client = ws
                     val (keyId, pem) = prefs.credentialSnapshot()
-                    ws.start(keyId, pem, channels, wanted)
+                    ws.start(keyId, pem, plan.channels, plan.marketTickers)
                 } else {
-                    existing.updateSubscriptions(channels, wanted)
+                    existing.updateSubscriptions(plan.channels, plan.marketTickers)
                 }
             }
     }
 
+    /**
+     * Keep [com.dirk.kalshiodds.signal.SignalHub.watchTickers] fresh after the
+     * Activity/ViewModel is gone so orderbook subscriptions do not go stale.
+     */
+    private suspend fun runMetadataLoop() {
+        val container = KalshiOddsApp.from(this).container
+        while (scope.isActive) {
+            refreshWakeLock()
+            if (LiveSignalsKeepAlive.isEnabled(this)) {
+                runCatching {
+                    val settings = container.hub.settings
+                    runCatching { container.external.refreshIfStale() }.getOrNull()?.let {
+                        container.hub.applyExternal(it)
+                    }
+                    val snap = container.repository.refresh(
+                        watchBtc = settings.watchBtc,
+                        watchEth = settings.watchEth,
+                        watchSol = settings.watchSol,
+                        extraTickers = settings.extraTickerList(),
+                        edgeThresholdPp = settings.edgeThresholdPp
+                    )
+                    container.hub.ingestRestSnapshot(snap)
+                }.onFailure { Log.w(TAG, "metadata refresh: ${it.message}") }
+            }
+            delay(LiveSignalsPolicy.METADATA_INTERVAL_MS)
+        }
+    }
+
+    private fun updateNotification(
+        connected: Boolean = false,
+        reconnecting: Boolean = false,
+        needsKey: Boolean = false
+    ) {
+        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
+            .getOrElse { SignalNotifier(this) }
+        val text = LiveSignalsPolicy.foregroundText(connected, reconnecting, needsKey, lastTickerCount)
+        runCatching {
+            ServiceCompat.startForeground(
+                this,
+                SignalNotifier.FG_NOTIFICATION_ID,
+                notifier.foregroundNotification(text),
+                foregroundType(false)
+            )
+        }
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        if (LiveSignalsPolicy.shouldRestartAfterKill(LiveSignalsKeepAlive.isEnabled(this), explicitStop)) {
+            LiveSignalsKeepAlive.startService(this)
+            LiveSignalsKeepAlive.enqueueSoon(this)
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun onTimeout(startId: Int) {
+        handleDataSyncTimeout()
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        handleDataSyncTimeout()
+    }
+
+    private fun handleDataSyncTimeout() {
+        // API 35 dataSync time-box. Stay up under specialUse if the user still wants live odds.
+        if (LiveSignalsPolicy.shouldRestartAfterKill(LiveSignalsKeepAlive.isEnabled(this), explicitStop)) {
+            promoteToForeground(specialUseOnly = true)
+        } else {
+            stopSelf()
+        }
+    }
+
     override fun onDestroy() {
-        client?.stop()
-        client = null
-        KalshiOddsApp.from(this).container.hub.wsLive = false
+        val restart = LiveSignalsPolicy.shouldRestartAfterKill(
+            LiveSignalsKeepAlive.isEnabled(this),
+            explicitStop
+        )
+        tearDownPipeline()
+        releaseWakeLock()
+        runCatching { KalshiOddsApp.from(this).container.hub.wsLive = false }
         scope.cancel()
         super.onDestroy()
+        if (restart) {
+            LiveSignalsKeepAlive.startService(applicationContext)
+            LiveSignalsKeepAlive.enqueueSoon(applicationContext)
+        }
+    }
+
+    private fun tearDownPipeline() {
+        client?.stop()
+        client = null
+        pipelineJob?.cancel()
+        pipelineJob = null
+        metadataJob?.cancel()
+        metadataJob = null
+    }
+
+    private fun acquireWakeLock() {
+        if (wakeLock?.isHeld == true) return
+        val pm = getSystemService(PowerManager::class.java) ?: return
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, LiveSignalsPolicy.WAKELOCK_TAG).apply {
+            setReferenceCounted(false)
+            acquire(LiveSignalsPolicy.WAKELOCK_TIMEOUT_MS)
+        }
+    }
+
+    private fun refreshWakeLock() {
+        val held = wakeLock
+        if (held == null || !held.isHeld) {
+            acquireWakeLock()
+            return
+        }
+        runCatching {
+            held.acquire(LiveSignalsPolicy.WAKELOCK_TIMEOUT_MS)
+        }
+    }
+
+    private fun releaseWakeLock() {
+        runCatching {
+            if (wakeLock?.isHeld == true) wakeLock?.release()
+        }
+        wakeLock = null
     }
 
     companion object {
         private const val TAG = "DipHunterWS"
 
-        fun start(context: Context) {
-            val intent = Intent(context, LiveSignalsService::class.java)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-        }
+        fun start(context: Context) = LiveSignalsKeepAlive.startService(context)
 
-        fun stop(context: Context) {
-            context.stopService(Intent(context, LiveSignalsService::class.java))
-        }
+        fun stop(context: Context) = LiveSignalsKeepAlive.stopService(context)
     }
 }

@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.signal.service.BatteryExemption
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.config.SecureCredentialStore
 import com.dirk.kalshiodds.signal.config.SignalConstants
@@ -26,7 +27,8 @@ data class SettingsUiState(
     val pauseReason: String? = null,
     val pendingRaiseStake: Double? = null,
     val raiseDraft: String = "",
-    val raiseError: String? = null
+    val raiseError: String? = null,
+    val batteryUnrestricted: Boolean = false
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -36,6 +38,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
 
     init {
+        refreshBatteryStatus()
         viewModelScope.launch {
             prefs.settings.collect { s ->
                 _state.update {
@@ -61,6 +64,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBankrollDraft(text: String) {
         _state.update { it.copy(bankrollDraft = text) }
         text.replace(",", "").toDoubleOrNull()?.let { setBankroll(it) }
+    }
+
+    fun refreshBatteryStatus() {
+        _state.update {
+            it.copy(batteryUnrestricted = BatteryExemption.isUnrestricted(getApplication()))
+        }
     }
 
     fun setWatchBtc(v: Boolean) = viewModelScope.launch { prefs.updateWatchBtc(v) }
