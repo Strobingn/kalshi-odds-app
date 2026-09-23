@@ -234,8 +234,8 @@ class LeadLagAndMicrostructureTest {
     fun depthNearMidAndDecay() {
         val book = LocalOrderBook()
         book.replaceSnapshot(
-            yesLevels = listOf(0.49 to 80.0, 0.30 to 200.0),
-            noLevels = listOf(0.50 to 20.0, 0.10 to 200.0),
+            yesLevels = listOf(0.49 to 80.0, 0.40 to 200.0),
+            noLevels = listOf(0.50 to 20.0, 0.40 to 200.0),
             seq = 1
         )
         val near = book.depthNearMid(3.0)
