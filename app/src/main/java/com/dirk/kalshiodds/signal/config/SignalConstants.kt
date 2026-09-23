@@ -1,7 +1,7 @@
 package com.dirk.kalshiodds.signal.config
 
 /**
- * Shared defaults for the v0.2.0 predictability stack.
+ * Shared defaults for the predictability + decision-support stack.
  * Analysis / alerts only — never used to place orders.
  */
 object SignalConstants {
@@ -29,4 +29,48 @@ object SignalConstants {
 
     const val DEPTH_NEAR_CENTS = 3.0
     const val DEPTH_FAR_CENTS = 15.0
+
+    // --- v0.2.1 decision support (advisory only) ---
+
+    /** Default paper bankroll used only for suggested size. */
+    const val DEFAULT_BANKROLL_USD = 1_000.0
+
+    /**
+     * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,
+     * a common conservative default for noisy edges.
+     */
+    const val DEFAULT_KELLY_FRACTION = 0.25
+
+    /** Hard cap on bankroll committed to one suggested clip. */
+    const val DEFAULT_MAX_BANKROLL_FRACTION = 0.05
+
+    /** Fixed-fraction mode: percent of bankroll per idea. */
+    const val DEFAULT_FIXED_FRACTION = 0.02
+
+    /**
+     * Default Kalshi-style taker fee coefficient.
+     * See [com.dirk.kalshiodds.signal.sizing.NetExpectedValue] for the model.
+     */
+    const val DEFAULT_FEE_RATE = 0.07
+
+    const val DEFAULT_RANK_BY_NET_EV = true
+    const val DEFAULT_AUTO_MUTE = true
+
+    /** Mute / downrank when rolling hit rate is below this (and enough samples). */
+    const val DEFAULT_MUTE_HIT_RATE_FLOOR = 0.40
+
+    /** Minimum settled samples in a bucket before auto-mute can fire. */
+    const val MIN_MUTE_SAMPLES = 8
+
+    const val DEFAULT_STREAK_PAUSE_N = 4
+    const val DEFAULT_DRAWDOWN_USD = 50.0
+    const val DEFAULT_RESUME_ON_NEW_SESSION = true
+
+    const val MIN_ADAPTER_SAMPLES = 8
+    const val ADAPTER_LEARNING_RATE = 0.08
+    const val ADAPTER_WEIGHT_EMA = 0.15
+
+    const val EXTERNAL_CACHE_MS = 25_000L
+    const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
+    const val EXTERNAL_READ_TIMEOUT_MS = 4_000L
 }

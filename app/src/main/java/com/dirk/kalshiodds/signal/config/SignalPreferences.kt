@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -33,6 +34,18 @@ data class SignalSettings(
     val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
     val maxSpreadCents: Double = SignalConstants.DEFAULT_MAX_SPREAD_CENTS,
     val hideWeakOpportunities: Boolean = SignalConstants.DEFAULT_HIDE_WEAK,
+    val bankrollUsd: Double = SignalConstants.DEFAULT_BANKROLL_USD,
+    val useKelly: Boolean = true,
+    val kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION,
+    val fixedFraction: Double = SignalConstants.DEFAULT_FIXED_FRACTION,
+    val maxBankrollFraction: Double = SignalConstants.DEFAULT_MAX_BANKROLL_FRACTION,
+    val feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+    val rankByNetEv: Boolean = SignalConstants.DEFAULT_RANK_BY_NET_EV,
+    val autoMute: Boolean = SignalConstants.DEFAULT_AUTO_MUTE,
+    val muteHitRateFloor: Double = SignalConstants.DEFAULT_MUTE_HIT_RATE_FLOOR,
+    val streakPauseN: Int = SignalConstants.DEFAULT_STREAK_PAUSE_N,
+    val drawdownUsd: Double = SignalConstants.DEFAULT_DRAWDOWN_USD,
+    val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false
 ) {
@@ -98,6 +111,34 @@ class SignalPreferences(
         it[KEY_MAX_SPREAD] = value.coerceIn(1.0, 25.0)
     }
     suspend fun updateHideWeak(value: Boolean) = edit { it[KEY_HIDE_WEAK] = value }
+    suspend fun updateBankrollUsd(value: Double) = edit {
+        it[KEY_BANKROLL] = value.coerceIn(10.0, 1_000_000.0)
+    }
+    suspend fun updateUseKelly(value: Boolean) = edit { it[KEY_USE_KELLY] = value }
+    suspend fun updateKellyFraction(value: Double) = edit {
+        it[KEY_KELLY_FRAC] = value.coerceIn(0.05, 1.0)
+    }
+    suspend fun updateFixedFraction(value: Double) = edit {
+        it[KEY_FIXED_FRAC] = value.coerceIn(0.002, 0.25)
+    }
+    suspend fun updateMaxBankrollFraction(value: Double) = edit {
+        it[KEY_MAX_FRAC] = value.coerceIn(0.005, 0.25)
+    }
+    suspend fun updateFeeRate(value: Double) = edit {
+        it[KEY_FEE_RATE] = value.coerceIn(0.0, 0.20)
+    }
+    suspend fun updateRankByNetEv(value: Boolean) = edit { it[KEY_RANK_NET] = value }
+    suspend fun updateAutoMute(value: Boolean) = edit { it[KEY_AUTO_MUTE] = value }
+    suspend fun updateMuteHitRateFloor(value: Double) = edit {
+        it[KEY_MUTE_FLOOR] = value.coerceIn(0.15, 0.70)
+    }
+    suspend fun updateStreakPauseN(value: Int) = edit {
+        it[KEY_STREAK_N] = value.coerceIn(2, 12)
+    }
+    suspend fun updateDrawdownUsd(value: Double) = edit {
+        it[KEY_DRAWDOWN] = value.coerceIn(5.0, 5_000.0)
+    }
+    suspend fun updateResumeOnNewSession(value: Boolean) = edit { it[KEY_RESUME_SESSION] = value }
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
@@ -133,6 +174,18 @@ class SignalPreferences(
             minLiquidity = this[KEY_MIN_LIQ] ?: def.minLiquidity,
             maxSpreadCents = this[KEY_MAX_SPREAD] ?: def.maxSpreadCents,
             hideWeakOpportunities = this[KEY_HIDE_WEAK] ?: def.hideWeakOpportunities,
+            bankrollUsd = this[KEY_BANKROLL] ?: def.bankrollUsd,
+            useKelly = this[KEY_USE_KELLY] ?: def.useKelly,
+            kellyFraction = this[KEY_KELLY_FRAC] ?: def.kellyFraction,
+            fixedFraction = this[KEY_FIXED_FRAC] ?: def.fixedFraction,
+            maxBankrollFraction = this[KEY_MAX_FRAC] ?: def.maxBankrollFraction,
+            feeRate = this[KEY_FEE_RATE] ?: def.feeRate,
+            rankByNetEv = this[KEY_RANK_NET] ?: def.rankByNetEv,
+            autoMute = this[KEY_AUTO_MUTE] ?: def.autoMute,
+            muteHitRateFloor = this[KEY_MUTE_FLOOR] ?: def.muteHitRateFloor,
+            streakPauseN = this[KEY_STREAK_N] ?: def.streakPauseN,
+            drawdownUsd = this[KEY_DRAWDOWN] ?: def.drawdownUsd,
+            resumeOnNewSession = this[KEY_RESUME_SESSION] ?: def.resumeOnNewSession,
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
         )
@@ -152,6 +205,18 @@ class SignalPreferences(
         private val KEY_MIN_LIQ = doublePreferencesKey("min_liquidity")
         private val KEY_MAX_SPREAD = doublePreferencesKey("max_spread_cents")
         private val KEY_HIDE_WEAK = booleanPreferencesKey("hide_weak_opportunities")
+        private val KEY_BANKROLL = doublePreferencesKey("bankroll_usd")
+        private val KEY_USE_KELLY = booleanPreferencesKey("use_kelly")
+        private val KEY_KELLY_FRAC = doublePreferencesKey("kelly_fraction")
+        private val KEY_FIXED_FRAC = doublePreferencesKey("fixed_fraction")
+        private val KEY_MAX_FRAC = doublePreferencesKey("max_bankroll_fraction")
+        private val KEY_FEE_RATE = doublePreferencesKey("fee_rate")
+        private val KEY_RANK_NET = booleanPreferencesKey("rank_by_net_ev")
+        private val KEY_AUTO_MUTE = booleanPreferencesKey("auto_mute")
+        private val KEY_MUTE_FLOOR = doublePreferencesKey("mute_hit_rate_floor")
+        private val KEY_STREAK_N = intPreferencesKey("streak_pause_n")
+        private val KEY_DRAWDOWN = doublePreferencesKey("drawdown_usd")
+        private val KEY_RESUME_SESSION = booleanPreferencesKey("resume_on_new_session")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

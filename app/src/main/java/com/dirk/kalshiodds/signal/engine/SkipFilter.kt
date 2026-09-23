@@ -43,11 +43,15 @@ object SkipFilter {
     fun shouldShowOpportunity(
         passedFilter: Boolean,
         edgePp: Double?,
-        settings: SignalSettings
+        settings: SignalSettings,
+        netEdgePp: Double? = null,
+        muted: Boolean = false
     ): Boolean {
-        if (edgePp == null) return false
+        if (muted && settings.autoMute) return false
+        val rank = if (settings.rankByNetEv) netEdgePp ?: edgePp else edgePp
+        if (rank == null) return false
         if (!passedFilter && settings.hideWeakOpportunities) return false
-        if (settings.hideWeakOpportunities && abs(edgePp) < settings.edgeThresholdPp) return false
+        if (settings.hideWeakOpportunities && abs(rank) < settings.edgeThresholdPp) return false
         return true
     }
 

@@ -42,7 +42,8 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
-    val snap by viewModel.snapshot.collectAsStateWithLifecycle()
+    val ui by viewModel.snapshot.collectAsStateWithLifecycle()
+    val snap = ui.metrics
 
     Scaffold(
         containerColor = Bg,
@@ -76,6 +77,9 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
                 color = TextSecondary
             )
             CalibrationBanner(snap)
+            AdapterBanner(ui.adapter)
+            GuardBanner(ui.guardrails)
+            MuteBanner(ui.allowlist)
             WindowCard("Today", snap.daily)
             WindowCard("Rolling 7 days", snap.rolling)
             WindowCard("All time", snap.allTime)
@@ -129,6 +133,77 @@ private fun CalibrationBanner(snap: ScorecardMetrics.Snapshot) {
         modifier = Modifier
             .fillMaxWidth()
             .background(color.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    )
+}
+
+@Composable
+private fun AdapterBanner(adapter: com.dirk.kalshiodds.signal.feedback.OnlineAdapter.State) {
+    val color = if (adapter.ready) AccentGreen else AccentOrange
+    val text = if (adapter.ready) {
+        String.format(
+            Locale.US,
+            "On-device adapter · %d settlements · slope=%.2f intercept=%+.2f. Blend weights reweighted from your outcomes (not just temperature).",
+            adapter.sampleCount,
+            adapter.slope,
+            adapter.intercept
+        )
+    } else {
+        val need = (com.dirk.kalshiodds.signal.config.SignalConstants.MIN_ADAPTER_SAMPLES - adapter.sampleCount)
+            .coerceAtLeast(0)
+        "Adapter cold start — $need more settlements before blend weights move. Defaults stay in force."
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = color,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    )
+}
+
+@Composable
+private fun GuardBanner(g: com.dirk.kalshiodds.signal.feedback.Guardrails.State) {
+    val color = if (g.paused) AccentOrange else TextSecondary
+    Text(
+        text = if (g.paused) {
+            g.banner ?: "alerts paused — streak guard"
+        } else {
+            String.format(
+                Locale.US,
+                "Guardrails live · streak %d · proxy P&L %+.2f · drawdown $%.2f",
+                g.consecutiveWrong,
+                g.rollingPnl,
+                g.drawdown
+            )
+        },
+        style = MaterialTheme.typography.bodyMedium,
+        color = color,
+        fontWeight = if (g.paused) FontWeight.Bold else FontWeight.Normal,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    )
+}
+
+@Composable
+private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
+    val muted = a.buckets.filter { it.muted }
+    val text = if (muted.isEmpty()) {
+        "No series/regimes muted. Auto-mute needs ${com.dirk.kalshiodds.signal.config.SignalConstants.MIN_MUTE_SAMPLES}+ rolling samples below the floor."
+    } else {
+        "Muted: " + muted.joinToString { "${it.label} ${(it.hitRate * 100).toInt()}% (${it.hits}/${it.total})" }
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodyMedium,
+        color = if (muted.isEmpty()) TextSecondary else AccentOrange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(AccentOrange.copy(alpha = if (muted.isEmpty()) 0.06f else 0.12f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     )
 }

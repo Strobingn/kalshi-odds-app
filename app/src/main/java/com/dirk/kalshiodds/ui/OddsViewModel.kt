@@ -14,9 +14,11 @@ import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
@@ -34,7 +36,10 @@ data class OddsUiState(
     val recentAlerts: List<SignalAlert> = emptyList(),
     val settings: SignalSettings = SignalSettings(),
     val avgEdgeWhenRight: Double? = null,
-    val avgEdgeWhenWrong: Double? = null
+    val avgEdgeWhenWrong: Double? = null,
+    val alertsPaused: Boolean = false,
+    val pauseBanner: String? = null,
+    val mutedSummary: String? = null
 )
 
 /**
@@ -58,6 +63,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
+                container.support.bootstrap(_state.value.settings)
+                publishSupportState()
             }
         }
         viewModelScope.launch {
@@ -78,6 +85,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             prefs.settings.collectLatest { settings ->
                 hub.settings = settings
                 _state.update { it.copy(settings = settings) }
+                publishSupportState()
                 if (settings.liveSignalsEnabled) {
                     runCatching { LiveSignalsService.start(getApplication()) }
                     if (!settings.credentialsConfigured) {
@@ -133,6 +141,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private suspend fun doRefresh(): MarketsSnapshot {
         val s = _state.value.settings
+        refreshExternal()
         return repository.refresh(
             watchBtc = s.watchBtc,
             watchEth = s.watchEth,
@@ -172,6 +181,38 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 avgEdgeWhenRight = overlaid.avgEdgeWhenRight,
                 avgEdgeWhenWrong = overlaid.avgEdgeWhenWrong
             )
+        }
+        publishSupportState()
+    }
+
+    private suspend fun refreshExternal() {
+        runCatching {
+            val snap = withContext(Dispatchers.IO) { container.external.refreshIfStale() }
+            hub.applyExternal(snap)
+        }
+    }
+
+    private fun publishSupportState() {
+        val g = container.scoring.guardrails
+        val a = container.scoring.allowlist
+        val muted = buildList {
+            if (a.mutedSeries.isNotEmpty()) add("series ${a.mutedSeries.joinToString { com.dirk.kalshiodds.signal.feedback.Allowlist.shortSeries(it) }}")
+            if (a.mutedRegimes.isNotEmpty()) add("regimes ${a.mutedRegimes.joinToString()}")
+            if (a.mutedTte.isNotEmpty()) add("TTE ${a.mutedTte.joinToString()}")
+        }.joinToString(" · ").ifBlank { null }
+        _state.update {
+            it.copy(
+                alertsPaused = g.paused,
+                pauseBanner = g.banner,
+                mutedSummary = muted?.let { m -> "Auto-mute: $m" }
+            )
+        }
+    }
+
+    fun resumeAlerts() {
+        viewModelScope.launch {
+            container.support.resumeAlerts()
+            publishSupportState()
         }
     }
 

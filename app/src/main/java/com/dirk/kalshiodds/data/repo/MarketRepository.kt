@@ -62,7 +62,8 @@ class MarketRepository(
     private val model: DipHunterModel = DipHunterModel(context.applicationContext),
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
     private val scorer: SettlementScorer = SettlementScorer(api, logStore),
-    private val onCalibration: ((Calibrator.State) -> Unit)? = null
+    private val onCalibration: ((Calibrator.State) -> Unit)? = null,
+    private val onAfterScore: (suspend () -> Unit)? = null
 ) {
 
     @Volatile private var lastScoreCorrect: Int? = null
@@ -176,6 +177,7 @@ class MarketRepository(
         val card = ScorecardMetrics.compute(entries, calibration = fitted)
         lastEdgeRight = card.allTime.avgEdgeWhenRight
         lastEdgeWrong = card.allTime.avgEdgeWhenWrong
+        runCatching { onAfterScore?.invoke() }
     }
 
     private suspend fun fetchExtra(ticker: String): MarketDto? {
@@ -210,7 +212,8 @@ class MarketRepository(
                         regime = m.regimeTag,
                         tteBucket = m.tteRegimeLabel,
                         fairValuePp = yesPct,
-                        calibrated = m.calibrated
+                        calibrated = m.calibrated,
+                        featureDevs = emptyMap()
                     )
                 )
             }

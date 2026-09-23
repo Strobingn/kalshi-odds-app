@@ -159,6 +159,143 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 steps = 17
             )
             ToggleRow("Hide weak / filtered from opportunities", s.hideWeakOpportunities, viewModel::setHideWeak)
+
+            Section("Bankroll & size (advisory)")
+            Text(
+                "Suggested contracts only. The app never places orders. Default is quarter-Kelly, capped at 5% of bankroll and by liquidity / spread.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            OutlinedTextField(
+                value = state.bankrollDraft,
+                onValueChange = viewModel::setBankrollDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Bankroll (USD)") },
+                supportingText = { Text("Used only to compute “N contracts max”.") },
+                singleLine = true
+            )
+            ToggleRow("Kelly sizing (off = fixed fraction)", s.useKelly, viewModel::setUseKelly)
+            if (s.useKelly) {
+                Text(
+                    String.format(Locale.US, "Kelly fraction  %.2f  (0.25 = quarter-Kelly)", s.kellyFraction),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = s.kellyFraction.toFloat(),
+                    onValueChange = { viewModel.setKellyFraction(it.toDouble()) },
+                    valueRange = 0.10f..1.0f,
+                    steps = 8
+                )
+            } else {
+                Text(
+                    String.format(Locale.US, "Fixed fraction  %.1f%% of bankroll", s.fixedFraction * 100.0),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = s.fixedFraction.toFloat(),
+                    onValueChange = { viewModel.setFixedFractionValue(it.toDouble()) },
+                    valueRange = 0.005f..0.10f,
+                    steps = 18
+                )
+            }
+            Text(
+                String.format(Locale.US, "Max clip  %.1f%% of bankroll", s.maxBankrollFraction * 100.0),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.maxBankrollFraction.toFloat(),
+                onValueChange = { viewModel.setMaxBankrollFraction(it.toDouble()) },
+                valueRange = 0.01f..0.15f,
+                steps = 13
+            )
+
+            Section("Fees & net EV")
+            Text(
+                "Kalshi-style taker fee ≈ feeRate × P × (1−P) per contract, plus half-spread. Ranking and alerts use net EV when the toggle is on. Raw edge still shows on cards.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            Text(
+                String.format(Locale.US, "Fee rate  %.0f%%  (Kalshi default 7%%)", s.feeRate * 100.0),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.feeRate.toFloat(),
+                onValueChange = { viewModel.setFeeRate(it.toDouble()) },
+                valueRange = 0f..0.15f,
+                steps = 14
+            )
+            ToggleRow("Rank & alert on net EV (after fees/spread)", s.rankByNetEv, viewModel::setRankByNetEv)
+
+            Section("Series / regime auto-mute")
+            Text(
+                "When a series or regime’s rolling 7-day hit rate falls below the floor (and has enough samples), it is muted: no alerts, downranked, “Muted” chip. Cold start never mutes.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Auto-mute weak series / regimes", s.autoMute, viewModel::setAutoMute)
+            Text(
+                String.format(Locale.US, "Hit-rate floor  %.0f%%", s.muteHitRateFloor * 100.0),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.muteHitRateFloor.toFloat(),
+                onValueChange = { viewModel.setMuteFloor(it.toDouble()) },
+                valueRange = 0.20f..0.60f,
+                steps = 7
+            )
+
+            Section("Streak / drawdown guard")
+            Text(
+                "Pauses alerts after N consecutive wrong settlements or after a one-contract P&L-proxy drawdown. Scoring continues. Resume here or automatically on the next session.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            if (state.alertsPaused) {
+                Text(
+                    state.pauseReason ?: "alerts paused — streak guard",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold
+                )
+                Button(onClick = viewModel::resumeAlerts) { Text("Resume alerts") }
+            }
+            Text(
+                "Pause after ${s.streakPauseN} wrong in a row",
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.streakPauseN.toFloat(),
+                onValueChange = { viewModel.setStreakPauseN(it.toInt()) },
+                valueRange = 2f..8f,
+                steps = 5
+            )
+            Text(
+                String.format(Locale.US, "Drawdown pause  $%.0f (1-contract proxy)", s.drawdownUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.drawdownUsd.toFloat().coerceIn(10f, 500f),
+                onValueChange = { viewModel.setDrawdownUsd(it.toDouble()) },
+                valueRange = 10f..500f,
+                steps = 48
+            )
+            ToggleRow("Resume automatically on next session", s.resumeOnNewSession, viewModel::setResumeOnNewSession)
+
             Text(
                 "Live signals keep a foreground WebSocket for instant local alerts. " +
                     "Killed-app remote push would need FCM later — this release is local-only. " +

@@ -357,6 +357,10 @@ class ScoringPredictabilityTest {
         assertEquals(TteRegime.LATE, scored!!.tteRegime)
         assertNotNull(scored.regime)
         assertTrue(scored.predictedSide == "YES" || scored.predictedSide == "NO")
+        assertNotNull(scored.netEdgePp)
+        assertNotNull(scored.suggestedContracts)
+        assertTrue(scored.suggestedContracts!! >= 0)
+        assertNotNull(scored.feePerContract)
     }
 }
 

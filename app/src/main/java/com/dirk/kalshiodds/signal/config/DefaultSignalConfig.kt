@@ -19,7 +19,19 @@ data class DefaultSignalConfig(
     val minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
     val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
     val maxSpreadCents: Double = SignalConstants.DEFAULT_MAX_SPREAD_CENTS,
-    val hideWeakOpportunities: Boolean = SignalConstants.DEFAULT_HIDE_WEAK
+    val hideWeakOpportunities: Boolean = SignalConstants.DEFAULT_HIDE_WEAK,
+    val bankrollUsd: Double = SignalConstants.DEFAULT_BANKROLL_USD,
+    val useKelly: Boolean = true,
+    val kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION,
+    val fixedFraction: Double = SignalConstants.DEFAULT_FIXED_FRACTION,
+    val maxBankrollFraction: Double = SignalConstants.DEFAULT_MAX_BANKROLL_FRACTION,
+    val feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+    val rankByNetEv: Boolean = SignalConstants.DEFAULT_RANK_BY_NET_EV,
+    val autoMute: Boolean = SignalConstants.DEFAULT_AUTO_MUTE,
+    val muteHitRateFloor: Double = SignalConstants.DEFAULT_MUTE_HIT_RATE_FLOOR,
+    val streakPauseN: Int = SignalConstants.DEFAULT_STREAK_PAUSE_N,
+    val drawdownUsd: Double = SignalConstants.DEFAULT_DRAWDOWN_USD,
+    val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION
 ) {
     companion object {
         const val ASSET_NAME = "default_signal_config.json"
