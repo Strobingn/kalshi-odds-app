@@ -41,7 +41,7 @@ object MarketRefreshScheduler {
             .build()
 
         // Background only: PeriodicWorkRequest minimum is 15 minutes on Android.
-        // Foreground UI polls ~1.5s in OddsViewModel.
+        // Foreground UI polls ~750ms (500–1000ms) in OddsViewModel.
         val request = PeriodicWorkRequestBuilder<MarketRefreshWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .build()

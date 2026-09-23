@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.data.repo.MarketRepository
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
+import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
 import kotlinx.coroutines.Job
@@ -20,12 +21,19 @@ data class OddsUiState(
     val isLoading: Boolean = false,
     val snapshot: MarketsSnapshot? = null,
     val userMessage: String? = null,
-    val pollLabel: String = "Polling ~1.5s"
+    val pollLabel: String = "Polling ~750ms"
 )
 
 /**
- * Foreground poll: base 1.5s with ±0.5s jitter (1.0–2.0s).
- * On HTTP 429/503: exponential backoff from 2s, doubling up to 60s, then resume.
+ * Fastest practical public-REST poll.
+ *
+ * Kalshi WebSocket requires API-key auth even for public market channels, so
+ * Dip Hunter stays on unauthenticated GET /markets.
+ *
+ * Base target: 750ms with ±250ms jitter → ~500ms–1000ms.
+ * On HTTP 429/503: double the current interval (cap 60s).
+ * On success: ease interval back toward base (×0.8 each success) instead of
+ * snapping instantly to full speed.
  */
 class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -35,7 +43,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
 
     private var pollJob: Job? = null
-    private var backoffMs: Long = 0L
+    /** Adaptive delay between polls; starts at BASE_POLL_MS. */
+    private var currentIntervalMs: Long = BASE_POLL_MS
 
     init {
         viewModelScope.launch {
@@ -70,14 +79,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun applyResult(result: MarketsSnapshot) {
         if (result.rateLimited) {
-            backoffMs = if (backoffMs <= 0L) INITIAL_BACKOFF_MS else min(backoffMs * 2, MAX_BACKOFF_MS)
+            currentIntervalMs = min(max(currentIntervalMs * 2, INITIAL_BACKOFF_MS), MAX_BACKOFF_MS)
         } else if (result.errorMessage == null) {
-            backoffMs = 0L
+            // Gradually speed back up toward the fast base interval.
+            currentIntervalMs = max((currentIntervalMs * 4) / 5, BASE_POLL_MS)
         }
-        val pollLabel = if (backoffMs > 0L) {
-            "Backing off ${backoffMs / 1000}s"
+        val pollLabel = if (currentIntervalMs > BASE_POLL_MS + JITTER_MS) {
+            "Backing off ~${currentIntervalMs / 1000}s"
         } else {
-            "Polling ~1.5s (±0.5s jitter)"
+            "Polling ~${currentIntervalMs}ms (±${JITTER_MS}ms)"
         }
         _state.update {
             it.copy(
@@ -95,21 +105,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun nextDelayMs(): Long {
-        if (backoffMs > 0L) {
-            val jitter = Random.nextLong(-BACKOFF_JITTER_MS, BACKOFF_JITTER_MS + 1)
-            return (backoffMs + jitter).coerceAtLeast(INITIAL_BACKOFF_MS)
-        }
-        val jitter = Random.nextLong(-JITTER_MS, JITTER_MS + 1)
-        return (BASE_POLL_MS + jitter).coerceIn(MIN_POLL_MS, MAX_POLL_MS)
+        val half = min(JITTER_MS, currentIntervalMs / 3)
+        val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
+        return (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
     }
 
     companion object {
-        const val BASE_POLL_MS = 1_500L
-        const val JITTER_MS = 500L
-        const val MIN_POLL_MS = 1_000L
-        const val MAX_POLL_MS = 2_000L
+        /** Target cadence when the API is healthy (~500–1000ms with jitter). */
+        const val BASE_POLL_MS = 750L
+        const val JITTER_MS = 250L
+        const val MIN_POLL_MS = 500L
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
-        const val BACKOFF_JITTER_MS = 250L
     }
 }
