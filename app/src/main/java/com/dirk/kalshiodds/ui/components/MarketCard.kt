@@ -93,6 +93,13 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 market.tteRegimeLabel,
                 if (market.calibrated) "Calibrated" else null,
                 if (market.adapterReady) "Adapter" else null,
+                if (market.heavyMl) "Heavy ML" else null,
+                if (market.uncertainty != null && !market.uncertaintyPassed) "Unc gated" else null,
+                market.sessionTag?.let { "Sess $it" },
+                if (market.newsShock) "News shock" else null,
+                market.anomalyNote,
+                if (market.conformalAmbiguous) "Conformal ?" else market.conformalSet,
+                market.flowNote?.takeIf { it == "smart-flow" },
                 if (market.muted) "Muted" else null,
                 market.suggestedContracts?.let { "$it contracts max" }
             )
@@ -240,6 +247,43 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                                 color = TextSecondary
                             )
                         }
+                    }
+                    if (market.timeToMoveSec != null || market.pFill != null || market.uncertainty != null) {
+                        Text(
+                            text = listOfNotNull(
+                                market.timeToMoveSec?.let { String.format(Locale.US, "TTM %.0fs", it) },
+                                market.midVolPp?.let { String.format(Locale.US, "vol %.1fpp", it) },
+                                market.pFill?.let { String.format(Locale.US, "P(fill) %.0f%%", it * 100.0) },
+                                market.uncertainty?.let { String.format(Locale.US, "unc %.2f", it) }
+                            ).joinToString(" · "),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = if (market.uncertaintyPassed) TextSecondary else AccentOrange,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+                    market.ensembleNote?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    market.extendedNote?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = TextSecondary,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                    market.rlNote?.let { note ->
+                        Text(
+                            text = note,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AccentBlue,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
                     }
                     market.stance?.let { s ->
                         Text(

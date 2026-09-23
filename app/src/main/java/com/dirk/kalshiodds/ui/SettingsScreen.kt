@@ -341,6 +341,66 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             )
             ToggleRow("Resume automatically on next session", s.resumeOnNewSession, viewModel::setResumeOnNewSession)
 
+            Section("Heavy ML (0.3.0)")
+            Text(
+                "Temporal CNN + TinyLSTM + GBM second opinion + shared BTC/ETH/SOL backbone. " +
+                    "Cold start falls back to the 0.2.x MLP blend. Heavier models use more CPU and battery — " +
+                    "turn the master switch off to disable them. Still analysis + approve-gated tickets only; " +
+                    "nothing is ordered without Approve.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Heavy ML (sequence + GBM + ensemble)", s.heavyMlEnabled, viewModel::setHeavyMl)
+            ToggleRow("Sequence model (Temporal CNN / TinyLSTM)", s.sequenceModelEnabled, viewModel::setSequenceModel)
+            ToggleRow("GBM second opinion", s.gbmEnabled, viewModel::setGbm)
+            ToggleRow("Continual fine-tune + regime calibration", s.continualFineTune, viewModel::setContinualFineTune)
+            ToggleRow("Uncertainty gate (alerts / tickets)", s.uncertaintyGateEnabled, viewModel::setUncertaintyGate)
+            Text(
+                String.format(Locale.US, "Max uncertainty  %.2f  (ensemble / MC-dropout std)", s.maxUncertainty),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.maxUncertainty.toFloat().coerceIn(0.02f, 0.40f),
+                onValueChange = { viewModel.setMaxUncertainty(it.toDouble()) },
+                valueRange = 0.02f..0.40f,
+                steps = 18
+            )
+            Text(
+                String.format(Locale.US, "Policy-eval stake  $%.0f  (scorecard counterfactual)", s.policyEvalStakeUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.policyEvalStakeUsd.toFloat().coerceIn(1f, 25f),
+                onValueChange = { viewModel.setPolicyEvalStakeUsd(it.toDouble()) },
+                valueRange = 1f..25f,
+                steps = 23
+            )
+
+            Section("Extended AI (0.3.0 · 10–19)")
+            Text(
+                "On-device regime / anomaly / survival / conformal / meta / path-sim plus advisory RL sizing. " +
+                    "These can raise CPU and battery — turn the master switch off to drop back to Heavy ML + 0.2.x. " +
+                    "RL suggested stake is display-only. Tickets always use the configured \$5 default / caps and still need Approve. " +
+                    "News embeddings fail-soft and cache if the network is down.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Extended AI (master)", s.extendedAiEnabled, viewModel::setExtendedAi)
+            ToggleRow("Regime classifier (session / weekend / news-shock)", s.regimeClassifierEnabled, viewModel::setRegimeClassifier)
+            ToggleRow("Anomaly / spoof gate", s.anomalyGateEnabled, viewModel::setAnomalyGate)
+            ToggleRow("Survival / hazard P(YES | TTE, path)", s.survivalModelEnabled, viewModel::setSurvivalModel)
+            ToggleRow("RL sizer (advisory only — never auto-bets)", s.rlSizerEnabled, viewModel::setRlSizer)
+            ToggleRow("News / social embedding pulse (fail-soft)", s.newsPulseEnabled, viewModel::setNewsPulse)
+            ToggleRow("Rival-flow clustering", s.rivalFlowEnabled, viewModel::setRivalFlow)
+            ToggleRow("Bayesian MM shadow voter", s.bayesianMmEnabled, viewModel::setBayesianMm)
+            ToggleRow("Conformal prediction sets", s.conformalEnabled, viewModel::setConformal)
+            ToggleRow("Meta-label take/skip", s.metaLabelEnabled, viewModel::setMetaLabel)
+            ToggleRow("Synthetic path simulator", s.pathSimEnabled, viewModel::setPathSim)
+
             Section("Trade tickets (approve-gated)")
             Text(
                 "Default stake \$5. A ticket is proposed only when max settlement payout for that stake is ≥\$100 " +

@@ -37,7 +37,15 @@ data class PredictionLogEntry(
     val calibrated: Boolean? = null,
     val settledAtMs: Long? = null,
     /** Blend-channel deviations (featureFair − mid) in pp, for on-device learning. */
-    val featureDevs: Map<String, Double> = emptyMap()
+    val featureDevs: Map<String, Double> = emptyMap(),
+    val uncertainty: Double? = null,
+    val timeToMoveSec: Double? = null,
+    val midVolPp: Double? = null,
+    val pFill: Double? = null,
+    val wouldAlert: Boolean? = null,
+    val mlpYes: Double? = null,
+    val cnnYes: Double? = null,
+    val gbmYes: Double? = null
 )
 
 @Serializable
@@ -49,7 +57,15 @@ data class SignalSnapshot(
     val tteBucket: String? = null,
     val fairValuePp: Double? = null,
     val calibrated: Boolean? = null,
-    val featureDevs: Map<String, Double> = emptyMap()
+    val featureDevs: Map<String, Double> = emptyMap(),
+    val uncertainty: Double? = null,
+    val timeToMoveSec: Double? = null,
+    val midVolPp: Double? = null,
+    val pFill: Double? = null,
+    val wouldAlert: Boolean? = null,
+    val mlpYes: Double? = null,
+    val cnnYes: Double? = null,
+    val gbmYes: Double? = null
 )
 
 class PredictionLogStore(private val context: Context) {
@@ -104,7 +120,15 @@ class PredictionLogStore(private val context: Context) {
                     tteBucket = snapshot?.tteBucket ?: prev.tteBucket,
                     fairValuePp = snapshot?.fairValuePp ?: prev.fairValuePp,
                     calibrated = snapshot?.calibrated ?: prev.calibrated,
-                    featureDevs = snapshot?.featureDevs?.takeIf { it.isNotEmpty() } ?: prev.featureDevs
+                    featureDevs = snapshot?.featureDevs?.takeIf { it.isNotEmpty() } ?: prev.featureDevs,
+                    uncertainty = snapshot?.uncertainty ?: prev.uncertainty,
+                    timeToMoveSec = snapshot?.timeToMoveSec ?: prev.timeToMoveSec,
+                    midVolPp = snapshot?.midVolPp ?: prev.midVolPp,
+                    pFill = snapshot?.pFill ?: prev.pFill,
+                    wouldAlert = snapshot?.wouldAlert ?: prev.wouldAlert,
+                    mlpYes = snapshot?.mlpYes ?: prev.mlpYes,
+                    cnnYes = snapshot?.cnnYes ?: prev.cnnYes,
+                    gbmYes = snapshot?.gbmYes ?: prev.gbmYes
                 )
             } else {
                 list.add(
@@ -123,7 +147,15 @@ class PredictionLogStore(private val context: Context) {
                         tteBucket = snapshot?.tteBucket,
                         fairValuePp = snapshot?.fairValuePp,
                         calibrated = snapshot?.calibrated,
-                        featureDevs = snapshot?.featureDevs ?: emptyMap()
+                        featureDevs = snapshot?.featureDevs ?: emptyMap(),
+                        uncertainty = snapshot?.uncertainty,
+                        timeToMoveSec = snapshot?.timeToMoveSec,
+                        midVolPp = snapshot?.midVolPp,
+                        pFill = snapshot?.pFill,
+                        wouldAlert = snapshot?.wouldAlert,
+                        mlpYes = snapshot?.mlpYes,
+                        cnnYes = snapshot?.cnnYes,
+                        gbmYes = snapshot?.gbmYes
                     )
                 )
             }

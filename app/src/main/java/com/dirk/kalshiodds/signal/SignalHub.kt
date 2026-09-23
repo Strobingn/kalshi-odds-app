@@ -208,7 +208,15 @@ class SignalHub(
                     tteBucket = scored.tteRegime.name,
                     fairValuePp = scored.fairValuePp,
                     calibrated = scored.calibrated,
-                    featureDevs = scored.featureDevs
+                    featureDevs = scored.featureDevs,
+                    uncertainty = scored.uncertainty,
+                    timeToMoveSec = scored.timeToMoveSec,
+                    midVolPp = scored.midVolPp,
+                    pFill = scored.pFill,
+                    wouldAlert = scored.passedFilter && kotlin.math.abs(scored.deltaPp) >= settings.edgeThresholdPp,
+                    mlpYes = scored.mlpPp?.div(100.0),
+                    cnnYes = scored.cnnPp?.div(100.0),
+                    gbmYes = scored.gbmPp?.div(100.0)
                 )
             )
         }

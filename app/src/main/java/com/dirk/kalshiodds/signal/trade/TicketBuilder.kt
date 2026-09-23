@@ -126,6 +126,11 @@ object TicketBuilder {
             add(if (market.passedFilter) "skip filter cleared" else "skip filter off for tickets")
             add(if (!market.muted) "not muted" else "mute bypassed")
             add(if (!ctx.alertsPaused) "alerts live" else "streak-pause bypassed")
+            market.rlNote?.let { add("$it — ticket still uses configured stake") }
+            market.conformalSet?.let { add("conformal $it") }
+            market.pathSurvive?.let {
+                add(String.format(java.util.Locale.US, "P(edge) %.0f%%", it * 100.0))
+            }
         }
         return bits.joinToString(" · ")
     }

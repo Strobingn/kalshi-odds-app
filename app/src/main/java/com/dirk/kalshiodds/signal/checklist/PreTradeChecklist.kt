@@ -28,14 +28,28 @@ object PreTradeChecklist {
             !market.passedFilter -> market.skipReason ?: "filtered"
             else -> "cleared"
         }
+        val unc = market.uncertainty?.let { String.format(Locale.US, "%.2f%s", it, if (market.uncertaintyPassed) "" else " GATE") } ?: "—"
+        val ttm = market.timeToMoveSec?.let { String.format(Locale.US, "%.0fs", it) } ?: "—"
+        val fill = market.pFill?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
+        val surv = market.survivalYesPp?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
+        val confSet = market.conformalSet ?: "—"
+        val path = market.pathSurvive?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
+        val rl = market.rlNote ?: "—"
         return listOf(
             Item("Side", side),
             Item("Size", size),
             Item("Net EV", net),
             Item("Confidence", conf),
+            Item("Uncertainty", unc),
+            Item("Time-to-move", ttm),
+            Item("P(fill)", fill),
             Item("Regime", regime),
             Item("TTE", tte),
-            Item("Skip filter", skip)
+            Item("Skip filter", skip),
+            Item("Survival P(YES)", surv),
+            Item("Conformal", confSet),
+            Item("P(edge survives)", path),
+            Item("RL stake", rl)
         )
     }
 
@@ -59,8 +73,21 @@ object PreTradeChecklist {
             appendLine("Net EV: $netEv ($netPp)")
             appendLine("Raw edge: $raw")
             appendLine("Confidence: $conf")
+            market.uncertainty?.let {
+                appendLine("Uncertainty: ${String.format(Locale.US, "%.2f", it)}${if (market.uncertaintyPassed) "" else " (gated)"}")
+            }
+            market.timeToMoveSec?.let { appendLine("Time-to-move: ${String.format(Locale.US, "%.0fs", it)}") }
+            market.midVolPp?.let { appendLine("Mid vol: ${String.format(Locale.US, "%.1fpp", it)}") }
+            market.pFill?.let { appendLine("P(fill): ${String.format(Locale.US, "%.0f%%", it * 100.0)}") }
             appendLine("Regime: ${market.regimeTag ?: "—"}")
+            market.sessionTag?.let { appendLine("Session: $it") }
             appendLine("TTE: ${market.tteRegimeLabel ?: "—"}")
+            market.survivalYesPp?.let { appendLine("Survival P(YES): ${String.format(Locale.US, "%.0f%%", it)}") }
+            market.conformalSet?.let { appendLine("Conformal: $it${if (market.conformalAmbiguous) " (ambiguous)" else ""}") }
+            market.pathSurvive?.let { appendLine("P(edge survives): ${String.format(Locale.US, "%.0f%%", it * 100.0)}") }
+            market.rlNote?.let { appendLine("RL stake (advisory): $it") }
+            market.metaNote?.let { appendLine("Meta: $it") }
+            market.anomalyNote?.let { appendLine("Anomaly: $it") }
             appendLine("Skip filter: $skip")
             market.stance?.let { appendLine("Stance: $it") }
         }.trim()

@@ -34,7 +34,25 @@ data class DefaultSignalConfig(
     val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
     val ticketsEnabled: Boolean = true,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
-    val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES
+    val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
+    val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,
+    val sequenceModelEnabled: Boolean = SignalConstants.DEFAULT_SEQUENCE_MODEL,
+    val gbmEnabled: Boolean = SignalConstants.DEFAULT_GBM,
+    val uncertaintyGateEnabled: Boolean = SignalConstants.DEFAULT_UNCERTAINTY_GATE,
+    val maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY,
+    val continualFineTune: Boolean = SignalConstants.DEFAULT_CONTINUAL_FINETUNE,
+    val policyEvalStakeUsd: Double = SignalConstants.DEFAULT_POLICY_EVAL_STAKE_USD,
+    val extendedAiEnabled: Boolean = SignalConstants.DEFAULT_EXTENDED_AI,
+    val regimeClassifierEnabled: Boolean = SignalConstants.DEFAULT_REGIME_CLASSIFIER,
+    val anomalyGateEnabled: Boolean = SignalConstants.DEFAULT_ANOMALY_GATE,
+    val survivalModelEnabled: Boolean = SignalConstants.DEFAULT_SURVIVAL_MODEL,
+    val rlSizerEnabled: Boolean = SignalConstants.DEFAULT_RL_SIZER,
+    val newsPulseEnabled: Boolean = SignalConstants.DEFAULT_NEWS_PULSE,
+    val rivalFlowEnabled: Boolean = SignalConstants.DEFAULT_RIVAL_FLOW,
+    val bayesianMmEnabled: Boolean = SignalConstants.DEFAULT_BAYESIAN_MM,
+    val conformalEnabled: Boolean = SignalConstants.DEFAULT_CONFORMAL,
+    val metaLabelEnabled: Boolean = SignalConstants.DEFAULT_META_LABEL,
+    val pathSimEnabled: Boolean = SignalConstants.DEFAULT_PATH_SIM
 ) {
     companion object {
         const val ASSET_NAME = "default_signal_config.json"

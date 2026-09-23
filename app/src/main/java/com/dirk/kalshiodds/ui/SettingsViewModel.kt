@@ -98,6 +98,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
     fun setTicketsEnabled(v: Boolean) = viewModelScope.launch { prefs.updateTicketsEnabled(v) }
     fun setTicketRespectGates(v: Boolean) = viewModelScope.launch { prefs.updateTicketRespectGates(v) }
+    fun setHeavyMl(v: Boolean) = viewModelScope.launch { prefs.updateHeavyMl(v) }
+    fun setSequenceModel(v: Boolean) = viewModelScope.launch { prefs.updateSequenceModel(v) }
+    fun setGbm(v: Boolean) = viewModelScope.launch { prefs.updateGbm(v) }
+    fun setUncertaintyGate(v: Boolean) = viewModelScope.launch { prefs.updateUncertaintyGate(v) }
+    fun setMaxUncertainty(v: Double) = viewModelScope.launch { prefs.updateMaxUncertainty(v) }
+    fun setContinualFineTune(v: Boolean) = viewModelScope.launch { prefs.updateContinualFineTune(v) }
+    fun setPolicyEvalStakeUsd(v: Double) = viewModelScope.launch { prefs.updatePolicyEvalStakeUsd(v) }
+    fun setExtendedAi(v: Boolean) = viewModelScope.launch { prefs.updateExtendedAi(v) }
+    fun setRegimeClassifier(v: Boolean) = viewModelScope.launch { prefs.updateRegimeClassifier(v) }
+    fun setAnomalyGate(v: Boolean) = viewModelScope.launch { prefs.updateAnomalyGate(v) }
+    fun setSurvivalModel(v: Boolean) = viewModelScope.launch { prefs.updateSurvivalModel(v) }
+    fun setRlSizer(v: Boolean) = viewModelScope.launch { prefs.updateRlSizer(v) }
+    fun setNewsPulse(v: Boolean) = viewModelScope.launch { prefs.updateNewsPulse(v) }
+    fun setRivalFlow(v: Boolean) = viewModelScope.launch { prefs.updateRivalFlow(v) }
+    fun setBayesianMm(v: Boolean) = viewModelScope.launch { prefs.updateBayesianMm(v) }
+    fun setConformal(v: Boolean) = viewModelScope.launch { prefs.updateConformal(v) }
+    fun setMetaLabel(v: Boolean) = viewModelScope.launch { prefs.updateMetaLabel(v) }
+    fun setPathSim(v: Boolean) = viewModelScope.launch { prefs.updatePathSim(v) }
 
     /**
      * Lowering stake (or staying ≤ $5) writes immediately. Raising above the

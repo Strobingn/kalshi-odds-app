@@ -224,6 +224,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val snap = withContext(Dispatchers.IO) { container.external.refreshIfStale() }
             hub.applyExternal(snap)
         }
+        runCatching {
+            val s = _state.value.settings
+            if (s.extendedAiEnabled && s.newsPulseEnabled) {
+                val news = withContext(Dispatchers.IO) { container.newsCache.refreshIfStale() }
+                container.scoring.extended.news = news
+            }
+        }
     }
 
     private fun publishSupportState() {

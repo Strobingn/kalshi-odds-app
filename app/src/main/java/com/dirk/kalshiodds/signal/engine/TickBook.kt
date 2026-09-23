@@ -13,7 +13,7 @@ import kotlin.math.tanh
  * volume-flow, tick velocity, related-crypto-series (BTC ↔ ETH ↔ SOL),
  * cross-asset lead–lag, aggressor flow, and bid/ask imbalance. Crypto only.
  */
-class TickBook(private val maxPoints: Int = 32) {
+class TickBook(private val maxPoints: Int = 80) {
     data class Point(
         val mid01: Double,
         val volume: Double?,

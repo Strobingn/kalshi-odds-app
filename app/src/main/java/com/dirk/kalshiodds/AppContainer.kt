@@ -13,6 +13,11 @@ import com.dirk.kalshiodds.signal.external.ExternalMarketCache
 import com.dirk.kalshiodds.signal.feedback.DecisionSupport
 import com.dirk.kalshiodds.signal.feedback.GuardrailStore
 import com.dirk.kalshiodds.signal.feedback.LearnedWeightsStore
+import com.dirk.kalshiodds.signal.ml.ExtendedAiRuntime
+import com.dirk.kalshiodds.signal.ml.HeavyMlAssets
+import com.dirk.kalshiodds.signal.ml.HeavyMlRuntime
+import com.dirk.kalshiodds.signal.ml.HeavyMlStore
+import com.dirk.kalshiodds.signal.ml.NewsPulseCache
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.trade.TicketSession
 
@@ -23,13 +28,20 @@ class AppContainer(context: Context) {
     val logStore = PredictionLogStore(app)
     val adapterStore = LearnedWeightsStore(app)
     val guardrailStore = GuardrailStore(app)
+    val heavyStore = HeavyMlStore(app)
     val notifier = SignalNotifier(app)
-    val scoring = ScoringEngine(model = model)
+    val newsCache = NewsPulseCache()
+    val scoring = ScoringEngine(
+        model = model,
+        heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
+        extended = ExtendedAiRuntime()
+    )
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,
         guardrailStore = guardrailStore,
-        scoring = scoring
+        scoring = scoring,
+        heavyStore = heavyStore
     )
     val external = ExternalMarketCache()
     val hub = SignalHub(scoring = scoring, notifier = notifier, logStore = logStore)

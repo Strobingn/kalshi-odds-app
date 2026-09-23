@@ -227,7 +227,14 @@ class MarketRepository(
                         tteBucket = m.tteRegimeLabel,
                         fairValuePp = yesPct,
                         calibrated = m.calibrated,
-                        featureDevs = emptyMap()
+                        featureDevs = emptyMap(),
+                        uncertainty = m.uncertainty,
+                        timeToMoveSec = m.timeToMoveSec,
+                        midVolPp = m.midVolPp,
+                        pFill = m.pFill,
+                        mlpYes = m.mlpPp?.div(100.0),
+                        cnnYes = m.cnnPp?.div(100.0),
+                        gbmYes = m.gbmPp?.div(100.0)
                     )
                 )
             }
