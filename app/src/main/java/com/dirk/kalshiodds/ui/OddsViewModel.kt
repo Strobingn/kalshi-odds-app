@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -31,7 +32,9 @@ data class OddsUiState(
     val modelScoreLabel: String? = null,
     val signalStatus: SignalStatus = SignalStatus(),
     val recentAlerts: List<SignalAlert> = emptyList(),
-    val settings: SignalSettings = SignalSettings()
+    val settings: SignalSettings = SignalSettings(),
+    val avgEdgeWhenRight: Double? = null,
+    val avgEdgeWhenWrong: Double? = null
 )
 
 /**
@@ -53,13 +56,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         viewModelScope.launch {
+            runCatching {
+                hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
+            }
+        }
+        viewModelScope.launch {
             repository.cachedSnapshot.collect { cached ->
                 if (cached != null && _state.value.snapshot == null) {
+                    val overlaid = cached.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
                     _state.update {
                         it.copy(
-                            snapshot = cached,
+                            snapshot = overlaid,
                             isLoading = false,
-                            modelScoreLabel = scoreLabel(cached)
+                            modelScoreLabel = scoreLabel(overlaid)
                         )
                     }
                 }
@@ -86,6 +95,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             hub.alerts.collect { alerts -> _state.update { it.copy(recentAlerts = alerts) } }
+        }
+        viewModelScope.launch {
+            hub.scores.collect { scores ->
+                _state.update { s ->
+                    val snap = s.snapshot ?: return@update s
+                    s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+                }
+            }
         }
         startPolling()
     }
@@ -139,10 +156,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             else -> "Polling ~${currentIntervalMs}ms (±${JITTER_MS}ms)"
         }
         hub.ingestRestSnapshot(result)
+        val overlaid = result.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
         _state.update {
             it.copy(
                 isLoading = false,
-                snapshot = result,
+                snapshot = overlaid,
                 userMessage = when {
                     result.errorMessage != null && result.fromCache ->
                         "Offline — showing cache (${result.errorMessage})"
@@ -150,7 +168,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     else -> null
                 },
                 pollLabel = pollLabel,
-                modelScoreLabel = scoreLabel(result)
+                modelScoreLabel = scoreLabel(overlaid),
+                avgEdgeWhenRight = overlaid.avgEdgeWhenRight,
+                avgEdgeWhenWrong = overlaid.avgEdgeWhenWrong
             )
         }
     }
@@ -160,7 +180,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val total = result.modelScoreTotal ?: return null
         if (total <= 0) return null
         val brier = result.modelMeanBrier?.let { String.format(java.util.Locale.US, " · Brier %.3f", it) }.orEmpty()
-        return "Model score: $c/$total correct$brier"
+        val right = result.avgEdgeWhenRight?.let { String.format(java.util.Locale.US, " · Δ✓ %+.1f", it) }.orEmpty()
+        val wrong = result.avgEdgeWhenWrong?.let { String.format(java.util.Locale.US, " · Δ✗ %+.1f", it) }.orEmpty()
+        return "Scorecard: $c/$total$brier$right$wrong"
     }
 
     private fun nextDelayMs(): Long {

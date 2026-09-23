@@ -29,6 +29,10 @@ data class SignalSettings(
     val liveSignalsEnabled: Boolean = false,
     val subscribeTrades: Boolean = true,
     val debounceMs: Long = 10_000L,
+    val minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
+    val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
+    val maxSpreadCents: Double = SignalConstants.DEFAULT_MAX_SPREAD_CENTS,
+    val hideWeakOpportunities: Boolean = SignalConstants.DEFAULT_HIDE_WEAK,
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false
 ) {
@@ -84,6 +88,16 @@ class SignalPreferences(
     suspend fun updateNotifications(value: Boolean) = edit { it[KEY_NOTIF] = value }
     suspend fun updateLiveSignals(value: Boolean) = edit { it[KEY_LIVE] = value }
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
+    suspend fun updateMinConfidence(value: Double) = edit {
+        it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)
+    }
+    suspend fun updateMinLiquidity(value: Double) = edit {
+        it[KEY_MIN_LIQ] = value.coerceIn(0.0, 50_000.0)
+    }
+    suspend fun updateMaxSpreadCents(value: Double) = edit {
+        it[KEY_MAX_SPREAD] = value.coerceIn(1.0, 25.0)
+    }
+    suspend fun updateHideWeak(value: Boolean) = edit { it[KEY_HIDE_WEAK] = value }
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
@@ -115,6 +129,10 @@ class SignalPreferences(
             liveSignalsEnabled = this[KEY_LIVE] ?: def.liveSignalsEnabled,
             subscribeTrades = this[KEY_TRADES] ?: def.subscribeTrades,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
+            minConfidence = this[KEY_MIN_CONF] ?: def.minConfidence,
+            minLiquidity = this[KEY_MIN_LIQ] ?: def.minLiquidity,
+            maxSpreadCents = this[KEY_MAX_SPREAD] ?: def.maxSpreadCents,
+            hideWeakOpportunities = this[KEY_HIDE_WEAK] ?: def.hideWeakOpportunities,
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
         )
@@ -130,6 +148,10 @@ class SignalPreferences(
         private val KEY_LIVE = booleanPreferencesKey("live_signals_enabled")
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
+        private val KEY_MIN_CONF = doublePreferencesKey("min_confidence")
+        private val KEY_MIN_LIQ = doublePreferencesKey("min_liquidity")
+        private val KEY_MAX_SPREAD = doublePreferencesKey("max_spread_cents")
+        private val KEY_HIDE_WEAK = booleanPreferencesKey("hide_weak_opportunities")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

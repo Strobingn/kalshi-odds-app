@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,6 +34,7 @@ import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
 import kotlin.math.abs
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Boolean = false) {
     val alertBorder = if (market.edgeAlert) AccentGreen else Border
@@ -74,16 +77,44 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 }
             }
 
-            if (market.edgeAlert) {
+            val chips = listOfNotNull(
+                market.regimeTag,
+                market.tteRegimeLabel,
+                if (market.calibrated) "Calibrated" else null
+            )
+            if (chips.isNotEmpty() || market.edgeAlert) {
                 Spacer(Modifier.height(8.dp))
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (market.edgeAlert) {
+                        Text(
+                            text = "⚡ Edge",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AccentGreen,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .background(AccentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                    chips.forEach { chip ->
+                        Text(
+                            text = chip,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = AccentBlue,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier
+                                .background(AccentBlue.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        )
+                    }
+                }
+            }
+            if (!market.passedFilter && market.skipReason != null) {
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "⚡ Edge alert ≥ ${EDGE_ALERT_THRESHOLD_PP.toInt()}pp",
+                    text = "Filtered · ${market.skipReason}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = AccentGreen,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .background(AccentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                    color = AccentOrange
                 )
             }
 
@@ -110,7 +141,7 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 OddsColumn(
-                    label = "AI YES",
+                    label = if (market.calibrated) "FV YES" else "AI YES",
                     percent = market.aiYesPercent,
                     bid = null,
                     ask = null,
@@ -119,7 +150,7 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                     big = true
                 )
                 OddsColumn(
-                    label = "AI NO",
+                    label = if (market.calibrated) "FV NO" else "AI NO",
                     percent = market.aiNoPercent,
                     bid = null,
                     ask = null,
@@ -166,7 +197,7 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                         )
                     }
                     Text(
-                        text = "AI YES − Market YES (percentage points). Text only — no orders.",
+                        text = "Fair − market (pp). Calibrated when enough settlements. Text only — no orders.",
                         style = MaterialTheme.typography.labelMedium,
                         color = TextSecondary,
                         modifier = Modifier.padding(top = 4.dp)

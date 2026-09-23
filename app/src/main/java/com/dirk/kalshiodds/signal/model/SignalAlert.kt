@@ -13,7 +13,11 @@ data class SignalAlert(
     val reason: String,
     val createdAtMs: Long,
     val receiveElapsedNanos: Long,
-    val notifyElapsedNanos: Long? = null
+    val notifyElapsedNanos: Long? = null,
+    val regime: String? = null,
+    val tteRegime: String? = null,
+    val confidence: Double? = null,
+    val passedFilter: Boolean = true
 ) {
     val stance: String
         get() = if (deltaPp >= 0) "Lean YES vs market" else "Lean NO vs market"

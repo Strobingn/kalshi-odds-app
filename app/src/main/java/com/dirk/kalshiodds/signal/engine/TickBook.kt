@@ -1,13 +1,17 @@
 package com.dirk.kalshiodds.signal.engine
 
+import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.TickSource
+import kotlin.math.ln
+import kotlin.math.tanh
 
 /**
  * In-memory recent-tick + last-mid + local order-book store used for
  * volume-flow, tick velocity, related-crypto-series (BTC ↔ ETH ↔ SOL),
- * and bid/ask imbalance. Crypto only.
+ * cross-asset lead–lag, aggressor flow, and bid/ask imbalance. Crypto only.
  */
 class TickBook(private val maxPoints: Int = 32) {
     data class Point(
@@ -26,6 +30,8 @@ class TickBook(private val maxPoints: Int = 32) {
     private val oiByTicker = linkedMapOf<String, Double>()
     private val volumeByTicker = linkedMapOf<String, Double>()
     private val books = linkedMapOf<String, LocalOrderBook>()
+    private val seriesHistory = linkedMapOf<String, ArrayDeque<Pair<Long, Double>>>()
+    private val maxSeriesPoints = 48
 
     @Synchronized
     fun push(tick: MarketTick, nowMs: Long = System.currentTimeMillis()): Point? {
@@ -35,7 +41,10 @@ class TickBook(private val maxPoints: Int = 32) {
         tick.openInterest?.let { oiByTicker[tick.ticker] = it }
         tick.volume?.let { volumeByTicker[tick.ticker] = it }
         val mid = tick.mid01
-        if (mid != null) lastMidBySeries[tick.series] = mid
+        if (mid != null) {
+            lastMidBySeries[tick.series] = mid
+            pushSeriesMid(tick.series, nowMs, mid)
+        }
         // Order-book-derived ticks refresh last mid / meta but do not pollute
         // the velocity / volume-flow series (those stay ticker/trade/REST).
         if (tick.source == TickSource.WS_ORDERBOOK) return last(tick.ticker)
@@ -99,7 +108,9 @@ class TickBook(private val maxPoints: Int = 32) {
         val book = books.getOrPut(ticker) { LocalOrderBook() }
         book.replaceSnapshot(yesLevels, noLevels, seq)
         book.mid01()?.let { mid ->
-            lastMidBySeries[CryptoMarkets.inferSeries(ticker)] = mid
+            val series = CryptoMarkets.inferSeries(ticker)
+            lastMidBySeries[series] = mid
+            pushSeriesMid(series, System.currentTimeMillis(), mid)
         }
         return book
     }
@@ -123,7 +134,9 @@ class TickBook(private val maxPoints: Int = 32) {
             return null
         }
         book.mid01()?.let { mid ->
-            lastMidBySeries[CryptoMarkets.inferSeries(ticker)] = mid
+            val series = CryptoMarkets.inferSeries(ticker)
+            lastMidBySeries[series] = mid
+            pushSeriesMid(series, System.currentTimeMillis(), mid)
         }
         return book
     }
@@ -134,6 +147,73 @@ class TickBook(private val maxPoints: Int = 32) {
         bandCents: Double = LocalOrderBook.DEFAULT_BAND_CENTS,
         topLevels: Int = LocalOrderBook.DEFAULT_TOP_LEVELS
     ): Double? = books[ticker]?.imbalance(bandCents, topLevels)
+
+    @Synchronized
+    fun depthNearMid(ticker: String, bandCents: Double = SignalConstants.DEPTH_NEAR_CENTS): Double? =
+        books[ticker]?.depthNearMid(bandCents)?.takeIf { it > 0.0 }
+
+    @Synchronized
+    fun depthDecay(ticker: String): Double? = books[ticker]?.depthDecay()
+
+    @Synchronized
+    fun bookPulse(ticker: String): LocalOrderBook.Pulse? = books[ticker]?.pulse()
+
+    /**
+     * Signed aggressor imbalance from trade `taker_side` when the WS trade
+     * feed provides it. 0 when no aggressor tags are present.
+     */
+    @Synchronized
+    fun aggressorScore(ticker: String): Double {
+        val pts = byTicker[ticker]?.toList().orEmpty().takeLast(16)
+        var signed = 0.0
+        var weight = 0.0
+        for (p in pts) {
+            val side = when (p.takerSide?.lowercase()) {
+                "yes", "yes_taker", "buy_yes" -> 1.0
+                "no", "no_taker", "buy_no" -> -1.0
+                else -> continue
+            }
+            val w = 1.0 + ln(1.0 + (p.tradeSize ?: 1.0).coerceAtLeast(0.0))
+            signed += side * w
+            weight += w
+        }
+        if (weight < 1e-9) return 0.0
+        return (signed / weight).coerceIn(-1.0, 1.0)
+    }
+
+    /**
+     * Short-lag leading of BTC → ETH/SOL (and reverse).
+     * Leader move over `[now − 3s, now − 0.4s]` minus follower move over
+     * the last 0.4s, tanh-scaled to `[-1, 1]`. Null when histories are cold.
+     */
+    @Synchronized
+    fun leadLagScore(targetSeries: String, nowMs: Long): Double? {
+        val targetHist = seriesHistory[targetSeries]?.toList().orEmpty()
+        if (targetHist.size < 2) return null
+        val leaders = leadersFor(targetSeries)
+        var weighted = 0.0
+        var wsum = 0.0
+        for (leader in leaders) {
+            val hist = seriesHistory[leader]?.toList().orEmpty()
+            if (hist.size < 2) continue
+            val leadMove = deltaBetween(
+                hist,
+                nowMs - SignalConstants.LEAD_WINDOW_MS,
+                nowMs - SignalConstants.LAG_OFFSET_MS
+            ) ?: continue
+            val followMove = deltaBetween(
+                targetHist,
+                nowMs - SignalConstants.LAG_OFFSET_MS,
+                nowMs
+            ) ?: 0.0
+            val residual = leadMove - followMove
+            val w = if (leader == KalshiApi.SERIES_BTC) 1.0 else 0.65
+            weighted += residual * w
+            wsum += w
+        }
+        if (wsum < 1e-9) return null
+        return tanh((weighted / wsum) * 25.0).coerceIn(-1.0, 1.0)
+    }
 
     @Synchronized
     fun flowScore(ticker: String): Double {
@@ -219,8 +299,35 @@ class TickBook(private val maxPoints: Int = 32) {
         )
     }
 
+    private fun pushSeriesMid(series: String, nowMs: Long, mid: Double) {
+        val q = seriesHistory.getOrPut(series) { ArrayDeque() }
+        val last = q.lastOrNull()
+        if (last != null && nowMs - last.first < 80 && kotlin.math.abs(last.second - mid) < 1e-6) return
+        q.addLast(nowMs to mid)
+        while (q.size > maxSeriesPoints) q.removeFirst()
+    }
+
     companion object {
         /** Last N ticks used for velocity / acceleration (user: 10–20). */
         const val VELOCITY_LOOKBACK = 16
+
+        fun leadersFor(targetSeries: String): List<String> {
+            return when (targetSeries) {
+                KalshiApi.SERIES_BTC -> listOf(KalshiApi.SERIES_ETH, KalshiApi.SERIES_SOL)
+                else -> listOf(KalshiApi.SERIES_BTC)
+            }
+        }
+
+        /**
+         * Mid change between the last point at-or-before [fromMs] and the
+         * last point at-or-before [toMs]. Null when the window is empty.
+         */
+        fun deltaBetween(hist: List<Pair<Long, Double>>, fromMs: Long, toMs: Long): Double? {
+            if (hist.size < 2 || toMs <= fromMs) return null
+            val a = hist.lastOrNull { it.first <= fromMs } ?: hist.firstOrNull { it.first >= fromMs } ?: return null
+            val b = hist.lastOrNull { it.first <= toMs } ?: return null
+            if (b.first <= a.first) return null
+            return b.second - a.second
+        }
     }
 }

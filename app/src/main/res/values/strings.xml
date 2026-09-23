@@ -17,4 +17,5 @@
     <string name="live_signals_fg_title">Dip Hunter live signals</string>
     <string name="live_signals_fg_text">Watching crypto ticker + orderbook WebSocket. Local alerts only — no trading.</string>
     <string name="signal_alert_title">Dip Hunter · %1$s</string>
+    <string name="scorecard">Scorecard</string>
 </resources>

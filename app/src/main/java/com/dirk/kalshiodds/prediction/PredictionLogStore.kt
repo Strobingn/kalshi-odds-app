@@ -24,9 +24,29 @@ data class PredictionLogEntry(
     val marketMid: Double,
     val timestampMs: Long,
     val closeTimeMs: Long?,
-    val outcome: String? = null, // "yes" | "no"
-    val score: Int? = null, // 1 correct, 0 wrong
-    val brier: Double? = null
+    val outcome: String? = null, // "yes" | "no" | "void"
+    val score: Int? = null, // 1 correct, 0 wrong; null for void
+    val brier: Double? = null,
+    /** YES or NO stance at signal time. */
+    val predictedSide: String? = null,
+    val edgePp: Double? = null,
+    val confidence: Double? = null,
+    val regime: String? = null,
+    val tteBucket: String? = null,
+    val fairValuePp: Double? = null,
+    val calibrated: Boolean? = null,
+    val settledAtMs: Long? = null
+)
+
+@Serializable
+data class SignalSnapshot(
+    val predictedSide: String? = null,
+    val edgePp: Double? = null,
+    val confidence: Double? = null,
+    val regime: String? = null,
+    val tteBucket: String? = null,
+    val fairValuePp: Double? = null,
+    val calibrated: Boolean? = null
 )
 
 class PredictionLogStore(private val context: Context) {
@@ -54,16 +74,18 @@ class PredictionLogStore(private val context: Context) {
         timestampMs: Long,
         closeTimeMs: Long?,
         throttleMs: Long = 30_000L,
-        midMoveThreshold: Double = 0.02
+        midMoveThreshold: Double = 0.02,
+        snapshot: SignalSnapshot? = null
     ) {
         context.predictionLogStore.edit { prefs ->
             val list = decode(prefs[key]).toMutableList()
             val existingIdx = list.indexOfLast { it.ticker == ticker && it.outcome == null }
             if (existingIdx >= 0) {
                 val prev = list[existingIdx]
+                val frozen = prev.tteBucket.equals("LATE", ignoreCase = true)
                 val age = timestampMs - prev.timestampMs
                 val moved = kotlin.math.abs(prev.marketMid - marketMid) > midMoveThreshold
-                if (age < throttleMs && !moved) {
+                if (frozen || (age < throttleMs && !moved)) {
                     return@edit
                 }
                 list[existingIdx] = prev.copy(
@@ -71,7 +93,14 @@ class PredictionLogStore(private val context: Context) {
                     predictedNo = predictedNo,
                     marketMid = marketMid,
                     timestampMs = timestampMs,
-                    closeTimeMs = closeTimeMs ?: prev.closeTimeMs
+                    closeTimeMs = closeTimeMs ?: prev.closeTimeMs,
+                    predictedSide = snapshot?.predictedSide ?: prev.predictedSide,
+                    edgePp = snapshot?.edgePp ?: prev.edgePp,
+                    confidence = snapshot?.confidence ?: prev.confidence,
+                    regime = snapshot?.regime ?: prev.regime,
+                    tteBucket = snapshot?.tteBucket ?: prev.tteBucket,
+                    fairValuePp = snapshot?.fairValuePp ?: prev.fairValuePp,
+                    calibrated = snapshot?.calibrated ?: prev.calibrated
                 )
             } else {
                 list.add(
@@ -82,7 +111,14 @@ class PredictionLogStore(private val context: Context) {
                         predictedNo = predictedNo,
                         marketMid = marketMid,
                         timestampMs = timestampMs,
-                        closeTimeMs = closeTimeMs
+                        closeTimeMs = closeTimeMs,
+                        predictedSide = snapshot?.predictedSide,
+                        edgePp = snapshot?.edgePp,
+                        confidence = snapshot?.confidence,
+                        regime = snapshot?.regime,
+                        tteBucket = snapshot?.tteBucket,
+                        fairValuePp = snapshot?.fairValuePp,
+                        calibrated = snapshot?.calibrated
                     )
                 )
             }
@@ -91,21 +127,29 @@ class PredictionLogStore(private val context: Context) {
         }
     }
 
-    suspend fun applySettlement(ticker: String, result: String) {
-        val normalized = result.lowercase()
-        if (normalized != "yes" && normalized != "no") return
+    suspend fun applySettlement(ticker: String, result: String, settledAtMs: Long = System.currentTimeMillis()) {
+        val normalized = result.lowercase().trim()
+        if (normalized != "yes" && normalized != "no" && normalized != "void") return
         context.predictionLogStore.edit { prefs ->
             val list = decode(prefs[key]).toMutableList()
             var changed = false
             for (i in list.indices) {
                 val e = list[i]
                 if (e.ticker == ticker && e.outcome == null) {
-                    val predYes = e.predictedYes > 0.5
-                    val actualYes = normalized == "yes"
-                    val score = if (predYes == actualYes) 1 else 0
-                    val y = if (actualYes) 1.0 else 0.0
-                    val brier = (e.predictedYes - y) * (e.predictedYes - y)
-                    list[i] = e.copy(outcome = normalized, score = score, brier = brier)
+                    if (normalized == "void") {
+                        list[i] = e.copy(outcome = "void", score = null, brier = null, settledAtMs = settledAtMs)
+                    } else {
+                        val predYes = when (e.predictedSide?.uppercase()) {
+                            "YES" -> true
+                            "NO" -> false
+                            else -> e.predictedYes > 0.5
+                        }
+                        val actualYes = normalized == "yes"
+                        val score = if (predYes == actualYes) 1 else 0
+                        val y = if (actualYes) 1.0 else 0.0
+                        val brier = (e.predictedYes - y) * (e.predictedYes - y)
+                        list[i] = e.copy(outcome = normalized, score = score, brier = brier, settledAtMs = settledAtMs)
+                    }
                     changed = true
                 }
             }

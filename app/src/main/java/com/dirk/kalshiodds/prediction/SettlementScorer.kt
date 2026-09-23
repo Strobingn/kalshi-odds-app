@@ -34,7 +34,7 @@ class SettlementScorer(
                 val settled = api.getMarkets(seriesTicker = series, status = "settled", limit = 100)
                 for (m in settled.markets) {
                     if (m.ticker in tickers) {
-                        val result = m.result ?: continue
+                        val result = normalizeResult(m.result) ?: continue
                         logStore.applySettlement(m.ticker, result)
                     }
                 }
@@ -45,7 +45,7 @@ class SettlementScorer(
                     try {
                         val resp = api.getMarkets(seriesTicker = series, status = "settled", ticker = t, limit = 5)
                         val hit = resp.markets.firstOrNull { it.ticker == t }
-                        val result = hit?.result ?: continue
+                        val result = normalizeResult(hit?.result) ?: continue
                         logStore.applySettlement(t, result)
                     } catch (_: Exception) {
                         // ignore per-ticker misses
@@ -59,4 +59,15 @@ class SettlementScorer(
 
     private fun inferSeries(ticker: String): String =
         com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
+
+    companion object {
+        fun normalizeResult(raw: String?): String? {
+            val n = raw?.lowercase()?.trim().orEmpty()
+            return when (n) {
+                "yes", "no", "void" -> n
+                "scalar", "cancelled", "canceled", "invalid" -> "void"
+                else -> null
+            }
+        }
+    }
 }

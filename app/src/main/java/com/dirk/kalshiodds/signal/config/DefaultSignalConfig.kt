@@ -15,7 +15,11 @@ data class DefaultSignalConfig(
     val notificationsEnabled: Boolean = true,
     val liveSignalsEnabled: Boolean = false,
     val subscribeTrades: Boolean = true,
-    val debounceMs: Long = 10_000L
+    val debounceMs: Long = 10_000L,
+    val minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
+    val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
+    val maxSpreadCents: Double = SignalConstants.DEFAULT_MAX_SPREAD_CENTS,
+    val hideWeakOpportunities: Boolean = SignalConstants.DEFAULT_HIDE_WEAK
 ) {
     companion object {
         const val ASSET_NAME = "default_signal_config.json"

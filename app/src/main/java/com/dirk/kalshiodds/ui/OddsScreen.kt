@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,8 +16,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import com.dirk.kalshiodds.signal.engine.SkipFilter
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -52,7 +55,7 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit) {
+fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScorecard: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -61,6 +64,9 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit) {
             TopAppBar(
                 title = { Text("Dip Hunter") },
                 actions = {
+                    IconButton(onClick = onOpenScorecard) {
+                        Icon(Icons.Default.Assessment, contentDescription = "Scorecard")
+                    }
                     IconButton(onClick = onOpenSettings) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
                     }
@@ -92,9 +98,13 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit) {
                 val allMarkets = snapshot?.allMarkets.orEmpty()
                 val ranked = allMarkets
                     .filter { it.edgePp != null }
-                    .sortedByDescending { abs(it.edgePp ?: 0.0) }
+                    .filter { SkipFilter.shouldShowOpportunity(it.passedFilter, it.edgePp, state.settings) }
+                    .sortedWith(
+                        compareByDescending<MarketUiModel> { it.passedFilter }
+                            .thenByDescending { abs(it.edgePp ?: 0.0) }
+                    )
                 val threshold = state.settings.edgeThresholdPp
-                val alertCount = allMarkets.count { it.edgeAlert }
+                val alertCount = allMarkets.count { it.edgeAlert && it.passedFilter }
 
                 LazyColumn(
                     modifier = Modifier
@@ -111,7 +121,8 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit) {
                             pollLabel = state.pollLabel,
                             modelScoreLabel = state.modelScoreLabel,
                             chipLabel = state.signalStatus.chipLabel(),
-                            chipState = state.signalStatus.state
+                            chipState = state.signalStatus.state,
+                            onOpenScorecard = onOpenScorecard
                         )
                     }
                     if (state.recentAlerts.isNotEmpty()) {
@@ -138,7 +149,7 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit) {
                         item { SectionHeader("Ranked opportunities") }
                         item {
                             Text(
-                                text = "Crypto only · sorted by |Dip Hunter edge|. Stance is advisory — no orders.",
+                                text = "Crypto only · filter-cleared · sorted by |fair − mid|. Stance is advisory — no orders.",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = TextSecondary
                             )
@@ -206,6 +217,10 @@ private fun SignalRow(alert: SignalAlert) {
             )
         }
         Text(alert.reason, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        val tags = listOfNotNull(alert.regime, alert.tteRegime).joinToString(" · ")
+        if (tags.isNotEmpty()) {
+            Text(tags, style = MaterialTheme.typography.labelMedium, color = color)
+        }
         Text(alert.stance, style = MaterialTheme.typography.labelMedium, color = color, fontWeight = FontWeight.SemiBold)
     }
 }
@@ -228,7 +243,8 @@ private fun MetaHeader(
     pollLabel: String,
     modelScoreLabel: String?,
     chipLabel: String,
-    chipState: WsConnectionState
+    chipState: WsConnectionState,
+    onOpenScorecard: () -> Unit
 ) {
     val chipColor = when (chipState) {
         WsConnectionState.CONNECTED -> AccentGreen
@@ -291,7 +307,18 @@ private fun MetaHeader(
                 style = MaterialTheme.typography.labelMedium,
                 color = AccentBlue,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 2.dp)
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .background(AccentBlue.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+            Text(
+                text = "Open scorecard for hit rate, Brier, edge when right vs wrong",
+                style = MaterialTheme.typography.labelMedium,
+                color = AccentBlue,
+                modifier = Modifier
+                    .padding(top = 2.dp)
+                    .clickable(onClick = onOpenScorecard)
             )
         }
         Text(
