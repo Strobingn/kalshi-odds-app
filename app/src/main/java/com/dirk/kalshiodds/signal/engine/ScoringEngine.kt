@@ -16,15 +16,17 @@ import kotlin.math.tanh
  *
  * fairValue = blend of
  *   (a) DipHunter TFLite / fallback MLP YES probability
- *   (b) volume-flow / momentum from recent ticks
+ *   (b) volume-flow from recent ticker / trade / REST ticks
  *   (c) related crypto-series mid (BTC ↔ ETH ↔ SOL) when 2+ are watched
+ *   (d) tick velocity `Δmid / Δt` (and short acceleration) over last N ticks
+ *   (e) order-book imbalance from local `orderbook_snapshot` / `orderbook_delta`
  *
  * delta = fairValue − marketMid (percentage points).
  * Emits [SignalAlert] when |delta| ≥ threshold, debounced per ticker.
  */
 class ScoringEngine(
     private val model: DipHunterModel = DipHunterModel(context = null),
-    private val book: TickBook = TickBook(),
+    val book: TickBook = TickBook(),
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     data class Score(
@@ -34,10 +36,16 @@ class ScoringEngine(
         val reason: String,
         val aiPp: Double?,
         val flowPp: Double?,
-        val relatedPp: Double?
+        val relatedPp: Double?,
+        val velocityPp: Double? = null,
+        val imbalancePp: Double? = null,
+        val velocityPerSec: Double? = null,
+        val accelerationPerSec: Double? = null,
+        val imbalance: Double? = null
     )
 
     private val lastAlertMs = linkedMapOf<String, Long>()
+    private val lastBookScoreMs = linkedMapOf<String, Long>()
 
     fun rememberMeta(ticker: String, closeTimeEpochMs: Long?, volume: Double?, openInterest: Double?) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
@@ -58,6 +66,21 @@ class ScoringEngine(
             )
         )
     }
+
+    fun applySnapshot(
+        ticker: String,
+        yesLevels: List<Pair<Double, Double>>,
+        noLevels: List<Pair<Double, Double>>,
+        seq: Int? = null
+    ): LocalOrderBook? = book.applySnapshot(ticker, yesLevels, noLevels, seq)
+
+    fun applyDelta(
+        ticker: String,
+        price: Double,
+        delta: Double,
+        side: String,
+        seq: Int? = null
+    ): LocalOrderBook? = book.applyDelta(ticker, price, delta, side, seq)
 
     fun score(tick: MarketTick, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Score? {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return null
@@ -87,22 +110,48 @@ class ScoringEngine(
         val related01 = book.relatedCryptoMid(tick.series, settings.watchedSeries)
         val relatedPp = related01?.times(100.0)
 
+        val vel = book.velocityPerSec(tick.ticker)
+        val acc = book.accelerationPerSec(tick.ticker)
+        val velAdjPp = vel?.let {
+            val velPpPerSec = it * 100.0
+            val accPpPerSec = (acc ?: 0.0) * 100.0
+            (midPp + 6.0 * tanh(velPpPerSec / 2.0) + 2.0 * tanh(accPpPerSec / 2.0)).coerceIn(2.0, 98.0)
+        }
+        val imb = book.imbalance(tick.ticker)
+        val imbAdjPp = imb?.let { (midPp + 8.0 * it).coerceIn(2.0, 98.0) }
+
         var wAi = if (aiPp != null) W_AI else 0.0
         var wFlow = W_FLOW
         var wRel = if (relatedPp != null) W_RELATED else 0.0
-        val wSum = wAi + wFlow + wRel
+        var wVel = if (velAdjPp != null) W_VELOCITY else 0.0
+        var wImb = if (imbAdjPp != null) W_IMBALANCE else 0.0
+        val wSum = wAi + wFlow + wRel + wVel + wImb
         if (wSum < 1e-9) return null
         wAi /= wSum
         wFlow /= wSum
         wRel /= wSum
+        wVel /= wSum
+        wImb /= wSum
 
         val fair = (
             (aiPp ?: 0.0) * wAi +
                 flowAdjPp * wFlow +
-                (relatedPp ?: 0.0) * wRel
+                (relatedPp ?: 0.0) * wRel +
+                (velAdjPp ?: 0.0) * wVel +
+                (imbAdjPp ?: 0.0) * wImb
             ).coerceIn(2.0, 98.0)
         val delta = fair - midPp
-        val reason = buildReason(aiPp, flow, momentumPp, relatedPp, midPp, fair, delta)
+        val reason = buildReason(
+            aiPp = aiPp,
+            flow = flow,
+            momentumPp = momentumPp,
+            relatedPp = relatedPp,
+            midPp = midPp,
+            fairPp = fair,
+            deltaPp = delta,
+            velocityPerSec = vel,
+            imbalance = imb
+        )
         return Score(
             fairValuePp = fair,
             marketMidPp = midPp,
@@ -110,7 +159,12 @@ class ScoringEngine(
             reason = reason,
             aiPp = aiPp,
             flowPp = flowAdjPp,
-            relatedPp = relatedPp
+            relatedPp = relatedPp,
+            velocityPp = velAdjPp,
+            imbalancePp = imbAdjPp,
+            velocityPerSec = vel,
+            accelerationPerSec = acc,
+            imbalance = imb
         )
     }
 
@@ -137,6 +191,19 @@ class ScoringEngine(
         )
     }
 
+    fun maybeAlertFromBook(
+        ticker: String,
+        settings: SignalSettings,
+        receiveElapsedNanos: Long,
+        nowMs: Long = System.currentTimeMillis()
+    ): SignalAlert? {
+        val last = lastBookScoreMs[ticker] ?: 0L
+        if (nowMs - last < BOOK_SCORE_MIN_INTERVAL_MS) return null
+        val tick = book.tickFromBook(ticker, receiveElapsedNanos, nowMs) ?: return null
+        lastBookScoreMs[ticker] = nowMs
+        return maybeAlert(tick, settings, nowMs)
+    }
+
     private fun buildReason(
         aiPp: Double?,
         flow: Double,
@@ -144,7 +211,9 @@ class ScoringEngine(
         relatedPp: Double?,
         midPp: Double,
         fairPp: Double,
-        deltaPp: Double
+        deltaPp: Double,
+        velocityPerSec: Double?,
+        imbalance: Double?
     ): String {
         val parts = mutableListOf<String>()
         if (aiPp != null) {
@@ -158,6 +227,14 @@ class ScoringEngine(
             abs(momentumPp) >= 2.0 -> String.format(java.util.Locale.US, "mom %+.1fpp", momentumPp)
             else -> "flow flat"
         }
+        val velPp = velocityPerSec?.times(100.0)
+        if (velPp != null && abs(velPp) >= 0.4) {
+            parts += String.format(java.util.Locale.US, "vel %+.1fpp/s", velPp)
+        }
+        if (imbalance != null && abs(imbalance) >= 0.12) {
+            val label = if (imbalance >= 0) "book bid" else "book ask"
+            parts += String.format(java.util.Locale.US, "%s %+.0f%%", label, imbalance * 100.0)
+        }
         if (relatedPp != null) {
             val label = if (relatedPp >= midPp) "related crypto higher" else "related crypto lower"
             parts += String.format(java.util.Locale.US, "%s (%.0f%%)", label, relatedPp)
@@ -167,8 +244,12 @@ class ScoringEngine(
     }
 
     companion object {
-        const val W_AI = 0.55
-        const val W_FLOW = 0.30
-        const val W_RELATED = 0.15
+        const val W_AI = 0.40
+        const val W_FLOW = 0.20
+        const val W_RELATED = 0.12
+        const val W_VELOCITY = 0.16
+        const val W_IMBALANCE = 0.12
+        /** Book deltas update depth immediately; re-score at most this often. */
+        const val BOOK_SCORE_MIN_INTERVAL_MS = 250L
     }
 }

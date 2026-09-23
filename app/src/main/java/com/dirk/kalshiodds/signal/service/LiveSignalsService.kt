@@ -22,8 +22,8 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 
 /**
- * Foreground service that keeps the Kalshi ticker WebSocket alive while
- * "Live signals" is enabled. Analysis / alerts only — no order channels.
+ * Foreground service that keeps the Kalshi ticker + orderbook WebSocket alive
+ * while "Live signals" is enabled. Analysis / alerts only — no order channels.
  */
 class LiveSignalsService : Service() {
 
@@ -79,17 +79,37 @@ class LiveSignalsService : Service() {
                     hub.setConnection(WsConnectionState.NEEDS_API_KEY, detail = "WS needs API key — using REST")
                     return@collectLatest
                 }
+                val wanted = tickers.filter { settings.isWatchedTicker(it) }
                 val channels = buildList {
                     add("ticker")
+                    if (wanted.isNotEmpty()) add("orderbook_delta")
                     if (settings.subscribeTrades) add("trade")
                 }
-                val wanted = tickers.filter { settings.isWatchedTicker(it) }
                 val existing = client
                 if (existing == null) {
                     hub.setConnection(WsConnectionState.CONNECTING)
                     val ws = KalshiWsClient(
                         scope = scope,
                         onTick = { tick -> hub.ingestTick(tick) },
+                        onBookSnapshot = { snap ->
+                            hub.ingestBookSnapshot(
+                                ticker = snap.ticker,
+                                yesLevels = snap.yesLevels,
+                                noLevels = snap.noLevels,
+                                seq = snap.seq,
+                                receiveElapsedNanos = snap.receiveElapsedNanos
+                            )
+                        },
+                        onBookDelta = { delta ->
+                            hub.ingestBookDelta(
+                                ticker = delta.ticker,
+                                price = delta.price,
+                                delta = delta.delta,
+                                side = delta.side,
+                                seq = delta.seq,
+                                receiveElapsedNanos = delta.receiveElapsedNanos
+                            )
+                        },
                         onState = { state ->
                             hub.wsLive = state.connected
                             val mapped = when {
