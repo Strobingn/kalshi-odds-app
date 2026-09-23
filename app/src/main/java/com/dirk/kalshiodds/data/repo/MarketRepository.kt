@@ -3,7 +3,6 @@ package com.dirk.kalshiodds.data.repo
 import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.api.NetworkModule
-import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.local.CachedMarketsPayload
 import com.dirk.kalshiodds.data.local.MarketCache
 import com.dirk.kalshiodds.domain.SeriesKind
@@ -13,13 +12,16 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import retrofit2.HttpException
 
 data class MarketsSnapshot(
     val btc: List<MarketUiModel>,
     val wti: List<MarketUiModel>,
     val fetchedAtEpochMs: Long,
     val fromCache: Boolean,
-    val errorMessage: String? = null
+    val errorMessage: String? = null,
+    /** True when Kalshi returned HTTP 429 or 503 — callers should back off. */
+    val rateLimited: Boolean = false
 )
 
 class MarketRepository(
@@ -45,32 +47,49 @@ class MarketRepository(
                 wti = wtiMarkets.map { it.toUiModel(SeriesKind.WTI) },
                 fetchedAtEpochMs = now,
                 fromCache = false,
-                errorMessage = null
+                errorMessage = null,
+                rateLimited = false
             )
         } catch (e: Exception) {
+            val rateLimited = isRateLimited(e)
+            val message = when {
+                rateLimited -> "Rate limited — backing off"
+                else -> e.message ?: "Network error"
+            }
             val cached = cache.read()
             if (cached != null) {
-                cached.toSnapshot(fromCache = true, errorMessage = e.message ?: "Network error")
+                cached.toSnapshot(fromCache = true, errorMessage = message, rateLimited = rateLimited)
             } else {
                 MarketsSnapshot(
                     btc = emptyList(),
                     wti = emptyList(),
                     fetchedAtEpochMs = 0L,
                     fromCache = false,
-                    errorMessage = e.message ?: "Network error"
+                    errorMessage = message,
+                    rateLimited = rateLimited
                 )
             }
         }
     }
 
+    private fun isRateLimited(e: Exception): Boolean {
+        val code = when (e) {
+            is HttpException -> e.code()
+            else -> (e.cause as? HttpException)?.code()
+        }
+        return code == 429 || code == 503
+    }
+
     private fun CachedMarketsPayload.toSnapshot(
         fromCache: Boolean,
-        errorMessage: String? = null
+        errorMessage: String? = null,
+        rateLimited: Boolean = false
     ): MarketsSnapshot = MarketsSnapshot(
         btc = btc.map { it.toUiModel(SeriesKind.BTC) },
         wti = wti.map { it.toUiModel(SeriesKind.WTI) },
         fetchedAtEpochMs = fetchedAtEpochMs,
         fromCache = fromCache,
-        errorMessage = errorMessage
+        errorMessage = errorMessage,
+        rateLimited = rateLimited
     )
 }

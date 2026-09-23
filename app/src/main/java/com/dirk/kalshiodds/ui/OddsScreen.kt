@@ -88,7 +88,8 @@ fun OddsScreen(viewModel: OddsViewModel) {
                         MetaHeader(
                             fetchedAtEpochMs = snapshot?.fetchedAtEpochMs ?: 0L,
                             fromCache = snapshot?.fromCache == true,
-                            message = state.userMessage
+                            message = state.userMessage,
+                            pollLabel = state.pollLabel
                         )
                     }
                     item { SectionHeader("Bitcoin · KXBTC15M") }
@@ -130,7 +131,7 @@ private fun SectionHeader(title: String) {
 }
 
 @Composable
-private fun MetaHeader(fetchedAtEpochMs: Long, fromCache: Boolean, message: String?) {
+private fun MetaHeader(fetchedAtEpochMs: Long, fromCache: Boolean, message: String?, pollLabel: String) {
     Column(Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth(),
@@ -163,7 +164,7 @@ private fun MetaHeader(fetchedAtEpochMs: Long, fromCache: Boolean, message: Stri
             )
         }
         Text(
-            text = "YES % = mid(bid, ask) when both present, else last price. Auto-refresh every 15 min.",
+            text = "YES YES % = mid(bid, ask) when both present, else last price. Auto-refresh every 15 min. NO odds. Auto-refresh ~1.5s with jitter; backs off on 429/503.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
             modifier = Modifier.padding(top = 6.dp)

@@ -27,7 +27,7 @@ object NetworkModule {
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
                     .header("Accept", "application/json")
-                    .header("User-Agent", "KalshiOdds/1.0 (Android; Dirk Diggler)")
+                    .header("User-Agent", "DipHunter/1.1 (Android; Dirk Diggler)")
                     .build()
                 chain.proceed(request)
             }

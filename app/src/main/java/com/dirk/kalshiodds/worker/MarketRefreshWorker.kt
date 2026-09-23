@@ -40,7 +40,8 @@ object MarketRefreshScheduler {
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
 
-        // PeriodicWorkRequest minimum interval is 15 minutes on Android.
+        // Background only: PeriodicWorkRequest minimum is 15 minutes on Android.
+        // Foreground UI polls ~1.5s in OddsViewModel.
         val request = PeriodicWorkRequestBuilder<MarketRefreshWorker>(15, TimeUnit.MINUTES)
             .setConstraints(constraints)
             .build()
