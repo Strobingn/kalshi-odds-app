@@ -59,6 +59,46 @@ class KalshiFeeAndWinTargetTest {
         )
         assertTrue(ticket != null)
         assertTrue(ticket!!.modelEdge)
+        assertEquals(0.18, ticket.impliedChance!!, 1e-9)
+        assertEquals(0.40, ticket.modelChance!!, 1e-9)
+        assertTrue(ticket.canApprove)
+        assertTrue(ticket.gateNote!!.contains("Approve still required"))
+    }
+
+    @Test
+    fun hunterValueDoesNotSurfaceAtTwentyOneCents() {
+        val market = sample(yesAsk = 0.21, noAsk = 0.79, aiYes = 80.0)
+        val ticket = TicketBuilder.proposeHunterValue(
+            market,
+            TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
+        )
+        assertTrue(ticket == null)
+    }
+
+    @Test
+    fun existingHunterAndConfiguredTiersStillFire() {
+        val cheap = sample(yesAsk = 0.04, noAsk = 0.96, aiYes = 30.0)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
+        val hunter = TicketBuilder.proposeHunter(cheap, ctx)
+        assertEquals(TicketKind.HUNTER, hunter!!.kind)
+        assertEquals(25, hunter.contracts)
+
+        val fiveCent = sample(yesAsk = 0.05, noAsk = 0.95, aiYes = 30.0).copy(predictedSide = "YES")
+        val configured = TicketBuilder.propose(fiveCent, ctx)
+        assertEquals(TicketKind.CONFIGURED, configured!!.kind)
+        assertTrue(configured.maxPayoutUsd + 1e-9 >= 100.0)
+    }
+
+    @Test
+    fun twentyCentNetPayoutAfterFeesIsJustUnderFive() {
+        // Gate stays gross $5 / 5 contracts (user: ask ≤ 20¢). Fees are for edge + P&L.
+        val fee = KalshiFee.perContract(0.20, 0.07)
+        val net = KalshiFee.netPayout(5, 0.20, 0.07)
+        assertEquals(0.0112, fee, 1e-9)
+        assertEquals(4.944, net, 1e-9)
+        assertTrue(net < 5.0)
+        val profit = KalshiFee.netProfit(5, 0.20, 0.07)
+        assertEquals(net - 1.0, profit, 1e-9)
     }
 
     @Test

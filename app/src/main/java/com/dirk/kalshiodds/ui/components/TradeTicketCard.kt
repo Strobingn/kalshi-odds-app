@@ -145,11 +145,17 @@ private fun ProposedTicketCard(
     onPaper: (String) -> Unit
 ) {
     val hunter = ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE
-    val border = if (hunter) AccentOrange else AccentBlue
+    val highlightEdge = hunter && ticket.modelEdge
+    val border = when {
+        highlightEdge -> AccentOrange
+        ticket.kind == TicketKind.HUNTER_VALUE -> TextSecondary
+        hunter -> AccentOrange
+        else -> AccentBlue
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(if (hunter) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
+            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
         colors = CardDefaults.cardColors(containerColor = Surface),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -158,13 +164,18 @@ private fun ProposedTicketCard(
                 Text(
                     when (ticket.kind) {
                         TicketKind.HUNTER -> "PENDING APPROVAL · $1 → ≥$25"
-                        TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · $1 → ≥$5"
+                        TicketKind.HUNTER_VALUE -> String.format(
+                            Locale.US,
+                            "PENDING APPROVAL · $%.0f → ≥$%.0f",
+                            ticket.stakeUsd.coerceAtLeast(1.0),
+                            ticket.maxPayoutUsd.coerceAtLeast(ticket.stakeUsd)
+                        )
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (hunter) AccentOrange else AccentBlue,
+                    color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) AccentOrange else AccentBlue,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
@@ -213,8 +224,20 @@ private fun ProposedTicketCard(
             }
             ticket.modelChance?.let {
                 TicketMetricRow(
-                    if (ticket.modelEdge) "AI / fair (edge)" else "AI / fair",
+                    if (ticket.modelEdge) "AI probability (edge)" else "AI probability",
                     String.format(Locale.US, "%.0f%%", it * 100.0)
+                )
+            }
+            ticket.fairChance?.let { fair ->
+                if (ticket.modelChance == null || kotlin.math.abs(fair - ticket.modelChance) > 0.005) {
+                    TicketMetricRow("Fair value", String.format(Locale.US, "%.0f%%", fair * 100.0))
+                }
+            }
+            if (ticket.kind == TicketKind.HUNTER_VALUE) {
+                TicketMetricRow(
+                    if (ticket.modelEdge) "Edge vs market" else "Edge vs market",
+                    if (ticket.modelEdge) "YES — model beats implied after fees + margin"
+                    else "No — model does not clear fees + margin"
                 )
             }
             ticket.winTargetNote?.let {
@@ -399,7 +422,7 @@ private fun ApproveTicketDialog(
                 }
                 if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE) {
                     Text(
-                        ticket.gateNote ?: "Hunter path · Approve still required.",
+                        ticket.gateNote ?: "Hunter path · Approve still required — never auto-placed.",
                         style = MaterialTheme.typography.labelMedium,
                         color = AccentOrange,
                         modifier = Modifier.padding(top = 6.dp)
