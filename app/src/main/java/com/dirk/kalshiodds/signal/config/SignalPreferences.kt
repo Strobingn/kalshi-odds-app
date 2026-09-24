@@ -255,6 +255,9 @@ class SignalPreferences(
 
     fun credentialSnapshot(): Pair<String, String> = secrets.snapshot()
 
+    /** True when EncryptedSharedPreferences died and no usable key loaded. */
+    fun needsReenterKey(): Boolean = !secrets.hasCredentials && secrets.keystoreInvalidated
+
     suspend fun restoreSnapshot(json: String) {
         val r = com.dirk.kalshiodds.data.local.history.SettingsRestore.parse(json)
         if (r.isEmpty) return

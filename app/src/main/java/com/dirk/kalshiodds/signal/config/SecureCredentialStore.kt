@@ -17,6 +17,9 @@ import androidx.security.crypto.MasterKeys
  */
 class SecureCredentialStore(context: Context) {
 
+    val keystoreInvalidated: Boolean
+        get() = lastKeystoreInvalidated
+
     private val prefs: SharedPreferences = createPrefs(context.applicationContext)
 
     var apiKeyId: String
@@ -48,6 +51,10 @@ class SecureCredentialStore(context: Context) {
         private const val KEY_ID = "api_key_id"
         private const val KEY_PEM = "private_key_pem"
 
+        @Volatile
+        var lastKeystoreInvalidated: Boolean = false
+            private set
+
         fun looksLikePem(pem: String): Boolean {
             val t = pem.trim()
             return t.contains("BEGIN") && t.contains("PRIVATE") && t.contains("END") && t.length > 80
@@ -70,17 +77,21 @@ class SecureCredentialStore(context: Context) {
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
             return try {
                 val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                EncryptedSharedPreferences.create(
+                val prefs = EncryptedSharedPreferences.create(
                     PREFS_NAME,
                     masterKey,
                     context,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
+                lastKeystoreInvalidated = false
+                prefs
             } catch (e: javax.crypto.AEADBadTagException) {
+                lastKeystoreInvalidated = true
                 Log.w(TAG, "Encrypted prefs Keystore tag invalid — using fallback, re-enter key")
                 null
             } catch (e: java.security.KeyStoreException) {
+                lastKeystoreInvalidated = true
                 Log.w(TAG, "Keystore unavailable (${e.javaClass.simpleName})")
                 null
             } catch (e: Exception) {
@@ -88,6 +99,7 @@ class SecureCredentialStore(context: Context) {
                 if (name.contains("AEAD", true) || name.contains("KeyStore", true) ||
                     e.cause is javax.crypto.AEADBadTagException
                 ) {
+                    lastKeystoreInvalidated = true
                     Log.w(TAG, "Encrypted prefs invalidated ($name) — using fallback")
                     return null
                 }

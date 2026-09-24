@@ -24,10 +24,13 @@ android {
             if (jks.isFile) {
                 storeFile = jks
                 storePassword = (findProperty("DIPHUNTER_DEBUG_STORE_PASSWORD") as String?)
+                    ?: System.getenv("DIPHUNTER_DEBUG_STORE_PASSWORD")
                     ?: "diphunter-debug"
                 keyAlias = (findProperty("DIPHUNTER_DEBUG_KEY_ALIAS") as String?)
+                    ?: System.getenv("DIPHUNTER_DEBUG_KEY_ALIAS")
                     ?: "diphunter-debug"
                 keyPassword = (findProperty("DIPHUNTER_DEBUG_KEY_PASSWORD") as String?)
+                    ?: System.getenv("DIPHUNTER_DEBUG_KEY_PASSWORD")
                     ?: "diphunter-debug"
             }
         }

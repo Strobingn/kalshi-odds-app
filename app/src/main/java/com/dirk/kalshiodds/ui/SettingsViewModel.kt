@@ -55,7 +55,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     it.copy(
                         settings = s,
                         keyIdDraft = s.apiKeyId,
-                        bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd)
+                        bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd),
+                        credentialMessage = if (prefs.needsReenterKey()) {
+                            "Re-enter key — device Keystore was invalidated. Restore from Data → Restore credentials, or paste again."
+                        } else {
+                            it.credentialMessage
+                        }
                     )
                 }
             }
