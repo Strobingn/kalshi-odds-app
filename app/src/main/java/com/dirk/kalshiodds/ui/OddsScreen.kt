@@ -38,21 +38,25 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
+import com.dirk.kalshiodds.ui.components.AiFairLabel
 import com.dirk.kalshiodds.ui.components.BidChart
+import com.dirk.kalshiodds.ui.components.MarketAskHero
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.PaperBookCard
+import com.dirk.kalshiodds.ui.components.PastSettlementsRow
 import com.dirk.kalshiodds.ui.components.PositionsCard
+import com.dirk.kalshiodds.ui.components.TapeConflictBanner
+import com.dirk.kalshiodds.ui.components.TargetNowLine
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
+import com.dirk.kalshiodds.ui.components.UpDownBuyButtons
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
@@ -414,8 +418,6 @@ private fun LiveUpDownHero(
     onBuyNo: (MarketUiModel) -> Unit,
     onOpenChart: (MarketUiModel) -> Unit = {}
 ) {
-    val primary = market?.primaryHeroSide
-    val tapeUp = primary == "YES" || (primary == null && (market?.yesAsk ?: 0.5) >= 0.5)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -436,32 +438,12 @@ private fun LiveUpDownHero(
             )
             TimeLeftLabel(market?.closeTimeEpochMs, pill = true)
         }
-        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.targetNowLine(market?.floorStrike, market?.spotUsd)?.let { line ->
-            val up = (market?.spotVsTargetUsd ?: 0.0) >= 0.0
-            Text(
-                line,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (up) AccentGreen else AccentRed,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            )
-        }
-        if (market?.tapeConflict == true && market.tapeConflictNote != null) {
-            Text(
-                text = market.tapeConflictNote.orEmpty(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = AccentOrange,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp)
-                    .background(AccentOrange.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
-                    .padding(10.dp)
-            )
-        }
+        market?.let { TargetNowLine(it, Modifier.padding(top = 8.dp)) }
+        market?.let { TapeConflictBanner(it, Modifier.padding(top = 8.dp)) }
         market?.let { m ->
+            MarketAskHero(m, Modifier.padding(top = 10.dp))
             Row(
-                Modifier.fillMaxWidth().padding(top = 10.dp),
+                Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
@@ -477,34 +459,8 @@ private fun LiveUpDownHero(
                     fontWeight = FontWeight.Bold
                 )
             }
-            com.dirk.kalshiodds.domain.KalshiQuoteDisplay.aiLabel(
-                (m.importedModelPp ?: m.aiYesPercent)?.div(100.0)
-            )?.let { ai ->
-                Text(
-                    ai + (m.digitalFairPp?.let { String.format(Locale.US, "  ·  Fair %.0f¢", it) } ?: ""),
-                    color = AccentBlue,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-            if (m.pastSettlements.isNotEmpty()) {
-                Row(
-                    Modifier.fillMaxWidth().padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Past", color = TextSecondary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                    m.pastSettlements.take(8).forEach { yes ->
-                        Text(
-                            if (yes) "▲" else "▼",
-                            color = if (yes) AccentGreen else AccentRed,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp
-                        )
-                    }
-                }
-            }
+            AiFairLabel(m, Modifier.padding(top = 4.dp))
+            PastSettlementsRow(m.pastSettlements, Modifier.padding(top = 8.dp))
             BidChart(
                 points = m.bidHistory.ifEmpty {
                     m.oddsHistory.mapIndexed { i, mid ->
@@ -534,43 +490,13 @@ private fun LiveUpDownHero(
             modifier = Modifier.padding(top = 8.dp)
         )
         if (market != null) {
-            Row(
-                Modifier.fillMaxWidth().padding(top = 10.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Button(
-                    onClick = { onBuyYes(market) },
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                        containerColor = if (tapeUp) AccentGreen else AccentGreen.copy(alpha = 0.75f)
-                    )
-                ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
-                Button(
-                    onClick = { onBuyNo(market) },
-                    modifier = Modifier.weight(1f).height(52.dp),
-                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentRed)
-                ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
-            }
+            UpDownBuyButtons(
+                market = market,
+                onBuyYes = { onBuyYes(market) },
+                onBuyNo = { onBuyNo(market) },
+                modifier = Modifier.padding(top = 10.dp)
+            )
         }
-    }
-}
-
-@Composable
-private fun HeroPct(label: String, percent: Double?, color: Color, emphasized: Boolean = true) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(
-            text = if (emphasized) "$label · primary" else label,
-            style = MaterialTheme.typography.titleMedium,
-            color = if (emphasized) color else TextSecondary,
-            fontWeight = FontWeight.Bold
-        )
-        Text(
-            text = percent?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
-            fontSize = if (emphasized) 56.sp else 40.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (emphasized) color else color.copy(alpha = 0.65f),
-            lineHeight = if (emphasized) 60.sp else 44.sp
-        )
     }
 }
 

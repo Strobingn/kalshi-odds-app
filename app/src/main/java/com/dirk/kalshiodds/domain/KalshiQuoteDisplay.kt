@@ -13,11 +13,24 @@ object KalshiQuoteDisplay {
         return kotlin.math.round(p * 100.0).toInt().coerceIn(1, 99)
     }
 
-    fun multiplier(ask: Double?): Double? {
+    /**
+     * Kalshi-app payout multiple on the buy button.
+     *
+     * Gross `1/ask` for 64¢ is 1.56x; the official app shows **1.52x / 2.59x**
+     * because the taker fee (`0.07 × P × (1−P)`) is included in the cost:
+     * `1 / (ask + fee)`. Match that so the hero is identical to Kalshi.
+     */
+    fun multiplier(ask: Double?, includeFee: Boolean = true, feeRate: Double = 0.07): Double? {
         val p = KalshiPrice.usable(ask) ?: return null
         if (p <= 0.0) return null
-        return 1.0 / p
+        val fee = if (includeFee) (feeRate.coerceIn(0.0, 0.25) * p * (1.0 - p)).coerceAtLeast(0.0) else 0.0
+        val cost = p + fee
+        if (cost <= 0.0) return null
+        return 1.0 / cost
     }
+
+    /** Gross `1/ask` without the taker fee (tests / EV math). */
+    fun grossMultiplier(ask: Double?): Double? = multiplier(ask, includeFee = false)
 
     fun impliedChance(ask: Double?): Double? = KalshiPrice.usable(ask)
 

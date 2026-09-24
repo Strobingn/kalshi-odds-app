@@ -17,6 +17,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
@@ -64,8 +65,9 @@ class MainActivity : ComponentActivity() {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var screen by rememberSaveable { mutableStateOf("odds") }
                     var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
+                    val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
-                        oddsViewModel.state.value.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
+                        oddsState.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
                     }
                     when {
                         screen == "settings" -> SettingsScreen(
@@ -94,11 +96,20 @@ class MainActivity : ComponentActivity() {
                                         tMs = (chartMarket.closeTimeEpochMs ?: 0L) -
                                             (chartMarket.oddsHistory.size - 1 - i) * 2_000L,
                                         upBidCents = mid,
-                                        downBidCents = 100f - mid
+                                        downBidCents = 100f - mid,
+                                        spotUsd = chartMarket.spotUsd
                                     )
                                 }
                             },
-                            onBack = { chartTicker = null }
+                            onBack = { chartTicker = null },
+                            onBuyYes = { m ->
+                                oddsViewModel.buyMarket(m, "YES")
+                                chartTicker = null
+                            },
+                            onBuyNo = { m ->
+                                oddsViewModel.buyMarket(m, "NO")
+                                chartTicker = null
+                            }
                         )
                         else -> OddsScreen(
                             viewModel = oddsViewModel,

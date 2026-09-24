@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -24,20 +23,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.chart.ChartDownsampler
-import com.dirk.kalshiodds.ui.theme.AccentBlue
+import com.dirk.kalshiodds.chart.SpotAxis
 import com.dirk.kalshiodds.ui.theme.AccentGreen
+import com.dirk.kalshiodds.ui.theme.AccentOrange
 import com.dirk.kalshiodds.ui.theme.AccentRed
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
-import com.dirk.kalshiodds.ui.theme.checklistValueColor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -56,7 +55,9 @@ fun BidChart(
     windowEndMs: Long? = null,
     strikeLabel: String? = null,
     spotUsd: Double? = null,
-    strikeUsd: Double? = null
+    strikeUsd: Double? = null,
+    spotHeightDp: Int = if (scrub) 168 else 72,
+    showSpotPanel: Boolean = true
 ) {
     val bg = MaterialTheme.colorScheme.surface
     val labelColor = checklistLabelColor(bg)
@@ -65,22 +66,58 @@ fun BidChart(
         ChartDownsampler.downsample(points, if (scrub) ChartDownsampler.DETAIL_POINTS else ChartDownsampler.CARD_POINTS)
     }
     if (downsampled.size < 2) {
-        Box(
-            modifier.height(heightDp.dp).fillMaxWidth().background(bg, RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            Text(
-                if (downsampled.isEmpty()) "Chart warming up" else "Need 2 prints",
-                style = MaterialTheme.typography.labelMedium,
-                color = labelColor,
-                modifier = Modifier.padding(horizontal = 8.dp)
-            )
+        val loneSpot = spotUsd?.takeIf { it.isFinite() && it > 0.0 }
+        val loneRange = SpotAxis.range(listOfNotNull(loneSpot), strikeUsd)
+        Column(modifier.fillMaxWidth()) {
+            if (showSpotPanel && loneRange != null) {
+                val t = downsampled.lastOrNull()?.tMs ?: (windowEndMs ?: System.currentTimeMillis())
+                SpotPathCanvas(
+                    series = listOfNotNull(loneSpot?.let { t to it }),
+                    strikeUsd = strikeUsd,
+                    range = loneRange,
+                    windowStartMs = windowStartMs ?: (t - 900_000L),
+                    windowEndMs = windowEndMs ?: t,
+                    heightDp = spotHeightDp,
+                    lastSpot = loneSpot,
+                    axisColor = axisColor
+                )
+            }
+            Box(
+                Modifier.height(heightDp.dp).fillMaxWidth().background(bg, RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    if (downsampled.isEmpty()) "Chart warming up" else "Need 2 prints",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = labelColor,
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+            }
         }
         return
     }
     var scrubIdx by remember(downsampled.size) { mutableStateOf<Int?>(null) }
     val pick = scrubIdx?.let { downsampled.getOrNull(it) } ?: downsampled.last()
+    val spotSeries = remember(downsampled, spotUsd) {
+        downsampled.mapNotNull { p -> p.spotUsd?.takeIf { it.isFinite() && it > 0.0 }?.let { p.tMs to it } } +
+            listOfNotNull(spotUsd?.takeIf { it.isFinite() && it > 0.0 }?.let { downsampled.last().tMs to it })
+    }
+    val spotRange = remember(spotSeries, strikeUsd) {
+        SpotAxis.range(spotSeries.map { it.second }, strikeUsd)
+    }
     Column(modifier.fillMaxWidth()) {
+        if (showSpotPanel && spotRange != null && (strikeUsd != null || spotSeries.isNotEmpty())) {
+            SpotPathCanvas(
+                series = spotSeries,
+                strikeUsd = strikeUsd,
+                range = spotRange,
+                windowStartMs = windowStartMs ?: downsampled.first().tMs,
+                windowEndMs = windowEndMs ?: downsampled.last().tMs,
+                heightDp = spotHeightDp,
+                lastSpot = spotUsd ?: spotSeries.lastOrNull()?.second,
+                axisColor = axisColor
+            )
+        }
         Canvas(
             Modifier
                 .fillMaxWidth()
@@ -135,25 +172,6 @@ fun BidChart(
             }
             line({ it.upBidCents }, AccentGreen)
             line({ it.downBidCents }, AccentRed)
-            if (strikeUsd != null && strikeUsd > 0.0) {
-                val spots = downsampled.mapNotNull { it.spotUsd } + listOfNotNull(spotUsd)
-                val lastSpot = spots.lastOrNull()
-                val band = maxOf(
-                    kotlin.math.abs((lastSpot ?: strikeUsd) - strikeUsd),
-                    strikeUsd * 0.001,
-                    1.0
-                )
-                val yStrike = size.height * 0.5f
-                var x = 0f
-                while (x < size.width) {
-                    drawLine(axisColor.copy(alpha = 0.55f), Offset(x, yStrike), Offset(x + 8f, yStrike), strokeWidth = 2f)
-                    x += 16f
-                }
-                if (lastSpot != null) {
-                    val ySpot = (size.height * (0.5f - ((lastSpot - strikeUsd) / (2.0 * band)).toFloat())).coerceIn(0f, size.height)
-                    drawCircle(AccentBlue, 4.dp.toPx(), Offset(size.width - 6.dp.toPx(), ySpot))
-                }
-            }
             if (scrub && scrubIdx != null) {
                 val x = xOf(pick.tMs)
                 drawLine(axisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
@@ -173,6 +191,79 @@ fun BidChart(
         }
         strikeLabel?.let {
             Text(it, color = labelColor, style = MaterialTheme.typography.labelMedium)
+        }
+    }
+}
+
+@Composable
+private fun SpotPathCanvas(
+    series: List<Pair<Long, Double>>,
+    strikeUsd: Double?,
+    range: Pair<Double, Double>,
+    windowStartMs: Long,
+    windowEndMs: Long,
+    heightDp: Int,
+    lastSpot: Double?,
+    axisColor: androidx.compose.ui.graphics.Color
+) {
+    val (minY, maxY) = range
+    val t0 = windowStartMs
+    val t1 = windowEndMs
+    val spanT = (t1 - t0).coerceAtLeast(1L)
+    Canvas(
+        Modifier
+            .fillMaxWidth()
+            .height(heightDp.dp)
+            .padding(bottom = 4.dp)
+    ) {
+        fun xOf(t: Long) = size.width * ((t - t0).toFloat() / spanT.toFloat()).coerceIn(0f, 1f)
+        fun yOf(v: Double) = size.height * SpotAxis.yFraction(v, minY, maxY)
+        val grid = axisColor.copy(alpha = 0.22f)
+        for (i in 1..3) {
+            val y = size.height * i / 4f
+            drawLine(grid, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+        }
+        if (strikeUsd != null && strikeUsd > 0.0) {
+            val yStrike = yOf(strikeUsd)
+            drawLine(
+                axisColor.copy(alpha = 0.7f),
+                Offset(0f, yStrike),
+                Offset(size.width, yStrike),
+                strokeWidth = 2f,
+                pathEffect = PathEffect.dashPathEffect(floatArrayOf(12f, 10f), 0f)
+            )
+        }
+        if (series.size >= 2) {
+            val path = Path()
+            series.forEachIndexed { i, (t, px) ->
+                val x = xOf(t)
+                val y = yOf(px)
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            drawPath(path, AccentOrange, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+        }
+        val endPx = lastSpot ?: series.lastOrNull()?.second
+        val endT = series.lastOrNull()?.first ?: t1
+        if (endPx != null) {
+            drawCircle(AccentOrange, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
+        }
+    }
+    Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+        val now = lastSpot ?: series.lastOrNull()?.second
+        Text(
+            now?.let { String.format(Locale.US, "Now $%,.2f", it) } ?: "Spot",
+            color = AccentOrange,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.weight(1f))
+        strikeUsd?.let {
+            Text(
+                String.format(Locale.US, "TARGET $%,.2f", it),
+                color = axisColor,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
         }
     }
 }
@@ -199,8 +290,16 @@ private fun BidChartPreview() {
         BidPoint(
             tMs = now + i * 30_000L,
             upBidCents = 40f + i * 0.4f,
-            downBidCents = 55f - i * 0.3f
+            downBidCents = 55f - i * 0.3f,
+            spotUsd = 84_300.0 + i * 0.8
         )
     }
-    BidChart(pts, heightDp = 110, scrub = true, strikeLabel = "Strike $111,200")
+    BidChart(
+        pts,
+        heightDp = 110,
+        scrub = true,
+        strikeLabel = "Strike $84,279",
+        spotUsd = 84_323.0,
+        strikeUsd = 84_278.84
+    )
 }

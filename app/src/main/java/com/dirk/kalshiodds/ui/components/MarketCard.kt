@@ -246,7 +246,10 @@ fun MarketCard(
                 heightDp = if (compact) 72 else 110,
                 windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
                 windowEndMs = market.closeTimeEpochMs,
-                strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) }
+                strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
+                spotUsd = market.spotUsd,
+                strikeUsd = market.floorStrike,
+                spotHeightDp = if (compact) 56 else 72
             )
             if (onOpenChart != null) {
                 Text(

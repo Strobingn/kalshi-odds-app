@@ -248,6 +248,8 @@ class ScoringEngine(
                 }
             }
         }
+        val spotFeat = external.forSeries(tick.series)
+        spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
@@ -281,7 +283,6 @@ class ScoringEngine(
         }.getOrNull()
         val mlpPp = ai?.yes?.times(100.0)
         val tteFrac = ((tteSec ?: 900L).toDouble() / 900.0).coerceIn(0.0, 1.0)
-        val spotFeat = external.forSeries(tick.series)
         val spotRet = spotFeat?.let { it.spotReturn1m ?: it.spotReturn5m }
         heavy.pushFrame(
             ticker = tick.ticker,
@@ -570,7 +571,9 @@ class ScoringEngine(
             strikeUsd = strikeUsd,
             fairYes = fair / 100.0,
             previousPrimary = lastPrimarySide[tick.ticker],
-            priorStreak = tapeStreak[tick.ticker] ?: 0
+            priorStreak = tapeStreak[tick.ticker] ?: 0,
+            yesBid = tick.yesBid,
+            noBid = tick.noBid
         )
         tapeStreak[tick.ticker] = tape.disagreementStreak
         lastPrimarySide[tick.ticker] = tape.primarySide

@@ -76,6 +76,34 @@ class TapeConflictTest {
     }
 
     @Test
+    fun singleOneSidedDumpDoesNotFlipPreviousPrimary() {
+        val out = TapeConflict.evaluate(
+            spotReturn1m = -0.01,
+            spotReturn5m = -0.02,
+            modelSide = "YES",
+            yesAsk = 0.05,
+            noAsk = 0.96,
+            fairYes = 0.71,
+            previousPrimary = "YES"
+        )
+        assertEquals("YES", out.primarySide)
+        assertFalse(out.conflict)
+    }
+
+    @Test
+    fun screenshotMarketIsYesNotSparklineDown() {
+        val primary = TapeConflict.primaryFromMarket(
+            yesAsk = 0.64,
+            noAsk = 0.37,
+            spotUsd = 84_311.58,
+            strikeUsd = 84_278.84,
+            fairYes = 0.73,
+            previousPrimary = "NO"
+        )
+        assertEquals("YES", primary)
+    }
+
+    @Test
     fun tinyMoveIsFlat() {
         val out = TapeConflict.evaluate(
             spotReturn1m = 0.0001,

@@ -123,7 +123,30 @@ object ChartDownsampler {
 
 fun BidPoint.hasQuote(): Boolean = upBidCents != null || downBidCents != null
 
+fun BidPoint.hasSpot(): Boolean = spotUsd != null && spotUsd.isFinite() && spotUsd > 0.0
+
 fun dollarsToCents(dollars: Double?): Float? {
     if (dollars == null || !dollars.isFinite()) return null
     return (dollars * 100.0).toFloat()
+}
+
+/**
+ * Y-range for the underlying spot panel so the dashed TARGET line
+ * sits in real USD space (not a mid-height hack).
+ */
+object SpotAxis {
+    fun range(spots: List<Double>, strike: Double?): Pair<Double, Double>? {
+        val clean = spots.filter { it.isFinite() && it > 0.0 }
+        val k = strike?.takeIf { it.isFinite() && it > 0.0 }
+        if (clean.isEmpty() && k == null) return null
+        val lo = listOfNotNull(clean.minOrNull(), k).minOrNull() ?: return null
+        val hi = listOfNotNull(clean.maxOrNull(), k).maxOrNull() ?: return null
+        val pad = maxOf((hi - lo) * 0.12, (k ?: hi) * 0.0002, 1.0)
+        return (lo - pad) to (hi + pad)
+    }
+
+    fun yFraction(value: Double, minY: Double, maxY: Double): Float {
+        val span = (maxY - minY).coerceAtLeast(1e-9)
+        return (1.0 - ((value - minY) / span)).toFloat().coerceIn(0f, 1f)
+    }
 }

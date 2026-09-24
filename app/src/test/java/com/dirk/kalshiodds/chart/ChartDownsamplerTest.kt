@@ -28,6 +28,17 @@ class ChartDownsamplerTest {
     }
 
     @Test
+    fun spotAxisKeepsStrikeInRange() {
+        val range = SpotAxis.range(listOf(84_311.58, 84_305.0), 84_278.84)
+        assertTrue(range != null)
+        assertTrue(range!!.first < 84_278.84)
+        assertTrue(range.second > 84_311.58)
+        val yStrike = SpotAxis.yFraction(84_278.84, range.first, range.second)
+        val ySpot = SpotAxis.yFraction(84_311.58, range.first, range.second)
+        assertTrue(ySpot < yStrike)
+    }
+
+    @Test
     fun windowFilters() {
         val pts = listOf(
             BidPoint(100, 10f, 90f),

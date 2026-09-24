@@ -698,7 +698,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 (stored + liveBids)
                     .filter {
                         com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.upBidCents) != null ||
-                            com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents) != null
+                            com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents) != null ||
+                            com.dirk.kalshiodds.chart.hasSpot(it)
                     }
                     .sortedBy { it.tMs }
                     .distinctBy { it.tMs },

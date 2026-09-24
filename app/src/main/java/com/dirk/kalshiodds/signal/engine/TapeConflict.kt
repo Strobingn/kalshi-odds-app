@@ -55,15 +55,16 @@ object TapeConflict {
         spotUsd: Double?,
         strikeUsd: Double?,
         fairYes: Double?,
-        previousPrimary: String?
+        previousPrimary: String?,
+        yesBid: Double? = null,
+        noBid: Double? = null
     ): String {
-        val yes = QuoteSanity.usablePair(null, yesAsk).second
-        val no = QuoteSanity.usablePair(null, noAsk).second
-        val mid = QuoteSanity.robustMid(
-            bid = yesAsk?.let { KalshiPrice.usable(1.0 - (noAsk ?: 1.0)) },
-            ask = yes,
-            last = null
-        ) ?: QuoteSanity.robustMid(null, yes) ?: no?.let { 1.0 - it }
+        val (yb, ya) = QuoteSanity.usablePair(yesBid, yesAsk)
+        val (_, na) = QuoteSanity.usablePair(noBid, noAsk)
+        val impliedYesBid = na?.let { KalshiPrice.usable(1.0 - it) } ?: yb
+        val mid = QuoteSanity.robustMid(impliedYesBid, ya)
+            ?: QuoteSanity.robustMid(yb, ya)
+            ?: na?.let { KalshiPrice.usable(1.0 - it) }
 
         val spot = spotUsd?.takeIf { it.isFinite() && it > 0.0 }
         val strike = strikeUsd?.takeIf { it.isFinite() && it > 0.0 }
@@ -94,10 +95,17 @@ object TapeConflict {
             }
         }
         val decided = fromSpot ?: fromMarket ?: fromFair
-        if (decided != null) return decided
-        val prev = previousPrimary?.uppercase()
-        if (prev == DirectionSanity.SIDE_YES || prev == DirectionSanity.SIDE_NO) return prev
-        return DirectionSanity.SIDE_YES
+        val prev = previousPrimary?.uppercase()?.takeIf {
+            it == DirectionSanity.SIDE_YES || it == DirectionSanity.SIDE_NO
+        }
+        if (decided == null) return prev ?: DirectionSanity.SIDE_YES
+        if (prev == null || prev == decided) return decided
+        // A single quote print cannot flip the previous primary. Spot vs
+        // strike is the underlying, not a book tick; market+fair agreement
+        // is two independent signals.
+        if (fromSpot != null) return fromSpot
+        if (fromMarket != null && fromFair != null && fromMarket == fromFair) return fromMarket
+        return prev
     }
 
     /**
@@ -113,7 +121,9 @@ object TapeConflict {
         strikeUsd: Double? = null,
         fairYes: Double? = null,
         previousPrimary: String? = null,
-        priorStreak: Int = 0
+        priorStreak: Int = 0,
+        yesBid: Double? = null,
+        noBid: Double? = null
     ): Result {
         val side = if (modelSide.equals("NO", ignoreCase = true)) DirectionSanity.SIDE_NO
         else DirectionSanity.SIDE_YES
@@ -125,7 +135,9 @@ object TapeConflict {
             spotUsd = spotUsd,
             strikeUsd = strikeUsd,
             fairYes = fairYes,
-            previousPrimary = previousPrimary ?: side
+            previousPrimary = previousPrimary ?: side,
+            yesBid = yesBid,
+            noBid = noBid
         )
         val disagree = side != primary
         val streak = if (disagree) priorStreak + 1 else 0
