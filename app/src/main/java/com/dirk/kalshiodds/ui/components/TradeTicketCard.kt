@@ -50,6 +50,7 @@ fun TradeTicketsSection(
     onApprove: (String) -> Unit,
     onApproveSell: (String, Int, Double) -> Unit = { id, _, _ -> onApprove(id) },
     onPaper: (String) -> Unit,
+    onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit
 ) {
@@ -105,7 +106,7 @@ fun TradeTicketsSection(
         }
         if (proposals.isEmpty() && working.isEmpty() && visibleError == null) {
             Text(
-                "No pending tickets. Use Buy YES / Buy NO on the hero or a market card.",
+                "No pending tickets. Use Buy YES / Buy NO on the hero, or Sell on Your positions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
                 modifier = Modifier
@@ -129,6 +130,7 @@ fun TradeTicketsSection(
             credentialsConfigured = credentialsConfigured,
             onApprove = { onApprove(awaiting.ticket.id) },
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
+            onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
             onDismiss = onCancelApprove
         )
     }
@@ -237,7 +239,7 @@ private fun ProposedTicketCard(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text("Paper $5")
+                    Text(if (ticket.isSell) "Paper sell" else "Paper $5")
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
@@ -246,6 +248,7 @@ private fun ProposedTicketCard(
                 ) {
                     Text(
                         when {
+                            ticket.paperOnly -> "Paper only"
                             !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
                             credentialsConfigured -> "Live Approve…"
                             else -> "Needs API key"
@@ -304,26 +307,40 @@ private fun ApproveTicketDialog(
     credentialsConfigured: Boolean,
     onApprove: () -> Unit,
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
+    onPaperSell: (Int, Double) -> Unit = { _, _ -> },
     onDismiss: () -> Unit
 ) {
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
+    val paperSell = ticket.paperOnly && ticket.isSell
     var countText by remember(ticket.id) { mutableStateOf(ticket.contracts.toString()) }
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (ticket.isSell) "Live Approve this sell?" else "Live Approve this ticket?") },
+        title = {
+            Text(
+                when {
+                    paperSell -> "Paper sell this position?"
+                    ticket.isSell -> "Live Approve this sell?"
+                    else -> "Live Approve this ticket?"
+                }
+            )
+        },
         text = {
             Column {
                 Text(
-                    if (ticket.isSell) {
-                        "Places a real V2 reduce-only GTC limit (POST /portfolio/events/orders) to sell the held side. " +
-                            "Count is capped at your position so this cannot flip. Not a paper fill."
-                    } else {
-                        "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
-                            "and not a paper fill. This tap is the only way a live order is sent. " +
-                            "Dismiss / Back leaves no hanging order. Not financial advice. High variance."
+                    when {
+                        paperSell ->
+                            "Simulated sell on the $100 paper book — never sent to Kalshi. " +
+                                "Count is capped at the paper fill so this cannot flip."
+                        ticket.isSell ->
+                            "Places a real V2 reduce-only GTC limit (POST /portfolio/events/orders) to sell the held side. " +
+                                "Count is capped at your position so this cannot flip. Not a paper fill."
+                        else ->
+                            "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
+                                "and not a paper fill. This tap is the only way a live order is sent. " +
+                                "Dismiss / Back leaves no hanging order. Not financial advice. High variance."
                     },
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -383,15 +400,23 @@ private fun ApproveTicketDialog(
                     if (ticket.isSell) {
                         val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
                         val px = (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
-                        onApproveSell(qty, px)
+                        if (paperSell) onPaperSell(qty, px) else onApproveSell(qty, px)
                     } else {
                         onApprove()
                     }
                 },
-                enabled = credentialsConfigured && ticket.canApprove,
+                enabled = if (paperSell) ticket.canPaper else credentialsConfigured && ticket.canApprove,
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
                 modifier = Modifier.height(48.dp)
-            ) { Text(if (ticket.isSell) "Live Approve sell" else "Live Approve") }
+            ) {
+                Text(
+                    when {
+                        paperSell -> "Paper sell"
+                        ticket.isSell -> "Live Approve sell"
+                        else -> "Live Approve"
+                    }
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

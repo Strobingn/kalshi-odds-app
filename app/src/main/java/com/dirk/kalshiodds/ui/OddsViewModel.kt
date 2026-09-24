@@ -430,6 +430,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ?: return
         if (!ticket.canPaper) return
         paperBook.manualFill(ticket)
+        if (ticket.isSell) ticketSession.dismiss(ticketId)
+    }
+
+    /** Paper-book sell with edited count/price. Never hits Kalshi. */
+    fun paperSellTicket(ticketId: String, count: Int, price: Double) {
+        ticketSession.revise(ticketId) { t -> resizeSell(t, count, price) }
+        paperTicket(ticketId)
     }
 
     fun sellPosition(ticker: String, side: String) {
@@ -516,6 +523,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 s.copy(snapshot = attachHistory(snap.overlayScores(scores, s.settings.edgeThresholdPp)))
             }
             scheduleRebuildTickets()
+            refreshPositionMarks()
         }
     }
 
@@ -545,6 +553,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (s.settings.paperTradingEnabled) {
             tickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
+        refreshPositionMarks()
     }
 
     private fun ticketContext(s: OddsUiState, nowMs: Long): TicketBuilder.Context {
@@ -563,6 +572,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             positions = s.positions,
             nowMs = nowMs
         )
+    }
+
+    /** Re-mark cached holdings from the latest book / WS tick. No REST. */
+    private fun refreshPositionMarks() {
+        val raw = _state.value.positions
+        if (raw.isEmpty()) return
+        decoratePositions(raw)
     }
 
     private fun refreshPositions() {
@@ -590,16 +606,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val bid = market?.let { TicketBuilder.bestBid(it, pos.side, ctx) } ?: pos.bestBid
             PositionParser.decorate(pos, market, bid)
         }
+        val note = when {
+            !s.settings.credentialsConfigured ->
+                "Add Kalshi API Key ID + PEM in Settings to load live positions."
+            decorated.isEmpty() -> "No open Kalshi positions."
+            else -> null
+        }
         _state.update {
-            it.copy(
-                positions = decorated,
-                positionsNote = when {
-                    !s.settings.credentialsConfigured ->
-                        "Add Kalshi API Key ID + PEM in Settings to load live positions."
-                    decorated.isEmpty() -> "No open Kalshi positions."
-                    else -> null
-                }
-            )
+            if (it.positions == decorated && it.positionsNote == note) it
+            else it.copy(positions = decorated, positionsNote = note)
         }
     }
 

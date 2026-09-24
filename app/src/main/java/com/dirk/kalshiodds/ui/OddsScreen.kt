@@ -167,6 +167,7 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             onApprove = { viewModel.approveTicket(it) },
                             onApproveSell = { id, count, price -> viewModel.approveSellTicket(id, count, price) },
                             onPaper = { viewModel.paperTicket(it) },
+                            onPaperSell = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
                             onCancelApprove = { viewModel.cancelTicketApprove() },
                             onCancelOrder = { viewModel.cancelWorkingOrder(it) }
                         )

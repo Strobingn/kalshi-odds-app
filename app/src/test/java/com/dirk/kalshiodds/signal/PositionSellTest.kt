@@ -54,6 +54,43 @@ class PositionParserTest {
         assertNull(PositionParser.parseMarket(MarketPositionDto(ticker = "X", positionFp = null)))
         assertTrue(PositionParser.parseAll(emptyList()).isEmpty())
     }
+
+    @Test
+    fun decorateMarksBidAndUnrealizedPnl() {
+        val pos = LivePosition(
+            ticker = "KXBTC15M-26SEP241700-00",
+            side = "YES",
+            contracts = 10.0,
+            exposureUsd = 2.0,
+            avgCost = 0.20
+        )
+        val market = MarketUiModel(
+            ticker = pos.ticker,
+            title = "BTC up?",
+            subtitle = null,
+            floorStrike = null,
+            yesBid = 0.35,
+            yesAsk = 0.37,
+            noBid = 0.63,
+            noAsk = 0.65,
+            lastPrice = 0.36,
+            yesProbabilityPercent = 36.0,
+            noProbabilityPercent = 64.0,
+            volume = 1.0,
+            volume24h = 1.0,
+            openInterest = 1.0,
+            liquidityDollars = 1.0,
+            closeTimeLocal = null,
+            closeTimeEpochMs = 2_000_000L + 600_000L,
+            status = "active",
+            seriesLabel = "Bitcoin"
+        )
+        val marked = PositionParser.decorate(pos, market, bid = 0.35)
+        assertEquals(0.35, marked.bestBid!!, 1e-9)
+        assertEquals(1.50, marked.unrealizedPnlUsd!!, 1e-9)
+        assertEquals(market.closeTimeEpochMs, marked.closeTimeEpochMs)
+        assertEquals("BTC up?", marked.title)
+    }
 }
 
 class SellTicketTest {
