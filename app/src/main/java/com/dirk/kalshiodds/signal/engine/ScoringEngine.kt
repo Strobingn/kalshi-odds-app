@@ -197,8 +197,24 @@ class ScoringEngine(
     ): LocalOrderBook? = book.applyDelta(ticker, price, delta, side, seq)
 
     fun score(tick: MarketTick, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Score? {
+        return try {
+            scoreUnchecked(tick, settings, nowMs)
+        } catch (t: Throwable) {
+            com.dirk.kalshiodds.data.local.results.CrashBreadcrumb.record("score ${tick.ticker}", t)
+            com.dirk.kalshiodds.signal.ml.HeavyMlGuard.noteFailure(t, "score")
+            try {
+                scoreUnchecked(tick, settings.copy(heavyMlEnabled = false, extendedAiEnabled = false), nowMs)
+            } catch (t2: Throwable) {
+                com.dirk.kalshiodds.data.local.results.CrashBreadcrumb.record("score-light ${tick.ticker}", t2)
+                null
+            }
+        }
+    }
+
+    private fun scoreUnchecked(tick: MarketTick, rawSettings: SignalSettings, nowMs: Long): Score? {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return null
-        if (!settings.isWatchedTicker(tick.ticker)) return null
+        if (!rawSettings.isWatchedTicker(tick.ticker)) return null
+        val settings = com.dirk.kalshiodds.signal.ml.HeavyMlGuard.apply(rawSettings)
         book.push(tick, nowMs)
         val mid01 = tick.mid01 ?: return null
         val midPp = mid01 * 100.0
@@ -274,7 +290,8 @@ class ScoringEngine(
             null
         }
         val stackOverride = extRegimePre?.let { RegimeClassifier.scaleStack(heavy.stack, it) }
-        val heavyOut = heavy.infer(
+        val heavyOut = try {
+            heavy.infer(
             HeavyMlRuntime.Input(
                 ticker = tick.ticker,
                 series = tick.series,
@@ -299,7 +316,11 @@ class ScoringEngine(
             ),
             settings,
             stackOverride = stackOverride
-        )
+            )
+        } catch (t: Throwable) {
+            com.dirk.kalshiodds.signal.ml.HeavyMlGuard.noteFailure(t, "heavy.infer")
+            heavy.lightOutput(ai?.yes, "0.2.x blend (heavy ML failed)")
+        }
         val aiPp = if (settings.heavyMlEnabled && heavyOut.usedHeavy) {
             heavyOut.ensembleYes * 100.0
         } else {
@@ -445,6 +466,7 @@ class ScoringEngine(
         }
         val sizeNorm = SequenceFeatures.normalizeSize(tick.tradeSize ?: depthNear ?: 0.0).toDouble()
         val extOut = if (settings.extendedAiEnabled) {
+            try {
             extended.evaluate(
                 ExtendedAiRuntime.Input(
                     ticker = tick.ticker,
@@ -481,6 +503,10 @@ class ScoringEngine(
                 settings,
                 heavy.stack
             )
+            } catch (t: Throwable) {
+                com.dirk.kalshiodds.signal.ml.HeavyMlGuard.noteFailure(t, "extended")
+                null
+            }
         } else {
             null
         }

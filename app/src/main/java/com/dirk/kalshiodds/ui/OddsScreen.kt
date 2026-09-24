@@ -160,10 +160,51 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             onCancelOrder = { viewModel.cancelWorkingOrder(it) }
                         )
                     }
+                    state.mlGuardNote?.let { note ->
+                        item {
+                            Text(
+                                text = note,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = AccentOrange,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(AccentOrange.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                                    .padding(12.dp)
+                            )
+                        }
+                    }
                     if (state.recentAlerts.isNotEmpty()) {
                         item { SectionHeader("Recent signals") }
                         items(state.recentAlerts.take(8), key = { "sig-${it.id}" }) { alert ->
                             SignalRow(alert)
+                        }
+                    } else if (state.persistedHistory.isNotEmpty()) {
+                        item { SectionHeader("Saved results (last session)") }
+                        item {
+                            Text(
+                                "Reloaded from SQLite after a crash or kill. Export a CSV from Settings or Scorecard.",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = TextSecondary
+                            )
+                        }
+                        items(state.persistedHistory.take(8), key = { "hist-${it.id}-${it.ticker}" }) { row ->
+                            Text(
+                                text = String.format(
+                                    Locale.US,
+                                    "%s  %s  Δ%+.1fpp  fair %.0f%%  mkt %.0f%%",
+                                    row.ticker,
+                                    row.side,
+                                    row.edgePp,
+                                    row.fairPp,
+                                    row.marketPp
+                                ),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onBackground,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(10.dp))
+                                    .padding(10.dp)
+                            )
                         }
                     }
                     if (alertCount > 0) {

@@ -19,6 +19,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Button
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -76,6 +77,12 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary
             )
+            Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
+                Text("Export results")
+            }
+            ui.exportMessage?.let {
+                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
             CalibrationBanner(snap)
             AdapterBanner(ui.adapter)
             GuardBanner(ui.guardrails)

@@ -18,9 +18,27 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.0**
+Package: `com.dirk.kalshiodds` · version **0.3.1**
 
-**0.3.0 adds on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19** (regime classifier, anomaly/spoof gate, survival, advisory RL sizer, news pulse, rival-flow, Bayesian MM, conformal sets, meta-label, path simulator) on top of the 0.2.x blend. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+**0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, OOM) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend); Heavy ML auto-disables after 3 session failures. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+
+## Persistence + crash harden (v0.3.1)
+
+Results now survive a process kill:
+
+- **SQLite** (`diphunter_results.db`): scored snapshots, alerts, scorecard / policy-eval rows, Approve-ticket attempts (advisory; never unsupervised).
+- **`results.log`**: rolling append-only text in app files.
+- **Export results** (Settings or Scorecard): CSV under app Downloads / MediaStore `Download/DipHunter`.
+- Cold start reloads recent SQLite rows into Recent signals / Saved results.
+
+**What was killing 0.3.0 mid-session**
+
+1. Every Kalshi **order-book delta** ran the full Heavy ML + Extended AI stack (CNN/LSTM, 3× MC-dropout, GBM, 48-path Monte Carlo) and then rewrote the entire prediction-log DataStore JSON **on the single tick thread**. Deltas arrive tens of times per second → allocation storm → **OOM** / ANR → process death. Scoring is now throttled to ≥400ms per ticker; DataStore/SQLite writes are batched on IO.
+2. **`HeavyMlRuntime` was not synchronized.** WS ticks and REST refresh shared `heads` / `stack` / a growing `lastActivation` map → `ConcurrentModificationException` and native-adjacent corruption.
+3. A single infer/OOM/TFLite failure could escape. Infer is now fail-soft to the **0.2.x MLP blend**; 3 failures (or a recent crash breadcrumb mentioning OOM/TFLite) disable Heavy ML for the session.
+4. Compose overlaid every score immediately — book floods hit the main thread. Overlay is debounced 250ms.
+
+**Light mode:** Settings → Light mode (default for new installs and a one-time 0.3.1 reset). Turn Heavy ML back on if the phone can take it.
 
 ## Heavy ML (v0.3.0)
 
@@ -52,7 +70,8 @@ Cold start: if the sequence window is short and the stack has not been fine-tune
 
 | Knob | Default | Role |
 |------|---------|------|
-| Heavy ML | on | Master switch. Off = 0.2.x blend |
+| Light mode | on (0.3.1) | Heavy ML + Extended AI off — safer on device |
+| Heavy ML | **off** | Master switch. Off = 0.2.x blend. Auto-off after 3 native/infer failures |
 | Sequence model | on | Temporal CNN / TinyLSTM |
 | GBM second opinion | on | Tabular booster |
 | Continual fine-tune | on | Last-layer + regime cal from settlements |

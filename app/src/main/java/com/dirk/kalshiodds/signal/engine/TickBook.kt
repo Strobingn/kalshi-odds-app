@@ -285,6 +285,20 @@ class TickBook(private val maxPoints: Int = 80) {
     }
 
     @Synchronized
+    fun pruneTo(keep: Set<String>) {
+        if (keep.isEmpty()) return
+        fun MutableMap<String, *>.drop() {
+            keys.filter { it !in keep }.forEach { remove(it) }
+        }
+        byTicker.drop()
+        lastTickByTicker.drop()
+        closeByTicker.drop()
+        oiByTicker.drop()
+        volumeByTicker.drop()
+        books.drop()
+    }
+
+    @Synchronized
     fun tickFromBook(
         ticker: String,
         receiveElapsedNanos: Long,

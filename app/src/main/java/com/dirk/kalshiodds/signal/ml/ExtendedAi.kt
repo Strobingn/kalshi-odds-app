@@ -100,7 +100,16 @@ class ExtendedAiRuntime(
     }
 
     fun evaluate(input: Input, settings: SignalSettings, stack: EnsembleStack.Weights): Output {
-        if (!settings.extendedAiEnabled) {
+        return try {
+            evaluateUnchecked(input, settings, stack)
+        } catch (t: Throwable) {
+            HeavyMlGuard.noteFailure(t, "extended")
+            idle("extended AI failed — 0.2.x blend")
+        }
+    }
+
+    private fun evaluateUnchecked(input: Input, settings: SignalSettings, stack: EnsembleStack.Weights): Output {
+        if (!settings.extendedAiEnabled || HeavyMlGuard.sessionDisabled) {
             return idle("extended AI off")
         }
         val regime = if (settings.regimeClassifierEnabled) {

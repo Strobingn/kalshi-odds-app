@@ -39,6 +39,7 @@ class LiveSignalsService : Service() {
 
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.Default + CoroutineExceptionHandler { _, t ->
+            com.dirk.kalshiodds.data.local.results.CrashBreadcrumb.record("pipeline", t)
             Log.e(TAG, "pipeline", t)
         }
     )

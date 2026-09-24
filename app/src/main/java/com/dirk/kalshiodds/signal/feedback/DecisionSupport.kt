@@ -1,8 +1,11 @@
 package com.dirk.kalshiodds.signal.feedback
 
+import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
+import com.dirk.kalshiodds.data.local.results.ScorecardRow
 import com.dirk.kalshiodds.prediction.PredictionLogStore
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
+import com.dirk.kalshiodds.signal.ml.PolicyEval
 import com.dirk.kalshiodds.signal.ml.ConformalSets
 import com.dirk.kalshiodds.signal.ml.ExtendedAiPersisted
 import com.dirk.kalshiodds.signal.ml.HeavyMlPersisted
@@ -22,6 +25,7 @@ class DecisionSupport(
     private val guardrailStore: GuardrailStore,
     private val scoring: ScoringEngine,
     private val heavyStore: HeavyMlStore? = null,
+    private val results: AsyncResultsWriter? = null,
     private val sessionId: Long = System.currentTimeMillis()
 ) {
     private val mutex = Mutex()
@@ -135,8 +139,41 @@ class DecisionSupport(
         if (settings.heavyMlEnabled && settings.continualFineTune) {
             scoring.heavy.applySettlements(replay, cal, enabled = true)
         }
-        scoring.extended.learnFromSettlements(replay, enabled = settings.extendedAiEnabled)
+            scoring.extended.learnFromSettlements(replay, enabled = settings.extendedAiEnabled)
         persistHeavy()
+        persistScorecardRows(settled, settings)
+    }
+
+    private fun persistScorecardRows(
+        settled: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
+        settings: SignalSettings
+    ) {
+        val writer = results ?: return
+        val policy = runCatching {
+            PolicyEval.evaluate(
+                settled,
+                stakeUsd = settings.policyEvalStakeUsd,
+                edgeThresholdPp = settings.edgeThresholdPp,
+                minConfidence = settings.minConfidence,
+                requireUncertaintyPass = settings.uncertaintyGateEnabled,
+                maxUncertainty = settings.maxUncertainty
+            )
+        }.getOrNull()
+        for (e in settled.takeLast(12)) {
+            writer.enqueueScorecard(
+                ScorecardRow(
+                    ticker = e.ticker,
+                    series = e.series,
+                    outcome = e.outcome.orEmpty(),
+                    score = e.score,
+                    brier = e.brier,
+                    edgePp = e.edgePp,
+                    policyRoi = policy?.gated?.roi,
+                    createdAtMs = e.settledAtMs ?: e.timestampMs,
+                    note = policy?.note
+                )
+            )
+        }
     }
 
     private suspend fun persistHeavy() {

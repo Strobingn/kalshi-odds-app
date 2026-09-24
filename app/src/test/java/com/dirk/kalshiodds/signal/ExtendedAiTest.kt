@@ -268,15 +268,16 @@ class ExtendedAiRuntimeTest {
     @Test
     fun votesOnlyAfterEnoughTicks() {
         val rt = ExtendedAiRuntime()
+        val on = SignalSettings(extendedAiEnabled = true)
         val cold = rt.evaluate(
             sampleInput(nTicks = 2),
-            SignalSettings(),
+            on,
             EnsembleStack.identity()
         )
         assertEquals(null, cold.fairBlendYes)
         val warm = rt.evaluate(
             sampleInput(nTicks = 10),
-            SignalSettings(),
+            on,
             EnsembleStack.identity()
         )
         assertNotNull(warm.survival)

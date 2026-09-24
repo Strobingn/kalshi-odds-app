@@ -25,6 +25,10 @@ class SequenceBuffer(
         while (q.isNotEmpty() && (q.size > maxRaw || q.first().tMs < cutoff)) {
             q.removeFirst()
         }
+        while (byTicker.size > MAX_TICKERS) {
+            val oldest = byTicker.keys.firstOrNull() ?: break
+            byTicker.remove(oldest)
+        }
     }
 
     @Synchronized
@@ -41,4 +45,8 @@ class SequenceBuffer(
     @Synchronized
     fun ready(ticker: String, nowMs: Long, minBins: Int = SequenceFeatures.MIN_FRAMES_FOR_SEQUENCE): Boolean =
         populatedBins(ticker, nowMs) >= minBins
+
+    companion object {
+        const val MAX_TICKERS = 24
+    }
 }
