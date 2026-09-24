@@ -25,6 +25,7 @@ class RivalFlowCluster {
     )
     private val counts = intArrayOf(1, 1, 1)
 
+    @Synchronized
     fun observe(aggressor: Double, midFollow: Double, sizeNorm: Double): FlowClusterResult {
         val x = doubleArrayOf(
             abs(aggressor).coerceIn(0.0, 1.0),

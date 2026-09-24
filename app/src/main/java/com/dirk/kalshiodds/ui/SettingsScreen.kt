@@ -358,6 +358,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 
             Section("Heavy ML (0.3.0 / safe light default)")
             Text(
+                "0.3.3 keeps light-mode scoring off the live order-book TreeMap (CME fix) and locks UP/YES vs DOWN/NO to spot-vs-target. " +
                 "0.3.1 defaults to light mode (0.2.x MLP blend) after Heavy ML exhausted the 256MB heap on a Galaxy S24 Ultra. " +
                     "One OutOfMemoryError immediately latches light mode and persists so the next launch stays on 0.2.x. " +
                     "Non-OOM failures still trip after 3. Re-enable Heavy ML only if you accept the heap risk. " +

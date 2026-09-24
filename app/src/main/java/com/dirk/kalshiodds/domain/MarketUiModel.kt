@@ -142,12 +142,7 @@ fun MarketUiModel.withEdgeMetrics(thresholdPp: Double = EDGE_ALERT_THRESHOLD_PP)
     val mkt = yesProbabilityPercent ?: return this
     val edge = ai - mkt
     val alert = abs(edge) >= thresholdPp
-    val stance = when {
-        edge >= thresholdPp -> "Lean YES vs market"
-        edge <= -thresholdPp -> "Lean NO vs market"
-        abs(edge) >= 2.0 -> if (edge > 0) "Slight YES lean" else "Slight NO lean"
-        else -> "No edge"
-    }
+    val stance = stanceFor(side = if (edge >= 0) "YES" else "NO", edgePp = edge, thresholdPp = thresholdPp)
     return copy(edgePp = edge, stance = stance, edgeAlert = alert)
 }
 
@@ -158,10 +153,8 @@ fun MarketUiModel.withSignalScore(
     val alert = score.passedFilter && abs(score.deltaPp) >= thresholdPp
     val stance = when {
         !score.passedFilter -> "Filtered — ${score.skipReason ?: "weak"}"
-        score.deltaPp >= thresholdPp -> "Lean YES vs market"
-        score.deltaPp <= -thresholdPp -> "Lean NO vs market"
-        abs(score.deltaPp) >= 2.0 -> if (score.deltaPp > 0) "Slight YES lean" else "Slight NO lean"
-        else -> "No edge"
+        score.directionalLock -> if (score.predictedSide.equals("NO", true)) "Lean DOWN / NO" else "Lean UP / YES"
+        else -> stanceFor(score.predictedSide, score.deltaPp, thresholdPp)
     }
     return copy(
         aiYesPercent = score.fairValuePp,
@@ -213,6 +206,15 @@ fun MarketUiModel.withSignalScore(
         pathSurvive = score.pathSurvive,
         extendedNote = score.extendedNote
     )
+}
+
+internal fun stanceFor(side: String, edgePp: Double, thresholdPp: Double): String {
+    val up = !side.equals("NO", ignoreCase = true)
+    return when {
+        abs(edgePp) >= thresholdPp -> if (up) "Lean UP / YES" else "Lean DOWN / NO"
+        abs(edgePp) >= 2.0 -> if (up) "Slight UP / YES" else "Slight DOWN / NO"
+        else -> "No edge"
+    }
 }
 
 private fun String?.toDoubleOrNullSafe(): Double? =

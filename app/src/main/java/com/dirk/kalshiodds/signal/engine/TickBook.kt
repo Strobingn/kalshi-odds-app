@@ -30,8 +30,22 @@ class TickBook(private val maxPoints: Int = 80) {
     private val oiByTicker = linkedMapOf<String, Double>()
     private val volumeByTicker = linkedMapOf<String, Double>()
     private val books = linkedMapOf<String, LocalOrderBook>()
+    private val strikeByTicker = linkedMapOf<String, Double>()
     private val seriesHistory = linkedMapOf<String, ArrayDeque<Pair<Long, Double>>>()
     private val maxSeriesPoints = 48
+
+    /**
+     * Immutable book metrics copied under the TickBook lock. Scoring / Extended
+     * AI must never iterate a live [LocalOrderBook] TreeMap — WS deltas mutate
+     * it on the ingest thread and that was a ConcurrentModificationException.
+     */
+    data class BookView(
+        val imbalance: Double? = null,
+        val depthNear: Double? = null,
+        val depthFar: Double? = null,
+        val depthDecay: Double? = null,
+        val pulse: LocalOrderBook.Pulse? = null
+    )
 
     @Synchronized
     fun push(tick: MarketTick, nowMs: Long = System.currentTimeMillis()): Point? {
@@ -96,6 +110,28 @@ class TickBook(private val maxPoints: Int = 80) {
 
     @Synchronized
     fun orderBook(ticker: String): LocalOrderBook? = books[ticker]
+
+    @Synchronized
+    fun rememberStrike(ticker: String, strike: Double?) {
+        val px = strike?.takeIf { it.isFinite() && it > 0.0 } ?: return
+        strikeByTicker[ticker] = px
+    }
+
+    @Synchronized
+    fun strike(ticker: String): Double? = strikeByTicker[ticker]
+
+    /** Snapshot imbalance / depth / pulse in one lock hold. */
+    @Synchronized
+    fun bookView(ticker: String): BookView {
+        val book = books[ticker] ?: return BookView()
+        return BookView(
+            imbalance = book.imbalance(),
+            depthNear = book.depthNearMid().takeIf { it > 0.0 },
+            depthFar = book.depthNearMid(SignalConstants.DEPTH_FAR_CENTS),
+            depthDecay = book.depthDecay(),
+            pulse = book.pulse()
+        )
+    }
 
     /**
      * Immutable copy of the local book. UI / TicketBuilder must not iterate
@@ -296,6 +332,7 @@ class TickBook(private val maxPoints: Int = 80) {
         oiByTicker.drop()
         volumeByTicker.drop()
         books.drop()
+        strikeByTicker.drop()
     }
 
     @Synchronized

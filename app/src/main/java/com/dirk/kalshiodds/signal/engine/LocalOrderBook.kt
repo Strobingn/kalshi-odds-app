@@ -40,8 +40,10 @@ class LocalOrderBook {
     private var cancelEma: Double = 0.0
     private var pullEma: Double = 0.0
 
+    @Synchronized
     fun isEmpty(): Boolean = yes.isEmpty() && no.isEmpty()
 
+    @Synchronized
     fun clear() {
         yes.clear()
         no.clear()
@@ -53,8 +55,10 @@ class LocalOrderBook {
         pullEma = 0.0
     }
 
+    @Synchronized
     fun pulse(): Pulse = Pulse(cancelSpike = cancelEma, quotePull = pullEma)
 
+    @Synchronized
     fun replaceSnapshot(
         yesLevels: List<Pair<Double, Double>>,
         noLevels: List<Pair<Double, Double>>,
@@ -73,6 +77,7 @@ class LocalOrderBook {
      * Apply one incremental size change. Returns false when [seq] skips ahead
      * of [lastSeq] (caller should wait for a fresh snapshot).
      */
+    @Synchronized
     fun applyDelta(price: Double, delta: Double, side: String, seq: Int? = null): Boolean {
         if (seq != null && lastSeq != null && seq > lastSeq!! + 1) {
             sawGap = true
@@ -97,11 +102,14 @@ class LocalOrderBook {
         return true
     }
 
+    @Synchronized
     fun bestYesBid(): Double? = if (yes.isEmpty()) null else yes.lastKey()
 
     /** Tightest YES offer implied by the best NO bid. */
+    @Synchronized
     fun bestYesAsk(): Double? = if (no.isEmpty()) null else (1.0 - no.lastKey()).coerceIn(0.0, 1.0)
 
+    @Synchronized
     fun mid01(): Double? {
         val bid = bestYesBid()
         val ask = bestYesAsk()
@@ -120,6 +128,7 @@ class LocalOrderBook {
      * Prefers size within [bandCents] of mid (YES-price axis). Falls back to
      * the top [topLevels] rungs when the band is empty.
      */
+    @Synchronized
     fun imbalance(bandCents: Double = DEFAULT_BAND_CENTS, topLevels: Int = DEFAULT_TOP_LEVELS): Double? {
         val mid = mid01()
         val band = (bandCents / 100.0).coerceAtLeast(0.0)
@@ -146,6 +155,7 @@ class LocalOrderBook {
     }
 
     /** Total size (YES bids + implied YES asks) within [bandCents] of mid. */
+    @Synchronized
     fun depthNearMid(bandCents: Double = SignalConstants.DEPTH_NEAR_CENTS): Double {
         val mid = mid01() ?: return 0.0
         val band = (bandCents / 100.0).coerceAtLeast(0.0)
@@ -164,6 +174,7 @@ class LocalOrderBook {
      * Near-mid size / far-mid size in `[0, 1]`. High = size concentrated
      * at the touch (better displayed liquidity). Null when the book is empty.
      */
+    @Synchronized
     fun depthDecay(
         nearCents: Double = SignalConstants.DEPTH_NEAR_CENTS,
         farCents: Double = SignalConstants.DEPTH_FAR_CENTS
@@ -174,11 +185,19 @@ class LocalOrderBook {
         return (near / far).coerceIn(0.0, 1.0)
     }
 
+    @Synchronized
     fun yesLevels(): List<Pair<Double, Double>> = yes.entries.map { it.key to it.value }
+
+    @Synchronized
     fun noLevels(): List<Pair<Double, Double>> = no.entries.map { it.key to it.value }
 
     /** Copy rungs so another thread can read them without racing [applyDelta]. */
-    fun snapshot(): BookLevelSnapshot = BookLevelSnapshot(yes = yesLevels(), no = noLevels())
+    @Synchronized
+    fun snapshot(): BookLevelSnapshot = BookLevelSnapshot(yes = yesLevelsUnlocked(), no = noLevelsUnlocked())
+
+    private fun yesLevelsUnlocked(): List<Pair<Double, Double>> = yes.entries.map { it.key to it.value }
+
+    private fun noLevelsUnlocked(): List<Pair<Double, Double>> = no.entries.map { it.key to it.value }
 
     private fun noteQuoteMove() {
         val bid = bestYesBid()

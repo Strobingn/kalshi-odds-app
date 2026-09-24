@@ -205,6 +205,49 @@ class TickBookMathTest {
         assertTrue(errors.joinToString { it.toString() }, errors.isEmpty())
     }
 
+    @Test
+    fun bookViewSurvivesConcurrentDeltas() {
+        val store = TickBook()
+        store.applySnapshot(
+            "KXBTC15M-VIEW",
+            yesLevels = listOf(0.50 to 5.0),
+            noLevels = listOf(0.49 to 5.0),
+            seq = 1
+        )
+        val errors = java.util.concurrent.CopyOnWriteArrayList<Throwable>()
+        val writers = (0 until 4).map { i ->
+            Thread {
+                try {
+                    repeat(80) { n ->
+                        store.applyDelta(
+                            "KXBTC15M-VIEW",
+                            price = 0.50,
+                            delta = if (n % 2 == 0) 1.0 else -1.0,
+                            side = "yes",
+                            seq = 2 + n + i * 80
+                        )
+                    }
+                } catch (t: Throwable) {
+                    errors.add(t)
+                }
+            }
+        }
+        val readers = (0 until 4).map {
+            Thread {
+                try {
+                    repeat(80) {
+                        store.bookView("KXBTC15M-VIEW")
+                    }
+                } catch (t: Throwable) {
+                    errors.add(t)
+                }
+            }
+        }
+        (writers + readers).forEach { it.start() }
+        (writers + readers).forEach { it.join() }
+        assertTrue(errors.joinToString { it.toString() }, errors.isEmpty())
+    }
+
     private fun tick(ticker: String, bid: Double, ask: Double) = MarketTick(
         ticker = ticker,
         series = MarketTick.inferSeries(ticker),
