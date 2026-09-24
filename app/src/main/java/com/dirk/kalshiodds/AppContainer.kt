@@ -40,11 +40,11 @@ class AppContainer(context: Context) {
     val notifier = SignalNotifier(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
-    val sqliteOrMemory = runCatching { SqliteResultsStore(app) }
+    private val resultsImpl = runCatching { SqliteResultsStore(app) as ResultsStore }
         .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
-    val resultsStore: ResultsStore = sqliteOrMemory
+    val resultsStore: ResultsStore = resultsImpl
     val archive: com.dirk.kalshiodds.data.local.archive.DataArchive =
-        sqliteOrMemory as com.dirk.kalshiodds.data.local.archive.DataArchive
+        resultsImpl as com.dirk.kalshiodds.data.local.archive.DataArchive
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))

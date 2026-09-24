@@ -474,19 +474,21 @@ def main() -> int:
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y)
     export(model, metrics, Path(args.out))
-    # tiny parity sample for Android tests
-    sample = {
-        "x": X[0],
-        "p": predict_rows(
-            [[(X[0][j] - model["mean"][j]) / model["std"][j] for j in range(len(FEATURE_NAMES))]],
-            model["weights"],
-            model["bias"],
-            model["platt_a"],
-            model["platt_b"],
-        )[0],
-    }
-    (ML_DIR / "fixtures").mkdir(exist_ok=True)
-    (ML_DIR / "fixtures" / "parity_sample.json").write_text(json.dumps(sample, indent=2), encoding="utf-8")
+    # Do not overwrite the hand-checked Android/Python parity fixture.
+    # Write a sample next to the exported model for debugging only.
+    if not args.fixture:
+        sample = {
+            "x": X[0],
+            "p": predict_rows(
+                [[(X[0][j] - model["mean"][j]) / model["std"][j] for j in range(len(FEATURE_NAMES))]],
+                model["weights"],
+                model["bias"],
+                model["platt_a"],
+                model["platt_b"],
+            )[0],
+        }
+        out_dir = Path(args.out).resolve().parent
+        (out_dir / "parity_sample.last.json").write_text(json.dumps(sample, indent=2), encoding="utf-8")
     return 0
 
 

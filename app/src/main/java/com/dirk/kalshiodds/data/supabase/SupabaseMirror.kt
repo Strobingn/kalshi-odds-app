@@ -56,7 +56,8 @@ class SupabaseMirror(
             val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return@let
             for (i in 0 until arr.length()) {
                 val o = arr.optJSONObject(i) ?: continue
-                val ticker = o.optString("ticker").ifBlank { continue }
+                val ticker = o.optString("ticker")
+                if (ticker.isBlank()) continue
                 val result = o.optString("result").lowercase()
                 if (result != "yes" && result != "no") continue
                 settled.add(

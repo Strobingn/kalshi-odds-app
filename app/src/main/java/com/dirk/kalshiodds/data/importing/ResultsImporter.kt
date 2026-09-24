@@ -272,26 +272,26 @@ object ResultsImporter {
             snapshots.add(row); imported += 1
             minTs = minOfTs(minTs, row.createdAtMs); maxTs = maxOfTs(maxTs, row.createdAtMs)
         }
-        arrayOf(root, "snapshots").forEachObj(::addSnap)
-        arrayOf(root, "alerts").forEachObj { o ->
+        jsonArray(root, "snapshots").forEachObj(::addSnap)
+        jsonArray(root, "alerts").forEachObj { o ->
             val row = jsonAlert(o) ?: run { skipped += 1; return@forEachObj }
             if (!seen.alerts.add(seen.alertKey(row.alertId, row.ticker, row.createdAtMs))) { skipped += 1; return@forEachObj }
             alerts.add(row); imported += 1
             minTs = minOfTs(minTs, row.createdAtMs); maxTs = maxOfTs(maxTs, row.createdAtMs)
         }
-        arrayOf(root, "scorecards").forEachObj { o ->
+        jsonArray(root, "scorecards").forEachObj { o ->
             val row = jsonScorecard(o) ?: run { skipped += 1; return@forEachObj }
             if (!seen.scorecards.add("${row.ticker}|${row.createdAtMs}")) { skipped += 1; return@forEachObj }
             scorecards.add(row); imported += 1
             minTs = minOfTs(minTs, row.createdAtMs); maxTs = maxOfTs(maxTs, row.createdAtMs)
         }
-        arrayOf(root, "tickets").forEachObj { o ->
+        jsonArray(root, "tickets").forEachObj { o ->
             val row = jsonTicket(o) ?: run { skipped += 1; return@forEachObj }
             if (!seen.tickets.add(seen.ticketKey(row.clientOrderId, row.ticker, row.createdAtMs))) { skipped += 1; return@forEachObj }
             tickets.add(row); imported += 1
             minTs = minOfTs(minTs, row.createdAtMs); maxTs = maxOfTs(maxTs, row.createdAtMs)
         }
-        arrayOf(root, "fills").forEachObj { o ->
+        jsonArray(root, "fills").forEachObj { o ->
             val row = jsonFill(o) ?: run { skipped += 1; return@forEachObj }
             if (!seen.fills.add(row.id)) { skipped += 1; return@forEachObj }
             fills.add(row); imported += 1
@@ -315,9 +315,7 @@ object ResultsImporter {
         )
     }
 
-    private fun JSONObject.arrayOf(key: String): JSONArray? = optJSONArray(key)
-
-    private fun arrayOf(root: JSONObject, key: String): JSONArray? = root.optJSONArray(key)
+    private fun jsonArray(root: JSONObject, key: String): JSONArray? = root.optJSONArray(key)
 
     private fun JSONArray?.forEachObj(block: (JSONObject) -> Unit) {
         if (this == null) return

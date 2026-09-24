@@ -58,3 +58,5 @@ Thumbs.db
 *.swp
 *~
 ml/train_log.txt
+ml/edge_model.json
+ml/parity_sample.last.json
