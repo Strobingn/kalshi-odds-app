@@ -17,9 +17,14 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -43,7 +48,9 @@ fun TradeTicketsSection(
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
+    onApproveSell: (String, Int, Double) -> Unit = { id, _, _ -> onApprove(id) },
     onPaper: (String) -> Unit,
+    onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit
 ) {
@@ -70,7 +77,9 @@ fun TradeTicketsSection(
                 color = AccentOrange
             )
         }
-        tickets.lastError?.let {
+        val visibleError = tickets.lastError
+            ?.takeUnless { com.dirk.kalshiodds.signal.trade.TicketSession.stalePageError(it) }
+        visibleError?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentRed)
         }
         when (val phase = tickets.phase) {
@@ -95,9 +104,9 @@ fun TradeTicketsSection(
             }
             else -> Unit
         }
-        if (proposals.isEmpty() && working.isEmpty() && tickets.lastError == null) {
+        if (proposals.isEmpty() && working.isEmpty() && visibleError == null) {
             Text(
-                "No pending tickets. Use Buy YES / Buy NO on the hero or a market card.",
+                "No pending tickets. Use Buy YES / Buy NO on the hero, or Sell on Your positions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
                 modifier = Modifier
@@ -120,6 +129,8 @@ fun TradeTicketsSection(
             ticket = awaiting.ticket,
             credentialsConfigured = credentialsConfigured,
             onApprove = { onApprove(awaiting.ticket.id) },
+            onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
+            onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
             onDismiss = onCancelApprove
         )
     }
@@ -149,6 +160,7 @@ private fun ProposedTicketCard(
                         TicketKind.HUNTER -> "PENDING APPROVAL · $1 → ≥$25"
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
+                        TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
                     },
                     style = MaterialTheme.typography.labelMedium,
                     color = if (hunter) AccentOrange else AccentBlue,
@@ -171,6 +183,18 @@ private fun ProposedTicketCard(
             ticket.title?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
             }
+            if (ticket.blockedReason != null) {
+                Text(
+                    ticket.blockedReason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentRed,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                ticket.gateNote?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                }
+            } else {
             Spacer(Modifier.height(8.dp))
             TicketMetricRow("Stake", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
             TicketMetricRow("Ask / limit", String.format(Locale.US, "%.0f¢  (never market)", ticket.limitPrice * 100))
@@ -195,23 +219,41 @@ private fun ProposedTicketCard(
             ticket.gateNote?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = AccentBlue)
             }
+            ticket.closeNote?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            }
             Row(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
                     onClick = { onPaper(ticket.id) },
+                    enabled = ticket.canPaper,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text("Paper $5")
+                    Text(if (ticket.isSell) "Paper sell" else "Paper $5")
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = credentialsConfigured,
+                    enabled = credentialsConfigured && ticket.canApprove,
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text(if (credentialsConfigured) "Live Approve…" else "Needs API key")
+                    Text(
+                        when {
+                            ticket.paperOnly -> "Paper only"
+                            !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
+                            credentialsConfigured -> "Live Approve…"
+                            else -> "Needs API key"
+                        }
+                    )
                 }
             }
             OutlinedButton(
@@ -264,17 +306,42 @@ private fun ApproveTicketDialog(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
     onApprove: () -> Unit,
+    onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
+    onPaperSell: (Int, Double) -> Unit = { _, _ -> },
     onDismiss: () -> Unit
 ) {
+    val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
+    val paperSell = ticket.paperOnly && ticket.isSell
+    var countText by remember(ticket.id) { mutableStateOf(ticket.contracts.toString()) }
+    var centsText by remember(ticket.id) {
+        mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Live Approve this ticket?") },
+        title = {
+            Text(
+                when {
+                    paperSell -> "Paper sell this position?"
+                    ticket.isSell -> "Live Approve this sell?"
+                    else -> "Live Approve this ticket?"
+                }
+            )
+        },
         text = {
             Column {
                 Text(
-                    "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
-                        "and not a paper fill. This tap is the only way a live order is sent. " +
-                        "Dismiss / Back leaves no hanging order. Not financial advice. High variance.",
+                    when {
+                        paperSell ->
+                            "Simulated sell on the $100 paper book — never sent to Kalshi. " +
+                                "Count is capped at the paper fill so this cannot flip."
+                        ticket.isSell ->
+                            "Places a real V2 reduce-only GTC limit (POST /portfolio/events/orders) to sell the held side. " +
+                                "Count is capped at your position so this cannot flip. Not a paper fill."
+                        else ->
+                            "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
+                                "and not a paper fill. This tap is the only way a live order is sent. " +
+                                "Dismiss / Back leaves no hanging order. Not financial advice. High variance."
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
@@ -294,6 +361,29 @@ private fun ApproveTicketDialog(
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                ticket.closeNote?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AccentOrange,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
+                if (ticket.isSell) {
+                    OutlinedTextField(
+                        value = countText,
+                        onValueChange = { countText = it.filter { ch -> ch.isDigit() }.take(6) },
+                        label = { Text("Contracts (max $held)") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                    OutlinedTextField(
+                        value = centsText,
+                        onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) },
+                        label = { Text("Limit ¢ (best bid)") },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                    )
+                }
                 if (ticket.kind == TicketKind.HUNTER) {
                     Text(
                         "Hunter path: $1 stake, ≥$25 max payout.",
@@ -306,11 +396,27 @@ private fun ApproveTicketDialog(
         },
         confirmButton = {
             Button(
-                onClick = onApprove,
-                enabled = credentialsConfigured,
+                onClick = {
+                    if (ticket.isSell) {
+                        val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
+                        val px = (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
+                        if (paperSell) onPaperSell(qty, px) else onApproveSell(qty, px)
+                    } else {
+                        onApprove()
+                    }
+                },
+                enabled = if (paperSell) ticket.canPaper else credentialsConfigured && ticket.canApprove,
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
                 modifier = Modifier.height(48.dp)
-            ) { Text("Live Approve") }
+            ) {
+                Text(
+                    when {
+                        paperSell -> "Paper sell"
+                        ticket.isSell -> "Live Approve sell"
+                        else -> "Live Approve"
+                    }
+                )
+            }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

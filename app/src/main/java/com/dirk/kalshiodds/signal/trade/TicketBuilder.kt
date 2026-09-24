@@ -1,9 +1,12 @@
 package com.dirk.kalshiodds.signal.trade
 
+import com.dirk.kalshiodds.domain.KalshiPrice
+import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
+import com.dirk.kalshiodds.signal.model.MarketTick
 import java.util.UUID
 
 /**
@@ -12,18 +15,40 @@ import java.util.UUID
  */
 object TicketBuilder {
 
+    const val MARKET_CLOSED = "Market closed"
+    const val NO_BUYERS = "No buyers right now"
+
+    fun noSellers(side: String): String =
+        "No sellers on ${side.uppercase()} right now"
+
+    fun closeNote(side: String, held: Int): String {
+        val label = if (side.equals("NO", true)) "DOWN" else "UP"
+        return "This will close $held of your $label shares"
+    }
+
     data class Context(
         val settings: SignalSettings,
         val alertsPaused: Boolean,
         val books: Map<String, BookLevelSnapshot> = emptyMap(),
+        val ticks: Map<String, MarketTick> = emptyMap(),
+        val positions: List<LivePosition> = emptyList(),
         val idFactory: () -> String = { UUID.randomUUID().toString() },
         val nowMs: Long = System.currentTimeMillis()
-    )
+    ) {
+        fun heldOpposite(ticker: String, buySide: String): Int {
+            val opposite = if (buySide == "NO") "YES" else "NO"
+            val pos = positions.firstOrNull {
+                it.ticker.equals(ticker, true) && it.side.equals(opposite, true)
+            } ?: return 0
+            return PositionParser.heldContracts(pos)
+        }
+    }
 
     fun proposeAll(markets: List<MarketUiModel>, ctx: Context): List<TradeTicket> {
         if (!ctx.settings.ticketsEnabled) return emptyList()
-        val hunter = markets.mapNotNull { proposeHunter(it, ctx) }
-        val configured = markets.mapNotNull { propose(it, ctx) }
+        val live = MarketLifecycle.tradable(markets, ctx.nowMs)
+        val hunter = live.mapNotNull { proposeHunter(it, ctx) }
+        val configured = live.mapNotNull { propose(it, ctx) }
         return (hunter + configured)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
@@ -35,6 +60,7 @@ object TicketBuilder {
      */
     fun proposeHunter(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         val preferred = resolveSide(market)
         val sides = listOfNotNull(preferred, "YES", "NO").distinct()
         return sides.firstNotNullOfOrNull { side ->
@@ -53,6 +79,7 @@ object TicketBuilder {
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
         val settings = ctx.settings
         if (!settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         val side = resolveSide(market) ?: return null
         val stake = PayoutGate.clipStake(settings.ticketStakeUsd)
         return buildTicket(
@@ -66,14 +93,25 @@ object TicketBuilder {
         )
     }
 
-    /** User-tapped Buy. Sizes at the touch even when payout < $25. */
+    /**
+     * User-tapped Buy. Always returns a card when tickets are on: a sized
+     * ticket, or a blocked "Market closed" / "No sellers on YES" card.
+     * Never places. Page-level failSoft is not used for missing asks.
+     */
     fun proposeManual(market: MarketUiModel, side: String, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         val want = side.uppercase().let { if (it == "NO") "NO" else "YES" }
         val stake = PayoutGate.clipStake(
             ctx.settings.ticketStakeUsd.coerceAtLeast(SignalConstants.HUNTER_STAKE_USD)
         )
-        return buildTicket(
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
+            return blocked(market, want, ctx, MARKET_CLOSED, stake)
+        }
+        val ask = bestAsk(market, want, ctx)
+        if (ask == null) {
+            return blocked(market, want, ctx, noSellers(want), stake)
+        }
+        val built = buildTicket(
             market = market,
             side = want,
             ctx = ctx,
@@ -81,6 +119,73 @@ object TicketBuilder {
             minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
             kind = TicketKind.MANUAL,
             requireGates = false
+        ) ?: blocked(market, want, ctx, noSellers(want), stake)
+        val heldOpposite = ctx.heldOpposite(market.ticker, want)
+        return if (heldOpposite > 0) {
+            built.copy(closeNote = closeNote(if (want == "YES") "NO" else "YES", heldOpposite))
+        } else {
+            built
+        }
+    }
+
+    /**
+     * Sell / reduce [heldContracts] of [side] at the best bid (user may
+     * override count/price). V2 `reduce_only` is set. Never places.
+     */
+    fun proposeSell(
+        market: MarketUiModel,
+        side: String,
+        heldContracts: Int,
+        ctx: Context,
+        count: Int? = null,
+        limitPrice: Double? = null,
+        paperOnly: Boolean = false
+    ): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        val want = side.uppercase().let { if (it == "NO") "NO" else "YES" }
+        val held = heldContracts.coerceAtLeast(0)
+        if (held <= 0) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
+            return blocked(market, want, ctx, MARKET_CLOSED, 0.0).copy(
+                kind = TicketKind.SELL,
+                reduceOnly = true,
+                heldContracts = held,
+                paperOnly = paperOnly
+            )
+        }
+        val bid = KalshiPrice.usable(limitPrice) ?: bestBid(market, want, ctx)
+        if (bid == null) {
+            return blocked(market, want, ctx, NO_BUYERS, 0.0).copy(
+                kind = TicketKind.SELL,
+                reduceOnly = true,
+                heldContracts = held,
+                paperOnly = paperOnly
+            )
+        }
+        val qty = (count ?: held).coerceIn(1, held)
+        val yesLimit = if (want == "YES") bid else (1.0 - bid)
+        val bookSide = if (want == "YES") "ask" else "bid"
+        val proceeds = qty * bid
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = want,
+            bookSide = bookSide,
+            stakeUsd = proceeds,
+            limitPrice = bid,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = qty,
+            estimatedFillUsd = proceeds,
+            maxPayoutUsd = proceeds,
+            estimatedAvgFill = bid,
+            title = market.title,
+            sizingNote = "$qty ct · sell ${want} @ ${String.format(java.util.Locale.US, "%.1f¢", bid * 100.0)} · reduce-only",
+            gateNote = "Sell GTC limit · Approve still required · never flips the other side",
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.SELL,
+            reduceOnly = true,
+            heldContracts = held,
+            paperOnly = paperOnly
         )
     }
 
@@ -93,12 +198,13 @@ object TicketBuilder {
         kind: TicketKind,
         requireGates: Boolean
     ): TradeTicket? {
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         if (requireGates) {
             if (!market.passedFilter) return null
             if (market.muted) return null
             if (ctx.alertsPaused) return null
         }
-        val ask = bestAsk(market, side) ?: return null
+        val ask = bestAsk(market, side, ctx) ?: return null
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val sizing = PayoutGate.evaluate(
@@ -120,7 +226,7 @@ object TicketBuilder {
             bookSide = bookSide,
             stakeUsd = stakeUsd,
             limitPrice = sizing.limitPrice,
-            yesLimitPrice = yesLimit.coerceIn(0.01, 0.99),
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
             contracts = sizing.contracts,
             estimatedFillUsd = sizing.estimatedFillUsd,
             maxPayoutUsd = sizing.maxPayoutUsd,
@@ -134,9 +240,43 @@ object TicketBuilder {
                 TicketKind.HUNTER -> "Hunter $1 → ≥$25 · Approve still required"
                 TicketKind.MANUAL -> "Manual buy · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
+                TicketKind.SELL -> "Sell GTC limit · Approve still required · reduce-only"
             },
             createdAtMs = ctx.nowMs,
             kind = kind
+        )
+    }
+
+    private fun blocked(
+        market: MarketUiModel,
+        side: String,
+        ctx: Context,
+        reason: String,
+        stakeUsd: Double
+    ): TradeTicket {
+        val bookSide = if (side == "YES") "bid" else "ask"
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = side,
+            bookSide = bookSide,
+            stakeUsd = stakeUsd,
+            limitPrice = 0.0,
+            yesLimitPrice = 0.0,
+            contracts = 0,
+            estimatedFillUsd = 0.0,
+            maxPayoutUsd = 0.0,
+            estimatedAvgFill = 0.0,
+            title = market.title,
+            sizingNote = reason,
+            gateNote = if (reason == MARKET_CLOSED) {
+                "This window is over — no live order will be sent"
+            } else {
+                "Approve stays off until sellers show up"
+            },
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.MANUAL,
+            blockedReason = reason
         )
     }
 
@@ -153,14 +293,54 @@ object TicketBuilder {
         }
     }
 
-    fun bestAsk(market: MarketUiModel, side: String): Double? {
-        return if (side == "YES") {
-            market.yesAsk
-                ?: market.noBid?.let { (1.0 - it).coerceIn(0.01, 0.99) }
+    fun bestAsk(market: MarketUiModel, side: String): Double? =
+        bestAsk(market, side, Context(settings = SignalSettings(), alertsPaused = false))
+
+    fun bestBid(market: MarketUiModel, side: String): Double? =
+        bestBid(market, side, Context(settings = SignalSettings(), alertsPaused = false))
+
+    fun bestBid(market: MarketUiModel, side: String, ctx: Context): Double? {
+        val book = ctx.books[market.ticker]
+        val tick = ctx.ticks[market.ticker]
+        val fromQuote = if (side == "YES") {
+            KalshiPrice.usable(market.yesBid)
+                ?: KalshiPrice.impliedAskFromOppositeBid(market.noAsk)
         } else {
-            market.noAsk
-                ?: market.yesBid?.let { (1.0 - it).coerceIn(0.01, 0.99) }
+            KalshiPrice.usable(market.noBid)
+                ?: KalshiPrice.impliedAskFromOppositeBid(market.yesAsk)
         }
+        val fromTick = if (side == "YES") {
+            KalshiPrice.usable(tick?.yesBid)
+        } else {
+            KalshiPrice.impliedAskFromOppositeBid(tick?.yesAsk)
+        }
+        val fromBook = if (book == null || book.isEmpty()) {
+            null
+        } else if (side == "YES") {
+            book.yes.maxByOrNull { it.first }?.first?.let { KalshiPrice.usable(it) }
+        } else {
+            book.no.maxByOrNull { it.first }?.first?.let { KalshiPrice.usable(it) }
+        }
+        return listOfNotNull(fromQuote, fromTick, fromBook).maxOrNull()
+    }
+
+    fun bestAsk(market: MarketUiModel, side: String, ctx: Context): Double? {
+        val book = ctx.books[market.ticker]
+        val tick = ctx.ticks[market.ticker]
+        val fromQuote = if (side == "YES") {
+            KalshiPrice.usable(market.yesAsk)
+                ?: KalshiPrice.impliedAskFromOppositeBid(market.noBid)
+        } else {
+            KalshiPrice.usable(market.noAsk)
+                ?: KalshiPrice.impliedAskFromOppositeBid(market.yesBid)
+        }
+        val fromTick = if (side == "YES") {
+            KalshiPrice.usable(tick?.yesAsk)
+        } else {
+            KalshiPrice.impliedAskFromOppositeBid(tick?.yesBid)
+        }
+        val fromBook = bookAsk(side, book)
+        return listOfNotNull(fromQuote, fromTick, fromBook).minOrNull()
     }
 
     /**
@@ -171,9 +351,13 @@ object TicketBuilder {
     fun askLevels(market: MarketUiModel, side: String, book: BookLevelSnapshot?): List<Pair<Double, Double>> {
         if (book != null && !book.isEmpty()) {
             return if (side == "YES") {
-                book.no.map { (noPx, size) -> (1.0 - noPx).coerceIn(0.0, 1.0) to size }
+                book.no.mapNotNull { (noPx, size) ->
+                    KalshiPrice.impliedAskFromOppositeBid(noPx)?.let { it to size }
+                }
             } else {
-                book.yes.map { (yesPx, size) -> (1.0 - yesPx).coerceIn(0.0, 1.0) to size }
+                book.yes.mapNotNull { (yesPx, size) ->
+                    KalshiPrice.impliedAskFromOppositeBid(yesPx)?.let { it to size }
+                }
             }
         }
         return emptyList()
@@ -182,10 +366,24 @@ object TicketBuilder {
     fun quotedSize(market: MarketUiModel, side: String, book: BookLevelSnapshot?): Double? {
         if (book != null && !book.isEmpty()) {
             val levels = askLevels(market, side, book)
-            val ask = bestAsk(market, side) ?: return null
-            return levels.filter { it.first <= ask + 1e-9 }.sumOf { it.second }
+            val ask = bookAsk(side, book)
+                ?: bestAsk(market, side)
+                ?: return levels.sumOf { it.second }.takeIf { it > 0.0 }
+            return levels.filter { it.first <= ask + 1e-9 }.sumOf { it.second }.takeIf { it > 0.0 }
+        }
+        if (side == "YES") {
+            market.yesAskSize?.takeIf { it > 0.0 }?.let { return it }
         }
         return listOfNotNull(market.volume, market.openInterest, market.liquidityDollars).maxOrNull()
+    }
+
+    private fun bookAsk(side: String, book: BookLevelSnapshot?): Double? {
+        if (book == null || book.isEmpty()) return null
+        return if (side == "YES") {
+            book.no.maxByOrNull { it.first }?.first?.let { KalshiPrice.impliedAskFromOppositeBid(it) }
+        } else {
+            book.yes.maxByOrNull { it.first }?.first?.let { KalshiPrice.impliedAskFromOppositeBid(it) }
+        }
     }
 
     private fun gateSummary(market: MarketUiModel, ctx: Context): String {

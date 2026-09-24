@@ -1,10 +1,12 @@
 package com.dirk.kalshiodds.signal.paper
 
+import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlin.math.floor
+import kotlin.math.min
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,7 +81,8 @@ class PaperBook(
      */
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
-        if (ticket.kind == TicketKind.MANUAL) return null
+        if (!ticket.canApprove) return null
+        if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
         return fill(
             ticker = ticket.ticker,
@@ -103,13 +106,81 @@ class PaperBook(
     }
 
     /** User tapped Paper on a ticket. Still never hits Kalshi. */
-    fun manualFill(ticket: TradeTicket): PaperFill? = fill(
-        ticker = ticket.ticker,
-        side = ticket.side,
-        limitPrice = ticket.limitPrice,
-        source = "manual paper",
-        note = "Paper $5 from ticket · never sent to Kalshi"
-    )
+    fun manualFill(ticket: TradeTicket): PaperFill? {
+        if (!ticket.canPaper) return null
+        if (ticket.isSell) return sell(ticket)
+        return fill(
+            ticker = ticket.ticker,
+            side = ticket.side,
+            limitPrice = ticket.limitPrice,
+            source = "manual paper",
+            note = "Paper $5 from ticket · never sent to Kalshi"
+        )
+    }
+
+    /**
+     * Simulated sell of an open paper fill at the ticket's bid. Never hits Kalshi.
+     */
+    fun sell(ticket: TradeTicket): PaperFill? {
+        if (!ticket.canPaper || !ticket.isSell) return null
+        val want = if (ticket.side.equals("NO", true)) "NO" else "YES"
+        val px = KalshiPrice.usable(ticket.limitPrice) ?: return null
+        synchronized(lock) {
+            val cur = _state.value
+            val open = cur.fills.firstOrNull {
+                !it.settled &&
+                    it.ticker.equals(ticket.ticker, ignoreCase = true) &&
+                    it.side.equals(want, ignoreCase = true)
+            } ?: run {
+                publish(cur.copy(lastMessage = "Paper sell skip ${ticket.ticker} — no open $want fill"))
+                return null
+            }
+            val qty = min(ticket.contracts, open.contracts).coerceAtLeast(0)
+            if (qty <= 0) return null
+            val proceeds = qty * px
+            val cost = qty * open.limitPrice
+            val pnl = proceeds - cost
+            val remaining = open.contracts - qty
+            val sold = open.copy(
+                settled = remaining <= 0,
+                contracts = if (remaining <= 0) open.contracts else qty,
+                outcome = "sell",
+                won = pnl >= 0.0,
+                pnlUsd = pnl,
+                note = "Paper sell $qty ct @ ${String.format(java.util.Locale.US, "%.1f¢", px * 100)} · never sent to Kalshi"
+            )
+            val leftover = if (remaining > 0) {
+                open.copy(
+                    contracts = remaining,
+                    stakeUsd = remaining * open.limitPrice,
+                    note = open.note
+                )
+            } else {
+                null
+            }
+            val nextFills = buildList {
+                leftover?.let { add(it) }
+                add(sold)
+                cur.fills.filterNot { it.id == open.id }.forEach { add(it) }
+            }.take(SignalConstants.PAPER_LEDGER_MAX)
+            publish(
+                cur.copy(
+                    cashUsd = cur.cashUsd + proceeds,
+                    fills = nextFills,
+                    lastMessage = String.format(
+                        java.util.Locale.US,
+                        "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · never Kalshi",
+                        sold.displaySide,
+                        sold.ticker,
+                        qty,
+                        px * 100,
+                        pnl
+                    )
+                )
+            )
+            return sold
+        }
+    }
 
     fun settle(ticker: String, result: String): List<PaperFill> {
         val outcome = result.lowercase().trim()

@@ -100,6 +100,13 @@ class PayoutGateTest {
     }
 
     @Test
+    fun deciCentAskSizesContracts() {
+        val r = PayoutGate.evaluate(stakeUsd = 1.0, bestAsk = 0.006, quotedSize = 500.0, minPayoutUsd = 25.0)
+        assertTrue(r.reason, r.ok)
+        assertEquals(166, r.contracts)
+    }
+
+    @Test
     fun stakeClipAndRaiseConfirm() {
         assertEquals(25.0, PayoutGate.clipStake(99.0), 1e-9)
         assertEquals(1.0, PayoutGate.clipStake(0.1), 1e-9)
