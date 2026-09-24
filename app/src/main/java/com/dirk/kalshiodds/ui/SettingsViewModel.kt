@@ -39,7 +39,8 @@ data class SettingsUiState(
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-    private val prefs = KalshiOddsApp.from(application).container.preferences
+    private val container = KalshiOddsApp.from(application).container
+    private val prefs = container.preferences
 
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -74,11 +75,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun refreshBatteryStatus() {
+        val persistReason = runCatching { container.oomFlag.reason() }.getOrNull()
+        val persistOn = runCatching { container.oomFlag.isDisabled() }.getOrElse { false }
         _state.update {
             it.copy(
                 batteryUnrestricted = BatteryExemption.isUnrestricted(getApplication()),
-                mlGuardNote = HeavyMlGuard.lastReason?.let { r ->
-                    "Heavy ML auto-disabled this session: $r. Scoring is the 0.2.x blend."
+                mlGuardNote = when {
+                    HeavyMlGuard.lastReason != null ->
+                        "Heavy ML auto-disabled: ${HeavyMlGuard.lastReason}. Scoring is the 0.2.x blend. Re-enable only if you accept the heap risk."
+                    persistOn ->
+                        "Heavy ML stays off after an out-of-memory crash${persistReason?.let { r -> " ($r)" } ?: ""}. Scoring is the 0.2.x blend."
+                    else -> null
                 }
             )
         }
@@ -115,12 +122,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             prefs.updateHeavyMl(false)
             prefs.updateExtendedAi(false)
         } else {
-            HeavyMlGuard.reset()
+            clearOomLatch()
             prefs.updateHeavyMl(true)
         }
     }
     fun setHeavyMl(v: Boolean) = viewModelScope.launch {
-        if (v) HeavyMlGuard.reset()
+        if (v) clearOomLatch()
         prefs.updateHeavyMl(v)
     }
     fun setSequenceModel(v: Boolean) = viewModelScope.launch { prefs.updateSequenceModel(v) }
@@ -130,8 +137,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setContinualFineTune(v: Boolean) = viewModelScope.launch { prefs.updateContinualFineTune(v) }
     fun setPolicyEvalStakeUsd(v: Double) = viewModelScope.launch { prefs.updatePolicyEvalStakeUsd(v) }
     fun setExtendedAi(v: Boolean) = viewModelScope.launch {
-        if (v) HeavyMlGuard.reset()
+        if (v) clearOomLatch()
         prefs.updateExtendedAi(v)
+    }
+
+    private fun clearOomLatch() {
+        HeavyMlGuard.reset()
+        runCatching { container.oomFlag.clear() }
+        refreshBatteryStatus()
     }
     fun setRegimeClassifier(v: Boolean) = viewModelScope.launch { prefs.updateRegimeClassifier(v) }
     fun setAnomalyGate(v: Boolean) = viewModelScope.launch { prefs.updateAnomalyGate(v) }

@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal.ml
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.nio.charset.Charsets
 import java.util.concurrent.TimeUnit
 
 /**
@@ -51,16 +52,23 @@ class NewsPulseCache(
         val req = Request.Builder()
             .url(url)
             .header("Accept", "application/rss+xml, application/xml, text/xml")
-            .header("User-Agent", "DipHunter/0.3.0 (Android; news-prior)")
+            .header("User-Agent", "DipHunter/0.3.1 (Android; news-prior)")
             .build()
         val body = http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return emptyList()
-            resp.body?.string().orEmpty()
+            val stream = resp.body?.byteStream() ?: return emptyList()
+            stream.use { ins ->
+                val buf = ByteArray(MAX_RSS_BYTES)
+                val n = ins.read(buf)
+                if (n <= 0) "" else String(buf, 0, n, Charsets.UTF_8)
+            }
         }
-        return parseTitles(body).take(24)
+        return parseTitles(body).take(12)
     }
 
     companion object {
+        const val MAX_RSS_BYTES = 48_000
+
         fun parseTitles(xml: String): List<String> {
             if (xml.isBlank()) return emptyList()
             val titles = Regex("<title>(?:<!\\[CDATA\\[)?(.*?)(?:]]>)?</title>", RegexOption.IGNORE_CASE)

@@ -4,6 +4,7 @@ import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiTradeClient
 import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
+import com.dirk.kalshiodds.data.local.results.OomFlagStore
 import com.dirk.kalshiodds.data.local.results.ResultsStore
 import com.dirk.kalshiodds.data.local.results.RollingTextLog
 import com.dirk.kalshiodds.data.local.results.SqliteResultsStore
@@ -37,6 +38,7 @@ class AppContainer(context: Context) {
     val heavyStore = HeavyMlStore(app)
     val notifier = SignalNotifier(app)
     val newsCache = NewsPulseCache()
+    val oomFlag = OomFlagStore(app)
     val resultsStore: ResultsStore = runCatching { SqliteResultsStore(app) }
         .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))

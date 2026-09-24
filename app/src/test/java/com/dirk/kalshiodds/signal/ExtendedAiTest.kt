@@ -175,7 +175,7 @@ class PathSimulatorTest {
             regime = RegimeTag.QUIET,
             seed = 17
         )
-        assertEquals(48, r.paths)
+        assertEquals(16, r.paths)
         assertTrue(r.pSurvive in 0.0..1.0)
         assertTrue(r.pYesExpiry in 0.0..1.0)
         assertTrue(r.pYesExpiry > 0.5)

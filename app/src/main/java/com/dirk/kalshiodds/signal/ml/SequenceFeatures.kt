@@ -54,30 +54,50 @@ object SequenceFeatures {
     fun resample(raw: List<SequenceFrame>, nowMs: Long, frames: Int = FRAMES, windowMs: Long = WINDOW_MS): Array<FloatArray> {
         val start = nowMs - windowMs
         val binMs = (windowMs / frames).coerceAtLeast(1L)
-        val buckets = Array(frames) { mutableListOf<SequenceFrame>() }
+        val sums = Array(frames) { FloatArray(SequenceFrame.CHANNELS) }
+        val counts = IntArray(frames)
         for (f in raw) {
             if (f.tMs < start) continue
             val idx = ((f.tMs - start) / binMs).toInt().coerceIn(0, frames - 1)
-            buckets[idx].add(f)
+            val row = sums[idx]
+            row[0] += f.mid
+            row[1] += f.size
+            row[2] += f.imbalance
+            row[3] += f.aggressor
+            row[4] += f.spot
+            counts[idx]++
         }
         val out = Array(frames) { FloatArray(SequenceFrame.CHANNELS) }
-        var last = raw.firstOrNull { it.tMs >= start } ?: raw.lastOrNull()
+        var last = FloatArray(SequenceFrame.CHANNELS)
+        var haveLast = false
+        val seed = raw.firstOrNull { it.tMs >= start } ?: raw.lastOrNull()
+        if (seed != null) {
+            last[0] = seed.mid
+            last[1] = seed.size
+            last[2] = seed.imbalance
+            last[3] = seed.aggressor
+            last[4] = seed.spot
+            haveLast = true
+        }
         for (i in 0 until frames) {
-            val bucket = buckets[i]
-            val pick = if (bucket.isNotEmpty()) {
-                SequenceFrame(
-                    mid = bucket.map { it.mid }.average().toFloat(),
-                    size = bucket.map { it.size }.average().toFloat(),
-                    imbalance = bucket.map { it.imbalance }.average().toFloat(),
-                    aggressor = bucket.map { it.aggressor }.average().toFloat(),
-                    spot = bucket.map { it.spot }.average().toFloat(),
-                    tMs = bucket.last().tMs
-                ).also { last = it }
-            } else {
-                last
-            }
-            if (pick != null) {
-                out[i] = pick.toRow()
+            val dest = out[i]
+            val n = counts[i]
+            if (n > 0) {
+                val inv = 1f / n
+                val src = sums[i]
+                dest[0] = src[0] * inv
+                dest[1] = src[1] * inv
+                dest[2] = src[2] * inv
+                dest[3] = src[3] * inv
+                dest[4] = src[4] * inv
+                last = dest
+                haveLast = true
+            } else if (haveLast) {
+                dest[0] = last[0]
+                dest[1] = last[1]
+                dest[2] = last[2]
+                dest[3] = last[3]
+                dest[4] = last[4]
             }
         }
         return out

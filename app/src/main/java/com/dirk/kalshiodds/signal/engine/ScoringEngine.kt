@@ -214,7 +214,18 @@ class ScoringEngine(
     private fun scoreUnchecked(tick: MarketTick, rawSettings: SignalSettings, nowMs: Long): Score? {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return null
         if (!rawSettings.isWatchedTicker(tick.ticker)) return null
-        val settings = com.dirk.kalshiodds.signal.ml.HeavyMlGuard.apply(rawSettings)
+        var settings = com.dirk.kalshiodds.signal.ml.HeavyMlGuard.apply(rawSettings)
+        if (settings.heavyMlEnabled || settings.extendedAiEnabled) {
+            when {
+                com.dirk.kalshiodds.signal.ml.HeapGuard.isCritical() -> {
+                    com.dirk.kalshiodds.signal.ml.HeavyMlGuard.noteHeapPressure()
+                    settings = settings.copy(heavyMlEnabled = false, extendedAiEnabled = false)
+                }
+                com.dirk.kalshiodds.signal.ml.HeapGuard.isTight() -> {
+                    settings = settings.copy(heavyMlEnabled = false, extendedAiEnabled = false)
+                }
+            }
+        }
         book.push(tick, nowMs)
         val mid01 = tick.mid01 ?: return null
         val midPp = mid01 * 100.0

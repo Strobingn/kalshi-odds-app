@@ -245,8 +245,8 @@ class HeavyMlRuntime(
             pFill = fill,
             usedHeavy = used,
             note = note,
-            backbone = backbone,
-            tabular = tabular,
+            backbone = null,
+            tabular = null,
             calibrated = regimeCal.bucket(input.series, input.tte.name).ready
         )
     }
@@ -266,7 +266,7 @@ class HeavyMlRuntime(
         lastActivation[ticker] = Pending(
             series = series,
             tte = tte,
-            out = out,
+            out = out.copy(backbone = null, tabular = null),
             mid = mid,
             edgePp = edgePp,
             atMs = nowMs

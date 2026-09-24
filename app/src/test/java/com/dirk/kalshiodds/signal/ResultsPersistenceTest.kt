@@ -166,12 +166,14 @@ class CrashHardenTest {
     @Before
     fun setUp() {
         HeavyMlGuard.reset()
+        HeavyMlGuard.persistHook = null
         CrashBreadcrumb.resetForTest()
     }
 
     @After
     fun tearDown() {
         HeavyMlGuard.reset()
+        HeavyMlGuard.persistHook = null
         CrashBreadcrumb.resetForTest()
     }
 
@@ -184,7 +186,7 @@ class CrashHardenTest {
         assertEquals(1, HeavyMlGuard.failureCount())
         assertFalse(HeavyMlGuard.sessionDisabled)
         repeat(HeavyMlGuard.FAIL_LIMIT - 1) {
-            SafeMl.run("boom", fallback = { 0 }) { throw OutOfMemoryError("heap") }
+            SafeMl.run("boom", fallback = { 0 }) { error("again") }
         }
         assertTrue(HeavyMlGuard.sessionDisabled)
         val settings = com.dirk.kalshiodds.signal.config.SignalSettings(
@@ -194,6 +196,58 @@ class CrashHardenTest {
         val applied = HeavyMlGuard.apply(settings)
         assertFalse(applied.heavyMlEnabled)
         assertFalse(applied.extendedAiEnabled)
+    }
+
+    @Test
+    fun firstOomImmediatelyDisablesAndPersists() {
+        val reasons = mutableListOf<String>()
+        HeavyMlGuard.persistHook = { reasons.add(it) }
+        val out = SafeMl.run("heap", fallback = { "light" }) {
+            throw OutOfMemoryError("Failed to allocate a 32 byte allocation")
+        }
+        assertEquals("light", out)
+        assertTrue(HeavyMlGuard.sessionDisabled)
+        assertEquals(1, reasons.size)
+        assertTrue(reasons[0].contains("OOM"))
+        val applied = HeavyMlGuard.apply(
+            com.dirk.kalshiodds.signal.config.SignalSettings(
+                heavyMlEnabled = true,
+                extendedAiEnabled = true
+            )
+        )
+        assertFalse(applied.heavyMlEnabled)
+        assertFalse(applied.extendedAiEnabled)
+    }
+
+    @Test
+    fun latestWinsMailboxCoalescesAndReschedules() {
+        val box = com.dirk.kalshiodds.signal.engine.LatestWinsMailbox<Int>()
+        assertTrue(box.offer("a", 1))
+        assertFalse(box.offer("a", 2))
+        assertFalse(box.offer("b", 3))
+        val batch = box.drain()
+        assertEquals(2, batch.size)
+        assertEquals(2, batch.first { it.first == "a" }.second)
+        assertEquals(3, batch.first { it.first == "b" }.second)
+        assertFalse(box.markIdleAndNeedsRerun())
+        assertTrue(box.offer("c", 4))
+        box.offer("c", 5)
+        val second = box.drain()
+        assertEquals(1, second.size)
+        assertEquals(5, second[0].second)
+        box.offer("d", 6)
+        assertTrue(box.markIdleAndNeedsRerun())
+    }
+
+    @Test
+    fun heapGuardRatiosMatch256MbDeviceBudget() {
+        assertEquals(0.80, com.dirk.kalshiodds.signal.ml.HeapGuard.TIGHT_RATIO, 1e-9)
+        assertEquals(0.90, com.dirk.kalshiodds.signal.ml.HeapGuard.CRITICAL_RATIO, 1e-9)
+        assertTrue(com.dirk.kalshiodds.signal.ml.HeapGuard.maxBytes() > 0L)
+        assertTrue(com.dirk.kalshiodds.signal.ml.SequenceBuffer.MAX_TICKERS == 12)
+        assertTrue(com.dirk.kalshiodds.signal.ml.PathSimulator.DEFAULT_PATHS == 16)
+        assertTrue(com.dirk.kalshiodds.signal.ml.NewsPulseCache.MAX_RSS_BYTES == 48_000)
+        assertTrue(com.dirk.kalshiodds.signal.ml.HeavyMlRuntime.MAX_PENDING == 24)
     }
 
     @Test

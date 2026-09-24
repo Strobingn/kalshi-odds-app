@@ -6,7 +6,7 @@ package com.dirk.kalshiodds.signal.ml
  */
 class SequenceBuffer(
     private val windowMs: Long = SequenceFeatures.WINDOW_MS,
-    private val maxRaw: Int = 240
+    private val maxRaw: Int = 80
 ) {
     private val byTicker = linkedMapOf<String, ArrayDeque<SequenceFrame>>()
 
@@ -47,6 +47,6 @@ class SequenceBuffer(
         populatedBins(ticker, nowMs) >= minBins
 
     companion object {
-        const val MAX_TICKERS = 24
+        const val MAX_TICKERS = 12
     }
 }

@@ -20,7 +20,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.1**
 
-**0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, OOM) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend); Heavy ML auto-disables after 3 session failures. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+**0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
 
 ## Persistence + crash harden (v0.3.1)
 
@@ -33,12 +33,17 @@ Results now survive a process kill:
 
 **What was killing 0.3.0 mid-session**
 
-1. Every Kalshi **order-book delta** ran the full Heavy ML + Extended AI stack (CNN/LSTM, 3× MC-dropout, GBM, 48-path Monte Carlo) and then rewrote the entire prediction-log DataStore JSON **on the single tick thread**. Deltas arrive tens of times per second → allocation storm → **OOM** / ANR → process death. Scoring is now throttled to ≥400ms per ticker; DataStore/SQLite writes are batched on IO.
-2. **`HeavyMlRuntime` was not synchronized.** WS ticks and REST refresh shared `heads` / `stack` / a growing `lastActivation` map → `ConcurrentModificationException` and native-adjacent corruption.
-3. A single infer/OOM/TFLite failure could escape. Infer is now fail-soft to the **0.2.x MLP blend**; 3 failures (or a recent crash breadcrumb mentioning OOM/TFLite) disable Heavy ML for the session.
-4. Compose overlaid every score immediately — book floods hit the main thread. Overlay is debounced 250ms.
+Confirmed on a Galaxy S24 Ultra (`SM-S928U`) at 2026-09-23 20:11:27.432-0400: `java.lang.OutOfMemoryError` allocating 32 bytes with ~1.79MB free, **heap growth limit 256MB**, victim thread `CancellableContinuationImpl` / EventLoop / DefaultExecutor. Historical (already partly 0.2.4): `LocalOrderBook` CME, `ForegroundServiceDidNotStopInTimeException`, `ForegroundServiceStartNotAllowedException`.
 
-**Light mode:** Settings → Light mode (default for new installs and a one-time 0.3.1 reset). Turn Heavy ML back on if the phone can take it.
+1. Every Kalshi **order-book delta** launched a scoring coroutine and ran the full Heavy ML + Extended AI stack (CNN/LSTM, 3× MC-dropout, GBM, 48-path Monte Carlo) and then rewrote the entire prediction-log DataStore JSON. Deltas arrive tens of times per second → allocation storm → **OOM** → process death. Book mutations apply on the WS thread; scoring is **latest-wins** (one drain coroutine, not one-per-delta) and throttled to ≥400ms per ticker. DataStore writes are single-in-flight on IO; SQLite/text persist even if DataStore is skipped.
+2. Sequence / news / ensemble allocations were unbounded. Caps now: 12 tickers × 80 raw frames, reused CNN/LSTM scratch, RSS ≤48KB / 12 titles, 16 path-sim paths, no stored backbone/tabular, no 3× MC-dropout. Heap ≥80% skips Heavy ML for that tick; ≥90% or any `OutOfMemoryError` latches light mode and persists via SharedPreferences (not DataStore).
+3. **`HeavyMlRuntime` was not synchronized.** WS ticks and REST refresh shared `heads` / `stack` / a growing `lastActivation` map → `ConcurrentModificationException` and native-adjacent corruption.
+4. A single infer/OOM/TFLite failure could escape. Infer is now fail-soft to the **0.2.x MLP blend**. One OOM persists Heavy ML off across process restarts; other failures trip after 3 (or a recent crash breadcrumb mentioning OOM/TFLite).
+5. Compose overlaid every score immediately — book floods hit the main thread. Overlay is debounced 250ms.
+
+`largeHeap` was **not** added — the 256MB limit is cut by bounding allocations, not by asking for a bigger heap.
+
+**Light mode:** Settings → Light mode (default for new installs and a one-time 0.3.1 reset). Turn Heavy ML back on if the phone can take it; that also clears the persisted OOM latch.
 
 ## Heavy ML (v0.3.0)
 
@@ -62,7 +67,7 @@ Analysis + existing approve-gated tickets only. Heavier models use more CPU/batt
 16. **Bayesian MM shadow.** Latent fair + inventory from the book; ensemble voter.
 17. **Conformal prediction sets.** Coverage-guaranteed {YES}, {NO}, or {YES,NO}. Hide when ambiguous and the bag is ready.
 18. **Meta-labeling.** Secondary take/skip on top of the primary side. Cold start always takes.
-19. **Synthetic path simulator.** 48×10 Monte Carlo mids; P(edge survives to expiry). Blocks when that probability is <35% and history is warm.
+19. **Synthetic path simulator.** 16×10 Monte Carlo mids; P(edge survives to expiry). Blocks when that probability is <35% and history is warm.
 
 Cold start: if the sequence window is short and the stack has not been fine-tuned, scoring is the **0.2.x blend** (MLP + microstructure). Extended-AI fair voters join only after ≥8 ticks. Conformal / meta never skip while cold. New models drop in as history arrives.
 
@@ -71,14 +76,14 @@ Cold start: if the sequence window is short and the stack has not been fine-tune
 | Knob | Default | Role |
 |------|---------|------|
 | Light mode | on (0.3.1) | Heavy ML + Extended AI off — safer on device |
-| Heavy ML | **off** | Master switch. Off = 0.2.x blend. Auto-off after 3 native/infer failures |
+| Heavy ML | **off** | Master switch. Off = 0.2.x blend. One OOM persists off; other failures after 3 |
 | Sequence model | on | Temporal CNN / TinyLSTM |
 | GBM second opinion | on | Tabular booster |
 | Continual fine-tune | on | Last-layer + regime cal from settlements |
 | Uncertainty gate | on | Block alerts / tickets when ensemble disagrees |
 | Max uncertainty | 0.12 | Stddev in probability units |
 | Policy-eval stake | $5 | Scorecard counterfactual size |
-| Extended AI | on | Master switch for capabilities 10–19 |
+| Extended AI | **off** | Master switch for capabilities 10–19 |
 | Regime classifier | on | Session / weekend / news-shock reweight |
 | Anomaly / spoof gate | on | Block on cancel-storm / stuffing / fake depth |
 | Survival / hazard | on | P(YES \| TTE, path) voter |

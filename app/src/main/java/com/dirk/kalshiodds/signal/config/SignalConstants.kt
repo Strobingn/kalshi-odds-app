@@ -110,8 +110,9 @@ object SignalConstants {
 
     /**
      * Master switch. Default **off** (light / 0.2.x blend) after 0.3.0
-     * devices OOM'd on Heavy ML + book-delta floods. Turn on in Settings
-     * if the phone can take it; auto-disables after 3 session failures.
+     * devices OOM'd on Heavy ML + book-delta floods (256MB growth limit).
+     * Turn on in Settings if the phone can take it. One OOM persists light
+     * mode; other failures auto-disable after 3.
      */
     const val DEFAULT_HEAVY_ML = false
     const val DEFAULT_SEQUENCE_MODEL = true

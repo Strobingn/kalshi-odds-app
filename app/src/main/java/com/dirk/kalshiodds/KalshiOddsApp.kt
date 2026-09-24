@@ -35,8 +35,26 @@ class KalshiOddsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         runCatching { CrashBreadcrumb.install(this) }
-        runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
         container = AppContainer(this)
+        HeavyMlGuard.persistHook = { reason ->
+            // SharedPreferences.apply() only — do not launch a coroutine
+            // here. The confirmed 0.3.0 death was CancellableContinuationImpl
+            // after the 256MB heap was already gone.
+            runCatching { container.oomFlag.setDisabled(reason) }
+        }
+        if (container.oomFlag.isDisabled()) {
+            HeavyMlGuard.disableForSession(
+                container.oomFlag.reason() ?: "persisted OOM flag",
+                persist = false
+            )
+            appScope.launch {
+                runCatching {
+                    container.preferences.updateHeavyMl(false)
+                    container.preferences.updateExtendedAi(false)
+                }
+            }
+        }
+        runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
         runCatching { SignalNotifier.ensureChannels(this) }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
