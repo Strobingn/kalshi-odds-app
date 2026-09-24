@@ -48,17 +48,20 @@ object NetworkModule {
      * Authenticated trade client. [credentials] returns (keyId, pem) from
      * EncryptedSharedPreferences. PEM is never logged (BASIC logging only).
      */
-    fun tradeApi(credentials: () -> Pair<String, String>): KalshiTradeApi {
+    fun tradeApi(
+        credentials: () -> Pair<String, String>,
+        baseUrl: String = KalshiApi.TRADE_BASE_URL
+    ): KalshiTradeApi {
         val client = okHttp.newBuilder()
             .addInterceptor(KalshiAuthInterceptor(credentials))
             .build()
         return Retrofit.Builder()
-            .baseUrl(KalshiApi.BASE_URL)
+            .baseUrl(baseUrl)
             .client(client)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(KalshiTradeApi::class.java)
     }
 
-    const val USER_AGENT = "DipHunter/0.2.2 (Android; Dirk Diggler)"
+    const val USER_AGENT = "DipHunter/0.3.5 (Android; Dirk Diggler)"
 }

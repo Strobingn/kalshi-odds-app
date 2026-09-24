@@ -15,6 +15,7 @@ import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
+import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -49,6 +50,7 @@ data class OddsUiState(
     val pauseBanner: String? = null,
     val mutedSummary: String? = null,
     val tickets: TicketUiState = TicketUiState(),
+    val paper: PaperBookState = PaperBookState(),
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null
 )
@@ -64,6 +66,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val hub = container.hub
     private val prefs = container.preferences
     private val ticketSession = container.tickets
+    private val paperBook = container.paper.book
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -78,10 +81,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         ticketSession.onStart()
+        _state.update { it.copy(paper = paperBook.snapshot()) }
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
                     _state.update { it.copy(tickets = tickets) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                paperBook.state.collect { paper ->
+                    _state.update { it.copy(paper = paper) }
                 }
             }
         }
@@ -146,7 +157,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             runCatching {
-                hub.alerts.collect { alerts -> _state.update { it.copy(recentAlerts = alerts) } }
+                hub.alerts.collect { alerts ->
+                    _state.update { it.copy(recentAlerts = alerts) }
+                    paperFromAlerts(alerts)
+                }
             }
         }
         viewModelScope.launch {
@@ -370,6 +384,24 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { ticketSession.cancelWorking(orderId) }
     }
 
+    fun setPaperTrading(enabled: Boolean) {
+        viewModelScope.launch { prefs.updatePaperTrading(enabled) }
+    }
+
+    fun resetPaperBook() {
+        paperBook.reset()
+    }
+
+    /**
+     * Simulated $5 fill on the paper book. Never calls [ticketSession.approve]
+     * and never hits the Kalshi order API.
+     */
+    fun paperTicket(ticketId: String) {
+        val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
+            ?: return
+        paperBook.manualFill(ticket)
+    }
+
     /**
      * Open an approve-gated Buy sheet for [side] on [market]. Never places.
      */
@@ -429,6 +461,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         )
         ticketSession.replaceProposals(tickets)
+        if (s.settings.paperTradingEnabled) {
+            tickets.forEach { paperBook.considerTicket(it, enabled = true) }
+        }
+    }
+
+    private fun paperFromAlerts(alerts: List<SignalAlert>) {
+        if (!_state.value.settings.paperTradingEnabled) return
+        val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
+        alerts.forEach { alert ->
+            val market = markets[alert.ticker]
+            val ask = market?.let { TicketBuilder.bestAsk(it, alert.predictedSide) }
+            paperBook.considerAlert(alert, ask, enabled = true)
+        }
     }
 
     private fun attachHistory(snap: MarketsSnapshot): MarketsSnapshot {

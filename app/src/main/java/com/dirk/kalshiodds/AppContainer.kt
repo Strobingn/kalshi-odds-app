@@ -25,6 +25,7 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlRuntime
 import com.dirk.kalshiodds.signal.ml.HeavyMlStore
 import com.dirk.kalshiodds.signal.ml.NewsPulseCache
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
+import com.dirk.kalshiodds.signal.paper.PaperBookStore
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import java.io.File
 
@@ -63,8 +64,16 @@ class AppContainer(context: Context) {
         logStore = logStore,
         results = resultsWriter
     )
+    val paper = PaperBookStore(app)
     val tradeClient = KalshiTradeClient(
-        api = NetworkModule.tradeApi { preferences.credentialSnapshot() },
+        primary = NetworkModule.tradeApi(
+            { preferences.credentialSnapshot() },
+            com.dirk.kalshiodds.data.api.KalshiApi.TRADE_BASE_URL
+        ),
+        fallback = NetworkModule.tradeApi(
+            { preferences.credentialSnapshot() },
+            com.dirk.kalshiodds.data.api.KalshiApi.BASE_URL
+        ),
         credentials = { preferences.credentialSnapshot() }
     )
     val tickets = TicketSession(
@@ -80,7 +89,12 @@ class AppContainer(context: Context) {
         context = app,
         model = model,
         logStore = logStore,
+        extraOpenTickers = { paper.book.openTickers() },
+        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
         onCalibration = { hub.applyCalibration(it) },
-        onAfterScore = { support.refreshFromSettlements(hub.settings) }
+        onAfterScore = {
+            support.refreshFromSettlements(hub.settings)
+            paper.book.settleFromLog(logStore.readAll())
+        }
     )
 }

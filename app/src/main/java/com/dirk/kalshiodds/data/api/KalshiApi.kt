@@ -20,7 +20,13 @@ interface KalshiApi {
     ): MarketsResponse
 
     companion object {
+        /** Public market-data host (also listed as a shared Trade API server). */
         const val BASE_URL = "https://api.elections.kalshi.com/trade-api/v2/"
+        /**
+         * Official production Trade API host for authenticated writes.
+         * Docs (Create Order V2): https://docs.kalshi.com/api-reference/orders/create-order-v2
+         */
+        const val TRADE_BASE_URL = "https://external-api.kalshi.com/trade-api/v2/"
         const val SERIES_BTC = "KXBTC15M"
         const val SERIES_ETH = "KXETH15M"
         const val SERIES_SOL = "KXSOL15M"

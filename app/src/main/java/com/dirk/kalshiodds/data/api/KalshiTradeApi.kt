@@ -1,9 +1,6 @@
 package com.dirk.kalshiodds.data.api
 
-import com.dirk.kalshiodds.data.dto.CancelOrderLegacyResponse
 import com.dirk.kalshiodds.data.dto.CancelOrderV2Response
-import com.dirk.kalshiodds.data.dto.CreateOrderLegacyRequest
-import com.dirk.kalshiodds.data.dto.CreateOrderLegacyResponse
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import retrofit2.Response
@@ -14,11 +11,15 @@ import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
- * Authenticated Kalshi Trade API (create + cancel only).
+ * Authenticated Kalshi Trade API — **V2 event-order writes only**.
  *
- * Primary: V2 event-market path documented at
- * `POST /trade-api/v2/portfolio/events/orders`.
- * Legacy `/portfolio/orders` is kept as a 404 fallback (deprecated ≥ May 2026).
+ * 0.3.4 and earlier posted [createOrderV2] then, on HTTP 404, fell back to
+ * `POST /portfolio/orders`. Kalshi retired that legacy write path
+ * (`deprecated_v1_order_endpoint`, HTTP 410). This interface no longer
+ * exposes `/portfolio/orders`.
+ *
+ * Create: `POST /trade-api/v2/portfolio/events/orders`
+ * Cancel: `DELETE /trade-api/v2/portfolio/events/orders/{order_id}`
  *
  * Signing is applied by [KalshiAuthInterceptor] — never log PEM.
  */
@@ -33,10 +34,4 @@ interface KalshiTradeApi {
         @Query("market_ticker") marketTicker: String? = null,
         @Query("exchange_index") exchangeIndex: Int = -1
     ): Response<CancelOrderV2Response>
-
-    @POST("portfolio/orders")
-    suspend fun createOrderLegacy(@Body body: CreateOrderLegacyRequest): Response<CreateOrderLegacyResponse>
-
-    @DELETE("portfolio/orders/{order_id}")
-    suspend fun cancelOrderLegacy(@Path("order_id") orderId: String): Response<CancelOrderLegacyResponse>
 }

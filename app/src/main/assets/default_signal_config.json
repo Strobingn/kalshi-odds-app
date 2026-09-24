@@ -25,6 +25,7 @@
   "drawdownUsd": 50.0,
   "resumeOnNewSession": true,
   "ticketsEnabled": true,
+  "paperTradingEnabled": true,
   "ticketStakeUsd": 5.0,
   "ticketRespectGates": true,
   "heavyMlEnabled": false,

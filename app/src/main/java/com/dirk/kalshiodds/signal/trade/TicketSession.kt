@@ -224,6 +224,11 @@ class TicketSession(
             if (lower.contains("begin") && lower.contains("private")) {
                 return "Order failed — credential error (secrets not logged)"
             }
+            if (lower.contains("deprecated_v1_order_endpoint") ||
+                (lower.contains("http 410") && lower.contains("v2"))
+            ) {
+                return raw.take(240)
+            }
             return raw.take(240)
         }
     }

@@ -15,14 +15,14 @@ object PreTradeChecklist {
     )
 
     fun items(market: MarketUiModel): List<Item> {
-        val side = market.predictedSide ?: market.stanceSide()
+        val side = orDash(market.predictedSide ?: market.stanceSide())
         val size = market.suggestedContracts?.let { "$it contracts max" } ?: "—"
         val net = market.netEdgePp?.let { String.format(Locale.US, "%+.1f pp", it) }
             ?: market.edgePp?.let { String.format(Locale.US, "%+.1f pp raw", it) }
             ?: "—"
         val conf = market.aiConfidence?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        val regime = market.regimeTag ?: "—"
-        val tte = market.tteRegimeLabel ?: "—"
+        val regime = orDash(market.regimeTag)
+        val tte = orDash(market.tteRegimeLabel)
         val skip = when {
             market.muted -> market.muteReason ?: "muted"
             !market.passedFilter -> market.skipReason ?: "filtered"
@@ -32,9 +32,9 @@ object PreTradeChecklist {
         val ttm = market.timeToMoveSec?.let { String.format(Locale.US, "%.0fs", it) } ?: "—"
         val fill = market.pFill?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         val surv = market.survivalYesPp?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
-        val confSet = market.conformalSet ?: "—"
+        val confSet = orDash(market.conformalSet)
         val path = market.pathSurvive?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        val rl = market.rlNote ?: "—"
+        val rl = orDash(market.rlNote)
         return listOf(
             Item("Side", side),
             Item("Size", size),
@@ -95,6 +95,11 @@ object PreTradeChecklist {
 
     fun compactLine(items: List<Item>): String =
         items.joinToString(" · ") { "${it.label} ${it.value}" }
+
+    private fun orDash(raw: String?): String {
+        val t = raw?.trim().orEmpty()
+        return if (t.isEmpty()) "—" else t
+    }
 
     private fun MarketUiModel.stanceSide(): String = when {
         (edgePp ?: 0.0) < 0 -> "NO"

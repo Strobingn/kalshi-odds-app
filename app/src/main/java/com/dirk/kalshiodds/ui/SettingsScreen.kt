@@ -425,18 +425,32 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             ToggleRow("Meta-label take/skip", s.metaLabelEnabled, viewModel::setMetaLabel)
             ToggleRow("Synthetic path simulator", s.pathSimEnabled, viewModel::setPathSim)
 
-            Section("Trade tickets (approve-gated)")
+            Section("Paper book (visible on home)")
             Text(
-                "Two approve-gated paths: (1) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
+                "Isolated from live money. Starts at \$100, auto-logs a \$5 simulated fill when an AI hunter / LiveCall " +
+                    "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
+                    "card is the ledger — you do not need to dig here to see it.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Paper trading (AI auto-log \$5 fills)", s.paperTradingEnabled, viewModel::setPaperTrading)
+            OutlinedButton(onClick = viewModel::resetPaperBook, modifier = Modifier.height(44.dp)) {
+                Text("Reset paper book to $100")
+            }
+
+            Section("Live Approve tickets (Kalshi V2)")
+            Text(
+                "Two approve-gated live paths: (1) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
                     "(2) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
                     "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
-                    "Nothing is sent without Approve. Raising stake above \$5 requires typing " +
+                    "Live Approve uses POST /trade-api/v2/portfolio/events/orders only (no v1 fallback). " +
+                    "Raising stake above \$5 requires typing " +
                     "${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
                     "High variance: you can lose the full stake.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
-            ToggleRow("Show trade tickets", s.ticketsEnabled, viewModel::setTicketsEnabled)
+            ToggleRow("Show live trade tickets", s.ticketsEnabled, viewModel::setTicketsEnabled)
             Text(
                 String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),
                 style = MaterialTheme.typography.bodyMedium,
@@ -459,8 +473,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
                     "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
-                    "Used for the public ticker / trade / orderbook_delta WebSocket and, after an in-app Approve, " +
-                    "POST /trade-api/v2/portfolio/events/orders (limit only).",
+                    "Used for the public ticker / trade / orderbook_delta WebSocket and, after Live Approve, " +
+                    "POST /trade-api/v2/portfolio/events/orders (V2 limit only — never /portfolio/orders).",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

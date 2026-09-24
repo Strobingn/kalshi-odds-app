@@ -55,6 +55,7 @@ data class SignalSettings(
     val drawdownUsd: Double = SignalConstants.DEFAULT_DRAWDOWN_USD,
     val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
     val ticketsEnabled: Boolean = true,
+    val paperTradingEnabled: Boolean = SignalConstants.DEFAULT_PAPER_TRADING,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
     val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,
@@ -181,6 +182,7 @@ class SignalPreferences(
     }
     suspend fun updateResumeOnNewSession(value: Boolean) = edit { it[KEY_RESUME_SESSION] = value }
     suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
+    suspend fun updatePaperTrading(value: Boolean) = edit { it[KEY_PAPER] = value }
     suspend fun updateTicketStakeUsd(value: Double) = edit {
         it[KEY_TICKET_STAKE] = value.coerceIn(
             SignalConstants.TICKET_STAKE_MIN_USD,
@@ -275,6 +277,7 @@ class SignalPreferences(
             drawdownUsd = this[KEY_DRAWDOWN] ?: def.drawdownUsd,
             resumeOnNewSession = this[KEY_RESUME_SESSION] ?: def.resumeOnNewSession,
             ticketsEnabled = this[KEY_TICKETS] ?: def.ticketsEnabled,
+            paperTradingEnabled = this[KEY_PAPER] ?: def.paperTradingEnabled,
             ticketStakeUsd = this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd,
             ticketRespectGates = this[KEY_TICKET_GATES] ?: def.ticketRespectGates,
             heavyMlEnabled = this[KEY_HEAVY_ML] ?: def.heavyMlEnabled,
@@ -327,6 +330,7 @@ class SignalPreferences(
         private val KEY_DRAWDOWN = doublePreferencesKey("drawdown_usd")
         private val KEY_RESUME_SESSION = booleanPreferencesKey("resume_on_new_session")
         private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
+        private val KEY_PAPER = booleanPreferencesKey("paper_trading_enabled")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
         private val KEY_HEAVY_ML = booleanPreferencesKey("heavy_ml_enabled")
