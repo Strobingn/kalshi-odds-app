@@ -468,6 +468,37 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         return out
     }
 
+    override fun recentSettled(series: String?, limit: Int): List<com.dirk.kalshiodds.data.local.archive.SettledWindowRow> {
+        val sql = if (series.isNullOrBlank()) {
+            "SELECT ticker, series, result, strike, open_ms, close_ms, imported_at_ms, source FROM $TABLE_SETTLED ORDER BY close_ms DESC LIMIT ?"
+        } else {
+            "SELECT ticker, series, result, strike, open_ms, close_ms, imported_at_ms, source FROM $TABLE_SETTLED WHERE series = ? OR ticker LIKE ? ORDER BY close_ms DESC LIMIT ?"
+        }
+        val args = if (series.isNullOrBlank()) {
+            arrayOf(limit.toString())
+        } else {
+            arrayOf(series, "$series%", limit.toString())
+        }
+        val out = ArrayList<com.dirk.kalshiodds.data.local.archive.SettledWindowRow>()
+        db.readableDatabase.rawQuery(sql, args).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+                        ticker = c.getString(0),
+                        series = c.getString(1) ?: "",
+                        result = c.getString(2) ?: "",
+                        strikeUsd = if (c.isNull(3)) null else c.getDouble(3),
+                        openMs = if (c.isNull(4)) null else c.getLong(4),
+                        closeMs = if (c.isNull(5)) null else c.getLong(5),
+                        importedAtMs = if (c.isNull(6)) 0L else c.getLong(6),
+                        source = c.getString(7) ?: "kalshi"
+                    )
+                )
+            }
+        }
+        return out
+    }
+
     override fun existingFillIds(): Set<String> {
         val out = HashSet<String>()
         db.readableDatabase.rawQuery("SELECT fill_id FROM $TABLE_FILL", null).use { c ->

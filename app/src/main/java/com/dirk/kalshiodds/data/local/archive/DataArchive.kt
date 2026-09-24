@@ -80,6 +80,7 @@ interface DataArchive {
     fun spotCloses(product: String, startMs: Long, endMs: Long): List<Double>
     fun stats(): DataStats
     fun settledTickers(): Set<String>
+    fun recentSettled(series: String? = null, limit: Int = 8): List<SettledWindowRow>
     fun existingFillIds(): Set<String>
     fun existingSnapshotKeys(): Set<String>
     fun existingAlertIds(): Set<String>

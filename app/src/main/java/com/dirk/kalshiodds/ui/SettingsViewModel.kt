@@ -127,6 +127,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setDrawdownUsd(v: Double) = viewModelScope.launch { prefs.updateDrawdownUsd(v) }
     fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
     fun setTicketsEnabled(v: Boolean) = viewModelScope.launch { prefs.updateTicketsEnabled(v) }
+    fun setHunterValueStake(v: Double) = viewModelScope.launch { prefs.updateHunterValueStakeUsd(v) }
+    fun setHunterValuePayout(v: Double) = viewModelScope.launch { prefs.updateHunterValuePayoutUsd(v) }
+    fun setWinTargetEnabled(v: Boolean) = viewModelScope.launch { prefs.updateWinTargetEnabled(v) }
+    fun setWinTargetUsd(v: Double) = viewModelScope.launch { prefs.updateWinTargetUsd(v) }
+    fun setWinTargetBankrollPct(v: Double) = viewModelScope.launch { prefs.updateWinTargetBankrollPct(v) }
+    fun setWinTargetAbsCapUsd(v: Double?) = viewModelScope.launch { prefs.updateWinTargetAbsCapUsd(v) }
     fun setPaperTrading(v: Boolean) = viewModelScope.launch { prefs.updatePaperTrading(v) }
     fun resetPaperBook() {
         container.paper.book.reset()

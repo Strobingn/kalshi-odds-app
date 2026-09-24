@@ -9,42 +9,70 @@ import org.junit.Test
 class TapeConflictTest {
 
     @Test
-    fun risingTapeConflictsWithDownCall() {
+    fun primaryFollowsSpotAndMarketNotSparkline() {
+        val out = TapeConflict.evaluate(
+            spotReturn1m = -0.05,
+            spotReturn5m = -0.08,
+            modelSide = "NO",
+            yesAsk = 0.64,
+            noAsk = 0.37,
+            spotUsd = 84_311.0,
+            strikeUsd = 84_278.0,
+            fairYes = 0.62,
+            previousPrimary = "YES",
+            priorStreak = 0
+        )
+        assertEquals("YES", out.primarySide)
+        assertFalse(out.conflict)
+        assertEquals(null, out.banner)
+    }
+
+    @Test
+    fun singleDisagreementDoesNotBanner() {
         val out = TapeConflict.evaluate(
             spotReturn1m = 0.002,
             spotReturn5m = 0.004,
-            modelSide = "NO"
+            modelSide = "NO",
+            yesAsk = 0.64,
+            noAsk = 0.37,
+            spotUsd = 84_311.0,
+            strikeUsd = 84_278.0,
+            priorStreak = 0
         )
-        assertTrue(out.conflict)
-        assertEquals(TapeConflict.Trend.UP, out.trend)
         assertEquals("YES", out.primarySide)
         assertEquals("NO", out.modelSide)
-        assertEquals("AI says DOWN, but live chart shows UP", out.banner)
+        assertFalse(out.conflict)
+        assertEquals(1, out.disagreementStreak)
     }
 
     @Test
-    fun fallingTapeConflictsWithUpCall() {
-        val out = TapeConflict.evaluate(
-            spotReturn1m = -0.002,
-            spotReturn5m = -0.004,
-            modelSide = "YES"
-        )
-        assertTrue(out.conflict)
-        assertEquals(TapeConflict.Trend.DOWN, out.trend)
-        assertEquals("NO", out.primarySide)
-        assertEquals("AI says UP, but live chart shows DOWN", out.banner)
-    }
-
-    @Test
-    fun alignedTapeIsNotAConflict() {
+    fun sustainedDisagreementShowsBanner() {
         val out = TapeConflict.evaluate(
             spotReturn1m = 0.002,
-            spotReturn5m = 0.003,
-            modelSide = "YES"
+            spotReturn5m = 0.004,
+            modelSide = "NO",
+            yesAsk = 0.64,
+            noAsk = 0.37,
+            spotUsd = 84_311.0,
+            strikeUsd = 84_278.0,
+            priorStreak = TapeConflict.SUSTAINED_STREAK - 1
         )
-        assertFalse(out.conflict)
+        assertTrue(out.conflict)
+        assertTrue(out.banner!!.contains("AI says DOWN"))
+        assertTrue(out.banner!!.contains("UP"))
+    }
+
+    @Test
+    fun zeroAskDoesNotFlipPreviousPrimary() {
+        val out = TapeConflict.evaluate(
+            spotReturn1m = -0.01,
+            spotReturn5m = -0.02,
+            modelSide = "YES",
+            yesAsk = 0.0,
+            noAsk = 1.0,
+            previousPrimary = "YES"
+        )
         assertEquals("YES", out.primarySide)
-        assertEquals(null, out.banner)
     }
 
     @Test
@@ -56,7 +84,6 @@ class TapeConflictTest {
         )
         assertEquals(TapeConflict.Trend.FLAT, out.trend)
         assertFalse(out.conflict)
-        assertEquals("NO", out.primarySide)
     }
 
     @Test

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import com.dirk.kalshiodds.signal.engine.SkipFilter
@@ -72,6 +73,7 @@ fun OddsScreen(
     onOpenSettings: () -> Unit,
     onOpenScorecard: () -> Unit,
     onOpenData: () -> Unit = {},
+    onOpenHistory: () -> Unit = {},
     onOpenChart: (MarketUiModel) -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -82,6 +84,9 @@ fun OddsScreen(
             TopAppBar(
                 title = { Text("Dip Hunter") },
                 actions = {
+                    IconButton(onClick = onOpenHistory) {
+                        Icon(Icons.Default.History, contentDescription = "History")
+                    }
                     IconButton(onClick = onOpenData) {
                         Icon(Icons.Default.FolderOpen, contentDescription = "Data")
                     }
@@ -160,7 +165,8 @@ fun OddsScreen(
                             enabled = state.settings.paperTradingEnabled,
                             onToggle = viewModel::setPaperTrading,
                             onReset = viewModel::resetPaperBook,
-                            onSell = { ticker, side -> viewModel.sellPosition(ticker, side) }
+                            onSell = { ticker, side -> viewModel.sellPosition(ticker, side) },
+                            onViewHistory = onOpenHistory
                         )
                     }
                     item { SectionHeader("Positions") }
@@ -168,7 +174,8 @@ fun OddsScreen(
                         PositionsCard(
                             positions = state.positions,
                             note = state.positionsNote,
-                            onSell = { ticker, side -> viewModel.sellPosition(ticker, side) }
+                            onSell = { ticker, side -> viewModel.sellPosition(ticker, side) },
+                            onViewHistory = onOpenHistory
                         )
                     }
                     item {
@@ -407,10 +414,8 @@ private fun LiveUpDownHero(
     onBuyNo: (MarketUiModel) -> Unit,
     onOpenChart: (MarketUiModel) -> Unit = {}
 ) {
-    val up = market?.aiYesPercent ?: market?.yesProbabilityPercent
-    val down = market?.aiNoPercent ?: market?.noProbabilityPercent ?: up?.let { 100.0 - it }
     val primary = market?.primaryHeroSide
-    val tapeUp = primary == "YES" || (primary == null && (up ?: 50.0) >= 50.0)
+    val tapeUp = primary == "YES" || (primary == null && (market?.yesAsk ?: 0.5) >= 0.5)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -429,7 +434,17 @@ private fun LiveUpDownHero(
                 color = TextSecondary,
                 modifier = Modifier.weight(1f)
             )
-            TimeLeftLabel(market?.closeTimeEpochMs)
+            TimeLeftLabel(market?.closeTimeEpochMs, pill = true)
+        }
+        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.targetNowLine(market?.floorStrike, market?.spotUsd)?.let { line ->
+            val up = (market?.spotVsTargetUsd ?: 0.0) >= 0.0
+            Text(
+                line,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (up) AccentGreen else AccentRed,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            )
         }
         if (market?.tapeConflict == true && market.tapeConflictNote != null) {
             Text(
@@ -443,24 +458,6 @@ private fun LiveUpDownHero(
                     .background(AccentOrange.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
                     .padding(10.dp)
             )
-            market.modelLeanSide?.let { lean ->
-                Text(
-                    "Model lean ${if (lean == "NO") "DOWN" else "UP"} — you decide. Primary follows live tape.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = AccentOrange,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            HeroPct(label = "UP", percent = up, color = AccentGreen, emphasized = tapeUp)
-            HeroPct(label = "DOWN", percent = down, color = AccentRed, emphasized = !tapeUp)
         }
         market?.let { m ->
             Row(
@@ -480,14 +477,33 @@ private fun LiveUpDownHero(
                     fontWeight = FontWeight.Bold
                 )
             }
-            m.digitalFairPp?.let { fv ->
+            com.dirk.kalshiodds.domain.KalshiQuoteDisplay.aiLabel(
+                (m.importedModelPp ?: m.aiYesPercent)?.div(100.0)
+            )?.let { ai ->
                 Text(
-                    String.format(Locale.US, "Fair value %.0f¢", fv),
+                    ai + (m.digitalFairPp?.let { String.format(Locale.US, "  ·  Fair %.0f¢", it) } ?: ""),
                     color = AccentBlue,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 4.dp)
                 )
+            }
+            if (m.pastSettlements.isNotEmpty()) {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Past", color = TextSecondary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+                    m.pastSettlements.take(8).forEach { yes ->
+                        Text(
+                            if (yes) "▲" else "▼",
+                            color = if (yes) AccentGreen else AccentRed,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp
+                        )
+                    }
+                }
             }
             BidChart(
                 points = m.bidHistory.ifEmpty {
@@ -505,7 +521,10 @@ private fun LiveUpDownHero(
                     .clickable { onOpenChart(m) },
                 heightDp = 88,
                 windowStartMs = m.closeTimeEpochMs?.minus(900_000L),
-                windowEndMs = m.closeTimeEpochMs
+                windowEndMs = m.closeTimeEpochMs,
+                strikeLabel = m.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
+                spotUsd = m.spotUsd,
+                strikeUsd = m.floorStrike
             )
         }
         Text(
@@ -521,13 +540,16 @@ private fun LiveUpDownHero(
             ) {
                 Button(
                     onClick = { onBuyYes(market) },
-                    modifier = Modifier.weight(1f).height(48.dp)
-                ) { Text("Buy UP") }
+                    modifier = Modifier.weight(1f).height(52.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                        containerColor = if (tapeUp) AccentGreen else AccentGreen.copy(alpha = 0.75f)
+                    )
+                ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
                 Button(
                     onClick = { onBuyNo(market) },
                     modifier = Modifier.weight(1f).height(52.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentRed)
-                ) { Text("Buy DOWN") }
+                ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
             }
         }
     }

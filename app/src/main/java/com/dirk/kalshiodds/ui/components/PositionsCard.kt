@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -29,7 +30,8 @@ import java.util.Locale
 fun PositionsCard(
     positions: List<LivePosition>,
     note: String?,
-    onSell: (ticker: String, side: String) -> Unit
+    onSell: (ticker: String, side: String) -> Unit,
+    onViewHistory: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -49,6 +51,11 @@ fun PositionsCard(
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary
         )
+        if (onViewHistory != null) {
+            OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
+                Text("View all")
+            }
+        }
         note?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentOrange)
         }

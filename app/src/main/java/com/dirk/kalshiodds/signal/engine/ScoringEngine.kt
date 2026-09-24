@@ -132,6 +132,7 @@ class ScoringEngine(
         val extendedNote: String? = null,
         val directionalLock: Boolean = false,
         val spotVsTargetUsd: Double? = null,
+        val spotUsd: Double? = null,
         val tapeTrend: String? = null,
         val tapeConflict: Boolean = false,
         val tapeConflictNote: String? = null,
@@ -172,6 +173,8 @@ class ScoringEngine(
 
     private val lastAlertMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastBookScoreMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val tapeStreak = java.util.concurrent.ConcurrentHashMap<String, Int>()
+    private val lastPrimarySide = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     fun rememberMeta(
         ticker: String,
@@ -560,8 +563,17 @@ class ScoringEngine(
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
             spotReturn5m = spotFeat?.spotReturn5m,
-            modelSide = predictedSide
+            modelSide = predictedSide,
+            yesAsk = tick.yesAsk,
+            noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
+            spotUsd = spotFeat?.lastPrice,
+            strikeUsd = strikeUsd,
+            fairYes = fair / 100.0,
+            previousPrimary = lastPrimarySide[tick.ticker],
+            priorStreak = tapeStreak[tick.ticker] ?: 0
         )
+        tapeStreak[tick.ticker] = tape.disagreementStreak
+        lastPrimarySide[tick.ticker] = tape.primarySide
         if (extOut?.fairBlendYes != null || dir.applied) {
             ev = NetExpectedValue.compute(
                 fairYes = fair / 100.0,
@@ -758,6 +770,7 @@ class ScoringEngine(
             extendedNote = extOut?.note,
             directionalLock = dir.applied,
             spotVsTargetUsd = dir.spotVsTargetUsd,
+            spotUsd = spotFeat?.lastPrice,
             tapeTrend = tape.trend.name,
             tapeConflict = tape.conflict,
             tapeConflictNote = tape.banner,

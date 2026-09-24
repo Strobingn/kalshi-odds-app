@@ -444,8 +444,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Two approve-gated live paths: (1) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
-                    "(2) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
+                "Three approve-gated live paths: (1) cheap hunter — \$1 stake when max payout is ≥\$5 (ask ≤~20¢); " +
+                    "(2) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
+                    "(3) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
                     "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
                     "Expired 15m windows drop or move to the live contract; a missing ask shows on that ticket " +
                     "(Approve stays off). Your positions load from GET /portfolio/positions; Sell is a reduce-only V2 " +
@@ -474,6 +475,67 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 "Require skip filter / mute / streak-pause for tickets",
                 s.ticketRespectGates,
                 viewModel::setTicketRespectGates
+            )
+            Text(
+                String.format(
+                    Locale.US,
+                    "$1 → $5 hunter  stake $%.0f · target $%.0f  (needs ask ≤ %.0f¢, market says ~%.0f%% chance)",
+                    s.hunterValueStakeUsd,
+                    s.hunterValuePayoutUsd,
+                    (s.hunterValueStakeUsd / s.hunterValuePayoutUsd) * 100.0,
+                    (s.hunterValueStakeUsd / s.hunterValuePayoutUsd) * 100.0
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text("Stake $", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Slider(
+                value = s.hunterValueStakeUsd.toFloat().coerceIn(1f, 5f),
+                onValueChange = { viewModel.setHunterValueStake(it.toDouble()) },
+                valueRange = 1f..5f,
+                steps = 3
+            )
+            Text("Target payout $", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Slider(
+                value = s.hunterValuePayoutUsd.toFloat().coerceIn(2f, 25f),
+                onValueChange = { viewModel.setHunterValuePayout(it.toDouble()) },
+                valueRange = 2f..25f,
+                steps = 22
+            )
+
+            Section("Win target sizing")
+            Text(
+                "Size hunter and Buy UP/DOWN tickets so profit-if-win ≥ the target, walking the ask book (VWAP). " +
+                    "Stake is capped at a % of bankroll (live Kalshi cash or paper equity) and an optional $ cap. " +
+                    "Still Approve-only.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Win-target sizing", s.winTargetEnabled, viewModel::setWinTargetEnabled)
+            Text(
+                String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.winTargetUsd.toFloat().coerceIn(5f, 200f),
+                onValueChange = { viewModel.setWinTargetUsd(it.toDouble()) },
+                valueRange = 5f..200f,
+                steps = 38
+            )
+            Text(
+                String.format(Locale.US, "Max stake  %.0f%% of bankroll", s.winTargetBankrollPct),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.winTargetBankrollPct.toFloat().coerceIn(1f, 50f),
+                onValueChange = { viewModel.setWinTargetBankrollPct(it.toDouble()) },
+                valueRange = 1f..50f,
+                steps = 48
             )
 
             Section("Kalshi API key (WS + approve-gated orders)")

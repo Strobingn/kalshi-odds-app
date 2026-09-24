@@ -163,6 +163,14 @@ class InMemoryResultsStore(
     override fun settledTickers(): Set<String> = settled.keys.toSet()
 
     @Synchronized
+    override fun recentSettled(series: String?, limit: Int): List<com.dirk.kalshiodds.data.local.archive.SettledWindowRow> {
+        val rows = settled.values
+            .filter { series == null || it.series.equals(series, true) || it.ticker.startsWith(series.orEmpty(), true) }
+            .sortedByDescending { it.closeMs ?: 0L }
+        return rows.take(limit.coerceAtLeast(0))
+    }
+
+    @Synchronized
     override fun existingFillIds(): Set<String> = fills.keys.toSet()
 
     @Synchronized

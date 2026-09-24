@@ -41,6 +41,7 @@ class MainActivity : ComponentActivity() {
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
+    private val historyViewModel: com.dirk.kalshiodds.ui.HistoryViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -78,6 +79,11 @@ class MainActivity : ComponentActivity() {
                         )
                         screen == "data" -> DataScreen(
                             viewModel = dataViewModel,
+                            onBack = { screen = "odds" },
+                            onOpenHistory = { screen = "history" }
+                        )
+                        screen == "history" -> com.dirk.kalshiodds.ui.HistoryScreen(
+                            viewModel = historyViewModel,
                             onBack = { screen = "odds" }
                         )
                         chartMarket != null -> ChartDetailScreen(
@@ -99,6 +105,7 @@ class MainActivity : ComponentActivity() {
                             onOpenSettings = { screen = "settings" },
                             onOpenScorecard = { screen = "scorecard" },
                             onOpenData = { screen = "data" },
+                            onOpenHistory = { screen = "history" },
                             onOpenChart = { chartTicker = it.ticker }
                         )
                     }

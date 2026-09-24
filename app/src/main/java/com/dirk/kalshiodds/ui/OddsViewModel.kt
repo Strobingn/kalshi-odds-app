@@ -669,11 +669,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }.getOrElse { emptyList() }
             val bids = com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
-                (stored + liveBids).sortedBy { it.tMs }.distinctBy { it.tMs },
+                (stored + liveBids)
+                    .filter {
+                        com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.upBidCents) != null ||
+                            com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents) != null
+                    }
+                    .sortedBy { it.tMs }
+                    .distinctBy { it.tMs },
                 com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
             )
+            val past = runCatching {
+                container.archive.recentSettled(com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker), 8)
+                    .map { it.result.equals("yes", true) }
+            }.getOrElse { emptyList() }
             val withOdds = if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
-            if (bids.isEmpty() && withOdds.bidHistory.isEmpty()) withOdds else withOdds.copy(bidHistory = bids.ifEmpty { withOdds.bidHistory })
+            val withBids = if (bids.isEmpty() && withOdds.bidHistory.isEmpty()) withOdds else withOdds.copy(bidHistory = bids.ifEmpty { withOdds.bidHistory })
+            if (past.isEmpty()) withBids else withBids.copy(pastSettlements = past)
         }
         return snap.copy(
             btc = snap.btc.withHist(),

@@ -7,7 +7,8 @@ package com.dirk.kalshiodds.chart
 data class BidPoint(
     val tMs: Long,
     val upBidCents: Float?,
-    val downBidCents: Float?
+    val downBidCents: Float?,
+    val spotUsd: Double? = null
 )
 
 data class BidSeries(

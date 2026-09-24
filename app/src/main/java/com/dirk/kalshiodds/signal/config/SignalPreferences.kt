@@ -58,6 +58,12 @@ data class SignalSettings(
     val paperTradingEnabled: Boolean = SignalConstants.DEFAULT_PAPER_TRADING,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
+    val hunterValueStakeUsd: Double = SignalConstants.HUNTER_VALUE_STAKE_USD,
+    val hunterValuePayoutUsd: Double = SignalConstants.HUNTER_VALUE_PAYOUT_USD,
+    val winTargetEnabled: Boolean = SignalConstants.DEFAULT_WIN_TARGET_ENABLED,
+    val winTargetUsd: Double = SignalConstants.DEFAULT_WIN_TARGET_USD,
+    val winTargetBankrollPct: Double = SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
+    val winTargetAbsCapUsd: Double? = null,
     val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,
     val sequenceModelEnabled: Boolean = SignalConstants.DEFAULT_SEQUENCE_MODEL,
     val gbmEnabled: Boolean = SignalConstants.DEFAULT_GBM,
@@ -190,6 +196,26 @@ class SignalPreferences(
         )
     }
     suspend fun updateTicketRespectGates(value: Boolean) = edit { it[KEY_TICKET_GATES] = value }
+    suspend fun updateHunterValueStakeUsd(value: Double) = edit {
+        it[KEY_HUNTER_VALUE_STAKE] = value.coerceIn(1.0, 5.0)
+    }
+    suspend fun updateHunterValuePayoutUsd(value: Double) = edit {
+        it[KEY_HUNTER_VALUE_PAYOUT] = value.coerceIn(2.0, 25.0)
+    }
+    suspend fun updateWinTargetEnabled(value: Boolean) = edit { it[KEY_WIN_TARGET] = value }
+    suspend fun updateWinTargetUsd(value: Double) = edit {
+        it[KEY_WIN_TARGET_USD] = value.coerceIn(5.0, 500.0)
+    }
+    suspend fun updateWinTargetBankrollPct(value: Double) = edit {
+        it[KEY_WIN_TARGET_PCT] = value.coerceIn(1.0, 50.0)
+    }
+    suspend fun updateWinTargetAbsCapUsd(value: Double?) = edit {
+        if (value == null || !value.isFinite() || value <= 0.0) {
+            it.remove(KEY_WIN_TARGET_ABS)
+        } else {
+            it[KEY_WIN_TARGET_ABS] = value.coerceIn(1.0, 10_000.0)
+        }
+    }
     suspend fun updateHeavyMl(value: Boolean) = edit { it[KEY_HEAVY_ML] = value }
     suspend fun updateSequenceModel(value: Boolean) = edit { it[KEY_SEQ_MODEL] = value }
     suspend fun updateGbm(value: Boolean) = edit { it[KEY_GBM] = value }
@@ -280,6 +306,12 @@ class SignalPreferences(
             paperTradingEnabled = this[KEY_PAPER] ?: def.paperTradingEnabled,
             ticketStakeUsd = this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd,
             ticketRespectGates = this[KEY_TICKET_GATES] ?: def.ticketRespectGates,
+            hunterValueStakeUsd = this[KEY_HUNTER_VALUE_STAKE] ?: SignalConstants.HUNTER_VALUE_STAKE_USD,
+            hunterValuePayoutUsd = this[KEY_HUNTER_VALUE_PAYOUT] ?: SignalConstants.HUNTER_VALUE_PAYOUT_USD,
+            winTargetEnabled = this[KEY_WIN_TARGET] ?: SignalConstants.DEFAULT_WIN_TARGET_ENABLED,
+            winTargetUsd = this[KEY_WIN_TARGET_USD] ?: SignalConstants.DEFAULT_WIN_TARGET_USD,
+            winTargetBankrollPct = this[KEY_WIN_TARGET_PCT] ?: SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
+            winTargetAbsCapUsd = this[KEY_WIN_TARGET_ABS],
             heavyMlEnabled = this[KEY_HEAVY_ML] ?: def.heavyMlEnabled,
             sequenceModelEnabled = this[KEY_SEQ_MODEL] ?: def.sequenceModelEnabled,
             gbmEnabled = this[KEY_GBM] ?: def.gbmEnabled,
@@ -333,6 +365,12 @@ class SignalPreferences(
         private val KEY_PAPER = booleanPreferencesKey("paper_trading_enabled")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
+        private val KEY_HUNTER_VALUE_STAKE = doublePreferencesKey("hunter_value_stake_usd")
+        private val KEY_HUNTER_VALUE_PAYOUT = doublePreferencesKey("hunter_value_payout_usd")
+        private val KEY_WIN_TARGET = booleanPreferencesKey("win_target_enabled")
+        private val KEY_WIN_TARGET_USD = doublePreferencesKey("win_target_usd")
+        private val KEY_WIN_TARGET_PCT = doublePreferencesKey("win_target_bankroll_pct")
+        private val KEY_WIN_TARGET_ABS = doublePreferencesKey("win_target_abs_cap_usd")
         private val KEY_HEAVY_ML = booleanPreferencesKey("heavy_ml_enabled")
         private val KEY_SEQ_MODEL = booleanPreferencesKey("sequence_model_enabled")
         private val KEY_GBM = booleanPreferencesKey("gbm_enabled")

@@ -424,13 +424,13 @@ fun MarketCard(
                         Button(
                             onClick = onBuyYes,
                             modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text("Buy UP") }
+                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
                     }
                     if (onBuyNo != null) {
                         OutlinedButton(
                             onClick = onBuyNo,
                             modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text("Buy DOWN") }
+                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
                     }
                     if (onSell != null) {
                         OutlinedButton(

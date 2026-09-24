@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.chart.ChartDownsampler
+import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentRed
 import com.dirk.kalshiodds.ui.theme.Contrast
@@ -53,7 +54,9 @@ fun BidChart(
     scrub: Boolean = false,
     windowStartMs: Long? = null,
     windowEndMs: Long? = null,
-    strikeLabel: String? = null
+    strikeLabel: String? = null,
+    spotUsd: Double? = null,
+    strikeUsd: Double? = null
 ) {
     val bg = MaterialTheme.colorScheme.surface
     val labelColor = checklistLabelColor(bg)
@@ -132,6 +135,25 @@ fun BidChart(
             }
             line({ it.upBidCents }, AccentGreen)
             line({ it.downBidCents }, AccentRed)
+            if (strikeUsd != null && strikeUsd > 0.0) {
+                val spots = downsampled.mapNotNull { it.spotUsd } + listOfNotNull(spotUsd)
+                val lastSpot = spots.lastOrNull()
+                val band = maxOf(
+                    kotlin.math.abs((lastSpot ?: strikeUsd) - strikeUsd),
+                    strikeUsd * 0.001,
+                    1.0
+                )
+                val yStrike = size.height * 0.5f
+                var x = 0f
+                while (x < size.width) {
+                    drawLine(axisColor.copy(alpha = 0.55f), Offset(x, yStrike), Offset(x + 8f, yStrike), strokeWidth = 2f)
+                    x += 16f
+                }
+                if (lastSpot != null) {
+                    val ySpot = (size.height * (0.5f - ((lastSpot - strikeUsd) / (2.0 * band)).toFloat())).coerceIn(0f, size.height)
+                    drawCircle(AccentBlue, 4.dp.toPx(), Offset(size.width - 6.dp.toPx(), ySpot))
+                }
+            }
             if (scrub && scrubIdx != null) {
                 val x = xOf(pick.tMs)
                 drawLine(axisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)

@@ -111,6 +111,14 @@ object SignalConstants {
     const val HUNTER_STAKE_USD = 1.0
     const val HUNTER_MIN_PAYOUT_USD = 25.0
 
+    /** Approve-gated cheap hunter: $1 → ≥$5 (ask ≤ 20¢ before fees). */
+    const val HUNTER_VALUE_STAKE_USD = 1.0
+    const val HUNTER_VALUE_PAYOUT_USD = 5.0
+
+    const val DEFAULT_WIN_TARGET_ENABLED = false
+    const val DEFAULT_WIN_TARGET_USD = 50.0
+    const val DEFAULT_WIN_TARGET_BANKROLL_PCT = 10.0
+
     /** Each winning binary contract settles at $1.00. */
     const val CONTRACT_SETTLEMENT_USD = 1.0
 

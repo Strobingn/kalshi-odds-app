@@ -35,11 +35,21 @@ data class PaperFill(
 }
 
 @Serializable
+data class PaperArchive(
+    val archivedAtMs: Long,
+    val startingUsd: Double,
+    val cashUsd: Double,
+    val fills: List<PaperFill>,
+    val note: String = "paper reset"
+)
+
+@Serializable
 data class PaperBookState(
     val startingUsd: Double = SignalConstants.PAPER_START_USD,
     val cashUsd: Double = SignalConstants.PAPER_START_USD,
     val fills: List<PaperFill> = emptyList(),
-    val lastMessage: String? = null
+    val lastMessage: String? = null,
+    val archived: List<PaperArchive> = emptyList()
 ) {
     val openStakeUsd: Double get() = fills.filter { !it.settled }.sumOf { it.stakeUsd }
     val realizedPnlUsd: Double get() = fills.mapNotNull { it.pnlUsd }.sum()
@@ -65,7 +75,20 @@ class PaperBook(
 
     fun reset() {
         synchronized(lock) {
-            publish(PaperBookState(lastMessage = "Paper book reset to $100 — no Kalshi orders"))
+            val cur = _state.value
+            val archive = PaperArchive(
+                archivedAtMs = nowMs(),
+                startingUsd = cur.startingUsd,
+                cashUsd = cur.cashUsd,
+                fills = cur.fills,
+                note = "Paper book reset — ledger archived"
+            )
+            publish(
+                PaperBookState(
+                    lastMessage = "Paper book reset to $100 — prior run archived",
+                    archived = cur.archived + archive
+                )
+            )
         }
     }
 

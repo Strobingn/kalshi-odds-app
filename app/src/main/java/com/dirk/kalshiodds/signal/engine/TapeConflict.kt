@@ -1,15 +1,14 @@
 package com.dirk.kalshiodds.signal.engine
 
+import com.dirk.kalshiodds.domain.KalshiPrice
 import kotlin.math.abs
 
 /**
- * Cross-check a directional suggestion against the live Bitcoin (or
- * ETH/SOL) tape — short-horizon spot returns already fetched by
- * [com.dirk.kalshiodds.signal.external.ExternalMarketClient].
+ * Primary side is **market + spot vs strike + fair value**, never a
+ * sparkline slope. A single bad tick cannot flip direction.
  *
- * Does **not** replace [DirectionSanity] (spot − strike lock). This only
- * decides when the model/lock side conflicts with a clear chart trend so
- * the UI can show both and align the primary hero with the tape.
+ * The "AI vs tape" banner only fires after [SUSTAINED_STREAK] consecutive
+ * disagreements between the model and that primary.
  */
 object TapeConflict {
 
@@ -21,13 +20,17 @@ object TapeConflict {
     /** ~8 bp over 5m — the Binance/Coinbase window we already cache. */
     const val CLEAR_5M = 0.0008
 
+    /** Banner only after this many consecutive model-vs-primary disagreements. */
+    const val SUSTAINED_STREAK = 3
+
     data class Result(
         val trend: Trend,
         val modelSide: String,
         val primarySide: String,
         val conflict: Boolean,
         val banner: String?,
-        val tapeReturn: Double?
+        val tapeReturn: Double?,
+        val disagreementStreak: Int = 0
     )
 
     fun trend(spotReturn1m: Double?, spotReturn5m: Double?): Trend {
@@ -37,10 +40,64 @@ object TapeConflict {
         val clear = if (r5 != null) CLEAR_5M else CLEAR_1M
         if (abs(primary) < clear) return Trend.FLAT
         if (r5 != null && r1 != null && r5 * r1 < 0.0 && abs(r1) >= CLEAR_1M) {
-            // 1m already reversed a 5m move — treat as flat, not a silent fade.
             return Trend.FLAT
         }
         return if (primary > 0.0) Trend.UP else Trend.DOWN
+    }
+
+    /**
+     * Market + spot vs strike (+ fair). Never a sparkline. Keep
+     * [previousPrimary] unless the new evidence is clean and decisive.
+     */
+    fun primaryFromMarket(
+        yesAsk: Double?,
+        noAsk: Double?,
+        spotUsd: Double?,
+        strikeUsd: Double?,
+        fairYes: Double?,
+        previousPrimary: String?
+    ): String {
+        val yes = QuoteSanity.usablePair(null, yesAsk).second
+        val no = QuoteSanity.usablePair(null, noAsk).second
+        val mid = QuoteSanity.robustMid(
+            bid = yesAsk?.let { KalshiPrice.usable(1.0 - (noAsk ?: 1.0)) },
+            ask = yes,
+            last = null
+        ) ?: QuoteSanity.robustMid(null, yes) ?: no?.let { 1.0 - it }
+
+        val spot = spotUsd?.takeIf { it.isFinite() && it > 0.0 }
+        val strike = strikeUsd?.takeIf { it.isFinite() && it > 0.0 }
+        val fromSpot = if (spot != null && strike != null) {
+            val gap = spot - strike
+            val rel = abs(gap) / strike
+            when {
+                rel < DirectionSanity.MIN_RELATIVE_GAP && abs(gap) < DirectionSanity.MIN_ABS_GAP_USD -> null
+                gap > 0.0 -> DirectionSanity.SIDE_YES
+                gap < 0.0 -> DirectionSanity.SIDE_NO
+                else -> null
+            }
+        } else {
+            null
+        }
+        val fromMarket = mid?.let {
+            when {
+                it > 0.52 -> DirectionSanity.SIDE_YES
+                it < 0.48 -> DirectionSanity.SIDE_NO
+                else -> null
+            }
+        }
+        val fromFair = fairYes?.takeIf { it.isFinite() }?.let {
+            when {
+                it > 0.52 -> DirectionSanity.SIDE_YES
+                it < 0.48 -> DirectionSanity.SIDE_NO
+                else -> null
+            }
+        }
+        val decided = fromSpot ?: fromMarket ?: fromFair
+        if (decided != null) return decided
+        val prev = previousPrimary?.uppercase()
+        if (prev == DirectionSanity.SIDE_YES || prev == DirectionSanity.SIDE_NO) return prev
+        return DirectionSanity.SIDE_YES
     }
 
     /**
@@ -49,34 +106,34 @@ object TapeConflict {
     fun evaluate(
         spotReturn1m: Double?,
         spotReturn5m: Double?,
-        modelSide: String
+        modelSide: String,
+        yesAsk: Double? = null,
+        noAsk: Double? = null,
+        spotUsd: Double? = null,
+        strikeUsd: Double? = null,
+        fairYes: Double? = null,
+        previousPrimary: String? = null,
+        priorStreak: Int = 0
     ): Result {
         val side = if (modelSide.equals("NO", ignoreCase = true)) DirectionSanity.SIDE_NO
         else DirectionSanity.SIDE_YES
         val t = trend(spotReturn1m, spotReturn5m)
         val tapeRet = (spotReturn5m ?: spotReturn1m)?.takeIf { it.isFinite() }
-        if (t == Trend.FLAT) {
-            return Result(
-                trend = t,
-                modelSide = side,
-                primarySide = side,
-                conflict = false,
-                banner = null,
-                tapeReturn = tapeRet
-            )
-        }
-        val tapeYes = t == Trend.UP
-        val modelYes = side == DirectionSanity.SIDE_YES
-        val conflict = tapeYes != modelYes
-        val primary = when {
-            conflict && tapeYes -> DirectionSanity.SIDE_YES
-            conflict && !tapeYes -> DirectionSanity.SIDE_NO
-            else -> side
-        }
+        val primary = primaryFromMarket(
+            yesAsk = yesAsk,
+            noAsk = noAsk,
+            spotUsd = spotUsd,
+            strikeUsd = strikeUsd,
+            fairYes = fairYes,
+            previousPrimary = previousPrimary ?: side
+        )
+        val disagree = side != primary
+        val streak = if (disagree) priorStreak + 1 else 0
+        val conflict = disagree && streak >= SUSTAINED_STREAK
         val banner = if (conflict) {
-            val ai = if (modelYes) "UP" else "DOWN"
-            val tape = if (tapeYes) "UP" else "DOWN"
-            "AI says $ai, but live chart shows $tape"
+            val ai = if (side == DirectionSanity.SIDE_YES) "UP" else "DOWN"
+            val mkt = if (primary == DirectionSanity.SIDE_YES) "UP" else "DOWN"
+            "AI says $ai, market + spot say $mkt"
         } else {
             null
         }
@@ -86,7 +143,8 @@ object TapeConflict {
             primarySide = primary,
             conflict = conflict,
             banner = banner,
-            tapeReturn = tapeRet
+            tapeReturn = tapeRet,
+            disagreementStreak = streak
         )
     }
 }

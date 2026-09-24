@@ -98,7 +98,10 @@ data class MarketUiModel(
     val bidHistory: List<com.dirk.kalshiodds.chart.BidPoint> = emptyList(),
     val digitalFairPp: Double? = null,
     val importedModelPp: Double? = null,
-    val modelEdgeQualified: Boolean = true
+    val modelEdgeQualified: Boolean = true,
+    val spotUsd: Double? = null,
+    val spotVsTargetUsd: Double? = null,
+    val pastSettlements: List<Boolean> = emptyList()
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -228,7 +231,9 @@ fun MarketUiModel.withSignalScore(
         modelLeanSide = score.modelLeanSide,
         digitalFairPp = score.digitalFairPp,
         importedModelPp = score.importedModelPp,
-        modelEdgeQualified = score.modelEdgeQualified
+        modelEdgeQualified = score.modelEdgeQualified,
+        spotUsd = score.spotUsd,
+        spotVsTargetUsd = score.spotVsTargetUsd
     )
 }
 

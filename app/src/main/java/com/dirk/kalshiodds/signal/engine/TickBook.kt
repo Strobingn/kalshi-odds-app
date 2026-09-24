@@ -105,17 +105,19 @@ class TickBook(private val maxPoints: Int = 80) {
         }.orEmpty()
 
     private fun recordBid(tick: MarketTick, nowMs: Long) {
-        val yes = tick.yesBid
-        val no = tick.noBid ?: tick.yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
-        if (yes == null && no == null) return
+        val (yesBid, yesAsk) = QuoteSanity.usablePair(tick.yesBid, tick.yesAsk)
+        val noFromAsk = yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+        val rawNo = tick.noBid
+        val no = if (QuoteSanity.isPlaceholder(rawNo)) noFromAsk else rawNo
+        if (yesBid == null && no == null) return
         val q = bidsByTicker.getOrPut(tick.ticker) { ArrayDeque() }
         val last = q.lastOrNull()
         if (last != null && nowMs - last.tMs < 400L &&
-            last.yesBid == yes && last.noBid == no
+            last.yesBid == yesBid && last.noBid == no
         ) {
             return
         }
-        q.addLast(BidSample(nowMs, yes, no))
+        q.addLast(BidSample(nowMs, yesBid, no))
         while (q.size > maxBidPoints) q.removeFirst()
     }
 
