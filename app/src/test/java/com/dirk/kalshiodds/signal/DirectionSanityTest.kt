@@ -277,6 +277,9 @@ class DirectionSanityTest {
         watchSol = true,
         edgeThresholdPp = 5.0,
         debounceMs = 10_000L,
+        minConfidence = 0.0,
+        maxSpreadCents = 50.0,
+        hideWeakOpportunities = false,
         heavyMlEnabled = false,
         extendedAiEnabled = false
     )
