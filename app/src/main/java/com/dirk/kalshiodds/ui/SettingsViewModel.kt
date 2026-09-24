@@ -4,6 +4,8 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.data.local.history.SettingsChange
+import com.dirk.kalshiodds.data.local.history.SettingsRestore
 import com.dirk.kalshiodds.data.local.results.ResultsExporter
 import com.dirk.kalshiodds.data.local.results.ResultsFileExport
 import com.dirk.kalshiodds.signal.service.BatteryExemption
@@ -113,7 +115,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setMinLiquidity(v: Double) = viewModelScope.launch { prefs.updateMinLiquidity(v) }
     fun setMaxSpreadCents(v: Double) = viewModelScope.launch { prefs.updateMaxSpreadCents(v) }
     fun setHideWeak(v: Boolean) = viewModelScope.launch { prefs.updateHideWeak(v) }
-    fun setBankroll(v: Double) = viewModelScope.launch { prefs.updateBankrollUsd(v) }
+    fun setBankroll(v: Double) = track("bankroll_usd", _state.value.settings.bankrollUsd, v) {
+        prefs.updateBankrollUsd(v)
+    }
     fun setUseKelly(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(v) }
     fun setKellyFraction(v: Double) = viewModelScope.launch { prefs.updateKellyFraction(v) }
     fun setFixedFraction(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(!v) }
@@ -127,16 +131,49 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setDrawdownUsd(v: Double) = viewModelScope.launch { prefs.updateDrawdownUsd(v) }
     fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
     fun setTicketsEnabled(v: Boolean) = viewModelScope.launch { prefs.updateTicketsEnabled(v) }
-    fun setHunterValueStake(v: Double) = viewModelScope.launch { prefs.updateHunterValueStakeUsd(v) }
-    fun setHunterValuePayout(v: Double) = viewModelScope.launch { prefs.updateHunterValuePayoutUsd(v) }
-    fun setWinTargetEnabled(v: Boolean) = viewModelScope.launch { prefs.updateWinTargetEnabled(v) }
-    fun setWinTargetUsd(v: Double) = viewModelScope.launch { prefs.updateWinTargetUsd(v) }
-    fun setWinTargetBankrollPct(v: Double) = viewModelScope.launch { prefs.updateWinTargetBankrollPct(v) }
-    fun setWinTargetAbsCapUsd(v: Double?) = viewModelScope.launch { prefs.updateWinTargetAbsCapUsd(v) }
-    fun setPaperTrading(v: Boolean) = viewModelScope.launch { prefs.updatePaperTrading(v) }
+    fun setHunterValueStake(v: Double) = track("hunter_value_stake", _state.value.settings.hunterValueStakeUsd, v) {
+        prefs.updateHunterValueStakeUsd(v)
+    }
+    fun setHunterValuePayout(v: Double) = track("hunter_value_payout", _state.value.settings.hunterValuePayoutUsd, v) {
+        prefs.updateHunterValuePayoutUsd(v)
+    }
+    fun setWinTargetEnabled(v: Boolean) = track("win_target_enabled", _state.value.settings.winTargetEnabled, v) {
+        prefs.updateWinTargetEnabled(v)
+    }
+    fun setWinTargetUsd(v: Double) = track("win_target_usd", _state.value.settings.winTargetUsd, v) {
+        prefs.updateWinTargetUsd(v)
+    }
+    fun setWinTargetBankrollPct(v: Double) = track("win_target_bankroll_pct", _state.value.settings.winTargetBankrollPct, v) {
+        prefs.updateWinTargetBankrollPct(v)
+    }
+    fun setWinTargetAbsCapUsd(v: Double?) = track("win_target_abs_cap", _state.value.settings.winTargetAbsCapUsd, v) {
+        prefs.updateWinTargetAbsCapUsd(v)
+    }
+    fun setPaperTrading(v: Boolean) = track("paper_trading", _state.value.settings.paperTradingEnabled, v) {
+        prefs.updatePaperTrading(v)
+    }
     fun resetPaperBook() {
+        val before = container.paper.book.snapshot().cashUsd
         container.paper.book.reset()
-        _state.update { it.copy(credentialMessage = "Paper book reset to $100 — no Kalshi orders") }
+        track("paper_reset", before, 100.0) { }
+        _state.update { it.copy(credentialMessage = "Paper book archived and reset to $100 — no Kalshi orders") }
+    }
+
+    private fun track(key: String, old: Any?, new: Any?, block: suspend () -> Unit) {
+        viewModelScope.launch {
+            block()
+            withContext(Dispatchers.IO) {
+                container.archive.insertSettingsChange(
+                    SettingsChange(
+                        createdAtMs = System.currentTimeMillis(),
+                        key = key,
+                        oldValue = old?.toString() ?: "",
+                        newValue = new?.toString() ?: "",
+                        snapshotJson = SettingsRestore.snapshot(_state.value.settings)
+                    )
+                )
+            }
+        }
     }
     fun setTicketRespectGates(v: Boolean) = viewModelScope.launch { prefs.updateTicketRespectGates(v) }
     fun setLightMode(on: Boolean) = viewModelScope.launch {
@@ -187,7 +224,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val clipped = PayoutGate.clipStake(raw)
         val current = _state.value.settings.ticketStakeUsd
         if (clipped <= current + 1e-9 || !PayoutGate.requiresRaiseConfirm(clipped)) {
-            viewModelScope.launch { prefs.updateTicketStakeUsd(clipped) }
+            track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
             _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
             return
         }

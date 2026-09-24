@@ -17,7 +17,7 @@ data class HistoryBet(
 data class HistorySession(
     val id: String,
     val startedAtMs: Long,
-    val endedAtMs: Long?,
+    val endedAtMs: Long? = null,
     val markets: Int = 0,
     val signals: Int = 0,
     val bets: Int = 0,

@@ -65,7 +65,8 @@ data class ImportBatch(
     val scorecards: List<ScorecardRow> = emptyList(),
     val tickets: List<TicketAttemptRow> = emptyList(),
     val fills: List<ImportedFill> = emptyList(),
-    val settledTickers: List<Pair<String, String>> = emptyList()
+    val settledTickers: List<Pair<String, String>> = emptyList(),
+    val settingsChanges: List<com.dirk.kalshiodds.data.local.history.SettingsChange> = emptyList()
 )
 
 data class SeenKeys(

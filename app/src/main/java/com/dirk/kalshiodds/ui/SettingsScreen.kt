@@ -537,8 +537,34 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 valueRange = 1f..50f,
                 steps = 48
             )
+            Text(
+                if (s.winTargetAbsCapUsd == null) {
+                    "Optional $ cap  off"
+                } else {
+                    String.format(Locale.US, "Optional $ cap  $%.0f", s.winTargetAbsCapUsd)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = (s.winTargetAbsCapUsd ?: 0.0).toFloat().coerceIn(0f, 200f),
+                onValueChange = {
+                    viewModel.setWinTargetAbsCapUsd(if (it < 1f) null else it.toDouble())
+                },
+                valueRange = 0f..200f,
+                steps = 39
+            )
 
             Section("Kalshi API key (WS + approve-gated orders)")
+            if (s.hasPrivateKey) {
+                Text(
+                    "Kalshi key saved (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
+            }
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
                     "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
@@ -568,8 +594,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 }
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = viewModel::saveCredentials) { Text("Save key") }
-                OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear key") }
+                Button(onClick = viewModel::saveCredentials) {
+                    Text(if (s.hasPrivateKey) "Update key" else "Save key")
+                }
+                OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
             }
             state.credentialMessage?.let {
                 Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)

@@ -54,6 +54,12 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
     val importModel = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::importModelUri) }
+    val backupCreds = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? -> uri?.let(viewModel::backupCredentials) }
+    val restoreCreds = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let(viewModel::restoreCredentials) }
 
     Scaffold(
         containerColor = Bg,
@@ -93,6 +99,28 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 onClick = onOpenHistory,
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text("History") }
+
+            Section("Back up Kalshi credentials")
+            Text(
+                "Sideloaded debug APKs used to be signed by a different machine each time, so Android required uninstall — which wiped the Keystore-encrypted key. Future 0.3.7+ debug APKs share one cert so updates keep your data. Still: back up the key with a passphrase and keep the file in Drive/Downloads.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            OutlinedTextField(
+                value = state.credPassphrase,
+                onValueChange = viewModel::setCredPassphrase,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Backup passphrase") },
+                singleLine = true
+            )
+            Button(
+                onClick = { backupCreds.launch("diphunter-kalshi-key.dhcred") },
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text("Back up credentials") }
+            OutlinedButton(
+                onClick = { restoreCreds.launch(arrayOf("*/*")) },
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text("Restore credentials") }
 
             Section("Import file")
             Text(

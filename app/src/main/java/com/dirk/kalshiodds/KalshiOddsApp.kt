@@ -72,6 +72,7 @@ class KalshiOddsApp : Application() {
 
             override fun onStop(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.markUiInForeground(false)
+                runCatching { container.endSession() }
             }
         })
         appScope.launch {

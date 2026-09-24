@@ -79,6 +79,42 @@ object ResultsExporter {
         return root.toString()
     }
 
+    fun jsonWithHistory(
+        bundle: ResultsBundle,
+        settings: List<com.dirk.kalshiodds.data.local.history.SettingsChange> = emptyList(),
+        sessions: List<com.dirk.kalshiodds.data.local.history.HistorySession> = emptyList()
+    ): String {
+        val root = org.json.JSONObject(json(bundle))
+        val sc = org.json.JSONArray()
+        for (r in settings) {
+            sc.put(
+                org.json.JSONObject()
+                    .put("kind", "settings_change")
+                    .put("created_at_ms", r.createdAtMs)
+                    .put("key", r.key)
+                    .put("old_value", r.oldValue)
+                    .put("new_value", r.newValue)
+                    .put("snapshot_json", r.snapshotJson)
+            )
+        }
+        root.put("settings_changes", sc)
+        val sess = org.json.JSONArray()
+        for (r in sessions) {
+            sess.put(
+                org.json.JSONObject()
+                    .put("kind", "session")
+                    .put("id", r.id)
+                    .put("started_at_ms", r.startedAtMs)
+                    .put("ended_at_ms", r.endedAtMs)
+                    .put("markets", r.markets)
+                    .put("signals", r.signals)
+                    .put("bets", r.bets)
+            )
+        }
+        root.put("sessions", sess)
+        return root.toString()
+    }
+
     fun csv(bundle: ResultsBundle): String = buildString {
         appendLine("# DipHunter results export")
         appendLine("# Approve-gated tickets only — never unsupervised bets.")

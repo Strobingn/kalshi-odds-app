@@ -255,6 +255,23 @@ class SignalPreferences(
 
     fun credentialSnapshot(): Pair<String, String> = secrets.snapshot()
 
+    suspend fun restoreSnapshot(json: String) {
+        val r = com.dirk.kalshiodds.data.local.history.SettingsRestore.parse(json)
+        if (r.isEmpty) return
+        r.hunterValueStakeUsd?.let { updateHunterValueStakeUsd(it) }
+        r.hunterValuePayoutUsd?.let { updateHunterValuePayoutUsd(it) }
+        r.winTargetEnabled?.let { updateWinTargetEnabled(it) }
+        r.winTargetUsd?.let { updateWinTargetUsd(it) }
+        r.winTargetBankrollPct?.let { updateWinTargetBankrollPct(it) }
+        r.winTargetAbsCapUsd?.let { updateWinTargetAbsCapUsd(it) }
+        r.ticketStakeUsd?.let { updateTicketStakeUsd(it) }
+        r.bankrollUsd?.let { updateBankrollUsd(it) }
+        r.edgeThresholdPp?.let { updateEdgeThresholdPp(it) }
+        r.paperTradingEnabled?.let { updatePaperTrading(it) }
+        r.minConfidence?.let { updateMinConfidence(it) }
+        r.maxSpreadCents?.let { updateMaxSpreadCents(it) }
+    }
+
     /**
      * 0.3.1 one-time: force light mode (Heavy ML + Extended AI off) so
      * devices that persisted 0.3.0 defaults stop OOM-looping. Users can

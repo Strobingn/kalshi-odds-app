@@ -24,6 +24,8 @@ class InMemoryResultsStore(
     private val spot = ArrayDeque<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>()
     private val fills = LinkedHashMap<String, com.dirk.kalshiodds.data.importing.ImportedFill>()
     private val cursors = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.BackfillCursorRow>()
+    private val settingsChanges = ArrayDeque<com.dirk.kalshiodds.data.local.history.SettingsChange>()
+    private val sessions = LinkedHashMap<String, com.dirk.kalshiodds.data.local.history.HistorySession>()
 
     @Synchronized
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -196,4 +198,42 @@ class InMemoryResultsStore(
     override fun clearCursor(job: String) {
         cursors.remove(job)
     }
+
+    @Synchronized
+    override fun insertSettingsChange(row: com.dirk.kalshiodds.data.local.history.SettingsChange) {
+        settingsChanges.addLast(row.copy(id = nextId.getAndIncrement()))
+        while (settingsChanges.size > 400) settingsChanges.removeFirst()
+    }
+
+    @Synchronized
+    override fun recentSettingsChanges(limit: Int, offset: Int): List<com.dirk.kalshiodds.data.local.history.SettingsChange> =
+        settingsChanges.toList().asReversed().drop(offset.coerceAtLeast(0)).take(limit.coerceAtLeast(0))
+
+    @Synchronized
+    override fun insertSession(row: com.dirk.kalshiodds.data.local.history.HistorySession) {
+        sessions[row.id] = row
+    }
+
+    @Synchronized
+    override fun closeSession(
+        id: String,
+        endedAtMs: Long,
+        markets: Int,
+        signals: Int,
+        bets: Int,
+        pnlUsd: Double?
+    ) {
+        val cur = sessions[id] ?: return
+        sessions[id] = cur.copy(
+            endedAtMs = endedAtMs,
+            markets = markets,
+            signals = signals,
+            bets = bets,
+            pnlUsd = pnlUsd
+        )
+    }
+
+    @Synchronized
+    override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> =
+        sessions.values.sortedByDescending { it.startedAtMs }.take(limit.coerceAtLeast(0))
 }

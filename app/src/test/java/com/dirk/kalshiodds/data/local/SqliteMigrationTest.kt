@@ -10,7 +10,8 @@ import org.junit.Test
 /**
  * In-memory stand-in for the 0.3.6 → 0.3.7 archive upgrade: existing
  * snapshots and settled windows must survive new History / bid columns.
- * Device SQLite onUpgrade (v2→v3→v4) only adds tables/columns.
+ * Device SQLite onUpgrade (v2→v3→v4) only adds tables/columns
+ * (settings_history / sessions in v4). Never drops 0.3.x rows.
  */
 class SqliteMigrationTest {
     @Test
@@ -45,5 +46,23 @@ class SqliteMigrationTest {
         assertTrue(store.settledTickers().contains("KXBTC15M-OLD"))
         assertEquals("yes", store.recentSettled("KXBTC15M", 5).first().result)
         assertEquals(1, store.stats().settledCount)
+        store.insertSettingsChange(
+            com.dirk.kalshiodds.data.local.history.SettingsChange(
+                createdAtMs = 1_700_000_000_100L,
+                key = "win_target_usd",
+                oldValue = "50",
+                newValue = "75",
+                snapshotJson = """{"winTargetUsd":75.0}"""
+            )
+        )
+        store.insertSession(
+            com.dirk.kalshiodds.data.local.history.HistorySession(
+                id = "sess-1",
+                startedAtMs = 1_700_000_000_000L
+            )
+        )
+        assertEquals(1, store.recentSettingsChanges(10).size)
+        assertEquals("KXBTC15M-OLD", store.recentSnapshots(10).first().ticker)
+        assertEquals("sess-1", store.recentSessions(5).first().id)
     }
 }

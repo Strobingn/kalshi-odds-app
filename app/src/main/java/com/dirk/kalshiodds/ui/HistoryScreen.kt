@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,6 +15,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
@@ -64,19 +66,45 @@ fun HistoryScreen(viewModel: HistoryViewModel, onBack: () -> Unit) {
                 color = TextSecondary,
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
             )
+            state.message?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(state.lines, key = { it }) { line ->
-                    Text(
-                        line,
-                        style = MaterialTheme.typography.bodyMedium,
-                        fontWeight = FontWeight.Medium,
-                        color = AccentGreen,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                items(state.lines, key = { it.id }) { line ->
+                    Column(Modifier.fillMaxWidth()) {
+                        Text(
+                            line.text,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = AccentGreen,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        if (line.restoreJson != null) {
+                            OutlinedButton(
+                                onClick = { viewModel.restoreSettings(line.restoreJson) },
+                                modifier = Modifier
+                                    .padding(top = 4.dp)
+                                    .height(44.dp)
+                            ) { Text("Restore these settings") }
+                        }
+                    }
+                }
+                if (state.hasMore) {
+                    item {
+                        OutlinedButton(
+                            onClick = viewModel::loadMore,
+                            modifier = Modifier.fillMaxWidth().height(48.dp)
+                        ) { Text("Load more") }
+                    }
                 }
                 if (state.lines.isEmpty()) {
                     item {

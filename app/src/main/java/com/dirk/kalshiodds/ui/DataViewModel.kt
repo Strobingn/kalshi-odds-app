@@ -35,7 +35,8 @@ data class DataUiState(
     val modelNote: String? = null,
     val supabaseUrlDraft: String = "",
     val supabaseKeyDraft: String = "",
-    val days: Int = 30
+    val days: Int = 30,
+    val credPassphrase: String = ""
 )
 
 class DataViewModel(application: Application) : AndroidViewModel(application) {
@@ -136,6 +137,7 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                 parsed.batch.scorecards.forEach { store.insertScorecard(it) }
                 parsed.batch.tickets.forEach { store.insertTicket(it) }
                 archive.insertFills(parsed.batch.fills)
+                parsed.batch.settingsChanges.forEach { archive.insertSettingsChange(it) }
             }
             _state.update {
                 it.copy(
@@ -160,6 +162,47 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                 }.getOrElse { it.message ?: "model import failed" }
             }
             _state.update { it.copy(modelNote = result, message = result) }
+        }
+    }
+
+    fun setCredPassphrase(v: String) = _state.update { it.copy(credPassphrase = v) }
+
+    fun backupCredentials(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pass = _state.value.credPassphrase
+                    require(pass.length >= 6) { "Passphrase must be at least 6 characters" }
+                    val (id, pem) = container.preferences.credentialSnapshot()
+                    require(id.isNotBlank() && pem.isNotBlank()) { "No Kalshi key saved to back up" }
+                    val bytes = com.dirk.kalshiodds.signal.config.CredentialBackup.encrypt(
+                        id, pem, pass.toCharArray()
+                    )
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        ?: error("could not write backup")
+                    "Credential backup written (passphrase-encrypted)"
+                }.getOrElse { it.message ?: "backup failed" }
+            }
+            _state.update { it.copy(message = result) }
+        }
+    }
+
+    fun restoreCredentials(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pass = _state.value.credPassphrase
+                    require(pass.isNotBlank()) { "Enter the backup passphrase" }
+                    val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?.use { it.readBytes() } ?: error("could not read backup")
+                    val (id, pem) = com.dirk.kalshiodds.signal.config.CredentialBackup.decrypt(
+                        bytes, pass.toCharArray()
+                    )
+                    container.preferences.saveCredentials(id, pem)
+                    "Kalshi key restored (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(id)})"
+                }.getOrElse { it.message ?: "restore failed" }
+            }
+            _state.update { it.copy(message = result) }
         }
     }
 

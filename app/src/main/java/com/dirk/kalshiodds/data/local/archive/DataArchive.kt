@@ -2,6 +2,8 @@ package com.dirk.kalshiodds.data.local.archive
 
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.data.importing.ImportedFill
+import com.dirk.kalshiodds.data.local.history.HistorySession
+import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.data.local.results.OddsMidRow
 
 data class SettledWindowRow(
@@ -88,6 +90,11 @@ interface DataArchive {
     fun readCursor(job: String): BackfillCursorRow?
     fun writeCursor(row: BackfillCursorRow)
     fun clearCursor(job: String)
+    fun insertSettingsChange(row: SettingsChange)
+    fun recentSettingsChanges(limit: Int, offset: Int = 0): List<SettingsChange>
+    fun insertSession(row: HistorySession)
+    fun closeSession(id: String, endedAtMs: Long, markets: Int = 0, signals: Int = 0, bets: Int = 0, pnlUsd: Double? = null)
+    fun recentSessions(limit: Int): List<HistorySession>
 }
 
 object ArchiveJobs {

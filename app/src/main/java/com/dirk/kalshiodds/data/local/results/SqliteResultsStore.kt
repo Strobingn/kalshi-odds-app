@@ -580,6 +580,97 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         db.writableDatabase.delete(TABLE_CURSOR, "job = ?", arrayOf(job))
     }
 
+    override fun insertSettingsChange(row: com.dirk.kalshiodds.data.local.history.SettingsChange) {
+        db.writableDatabase.insert(
+            TABLE_SETTINGS,
+            null,
+            ContentValues().apply {
+                put("created_at_ms", row.createdAtMs)
+                put("key", row.key)
+                put("old_value", row.oldValue)
+                put("new_value", row.newValue)
+                put("snapshot_json", row.snapshotJson)
+            }
+        )
+        prune(db.writableDatabase, TABLE_SETTINGS, MAX_SETTINGS)
+    }
+
+    override fun recentSettingsChanges(limit: Int, offset: Int): List<com.dirk.kalshiodds.data.local.history.SettingsChange> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.history.SettingsChange>()
+        db.readableDatabase.rawQuery(
+            "SELECT id, created_at_ms, key, old_value, new_value, snapshot_json FROM $TABLE_SETTINGS ORDER BY created_at_ms DESC LIMIT ? OFFSET ?",
+            arrayOf(limit.coerceIn(1, 400).toString(), offset.coerceAtLeast(0).toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.history.SettingsChange(
+                        id = c.getLong(0),
+                        createdAtMs = c.getLong(1),
+                        key = c.getString(2).orEmpty(),
+                        oldValue = c.getString(3).orEmpty(),
+                        newValue = c.getString(4).orEmpty(),
+                        snapshotJson = c.getString(5)
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    override fun insertSession(row: com.dirk.kalshiodds.data.local.history.HistorySession) {
+        db.writableDatabase.insertWithOnConflict(
+            TABLE_SESSION,
+            null,
+            ContentValues().apply {
+                put("id", row.id)
+                put("started_at_ms", row.startedAtMs)
+                put("ended_at_ms", row.endedAtMs)
+                put("markets", row.markets)
+                put("signals", row.signals)
+                put("bets", row.bets)
+                put("pnl_usd", row.pnlUsd)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun closeSession(
+        id: String,
+        endedAtMs: Long,
+        markets: Int,
+        signals: Int,
+        bets: Int,
+        pnlUsd: Double?
+    ) {
+        db.writableDatabase.execSQL(
+            "UPDATE $TABLE_SESSION SET ended_at_ms = ?, markets = ?, signals = ?, bets = ?, pnl_usd = ? WHERE id = ?",
+            arrayOf(endedAtMs, markets, signals, bets, pnlUsd, id)
+        )
+    }
+
+    override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.history.HistorySession>()
+        db.readableDatabase.rawQuery(
+            "SELECT id, started_at_ms, ended_at_ms, markets, signals, bets, pnl_usd FROM $TABLE_SESSION ORDER BY started_at_ms DESC LIMIT ?",
+            arrayOf(limit.coerceIn(1, 200).toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.history.HistorySession(
+                        id = c.getString(0),
+                        startedAtMs = c.getLong(1),
+                        endedAtMs = if (c.isNull(2)) null else c.getLong(2),
+                        markets = c.getInt(3),
+                        signals = c.getInt(4),
+                        bets = c.getInt(5),
+                        pnlUsd = if (c.isNull(6)) null else c.getDouble(6)
+                    )
+                )
+            }
+        }
+        return out
+    }
+
     private fun cursorToTicket(c: Cursor) = TicketAttemptRow(
         id = c.long("id"),
         ticker = c.str("ticker"),
@@ -666,6 +757,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             db.execSQL("CREATE INDEX idx_alert_created ON $TABLE_ALERT(created_at_ms)")
             createOddsTable(db)
             createArchiveTables(db)
+            createHistoryTables(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -674,6 +766,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 addBidColumns(db)
                 createArchiveTables(db)
             }
+            if (oldVersion < 4) createHistoryTables(db)
         }
 
         private fun createOddsTable(db: SQLiteDatabase) {
@@ -768,11 +861,43 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_path_ticker ON $TABLE_PATH(ticker, t_ms)")
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_spot_prod ON $TABLE_SPOT(product, t_ms)")
         }
+
+        private fun createHistoryTables(db: SQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_SETTINGS (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  created_at_ms INTEGER NOT NULL,
+                  key TEXT,
+                  old_value TEXT,
+                  new_value TEXT,
+                  snapshot_json TEXT
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_SESSION (
+                  id TEXT PRIMARY KEY,
+                  started_at_ms INTEGER NOT NULL,
+                  ended_at_ms INTEGER,
+                  markets INTEGER,
+                  signals INTEGER,
+                  bets INTEGER,
+                  pnl_usd REAL
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_settings_created ON $TABLE_SETTINGS(created_at_ms)")
+        }
     }
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 3
+        const val DB_VERSION = 4
+        const val TABLE_SETTINGS = "settings_history"
+        const val TABLE_SESSION = "sessions"
+        const val MAX_SETTINGS = 400
         const val TABLE_SNAP = "scored_snapshots"
         const val TABLE_ALERT = "alerts_fired"
         const val TABLE_CARD = "scorecard_rows"

@@ -262,6 +262,7 @@ object ResultsImporter {
         val scorecards = ArrayList<ScorecardRow>()
         val tickets = ArrayList<TicketAttemptRow>()
         val fills = ArrayList<ImportedFill>()
+        val settingsChanges = ArrayList<com.dirk.kalshiodds.data.local.history.SettingsChange>()
         var imported = 0
         var skipped = 0
         var minTs: Long? = null
@@ -297,8 +298,24 @@ object ResultsImporter {
             fills.add(row); imported += 1
             minTs = minOfTs(minTs, row.createdAtMs); maxTs = maxOfTs(maxTs, row.createdAtMs)
         }
+        jsonArray(root, "settings_changes").forEachObj { o ->
+            val ts = o.optLong("created_at_ms", 0L)
+            val key = o.optString("key")
+            if (key.isBlank()) { skipped += 1; return@forEachObj }
+            settingsChanges.add(
+                com.dirk.kalshiodds.data.local.history.SettingsChange(
+                    createdAtMs = ts,
+                    key = key,
+                    oldValue = o.optString("old_value"),
+                    newValue = o.optString("new_value"),
+                    snapshotJson = o.optString("snapshot_json").takeIf { it.isNotBlank() }
+                )
+            )
+            imported += 1
+            minTs = minOfTs(minTs, ts); maxTs = maxOfTs(maxTs, ts)
+        }
         return Parsed(
-            ImportBatch(snapshots, alerts, scorecards, tickets, fills),
+            ImportBatch(snapshots, alerts, scorecards, tickets, fills, settingsChanges = settingsChanges),
             ImportSummary(
                 kind = "diphunter-json",
                 imported = imported,
