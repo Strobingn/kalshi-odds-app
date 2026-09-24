@@ -21,6 +21,7 @@ import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.chart.hasSpot
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -699,7 +700,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     .filter {
                         com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.upBidCents) != null ||
                             com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents) != null ||
-                            com.dirk.kalshiodds.chart.hasSpot(it)
+                            it.hasSpot()
                     }
                     .sortedBy { it.tMs }
                     .distinctBy { it.tMs },
