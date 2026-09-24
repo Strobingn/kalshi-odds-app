@@ -24,7 +24,7 @@ class ExtendedAiRuntime(
     @Volatile
     var lastSettledAtMs: Long = 0L
 
-    private val flicker = java.util.concurrent.ConcurrentHashMap<String, Flicker>()()
+    private val flicker = java.util.concurrent.ConcurrentHashMap<String, Flicker>()
 
     data class Input(
         val ticker: String,
