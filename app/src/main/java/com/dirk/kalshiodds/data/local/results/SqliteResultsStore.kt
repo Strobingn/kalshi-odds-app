@@ -47,6 +47,21 @@ class SqliteResultsStore(context: Context) : ResultsStore {
         prune(w, TABLE_TICKET, MAX_TICKET)
     }
 
+    override fun insertOddsMids(rows: List<OddsMidRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insert(TABLE_ODDS, null, oddsValues(r))
+            }
+            prune(w, TABLE_ODDS, MAX_ODDS)
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
         query(TABLE_SNAP, limit) { cursorToSnap(it) }
 
@@ -58,6 +73,9 @@ class SqliteResultsStore(context: Context) : ResultsStore {
 
     override fun recentTickets(limit: Int): List<TicketAttemptRow> =
         query(TABLE_TICKET, limit) { cursorToTicket(it) }
+
+    override fun recentOddsMids(limit: Int): List<OddsMidRow> =
+        query(TABLE_ODDS, limit) { cursorToOdds(it) }
 
     override fun exportBundle(limit: Int): ResultsBundle = ResultsBundle(
         snapshots = recentSnapshots(limit),
@@ -130,6 +148,12 @@ class SqliteResultsStore(context: Context) : ResultsStore {
         put("created_at_ms", r.createdAtMs)
     }
 
+    private fun oddsValues(r: OddsMidRow) = ContentValues().apply {
+        put("ticker", r.ticker)
+        put("mid01", r.mid01)
+        put("created_at_ms", r.createdAtMs)
+    }
+
     private fun ticketValues(r: TicketAttemptRow) = ContentValues().apply {
         put("ticker", r.ticker)
         put("side", r.side)
@@ -183,6 +207,13 @@ class SqliteResultsStore(context: Context) : ResultsStore {
         policyRoi = c.dblOrNull("policy_roi"),
         createdAtMs = c.long("created_at_ms"),
         note = c.strOrNull("note")
+    )
+
+    private fun cursorToOdds(c: Cursor) = OddsMidRow(
+        id = c.long("id"),
+        ticker = c.str("ticker"),
+        mid01 = c.dbl("mid01"),
+        createdAtMs = c.long("created_at_ms")
     )
 
     private fun cursorToTicket(c: Cursor) = TicketAttemptRow(
@@ -269,24 +300,41 @@ class SqliteResultsStore(context: Context) : ResultsStore {
             )
             db.execSQL("CREATE INDEX idx_snap_created ON $TABLE_SNAP(created_at_ms)")
             db.execSQL("CREATE INDEX idx_alert_created ON $TABLE_ALERT(created_at_ms)")
+            createOddsTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // v1 is the first schema.
+            if (oldVersion < 2) createOddsTable(db)
+        }
+
+        private fun createOddsTable(db: SQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_ODDS (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ticker TEXT NOT NULL,
+                  mid01 REAL NOT NULL,
+                  created_at_ms INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_odds_ticker_time ON $TABLE_ODDS(ticker, created_at_ms)")
         }
     }
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 1
+        const val DB_VERSION = 2
         const val TABLE_SNAP = "scored_snapshots"
         const val TABLE_ALERT = "alerts_fired"
         const val TABLE_CARD = "scorecard_rows"
         const val TABLE_TICKET = "ticket_attempts"
+        const val TABLE_ODDS = "odds_mids"
         const val MAX_SNAP = 1_200
         const val MAX_ALERT = 400
         const val MAX_CARD = 600
         const val MAX_TICKET = 300
+        const val MAX_ODDS = 2_400
     }
 }
 

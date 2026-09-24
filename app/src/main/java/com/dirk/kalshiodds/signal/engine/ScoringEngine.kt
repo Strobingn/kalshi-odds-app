@@ -129,7 +129,12 @@ class ScoringEngine(
         val pathSurvive: Double? = null,
         val extendedNote: String? = null,
         val directionalLock: Boolean = false,
-        val spotVsTargetUsd: Double? = null
+        val spotVsTargetUsd: Double? = null,
+        val tapeTrend: String? = null,
+        val tapeConflict: Boolean = false,
+        val tapeConflictNote: String? = null,
+        val primaryHeroSide: String? = null,
+        val modelLeanSide: String? = null
     )
 
     data class BlendWeights(
@@ -546,6 +551,11 @@ class ScoringEngine(
             predictedSide = dir.side
             delta = fair - midPp
         }
+        val tape = TapeConflict.evaluate(
+            spotReturn1m = spotFeat?.spotReturn1m,
+            spotReturn5m = spotFeat?.spotReturn5m,
+            modelSide = predictedSide
+        )
         if (extOut?.fairBlendYes != null || dir.applied) {
             ev = NetExpectedValue.compute(
                 fairYes = fair / 100.0,
@@ -696,7 +706,12 @@ class ScoringEngine(
             pathSurvive = extOut?.path?.pSurvive,
             extendedNote = extOut?.note,
             directionalLock = dir.applied,
-            spotVsTargetUsd = dir.spotVsTargetUsd
+            spotVsTargetUsd = dir.spotVsTargetUsd,
+            tapeTrend = tape.trend.name,
+            tapeConflict = tape.conflict,
+            tapeConflictNote = tape.banner,
+            primaryHeroSide = tape.primarySide,
+            modelLeanSide = if (tape.conflict) tape.modelSide else null
         )
     }
 

@@ -427,10 +427,11 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 
             Section("Trade tickets (approve-gated)")
             Text(
-                "Default stake \$5. A ticket is proposed only when max settlement payout for that stake is ≥\$100 " +
-                    "(contracts = floor(stake ÷ limit); payout = contracts × \$1). At \$5 that means a conservative " +
-                    "limit ≤5¢ with enough size. Limit orders only — never market. Raising stake above \$5 requires " +
-                    "typing ${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
+                "Two approve-gated paths: (1) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
+                    "(2) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
+                    "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
+                    "Nothing is sent without Approve. Raising stake above \$5 requires typing " +
+                    "${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
                     "High variance: you can lose the full stake.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary

@@ -92,13 +92,25 @@ object SignalConstants {
     const val TICKET_STAKE_MIN_USD = 1.0
 
     /**
-     * Propose only when max settlement payout for the ticket stake is at
-     * least this many dollars. See [com.dirk.kalshiodds.signal.trade.PayoutGate].
+     * Configured-stake path (default $5): propose only when max settlement
+     * payout is at least this many dollars. See [com.dirk.kalshiodds.signal.trade.PayoutGate].
      */
     const val DEFAULT_MIN_PAYOUT_USD = 100.0
 
+    /**
+     * Approval-gated hunter path: $1 stake must be able to settle at least
+     * this many dollars (ask ≤ ~4¢ on a $1 binary). Detection is automatic;
+     * execution still needs an in-app Confirm. Never unsupervised.
+     */
+    const val HUNTER_STAKE_USD = 1.0
+    const val HUNTER_MIN_PAYOUT_USD = 25.0
+
     /** Each winning binary contract settles at $1.00. */
     const val CONTRACT_SETTLEMENT_USD = 1.0
+
+    /** Sparkline ring — copied under lock; persisted off the scan thread. */
+    const val SPARKLINE_MAX_POINTS = 48
+    const val ODDS_MID_PERSIST_MIN_MS = 2_000L
 
     /** Default: skip filter / mute / streak pause still gate tickets. */
     const val DEFAULT_TICKET_RESPECT_GATES = true

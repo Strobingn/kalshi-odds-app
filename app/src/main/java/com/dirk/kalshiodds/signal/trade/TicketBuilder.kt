@@ -22,31 +22,91 @@ object TicketBuilder {
 
     fun proposeAll(markets: List<MarketUiModel>, ctx: Context): List<TradeTicket> {
         if (!ctx.settings.ticketsEnabled) return emptyList()
-        return markets.mapNotNull { propose(it, ctx) }
+        val hunter = markets.mapNotNull { proposeHunter(it, ctx) }
+        val configured = markets.mapNotNull { propose(it, ctx) }
+        return (hunter + configured)
+            .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
+    }
+
+    /**
+     * $1 → ≥$25 hunter. Quality gates do **not** hide a cheap print —
+     * detection is automatic, execution is still Approve-only.
+     */
+    fun proposeHunter(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        val preferred = resolveSide(market)
+        val sides = listOfNotNull(preferred, "YES", "NO").distinct()
+        return sides.firstNotNullOfOrNull { side ->
+            buildTicket(
+                market = market,
+                side = side,
+                ctx = ctx,
+                stakeUsd = SignalConstants.HUNTER_STAKE_USD,
+                minPayoutUsd = SignalConstants.HUNTER_MIN_PAYOUT_USD,
+                kind = TicketKind.HUNTER,
+                requireGates = false
+            )
+        }
     }
 
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
         val settings = ctx.settings
         if (!settings.ticketsEnabled) return null
+        val side = resolveSide(market) ?: return null
+        val stake = PayoutGate.clipStake(settings.ticketStakeUsd)
+        return buildTicket(
+            market = market,
+            side = side,
+            ctx = ctx,
+            stakeUsd = stake,
+            minPayoutUsd = SignalConstants.DEFAULT_MIN_PAYOUT_USD,
+            kind = TicketKind.CONFIGURED,
+            requireGates = settings.ticketRespectGates
+        )
+    }
 
-        if (settings.ticketRespectGates) {
+    /** User-tapped Buy. Sizes at the touch even when payout < $25. */
+    fun proposeManual(market: MarketUiModel, side: String, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        val want = side.uppercase().let { if (it == "NO") "NO" else "YES" }
+        val stake = PayoutGate.clipStake(
+            ctx.settings.ticketStakeUsd.coerceAtLeast(SignalConstants.HUNTER_STAKE_USD)
+        )
+        return buildTicket(
+            market = market,
+            side = want,
+            ctx = ctx,
+            stakeUsd = stake,
+            minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
+            kind = TicketKind.MANUAL,
+            requireGates = false
+        )
+    }
+
+    private fun buildTicket(
+        market: MarketUiModel,
+        side: String,
+        ctx: Context,
+        stakeUsd: Double,
+        minPayoutUsd: Double,
+        kind: TicketKind,
+        requireGates: Boolean
+    ): TradeTicket? {
+        if (requireGates) {
             if (!market.passedFilter) return null
             if (market.muted) return null
             if (ctx.alertsPaused) return null
         }
-
-        val side = resolveSide(market) ?: return null
         val ask = bestAsk(market, side) ?: return null
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
-        val stake = PayoutGate.clipStake(settings.ticketStakeUsd)
         val sizing = PayoutGate.evaluate(
-            stakeUsd = stake,
+            stakeUsd = stakeUsd,
             bestAsk = ask,
             askLevels = levels,
             quotedSize = quoted,
-            minPayoutUsd = SignalConstants.DEFAULT_MIN_PAYOUT_USD
+            minPayoutUsd = minPayoutUsd
         )
         if (!sizing.ok) return null
 
@@ -58,7 +118,7 @@ object TicketBuilder {
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,
-            stakeUsd = stake,
+            stakeUsd = stakeUsd,
             limitPrice = sizing.limitPrice,
             yesLimitPrice = yesLimit.coerceIn(0.01, 0.99),
             contracts = sizing.contracts,
@@ -70,12 +130,19 @@ object TicketBuilder {
             netEdgePp = market.netEdgePp,
             title = market.title,
             sizingNote = sizing.reason,
-            gateNote = gateSummary(market, ctx),
-            createdAtMs = ctx.nowMs
+            gateNote = when (kind) {
+                TicketKind.HUNTER -> "Hunter $1 → ≥$25 · Approve still required"
+                TicketKind.MANUAL -> "Manual buy · Approve still required"
+                TicketKind.CONFIGURED -> gateSummary(market, ctx)
+            },
+            createdAtMs = ctx.nowMs,
+            kind = kind
         )
     }
 
     fun resolveSide(market: MarketUiModel): String? {
+        val primary = market.primaryHeroSide?.uppercase()
+        if (primary == "YES" || primary == "NO") return primary
         val predicted = market.predictedSide?.uppercase()
         if (predicted == "YES" || predicted == "NO") return predicted
         val net = market.netEdgePp ?: market.edgePp ?: return null

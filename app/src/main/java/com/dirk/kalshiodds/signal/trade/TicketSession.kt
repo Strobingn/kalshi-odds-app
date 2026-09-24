@@ -40,28 +40,49 @@ class TicketSession(
      */
     fun replaceProposals(tickets: List<TradeTicket>) {
         _state.update { cur ->
-            val remapped = preserveIds(cur.proposals, tickets)
+            val manuals = cur.proposals.filter { it.kind == TicketKind.MANUAL }
+            val remapped = preserveIds(cur.proposals.filterNot { it.kind == TicketKind.MANUAL }, tickets)
+            val merged = (manuals + remapped).distinctBy { ticketKey(it) }
             if (cur.phase is TicketPhase.Submitting) {
-                return@update cur.copy(proposals = remapped, lastError = cur.lastError)
+                return@update cur.copy(proposals = merged, lastError = cur.lastError)
             }
             val awaiting = (cur.phase as? TicketPhase.AwaitingApprove)?.ticket
             val phase = when {
-                awaiting != null && remapped.any { it.id == awaiting.id } -> {
-                    val fresh = remapped.first { it.id == awaiting.id }
-                    TicketPhase.AwaitingApprove(fresh, remapped.filterNot { it.id == fresh.id })
+                awaiting != null && merged.any { it.id == awaiting.id } -> {
+                    val fresh = merged.first { it.id == awaiting.id }
+                    TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
                 }
-                remapped.isEmpty() -> TicketPhase.Idle
-                else -> TicketPhase.Proposed(remapped)
+                awaiting != null && awaiting.kind == TicketKind.MANUAL -> {
+                    TicketPhase.AwaitingApprove(awaiting, merged.filterNot { it.id == awaiting.id })
+                }
+                merged.isEmpty() -> TicketPhase.Idle
+                else -> TicketPhase.Proposed(merged)
             }
-            cur.copy(phase = phase, proposals = remapped)
+            cur.copy(phase = phase, proposals = merged)
         }
     }
 
     private fun preserveIds(existing: List<TradeTicket>, incoming: List<TradeTicket>): List<TradeTicket> {
-        val byKey = existing.associateBy { it.ticker + "|" + it.side }
+        val byKey = existing.associateBy { ticketKey(it) }
         return incoming.map { t ->
-            val old = byKey[t.ticker + "|" + t.side]
+            val old = byKey[ticketKey(t)]
             if (old != null) t.copy(id = old.id) else t
+        }
+    }
+
+    /**
+     * User tapped Buy. Queues the ticket and opens the confirm sheet.
+     * Never places — only [approve] may call the trade client.
+     */
+    fun addManual(ticket: TradeTicket) {
+        _state.update { cur ->
+            val others = cur.proposals.filterNot { ticketKey(it) == ticketKey(ticket) }
+            val next = listOf(ticket) + others
+            cur.copy(
+                phase = TicketPhase.AwaitingApprove(ticket, others),
+                proposals = next,
+                lastError = null
+            )
         }
     }
 
@@ -192,6 +213,9 @@ class TicketSession(
     val placementCount: Int get() = _state.value.placementCount
 
     companion object {
+        fun ticketKey(t: TradeTicket): String =
+            "${t.ticker}|${t.side}|${t.kind}|${t.stakeUsd}"
+
         fun humanError(err: Throwable): String {
             val raw = err.message?.trim().orEmpty()
             if (raw.isBlank()) return "Order failed — try again or check Settings keys"

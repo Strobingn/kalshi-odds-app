@@ -10,13 +10,15 @@ class InMemoryResultsStore(
     private val maxSnapshots: Int = 800,
     private val maxAlerts: Int = 200,
     private val maxScorecards: Int = 400,
-    private val maxTickets: Int = 200
+    private val maxTickets: Int = 200,
+    private val maxOdds: Int = 1_200
 ) : ResultsStore {
     private val nextId = AtomicLong(1L)
     private val snapshots = ArrayDeque<ScoredSnapshotRow>()
     private val alerts = ArrayDeque<AlertRow>()
     private val scorecards = ArrayDeque<ScorecardRow>()
     private val tickets = ArrayDeque<TicketAttemptRow>()
+    private val odds = ArrayDeque<OddsMidRow>()
 
     @Synchronized
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -43,6 +45,18 @@ class InMemoryResultsStore(
         tickets.addLast(row.copy(id = nextId.getAndIncrement()))
         while (tickets.size > maxTickets) tickets.removeFirst()
     }
+
+    @Synchronized
+    override fun insertOddsMids(rows: List<OddsMidRow>) {
+        for (row in rows) {
+            odds.addLast(row.copy(id = nextId.getAndIncrement()))
+            while (odds.size > maxOdds) odds.removeFirst()
+        }
+    }
+
+    @Synchronized
+    override fun recentOddsMids(limit: Int): List<OddsMidRow> =
+        odds.toList().takeLast(limit).asReversed()
 
     @Synchronized
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =

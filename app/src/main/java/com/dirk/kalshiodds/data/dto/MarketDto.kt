@@ -28,6 +28,8 @@ data class MarketDto(
     @SerialName("open_interest_fp") val openInterestFp: String? = null,
     @SerialName("liquidity_dollars") val liquidityDollars: String? = null,
     @SerialName("close_time") val closeTime: String? = null,
+    @SerialName("expiration_time") val expirationTime: String? = null,
+    @SerialName("expected_expiration_time") val expectedExpirationTime: String? = null,
     val status: String? = null,
     /** Settled markets: "yes" or "no". */
     val result: String? = null,

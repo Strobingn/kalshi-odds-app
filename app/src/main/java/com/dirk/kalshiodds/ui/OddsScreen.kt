@@ -45,6 +45,8 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.ui.components.MarketCard
+import com.dirk.kalshiodds.ui.components.OddsSparkline
+import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
@@ -131,7 +133,22 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
                     item {
-                        LiveUpDownHero(market = featuredLiveMarket(allMarkets))
+                        LiveUpDownHero(
+                            market = featuredLiveMarket(allMarkets),
+                            onBuyYes = { m -> viewModel.buyMarket(m, "YES") },
+                            onBuyNo = { m -> viewModel.buyMarket(m, "NO") }
+                        )
+                    }
+                    item {
+                        TradeTicketsSection(
+                            tickets = state.tickets,
+                            credentialsConfigured = state.settings.credentialsConfigured,
+                            onReview = { viewModel.openTicketApprove(it) },
+                            onDismiss = { viewModel.dismissTicket(it) },
+                            onApprove = { viewModel.approveTicket(it) },
+                            onCancelApprove = { viewModel.cancelTicketApprove() },
+                            onCancelOrder = { viewModel.cancelWorkingOrder(it) }
+                        )
                     }
                     item {
                         LiveSignalsCard(
@@ -153,17 +170,6 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             pauseBanner = state.pauseBanner,
                             mutedSummary = state.mutedSummary,
                             onResumeAlerts = { viewModel.resumeAlerts() }
-                        )
-                    }
-                    item {
-                        TradeTicketsSection(
-                            tickets = state.tickets,
-                            credentialsConfigured = state.settings.credentialsConfigured,
-                            onReview = { viewModel.openTicketApprove(it) },
-                            onDismiss = { viewModel.dismissTicket(it) },
-                            onApprove = { viewModel.approveTicket(it) },
-                            onCancelApprove = { viewModel.cancelTicketApprove() },
-                            onCancelOrder = { viewModel.cancelWorkingOrder(it) }
                         )
                     }
                     state.mlGuardNote?.let { note ->
@@ -241,24 +247,29 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             )
                         }
                         items(ranked.take(8), key = { "rank-${it.ticker}" }) { market ->
-                            MarketCard(market, compact = true)
+                            MarketCard(
+                                market,
+                                compact = true,
+                                onBuyYes = { viewModel.buyMarket(market, "YES") },
+                                onBuyNo = { viewModel.buyMarket(market, "NO") }
+                            )
                         }
                     }
                     if (state.settings.watchBtc) {
                         item { SectionHeader("Bitcoin · KXBTC15M") }
-                        marketsOrEmpty("btc", snapshot?.btc.orEmpty())
+                        marketsOrEmpty("btc", snapshot?.btc.orEmpty(), viewModel)
                     }
                     if (state.settings.watchEth) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Ethereum · KXETH15M") }
-                        marketsOrEmpty("eth", snapshot?.eth.orEmpty())
+                        marketsOrEmpty("eth", snapshot?.eth.orEmpty(), viewModel)
                     }
                     if (state.settings.watchSol) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Solana · KXSOL15M") }
-                        marketsOrEmpty("sol", snapshot?.sol.orEmpty())
+                        marketsOrEmpty("sol", snapshot?.sol.orEmpty(), viewModel)
                     }
                     if (snapshot?.extra.orEmpty().isNotEmpty()) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Extra crypto") }
-                        marketsOrEmpty("extra", snapshot?.extra.orEmpty())
+                        marketsOrEmpty("extra", snapshot?.extra.orEmpty(), viewModel)
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
@@ -269,7 +280,8 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
 
 private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
     section: String,
-    markets: List<MarketUiModel>
+    markets: List<MarketUiModel>,
+    viewModel: OddsViewModel
 ) {
     if (markets.isEmpty()) {
         item(key = "empty-$section") {
@@ -282,7 +294,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
         }
     } else {
         items(markets, key = { "$section-${it.ticker}" }) { market ->
-            MarketCard(market)
+            MarketCard(
+                market,
+                onBuyYes = { viewModel.buyMarket(market, "YES") },
+                onBuyNo = { viewModel.buyMarket(market, "NO") }
+            )
         }
     }
 }
@@ -333,21 +349,56 @@ private fun LiveSignalsCard(
 }
 
 @Composable
-private fun LiveUpDownHero(market: MarketUiModel?) {
+private fun LiveUpDownHero(
+    market: MarketUiModel?,
+    onBuyYes: (MarketUiModel) -> Unit,
+    onBuyNo: (MarketUiModel) -> Unit
+) {
     val up = market?.aiYesPercent ?: market?.yesProbabilityPercent
     val down = market?.aiNoPercent ?: market?.noProbabilityPercent ?: up?.let { 100.0 - it }
+    val primary = market?.primaryHeroSide
+    val tapeUp = primary == "YES" || (primary == null && (up ?: 50.0) >= 50.0)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .background(SurfaceAlt, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 20.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Text(
-            text = market?.title?.takeIf { it.isNotBlank() } ?: "Live scan",
-            style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary
-        )
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = market?.title?.takeIf { it.isNotBlank() } ?: "Live scan",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary,
+                modifier = Modifier.weight(1f)
+            )
+            TimeLeftLabel(market?.closeTimeEpochMs)
+        }
+        if (market?.tapeConflict == true && market.tapeConflictNote != null) {
+            Text(
+                text = market.tapeConflictNote.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentOrange,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .background(AccentOrange.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
+                    .padding(10.dp)
+            )
+            market.modelLeanSide?.let { lean ->
+                Text(
+                    "Model lean ${if (lean == "NO") "DOWN" else "UP"} — you decide. Primary follows live tape.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = AccentOrange,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+        }
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -355,8 +406,16 @@ private fun LiveUpDownHero(market: MarketUiModel?) {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            HeroPct(label = "UP", percent = up, color = AccentGreen)
-            HeroPct(label = "DOWN", percent = down, color = AccentRed)
+            HeroPct(label = "UP", percent = up, color = AccentGreen, emphasized = tapeUp)
+            HeroPct(label = "DOWN", percent = down, color = AccentRed, emphasized = !tapeUp)
+        }
+        market?.let {
+            OddsSparkline(
+                it.oddsHistory,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+            )
         }
         Text(
             text = market?.ticker ?: "Waiting for live quote",
@@ -364,24 +423,40 @@ private fun LiveUpDownHero(market: MarketUiModel?) {
             color = TextSecondary,
             modifier = Modifier.padding(top = 8.dp)
         )
+        if (market != null) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { onBuyYes(market) },
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) { Text("Buy YES") }
+                Button(
+                    onClick = { onBuyNo(market) },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentRed)
+                ) { Text("Buy NO") }
+            }
+        }
     }
 }
 
 @Composable
-private fun HeroPct(label: String, percent: Double?, color: Color) {
+private fun HeroPct(label: String, percent: Double?, color: Color, emphasized: Boolean = true) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
-            text = label,
+            text = if (emphasized) "$label · primary" else label,
             style = MaterialTheme.typography.titleMedium,
-            color = color,
+            color = if (emphasized) color else TextSecondary,
             fontWeight = FontWeight.Bold
         )
         Text(
             text = percent?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
-            fontSize = 56.sp,
+            fontSize = if (emphasized) 56.sp else 40.sp,
             fontWeight = FontWeight.Bold,
-            color = color,
-            lineHeight = 60.sp
+            color = if (emphasized) color else color.copy(alpha = 0.65f),
+            lineHeight = if (emphasized) 60.sp else 44.sp
         )
     }
 }
@@ -549,7 +624,7 @@ private fun MetaHeader(
             )
         }
         Text(
-            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · approve-gated tickets · no auto-fire.",
+            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · Buy/Approve on this screen · no auto-fire.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
             modifier = Modifier.padding(top = 6.dp)

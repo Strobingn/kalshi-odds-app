@@ -132,6 +132,34 @@ class DirectionSanityTest {
     }
 
     @Test
+    fun tapeConflictDoesNotUndoSpotStrikeLock() {
+        val engine = ScoringEngine(idFactory = { "tape" })
+        engine.rememberMeta("KXBTC15M-DIR", 1_800_000L, 20_000.0, 2_000.0, floorStrike = 100_000.0)
+        engine.external = ExternalSnapshot(
+            btc = AssetSpotFeatures(
+                asset = "BTC",
+                lastPrice = 100_241.0,
+                spotReturn1m = -0.003,
+                spotReturn5m = -0.004,
+                source = "test",
+                fetchedAtMs = 1L
+            )
+        )
+        val score = engine.score(dirTick(yesBid = 0.88, yesAsk = 0.92), dirSettings(), nowMs = 10_000L)
+        assertNotNull(score)
+        assertTrue(score!!.directionalLock)
+        assertEquals("YES", score.predictedSide)
+        assertTrue(score.tapeConflict)
+        assertEquals("NO", score.primaryHeroSide)
+        assertEquals("YES", score.modelLeanSide)
+        assertTrue(score.tapeConflictNote!!.contains("AI says UP, but live chart shows DOWN"))
+        val ui = sampleMarket().withSignalScore(score, thresholdPp = 5.0)
+        assertEquals("Lean UP / YES", ui.stance)
+        assertEquals("NO", ui.primaryHeroSide)
+        assertTrue((ui.aiYesPercent ?: 0.0) > 50.0)
+    }
+
+    @Test
     fun scoringEngineBelowTargetFallingLeansDownNo() {
         val engine = ScoringEngine(idFactory = { "dir-dn" })
         engine.rememberMeta("KXBTC15M-DIR", 1_800_000L, 20_000.0, 2_000.0, floorStrike = 100_000.0)

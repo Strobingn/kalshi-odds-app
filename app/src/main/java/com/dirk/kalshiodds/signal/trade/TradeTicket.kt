@@ -1,5 +1,14 @@
 package com.dirk.kalshiodds.signal.trade
 
+enum class TicketKind {
+    /** Settings stake (default $5) → ≥$100 max payout. */
+    CONFIGURED,
+    /** Automatic hunter: $1 stake → ≥$25 max payout. */
+    HUNTER,
+    /** User tapped Buy on a market card / hero. */
+    MANUAL
+}
+
 /**
  * One proposed (or working) approve-gated limit ticket.
  * Never submitted unless [TicketSession.approve] is called with this [id].
@@ -28,9 +37,12 @@ data class TradeTicket(
     val title: String? = null,
     val sizingNote: String,
     val gateNote: String? = null,
-    val createdAtMs: Long = System.currentTimeMillis()
+    val createdAtMs: Long = System.currentTimeMillis(),
+    val kind: TicketKind = TicketKind.CONFIGURED
 ) {
     val displaySide: String get() = side.uppercase()
+
+    val potentialGainUsd: Double get() = (maxPayoutUsd - stakeUsd).coerceAtLeast(0.0)
 
     fun matchesApproval(ticketId: String): Boolean = ticketId == id
 }

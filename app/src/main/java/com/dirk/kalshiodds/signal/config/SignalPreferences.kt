@@ -2,10 +2,12 @@ package com.dirk.kalshiodds.signal.config
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -15,10 +17,15 @@ import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
-private val Context.signalDataStore: DataStore<Preferences> by preferencesDataStore(name = "diphunter_signal_prefs")
+private val Context.signalDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "diphunter_signal_prefs",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 data class SignalSettings(
     val watchBtc: Boolean = true,
@@ -105,6 +112,7 @@ class SignalPreferences(
     private val secretRevision = MutableStateFlow(0)
 
     val settings: Flow<SignalSettings> = app.signalDataStore.data
+        .catch { emit(emptyPreferences()) }
         .map { it.toSettings() }
         .combine(secretRevision) { s, _ ->
             s.copy(
@@ -112,6 +120,14 @@ class SignalPreferences(
                 hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
             )
         }
+
+    /** Blocking-safe first read so the UI is not stuck on factory defaults. */
+    suspend fun hydrate(): SignalSettings = runCatching { settings.first() }.getOrElse {
+        SignalSettings(
+            apiKeyId = secrets.apiKeyId,
+            hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
+        )
+    }
 
     suspend fun updateWatchBtc(value: Boolean) = edit { it[KEY_WATCH_BTC] = value }
     suspend fun updateWatchEth(value: Boolean) = edit { it[KEY_WATCH_ETH] = value }

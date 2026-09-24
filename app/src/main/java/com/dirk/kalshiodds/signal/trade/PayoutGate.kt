@@ -5,7 +5,7 @@ import kotlin.math.floor
 import kotlin.math.min
 
 /**
- * $5 → ≥$100 max-payout gate for $1 binary contracts.
+ * Max-payout gate for $1 binary contracts.
  *
  * ## Formula
  *
@@ -13,15 +13,16 @@ import kotlin.math.min
  *
  *     contracts             = floor(stakeUsd / conservativeLimitPrice)
  *     maxSettlementPayout   = contracts × $1.00
- *     propose iff           maxSettlementPayout ≥ minPayoutUsd   (default $100)
+ *     propose iff           maxSettlementPayout ≥ minPayoutUsd
  *
  * Equivalently, the conservative limit (average fill) must satisfy
  *
  *     conservativeLimitPrice ≤ stakeUsd / minPayoutUsd
  *
- * For the defaults ($5 stake, $100 min payout) that is **price ≤ $0.05**
- * (5¢ on a $1 binary). A $5 stake at 5¢ buys 100 contracts → $100 max payout.
- * At 6¢, floor(5/0.06) = 83 contracts → $83 max payout → **do not propose**.
+ * Paths:
+ * - Configured (default $5 / $100): **price ≤ 5¢**. $5 at 5¢ → 100 ct → $100.
+ * - Hunter ($1 / $25): **price ≤ 4¢**. $1 at 4¢ → 25 ct → $25 max payout.
+ *   At 5¢, floor(1/0.05) = 20 ct → $20 → **do not auto-propose**.
  *
  * ## Liquidity
  *
@@ -46,7 +47,7 @@ object PayoutGate {
 
     /**
      * Highest limit that can still hit [minPayoutUsd] with [stakeUsd].
-     * `$5 / $100 = $0.05`. Returns null when inputs are unusable.
+     * `$5 / $100 = $0.05`. `$1 / $25 = $0.04`. Returns null when unusable.
      */
     fun maxLimitForPayout(
         stakeUsd: Double,

@@ -60,6 +60,13 @@ data class TicketAttemptRow(
     val note: String? = null
 )
 
+data class OddsMidRow(
+    val id: Long = 0L,
+    val ticker: String,
+    val mid01: Double,
+    val createdAtMs: Long
+)
+
 data class ResultsBundle(
     val snapshots: List<ScoredSnapshotRow> = emptyList(),
     val alerts: List<AlertRow> = emptyList(),
@@ -72,9 +79,11 @@ interface ResultsStore {
     fun insertAlert(row: AlertRow)
     fun insertScorecard(row: ScorecardRow)
     fun insertTicket(row: TicketAttemptRow)
+    fun insertOddsMids(rows: List<OddsMidRow>)
     fun recentSnapshots(limit: Int = 80): List<ScoredSnapshotRow>
     fun recentAlerts(limit: Int = 40): List<AlertRow>
     fun recentScorecards(limit: Int = 80): List<ScorecardRow>
     fun recentTickets(limit: Int = 40): List<TicketAttemptRow>
+    fun recentOddsMids(limit: Int = 800): List<OddsMidRow>
     fun exportBundle(limit: Int = 400): ResultsBundle
 }

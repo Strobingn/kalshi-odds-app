@@ -25,6 +25,21 @@ class PayoutGateTest {
     }
 
     @Test
+    fun hunterDollarOneToTwentyFiveIsFourCents() {
+        val max = PayoutGate.maxLimitForPayout(
+            SignalConstants.HUNTER_STAKE_USD,
+            SignalConstants.HUNTER_MIN_PAYOUT_USD
+        )
+        assertEquals(0.04, max!!, 1e-9)
+        val pass = PayoutGate.evaluate(stakeUsd = 1.0, bestAsk = 0.04, quotedSize = 500.0, minPayoutUsd = 25.0)
+        assertTrue(pass.reason, pass.ok)
+        assertEquals(25, pass.contracts)
+        assertEquals(25.0, pass.maxPayoutUsd, 1e-9)
+        val fail = PayoutGate.evaluate(stakeUsd = 1.0, bestAsk = 0.05, quotedSize = 500.0, minPayoutUsd = 25.0)
+        assertFalse(fail.ok)
+    }
+
+    @Test
     fun contractsAndPayoutFormula() {
         // floor(5 / 0.05) = 100 → $100 max payout
         assertEquals(100, PayoutGate.contractsFor(5.0, 0.05))
@@ -160,6 +175,19 @@ class TicketSessionTest {
     }
 
     @Test
+    fun replaceProposalsKeepsManualTicket() {
+        val placed = AtomicInteger(0)
+        val session = session(placed)
+        val manual = sampleTicket("m1").copy(kind = com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL)
+        session.addManual(manual)
+        assertTrue(session.snapshot().phase is TicketPhase.AwaitingApprove)
+        session.replaceProposals(listOf(sampleTicket("auto", ticker = "KXBTC15M-OTHER")))
+        assertTrue(session.snapshot().proposals.any { it.id == "m1" })
+        assertTrue(session.snapshot().phase is TicketPhase.AwaitingApprove)
+        assertEquals(0, placed.get())
+    }
+
+    @Test
     fun replaceProposalsPreservesIdAndDoesNotPlace() {
         val placed = AtomicInteger(0)
         val session = session(placed)
@@ -283,6 +311,44 @@ class TicketBuilderGateTest {
     }
 
     @Test
+    fun hunterIgnoresQualityGatesAndUsesOneDollar() {
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(ticketRespectGates = true, ticketsEnabled = true),
+            alertsPaused = true,
+            idFactory = { "hunter" },
+            nowMs = 1L
+        )
+        val ticket = TicketBuilder.proposeHunter(
+            market(passed = false, muted = true, ask = 0.04, volume = 5_000.0),
+            ctx
+        )
+        assertTrue(ticket != null)
+        assertEquals(1.0, ticket!!.stakeUsd, 1e-9)
+        assertEquals(25, ticket.contracts)
+        assertTrue(ticket.maxPayoutUsd >= 25.0)
+        assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)
+    }
+
+    @Test
+    fun manualBuyOpensWithoutPayoutFloor() {
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(ticketsEnabled = true, ticketStakeUsd = 1.0),
+            alertsPaused = false,
+            idFactory = { "manual" },
+            nowMs = 1L
+        )
+        val ticket = TicketBuilder.proposeManual(
+            market(passed = true, muted = false, ask = 0.40, volume = 5_000.0),
+            "YES",
+            ctx
+        )
+        assertTrue(ticket != null)
+        assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL, ticket!!.kind)
+        assertEquals("YES", ticket.side)
+        assertTrue(ticket.contracts >= 1)
+    }
+
+    @Test
     fun ticketsDisabledYieldsNothing() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketsEnabled = false, ticketRespectGates = false),
@@ -304,6 +370,8 @@ class DefaultConfigV22Test {
         assertEquals(SignalConstants.DEFAULT_TICKET_STAKE_USD, 5.0, 1e-9)
         assertEquals(SignalConstants.TICKET_STAKE_HARD_CAP_USD, 25.0, 1e-9)
         assertEquals(SignalConstants.DEFAULT_MIN_PAYOUT_USD, 100.0, 1e-9)
+        assertEquals(SignalConstants.HUNTER_STAKE_USD, 1.0, 1e-9)
+        assertEquals(SignalConstants.HUNTER_MIN_PAYOUT_USD, 25.0, 1e-9)
     }
 }
 
