@@ -20,6 +20,8 @@ class ResultsImporterTest {
                     edgePp = 6.5,
                     fairPp = 42.0,
                     marketPp = 35.5,
+                    regime = null,
+                    uncertainty = null,
                     createdAtMs = 1_700_000_000_000L
                 )
             )
@@ -46,6 +48,8 @@ class ResultsImporterTest {
                     edgePp = -3.0,
                     fairPp = 40.0,
                     marketPp = 43.0,
+                    regime = null,
+                    uncertainty = null,
                     createdAtMs = 1_700_000_100_000L
                 )
             )
