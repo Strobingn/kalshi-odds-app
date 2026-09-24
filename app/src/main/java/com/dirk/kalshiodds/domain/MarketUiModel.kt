@@ -19,6 +19,8 @@ data class MarketUiModel(
     val yesAsk: Double?,
     val noBid: Double?,
     val noAsk: Double?,
+    /** Contracts at the YES ask (`yes_ask_size_fp`). */
+    val yesAskSize: Double? = null,
     val lastPrice: Double?,
     /** Raw Kalshi YES mid 0–100 (secondary display). */
     val yesProbabilityPercent: Double?,
@@ -103,11 +105,11 @@ enum class SeriesKind(val ticker: String, val label: String) {
 }
 
 fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
-    val yesBid = yesBidDollars.toDoubleOrNullSafe()
-    val yesAsk = yesAskDollars.toDoubleOrNullSafe()
-    val noBid = noBidDollars.toDoubleOrNullSafe()
-    val noAsk = noAskDollars.toDoubleOrNullSafe()
-    val last = lastPriceDollars.toDoubleOrNullSafe()
+    val yesBid = KalshiPrice.parseDollars(yesBidDollars)
+    val yesAsk = KalshiPrice.parseDollars(yesAskDollars)
+    val noBid = KalshiPrice.parseDollars(noBidDollars)
+    val noAsk = KalshiPrice.parseDollars(noAskDollars)
+    val last = KalshiPrice.parseDollars(lastPriceDollars)
     val yesImplied = when {
         yesBid != null && yesAsk != null -> (yesBid + yesAsk) / 2.0
         last != null -> last
@@ -128,6 +130,7 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         yesAsk = yesAsk,
         noBid = noBid,
         noAsk = noAsk,
+        yesAskSize = KalshiPrice.parseCount(yesAskSizeFp),
         lastPrice = last,
         yesProbabilityPercent = yesImplied?.times(100.0),
         noProbabilityPercent = noImplied?.times(100.0),

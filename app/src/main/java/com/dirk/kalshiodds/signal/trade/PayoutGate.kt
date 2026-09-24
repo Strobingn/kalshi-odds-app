@@ -58,12 +58,16 @@ object PayoutGate {
         if (!stake.isFinite() || !floorPayout.isFinite()) return null
         if (stake < SignalConstants.TICKET_STAKE_MIN_USD - 1e-9) return null
         if (floorPayout <= 0.0) return null
-        return (stake / floorPayout).coerceIn(0.01, 0.99)
+        return (stake / floorPayout).coerceIn(
+            com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS,
+            0.99
+        )
     }
 
     fun contractsFor(stakeUsd: Double, limitPrice: Double): Int {
         val c = limitPrice
-        if (!stakeUsd.isFinite() || !c.isFinite() || c < 0.01 - 1e-12 || c > 0.99 + 1e-12) return 0
+        val minTick = com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS
+        if (!stakeUsd.isFinite() || !c.isFinite() || c < minTick - 1e-12 || c > 0.99 + 1e-12) return 0
         return floor((stakeUsd / c) + 1e-9).toInt().coerceAtLeast(0)
     }
 
@@ -140,7 +144,7 @@ object PayoutGate {
                     "\$${fmt(stakeUsd)}→≥\$${fmt(minPayoutUsd)})"
             )
         }
-        val limit = ask.coerceIn(0.01, maxPx)
+        val limit = ask.coerceIn(com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS, maxPx)
         val contracts = contractsFor(stakeUsd, limit)
         if (contracts <= 0) {
             return reject("stake too small for a contract at ${cents(limit)}")

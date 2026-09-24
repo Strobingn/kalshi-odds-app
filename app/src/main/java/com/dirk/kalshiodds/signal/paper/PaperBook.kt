@@ -79,6 +79,7 @@ class PaperBook(
      */
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
+        if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
         return fill(
@@ -103,13 +104,16 @@ class PaperBook(
     }
 
     /** User tapped Paper on a ticket. Still never hits Kalshi. */
-    fun manualFill(ticket: TradeTicket): PaperFill? = fill(
+    fun manualFill(ticket: TradeTicket): PaperFill? {
+        if (!ticket.canApprove) return null
+        return fill(
         ticker = ticket.ticker,
         side = ticket.side,
         limitPrice = ticket.limitPrice,
         source = "manual paper",
         note = "Paper $5 from ticket · never sent to Kalshi"
-    )
+        )
+    }
 
     fun settle(ticker: String, result: String): List<PaperFill> {
         val outcome = result.lowercase().trim()

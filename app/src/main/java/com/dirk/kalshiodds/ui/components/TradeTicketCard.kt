@@ -70,7 +70,9 @@ fun TradeTicketsSection(
                 color = AccentOrange
             )
         }
-        tickets.lastError?.let {
+        val visibleError = tickets.lastError
+            ?.takeUnless { com.dirk.kalshiodds.signal.trade.TicketSession.stalePageError(it) }
+        visibleError?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentRed)
         }
         when (val phase = tickets.phase) {
@@ -95,7 +97,7 @@ fun TradeTicketsSection(
             }
             else -> Unit
         }
-        if (proposals.isEmpty() && working.isEmpty() && tickets.lastError == null) {
+        if (proposals.isEmpty() && working.isEmpty() && visibleError == null) {
             Text(
                 "No pending tickets. Use Buy YES / Buy NO on the hero or a market card.",
                 style = MaterialTheme.typography.bodyMedium,
@@ -171,6 +173,18 @@ private fun ProposedTicketCard(
             ticket.title?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
             }
+            if (ticket.blockedReason != null) {
+                Text(
+                    ticket.blockedReason,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentRed,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+                ticket.gateNote?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                }
+            } else {
             Spacer(Modifier.height(8.dp))
             TicketMetricRow("Stake", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
             TicketMetricRow("Ask / limit", String.format(Locale.US, "%.0f¢  (never market)", ticket.limitPrice * 100))
@@ -195,12 +209,14 @@ private fun ProposedTicketCard(
             ticket.gateNote?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = AccentBlue)
             }
+            }
             Row(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 OutlinedButton(
                     onClick = { onPaper(ticket.id) },
+                    enabled = ticket.canApprove,
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
@@ -208,10 +224,16 @@ private fun ProposedTicketCard(
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = credentialsConfigured,
+                    enabled = credentialsConfigured && ticket.canApprove,
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text(if (credentialsConfigured) "Live Approve…" else "Needs API key")
+                    Text(
+                        when {
+                            !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
+                            credentialsConfigured -> "Live Approve…"
+                            else -> "Needs API key"
+                        }
+                    )
                 }
             }
             OutlinedButton(
@@ -307,7 +329,7 @@ private fun ApproveTicketDialog(
         confirmButton = {
             Button(
                 onClick = onApprove,
-                enabled = credentialsConfigured,
+                enabled = credentialsConfigured && ticket.canApprove,
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
                 modifier = Modifier.height(48.dp)
             ) { Text("Live Approve") }

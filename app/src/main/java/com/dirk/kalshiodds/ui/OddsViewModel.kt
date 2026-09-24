@@ -17,7 +17,9 @@ import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import kotlin.math.max
 import kotlin.math.min
@@ -376,6 +378,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
                 return@launch
             }
+            val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
+            if (ticket != null && !ticket.canApprove) {
+                return@launch
+            }
             ticketSession.approve(ticketId)
         }
     }
@@ -399,11 +405,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun paperTicket(ticketId: String) {
         val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             ?: return
+        if (!ticket.canApprove) return
         paperBook.manualFill(ticket)
     }
 
     /**
      * Open an approve-gated Buy sheet for [side] on [market]. Never places.
+     * Closed 15m windows remap to the current live contract. Missing asks
+     * become a disabled ticket card — never a page-level "No ask to size" error.
      */
     fun buyMarket(market: MarketUiModel, side: String) {
         val s = _state.value
@@ -411,20 +420,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ticketSession.failSoft("Turn on trade tickets in Settings to buy")
             return
         }
-        val books = hub.scoring.book.snapshotBook(market.ticker)?.let { mapOf(market.ticker to it) }.orEmpty()
-        val ticket = TicketBuilder.proposeManual(
-            market,
-            side,
-            TicketBuilder.Context(
-                settings = s.settings,
-                alertsPaused = s.alertsPaused,
-                books = books
-            )
-        )
-        if (ticket == null) {
-            ticketSession.failSoft("No ask to size a limit on ${market.ticker}")
-            return
-        }
+        val now = System.currentTimeMillis()
+        val all = s.snapshot?.allMarkets.orEmpty()
+        val target = MarketLifecycle.resolveLive(market, all, now)
+        val ticketCtx = ticketContext(s, now)
+        val ticket = TicketBuilder.proposeManual(target, side, ticketCtx) ?: return
         ticketSession.addManual(ticket)
     }
 
@@ -448,30 +448,51 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun rebuildTickets() {
         val s = _state.value
+        val now = System.currentTimeMillis()
+        val markets = s.snapshot?.allMarkets.orEmpty()
+        val live = MarketLifecycle.tradable(markets, now)
+        val liveTickers = live.map { it.ticker }.toSet()
+        val ctx = ticketContext(s, now)
+        val remappedManuals = s.tickets.proposals.mapNotNull { existing ->
+            if (existing.kind != TicketKind.MANUAL) return@mapNotNull null
+            if (existing.ticker in liveTickers) return@mapNotNull null
+            val next = MarketLifecycle.liveSuccessor(existing.ticker, live, now) ?: return@mapNotNull null
+            TicketBuilder.proposeManual(next, existing.side, ctx)
+        }
+        val tickets = TicketBuilder.proposeAll(live, ctx) + remappedManuals
+        ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
+        if (s.settings.paperTradingEnabled) {
+            tickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+        }
+    }
+
+    private fun ticketContext(s: OddsUiState, nowMs: Long): TicketBuilder.Context {
         val markets = s.snapshot?.allMarkets.orEmpty()
         val books = markets.mapNotNull { m ->
             hub.scoring.book.snapshotBook(m.ticker)?.let { m.ticker to it }
         }.toMap()
-        val tickets = TicketBuilder.proposeAll(
-            markets,
-            TicketBuilder.Context(
-                settings = s.settings,
-                alertsPaused = s.alertsPaused,
-                books = books
-            )
+        val ticks = markets.mapNotNull { m ->
+            hub.scoring.book.lastTick(m.ticker)?.let { m.ticker to it }
+        }.toMap()
+        return TicketBuilder.Context(
+            settings = s.settings,
+            alertsPaused = s.alertsPaused,
+            books = books,
+            ticks = ticks,
+            nowMs = nowMs
         )
-        ticketSession.replaceProposals(tickets)
-        if (s.settings.paperTradingEnabled) {
-            tickets.forEach { paperBook.considerTicket(it, enabled = true) }
-        }
     }
 
     private fun paperFromAlerts(alerts: List<SignalAlert>) {
         if (!_state.value.settings.paperTradingEnabled) return
         val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
+        val now = System.currentTimeMillis()
         alerts.forEach { alert ->
             val market = markets[alert.ticker]
-            val ask = market?.let { TicketBuilder.bestAsk(it, alert.predictedSide) }
+            if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
+            val ask = market?.let {
+                TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
+            }
             paperBook.considerAlert(alert, ask, enabled = true)
         }
     }

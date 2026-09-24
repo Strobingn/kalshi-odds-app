@@ -37,28 +37,46 @@ class TicketSession(
     /**
      * Refresh proposed tickets from the latest scan. Leaves submitting /
      * submitted / working orders alone. Never places.
+     *
+     * [liveTickers]: when set, drop hunter / manual cards whose ticker is
+     * no longer tradable (expired 15m window). Incoming [tickets] may include
+     * remapped manuals for the current live window.
      */
-    fun replaceProposals(tickets: List<TradeTicket>) {
+    fun replaceProposals(tickets: List<TradeTicket>, liveTickers: Set<String>? = null) {
         _state.update { cur ->
-            val manuals = cur.proposals.filter { it.kind == TicketKind.MANUAL }
-            val remapped = preserveIds(cur.proposals.filterNot { it.kind == TicketKind.MANUAL }, tickets)
+            val incomingManuals = tickets.filter { it.kind == TicketKind.MANUAL }
+            val incomingAuto = tickets.filterNot { it.kind == TicketKind.MANUAL }
+            val preservedManuals = cur.proposals.filter { t ->
+                t.kind == TicketKind.MANUAL &&
+                    incomingManuals.none { n -> ticketKey(n) == ticketKey(t) } &&
+                    (liveTickers == null || t.ticker in liveTickers)
+            }
+            val manuals = incomingManuals + preservedManuals
+            val remapped = preserveIds(cur.proposals.filterNot { it.kind == TicketKind.MANUAL }, incomingAuto)
+                .filter { liveTickers == null || it.ticker in liveTickers }
             val merged = (manuals + remapped).distinctBy { ticketKey(it) }
+            val cleanedError = cur.lastError?.takeUnless { stalePageError(it) }
             if (cur.phase is TicketPhase.Submitting) {
-                return@update cur.copy(proposals = merged, lastError = cur.lastError)
+                return@update cur.copy(proposals = merged, lastError = cleanedError)
             }
             val awaiting = (cur.phase as? TicketPhase.AwaitingApprove)?.ticket
+            val liveAwaiting = awaiting?.takeIf { ticket ->
+                (liveTickers == null || ticket.ticker in liveTickers) &&
+                    merged.any { it.id == ticket.id || ticketKey(it) == ticketKey(ticket) }
+            }
             val phase = when {
-                awaiting != null && merged.any { it.id == awaiting.id } -> {
-                    val fresh = merged.first { it.id == awaiting.id }
+                liveAwaiting != null && merged.any { it.id == liveAwaiting.id } -> {
+                    val fresh = merged.first { it.id == liveAwaiting.id }
                     TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
                 }
-                awaiting != null && awaiting.kind == TicketKind.MANUAL -> {
-                    TicketPhase.AwaitingApprove(awaiting, merged.filterNot { it.id == awaiting.id })
+                liveAwaiting != null && liveAwaiting.kind == TicketKind.MANUAL -> {
+                    val fresh = merged.firstOrNull { ticketKey(it) == ticketKey(liveAwaiting) } ?: liveAwaiting
+                    TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
                 }
                 merged.isEmpty() -> TicketPhase.Idle
                 else -> TicketPhase.Proposed(merged)
             }
-            cur.copy(phase = phase, proposals = merged)
+            cur.copy(phase = phase, proposals = merged, lastError = cleanedError)
         }
     }
 
@@ -129,6 +147,9 @@ class TicketSession(
                 it.copy(lastError = "Approve ignored — no matching ticket (orders are never auto-fired)")
             }
             return _state.value
+        }
+        if (!ticket.canApprove) {
+            return cur
         }
         if (cur.phase is TicketPhase.Submitting) return cur
 
@@ -215,6 +236,12 @@ class TicketSession(
     companion object {
         fun ticketKey(t: TradeTicket): String =
             "${t.ticker}|${t.side}|${t.kind}|${t.stakeUsd}"
+
+        fun stalePageError(message: String): Boolean {
+            val lower = message.lowercase()
+            return lower.startsWith("no ask to size") ||
+                lower.contains("no ask to size a limit")
+        }
 
         fun humanError(err: Throwable): String {
             val raw = err.message?.trim().orEmpty()

@@ -36,6 +36,9 @@ class KalshiTradeClient(
     ) : this(primary = api, fallback = null, credentials = credentials)
 
     suspend fun createLimit(ticket: TradeTicket, clientOrderId: String): PlacedOrder {
+        if (!ticket.canApprove) {
+            throw IllegalStateException(ticket.blockedReason ?: "Market closed")
+        }
         ensureKeys()
         val body = v2Body(ticket, clientOrderId)
         return try {

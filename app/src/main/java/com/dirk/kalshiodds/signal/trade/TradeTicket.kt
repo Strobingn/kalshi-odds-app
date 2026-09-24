@@ -38,11 +38,18 @@ data class TradeTicket(
     val sizingNote: String,
     val gateNote: String? = null,
     val createdAtMs: Long = System.currentTimeMillis(),
-    val kind: TicketKind = TicketKind.CONFIGURED
+    val kind: TicketKind = TicketKind.CONFIGURED,
+    /**
+     * Non-null when the card is informational only (closed market or empty
+     * ask). Approve stays disabled and [TicketSession.approve] will not place.
+     */
+    val blockedReason: String? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
     val potentialGainUsd: Double get() = (maxPayoutUsd - stakeUsd).coerceAtLeast(0.0)
+
+    val canApprove: Boolean get() = blockedReason.isNullOrBlank() && contracts > 0
 
     fun matchesApproval(ticketId: String): Boolean = ticketId == id
 }

@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -471,14 +472,10 @@ private fun HeroPct(label: String, percent: Double?, color: Color, emphasized: B
     }
 }
 
-internal fun featuredLiveMarket(markets: List<MarketUiModel>): MarketUiModel? {
-    if (markets.isEmpty()) return null
-    val btc = markets.filter { it.seriesLabel.equals("Bitcoin", ignoreCase = true) }
-    val pool = btc.ifEmpty { markets }
-    return pool.minByOrNull { market ->
-        abs((market.yesProbabilityPercent ?: market.aiYesPercent ?: 50.0) - 50.0)
-    }
-}
+internal fun featuredLiveMarket(
+    markets: List<MarketUiModel>,
+    nowMs: Long = System.currentTimeMillis()
+): MarketUiModel? = MarketLifecycle.featuredLive(markets, nowMs)
 
 @Composable
 private fun SignalRow(alert: SignalAlert) {

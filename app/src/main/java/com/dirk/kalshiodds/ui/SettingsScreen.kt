@@ -443,7 +443,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 "Two approve-gated live paths: (1) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
                     "(2) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
                     "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
-                    "Live Approve uses POST /trade-api/v2/portfolio/events/orders only (no v1 fallback). " +
+                    "Expired 15m windows drop or move to the live contract; a missing ask shows on that ticket " +
+                    "(Approve stays off). Live Approve uses POST /trade-api/v2/portfolio/events/orders only (no v1 fallback). " +
                     "Raising stake above \$5 requires typing " +
                     "${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
                     "High variance: you can lose the full stake.",
