@@ -506,9 +506,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Win target sizing")
             Text(
-                "Size hunter and Buy UP/DOWN tickets so profit-if-win ≥ the target, walking the ask book (VWAP). " +
-                    "Stake is capped at a % of bankroll (live Kalshi cash or paper equity) and an optional $ cap. " +
-                    "Still Approve-only.",
+                "Size hunter and Buy UP/DOWN tickets so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
+                    "Live Approve uses GET /portfolio/balance cash; Paper uses paper-book equity. " +
+                    "Stake is capped at a % of that bankroll (default 10%) and an optional $ cap. " +
+                    "Still Approve-only — never auto-placed.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

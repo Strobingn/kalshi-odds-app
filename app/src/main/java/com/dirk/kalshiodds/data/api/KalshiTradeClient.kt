@@ -85,6 +85,22 @@ class KalshiTradeClient(
     private fun shouldRetryOtherHost(code: Int): Boolean =
         code == 404 || code == 410 || code >= 500
 
+    /**
+     * Available cash for Live Approve sizing. Never logs the body.
+     * Returns null if the key cannot read `portfolio/balance`.
+     */
+    suspend fun getCashUsd(): Double? {
+        ensureKeys()
+        return try {
+            val first = primary.getBalance()
+            val chosen = chooseHost(first) { fallback?.getBalance() }
+            if (!chosen.isSuccessful) return null
+            chosen.body()?.cashUsd()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun listMarketPositions(): List<MarketPositionDto> {
         ensureKeys()
         return try {

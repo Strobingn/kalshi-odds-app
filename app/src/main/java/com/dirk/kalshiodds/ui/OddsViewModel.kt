@@ -58,6 +58,8 @@ data class OddsUiState(
     val paper: PaperBookState = PaperBookState(),
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
+    /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
+    val liveCashUsd: Double? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null
 )
@@ -429,7 +431,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             ?: return
         if (!ticket.canPaper) return
-        paperBook.manualFill(ticket)
+        paperBook.manualFill(paperSized(ticket))
         if (ticket.isSell) ticketSession.dismiss(ticketId)
     }
 
@@ -551,7 +553,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val tickets = TicketBuilder.proposeAll(live, ctx) + remappedManuals
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         if (s.settings.paperTradingEnabled) {
-            tickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            val paperCtx = ctx.copy(
+                bankrollUsd = paperBook.snapshot().equityUsd,
+                bankrollSource = "paper"
+            )
+            val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
+            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
         refreshPositionMarks()
     }
@@ -570,8 +577,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             books = books,
             ticks = ticks,
             positions = s.positions,
-            nowMs = nowMs
+            nowMs = nowMs,
+            bankrollUsd = s.liveCashUsd ?: s.settings.bankrollUsd,
+            bankrollSource = if (s.liveCashUsd != null) "live" else "settings"
         )
+    }
+
+    private fun paperSized(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket): com.dirk.kalshiodds.signal.trade.TradeTicket {
+        if (ticket.isSell || !_state.value.settings.winTargetEnabled) return ticket
+        val s = _state.value
+        val market = s.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticket.ticker, true) }
+            ?: return ticket
+        val ctx = ticketContext(s, System.currentTimeMillis()).copy(
+            bankrollUsd = paperBook.snapshot().equityUsd,
+            bankrollSource = "paper"
+        )
+        return TicketBuilder.resizeForBankroll(ticket, market, ctx)
     }
 
     /** Re-mark cached holdings from the latest book / WS tick. No REST. */
@@ -588,8 +609,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 decoratePositions(_state.value.positions)
                 return@launch
             }
-            val rows = withContext(Dispatchers.IO) {
-                runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
+            val (rows, cash) = withContext(Dispatchers.IO) {
+                val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
+                val cashUsd = runCatching { container.tradeClient.getCashUsd() }.getOrNull()
+                positions to cashUsd
+            }
+            if (cash != null) {
+                _state.update { it.copy(liveCashUsd = cash) }
             }
             val parsed = PositionParser.parseAll(rows)
             decoratePositions(parsed)

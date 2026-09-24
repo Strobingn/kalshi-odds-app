@@ -112,7 +112,13 @@ class PaperBook(
             side = ticket.side,
             limitPrice = ticket.limitPrice,
             source = source,
-            note = "Paper $5 · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
+            note = if (ticket.winTargetUsd != null) {
+                "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
+            } else {
+                "Paper $5 · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
+            },
+            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 }
         )
     }
 
@@ -135,9 +141,15 @@ class PaperBook(
         return fill(
             ticker = ticket.ticker,
             side = ticket.side,
-            limitPrice = ticket.limitPrice,
+            limitPrice = ticket.estimatedAvgFill.takeIf { it > 0 } ?: ticket.limitPrice,
             source = "manual paper",
-            note = "Paper $5 from ticket · never sent to Kalshi"
+            note = if (ticket.winTargetUsd != null) {
+                "Paper win-target from ticket · never sent to Kalshi"
+            } else {
+                "Paper $5 from ticket · never sent to Kalshi"
+            },
+            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 }
         )
     }
 
@@ -270,19 +282,21 @@ class PaperBook(
         side: String,
         limitPrice: Double,
         source: String,
-        note: String
+        note: String,
+        contracts: Int? = null,
+        stakeUsd: Double? = null
     ): PaperFill? {
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = limitPrice.coerceIn(0.01, 0.99)
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { it.ticker.equals(ticker, ignoreCase = true) }) return null
-            val contracts = floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
-            if (contracts < 1) {
+            val qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            if (qty < 1) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
                 return null
             }
-            val stake = contracts * px
+            val stake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)
             if (cur.cashUsd + 1e-9 < stake) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — need $100 reset (cash ${fmt(cur.cashUsd)})"))
                 return null
@@ -292,7 +306,7 @@ class PaperBook(
                 ticker = ticker,
                 side = want,
                 stakeUsd = stake,
-                contracts = contracts,
+                contracts = qty,
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),

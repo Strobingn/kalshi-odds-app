@@ -208,17 +208,28 @@ private fun ProposedTicketCard(
                 }
             } else {
             Spacer(Modifier.height(8.dp))
-            TicketMetricRow("Stake", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
-            TicketMetricRow("Ask / limit", String.format(Locale.US, "%.0f¢  (never market)", ticket.limitPrice * 100))
-            TicketMetricRow("Est. fill", String.format(Locale.US, "$%.2f", ticket.estimatedFillUsd))
+            TicketMetricRow("Stake needed", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
+            TicketMetricRow("Contracts", String.format(Locale.US, "%d", ticket.contracts))
+            TicketMetricRow(
+                "Avg fill",
+                String.format(Locale.US, "%.1f¢  (never market)", ticket.estimatedAvgFill * 100)
+            )
             TicketMetricRow(
                 "Max payout",
                 String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)
             )
             TicketMetricRow(
-                "Potential gain",
-                String.format(Locale.US, "$%.0f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
+                "Profit if wins",
+                String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
             )
+            ticket.bankrollUsd?.let { roll ->
+                val src = when (ticket.bankrollSource) {
+                    "live" -> "Kalshi cash"
+                    "paper" -> "paper book"
+                    else -> "settings bankroll"
+                }
+                TicketMetricRow("Bankroll", String.format(Locale.US, "$%.0f · %s", roll, src))
+            }
             ticket.impliedChance?.let {
                 TicketMetricRow("Implied chance", String.format(Locale.US, "%.0f%%", it * 100.0))
             }

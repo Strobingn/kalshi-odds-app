@@ -34,7 +34,8 @@ object TicketBuilder {
         val positions: List<LivePosition> = emptyList(),
         val idFactory: () -> String = { UUID.randomUUID().toString() },
         val nowMs: Long = System.currentTimeMillis(),
-        val bankrollUsd: Double? = null
+        val bankrollUsd: Double? = null,
+        val bankrollSource: String? = null
     ) {
         fun heldOpposite(ticker: String, buySide: String): Int {
             val opposite = if (buySide == "NO") "YES" else "NO"
@@ -100,6 +101,18 @@ object TicketBuilder {
                 requireGates = false
             )
         }
+    }
+
+    /** Rebuild the same kind of ticket against a different bankroll (paper vs live). */
+    fun resizeForBankroll(ticket: TradeTicket, market: MarketUiModel, ctx: Context): TradeTicket {
+        if (ticket.isSell || !ctx.settings.winTargetEnabled) return ticket
+        return when (ticket.kind) {
+            TicketKind.HUNTER -> proposeHunter(market, ctx)
+            TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
+            TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
+            TicketKind.CONFIGURED -> propose(market, ctx)
+            TicketKind.SELL -> ticket
+        } ?: ticket
     }
 
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
@@ -314,7 +327,9 @@ object TicketBuilder {
             profitIfWinUsd = win?.profitIfWin ?: KalshiFee.netProfit(sizing.contracts, sizing.estimatedAvgFill, ctx.settings.feeRate),
             winTargetUsd = if (ctx.settings.winTargetEnabled) ctx.settings.winTargetUsd else null,
             winTargetCapped = win?.capped == true,
-            winTargetNote = win?.note
+            winTargetNote = win?.note,
+            bankrollSource = ctx.bankrollSource,
+            bankrollUsd = bankroll
         )
     }
 

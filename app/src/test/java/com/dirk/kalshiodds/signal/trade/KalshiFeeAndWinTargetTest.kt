@@ -127,6 +127,43 @@ class KalshiFeeAndWinTargetTest {
     }
 
     @Test
+    fun winTargetWalksVwapNotTopOfBook() {
+        val levels = listOf(0.10 to 2.0, 0.20 to 8.0)
+        val hit = WinTargetSizer.size(
+            askLevels = levels,
+            targetProfitUsd = 5.0,
+            bankrollUsd = 1_000.0,
+            bankrollPct = 50.0,
+            feeRate = 0.07
+        )
+        assertTrue(hit.contracts > 2)
+        assertTrue(hit.vwap > 0.10 + 1e-9)
+        assertTrue(hit.profitIfWin + 1e-6 >= 5.0 || hit.capped || hit.insufficientDepth)
+    }
+
+    @Test
+    fun liveCashAndPaperEquityAreDistinctCaps() {
+        val levels = listOf(0.20 to 1_000.0)
+        val live = WinTargetSizer.size(
+            askLevels = levels,
+            targetProfitUsd = 50.0,
+            bankrollUsd = 200.0,
+            bankrollPct = 10.0,
+            feeRate = 0.07
+        )
+        val paper = WinTargetSizer.size(
+            askLevels = levels,
+            targetProfitUsd = 50.0,
+            bankrollUsd = 100.0,
+            bankrollPct = 10.0,
+            feeRate = 0.07
+        )
+        assertTrue(live.stakeUsd <= 20.0 + 1e-6)
+        assertTrue(paper.stakeUsd <= 10.0 + 1e-6)
+        assertTrue(paper.stakeUsd < live.stakeUsd + 1e-9)
+    }
+
+    @Test
     fun winTargetInsufficientDepth() {
         val thin = WinTargetSizer.size(
             askLevels = listOf(0.30 to 1.0),

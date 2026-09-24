@@ -62,7 +62,10 @@ data class TradeTicket(
     val profitIfWinUsd: Double? = null,
     val winTargetUsd: Double? = null,
     val winTargetCapped: Boolean = false,
-    val winTargetNote: String? = null
+    val winTargetNote: String? = null,
+    /** `live` = Kalshi cash, `paper` = paper equity, `settings` = advisory bankroll. */
+    val bankrollSource: String? = null,
+    val bankrollUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
