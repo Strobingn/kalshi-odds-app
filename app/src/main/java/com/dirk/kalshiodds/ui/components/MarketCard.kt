@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -47,7 +48,13 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun MarketCard(
+    market: MarketUiModel,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    onBuyYes: (() -> Unit)? = null,
+    onBuyNo: (() -> Unit)? = null
+) {
     val alertBorder = if (market.edgeAlert) AccentGreen else Border
     Card(
         modifier = modifier
@@ -79,11 +86,12 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 }
                 Column(horizontalAlignment = Alignment.End) {
                     StatusChip(market.status)
+                    TimeLeftLabel(market.closeTimeEpochMs, compact = true)
                     Text(
                         text = market.ticker,
                         style = MaterialTheme.typography.labelMedium,
                         color = TextSecondary,
-                        modifier = Modifier.padding(top = 6.dp)
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
             }
@@ -147,6 +155,37 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                     color = AccentOrange
                 )
             }
+
+            if (market.tapeConflict && market.tapeConflictNote != null) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = market.tapeConflictNote.orEmpty(),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(AccentOrange.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                )
+                market.modelLeanSide?.let { lean ->
+                    Text(
+                        text = "Model lean ${if (lean == "NO") "DOWN / NO" else "UP / YES"} · primary follows live tape",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AccentOrange,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            Text(
+                text = "Odds (YES mid)",
+                style = MaterialTheme.typography.labelMedium,
+                color = AccentBlue,
+                fontWeight = FontWeight.Bold
+            )
+            OddsSparkline(market.oddsHistory, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
 
             Spacer(Modifier.height(10.dp))
             Text(
@@ -303,6 +342,33 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
                 }
             }
 
+            if (onBuyYes != null || onBuyNo != null) {
+                Spacer(Modifier.height(12.dp))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (onBuyYes != null) {
+                        Button(
+                            onClick = onBuyYes,
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) { Text("Buy YES") }
+                    }
+                    if (onBuyNo != null) {
+                        OutlinedButton(
+                            onClick = onBuyNo,
+                            modifier = Modifier.weight(1f).height(48.dp)
+                        ) { Text("Buy NO") }
+                    }
+                }
+                Text(
+                    "Opens an approve-gated limit. Nothing is sent until you tap Approve.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+
             ChecklistBlock(market)
 
             if (!compact) {
@@ -349,7 +415,13 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Metric("24h vol", formatCompact(market.volume24h))
                 Metric("Liquidity", market.liquidityDollars?.let { formatCompact(it) } ?: "—")
-                Metric("Closes", market.closeTimeLocal ?: "—")
+                Column {
+                    Text("Time left", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    TimeLeftLabel(market.closeTimeEpochMs)
+                    market.closeTimeLocal?.let {
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    }
+                }
             }
         }
     }

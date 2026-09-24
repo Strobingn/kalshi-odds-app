@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
+import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -44,30 +46,25 @@ fun TradeTicketsSection(
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit
 ) {
-    val proposals = tickets.proposals
-    val working = tickets.working.filter { it.orderId != null && it.error?.startsWith("cancelled") != true }
-    if (proposals.isEmpty() && working.isEmpty() && tickets.lastError == null &&
-        tickets.phase !is TicketPhase.Failed && tickets.phase !is TicketPhase.Submitted
-    ) {
-        return
+    val proposals = tickets.proposals.sortedByDescending {
+        if (it.kind == TicketKind.HUNTER) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
+    val working = tickets.working.filter { it.orderId != null && it.error?.startsWith("cancelled") != true }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = "Trade tickets",
+            text = "Buy / Approve",
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Limit orders only. A ticket appears when a \$${fmt(proposals.firstOrNull()?.stakeUsd ?: 5.0)} " +
-                "stake can settle ≥\$100 (price ≤5¢ on \$1 binaries, enough size). " +
-                "Nothing is sent until you tap Approve on that ticket. Not financial advice — high variance.",
+            text = "Tap Buy on a market to open a limit ticket. A hunter card appears automatically when a $1 stake can settle ≥$25 (ask ≤~4¢). The $5 → ≥$100 path still works. Nothing is sent until you tap Approve. Cancel leaves no order.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary
         )
         if (!credentialsConfigured) {
             Text(
-                text = "Add Kalshi API Key ID + PEM in Settings to Approve. Keys stay in EncryptedSharedPreferences.",
+                text = "Add Kalshi API Key ID + PEM in Settings to Approve. Keys stay on device and are never logged.",
                 style = MaterialTheme.typography.labelMedium,
                 color = AccentOrange
             )
@@ -97,6 +94,17 @@ fun TradeTicketsSection(
             }
             else -> Unit
         }
+        if (proposals.isEmpty() && working.isEmpty() && tickets.lastError == null) {
+            Text(
+                "No pending tickets. Use Buy YES / Buy NO on the hero or a market card.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = TextSecondary,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(AccentBlue.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            )
+        }
         working.forEach { order ->
             WorkingOrderCard(order, onCancelOrder)
         }
@@ -123,17 +131,25 @@ private fun ProposedTicketCard(
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit
 ) {
+    val hunter = ticket.kind == TicketKind.HUNTER
+    val border = if (hunter) AccentOrange else AccentBlue
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(if (hunter) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
         colors = CardDefaults.cardColors(containerColor = Surface),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
-                    "${ticket.displaySide} · ${ticket.ticker}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    when (ticket.kind) {
+                        TicketKind.HUNTER -> "PENDING APPROVAL · $1 → ≥$25"
+                        TicketKind.MANUAL -> "MANUAL BUY"
+                        TicketKind.CONFIGURED -> "TICKET"
+                    },
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (hunter) AccentOrange else AccentBlue,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
@@ -143,13 +159,28 @@ private fun ProposedTicketCard(
                     fontWeight = FontWeight.Bold
                 )
             }
+            Text(
+                "${ticket.displaySide} · ${ticket.ticker}",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 4.dp)
+            )
             ticket.title?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
             }
             Spacer(Modifier.height(8.dp))
-            TicketMetricRow("Limit", String.format(Locale.US, "%.0f¢  (never market)", ticket.limitPrice * 100))
+            TicketMetricRow("Stake", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
+            TicketMetricRow("Ask / limit", String.format(Locale.US, "%.0f¢  (never market)", ticket.limitPrice * 100))
             TicketMetricRow("Est. fill", String.format(Locale.US, "$%.2f", ticket.estimatedFillUsd))
-            TicketMetricRow("Max payout", String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide))
+            TicketMetricRow(
+                "Max payout",
+                String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)
+            )
+            TicketMetricRow(
+                "Potential gain",
+                String.format(Locale.US, "$%.0f", ticket.potentialGainUsd)
+            )
             ticket.netEvUsd?.let {
                 TicketMetricRow("Net EV", String.format(Locale.US, "%+.2f  (%+.1f pp)", it, ticket.netEdgePp ?: 0.0))
             }
@@ -169,11 +200,14 @@ private fun ProposedTicketCard(
                 Button(
                     onClick = { onReview(ticket.id) },
                     enabled = credentialsConfigured,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(if (credentialsConfigured) "Approve…" else "Needs API key")
                 }
-                OutlinedButton(onClick = { onDismiss(ticket.id) }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { onDismiss(ticket.id) },
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
                     Text("Dismiss")
                 }
             }
@@ -211,7 +245,7 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
         )
         OutlinedButton(
             onClick = { onCancel(id) },
-            modifier = Modifier.padding(top = 6.dp)
+            modifier = Modifier.padding(top = 6.dp).height(44.dp)
         ) { Text("Cancel order") }
     }
 }
@@ -230,35 +264,46 @@ private fun ApproveTicketDialog(
             Column {
                 Text(
                     "Places a GTC limit — not a market order. This tap is the only way an order is sent. " +
-                        "Not financial advice. High variance: you can lose the full stake.",
+                        "Dismiss / Back leaves no hanging order. Not financial advice. High variance.",
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
                     String.format(
                         Locale.US,
-                        "%s %s\n%d contracts @ %.0f¢\nEst. fill $%.2f · max payout $%.0f",
+                        "%s %s\n$%.2f stake · %d contracts @ %.0f¢\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
                         ticket.displaySide,
                         ticket.ticker,
+                        ticket.stakeUsd,
                         ticket.contracts,
                         ticket.limitPrice * 100,
                         ticket.estimatedFillUsd,
-                        ticket.maxPayoutUsd
+                        ticket.maxPayoutUsd,
+                        ticket.potentialGainUsd
                     ),
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
+                if (ticket.kind == TicketKind.HUNTER) {
+                    Text(
+                        "Hunter path: $1 stake, ≥$25 max payout.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = AccentOrange,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
             }
         },
         confirmButton = {
             Button(
                 onClick = onApprove,
                 enabled = credentialsConfigured,
-                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen)
+                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                modifier = Modifier.height(48.dp)
             ) { Text("Approve") }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Back") }
+            TextButton(onClick = onDismiss) { Text("Cancel") }
         }
     )
 }
@@ -270,5 +315,3 @@ private fun TicketMetricRow(label: String, value: String) {
         Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
 }
-
-private fun fmt(v: Double): String = String.format(Locale.US, "%.0f", v)

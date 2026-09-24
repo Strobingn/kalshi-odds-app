@@ -85,7 +85,14 @@ data class MarketUiModel(
     val metaTake: Boolean? = null,
     val metaNote: String? = null,
     val pathSurvive: Double? = null,
-    val extendedNote: String? = null
+    val extendedNote: String? = null,
+    /** YES mid history in percent, oldest → newest. Copied off live structures. */
+    val oddsHistory: List<Float> = emptyList(),
+    val tapeTrend: String? = null,
+    val tapeConflict: Boolean = false,
+    val tapeConflictNote: String? = null,
+    val primaryHeroSide: String? = null,
+    val modelLeanSide: String? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -129,8 +136,10 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         volume24h = volume24hFp.toDoubleOrNullSafe(),
         openInterest = openInterestFp.toDoubleOrNullSafe(),
         liquidityDollars = liquidityDollars.toDoubleOrNullSafe(),
-        closeTimeLocal = formatCloseTimeLocal(closeTime),
-        closeTimeEpochMs = parseCloseEpochMs(closeTime),
+        closeTimeLocal = formatCloseTimeLocal(closeTime ?: expirationTime ?: expectedExpirationTime),
+        closeTimeEpochMs = parseCloseEpochMs(closeTime)
+            ?: parseCloseEpochMs(expirationTime)
+            ?: parseCloseEpochMs(expectedExpirationTime),
         status = status,
         seriesLabel = series.label
     )
@@ -204,7 +213,12 @@ fun MarketUiModel.withSignalScore(
         metaTake = score.metaTake,
         metaNote = score.metaNote,
         pathSurvive = score.pathSurvive,
-        extendedNote = score.extendedNote
+        extendedNote = score.extendedNote,
+        tapeTrend = score.tapeTrend,
+        tapeConflict = score.tapeConflict,
+        tapeConflictNote = score.tapeConflictNote,
+        primaryHeroSide = score.primaryHeroSide,
+        modelLeanSide = score.modelLeanSide
     )
 }
 

@@ -48,6 +48,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     init {
         refreshBatteryStatus()
         viewModelScope.launch {
+            runCatching { prefs.hydrate() }.getOrNull()?.let { s ->
+                _state.update {
+                    it.copy(
+                        settings = s,
+                        keyIdDraft = s.apiKeyId,
+                        bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd)
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
             prefs.settings.collect { s ->
                 _state.update {
                     it.copy(

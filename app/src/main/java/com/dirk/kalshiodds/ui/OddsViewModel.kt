@@ -17,6 +17,7 @@ import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.domain.MarketUiModel
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
@@ -24,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -91,18 +93,29 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         viewModelScope.launch {
+            runCatching { restorePersistedState() }
+            startPolling()
+        }
+        viewModelScope.launch {
             runCatching {
                 repository.cachedSnapshot.collect { cached ->
-                    if (cached != null && _state.value.snapshot == null) {
-                        val overlaid = cached.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
-                        _state.update {
-                            it.copy(
-                                snapshot = overlaid,
-                                isLoading = false,
-                                modelScoreLabel = scoreLabel(overlaid)
-                            )
-                        }
+                    if (cached == null) return@collect
+                    val cur = _state.value.snapshot
+                    val shouldApply = cur == null ||
+                        cur.allMarkets.isEmpty() ||
+                        (cur.fromCache && cached.fetchedAtEpochMs >= cur.fetchedAtEpochMs)
+                    if (!shouldApply) return@collect
+                    val overlaid = attachHistory(
+                        cached.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
+                    )
+                    _state.update {
+                        it.copy(
+                            snapshot = overlaid,
+                            isLoading = false,
+                            modelScoreLabel = scoreLabel(overlaid)
+                        )
                     }
+                    scheduleRebuildTickets()
                 }
             }
         }
@@ -158,18 +171,54 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
-            runCatching {
-                val rows = withContext(Dispatchers.IO) { container.resultsStore.recentSnapshots(24) }
-                _state.update {
-                    it.copy(
-                        persistedHistory = rows,
-                        mlGuardNote = HeavyMlGuard.lastReason?.let { r -> "Light mode: $r" }
+    }
+
+    private suspend fun restorePersistedState() {
+        val hydrated = runCatching { prefs.hydrate() }.getOrNull()
+        if (hydrated != null) {
+            hub.settings = hydrated
+            _state.update { it.copy(settings = hydrated) }
+        }
+        seedOddsHistory()
+        val cached = runCatching { repository.cachedSnapshot.first() }.getOrNull()
+        if (cached != null && (_state.value.snapshot == null || _state.value.snapshot!!.allMarkets.isEmpty())) {
+            val overlaid = attachHistory(
+                cached.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
+            )
+            _state.update {
+                it.copy(
+                    snapshot = overlaid,
+                    isLoading = false,
+                    modelScoreLabel = scoreLabel(overlaid)
+                )
+            }
+        }
+        val rows = withContext(Dispatchers.IO) { container.resultsStore.recentSnapshots(24) }
+        _state.update {
+            it.copy(
+                persistedHistory = rows,
+                mlGuardNote = HeavyMlGuard.lastReason?.let { r -> "Light mode: $r" }
+            )
+        }
+    }
+
+    private fun seedOddsHistory() {
+        runCatching {
+            val mids = container.resultsStore.recentOddsMids(800)
+            val grouped = mids.groupBy { it.ticker }
+            for ((ticker, rows) in grouped) {
+                hub.scoring.book.seedSeries(ticker, rows.map { it.createdAtMs to it.mid01 }.asReversed())
+            }
+            if (grouped.isEmpty()) {
+                val snaps = container.resultsStore.recentSnapshots(200)
+                snaps.groupBy { it.ticker }.forEach { (ticker, rows) ->
+                    hub.scoring.book.seedSeries(
+                        ticker,
+                        rows.map { it.createdAtMs to (it.marketPp / 100.0) }.asReversed()
                     )
                 }
             }
         }
-        startPolling()
     }
 
     fun setLiveSignals(enabled: Boolean) {
@@ -228,7 +277,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             else -> "Polling ~${currentIntervalMs}ms (±${JITTER_MS}ms)"
         }
         hub.ingestRestSnapshot(result)
-        val overlaid = result.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
+        val overlaid = attachHistory(
+            result.overlayScores(hub.latestScores(), _state.value.settings.edgeThresholdPp)
+        )
         _state.update {
             it.copy(
                 isLoading = false,
@@ -319,11 +370,37 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { ticketSession.cancelWorking(orderId) }
     }
 
+    /**
+     * Open an approve-gated Buy sheet for [side] on [market]. Never places.
+     */
+    fun buyMarket(market: MarketUiModel, side: String) {
+        val s = _state.value
+        if (!s.settings.ticketsEnabled) {
+            ticketSession.failSoft("Turn on trade tickets in Settings to buy")
+            return
+        }
+        val books = hub.scoring.book.snapshotBook(market.ticker)?.let { mapOf(market.ticker to it) }.orEmpty()
+        val ticket = TicketBuilder.proposeManual(
+            market,
+            side,
+            TicketBuilder.Context(
+                settings = s.settings,
+                alertsPaused = s.alertsPaused,
+                books = books
+            )
+        )
+        if (ticket == null) {
+            ticketSession.failSoft("No ask to size a limit on ${market.ticker}")
+            return
+        }
+        ticketSession.addManual(ticket)
+    }
+
     private fun applyScoreOverlay(scores: Map<String, ScoringEngine.Score>) {
         runCatching {
             _state.update { s ->
                 val snap = s.snapshot ?: return@update s
-                s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+                s.copy(snapshot = attachHistory(snap.overlayScores(scores, s.settings.edgeThresholdPp)))
             }
             scheduleRebuildTickets()
         }
@@ -352,6 +429,25 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         )
         ticketSession.replaceProposals(tickets)
+    }
+
+    private fun attachHistory(snap: MarketsSnapshot): MarketsSnapshot {
+        fun List<MarketUiModel>.withHist(): List<MarketUiModel> = map { m ->
+            val pts = runCatching { hub.scoring.book.midHistoryPp(m.ticker) }.getOrElse { emptyList() }
+            val last = m.yesProbabilityPercent?.toFloat()
+            val merged = if (last != null && (pts.isEmpty() || kotlin.math.abs(pts.last() - last) > 0.05f)) {
+                (pts + last).takeLast(com.dirk.kalshiodds.signal.config.SignalConstants.SPARKLINE_MAX_POINTS)
+            } else {
+                pts
+            }
+            if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
+        }
+        return snap.copy(
+            btc = snap.btc.withHist(),
+            eth = snap.eth.withHist(),
+            sol = snap.sol.withHist(),
+            extra = snap.extra.withHist()
+        )
     }
 
     private fun scoreLabel(result: MarketsSnapshot): String? {

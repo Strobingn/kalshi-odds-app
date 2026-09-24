@@ -5,13 +5,18 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.first
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-private val Context.heavyMlStore: DataStore<Preferences> by preferencesDataStore(name = "diphunter_heavy_ml")
+private val Context.heavyMlStore: DataStore<Preferences> by preferencesDataStore(
+    name = "diphunter_heavy_ml",
+    corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() }
+)
 
 @Serializable
 data class ExtendedAiPersisted(

@@ -80,6 +80,39 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun series(ticker: String): List<Point> = byTicker[ticker]?.toList().orEmpty()
 
+    /** YES mid in percent, copied under the lock for sparklines. */
+    @Synchronized
+    fun midHistoryPp(ticker: String): List<Float> =
+        byTicker[ticker]?.map { (it.mid01 * 100.0).toFloat() }.orEmpty()
+
+    /**
+     * Seed sparkline history after process death. No-op once live ticks
+     * already filled the ring so we never block or overwrite the scan path.
+     */
+    @Synchronized
+    fun seedSeries(ticker: String, mids: List<Pair<Long, Double>>) {
+        if (!CryptoMarkets.isCryptoTicker(ticker) || mids.isEmpty()) return
+        val q = byTicker.getOrPut(ticker) { ArrayDeque() }
+        if (q.size >= 8) return
+        val existing = q.map { it.nowMs }.toHashSet()
+        for ((ts, mid) in mids.sortedBy { it.first }) {
+            if (!mid.isFinite() || mid <= 0.0 || mid >= 1.0) continue
+            if (ts in existing) continue
+            q.addLast(
+                Point(
+                    mid01 = mid,
+                    volume = null,
+                    tradeSize = null,
+                    takerSide = null,
+                    source = TickSource.REST,
+                    nowMs = ts
+                )
+            )
+            existing.add(ts)
+            while (q.size > maxPoints) q.removeFirst()
+        }
+    }
+
     @Synchronized
     fun last(ticker: String): Point? = byTicker[ticker]?.lastOrNull()
 

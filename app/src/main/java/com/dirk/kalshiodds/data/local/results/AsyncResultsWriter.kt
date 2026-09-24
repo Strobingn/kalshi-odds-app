@@ -25,6 +25,7 @@ class AsyncResultsWriter(
     private val alerts = ConcurrentLinkedQueue<AlertRow>()
     private val scorecards = ConcurrentLinkedQueue<ScorecardRow>()
     private val tickets = ConcurrentLinkedQueue<TicketAttemptRow>()
+    private val odds = ConcurrentLinkedQueue<OddsMidRow>()
     private val flushScheduled = AtomicBoolean(false)
 
     fun enqueueSnapshot(row: ScoredSnapshotRow) {
@@ -50,6 +51,11 @@ class AsyncResultsWriter(
         schedule()
     }
 
+    fun enqueueOddsMid(row: OddsMidRow) {
+        odds.add(row)
+        schedule()
+    }
+
     fun flushNow() {
         drain()
     }
@@ -67,7 +73,8 @@ class AsyncResultsWriter(
     }
 
     private fun pending(): Boolean =
-        snapshots.isNotEmpty() || alerts.isNotEmpty() || scorecards.isNotEmpty() || tickets.isNotEmpty()
+        snapshots.isNotEmpty() || alerts.isNotEmpty() || scorecards.isNotEmpty() ||
+            tickets.isNotEmpty() || odds.isNotEmpty()
 
     @Synchronized
     private fun drain() {
@@ -96,6 +103,14 @@ class AsyncResultsWriter(
                 val next = tickets.poll() ?: break
                 store.insertTicket(next)
             }
+        }
+        runCatching {
+            val batch = ArrayList<OddsMidRow>(maxBatch)
+            while (batch.size < maxBatch) {
+                val next = odds.poll() ?: break
+                batch.add(next)
+            }
+            if (batch.isNotEmpty()) store.insertOddsMids(batch)
         }
     }
 }

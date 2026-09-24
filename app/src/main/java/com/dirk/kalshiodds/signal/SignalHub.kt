@@ -5,7 +5,9 @@ import android.util.Log
 import com.dirk.kalshiodds.data.local.results.AlertRow
 import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
 import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
+import com.dirk.kalshiodds.data.local.results.OddsMidRow
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.PredictionLogStore
@@ -62,6 +64,8 @@ class SignalHub(
         }
     )
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
+    private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
+    private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
     private val bookMailbox = LatestWinsMailbox<Long>()
     private val logWriteBusy = AtomicBoolean(false)
@@ -232,6 +236,7 @@ class SignalHub(
         if (scored != null) {
             _scores.update { it + (tick.ticker to scored) }
             persistScore(tick, scored)
+            persistOddsMid(tick.ticker, scored.marketMidPp)
         }
         val alert = if (notify && scored != null) {
             scoring.maybeAlert(tick, settings, precomputed = scored)
@@ -257,6 +262,27 @@ class SignalHub(
         val scored = runCatching { scoring.score(tick, settings) }.getOrNull() ?: return
         _scores.update { it + (ticker to scored) }
         persistScore(tick, scored)
+        persistOddsMid(ticker, scored.marketMidPp)
+    }
+
+    private fun persistOddsMid(ticker: String, marketMidPp: Double) {
+        val mid01 = marketMidPp / 100.0
+        if (!mid01.isFinite() || mid01 <= 0.0 || mid01 >= 1.0) return
+        val now = System.currentTimeMillis()
+        val lastTs = lastOddsPersistMs[ticker] ?: 0L
+        val lastMid = lastOddsMid[ticker]
+        if (now - lastTs < SignalConstants.ODDS_MID_PERSIST_MIN_MS &&
+            lastMid != null && kotlin.math.abs(lastMid - mid01) < 0.001
+        ) {
+            return
+        }
+        lastOddsPersistMs[ticker] = now
+        lastOddsMid[ticker] = mid01
+        runCatching {
+            results?.enqueueOddsMid(
+                OddsMidRow(ticker = ticker, mid01 = mid01, createdAtMs = now)
+            )
+        }
     }
 
     private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
