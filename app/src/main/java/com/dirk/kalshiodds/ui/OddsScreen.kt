@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import com.dirk.kalshiodds.signal.engine.SkipFilter
@@ -45,8 +46,8 @@ import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
+import com.dirk.kalshiodds.ui.components.BidChart
 import com.dirk.kalshiodds.ui.components.MarketCard
-import com.dirk.kalshiodds.ui.components.OddsSparkline
 import com.dirk.kalshiodds.ui.components.PaperBookCard
 import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
@@ -66,7 +67,13 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScorecard: () -> Unit) {
+fun OddsScreen(
+    viewModel: OddsViewModel,
+    onOpenSettings: () -> Unit,
+    onOpenScorecard: () -> Unit,
+    onOpenData: () -> Unit = {},
+    onOpenChart: (MarketUiModel) -> Unit = {}
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
@@ -75,6 +82,9 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
             TopAppBar(
                 title = { Text("Dip Hunter") },
                 actions = {
+                    IconButton(onClick = onOpenData) {
+                        Icon(Icons.Default.FolderOpen, contentDescription = "Data")
+                    }
                     IconButton(onClick = onOpenScorecard) {
                         Icon(Icons.Default.Assessment, contentDescription = "Scorecard")
                     }
@@ -139,9 +149,11 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                         LiveUpDownHero(
                             market = featuredLiveMarket(allMarkets),
                             onBuyYes = { m -> viewModel.buyMarket(m, "YES") },
-                            onBuyNo = { m -> viewModel.buyMarket(m, "NO") }
+                            onBuyNo = { m -> viewModel.buyMarket(m, "NO") },
+                            onOpenChart = onOpenChart
                         )
                     }
+                    item { SectionHeader("Paper book") }
                     item {
                         PaperBookCard(
                             paper = state.paper,
@@ -151,6 +163,7 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             onSell = { ticker, side -> viewModel.sellPosition(ticker, side) }
                         )
                     }
+                    item { SectionHeader("Positions") }
                     item {
                         PositionsCard(
                             positions = state.positions,
@@ -172,6 +185,7 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             onCancelOrder = { viewModel.cancelWorkingOrder(it) }
                         )
                     }
+                    item { SectionHeader("Signals") }
                     item {
                         LiveSignalsCard(
                             enabled = state.settings.liveSignalsEnabled,
@@ -273,25 +287,28 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                                 market,
                                 compact = true,
                                 onBuyYes = { viewModel.buyMarket(market, "YES") },
-                                onBuyNo = { viewModel.buyMarket(market, "NO") }
+                                onBuyNo = { viewModel.buyMarket(market, "NO") },
+                                onSell = sellAction(state, viewModel, market),
+                                onOpenChart = { onOpenChart(market) }
                             )
                         }
                     }
+                    item { SectionHeader("Live markets") }
                     if (state.settings.watchBtc) {
                         item { SectionHeader("Bitcoin · KXBTC15M") }
-                        marketsOrEmpty("btc", snapshot?.btc.orEmpty(), viewModel)
+                        marketsOrEmpty("btc", snapshot?.btc.orEmpty(), viewModel, state, onOpenChart)
                     }
                     if (state.settings.watchEth) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Ethereum · KXETH15M") }
-                        marketsOrEmpty("eth", snapshot?.eth.orEmpty(), viewModel)
+                        marketsOrEmpty("eth", snapshot?.eth.orEmpty(), viewModel, state, onOpenChart)
                     }
                     if (state.settings.watchSol) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Solana · KXSOL15M") }
-                        marketsOrEmpty("sol", snapshot?.sol.orEmpty(), viewModel)
+                        marketsOrEmpty("sol", snapshot?.sol.orEmpty(), viewModel, state, onOpenChart)
                     }
                     if (snapshot?.extra.orEmpty().isNotEmpty()) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Extra crypto") }
-                        marketsOrEmpty("extra", snapshot?.extra.orEmpty(), viewModel)
+                        marketsOrEmpty("extra", snapshot?.extra.orEmpty(), viewModel, state, onOpenChart)
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
@@ -303,7 +320,9 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
 private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
     section: String,
     markets: List<MarketUiModel>,
-    viewModel: OddsViewModel
+    viewModel: OddsViewModel,
+    state: OddsUiState,
+    onOpenChart: (MarketUiModel) -> Unit
 ) {
     if (markets.isEmpty()) {
         item(key = "empty-$section") {
@@ -319,10 +338,21 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
             MarketCard(
                 market,
                 onBuyYes = { viewModel.buyMarket(market, "YES") },
-                onBuyNo = { viewModel.buyMarket(market, "NO") }
+                onBuyNo = { viewModel.buyMarket(market, "NO") },
+                onSell = sellAction(state, viewModel, market),
+                onOpenChart = { onOpenChart(market) }
             )
         }
     }
+}
+
+private fun sellAction(
+    state: OddsUiState,
+    viewModel: OddsViewModel,
+    market: MarketUiModel
+): (() -> Unit)? {
+    val pos = state.positions.firstOrNull { it.ticker == market.ticker } ?: return null
+    return { viewModel.sellPosition(pos.ticker, pos.side) }
 }
 
 @Composable
@@ -374,7 +404,8 @@ private fun LiveSignalsCard(
 private fun LiveUpDownHero(
     market: MarketUiModel?,
     onBuyYes: (MarketUiModel) -> Unit,
-    onBuyNo: (MarketUiModel) -> Unit
+    onBuyNo: (MarketUiModel) -> Unit,
+    onOpenChart: (MarketUiModel) -> Unit = {}
 ) {
     val up = market?.aiYesPercent ?: market?.yesProbabilityPercent
     val down = market?.aiNoPercent ?: market?.noProbabilityPercent ?: up?.let { 100.0 - it }
@@ -431,12 +462,50 @@ private fun LiveUpDownHero(
             HeroPct(label = "UP", percent = up, color = AccentGreen, emphasized = tapeUp)
             HeroPct(label = "DOWN", percent = down, color = AccentRed, emphasized = !tapeUp)
         }
-        market?.let {
-            OddsSparkline(
-                it.oddsHistory,
+        market?.let { m ->
+            Row(
+                Modifier.fillMaxWidth().padding(top = 10.dp),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    "UP bid ${m.yesBid?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}  ask ${m.yesAsk?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}",
+                    color = AccentGreen,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "DOWN bid ${m.noBid?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}  ask ${m.noAsk?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}",
+                    color = AccentRed,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            m.digitalFairPp?.let { fv ->
+                Text(
+                    String.format(Locale.US, "Fair value %.0f¢", fv),
+                    color = AccentBlue,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            BidChart(
+                points = m.bidHistory.ifEmpty {
+                    m.oddsHistory.mapIndexed { i, mid ->
+                        com.dirk.kalshiodds.chart.BidPoint(
+                            tMs = (m.closeTimeEpochMs ?: 0L) - (m.oddsHistory.size - 1 - i) * 2_000L,
+                            upBidCents = mid,
+                            downBidCents = 100f - mid
+                        )
+                    }
+                },
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 10.dp)
+                    .clickable { onOpenChart(m) },
+                heightDp = 88,
+                windowStartMs = m.closeTimeEpochMs?.minus(900_000L),
+                windowEndMs = m.closeTimeEpochMs
             )
         }
         Text(
@@ -453,12 +522,12 @@ private fun LiveUpDownHero(
                 Button(
                     onClick = { onBuyYes(market) },
                     modifier = Modifier.weight(1f).height(48.dp)
-                ) { Text("Buy YES") }
+                ) { Text("Buy UP") }
                 Button(
                     onClick = { onBuyNo(market) },
-                    modifier = Modifier.weight(1f).height(48.dp),
+                    modifier = Modifier.weight(1f).height(52.dp),
                     colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentRed)
-                ) { Text("Buy NO") }
+                ) { Text("Buy DOWN") }
             }
         }
     }

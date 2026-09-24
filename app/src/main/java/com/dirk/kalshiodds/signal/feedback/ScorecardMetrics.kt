@@ -29,6 +29,17 @@ object ScorecardMetrics {
         val stats: WindowStats
     )
 
+    data class Honest(
+        val n: Int,
+        val modelBrier: Double?,
+        val marketBrier: Double?,
+        val hitRate: Double?,
+        val avgEdgeWhenRight: Double?,
+        val avgEdgeWhenWrong: Double?,
+        val enoughData: Boolean,
+        val perAsset: List<SeriesStats>
+    )
+
     data class Snapshot(
         val daily: WindowStats,
         val rolling: WindowStats,
@@ -40,7 +51,8 @@ object ScorecardMetrics {
         val calibrationReady: Boolean,
         val temperature: Double?,
         val calibrationSamples: Int,
-        val policy: PolicyEval.Scorecard? = null
+        val policy: PolicyEval.Scorecard? = null,
+        val honest: Honest = Honest(0, null, null, null, null, null, false, emptyList())
     )
 
     fun compute(
@@ -74,6 +86,7 @@ object ScorecardMetrics {
             calibrationReady = calibration.ready,
             temperature = if (calibration.ready) calibration.temperature else null,
             calibrationSamples = calibration.sampleCount,
+            honest = honest(settled),
             policy = PolicyEval.evaluate(
                 entries = entries,
                 stakeUsd = policyStakeUsd,
@@ -82,6 +95,38 @@ object ScorecardMetrics {
                 requireUncertaintyPass = requireUncertaintyPass,
                 maxUncertainty = maxUncertainty
             )
+        )
+    }
+
+    const val MIN_HONEST_SAMPLES = 100
+
+    fun honest(rows: List<PredictionLogEntry>): Honest {
+        if (rows.isEmpty()) return Honest(0, null, null, null, null, null, false, emptyList())
+        val all = window(rows)
+        val modelBriers = rows.map { e ->
+            val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
+            val p = e.predictedYes
+            (p - y) * (p - y)
+        }
+        val marketBriers = rows.map { e ->
+            val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
+            val p = e.marketMid
+            (p - y) * (p - y)
+        }
+        val per = rows.groupBy { it.series.ifBlank { "unknown" } }
+            .toSortedMap()
+            .map { (series, group) ->
+                SeriesStats(series = series, label = seriesLabel(series), stats = window(group))
+            }
+        return Honest(
+            n = rows.size,
+            modelBrier = modelBriers.average(),
+            marketBrier = marketBriers.average(),
+            hitRate = all.hitRate,
+            avgEdgeWhenRight = all.avgEdgeWhenRight,
+            avgEdgeWhenWrong = all.avgEdgeWhenWrong,
+            enoughData = rows.size >= MIN_HONEST_SAMPLES,
+            perAsset = per
         )
     }
 

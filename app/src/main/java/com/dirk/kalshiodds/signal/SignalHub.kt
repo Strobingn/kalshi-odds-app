@@ -279,8 +279,15 @@ class SignalHub(
         lastOddsPersistMs[ticker] = now
         lastOddsMid[ticker] = mid01
         runCatching {
+            val last = scoring.book.lastTick(ticker)
             results?.enqueueOddsMid(
-                OddsMidRow(ticker = ticker, mid01 = mid01, createdAtMs = now)
+                OddsMidRow(
+                    ticker = ticker,
+                    mid01 = mid01,
+                    createdAtMs = now,
+                    yesBid = last?.yesBid,
+                    noBid = last?.noBid ?: last?.yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+                )
             )
         }
     }

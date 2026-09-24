@@ -64,7 +64,9 @@ data class OddsMidRow(
     val id: Long = 0L,
     val ticker: String,
     val mid01: Double,
-    val createdAtMs: Long
+    val createdAtMs: Long,
+    val yesBid: Double? = null,
+    val noBid: Double? = null
 )
 
 data class ResultsBundle(

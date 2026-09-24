@@ -20,6 +20,10 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
+import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.ui.ChartDetailScreen
+import com.dirk.kalshiodds.ui.DataScreen
+import com.dirk.kalshiodds.ui.DataViewModel
 import com.dirk.kalshiodds.ui.OddsScreen
 import com.dirk.kalshiodds.ui.OddsViewModel
 import com.dirk.kalshiodds.ui.ScorecardScreen
@@ -36,6 +40,7 @@ class MainActivity : ComponentActivity() {
     private val oddsViewModel: OddsViewModel by viewModels()
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val scorecardViewModel: ScorecardViewModel by viewModels()
+    private val dataViewModel: DataViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -57,19 +62,44 @@ class MainActivity : ComponentActivity() {
             KalshiOddsTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var screen by rememberSaveable { mutableStateOf("odds") }
-                    when (screen) {
-                        "settings" -> SettingsScreen(
+                    var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
+                    val chartMarket: MarketUiModel? = chartTicker?.let { t ->
+                        oddsViewModel.state.value.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
+                    }
+                    when {
+                        screen == "settings" -> SettingsScreen(
                             viewModel = settingsViewModel,
-                            onBack = { screen = "odds" }
+                            onBack = { screen = "odds" },
+                            onOpenData = { screen = "data" }
                         )
-                        "scorecard" -> ScorecardScreen(
+                        screen == "scorecard" -> ScorecardScreen(
                             viewModel = scorecardViewModel,
                             onBack = { screen = "odds" }
+                        )
+                        screen == "data" -> DataScreen(
+                            viewModel = dataViewModel,
+                            onBack = { screen = "odds" }
+                        )
+                        chartMarket != null -> ChartDetailScreen(
+                            market = chartMarket,
+                            points = chartMarket.bidHistory.ifEmpty {
+                                chartMarket.oddsHistory.mapIndexed { i, mid ->
+                                    com.dirk.kalshiodds.chart.BidPoint(
+                                        tMs = (chartMarket.closeTimeEpochMs ?: 0L) -
+                                            (chartMarket.oddsHistory.size - 1 - i) * 2_000L,
+                                        upBidCents = mid,
+                                        downBidCents = 100f - mid
+                                    )
+                                }
+                            },
+                            onBack = { chartTicker = null }
                         )
                         else -> OddsScreen(
                             viewModel = oddsViewModel,
                             onOpenSettings = { screen = "settings" },
-                            onOpenScorecard = { screen = "scorecard" }
+                            onOpenScorecard = { screen = "scorecard" },
+                            onOpenData = { screen = "data" },
+                            onOpenChart = { chartTicker = it.ticker }
                         )
                     }
                 }

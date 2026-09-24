@@ -30,7 +30,9 @@ data class MarketTick(
     val tradeSize: Double? = null,
     val takerSide: String? = null,
     /** Kalshi floor / target price in USD when the REST snapshot provided it. */
-    val floorStrike: Double? = null
+    val floorStrike: Double? = null,
+    val noBid: Double? = null,
+    val noAsk: Double? = null
 ) {
     /** YES mid in 0–1 probability, or last if book is one-sided. */
     val mid01: Double?
@@ -57,7 +59,9 @@ data class MarketTick(
                 closeTimeEpochMs = model.closeTimeEpochMs,
                 source = source,
                 receiveElapsedNanos = receiveElapsedNanos,
-                floorStrike = model.floorStrike
+                floorStrike = model.floorStrike,
+                noBid = model.noBid,
+                noAsk = model.noAsk
             )
     }
 }

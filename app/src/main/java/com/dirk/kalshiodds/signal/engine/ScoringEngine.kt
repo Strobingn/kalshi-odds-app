@@ -60,6 +60,8 @@ class ScoringEngine(
     val extended: ExtendedAiRuntime = ExtendedAiRuntime(),
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
+    @Volatile
+    var edgeModel: com.dirk.kalshiodds.prediction.EdgeModel? = null
     data class Score(
         val fairValuePp: Double,
         val marketMidPp: Double,
@@ -134,7 +136,11 @@ class ScoringEngine(
         val tapeConflict: Boolean = false,
         val tapeConflictNote: String? = null,
         val primaryHeroSide: String? = null,
-        val modelLeanSide: String? = null
+        val modelLeanSide: String? = null,
+        val digitalFairPp: Double? = null,
+        val importedModelPp: Double? = null,
+        val modelEdgeQualified: Boolean = true,
+        val blendWeight: Double? = null
     )
 
     data class BlendWeights(
@@ -605,6 +611,51 @@ class ScoringEngine(
             extBlocked != null -> extBlocked
             else -> filter.reason
         }
+        val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
+            if (!barStd.isFinite() || barStd <= 0.0) null
+            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
+                .coerceIn(0.01, 5.0)
+        }
+        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
+            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
+                spot = spotFeat.lastPrice!!,
+                strike = strikeUsd,
+                tteSeconds = (tteSec ?: 900L).toDouble(),
+                sigmaAnnual = sigmaAnnual
+            )?.times(100.0)
+        } else {
+            null
+        }
+        var importedModelPp: Double? = null
+        var modelEdgeQualified = true
+        var importedBlendW: Double? = null
+        val loaded = edgeModel
+        if (loaded != null) {
+            val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
+                com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
+                    spot = spotFeat?.lastPrice,
+                    strike = strikeUsd,
+                    tteSeconds = (tteSec ?: 900L).toDouble(),
+                    sigmaAnnual = sigmaAnnual,
+                    marketMid = mid01,
+                    imbalance = imb,
+                    spread = spread,
+                    momentum = momForMl,
+                    realizedVol01 = volForMl,
+                    crossAssetRet = spotFeat?.spotReturn5m,
+                    nowMs = nowMs,
+                    digitalFair = digitalFairPp?.div(100.0)
+                )
+            )
+            val pYes = loaded.predictYes(feats)
+            importedModelPp = pYes * 100.0
+            importedBlendW = loaded.blendWeight.toDouble()
+            modelEdgeQualified = loaded.qualifiesEdge(pYes, mid01, settings.feeRate)
+            val blended = loaded.blendWithMarket(pYes, mid01)
+            fair = (0.55 * (fair / 100.0) + 0.45 * blended).times(100.0).coerceIn(2.0, 98.0)
+            delta = fair - midPp
+            predictedSide = if (delta >= 0) "YES" else "NO"
+        }
         val reason = buildReason(
             aiPp = aiPp,
             flow = flow,
@@ -711,7 +762,11 @@ class ScoringEngine(
             tapeConflict = tape.conflict,
             tapeConflictNote = tape.banner,
             primaryHeroSide = tape.primarySide,
-            modelLeanSide = if (tape.conflict) tape.modelSide else null
+            modelLeanSide = if (tape.conflict) tape.modelSide else null,
+            digitalFairPp = digitalFairPp,
+            importedModelPp = importedModelPp,
+            modelEdgeQualified = modelEdgeQualified,
+            blendWeight = importedBlendW
         )
     }
 
@@ -731,6 +786,7 @@ class ScoringEngine(
             scored.deltaPp
         }
         if (abs(edgeForAlert) < settings.edgeThresholdPp) return null
+        if (edgeModel != null && !scored.modelEdgeQualified) return null
         val last = lastAlertMs[tick.ticker] ?: 0L
         if (nowMs - last < settings.debounceMs) return null
         lastAlertMs[tick.ticker] = nowMs

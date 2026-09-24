@@ -106,7 +106,7 @@ fun TradeTicketsSection(
         }
         if (proposals.isEmpty() && working.isEmpty() && visibleError == null) {
             Text(
-                "No pending tickets. Use Buy YES / Buy NO on the hero, or Sell on Your positions.",
+                "No pending tickets. Use Buy UP / Buy DOWN on a market, or Sell on Positions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
                 modifier = Modifier

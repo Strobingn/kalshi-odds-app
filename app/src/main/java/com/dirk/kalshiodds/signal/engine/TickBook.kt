@@ -33,6 +33,14 @@ class TickBook(private val maxPoints: Int = 80) {
     private val strikeByTicker = linkedMapOf<String, Double>()
     private val seriesHistory = linkedMapOf<String, ArrayDeque<Pair<Long, Double>>>()
     private val maxSeriesPoints = 48
+    private val bidsByTicker = linkedMapOf<String, ArrayDeque<BidSample>>()
+    private val maxBidPoints = 64
+
+    data class BidSample(
+        val tMs: Long,
+        val yesBid: Double?,
+        val noBid: Double?
+    )
 
     /**
      * Immutable book metrics copied under the TickBook lock. Scoring / Extended
@@ -61,6 +69,7 @@ class TickBook(private val maxPoints: Int = 80) {
         }
         // Order-book-derived ticks refresh last mid / meta but do not pollute
         // the velocity / volume-flow series (those stay ticker/trade/REST).
+        recordBid(tick, nowMs)
         if (tick.source == TickSource.WS_ORDERBOOK) return last(tick.ticker)
         if (mid == null) return last(tick.ticker)
         val q = byTicker.getOrPut(tick.ticker) { ArrayDeque() }
@@ -84,6 +93,31 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun midHistoryPp(ticker: String): List<Float> =
         byTicker[ticker]?.map { (it.mid01 * 100.0).toFloat() }.orEmpty()
+
+    @Synchronized
+    fun bidHistory(ticker: String): List<com.dirk.kalshiodds.chart.BidPoint> =
+        bidsByTicker[ticker]?.map {
+            com.dirk.kalshiodds.chart.BidPoint(
+                tMs = it.tMs,
+                upBidCents = it.yesBid?.times(100.0)?.toFloat(),
+                downBidCents = it.noBid?.times(100.0)?.toFloat()
+            )
+        }.orEmpty()
+
+    private fun recordBid(tick: MarketTick, nowMs: Long) {
+        val yes = tick.yesBid
+        val no = tick.noBid ?: tick.yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+        if (yes == null && no == null) return
+        val q = bidsByTicker.getOrPut(tick.ticker) { ArrayDeque() }
+        val last = q.lastOrNull()
+        if (last != null && nowMs - last.tMs < 400L &&
+            last.yesBid == yes && last.noBid == no
+        ) {
+            return
+        }
+        q.addLast(BidSample(nowMs, yes, no))
+        while (q.size > maxBidPoints) q.removeFirst()
+    }
 
     /**
      * Seed sparkline history after process death. No-op once live ticks
@@ -391,7 +425,9 @@ class TickBook(private val maxPoints: Int = 80) {
             closeTimeEpochMs = last?.closeTimeEpochMs ?: closeByTicker[ticker],
             source = TickSource.WS_ORDERBOOK,
             receiveElapsedNanos = receiveElapsedNanos,
-            exchangeTsMs = nowMs
+            exchangeTsMs = nowMs,
+            noBid = last?.noBid ?: ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
+            noAsk = last?.noAsk ?: bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
         )
     }
 

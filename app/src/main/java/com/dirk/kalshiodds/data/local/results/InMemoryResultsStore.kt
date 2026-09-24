@@ -12,13 +12,18 @@ class InMemoryResultsStore(
     private val maxScorecards: Int = 400,
     private val maxTickets: Int = 200,
     private val maxOdds: Int = 1_200
-) : ResultsStore {
+) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
     private val nextId = AtomicLong(1L)
     private val snapshots = ArrayDeque<ScoredSnapshotRow>()
     private val alerts = ArrayDeque<AlertRow>()
     private val scorecards = ArrayDeque<ScorecardRow>()
     private val tickets = ArrayDeque<TicketAttemptRow>()
     private val odds = ArrayDeque<OddsMidRow>()
+    private val settled = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.SettledWindowRow>()
+    private val path = ArrayDeque<com.dirk.kalshiodds.data.local.archive.PricePathRow>()
+    private val spot = ArrayDeque<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>()
+    private val fills = LinkedHashMap<String, com.dirk.kalshiodds.data.importing.ImportedFill>()
+    private val cursors = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.BackfillCursorRow>()
 
     @Synchronized
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -81,4 +86,106 @@ class InMemoryResultsStore(
         scorecards = scorecards.toList().takeLast(limit).asReversed(),
         tickets = tickets.toList().takeLast(limit).asReversed()
     )
+
+    @Synchronized
+    override fun upsertSettled(rows: List<com.dirk.kalshiodds.data.local.archive.SettledWindowRow>) {
+        for (r in rows) settled[r.ticker] = r
+    }
+
+    @Synchronized
+    override fun insertPricePath(rows: List<com.dirk.kalshiodds.data.local.archive.PricePathRow>) {
+        path.addAll(rows)
+        while (path.size > 8_000) path.removeFirst()
+    }
+
+    @Synchronized
+    override fun insertSpotCandles(rows: List<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>) {
+        spot.addAll(rows)
+        while (spot.size > 12_000) spot.removeFirst()
+    }
+
+    @Synchronized
+    override fun insertFills(rows: List<com.dirk.kalshiodds.data.importing.ImportedFill>) {
+        for (r in rows) if (r.id !in fills) fills[r.id] = r
+    }
+
+    @Synchronized
+    override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
+
+    @Synchronized
+    override fun bidHistory(ticker: String, sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.chart.BidPoint> {
+        val fromOdds = odds.filter { it.ticker == ticker && it.createdAtMs >= sinceMs }
+            .map {
+                com.dirk.kalshiodds.chart.BidPoint(
+                    tMs = it.createdAtMs,
+                    upBidCents = (it.yesBid ?: it.mid01)?.times(100.0)?.toFloat(),
+                    downBidCents = (it.noBid ?: (1.0 - it.mid01))?.times(100.0)?.toFloat()
+                )
+            }
+        val fromPath = path.filter { it.ticker == ticker && it.tMs >= sinceMs }
+            .map {
+                com.dirk.kalshiodds.chart.BidPoint(
+                    tMs = it.tMs,
+                    upBidCents = (it.yesBid ?: it.mid)?.times(100.0)?.toFloat(),
+                    downBidCents = (it.noBid ?: it.mid?.let { m -> 1.0 - m })?.times(100.0)?.toFloat()
+                )
+            }
+        return (fromOdds + fromPath).sortedBy { it.tMs }.takeLast(limit)
+    }
+
+    @Synchronized
+    override fun pricePath(ticker: String, limit: Int) =
+        path.filter { it.ticker == ticker }.takeLast(limit)
+
+    @Synchronized
+    override fun spotCloses(product: String, startMs: Long, endMs: Long): List<Double> =
+        spot.filter { it.product == product && it.tMs in startMs..endMs }.map { it.close }
+
+    @Synchronized
+    override fun stats(): com.dirk.kalshiodds.data.local.archive.DataStats {
+        val rows = settled.values
+        return com.dirk.kalshiodds.data.local.archive.DataStats(
+            settledCount = rows.size,
+            minCloseMs = rows.minOfOrNull { it.closeMs ?: Long.MAX_VALUE }?.takeIf { it != Long.MAX_VALUE },
+            maxCloseMs = rows.maxOfOrNull { it.closeMs ?: 0L },
+            btc = rows.count { it.series.contains("BTC") },
+            eth = rows.count { it.series.contains("ETH") },
+            sol = rows.count { it.series.contains("SOL") },
+            pathPoints = path.size,
+            spotCandles = spot.size,
+            fills = fills.size,
+            yesSettled = rows.count { it.result == "yes" },
+            noSettled = rows.count { it.result == "no" }
+        ).let { it.copy(other = (it.settledCount - it.btc - it.eth - it.sol).coerceAtLeast(0)) }
+    }
+
+    @Synchronized
+    override fun settledTickers(): Set<String> = settled.keys.toSet()
+
+    @Synchronized
+    override fun existingFillIds(): Set<String> = fills.keys.toSet()
+
+    @Synchronized
+    override fun existingSnapshotKeys(): Set<String> =
+        snapshots.map { "${it.ticker}|${it.createdAtMs}" }.toSet()
+
+    @Synchronized
+    override fun existingAlertIds(): Set<String> = alerts.map { it.alertId }.toSet()
+
+    @Synchronized
+    override fun existingTicketKeys(): Set<String> =
+        tickets.map { it.clientOrderId ?: "${it.ticker}|${it.createdAtMs}" }.toSet()
+
+    @Synchronized
+    override fun readCursor(job: String) = cursors[job]
+
+    @Synchronized
+    override fun writeCursor(row: com.dirk.kalshiodds.data.local.archive.BackfillCursorRow) {
+        cursors[row.job] = row
+    }
+
+    @Synchronized
+    override fun clearCursor(job: String) {
+        cursors.remove(job)
+    }
 }

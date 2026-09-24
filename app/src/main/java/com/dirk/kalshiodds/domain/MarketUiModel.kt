@@ -94,7 +94,11 @@ data class MarketUiModel(
     val tapeConflict: Boolean = false,
     val tapeConflictNote: String? = null,
     val primaryHeroSide: String? = null,
-    val modelLeanSide: String? = null
+    val modelLeanSide: String? = null,
+    val bidHistory: List<com.dirk.kalshiodds.chart.BidPoint> = emptyList(),
+    val digitalFairPp: Double? = null,
+    val importedModelPp: Double? = null,
+    val modelEdgeQualified: Boolean = true
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -221,7 +225,10 @@ fun MarketUiModel.withSignalScore(
         tapeConflict = score.tapeConflict,
         tapeConflictNote = score.tapeConflictNote,
         primaryHeroSide = score.primaryHeroSide,
-        modelLeanSide = score.modelLeanSide
+        modelLeanSide = score.modelLeanSide,
+        digitalFairPp = score.digitalFairPp,
+        importedModelPp = score.importedModelPp,
+        modelEdgeQualified = score.modelEdgeQualified
     )
 }
 

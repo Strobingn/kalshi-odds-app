@@ -40,15 +40,20 @@ class AppContainer(context: Context) {
     val notifier = SignalNotifier(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
-    val resultsStore: ResultsStore = runCatching { SqliteResultsStore(app) }
+    val sqliteOrMemory = runCatching { SqliteResultsStore(app) }
         .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
+    val resultsStore: ResultsStore = sqliteOrMemory
+    val archive: com.dirk.kalshiodds.data.local.archive.DataArchive =
+        sqliteOrMemory as com.dirk.kalshiodds.data.local.archive.DataArchive
+    val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
+    val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
     val scoring = ScoringEngine(
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
         extended = ExtendedAiRuntime()
-    )
+    ).also { it.edgeModel = importedModel.current() }
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,

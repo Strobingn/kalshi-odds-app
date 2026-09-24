@@ -660,7 +660,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 pts
             }
-            if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
+            val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
+            val stored = runCatching {
+                container.archive.bidHistory(
+                    m.ticker,
+                    (m.closeTimeEpochMs ?: System.currentTimeMillis()) - 3_600_000L,
+                    240
+                )
+            }.getOrElse { emptyList() }
+            val bids = com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
+                (stored + liveBids).sortedBy { it.tMs }.distinctBy { it.tMs },
+                com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
+            )
+            val withOdds = if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
+            if (bids.isEmpty() && withOdds.bidHistory.isEmpty()) withOdds else withOdds.copy(bidHistory = bids.ifEmpty { withOdds.bidHistory })
         }
         return snap.copy(
             btc = snap.btc.withHist(),

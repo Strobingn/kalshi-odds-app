@@ -48,7 +48,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
+fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current
@@ -345,10 +345,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             Text(
                 "Scored snapshots, alerts, scorecard rows, and Approve-ticket attempts are written to on-device SQLite " +
                     "and a rolling results.log. Export writes a CSV you can open after a kill. " +
+                    "Import, Kalshi backfill, spot candles, Supabase restore, and model weights live on the Data screen. " +
                     "Tickets are still Approve-only — never unsupervised bets.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
+            Button(onClick = onOpenData, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Text("Open Data (import / backfill)")
+            }
             Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
             }
