@@ -40,9 +40,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.model.LiveCall
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.ui.components.MarketCard
+import com.dirk.kalshiodds.ui.components.UpDownHero
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
@@ -132,6 +134,12 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             enabled = state.settings.liveSignalsEnabled,
                             connection = state.signalStatus.state,
                             onToggle = viewModel::setLiveSignals
+                        )
+                    }
+                    item {
+                        UpDownHero(
+                            call = bestLiveCall(state),
+                            live = state.signalStatus.state == WsConnectionState.CONNECTED
                         )
                     }
                     item {
@@ -235,24 +243,28 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             )
                         }
                         items(ranked.take(8), key = { "rank-${it.ticker}" }) { market ->
-                            MarketCard(market, compact = true)
+                            MarketCard(
+                                market,
+                                compact = true,
+                                liveCall = state.liveCalls[market.ticker]
+                            )
                         }
                     }
                     if (state.settings.watchBtc) {
                         item { SectionHeader("Bitcoin · KXBTC15M") }
-                        marketsOrEmpty("btc", snapshot?.btc.orEmpty())
+                        marketsOrEmpty("btc", snapshot?.btc.orEmpty(), state.liveCalls)
                     }
                     if (state.settings.watchEth) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Ethereum · KXETH15M") }
-                        marketsOrEmpty("eth", snapshot?.eth.orEmpty())
+                        marketsOrEmpty("eth", snapshot?.eth.orEmpty(), state.liveCalls)
                     }
                     if (state.settings.watchSol) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Solana · KXSOL15M") }
-                        marketsOrEmpty("sol", snapshot?.sol.orEmpty())
+                        marketsOrEmpty("sol", snapshot?.sol.orEmpty(), state.liveCalls)
                     }
                     if (snapshot?.extra.orEmpty().isNotEmpty()) {
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Extra crypto") }
-                        marketsOrEmpty("extra", snapshot?.extra.orEmpty())
+                        marketsOrEmpty("extra", snapshot?.extra.orEmpty(), state.liveCalls)
                     }
                     item { Spacer(Modifier.height(24.dp)) }
                 }
@@ -263,7 +275,8 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
 
 private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
     section: String,
-    markets: List<MarketUiModel>
+    markets: List<MarketUiModel>,
+    liveCalls: Map<String, LiveCall> = emptyMap()
 ) {
     if (markets.isEmpty()) {
         item(key = "empty-$section") {
@@ -276,9 +289,25 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
         }
     } else {
         items(markets, key = { "$section-${it.ticker}" }) { market ->
-            MarketCard(market)
+            MarketCard(market, liveCall = liveCalls[market.ticker])
         }
     }
+}
+
+private fun bestLiveCall(state: OddsUiState): LiveCall? {
+    val fromFeed = state.liveCalls.values.maxByOrNull { it.convictionPp }
+    if (fromFeed != null) return fromFeed
+    val m = state.snapshot?.allMarkets?.firstOrNull { it.aiYesPercent != null } ?: return null
+    val up = m.aiYesPercent ?: return null
+    return LiveCall(
+        ticker = m.ticker,
+        series = m.ticker.substringBefore('-'),
+        upPct = up,
+        downPct = m.aiNoPercent ?: (100.0 - up),
+        direction = LiveCall.directionFromUp(up),
+        marketYesPct = m.yesProbabilityPercent ?: up,
+        edgePp = m.edgePp ?: 0.0
+    )
 }
 
 @Composable

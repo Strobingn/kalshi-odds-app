@@ -251,6 +251,22 @@ class CrashHardenTest {
     }
 
     @Test
+    fun overlayThrottleIsLatestWinsNotDebounceReset() {
+        var now = 1_000L
+        val t = com.dirk.kalshiodds.signal.engine.OverlayThrottle(80L) { now }
+        assertEquals(0L, t.onEvent())
+        t.markApplied()
+        now = 1_020L
+        val wait = t.onEvent()
+        assertTrue(wait in 1L..80L)
+        now = 1_020L + wait
+        assertEquals(0L, t.onEvent())
+        t.markApplied()
+        now = 1_200L
+        assertEquals(0L, t.onEvent())
+    }
+
+    @Test
     fun bookScoreGateThrottlesSameTicker() {
         val last = mutableMapOf<String, Long>()
         assertTrue(BookScoreGate.shouldPublish("T", 1_000L, last, minIntervalMs = 400L))

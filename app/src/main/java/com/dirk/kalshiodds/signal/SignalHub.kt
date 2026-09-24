@@ -16,6 +16,8 @@ import com.dirk.kalshiodds.signal.engine.LatestWinsMailbox
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
 import java.util.concurrent.atomic.AtomicBoolean
 import com.dirk.kalshiodds.signal.feedback.Calibrator
+import com.dirk.kalshiodds.signal.model.LiveCall
+import com.dirk.kalshiodds.signal.model.LiveQuote
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
@@ -78,6 +80,12 @@ class SignalHub(
     private val _scores = MutableStateFlow<Map<String, ScoringEngine.Score>>(emptyMap())
     val scores: StateFlow<Map<String, ScoringEngine.Score>> = _scores.asStateFlow()
 
+    private val _liveCalls = MutableStateFlow<Map<String, LiveCall>>(emptyMap())
+    val liveCalls: StateFlow<Map<String, LiveCall>> = _liveCalls.asStateFlow()
+
+    private val _liveQuotes = MutableStateFlow<Map<String, LiveQuote>>(emptyMap())
+    val liveQuotes: StateFlow<Map<String, LiveQuote>> = _liveQuotes.asStateFlow()
+
     fun latestScores(): Map<String, ScoringEngine.Score> = _scores.value
 
     fun applyCalibration(state: Calibrator.State) {
@@ -111,6 +119,8 @@ class SignalHub(
         if (tickers.isNotEmpty()) {
             runCatching { scoring.book.pruneTo(tickers) }
             _scores.update { cur -> cur.filterKeys { it in tickers } }
+            _liveCalls.update { cur -> cur.filterKeys { it in tickers } }
+            _liveQuotes.update { cur -> cur.filterKeys { it in tickers } }
         }
     }
 
@@ -146,6 +156,7 @@ class SignalHub(
     }
 
     fun ingestTick(tick: MarketTick) {
+        publishQuote(tick)
         if (tickMailbox.offer(tick.ticker, tick)) {
             tickScope.launch { drainTicks() }
         }
@@ -161,6 +172,7 @@ class SignalHub(
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         if (!settings.isWatchedTicker(ticker)) return
         runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
+        scoring.book.tickFromBook(ticker, receiveElapsedNanos)?.let { publishQuote(it) }
         requestBookScore(ticker, receiveElapsedNanos)
     }
 
@@ -177,6 +189,7 @@ class SignalHub(
         // Apply on the WS thread under TickBook's lock — cheap. Scoring is
         // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
         runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }
+        scoring.book.tickFromBook(ticker, receiveElapsedNanos)?.let { publishQuote(it) }
         requestBookScore(ticker, receiveElapsedNanos)
     }
 
@@ -231,6 +244,7 @@ class SignalHub(
         }
         if (scored != null) {
             _scores.update { it + (tick.ticker to scored) }
+            publishLiveCall(tick, scored)
             persistScore(tick, scored)
         }
         val alert = if (notify && scored != null) {
@@ -252,11 +266,37 @@ class SignalHub(
 
     private suspend fun publishBookScore(ticker: String, receiveElapsedNanos: Long) {
         val now = System.currentTimeMillis()
-        if (!BookScoreGate.shouldPublish(ticker, now, lastBookPublishMs)) return
+        val heavy = settings.heavyMlEnabled &&
+            !com.dirk.kalshiodds.signal.ml.HeavyMlGuard.sessionDisabled
+        val interval = BookScoreGate.intervalMs(heavy)
+        if (!BookScoreGate.shouldPublish(ticker, now, lastBookPublishMs, interval)) return
         val tick = scoring.book.tickFromBook(ticker, receiveElapsedNanos) ?: return
         val scored = runCatching { scoring.score(tick, settings) }.getOrNull() ?: return
         _scores.update { it + (ticker to scored) }
+        publishLiveCall(tick, scored)
         persistScore(tick, scored)
+    }
+
+    private fun publishQuote(tick: MarketTick) {
+        val quote = LiveQuote.fromTick(tick) ?: return
+        _liveQuotes.update { it + (tick.ticker to quote) }
+        _liveCalls.update { cur ->
+            val prev = cur[tick.ticker] ?: return@update cur
+            cur + (tick.ticker to prev.copy(
+                marketYesPct = quote.marketYesPct,
+                edgePp = prev.upPct - quote.marketYesPct,
+                updatedAtMs = quote.updatedAtMs,
+                source = tick.source
+            ))
+        }
+    }
+
+    private fun publishLiveCall(tick: MarketTick, scored: ScoringEngine.Score) {
+        val call = LiveCall.fromScore(tick.ticker, tick.series, scored, tick.source)
+        _liveCalls.update { it + (tick.ticker to call) }
+        LiveQuote.fromTick(tick)?.let { q ->
+            _liveQuotes.update { it + (tick.ticker to q) }
+        }
     }
 
     private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {

@@ -35,10 +35,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.model.LiveCall
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
+import com.dirk.kalshiodds.ui.theme.AccentRed
 import com.dirk.kalshiodds.ui.theme.Border
 import com.dirk.kalshiodds.ui.theme.Surface
 import com.dirk.kalshiodds.ui.theme.TextSecondary
@@ -47,7 +49,12 @@ import kotlin.math.abs
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Boolean = false) {
+fun MarketCard(
+    market: MarketUiModel,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+    liveCall: LiveCall? = null
+) {
     val alertBorder = if (market.edgeAlert) AccentGreen else Border
     Card(
         modifier = modifier
@@ -149,42 +156,37 @@ fun MarketCard(market: MarketUiModel, modifier: Modifier = Modifier, compact: Bo
             }
 
             Spacer(Modifier.height(10.dp))
+            val upPct = liveCall?.upPct ?: market.aiYesPercent
+            val downPct = liveCall?.downPct ?: market.aiNoPercent
+            val dir = liveCall?.direction ?: upPct?.let { LiveCall.directionFromUp(it) }
+            val upColor = if (dir == LiveCall.UP) AccentGreen else TextSecondary
+            val downColor = if (dir == LiveCall.DOWN) AccentRed else TextSecondary
             Text(
-                text = "DIP HUNTER AI",
-                style = MaterialTheme.typography.labelMedium,
-                color = AccentBlue,
-                fontWeight = FontWeight.Bold
+                text = dir ?: "UP / DOWN",
+                fontSize = if (compact) 28.sp else 36.sp,
+                fontWeight = FontWeight.Black,
+                color = if (dir == LiveCall.DOWN) AccentRed else AccentGreen,
+                lineHeight = if (compact) 30.sp else 40.sp
             )
-            market.aiNote?.let {
-                Text(
-                    text = it + market.aiConfidence?.let { c ->
-                        String.format(Locale.US, " · conf %.0f%%", c * 100)
-                    }.orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary,
-                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
-                )
-            }
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 OddsColumn(
-                    label = if (market.calibrated) "FV YES" else "AI YES",
-                    percent = market.aiYesPercent,
+                    label = "UP",
+                    percent = upPct,
                     bid = null,
                     ask = null,
-                    accent = AccentGreen,
+                    accent = upColor,
                     modifier = Modifier.weight(1f),
                     big = true
                 )
                 OddsColumn(
-                    label = if (market.calibrated) "FV NO" else "AI NO",
-                    percent = market.aiNoPercent,
+                    label = "DOWN",
+                    percent = downPct,
                     bid = null,
                     ask = null,
-                    accent = AccentOrange,
+                    accent = downColor,
                     modifier = Modifier.weight(1f),
                     endAligned = true,
                     big = true

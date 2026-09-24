@@ -6,6 +6,11 @@ package com.dirk.kalshiodds.signal.engine
  */
 object BookScoreGate {
     const val MIN_INTERVAL_MS = 400L
+    const val LIGHT_INTERVAL_MS = 80L
+    const val HEAVY_INTERVAL_MS = 400L
+
+    fun intervalMs(heavyEnabled: Boolean): Long =
+        if (heavyEnabled) HEAVY_INTERVAL_MS else LIGHT_INTERVAL_MS
 
     fun shouldPublish(
         ticker: String,
