@@ -18,9 +18,21 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.3**
+Package: `com.dirk.kalshiodds` · version **0.3.5**
 
-**0.3.3 fixes two live 0.3.2 bugs:** (1) light-mode / Extended AI `ConcurrentModificationException` from iterating a live order-book TreeMap (and unsynchronized flicker / flow maps) while WS deltas mutated them — fail-soft snapshots + thread-safe structures; OverlayThrottle and the UP/DOWN hero stay. (2) inverted NO/DOWN recommendations when spot was hundreds of dollars **above** the 15m target and climbing — `delta = fair − mid` was a fade-the-expensive-YES rule that ignored `sign(spot − strike)`. Direction now locks to YES=UP / NO=DOWN for Kalshi crypto 15m “price up?” markets. **0.3.2** added latest-wins overlay throttle + live UP/DOWN hero. **0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+**0.3.5** retires the Kalshi **v1 create-order fallback** that produced HTTP 410 `deprecated_v1_order_endpoint` on Live Approve, and adds a visible **paper book** ($100 start / $5 AI fills) on the home screen. **0.3.3 fixes two live 0.3.2 bugs:** (1) light-mode / Extended AI `ConcurrentModificationException` from iterating a live order-book TreeMap (and unsynchronized flicker / flow maps) while WS deltas mutated them — fail-soft snapshots + thread-safe structures; OverlayThrottle and the UP/DOWN hero stay. (2) inverted NO/DOWN recommendations when spot was hundreds of dollars **above** the 15m target and climbing — `delta = fair − mid` was a fade-the-expensive-YES rule that ignored `sign(spot − strike)`. Direction now locks to YES=UP / NO=DOWN for Kalshi crypto 15m “price up?” markets. **0.3.2** added latest-wins overlay throttle + live UP/DOWN hero. **0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+
+## V2 Live Approve + paper book (v0.3.5)
+
+**Bug (user screenshot, 0.3.4):** tapping Approve on a hunter ticket (`KXBTC15M-26SEP241445-45` YES @ 1¢) showed
+
+`HTTP 410 — {"error":{"code":"deprecated_v1_order_endpoint","message":"Please switch to the V2 endpoints",…}}`
+
+**Cause:** `KalshiTradeClient.createLimit` posted V2 `POST /portfolio/events/orders` first, then on HTTP 404 fell back to legacy **`POST /portfolio/orders`**. Kalshi retired that v1 write (changelog: returns “Please switch to the V2 endpoints”). The 410 body in the screenshot is that fallback — not a successful V2 ack.
+
+**Fix:** Live Approve is **V2 only**. Create `POST /trade-api/v2/portfolio/events/orders` with documented fields (`ticker`, `side` = `bid`/`ask`, `count`, `price`, `time_in_force`, `self_trade_prevention_type`, `client_order_id`). Cancel `DELETE /trade-api/v2/portfolio/events/orders/{order_id}`. Primary host `external-api.kalshi.com`; elections host is V2 fallback only. **`/portfolio/orders` is never called.** 410/404 surface a readable error; the pending card stays so you can retry. Still approve-gated — no unsupervised auto-bets. Auth (Key ID + PEM signing) is unchanged (`timestamp + METHOD + /trade-api/v2/portfolio/events/orders`).
+
+**Paper trading:** 0.3.4 only had an advisory “bankroll” for suggested size — no paper ledger, so AI/LiveCall never recorded simulated fills. Home now shows a **PAPER BOOK** card (start/reset **$100**, **$5** per AI hunter / LiveCall fill). Paper never hits the Kalshi order API. **Paper $5** vs **Live Approve** are labeled separately.
 
 ## Light-mode CME + direction lock (v0.3.3)
 
@@ -127,7 +139,7 @@ Human **Approve** is required for **that** ticket before any order is sent.
    - At the $5 default that means a conservative limit **≤ $0.05** (5¢) **and** enough visible size at/under that price. If the ask is too high or the book is too thin, no ticket.
 3. **Quality gates (default ON).** Skip filter, not muted, and alerts not paused by streak/drawdown. Settings can disable these for tickets only.
 4. **Limit only.** GTC limit at the conservative ask. Never a market order. Ticket shows side, ticker, size, estimated fill, max payout, net EV when available.
-5. **Auth.** Uses the Key ID + PEM already in Settings (`EncryptedSharedPreferences`). PEM is never logged. Soft-fail with a clear error. Create: `POST /trade-api/v2/portfolio/events/orders`. Cancel: `DELETE /trade-api/v2/portfolio/events/orders/{order_id}`.
+5. **Auth.** Uses the Key ID + PEM already in Settings (`EncryptedSharedPreferences`). PEM is never logged. Soft-fail with a clear error. Create: `POST /trade-api/v2/portfolio/events/orders` (V2 only — never `/portfolio/orders`). Cancel: `DELETE /trade-api/v2/portfolio/events/orders/{order_id}`.
 
 ## Decision support (v0.2.1)
 
@@ -226,10 +238,11 @@ adb install -r app/build/outputs/apk/debug/DipHunter-debug.apk
 
 ## API notes
 
-- REST base: `https://api.elections.kalshi.com/trade-api/v2`
+- Public REST base: `https://api.elections.kalshi.com/trade-api/v2`
+- Authenticated trade writes: `https://external-api.kalshi.com/trade-api/v2` (elections as V2-only fallback)
 - WS: `wss://external-api-ws.kalshi.com/trade-api/ws/v2` (elections host as alternate)
 - Public REST (no auth): `GET /markets?series_ticker=KXBTC15M|KXETH15M|KXSOL15M&status=open`
-- Authenticated create (after Approve): `POST /portfolio/events/orders` (V2 bid/ask, GTC limit). Cancel: `DELETE /portfolio/events/orders/{order_id}`.
+- Authenticated create (after Live Approve): `POST /portfolio/events/orders` (V2 bid/ask, GTC limit). Cancel: `DELETE /portfolio/events/orders/{order_id}`. Never `POST /portfolio/orders`.
 - Example tickers: `KXBTC15M-26SEP231600-00`, `KXETH15M-26SEP231645-45`, `KXSOL15M-26SEP231645-45`
 
 ## Project layout
@@ -249,7 +262,8 @@ app/src/main/java/com/dirk/kalshiodds/
     ml/              Sequence, TCNN, TinyLSTM, GBM, ensemble, uncertainty, fine-tune, policy eval
     feedback/        Calibrator, ScorecardMetrics, OnlineAdapter, Allowlist, Guardrails
     sizing/          PositionSizer, NetExpectedValue (advisory)
-    trade/           PayoutGate, TicketBuilder, TicketSession (approve-gated)
+    trade/           PayoutGate, TicketBuilder, TicketSession (Live Approve)
+    paper/           PaperBook ($100 / $5 AI fills, never Kalshi)
     external/        Public Binance/Coinbase spot · vol · funding
     checklist/       Pre-trade checklist + copy text
     notify/          SignalNotifier (HIGH alerts + ongoing FGS)
@@ -276,6 +290,7 @@ ml/train_heavy.py        export student JSON / optional TFLite
 - Bankroll, Kelly / fixed-fraction, fee rate, net-EV ranking
 - Auto-mute floor, streak / drawdown guard, resume
 - Ticket stake ($5 default, $25 hard cap), quality gates for tickets
+- Paper trading toggle (home-screen $100 book / $5 AI fills; default on)
 - Heavy ML, sequence, GBM, uncertainty cap, continual fine-tune, policy-eval stake
 - Extended AI master + regime / anomaly / survival / RL / news / flow / MM / conformal / meta / path-sim
 - Kalshi API Key ID + private key PEM (secure storage; WS + Approve only)

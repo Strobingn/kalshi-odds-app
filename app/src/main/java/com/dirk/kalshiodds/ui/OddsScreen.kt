@@ -46,6 +46,7 @@ import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.OddsSparkline
+import com.dirk.kalshiodds.ui.components.PaperBookCard
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.theme.AccentBlue
@@ -140,12 +141,21 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                         )
                     }
                     item {
+                        PaperBookCard(
+                            paper = state.paper,
+                            enabled = state.settings.paperTradingEnabled,
+                            onToggle = viewModel::setPaperTrading,
+                            onReset = viewModel::resetPaperBook
+                        )
+                    }
+                    item {
                         TradeTicketsSection(
                             tickets = state.tickets,
                             credentialsConfigured = state.settings.credentialsConfigured,
                             onReview = { viewModel.openTicketApprove(it) },
                             onDismiss = { viewModel.dismissTicket(it) },
                             onApprove = { viewModel.approveTicket(it) },
+                            onPaper = { viewModel.paperTicket(it) },
                             onCancelApprove = { viewModel.cancelTicketApprove() },
                             onCancelOrder = { viewModel.cancelWorkingOrder(it) }
                         )
@@ -624,7 +634,7 @@ private fun MetaHeader(
             )
         }
         Text(
-            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · Buy/Approve on this screen · no auto-fire.",
+            text = "CRYPTO ONLY · BTC/ETH/SOL 15m · Paper vs Live Approve · no auto-fire.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary,
             modifier = Modifier.padding(top = 6.dp)

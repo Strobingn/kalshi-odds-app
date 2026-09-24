@@ -43,6 +43,7 @@ fun TradeTicketsSection(
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
+    onPaper: (String) -> Unit,
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit
 ) {
@@ -53,18 +54,18 @@ fun TradeTicketsSection(
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = "Buy / Approve",
+            text = "Live Approve",
             style = MaterialTheme.typography.headlineMedium,
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Tap Buy on a market to open a limit ticket. A hunter card appears automatically when a $1 stake can settle ≥$25 (ask ≤~4¢). The $5 → ≥$100 path still works. Nothing is sent until you tap Approve. Cancel leaves no order.",
+            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper \$5 (above, or on the card) is a simulated fill on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary
         )
         if (!credentialsConfigured) {
             Text(
-                text = "Add Kalshi API Key ID + PEM in Settings to Approve. Keys stay on device and are never logged.",
+                text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
                 style = MaterialTheme.typography.labelMedium,
                 color = AccentOrange
             )
@@ -109,7 +110,7 @@ fun TradeTicketsSection(
             WorkingOrderCard(order, onCancelOrder)
         }
         proposals.forEach { ticket ->
-            ProposedTicketCard(ticket, credentialsConfigured, onReview, onDismiss)
+            ProposedTicketCard(ticket, credentialsConfigured, onReview, onDismiss, onPaper)
         }
     }
 
@@ -129,7 +130,8 @@ private fun ProposedTicketCard(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
     onReview: (String) -> Unit,
-    onDismiss: (String) -> Unit
+    onDismiss: (String) -> Unit,
+    onPaper: (String) -> Unit
 ) {
     val hunter = ticket.kind == TicketKind.HUNTER
     val border = if (hunter) AccentOrange else AccentBlue
@@ -197,19 +199,26 @@ private fun ProposedTicketCard(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                OutlinedButton(
+                    onClick = { onPaper(ticket.id) },
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) {
+                    Text("Paper $5")
+                }
                 Button(
                     onClick = { onReview(ticket.id) },
                     enabled = credentialsConfigured,
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text(if (credentialsConfigured) "Approve…" else "Needs API key")
+                    Text(if (credentialsConfigured) "Live Approve…" else "Needs API key")
                 }
-                OutlinedButton(
-                    onClick = { onDismiss(ticket.id) },
-                    modifier = Modifier.weight(1f).height(48.dp)
-                ) {
-                    Text("Dismiss")
-                }
+            }
+            OutlinedButton(
+                onClick = { onDismiss(ticket.id) },
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
+            ) {
+                Text("Dismiss")
             }
         }
     }
@@ -259,11 +268,12 @@ private fun ApproveTicketDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Approve this ticket?") },
+        title = { Text("Live Approve this ticket?") },
         text = {
             Column {
                 Text(
-                    "Places a GTC limit — not a market order. This tap is the only way an order is sent. " +
+                    "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
+                        "and not a paper fill. This tap is the only way a live order is sent. " +
                         "Dismiss / Back leaves no hanging order. Not financial advice. High variance.",
                     style = MaterialTheme.typography.bodyMedium
                 )
@@ -300,7 +310,7 @@ private fun ApproveTicketDialog(
                 enabled = credentialsConfigured,
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
                 modifier = Modifier.height(48.dp)
-            ) { Text("Approve") }
+            ) { Text("Live Approve") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

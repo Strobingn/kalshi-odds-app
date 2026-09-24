@@ -32,8 +32,14 @@ object SignalConstants {
 
     // --- v0.2.1 decision support (advisory only) ---
 
-    /** Default paper bankroll used only for suggested size. */
+    /** Default advisory bankroll used only for suggested size (not the paper book). */
     const val DEFAULT_BANKROLL_USD = 1_000.0
+
+    /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
+    const val PAPER_START_USD = 100.0
+    const val PAPER_STAKE_USD = 5.0
+    const val DEFAULT_PAPER_TRADING = true
+    const val PAPER_LEDGER_MAX = 40
 
     /**
      * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,

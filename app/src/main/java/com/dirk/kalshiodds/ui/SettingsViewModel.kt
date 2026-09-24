@@ -127,6 +127,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setDrawdownUsd(v: Double) = viewModelScope.launch { prefs.updateDrawdownUsd(v) }
     fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
     fun setTicketsEnabled(v: Boolean) = viewModelScope.launch { prefs.updateTicketsEnabled(v) }
+    fun setPaperTrading(v: Boolean) = viewModelScope.launch { prefs.updatePaperTrading(v) }
+    fun resetPaperBook() {
+        container.paper.book.reset()
+        _state.update { it.copy(credentialMessage = "Paper book reset to $100 — no Kalshi orders") }
+    }
     fun setTicketRespectGates(v: Boolean) = viewModelScope.launch { prefs.updateTicketRespectGates(v) }
     fun setLightMode(on: Boolean) = viewModelScope.launch {
         if (on) {

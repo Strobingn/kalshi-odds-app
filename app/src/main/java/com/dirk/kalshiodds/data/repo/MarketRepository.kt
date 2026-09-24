@@ -63,7 +63,14 @@ class MarketRepository(
     private val cache: MarketCache = MarketCache(context.applicationContext),
     private val model: DipHunterModel = DipHunterModel(context.applicationContext),
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
-    private val scorer: SettlementScorer = SettlementScorer(api, logStore),
+    extraOpenTickers: () -> Set<String> = { emptySet() },
+    onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
+    private val scorer: SettlementScorer = SettlementScorer(
+        api,
+        logStore,
+        extraOpenTickers,
+        onMarketSettled
+    ),
     private val onCalibration: ((Calibrator.State) -> Unit)? = null,
     private val onAfterScore: (suspend () -> Unit)? = null
 ) {
