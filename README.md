@@ -18,7 +18,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.1**
+Package: `com.dirk.kalshiodds` · version **0.3.2**
 
 **0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
 
@@ -39,7 +39,7 @@ Confirmed on a Galaxy S24 Ultra (`SM-S928U`) at 2026-09-23 20:11:27.432-0400: `j
 2. Sequence / news / ensemble allocations were unbounded. Caps now: 12 tickers × 80 raw frames, reused CNN/LSTM scratch, RSS ≤48KB / 12 titles, 16 path-sim paths, no stored backbone/tabular, no 3× MC-dropout. Heap ≥80% skips Heavy ML for that tick; ≥90% or any `OutOfMemoryError` latches light mode and persists via SharedPreferences (not DataStore).
 3. **`HeavyMlRuntime` was not synchronized.** WS ticks and REST refresh shared `heads` / `stack` / a growing `lastActivation` map → `ConcurrentModificationException` and native-adjacent corruption.
 4. A single infer/OOM/TFLite failure could escape. Infer is now fail-soft to the **0.2.x MLP blend**. One OOM persists Heavy ML off across process restarts; other failures trip after 3 (or a recent crash breadcrumb mentioning OOM/TFLite).
-5. Compose overlaid every score immediately — book floods hit the main thread. Overlay is debounced 250ms.
+5. Compose overlaid every score immediately — book floods hit the main thread. Overlay is a 250ms latest-wins throttle (apply now if the interval elapsed, else one trailing apply). Debounce reset on every WS delta and never fired.
 
 `largeHeap` was **not** added — the 256MB limit is cut by bounding allocations, not by asking for a bigger heap.
 

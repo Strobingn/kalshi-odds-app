@@ -36,8 +36,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
@@ -49,6 +51,7 @@ import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
 import com.dirk.kalshiodds.ui.theme.AccentRed
 import com.dirk.kalshiodds.ui.theme.Bg
+import com.dirk.kalshiodds.ui.theme.SurfaceAlt
 import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.time.Instant
 import java.time.ZoneId
@@ -127,6 +130,9 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item {
+                        LiveUpDownHero(market = featuredLiveMarket(allMarkets))
+                    }
                     item {
                         LiveSignalsCard(
                             enabled = state.settings.liveSignalsEnabled,
@@ -323,6 +329,69 @@ private fun LiveSignalsCard(
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
+    }
+}
+
+@Composable
+private fun LiveUpDownHero(market: MarketUiModel?) {
+    val up = market?.aiYesPercent ?: market?.yesProbabilityPercent
+    val down = market?.aiNoPercent ?: market?.noProbabilityPercent ?: up?.let { 100.0 - it }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceAlt, RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Text(
+            text = market?.title?.takeIf { it.isNotBlank() } ?: "Live scan",
+            style = MaterialTheme.typography.labelMedium,
+            color = TextSecondary
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            HeroPct(label = "UP", percent = up, color = AccentGreen)
+            HeroPct(label = "DOWN", percent = down, color = AccentRed)
+        }
+        Text(
+            text = market?.ticker ?: "Waiting for live quote",
+            style = MaterialTheme.typography.labelMedium,
+            color = TextSecondary,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun HeroPct(label: String, percent: Double?, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.titleMedium,
+            color = color,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            text = percent?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—",
+            fontSize = 56.sp,
+            fontWeight = FontWeight.Bold,
+            color = color,
+            lineHeight = 60.sp
+        )
+    }
+}
+
+internal fun featuredLiveMarket(markets: List<MarketUiModel>): MarketUiModel? {
+    if (markets.isEmpty()) return null
+    val btc = markets.filter { it.seriesLabel.equals("Bitcoin", ignoreCase = true) }
+    val pool = btc.ifEmpty { markets }
+    return pool.minByOrNull { market ->
+        abs((market.yesProbabilityPercent ?: market.aiYesPercent ?: 50.0) - 50.0)
     }
 }
 

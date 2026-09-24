@@ -9,6 +9,8 @@ import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.feedback.Calibrator
+import com.dirk.kalshiodds.signal.engine.OverlayThrottle
+import com.dirk.kalshiodds.signal.engine.ScoringEngine
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -67,6 +69,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var pollJob: Job? = null
     private var ticketRebuildJob: Job? = null
     private var scoreOverlayJob: Job? = null
+    private val overlayThrottle = OverlayThrottle<Map<String, ScoringEngine.Score>>(
+        intervalMs = SCORE_OVERLAY_THROTTLE_MS
+    )
     private var currentIntervalMs: Long = BASE_POLL_MS
 
     init {
@@ -134,16 +139,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 hub.scores.collect { scores ->
-                    scoreOverlayJob?.cancel()
-                    scoreOverlayJob = viewModelScope.launch {
-                        delay(SCORE_OVERLAY_DEBOUNCE_MS)
-                        runCatching {
-                            _state.update { s ->
-                                val snap = s.snapshot ?: return@update s
-                                s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
-                            }
-                            scheduleRebuildTickets()
+                    when (overlayThrottle.onEvent(scores)) {
+                        OverlayThrottle.Decision.APPLY_NOW -> {
+                            scoreOverlayJob?.cancel()
+                            scoreOverlayJob = null
+                            applyScoreOverlay(scores)
                         }
+                        OverlayThrottle.Decision.SCHEDULE_TRAILING -> {
+                            val waitMs = overlayThrottle.remainingMs()
+                            scoreOverlayJob?.cancel()
+                            scoreOverlayJob = viewModelScope.launch {
+                                delay(waitMs)
+                                overlayThrottle.takeTrailing()?.let { applyScoreOverlay(it) }
+                            }
+                        }
+                        OverlayThrottle.Decision.HOLD -> Unit
                     }
                 }
             }
@@ -309,6 +319,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { ticketSession.cancelWorking(orderId) }
     }
 
+    private fun applyScoreOverlay(scores: Map<String, ScoringEngine.Score>) {
+        runCatching {
+            _state.update { s ->
+                val snap = s.snapshot ?: return@update s
+                s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+            }
+            scheduleRebuildTickets()
+        }
+    }
+
     private fun scheduleRebuildTickets(immediate: Boolean = false) {
         ticketRebuildJob?.cancel()
         ticketRebuildJob = viewModelScope.launch {
@@ -359,6 +379,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
         const val WS_METADATA_POLL_MS = 15_000L
-        const val SCORE_OVERLAY_DEBOUNCE_MS = 250L
+        const val SCORE_OVERLAY_THROTTLE_MS = 250L
     }
 }
