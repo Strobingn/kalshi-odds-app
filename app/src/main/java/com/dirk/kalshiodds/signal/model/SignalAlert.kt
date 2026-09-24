@@ -17,10 +17,11 @@ data class SignalAlert(
     val regime: String? = null,
     val tteRegime: String? = null,
     val confidence: Double? = null,
-    val passedFilter: Boolean = true
+    val passedFilter: Boolean = true,
+    val predictedSide: String = "YES"
 ) {
     val stance: String
-        get() = if (deltaPp >= 0) "Lean YES vs market" else "Lean NO vs market"
+        get() = if (predictedSide.equals("NO", ignoreCase = true)) "Lean DOWN / NO" else "Lean UP / YES"
 
     val latencyToNotifyMs: Double?
         get() = notifyElapsedNanos?.let { (it - receiveElapsedNanos) / 1_000_000.0 }

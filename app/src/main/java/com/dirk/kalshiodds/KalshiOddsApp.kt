@@ -108,7 +108,8 @@ class KalshiOddsApp : Application() {
                 reason = r.reason,
                 createdAtMs = r.createdAtMs,
                 receiveElapsedNanos = 0L,
-                regime = r.regime
+                regime = r.regime,
+                predictedSide = r.side.ifBlank { if (r.edgePp >= 0) "YES" else "NO" }
             )
         }
         container.hub.restoreAlerts(alerts)

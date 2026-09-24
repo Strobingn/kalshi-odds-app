@@ -24,7 +24,7 @@ class ExtendedAiRuntime(
     @Volatile
     var lastSettledAtMs: Long = 0L
 
-    private val flicker = linkedMapOf<String, Flicker>()
+    private val flicker = java.util.concurrent.ConcurrentHashMap<String, Flicker>()
 
     data class Input(
         val ticker: String,
@@ -94,17 +94,23 @@ class ExtendedAiRuntime(
             )
         }
         flicker[ticker] = window
-        if (flicker.size > 64) flicker.remove(flicker.keys.first())
+        if (flicker.size > 64) {
+            val oldest = flicker.keys.firstOrNull()
+            if (oldest != null) flicker.remove(oldest)
+        }
         val dt = ((nowMs - window.windowStartMs).coerceAtLeast(1L)) / 1000.0
         return window.flips / dt
     }
 
+    /**
+     * Synchronized: REST annotate and WS ticks share one runtime. The flicker
+     * map and flow / MM voters were a ConcurrentModificationException path
+     * (device banner `Light mode: ConcurrentModificationException: extended`).
+     */
+    @Synchronized
     fun evaluate(input: Input, settings: SignalSettings, stack: EnsembleStack.Weights): Output {
-        return try {
+        return SafeMl.run("extended", fallback = { idle("extended AI failed — 0.2.x blend") }) {
             evaluateUnchecked(input, settings, stack)
-        } catch (t: Throwable) {
-            HeavyMlGuard.noteFailure(t, "extended")
-            idle("extended AI failed — 0.2.x blend")
         }
     }
 
@@ -236,6 +242,7 @@ class ExtendedAiRuntime(
         )
     }
 
+    @Synchronized
     fun learnFromSettlements(
         samples: List<ReplaySample>,
         enabled: Boolean

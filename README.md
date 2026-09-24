@@ -18,9 +18,14 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.2**
+Package: `com.dirk.kalshiodds` · version **0.3.3**
 
-**0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+**0.3.3 fixes two live 0.3.2 bugs:** (1) light-mode / Extended AI `ConcurrentModificationException` from iterating a live order-book TreeMap (and unsynchronized flicker / flow maps) while WS deltas mutated them — fail-soft snapshots + thread-safe structures; OverlayThrottle and the UP/DOWN hero stay. (2) inverted NO/DOWN recommendations when spot was hundreds of dollars **above** the 15m target and climbing — `delta = fair − mid` was a fade-the-expensive-YES rule that ignored `sign(spot − strike)`. Direction now locks to YES=UP / NO=DOWN for Kalshi crypto 15m “price up?” markets. **0.3.2** added latest-wins overlay throttle + live UP/DOWN hero. **0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
+
+## Light-mode CME + direction lock (v0.3.3)
+
+- **CME:** Scoring no longer holds a live `LocalOrderBook`. Imbalance / depth / pulse are copied under `TickBook`’s lock (`BookView`). `LocalOrderBook` mutators and iterators are synchronized. `ExtendedAiRuntime.evaluate` is synchronized and wrapped in `SafeMl` (`label=extended`); flicker uses `ConcurrentHashMap`; rival-flow centroids are synchronized. The banner `Light mode: ConcurrentModificationException: extended` was this race (exception message is null, so the guard used the `"extended"` label).
+- **Direction:** For KXBTC/ETH/SOL 15m “price up?” contracts, YES=UP and NO=DOWN. If spot is above the Kalshi `floor_strike` (or parsed target) and rising, the app leans **UP / YES** even when market YES is already expensive. Displayed UP/DOWN percentages are clamped to the same side of 50% as that recommendation.
 
 ## Persistence + crash harden (v0.3.1)
 
@@ -206,7 +211,7 @@ Event-driven fair-value alerts on crypto ticks.
 
 On-device YES/NO via the 8-feature **TensorFlow Lite** MLP (`Input(8) → Dense(32) → Dense(16) → Dense(2, softmax)` = `[P(NO), P(YES)]`) **plus** the 0.3.0 sequence/GBM ensemble. Features: see `ml/FEATURES.md`. The historical trainer still includes settled WTI rows; **runtime inference and the live watchlist are crypto-only**.
 
-**Edge hunting:** Dip Hunter edge (AI−market pp), ranked opportunities, stance text (Lean YES/NO — no orders).
+**Edge hunting:** Dip Hunter edge (AI−market pp), ranked opportunities, stance text (Lean UP/YES or DOWN/NO — no orders). When spot vs strike is known, the recommended side matches that delta; a fade vs a rich YES mid cannot invert it.
 
 ## Open in Android Studio
 

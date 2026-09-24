@@ -134,7 +134,7 @@ class SignalHub(
         val markets = snapshot.allMarkets.filter { CryptoMarkets.isCryptoTicker(it.ticker) }
         setWatchTickers(markets.map { it.ticker }.toSet())
         for (m in markets) {
-            scoring.rememberMeta(m.ticker, m.closeTimeEpochMs, m.volume, m.openInterest)
+            scoring.rememberMeta(m.ticker, m.closeTimeEpochMs, m.volume, m.openInterest, m.floorStrike)
         }
         if (wsLive && _status.value.state == WsConnectionState.CONNECTED) return
         tickScope.launch {
@@ -339,7 +339,7 @@ class SignalHub(
                     alertId = complete.id,
                     ticker = complete.ticker,
                     series = complete.series,
-                    side = if (complete.deltaPp >= 0) "YES" else "NO",
+                    side = complete.predictedSide,
                     edgePp = complete.deltaPp,
                     fairPp = complete.fairValuePp,
                     marketPp = complete.marketMidPp,
