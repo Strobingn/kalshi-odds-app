@@ -45,6 +45,7 @@ class KalshiTradeClientTest {
         assertEquals("good_till_canceled", body.timeInForce)
         assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals("cid-1", body.clientOrderId)
+        assertFalse(body.reduceOnly)
         assertEquals(KalshiTradeClient.V2_CREATE_PATH, "/trade-api/v2/portfolio/events/orders")
         assertFalse(KalshiTradeClient.LEGACY_CREATE_PATH.contains("events"))
     }
@@ -143,6 +144,12 @@ class KalshiTradeClientTest {
             creates += body
             return create
         }
+
+        override suspend fun getPositions(
+            countFilter: String,
+            limit: Int,
+            cursor: String?
+        ) = Response.success(com.dirk.kalshiodds.data.dto.PositionsResponse())
 
         override suspend fun cancelOrderV2(
             orderId: String,

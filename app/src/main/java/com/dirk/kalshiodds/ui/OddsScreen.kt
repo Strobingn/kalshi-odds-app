@@ -48,6 +48,7 @@ import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.OddsSparkline
 import com.dirk.kalshiodds.ui.components.PaperBookCard
+import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.theme.AccentBlue
@@ -146,7 +147,15 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             paper = state.paper,
                             enabled = state.settings.paperTradingEnabled,
                             onToggle = viewModel::setPaperTrading,
-                            onReset = viewModel::resetPaperBook
+                            onReset = viewModel::resetPaperBook,
+                            onSell = { ticker, side -> viewModel.sellPosition(ticker, side) }
+                        )
+                    }
+                    item {
+                        PositionsCard(
+                            positions = state.positions,
+                            note = state.positionsNote,
+                            onSell = { ticker, side -> viewModel.sellPosition(ticker, side) }
                         )
                     }
                     item {
@@ -156,6 +165,7 @@ fun OddsScreen(viewModel: OddsViewModel, onOpenSettings: () -> Unit, onOpenScore
                             onReview = { viewModel.openTicketApprove(it) },
                             onDismiss = { viewModel.dismissTicket(it) },
                             onApprove = { viewModel.approveTicket(it) },
+                            onApproveSell = { id, count, price -> viewModel.approveSellTicket(id, count, price) },
                             onPaper = { viewModel.paperTicket(it) },
                             onCancelApprove = { viewModel.cancelTicketApprove() },
                             onCancelOrder = { viewModel.cancelWorkingOrder(it) }

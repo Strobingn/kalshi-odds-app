@@ -16,9 +16,12 @@ import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.trade.LivePosition
+import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import kotlin.math.max
@@ -53,6 +56,8 @@ data class OddsUiState(
     val mutedSummary: String? = null,
     val tickets: TicketUiState = TicketUiState(),
     val paper: PaperBookState = PaperBookState(),
+    val positions: List<LivePosition> = emptyList(),
+    val positionsNote: String? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null
 )
@@ -216,6 +221,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 mlGuardNote = HeavyMlGuard.lastReason?.let { r -> "Light mode: $r" }
             )
         }
+        refreshPositions()
     }
 
     private fun seedOddsHistory() {
@@ -314,6 +320,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         publishSupportState()
         scheduleRebuildTickets()
+        refreshPositions()
     }
 
     private suspend fun refreshExternal() {
@@ -386,6 +393,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun approveSellTicket(ticketId: String, count: Int, price: Double) {
+        viewModelScope.launch {
+            val settings = _state.value.settings
+            if (!settings.credentialsConfigured) {
+                ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
+                return@launch
+            }
+            ticketSession.revise(ticketId) { t ->
+                resizeSell(t, count, price)
+            }
+            val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
+            if (ticket != null && !ticket.canApprove) return@launch
+            ticketSession.approve(ticketId)
+        }
+    }
+
     fun cancelWorkingOrder(orderId: String) {
         viewModelScope.launch { ticketSession.cancelWorking(orderId) }
     }
@@ -405,8 +428,66 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun paperTicket(ticketId: String) {
         val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             ?: return
-        if (!ticket.canApprove) return
+        if (!ticket.canPaper) return
         paperBook.manualFill(ticket)
+    }
+
+    fun sellPosition(ticker: String, side: String) {
+        val s = _state.value
+        if (!s.settings.ticketsEnabled) {
+            ticketSession.failSoft("Turn on trade tickets in Settings to sell")
+            return
+        }
+        val now = System.currentTimeMillis()
+        val markets = s.snapshot?.allMarkets.orEmpty()
+        val livePos = s.positions.firstOrNull {
+            it.ticker.equals(ticker, true) && it.side.equals(side, true)
+        }
+        val paperFill = s.paper.fills.firstOrNull {
+            !it.settled && it.ticker.equals(ticker, true) && it.side.equals(side, true)
+        }
+        val held = livePos?.let { PositionParser.heldContracts(it) } ?: paperFill?.contracts ?: 0
+        if (held <= 0) {
+            ticketSession.failSoft("No open $side position on $ticker")
+            return
+        }
+        val market = markets.firstOrNull { it.ticker.equals(ticker, true) }
+            ?: livePos?.let {
+                MarketUiModel(
+                    ticker = ticker,
+                    title = it.title ?: ticker,
+                    subtitle = null,
+                    floorStrike = null,
+                    yesBid = if (side == "YES") it.bestBid else null,
+                    yesAsk = null,
+                    noBid = if (side == "NO") it.bestBid else null,
+                    noAsk = null,
+                    lastPrice = it.bestBid,
+                    yesProbabilityPercent = null,
+                    noProbabilityPercent = null,
+                    volume = null,
+                    volume24h = null,
+                    openInterest = null,
+                    liquidityDollars = null,
+                    closeTimeLocal = null,
+                    closeTimeEpochMs = it.closeTimeEpochMs,
+                    status = "active",
+                    seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticker).label
+                )
+            }
+        if (market == null) {
+            ticketSession.failSoft("Market closed")
+            return
+        }
+        val paperOnly = livePos == null
+        val ticket = TicketBuilder.proposeSell(
+            market = market,
+            side = side,
+            heldContracts = held,
+            ctx = ticketContext(s, now),
+            paperOnly = paperOnly
+        ) ?: return
+        ticketSession.addManual(ticket)
     }
 
     /**
@@ -479,7 +560,65 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             alertsPaused = s.alertsPaused,
             books = books,
             ticks = ticks,
+            positions = s.positions,
             nowMs = nowMs
+        )
+    }
+
+    private fun refreshPositions() {
+        viewModelScope.launch {
+            val settings = _state.value.settings
+            if (!settings.credentialsConfigured) {
+                decoratePositions(_state.value.positions)
+                return@launch
+            }
+            val rows = withContext(Dispatchers.IO) {
+                runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
+            }
+            val parsed = PositionParser.parseAll(rows)
+            decoratePositions(parsed)
+        }
+    }
+
+    private fun decoratePositions(raw: List<LivePosition>) {
+        val s = _state.value
+        val now = System.currentTimeMillis()
+        val markets = s.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
+        val ctx = ticketContext(s, now)
+        val decorated = raw.map { pos ->
+            val market = markets[pos.ticker]
+            val bid = market?.let { TicketBuilder.bestBid(it, pos.side, ctx) } ?: pos.bestBid
+            PositionParser.decorate(pos, market, bid)
+        }
+        _state.update {
+            it.copy(
+                positions = decorated,
+                positionsNote = when {
+                    !s.settings.credentialsConfigured ->
+                        "Add Kalshi API Key ID + PEM in Settings to load live positions."
+                    decorated.isEmpty() -> "No open Kalshi positions."
+                    else -> null
+                }
+            )
+        }
+    }
+
+    private fun resizeSell(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, count: Int, price: Double): com.dirk.kalshiodds.signal.trade.TradeTicket {
+        if (!ticket.isSell) return ticket
+        val held = ticket.heldContracts ?: ticket.contracts
+        val qty = count.coerceIn(1, held.coerceAtLeast(1))
+        val bid = KalshiPrice.usable(price) ?: ticket.limitPrice
+        val yesLimit = if (ticket.side == "YES") bid else (1.0 - bid)
+        val proceeds = qty * bid
+        return ticket.copy(
+            contracts = qty,
+            limitPrice = bid,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            stakeUsd = proceeds,
+            estimatedFillUsd = proceeds,
+            maxPayoutUsd = proceeds,
+            estimatedAvgFill = bid,
+            sizingNote = "$qty ct · sell ${ticket.side} @ ${String.format(java.util.Locale.US, "%.1f¢", bid * 100.0)} · reduce-only"
         )
     }
 

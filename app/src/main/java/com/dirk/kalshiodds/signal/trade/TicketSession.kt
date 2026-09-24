@@ -44,15 +44,18 @@ class TicketSession(
      */
     fun replaceProposals(tickets: List<TradeTicket>, liveTickers: Set<String>? = null) {
         _state.update { cur ->
-            val incomingManuals = tickets.filter { it.kind == TicketKind.MANUAL }
-            val incomingAuto = tickets.filterNot { it.kind == TicketKind.MANUAL }
+            val incomingManuals = tickets.filter { it.kind == TicketKind.MANUAL || it.kind == TicketKind.SELL }
+            val incomingAuto = tickets.filterNot { it.kind == TicketKind.MANUAL || it.kind == TicketKind.SELL }
             val preservedManuals = cur.proposals.filter { t ->
-                t.kind == TicketKind.MANUAL &&
+                (t.kind == TicketKind.MANUAL || t.kind == TicketKind.SELL) &&
                     incomingManuals.none { n -> ticketKey(n) == ticketKey(t) } &&
                     (liveTickers == null || t.ticker in liveTickers)
             }
             val manuals = incomingManuals + preservedManuals
-            val remapped = preserveIds(cur.proposals.filterNot { it.kind == TicketKind.MANUAL }, incomingAuto)
+            val remapped = preserveIds(
+                cur.proposals.filterNot { it.kind == TicketKind.MANUAL || it.kind == TicketKind.SELL },
+                incomingAuto
+            )
                 .filter { liveTickers == null || it.ticker in liveTickers }
             val merged = (manuals + remapped).distinctBy { ticketKey(it) }
             val cleanedError = cur.lastError?.takeUnless { stalePageError(it) }
@@ -69,7 +72,8 @@ class TicketSession(
                     val fresh = merged.first { it.id == liveAwaiting.id }
                     TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
                 }
-                liveAwaiting != null && liveAwaiting.kind == TicketKind.MANUAL -> {
+                liveAwaiting != null &&
+                    (liveAwaiting.kind == TicketKind.MANUAL || liveAwaiting.kind == TicketKind.SELL) -> {
                     val fresh = merged.firstOrNull { ticketKey(it) == ticketKey(liveAwaiting) } ?: liveAwaiting
                     TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
                 }
@@ -102,6 +106,31 @@ class TicketSession(
                 lastError = null
             )
         }
+    }
+
+    /**
+     * Update a proposed / awaiting ticket (sell count/price) without placing.
+     */
+    fun revise(ticketId: String, transform: (TradeTicket) -> TradeTicket): Boolean {
+        var changed = false
+        _state.update { cur ->
+            val found = cur.proposals.firstOrNull { it.id == ticketId } ?: return@update cur
+            val nextTicket = transform(found)
+            if (nextTicket == found) return@update cur
+            changed = true
+            val next = cur.proposals.map { if (it.id == ticketId) nextTicket else it }
+            val phase = when (val p = cur.phase) {
+                is TicketPhase.AwaitingApprove ->
+                    if (p.ticket.id == ticketId) {
+                        TicketPhase.AwaitingApprove(nextTicket, next.filterNot { it.id == ticketId })
+                    } else {
+                        p
+                    }
+                else -> p
+            }
+            cur.copy(proposals = next, phase = phase)
+        }
+        return changed
     }
 
     fun dismiss(ticketId: String) {

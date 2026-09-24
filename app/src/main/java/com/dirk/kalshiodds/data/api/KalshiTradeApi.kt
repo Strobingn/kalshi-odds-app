@@ -3,9 +3,11 @@ package com.dirk.kalshiodds.data.api
 import com.dirk.kalshiodds.data.dto.CancelOrderV2Response
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
+import com.dirk.kalshiodds.data.dto.PositionsResponse
 import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
+import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
 import retrofit2.http.Query
@@ -24,6 +26,13 @@ import retrofit2.http.Query
  * Signing is applied by [KalshiAuthInterceptor] — never log PEM.
  */
 interface KalshiTradeApi {
+
+    @GET("portfolio/positions")
+    suspend fun getPositions(
+        @Query("count_filter") countFilter: String = "position",
+        @Query("limit") limit: Int = 200,
+        @Query("cursor") cursor: String? = null
+    ): Response<PositionsResponse>
 
     @POST("portfolio/events/orders")
     suspend fun createOrderV2(@Body body: CreateOrderV2Request): Response<CreateOrderV2Response>

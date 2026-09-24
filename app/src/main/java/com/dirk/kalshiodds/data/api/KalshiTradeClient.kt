@@ -4,6 +4,7 @@ import android.util.Log
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.KalshiErrorEnvelope
+import com.dirk.kalshiodds.data.dto.MarketPositionDto
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import java.util.Locale
@@ -84,13 +85,26 @@ class KalshiTradeClient(
     private fun shouldRetryOtherHost(code: Int): Boolean =
         code == 404 || code == 410 || code >= 500
 
+    suspend fun listMarketPositions(): List<MarketPositionDto> {
+        ensureKeys()
+        return try {
+            val first = primary.getPositions(countFilter = "position", limit = 200)
+            val chosen = chooseHost(first) { fallback?.getPositions(countFilter = "position", limit = 200) }
+            if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
+            chosen.body()?.marketPositions.orEmpty()
+        } catch (e: Exception) {
+            throw softFailure(e)
+        }
+    }
+
     private fun v2Body(ticket: TradeTicket, clientOrderId: String): CreateOrderV2Request =
         CreateOrderV2Request(
             ticker = ticket.ticker,
             side = ticket.bookSide,
             count = String.format(Locale.US, "%.2f", ticket.contracts.toDouble()),
             price = String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
-            clientOrderId = clientOrderId
+            clientOrderId = clientOrderId,
+            reduceOnly = ticket.reduceOnly || ticket.isSell
         )
 
     private fun mapV2(

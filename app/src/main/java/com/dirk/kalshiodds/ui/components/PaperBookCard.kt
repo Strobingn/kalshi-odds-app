@@ -33,7 +33,8 @@ fun PaperBookCard(
     paper: PaperBookState,
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onSell: ((ticker: String, side: String) -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -107,7 +108,7 @@ fun PaperBookCard(
                 fontWeight = FontWeight.Bold
             )
             paper.fills.take(12).forEach { fill ->
-                PaperLedgerRow(fill)
+                PaperLedgerRow(fill, onSell = if (!fill.settled) onSell else null)
             }
         }
     }
@@ -122,7 +123,10 @@ private fun PaperStat(label: String, value: String, color: androidx.compose.ui.g
 }
 
 @Composable
-private fun PaperLedgerRow(fill: PaperFill) {
+private fun PaperLedgerRow(
+    fill: PaperFill,
+    onSell: ((ticker: String, side: String) -> Unit)? = null
+) {
     val status = when {
         !fill.settled -> "OPEN"
         fill.outcome == "void" -> "VOID"
@@ -168,5 +172,11 @@ private fun PaperLedgerRow(fill: PaperFill) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface
         )
+        if (onSell != null && !fill.settled) {
+            OutlinedButton(
+                onClick = { onSell(fill.ticker, fill.side) },
+                modifier = Modifier.padding(top = 6.dp).height(40.dp)
+            ) { Text("Paper sell") }
+        }
     }
 }
