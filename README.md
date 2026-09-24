@@ -34,6 +34,8 @@ Package: `com.dirk.kalshiodds` · version **0.3.5**
 
 **Paper trading:** 0.3.4 only had an advisory “bankroll” for suggested size — no paper ledger, so AI/LiveCall never recorded simulated fills. Home now shows a **PAPER BOOK** card (start/reset **$100**, **$5** per AI hunter / LiveCall fill). Paper never hits the Kalshi order API. **Paper $5** vs **Live Approve** are labeled separately.
 
+**Checklist contrast:** Pre-trade checklist rows and lower market stats (Spread / Volume / OI / 24h / Liquidity / Time left) used `MaterialTheme.colorScheme.onSurface` on a hardcoded dark card. With a light system theme that is near-black on black — the “No info” screenshot. Those rows now use Material3 `onSurface` / `onSurfaceVariant` against `colorScheme.surface`, with a WCAG-ish fallback so text cannot disappear. Missing stats render as **—**.
+
 ## Light-mode CME + direction lock (v0.3.3)
 
 - **CME:** Scoring no longer holds a live `LocalOrderBook`. Imbalance / depth / pulse are copied under `TickBook`’s lock (`BookView`). `LocalOrderBook` mutators and iterators are synchronized. `ExtendedAiRuntime.evaluate` is synchronized and wrapped in `SafeMl` (`label=extended`); flicker uses `ConcurrentHashMap`; rival-flow centroids are synchronized. The banner `Light mode: ConcurrentModificationException: extended` was this race (exception message is null, so the guard used the `"extended"` label).

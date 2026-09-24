@@ -389,6 +389,43 @@ class ChecklistTest {
         assertEquals("Uncertainty", items[4].label)
         assertEquals("Survival P(YES)", items[10].label)
         assertEquals("RL stake", items[13].label)
+        assertEquals("—", items[13].value)
+    }
+
+    @Test
+    fun checklistUsesDashNotBlankWhenDataMissing() {
+        val market = MarketUiModel(
+            ticker = "KXBTC15M-EMPTY",
+            title = "BTC",
+            subtitle = null,
+            floorStrike = null,
+            yesBid = 0.40,
+            yesAsk = 0.44,
+            noBid = 0.56,
+            noAsk = 0.60,
+            lastPrice = 0.42,
+            yesProbabilityPercent = 42.0,
+            noProbabilityPercent = 58.0,
+            volume = null,
+            volume24h = null,
+            openInterest = null,
+            liquidityDollars = null,
+            closeTimeLocal = null,
+            closeTimeEpochMs = null,
+            status = "open",
+            seriesLabel = "Bitcoin"
+        )
+        val byLabel = PreTradeChecklist.items(market).associate { it.label to it.value }
+        assertTrue(byLabel["Side"]!!.isNotBlank())
+        assertEquals("—", byLabel["Size"])
+        assertEquals("—", byLabel["Net EV"])
+        assertEquals("—", byLabel["Confidence"])
+        assertEquals("—", byLabel["Regime"])
+        assertEquals("—", byLabel["TTE"])
+        assertEquals("—", byLabel["RL stake"])
+        byLabel.values.forEach { v ->
+            assertTrue("blank checklist value", v.isNotBlank())
+        }
     }
 }
 

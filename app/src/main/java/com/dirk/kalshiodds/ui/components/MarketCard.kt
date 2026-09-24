@@ -40,9 +40,9 @@ import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
 import com.dirk.kalshiodds.ui.theme.AccentBlue
 import com.dirk.kalshiodds.ui.theme.AccentGreen
 import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.Border
-import com.dirk.kalshiodds.ui.theme.Surface
-import com.dirk.kalshiodds.ui.theme.TextSecondary
+import com.dirk.kalshiodds.ui.theme.Contrast
+import com.dirk.kalshiodds.ui.theme.checklistLabelColor
+import com.dirk.kalshiodds.ui.theme.checklistValueColor
 import java.util.Locale
 import kotlin.math.abs
 
@@ -55,13 +55,20 @@ fun MarketCard(
     onBuyYes: (() -> Unit)? = null,
     onBuyNo: (() -> Unit)? = null
 ) {
-    val alertBorder = if (market.edgeAlert) AccentGreen else Border
+    val scheme = MaterialTheme.colorScheme
+    val cardBg = scheme.surface
+    val labelColor = checklistLabelColor(cardBg)
+    val valueColor = checklistValueColor(cardBg)
+    val alertBorder = if (market.edgeAlert) AccentGreen else scheme.outline
     Card(
         modifier = modifier
             .fillMaxWidth()
             .border(if (market.edgeAlert) 2.dp else 1.dp, alertBorder, RoundedCornerShape(16.dp)),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(containerColor = Surface)
+        colors = CardDefaults.cardColors(
+            containerColor = cardBg,
+            contentColor = valueColor
+        )
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -73,13 +80,13 @@ fun MarketCard(
                     Text(
                         text = market.title,
                         style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = valueColor
                     )
                     market.subtitle?.let {
                         Text(
                             text = it,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = TextSecondary,
+                            color = labelColor,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -90,7 +97,7 @@ fun MarketCard(
                     Text(
                         text = market.ticker,
                         style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondary,
+                        color = labelColor,
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
@@ -200,7 +207,7 @@ fun MarketCard(
                         String.format(Locale.US, " · conf %.0f%%", c * 100)
                     }.orEmpty(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary,
+                    color = labelColor,
                     modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
                 )
             }
@@ -236,7 +243,7 @@ fun MarketCard(
                 val edgeColor = when {
                     abs(edge) >= EDGE_ALERT_THRESHOLD_PP -> AccentGreen
                     abs(edge) >= 2.0 -> AccentBlue
-                    else -> TextSecondary
+                    else -> labelColor
                 }
                 Column(
                     modifier = Modifier
@@ -247,7 +254,7 @@ fun MarketCard(
                     Text(
                         text = "Dip Hunter edge",
                         style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondary
+                        color = labelColor
                     )
                     Text(
                         text = String.format(Locale.US, "%+.1f pp", edge),
@@ -283,7 +290,7 @@ fun MarketCard(
                             Text(
                                 text = note,
                                 style = MaterialTheme.typography.labelMedium,
-                                color = TextSecondary
+                                color = labelColor
                             )
                         }
                     }
@@ -296,7 +303,7 @@ fun MarketCard(
                                 market.uncertainty?.let { String.format(Locale.US, "unc %.2f", it) }
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (market.uncertaintyPassed) TextSecondary else AccentOrange,
+                            color = if (market.uncertaintyPassed) labelColor else AccentOrange,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -304,7 +311,7 @@ fun MarketCard(
                         Text(
                             text = note,
                             style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary,
+                            color = labelColor,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
@@ -312,7 +319,7 @@ fun MarketCard(
                         Text(
                             text = note,
                             style = MaterialTheme.typography.labelMedium,
-                            color = TextSecondary,
+                            color = labelColor,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
@@ -336,7 +343,7 @@ fun MarketCard(
                     Text(
                         text = "Fair − market (pp). Net EV subtracts Kalshi-style fee + half-spread. Analysis stays advisory; tickets need a separate Approve.",
                         style = MaterialTheme.typography.labelMedium,
-                        color = TextSecondary,
+                        color = labelColor,
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
@@ -364,7 +371,7 @@ fun MarketCard(
                 Text(
                     "Opens an approve-gated limit. Nothing is sent until you tap Approve.",
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary,
+                    color = labelColor,
                     modifier = Modifier.padding(top = 4.dp)
                 )
             }
@@ -376,7 +383,7 @@ fun MarketCard(
                 Text(
                     text = "Kalshi market (reference)",
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary
+                    color = labelColor
                 )
                 Spacer(Modifier.height(6.dp))
                 Row(
@@ -388,7 +395,7 @@ fun MarketCard(
                         percent = market.yesProbabilityPercent,
                         bid = market.yesBid,
                         ask = market.yesAsk,
-                        accent = TextSecondary,
+                        accent = valueColor,
                         modifier = Modifier.weight(1f),
                         big = false
                     )
@@ -397,7 +404,7 @@ fun MarketCard(
                         percent = market.noProbabilityPercent,
                         bid = market.noBid,
                         ask = market.noAsk,
-                        accent = TextSecondary,
+                        accent = valueColor,
                         modifier = Modifier.weight(1f),
                         endAligned = true,
                         big = false
@@ -416,10 +423,10 @@ fun MarketCard(
                 Metric("24h vol", formatCompact(market.volume24h))
                 Metric("Liquidity", market.liquidityDollars?.let { formatCompact(it) } ?: "—")
                 Column {
-                    Text("Time left", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    Text("Time left", style = MaterialTheme.typography.labelMedium, color = labelColor)
                     TimeLeftLabel(market.closeTimeEpochMs)
                     market.closeTimeLocal?.let {
-                        Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                        Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor)
                     }
                 }
             }
@@ -432,11 +439,14 @@ private fun ChecklistBlock(market: MarketUiModel) {
     val items = PreTradeChecklist.items(market)
     val clipboard = LocalClipboardManager.current
     var copied by remember(market.ticker) { mutableStateOf(false) }
+    val bg = MaterialTheme.colorScheme.surface
+    val labelColor = checklistLabelColor(bg)
+    val valueColor = checklistValueColor(bg)
     Spacer(Modifier.height(12.dp))
     Text(
         text = "PRE-TRADE CHECKLIST",
         style = MaterialTheme.typography.labelMedium,
-        color = AccentBlue,
+        color = Contrast.readable(AccentBlue, bg, minRatio = Contrast.AA_LARGE),
         fontWeight = FontWeight.Bold
     )
     Spacer(Modifier.height(4.dp))
@@ -445,11 +455,11 @@ private fun ChecklistBlock(market: MarketUiModel) {
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(item.label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Text(item.label, style = MaterialTheme.typography.labelMedium, color = labelColor)
             Text(
-                item.value,
+                Contrast.display(item.value),
                 style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
+                color = valueColor,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -482,23 +492,26 @@ private fun OddsColumn(
     endAligned: Boolean = false,
     big: Boolean = true
 ) {
+    val bg = MaterialTheme.colorScheme.surface
+    val labelColor = checklistLabelColor(bg)
+    val valueColor = Contrast.readable(accent, bg, minRatio = Contrast.AA_LARGE)
     Column(
         modifier = modifier,
         horizontalAlignment = if (endAligned) Alignment.End else Alignment.Start
     ) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = labelColor)
         Text(
             text = percent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
             fontSize = if (big) 36.sp else 22.sp,
             fontWeight = FontWeight.Bold,
-            color = accent,
+            color = valueColor,
             lineHeight = if (big) 40.sp else 26.sp
         )
         if (bid != null || ask != null) {
             Text(
                 text = "Bid ${formatCents(bid)} · Ask ${formatCents(ask)}",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary,
+                color = labelColor,
                 modifier = Modifier.padding(top = 4.dp)
             )
         }
@@ -507,9 +520,17 @@ private fun OddsColumn(
 
 @Composable
 private fun Metric(label: String, value: String) {
+    val bg = MaterialTheme.colorScheme.surface
+    val labelColor = checklistLabelColor(bg)
+    val valueColor = checklistValueColor(bg)
     Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-        Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = labelColor)
+        Text(
+            Contrast.display(value),
+            style = MaterialTheme.typography.bodyMedium,
+            color = valueColor,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }
 
