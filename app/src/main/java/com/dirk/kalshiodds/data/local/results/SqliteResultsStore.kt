@@ -863,32 +863,9 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
 
         private fun createHistoryTables(db: SQLiteDatabase) {
-            db.execSQL(
-                """
-                CREATE TABLE IF NOT EXISTS $TABLE_SETTINGS (
-                  id INTEGER PRIMARY KEY AUTOINCREMENT,
-                  created_at_ms INTEGER NOT NULL,
-                  key TEXT,
-                  old_value TEXT,
-                  new_value TEXT,
-                  snapshot_json TEXT
-                )
-                """.trimIndent()
-            )
-            db.execSQL(
-                """
-                CREATE TABLE IF NOT EXISTS $TABLE_SESSION (
-                  id TEXT PRIMARY KEY,
-                  started_at_ms INTEGER NOT NULL,
-                  ended_at_ms INTEGER,
-                  markets INTEGER,
-                  signals INTEGER,
-                  bets INTEGER,
-                  pnl_usd REAL
-                )
-                """.trimIndent()
-            )
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_settings_created ON $TABLE_SETTINGS(created_at_ms)")
+            for (sql in com.dirk.kalshiodds.data.local.history.ArchiveSchema.upgradeSql(3)) {
+                db.execSQL(sql)
+            }
         }
     }
 

@@ -290,7 +290,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val store = KalshiOddsApp.from(getApplication()).container.resultsStore
-                    val csv = ResultsExporter.csv(store.exportBundle())
+                    val archive = KalshiOddsApp.from(getApplication()).container.archive
+                    val json = ResultsExporter.jsonWithHistory(
+                        store.exportBundle(),
+                        settings = archive.recentSettingsChanges(400),
+                        sessions = archive.recentSessions(200)
+                    )
+                    val csv = ResultsExporter.csv(store.exportBundle()) + "\n# history json follows\n" + json
                     ResultsFileExport.write(getApplication(), csv)
                 }.getOrElse {
                     com.dirk.kalshiodds.data.local.results.ExportResult(

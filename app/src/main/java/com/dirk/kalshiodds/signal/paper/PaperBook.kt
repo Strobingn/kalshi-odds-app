@@ -29,7 +29,8 @@ data class PaperFill(
     val outcome: String? = null,
     val won: Boolean? = null,
     val pnlUsd: Double? = null,
-    val note: String
+    val note: String,
+    val winTargetUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 }
@@ -118,7 +119,8 @@ class PaperBook(
                 "Paper $5 · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
-            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 }
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
+            winTargetUsd = ticket.winTargetUsd
         )
     }
 
@@ -149,7 +151,8 @@ class PaperBook(
                 "Paper $5 from ticket · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
-            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 }
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
+            winTargetUsd = ticket.winTargetUsd
         )
     }
 
@@ -284,7 +287,8 @@ class PaperBook(
         source: String,
         note: String,
         contracts: Int? = null,
-        stakeUsd: Double? = null
+        stakeUsd: Double? = null,
+        winTargetUsd: Double? = null
     ): PaperFill? {
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = limitPrice.coerceIn(0.01, 0.99)
@@ -310,7 +314,8 @@ class PaperBook(
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),
-                note = note
+                note = note,
+                winTargetUsd = winTargetUsd
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(

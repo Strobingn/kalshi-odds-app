@@ -68,6 +68,7 @@ class MainActivity : ComponentActivity() {
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
                         oddsState.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
+                            ?: historyViewModel.marketModel(t)
                     }
                     when {
                         screen == "settings" -> SettingsScreen(
@@ -86,7 +87,11 @@ class MainActivity : ComponentActivity() {
                         )
                         screen == "history" -> com.dirk.kalshiodds.ui.HistoryScreen(
                             viewModel = historyViewModel,
-                            onBack = { screen = "odds" }
+                            onBack = { screen = "odds" },
+                            onOpenMarket = { m ->
+                                chartTicker = m.ticker
+                                screen = "odds"
+                            }
                         )
                         chartMarket != null -> ChartDetailScreen(
                             market = chartMarket,

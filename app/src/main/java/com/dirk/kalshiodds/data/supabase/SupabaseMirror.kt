@@ -39,6 +39,8 @@ class SupabaseMirror(
         val snapshots = get(base, key, "diphunter_snapshots")
             ?: get(base, key, "diphunter_results")
         val settledJson = get(base, key, "diphunter_settled")
+        val historyJson = get(base, key, "diphunter_history")
+            ?: get(base, key, "diphunter_settings")
         if (snapshots == null && settledJson == null) {
             return Restore(
                 ImportBatch(),
@@ -51,6 +53,7 @@ class SupabaseMirror(
         } else {
             ResultsImporter.parse(java.io.StringReader("[]"), seen)
         }
+        val historyBatch = historyJson?.let { ResultsImporter.parseJsonObjectSafe(it, seen).batch }
         val settled = ArrayList<SettledWindowRow>()
         settledJson?.let { raw ->
             val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return@let
@@ -75,10 +78,19 @@ class SupabaseMirror(
                 )
             }
         }
+        val merged = if (historyBatch == null) {
+            parsed.batch
+        } else {
+            parsed.batch.copy(
+                settingsChanges = parsed.batch.settingsChanges + historyBatch.settingsChanges,
+                sessions = parsed.batch.sessions + historyBatch.sessions
+            )
+        }
         return Restore(
-            batch = parsed.batch,
+            batch = merged,
             settled = settled,
-            message = "Supabase: ${parsed.summary.message}; ${settled.size} settled windows"
+            message = "Supabase: ${parsed.summary.message}; ${settled.size} settled windows; " +
+                "${merged.settingsChanges.size} settings; ${merged.sessions.size} sessions"
         )
     }
 

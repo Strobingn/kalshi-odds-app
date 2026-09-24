@@ -11,7 +11,8 @@ data class HistoryBet(
     val source: String,
     val result: String,
     val pnlUsd: Double?,
-    val live: Boolean
+    val live: Boolean,
+    val winTargetUsd: Double? = null
 )
 
 data class HistorySession(

@@ -421,7 +421,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resetPaperBook() {
+        val before = paperBook.snapshot().cashUsd
+        val snap = _state.value.settings
         paperBook.reset()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                container.archive.insertSettingsChange(
+                    com.dirk.kalshiodds.data.local.history.SettingsChange(
+                        createdAtMs = System.currentTimeMillis(),
+                        key = "paper_reset",
+                        oldValue = before.toString(),
+                        newValue = "100.0",
+                        snapshotJson = com.dirk.kalshiodds.data.local.history.SettingsRestore.snapshot(snap)
+                    )
+                )
+            }
+        }
     }
 
     /**

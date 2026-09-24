@@ -1,23 +1,28 @@
 package com.dirk.kalshiodds.data.local
 
 import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
+import com.dirk.kalshiodds.data.local.history.ArchiveSchema
+import com.dirk.kalshiodds.data.local.history.HistorySession
+import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.data.local.results.InMemoryResultsStore
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
+import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * In-memory stand-in for the 0.3.6 → 0.3.7 archive upgrade: existing
- * snapshots and settled windows must survive new History / bid columns.
- * Device SQLite onUpgrade (v2→v3→v4) only adds tables/columns
- * (settings_history / sessions in v4). Never drops 0.3.x rows.
+ * 0.3.6 (DB v3) → 0.3.7 (v4) upgrade: existing snapshots, tickets, and
+ * settled windows survive. v4 only CREATE TABLE / INDEX for
+ * settings_history + sessions — never DROP.
  */
 class SqliteMigrationTest {
+
     @Test
-    fun existingSnapshotsAndSettledSurviveNewApis() {
-        val store = InMemoryResultsStore()
-        store.insertSnapshots(
+    fun v036FixtureRowsSurviveHistoryUpgrade() {
+        val fixture = InMemoryResultsStore()
+        fixture.insertSnapshots(
             listOf(
                 ScoredSnapshotRow(
                     ticker = "KXBTC15M-OLD",
@@ -32,7 +37,17 @@ class SqliteMigrationTest {
                 )
             )
         )
-        store.upsertSettled(
+        fixture.insertTicket(
+            TicketAttemptRow(
+                ticker = "KXBTC15M-OLD",
+                side = "YES",
+                stakeUsd = 5.0,
+                approved = true,
+                result = "submitted",
+                createdAtMs = 1_700_000_000_100L
+            )
+        )
+        fixture.upsertSettled(
             listOf(
                 SettledWindowRow(
                     ticker = "KXBTC15M-OLD",
@@ -42,27 +57,39 @@ class SqliteMigrationTest {
                 )
             )
         )
-        assertEquals(1, store.recentSnapshots(10).size)
-        assertTrue(store.settledTickers().contains("KXBTC15M-OLD"))
-        assertEquals("yes", store.recentSettled("KXBTC15M", 5).first().result)
-        assertEquals(1, store.stats().settledCount)
-        store.insertSettingsChange(
-            com.dirk.kalshiodds.data.local.history.SettingsChange(
-                createdAtMs = 1_700_000_000_100L,
+
+        val sql = ArchiveSchema.upgradeSql(ArchiveSchema.V036)
+        assertTrue(sql.isNotEmpty())
+        assertTrue(sql.none { ArchiveSchema.isDestructive(it) })
+        assertTrue(sql.any { it.contains(ArchiveSchema.SETTINGS_TABLE) })
+        assertTrue(sql.any { it.contains(ArchiveSchema.SESSION_TABLE) })
+
+        fixture.insertSettingsChange(
+            SettingsChange(
+                createdAtMs = 1_700_000_000_200L,
                 key = "win_target_usd",
                 oldValue = "50",
                 newValue = "75",
                 snapshotJson = """{"winTargetUsd":75.0}"""
             )
         )
-        store.insertSession(
-            com.dirk.kalshiodds.data.local.history.HistorySession(
-                id = "sess-1",
-                startedAtMs = 1_700_000_000_000L
-            )
+        fixture.insertSession(
+            HistorySession(id = "sess-1", startedAtMs = 1_700_000_000_000L)
         )
-        assertEquals(1, store.recentSettingsChanges(10).size)
-        assertEquals("KXBTC15M-OLD", store.recentSnapshots(10).first().ticker)
-        assertEquals("sess-1", store.recentSessions(5).first().id)
+
+        assertEquals("KXBTC15M-OLD", fixture.recentSnapshots(10).first().ticker)
+        assertEquals("KXBTC15M-OLD", fixture.recentTickets(10).first().ticker)
+        assertTrue(fixture.settledTickers().contains("KXBTC15M-OLD"))
+        assertEquals("yes", fixture.recentSettled("KXBTC15M", 5).first().result)
+        assertEquals(1, fixture.stats().settledCount)
+        assertEquals(1, fixture.recentSettingsChanges(10).size)
+        assertEquals("sess-1", fixture.recentSessions(5).first().id)
+    }
+
+    @Test
+    fun upgradeFromCurrentIsNoopAndNeverDrops() {
+        assertTrue(ArchiveSchema.upgradeSql(ArchiveSchema.CURRENT).isEmpty())
+        assertFalse(ArchiveSchema.isDestructive(ArchiveSchema.CREATE_SETTINGS))
+        assertFalse(ArchiveSchema.isDestructive(ArchiveSchema.CREATE_SESSIONS))
     }
 }

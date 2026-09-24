@@ -138,6 +138,7 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                 parsed.batch.tickets.forEach { store.insertTicket(it) }
                 archive.insertFills(parsed.batch.fills)
                 parsed.batch.settingsChanges.forEach { archive.insertSettingsChange(it) }
+                parsed.batch.sessions.forEach { archive.insertSession(it) }
             }
             _state.update {
                 it.copy(
@@ -227,6 +228,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     restore.batch.alerts.forEach { store.insertAlert(it) }
                     restore.batch.scorecards.forEach { store.insertScorecard(it) }
                     restore.batch.tickets.forEach { store.insertTicket(it) }
+                    restore.batch.settingsChanges.forEach { archive.insertSettingsChange(it) }
+                    restore.batch.sessions.forEach { archive.insertSession(it) }
                     archive.upsertSettled(restore.settled)
                     restore.message
                 }.getOrElse { it.message ?: "Supabase restore failed" }

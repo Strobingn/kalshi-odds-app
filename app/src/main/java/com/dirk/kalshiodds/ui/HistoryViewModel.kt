@@ -4,29 +4,37 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.chart.BidPoint
+import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
+import com.dirk.kalshiodds.data.local.history.HistoryAssembler
+import com.dirk.kalshiodds.data.local.history.HistoryBet
 import com.dirk.kalshiodds.data.local.history.HistoryPager
+import com.dirk.kalshiodds.data.local.history.HistorySession
+import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.data.local.history.SettingsRestore
+import com.dirk.kalshiodds.domain.MarketUiModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import java.util.Locale
-
-data class HistoryLine(
-    val id: String,
-    val text: String,
-    val restoreJson: String? = null
-)
 
 data class HistoryUiState(
     val tab: Int = 0,
-    val lines: List<HistoryLine> = emptyList(),
-    val summary: String = "Paged history — paper reset archives the old book.",
+    val bets: List<HistoryBet> = emptyList(),
+    val signals: List<HistoryAssembler.SignalLine> = emptyList(),
+    val sessions: List<HistorySession> = emptyList(),
+    val settings: List<SettingsChange> = emptyList(),
+    val markets: List<SettledWindowRow> = emptyList(),
+    val totals: HistoryAssembler.Totals = HistoryAssembler.Totals(),
+    val pnl: List<Pair<Long, Double>> = emptyList(),
+    val source: HistoryAssembler.SourceFilter = HistoryAssembler.SourceFilter.ALL,
+    val coin: HistoryAssembler.CoinFilter = HistoryAssembler.CoinFilter.ALL,
+    val date: HistoryAssembler.DateFilter = HistoryAssembler.DateFilter.ALL,
     val offset: Int = 0,
     val hasMore: Boolean = false,
-    val message: String? = null
+    val message: String? = null,
+    val currentSettingsJson: String? = null
 )
 
 class HistoryViewModel(app: Application) : AndroidViewModel(app) {
@@ -39,26 +47,15 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     fun load(tab: Int, offset: Int = 0) {
         viewModelScope.launch(Dispatchers.IO) {
             val page = 40
-            val lines = when (tab) {
-                0 -> bets(offset, page)
-                1 -> signals(offset, page)
-                2 -> sessions()
-                3 -> settingsLog(offset, page)
-                else -> markets(offset, page)
+            val cur = _state.value
+            val next = when (tab) {
+                0 -> betsPage(cur, offset, page)
+                1 -> signalsPage(offset, page, cur)
+                2 -> sessionsPage(offset, page, cur)
+                3 -> settingsPage(offset, page, cur)
+                else -> marketsPage(offset, page, cur)
             }
-            _state.value = HistoryUiState(
-                tab = tab,
-                lines = if (offset == 0) lines else _state.value.lines + lines,
-                summary = when (tab) {
-                    0 -> "Live Approve + paper fills (archived runs kept)."
-                    1 -> "AI / hunter signals vs market at the time."
-                    2 -> "App sessions this install."
-                    3 -> "Settings & stake changes. Restore reapplies hunter / win-target / bankroll."
-                    else -> "Settled 15m windows with stored charts."
-                },
-                offset = offset,
-                hasMore = lines.size >= page
-            )
+            _state.value = next
         }
     }
 
@@ -68,6 +65,21 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         load(s.tab, s.offset + 40)
     }
 
+    fun setSource(v: HistoryAssembler.SourceFilter) {
+        _state.value = _state.value.copy(source = v)
+        load(0, 0)
+    }
+
+    fun setCoin(v: HistoryAssembler.CoinFilter) {
+        _state.value = _state.value.copy(coin = v)
+        load(0, 0)
+    }
+
+    fun setDate(v: HistoryAssembler.DateFilter) {
+        _state.value = _state.value.copy(date = v)
+        load(0, 0)
+    }
+
     fun restoreSettings(json: String) {
         viewModelScope.launch {
             runCatching { container.preferences.restoreSnapshot(json) }
@@ -75,128 +87,116 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun bets(offset: Int, page: Int): List<HistoryLine> {
-        val tickets = container.resultsStore.recentTickets(offset + page)
-        val paper = container.paper.book.snapshot()
-        val live = tickets.map {
-            HistoryLine(
-                id = "live-${it.id}-${it.createdAtMs}",
-                text = String.format(
-                    Locale.US,
-                    "%s  %s %s  $%.2f  %s  %s",
-                    historyTime(it.createdAtMs),
-                    it.ticker,
-                    it.side,
-                    it.stakeUsd,
-                    if (it.approved) "live" else "ticket",
-                    it.result
-                )
-            )
-        }
-        val fills = (paper.fills + paper.archived.flatMap { it.fills })
-            .sortedByDescending { it.createdAtMs }
-        val paperLines = fills.map {
-            HistoryLine(
-                id = "paper-${it.id}",
-                text = String.format(
-                    Locale.US,
-                    "%s  %s %s  %d ct @ %.0f¢  $%.2f  paper  %s",
-                    historyTime(it.createdAtMs),
-                    it.ticker,
-                    it.side,
-                    it.contracts,
-                    it.limitPrice * 100.0,
-                    it.stakeUsd,
-                    it.outcome ?: (if (it.settled) "settled" else "open")
-                )
-            )
-        }
-        return HistoryPager.page((live + paperLines).distinctBy { it.id }, offset, page).items
+    fun marketModel(ticker: String): MarketUiModel {
+        val row = runCatching {
+            container.archive.recentSettled(null, 400).firstOrNull { it.ticker == ticker }
+        }.getOrNull() ?: com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+            ticker = ticker,
+            series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker),
+            result = "unknown"
+        )
+        return marketModel(row)
     }
 
-    private fun signals(offset: Int, page: Int): List<HistoryLine> {
-        val rows = container.resultsStore.recentSnapshots(offset + page).drop(offset)
-        return rows.map {
-            HistoryLine(
-                id = "sig-${it.id}-${it.createdAtMs}",
-                text = String.format(
-                    Locale.US,
-                    "%s  %s  %s  edge %+.1f pp  mkt %.0f  fair %.0f",
-                    historyTime(it.createdAtMs),
-                    it.ticker,
-                    it.side,
-                    it.edgePp,
-                    it.marketPp,
-                    it.fairPp
-                )
-            )
-        }
+    fun marketModel(row: SettledWindowRow): MarketUiModel {
+        val bids = runCatching {
+            container.archive.bidHistory(row.ticker, (row.closeMs ?: 0L) - 3_600_000L, 240)
+        }.getOrElse { emptyList() }
+        return settledToMarket(row, bids)
     }
 
-    private fun sessions(): List<HistoryLine> {
-        val rows = container.archive.recentSessions(40)
-        if (rows.isEmpty()) {
-            return listOf(
-                HistoryLine(
-                    id = "sess-empty",
-                    text = "Current process is the first recorded session. Later launches keep start/end here."
-                )
-            )
-        }
-        return rows.map {
-            HistoryLine(
-                id = "sess-${it.id}",
-                text = String.format(
-                    Locale.US,
-                    "%s → %s  markets %d  signals %d  bets %d  %s",
-                    historyTime(it.startedAtMs),
-                    it.endedAtMs?.let { ms -> historyTime(ms) } ?: "open",
-                    it.markets,
-                    it.signals,
-                    it.bets,
-                    it.pnlUsd?.let { p -> String.format(Locale.US, "P&L $%.2f", p) } ?: ""
-                )
-            )
-        }
+    private fun betsPage(cur: HistoryUiState, offset: Int, page: Int): HistoryUiState {
+        val since = HistoryAssembler.sinceMs(cur.date, System.currentTimeMillis())
+        val all = HistoryAssembler.bets(
+            tickets = container.resultsStore.recentTickets(400),
+            paper = container.paper.book.snapshot(),
+            source = cur.source,
+            coin = cur.coin,
+            sinceMs = since
+        )
+        val sliced = HistoryPager.page(all, offset, page)
+        val shown = if (offset == 0) sliced.items else cur.bets + sliced.items
+        return cur.copy(
+            tab = 0,
+            bets = shown,
+            totals = HistoryAssembler.totals(all),
+            pnl = HistoryAssembler.cumulativePnl(all),
+            offset = offset,
+            hasMore = sliced.hasMore,
+            message = null
+        )
     }
 
-    private fun settingsLog(offset: Int, page: Int): List<HistoryLine> {
+    private fun signalsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
+        val snaps = container.resultsStore.recentSnapshots(offset + page)
+        val settled = container.archive.recentSettled(null, 400)
+        val all = HistoryAssembler.signals(snaps, settled)
+        val sliced = HistoryPager.page(all, offset, page)
+        return cur.copy(
+            tab = 1,
+            signals = if (offset == 0) sliced.items else cur.signals + sliced.items,
+            offset = offset,
+            hasMore = sliced.hasMore
+        )
+    }
+
+    private fun sessionsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
+        val rows = container.archive.recentSessions(offset + page)
+        val sliced = HistoryPager.page(rows, offset, page)
+        return cur.copy(
+            tab = 2,
+            sessions = if (offset == 0) sliced.items else cur.sessions + sliced.items,
+            offset = offset,
+            hasMore = sliced.hasMore
+        )
+    }
+
+    private suspend fun settingsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
         val rows = container.archive.recentSettingsChanges(page, offset)
-        if (rows.isEmpty() && offset == 0) {
-            val snap = SettingsRestore.snapshot(container.preferences.let { runCatching { it }.getOrNull(); _liveSettings() })
-            return listOf(
-                HistoryLine(
-                    id = "set-current",
-                    text = "Current · ${SettingsRestore.label(_liveSettings())}",
-                    restoreJson = snap
-                )
-            )
+        val live = runCatching { container.preferences.hydrate() }.getOrElse {
+            com.dirk.kalshiodds.signal.config.SignalSettings()
         }
-        return rows.map {
-            HistoryLine(
-                id = "set-${it.id}-${it.createdAtMs}",
-                text = "${historyTime(it.createdAtMs)}  ${it.key}: ${it.oldValue} → ${it.newValue}",
-                restoreJson = it.snapshotJson
-            )
-        }
+        return cur.copy(
+            tab = 3,
+            settings = if (offset == 0) rows else cur.settings + rows,
+            currentSettingsJson = SettingsRestore.snapshot(live),
+            offset = offset,
+            hasMore = rows.size >= page
+        )
     }
 
-    private fun _liveSettings() = runCatching {
-        kotlinx.coroutines.runBlocking { container.preferences.hydrate() }
-    }.getOrElse { com.dirk.kalshiodds.signal.config.SignalSettings() }
+    private fun marketsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
+        val rows = container.archive.recentSettled(null, offset + page)
+        val sliced = HistoryPager.page(rows, offset, page)
+        return cur.copy(
+            tab = 4,
+            markets = if (offset == 0) sliced.items else cur.markets + sliced.items,
+            offset = offset,
+            hasMore = sliced.hasMore
+        )
+    }
+}
 
-    private fun markets(offset: Int, page: Int): List<HistoryLine> =
-        container.archive.recentSettled(null, offset + page).drop(offset).map {
-            HistoryLine(
-                id = "mkt-${it.ticker}",
-                text = String.format(
-                    Locale.US,
-                    "%s  %s  %s  strike %s",
-                    it.closeMs?.let { ms -> historyTime(ms) } ?: "—",
-                    it.ticker,
-                    it.result.uppercase(),
-                    it.strikeUsd?.let { s -> String.format(Locale.US, "$%,.0f", s) } ?: "—"
-                )
-            )
-        }
+internal fun settledToMarket(row: SettledWindowRow, bids: List<BidPoint>): MarketUiModel {
+    val yes = row.result.equals("yes", ignoreCase = true)
+    return MarketUiModel(
+        ticker = row.ticker,
+        title = row.ticker,
+        subtitle = "Settled ${row.result.uppercase()}",
+        floorStrike = row.strikeUsd,
+        yesBid = null,
+        yesAsk = null,
+        noBid = null,
+        noAsk = null,
+        lastPrice = if (yes) 1.0 else 0.0,
+        yesProbabilityPercent = if (yes) 100.0 else 0.0,
+        noProbabilityPercent = if (yes) 0.0 else 100.0,
+        volume = null,
+        volume24h = null,
+        closeTimeLocal = row.closeMs?.let { historyTime(it) },
+        closeTimeEpochMs = row.closeMs,
+        status = "determined",
+        seriesLabel = row.series,
+        bidHistory = bids
+    )
 }
