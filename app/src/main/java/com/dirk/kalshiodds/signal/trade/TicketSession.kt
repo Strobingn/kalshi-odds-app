@@ -20,7 +20,8 @@ import kotlinx.coroutines.sync.withLock
 class TicketSession(
     private val placeOrder: suspend (ticket: TradeTicket, clientOrderId: String) -> Result<PlacedOrder>,
     private val cancelOrder: suspend (order: PlacedOrder) -> Result<PlacedOrder> = { Result.success(it) },
-    private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() }
+    private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
+    private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
@@ -118,6 +119,23 @@ class TicketSession(
             )
         }
         val result = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
+        runCatching {
+            onAttempt?.invoke(
+                com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
+                    ticker = ticket.ticker,
+                    side = ticket.side,
+                    stakeUsd = ticket.stakeUsd,
+                    approved = true,
+                    result = result.fold(
+                        onSuccess = { ack -> ack.error ?: ack.orderId ?: "submitted" },
+                        onFailure = { err -> humanError(err) }
+                    ),
+                    createdAtMs = System.currentTimeMillis(),
+                    clientOrderId = clientOrderId,
+                    note = "Approve-gated — never unsupervised"
+                )
+            )
+        }
         val next = result.fold(
             onSuccess = { ack ->
                 val working = cur.working + ack

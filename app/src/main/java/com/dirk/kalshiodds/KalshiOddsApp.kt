@@ -6,6 +6,9 @@ import android.util.Log
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
+import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
+import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
 import com.dirk.kalshiodds.signal.service.LiveSignalsPolicy
@@ -31,7 +34,27 @@ class KalshiOddsApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        runCatching { CrashBreadcrumb.install(this) }
         container = AppContainer(this)
+        HeavyMlGuard.persistHook = { reason ->
+            // SharedPreferences.apply() only — do not launch a coroutine
+            // here. The confirmed 0.3.0 death was CancellableContinuationImpl
+            // after the 256MB heap was already gone.
+            runCatching { container.oomFlag.setDisabled(reason) }
+        }
+        if (container.oomFlag.isDisabled()) {
+            HeavyMlGuard.disableForSession(
+                container.oomFlag.reason() ?: "persisted OOM flag",
+                persist = false
+            )
+            appScope.launch {
+                runCatching {
+                    container.preferences.updateHeavyMl(false)
+                    container.preferences.updateExtendedAi(false)
+                }
+            }
+        }
+        runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
         runCatching { SignalNotifier.ensureChannels(this) }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
@@ -52,6 +75,10 @@ class KalshiOddsApp : Application() {
             }
         })
         appScope.launch {
+            runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
+            runCatching { restorePersistedHistory() }
+        }
+        appScope.launch {
             runCatching {
                 container.preferences.settings
                     .map { it.liveSignalsEnabled }
@@ -65,6 +92,26 @@ class KalshiOddsApp : Application() {
                     }
             }
         }
+    }
+
+    private fun restorePersistedHistory() {
+        val rows = runCatching { container.resultsStore.recentAlerts(20) }.getOrElse { emptyList() }
+        if (rows.isEmpty()) return
+        val alerts = rows.map { r ->
+            SignalAlert(
+                id = r.alertId.ifBlank { "persisted-${r.id}" },
+                ticker = r.ticker,
+                series = r.series,
+                deltaPp = r.edgePp,
+                fairValuePp = r.fairPp,
+                marketMidPp = r.marketPp,
+                reason = r.reason,
+                createdAtMs = r.createdAtMs,
+                receiveElapsedNanos = 0L,
+                regime = r.regime
+            )
+        }
+        container.hub.restoreAlerts(alerts)
     }
 
     companion object {

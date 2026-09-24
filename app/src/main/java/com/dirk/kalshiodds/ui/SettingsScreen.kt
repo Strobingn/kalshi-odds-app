@@ -341,15 +341,38 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             )
             ToggleRow("Resume automatically on next session", s.resumeOnNewSession, viewModel::setResumeOnNewSession)
 
-            Section("Heavy ML (0.3.0)")
+            Section("Results (survive crashes)")
             Text(
-                "Temporal CNN + TinyLSTM + GBM second opinion + shared BTC/ETH/SOL backbone. " +
-                    "Cold start falls back to the 0.2.x MLP blend. Heavier models use more CPU and battery — " +
-                    "turn the master switch off to disable them. Still analysis + approve-gated tickets only; " +
-                    "nothing is ordered without Approve.",
+                "Scored snapshots, alerts, scorecard rows, and Approve-ticket attempts are written to on-device SQLite " +
+                    "and a rolling results.log. Export writes a CSV you can open after a kill. " +
+                    "Tickets are still Approve-only — never unsupervised bets.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
+            Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
+                Text("Export results")
+            }
+            state.exportMessage?.let {
+                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
+
+            Section("Heavy ML (0.3.0 / safe light default)")
+            Text(
+                "0.3.1 defaults to light mode (0.2.x MLP blend) after Heavy ML exhausted the 256MB heap on a Galaxy S24 Ultra. " +
+                    "One OutOfMemoryError immediately latches light mode and persists so the next launch stays on 0.2.x. " +
+                    "Non-OOM failures still trip after 3. Re-enable Heavy ML only if you accept the heap risk. " +
+                    "Still analysis + approve-gated tickets only.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow(
+                "Light mode (recommended — 0.2.x scoring, safer on device)",
+                !s.heavyMlEnabled && !s.extendedAiEnabled,
+                viewModel::setLightMode
+            )
+            state.mlGuardNote?.let {
+                Text(it, color = AccentOrange, style = MaterialTheme.typography.bodyMedium)
+            }
             ToggleRow("Heavy ML (sequence + GBM + ensemble)", s.heavyMlEnabled, viewModel::setHeavyMl)
             ToggleRow("Sequence model (Temporal CNN / TinyLSTM)", s.sequenceModelEnabled, viewModel::setSequenceModel)
             ToggleRow("GBM second opinion", s.gbmEnabled, viewModel::setGbm)

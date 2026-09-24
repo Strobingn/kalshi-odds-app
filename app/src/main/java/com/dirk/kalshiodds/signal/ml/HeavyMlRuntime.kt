@@ -103,13 +103,51 @@ class HeavyMlRuntime(
         )
     }
 
+    fun lightOutput(mlp: Double?, note: String = "0.2.x blend (fail-soft)"): Output {
+        val p = mlp?.let { MlMath.clip01(it) } ?: 0.5
+        return Output(
+            ensembleYes = p,
+            mlpYes = mlp,
+            cnnYes = null,
+            lstmYes = null,
+            gbmYes = null,
+            uncertainty = 0.06,
+            uncertaintyPassed = true,
+            uncertaintyMethod = "fail-soft",
+            timeToMoveSec = null,
+            midVol = null,
+            pFill = null,
+            usedHeavy = false,
+            note = note
+        )
+    }
+
+    /**
+     * Synchronized: REST annotate and WS ticks share one runtime. Concurrent
+     * mutation of [heads]/[stack]/[lastActivation] was a CME / native-adjacent
+     * crash path after 0.3.0.
+     */
+    @Synchronized
     fun infer(
         input: Input,
         settings: SignalSettings,
         stackOverride: EnsembleStack.Weights? = null
     ): Output {
+        return try {
+            inferUnchecked(input, settings, stackOverride)
+        } catch (t: Throwable) {
+            HeavyMlGuard.noteFailure(t, "heavy.infer")
+            lightOutput(input.mlpYes, "0.2.x blend (heavy ML failed)")
+        }
+    }
+
+    private fun inferUnchecked(
+        input: Input,
+        settings: SignalSettings,
+        stackOverride: EnsembleStack.Weights?
+    ): Output {
         val mlp = input.mlpYes?.let { MlMath.clip01(it) }
-        if (!settings.heavyMlEnabled) {
+        if (!settings.heavyMlEnabled || HeavyMlGuard.sessionDisabled) {
             return fallback(mlp, input, settings, used = false, note = "0.2.x blend (heavy ML off)")
         }
 
@@ -129,14 +167,8 @@ class HeavyMlRuntime(
             headsOut = this.heads.infer(backbone)
             cnnYes = headsOut.pYes
             lstmYes = lstmHeadYes(lstmH, input.series)
-            if (settings.uncertaintyGateEnabled) {
-                for (k in 0 until 3) {
-                    val mask = UncertaintyGate.dropoutMask(cnnPool.size, 0.20, seed = 17 + k * 31)
-                    val dropped = cnnModel.encodeWithDropout(frames, mask)
-                    val h = backboneModel.encode(dropped, lstmH, input.series)
-                    mc += this.heads.infer(h).pYes
-                }
-            }
+            // Skip 3× MC-dropout CNN re-encodes. Ensemble variance is enough
+            // and the extra allocations were a mid-session OOM source.
         }
 
         val snap = input.bookSnap
@@ -213,12 +245,13 @@ class HeavyMlRuntime(
             pFill = fill,
             usedHeavy = used,
             note = note,
-            backbone = backbone,
-            tabular = tabular,
+            backbone = null,
+            tabular = null,
             calibrated = regimeCal.bucket(input.series, input.tte.name).ready
         )
     }
 
+    @Synchronized
     fun rememberInference(
         ticker: String,
         series: String,
@@ -233,13 +266,18 @@ class HeavyMlRuntime(
         lastActivation[ticker] = Pending(
             series = series,
             tte = tte,
-            out = out,
+            out = out.copy(backbone = null, tabular = null),
             mid = mid,
             edgePp = edgePp,
             atMs = nowMs
         )
+        while (lastActivation.size > MAX_PENDING) {
+            val first = lastActivation.keys.firstOrNull() ?: break
+            lastActivation.remove(first)
+        }
     }
 
+    @Synchronized
     fun attachSettlement(ticker: String, outcomeYes: Boolean, settledAtMs: Long): ReplaySample? {
         val pending = lastActivation[ticker] ?: return null
         val o = pending.out
@@ -263,6 +301,7 @@ class HeavyMlRuntime(
         return sample
     }
 
+    @Synchronized
     fun applySettlements(
         samples: List<ReplaySample>,
         calSamples: List<RegimeCalibrator.Sample>,
@@ -283,6 +322,10 @@ class HeavyMlRuntime(
     }
 
     private val lastActivation = linkedMapOf<String, Pending>()
+
+    companion object {
+        const val MAX_PENDING = 24
+    }
 
     private data class Pending(
         val series: String,

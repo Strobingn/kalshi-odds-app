@@ -2,12 +2,19 @@ package com.dirk.kalshiodds.signal
 
 import android.os.SystemClock
 import android.util.Log
+import com.dirk.kalshiodds.data.local.results.AlertRow
+import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
+import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
+import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.PredictionLogStore
 import com.dirk.kalshiodds.prediction.SignalSnapshot
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.engine.BookScoreGate
+import com.dirk.kalshiodds.signal.engine.LatestWinsMailbox
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
+import java.util.concurrent.atomic.AtomicBoolean
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
@@ -15,6 +22,7 @@ import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.TickSource
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
@@ -36,6 +44,7 @@ class SignalHub(
     val scoring: ScoringEngine,
     private val notifier: SignalNotifier,
     private val logStore: PredictionLogStore? = null,
+    private val results: AsyncResultsWriter? = null,
     tickDispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
         Thread(r, "diphunter-ticks").apply { priority = Thread.NORM_PRIORITY + 1; isDaemon = true }
     }.asCoroutineDispatcher()
@@ -43,9 +52,19 @@ class SignalHub(
     private val job = SupervisorJob()
     val tickScope = CoroutineScope(
         job + tickDispatcher + CoroutineExceptionHandler { _, t ->
+            CrashBreadcrumb.record("tick", t)
             Log.e(TAG, "tick", t)
         }
     )
+    private val persistScope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, t ->
+            CrashBreadcrumb.record("persist", t)
+        }
+    )
+    private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
+    private val tickMailbox = LatestWinsMailbox<MarketTick>()
+    private val bookMailbox = LatestWinsMailbox<Long>()
+    private val logWriteBusy = AtomicBoolean(false)
 
     private val _status = MutableStateFlow(SignalStatus())
     val status: StateFlow<SignalStatus> = _status.asStateFlow()
@@ -89,6 +108,17 @@ class SignalHub(
 
     fun setWatchTickers(tickers: Set<String>) {
         _watchTickers.value = tickers
+        if (tickers.isNotEmpty()) {
+            runCatching { scoring.book.pruneTo(tickers) }
+            _scores.update { cur -> cur.filterKeys { it in tickers } }
+        }
+    }
+
+    fun restoreAlerts(alerts: List<SignalAlert>) {
+        if (alerts.isEmpty()) return
+        _alerts.update { cur ->
+            if (cur.isNotEmpty()) cur else alerts.take(MAX_ALERTS)
+        }
     }
 
     fun setConnection(
@@ -116,7 +146,9 @@ class SignalHub(
     }
 
     fun ingestTick(tick: MarketTick) {
-        tickScope.launch { runCatching { processTick(tick, notify = true) } }
+        if (tickMailbox.offer(tick.ticker, tick)) {
+            tickScope.launch { drainTicks() }
+        }
     }
 
     fun ingestBookSnapshot(
@@ -126,15 +158,10 @@ class SignalHub(
         seq: Int?,
         receiveElapsedNanos: Long
     ) {
-        tickScope.launch {
-            runCatching {
-                if (!CryptoMarkets.isCryptoTicker(ticker)) return@runCatching
-                if (!settings.isWatchedTicker(ticker)) return@runCatching
-                scoring.applySnapshot(ticker, yesLevels, noLevels, seq)
-                publishBookScore(ticker, receiveElapsedNanos)
-                scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
-            }
-        }
+        if (!CryptoMarkets.isCryptoTicker(ticker)) return
+        if (!settings.isWatchedTicker(ticker)) return
+        runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
+        requestBookScore(ticker, receiveElapsedNanos)
     }
 
     fun ingestBookDelta(
@@ -145,13 +172,51 @@ class SignalHub(
         seq: Int?,
         receiveElapsedNanos: Long
     ) {
-        tickScope.launch {
-            runCatching {
-                if (!CryptoMarkets.isCryptoTicker(ticker)) return@runCatching
-                if (!settings.isWatchedTicker(ticker)) return@runCatching
-                scoring.applyDelta(ticker, price, delta, side, seq)
-                publishBookScore(ticker, receiveElapsedNanos)
-                scoring.maybeAlertFromBook(ticker, settings, receiveElapsedNanos)?.let { emitAlert(it) }
+        if (!CryptoMarkets.isCryptoTicker(ticker)) return
+        if (!settings.isWatchedTicker(ticker)) return
+        // Apply on the WS thread under TickBook's lock — cheap. Scoring is
+        // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
+        runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }
+        requestBookScore(ticker, receiveElapsedNanos)
+    }
+
+    private fun requestBookScore(ticker: String, receiveElapsedNanos: Long) {
+        if (bookMailbox.offer(ticker, receiveElapsedNanos)) {
+            tickScope.launch { drainBooks() }
+        }
+    }
+
+    private suspend fun drainTicks() {
+        try {
+            while (true) {
+                val batch = tickMailbox.drain()
+                if (batch.isEmpty()) break
+                for ((_, tick) in batch) {
+                    runCatching { processTick(tick, notify = true) }
+                }
+            }
+        } finally {
+            if (tickMailbox.markIdleAndNeedsRerun()) {
+                tickScope.launch { drainTicks() }
+            }
+        }
+    }
+
+    private suspend fun drainBooks() {
+        try {
+            while (true) {
+                val batch = bookMailbox.drain()
+                if (batch.isEmpty()) break
+                for ((ticker, recv) in batch) {
+                    runCatching {
+                        publishBookScore(ticker, recv)
+                        scoring.maybeAlertFromBook(ticker, settings, recv)?.let { emitAlert(it) }
+                    }
+                }
+            }
+        } finally {
+            if (bookMailbox.markIdleAndNeedsRerun()) {
+                tickScope.launch { drainBooks() }
             }
         }
     }
@@ -160,7 +225,10 @@ class SignalHub(
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return
         if (!settings.isWatchedTicker(tick.ticker)) return
         val t0 = tick.receiveElapsedNanos
-        val scored = scoring.score(tick, settings)
+        val scored = runCatching { scoring.score(tick, settings) }.getOrElse { t ->
+            CrashBreadcrumb.record("processTick ${tick.ticker}", t)
+            null
+        }
         if (scored != null) {
             _scores.update { it + (tick.ticker to scored) }
             persistScore(tick, scored)
@@ -183,42 +251,76 @@ class SignalHub(
     }
 
     private suspend fun publishBookScore(ticker: String, receiveElapsedNanos: Long) {
+        val now = System.currentTimeMillis()
+        if (!BookScoreGate.shouldPublish(ticker, now, lastBookPublishMs)) return
         val tick = scoring.book.tickFromBook(ticker, receiveElapsedNanos) ?: return
-        val scored = scoring.score(tick, settings) ?: return
+        val scored = runCatching { scoring.score(tick, settings) }.getOrNull() ?: return
         _scores.update { it + (ticker to scored) }
         persistScore(tick, scored)
     }
 
-    private suspend fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
-        val store = logStore ?: return
+    private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
+        val now = System.currentTimeMillis()
         runCatching {
-            store.upsertOpenPrediction(
-                ticker = tick.ticker,
-                series = tick.series,
-                predictedYes = scored.fairValuePp / 100.0,
-                predictedNo = 1.0 - scored.fairValuePp / 100.0,
-                marketMid = scored.marketMidPp / 100.0,
-                timestampMs = System.currentTimeMillis(),
-                closeTimeMs = tick.closeTimeEpochMs ?: scoring.book.closeTime(tick.ticker),
-                snapshot = SignalSnapshot(
-                    predictedSide = scored.predictedSide,
+            results?.enqueueSnapshot(
+                ScoredSnapshotRow(
+                    ticker = tick.ticker,
+                    series = tick.series,
+                    side = scored.predictedSide,
                     edgePp = scored.deltaPp,
-                    confidence = scored.confidence,
+                    fairPp = scored.fairValuePp,
+                    marketPp = scored.marketMidPp,
                     regime = scored.regime.name,
-                    tteBucket = scored.tteRegime.name,
-                    fairValuePp = scored.fairValuePp,
-                    calibrated = scored.calibrated,
-                    featureDevs = scored.featureDevs,
                     uncertainty = scored.uncertainty,
-                    timeToMoveSec = scored.timeToMoveSec,
-                    midVolPp = scored.midVolPp,
-                    pFill = scored.pFill,
-                    wouldAlert = scored.passedFilter && kotlin.math.abs(scored.deltaPp) >= settings.edgeThresholdPp,
-                    mlpYes = scored.mlpPp?.div(100.0),
-                    cnnYes = scored.cnnPp?.div(100.0),
-                    gbmYes = scored.gbmPp?.div(100.0)
+                    createdAtMs = now,
+                    confidence = scored.confidence,
+                    tte = scored.tteRegime.name,
+                    heavyMl = scored.heavyMl,
+                    note = scored.ensembleNote
                 )
             )
+        }
+        // SQLite/text already have the row. Skip the DataStore JSON rewrite
+        // when heap is tight or another write is in flight — that rewrite is
+        // what filled the 256MB heap on SM-S928U (CancellableContinuationImpl).
+        if (com.dirk.kalshiodds.signal.ml.HeapGuard.isTight()) return
+        val store = logStore ?: return
+        if (!logWriteBusy.compareAndSet(false, true)) return
+        persistScope.launch {
+            try {
+                runCatching {
+                    store.upsertOpenPrediction(
+                        ticker = tick.ticker,
+                        series = tick.series,
+                        predictedYes = scored.fairValuePp / 100.0,
+                        predictedNo = 1.0 - scored.fairValuePp / 100.0,
+                        marketMid = scored.marketMidPp / 100.0,
+                        timestampMs = System.currentTimeMillis(),
+                        closeTimeMs = tick.closeTimeEpochMs ?: scoring.book.closeTime(tick.ticker),
+                        snapshot = SignalSnapshot(
+                            predictedSide = scored.predictedSide,
+                            edgePp = scored.deltaPp,
+                            confidence = scored.confidence,
+                            regime = scored.regime.name,
+                            tteBucket = scored.tteRegime.name,
+                            fairValuePp = scored.fairValuePp,
+                            calibrated = scored.calibrated,
+                            featureDevs = scored.featureDevs,
+                            uncertainty = scored.uncertainty,
+                            timeToMoveSec = scored.timeToMoveSec,
+                            midVolPp = scored.midVolPp,
+                            pFill = scored.pFill,
+                            wouldAlert = scored.passedFilter &&
+                                kotlin.math.abs(scored.deltaPp) >= settings.edgeThresholdPp,
+                            mlpYes = scored.mlpPp?.div(100.0),
+                            cnnYes = scored.cnnPp?.div(100.0),
+                            gbmYes = scored.gbmPp?.div(100.0)
+                        )
+                    )
+                }
+            } finally {
+                logWriteBusy.set(false)
+            }
         }
     }
 
@@ -231,6 +333,22 @@ class SignalHub(
         }
         val complete = alert.copy(notifyElapsedNanos = posted)
         _alerts.update { (listOf(complete) + it).take(MAX_ALERTS) }
+        runCatching {
+            results?.enqueueAlert(
+                AlertRow(
+                    alertId = complete.id,
+                    ticker = complete.ticker,
+                    series = complete.series,
+                    side = if (complete.deltaPp >= 0) "YES" else "NO",
+                    edgePp = complete.deltaPp,
+                    fairPp = complete.fairValuePp,
+                    marketPp = complete.marketMidPp,
+                    reason = complete.reason,
+                    regime = complete.regime,
+                    createdAtMs = complete.createdAtMs
+                )
+            )
+        }
         Log.d(TAG, "alert ticker=${alert.ticker} delta=${alert.deltaPp} notifyMs=${complete.latencyToNotifyMs}")
     }
 

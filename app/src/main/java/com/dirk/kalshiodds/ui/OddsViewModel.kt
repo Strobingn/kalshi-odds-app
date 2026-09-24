@@ -4,8 +4,10 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
@@ -42,7 +44,9 @@ data class OddsUiState(
     val alertsPaused: Boolean = false,
     val pauseBanner: String? = null,
     val mutedSummary: String? = null,
-    val tickets: TicketUiState = TicketUiState()
+    val tickets: TicketUiState = TicketUiState(),
+    val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
+    val mlGuardNote: String? = null
 )
 
 /**
@@ -62,6 +66,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private var pollJob: Job? = null
     private var ticketRebuildJob: Job? = null
+    private var scoreOverlayJob: Job? = null
     private var currentIntervalMs: Long = BASE_POLL_MS
 
     init {
@@ -129,13 +134,28 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 hub.scores.collect { scores ->
-                    runCatching {
-                        _state.update { s ->
-                            val snap = s.snapshot ?: return@update s
-                            s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+                    scoreOverlayJob?.cancel()
+                    scoreOverlayJob = viewModelScope.launch {
+                        delay(SCORE_OVERLAY_DEBOUNCE_MS)
+                        runCatching {
+                            _state.update { s ->
+                                val snap = s.snapshot ?: return@update s
+                                s.copy(snapshot = snap.overlayScores(scores, s.settings.edgeThresholdPp))
+                            }
+                            scheduleRebuildTickets()
                         }
-                        scheduleRebuildTickets()
                     }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                val rows = withContext(Dispatchers.IO) { container.resultsStore.recentSnapshots(24) }
+                _state.update {
+                    it.copy(
+                        persistedHistory = rows,
+                        mlGuardNote = HeavyMlGuard.lastReason?.let { r -> "Light mode: $r" }
+                    )
                 }
             }
         }
@@ -339,5 +359,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
         const val WS_METADATA_POLL_MS = 15_000L
+        const val SCORE_OVERLAY_DEBOUNCE_MS = 250L
     }
 }

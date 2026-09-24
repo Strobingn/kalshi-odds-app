@@ -108,8 +108,13 @@ object SignalConstants {
 
     // --- v0.3.0 heavy ML (on-device; never unsupervised betting) ---
 
-    /** Master switch. Off = identical 0.2.x MLP blend. */
-    const val DEFAULT_HEAVY_ML = true
+    /**
+     * Master switch. Default **off** (light / 0.2.x blend) after 0.3.0
+     * devices OOM'd on Heavy ML + book-delta floods (256MB growth limit).
+     * Turn on in Settings if the phone can take it. One OOM persists light
+     * mode; other failures auto-disable after 3.
+     */
+    const val DEFAULT_HEAVY_ML = false
     const val DEFAULT_SEQUENCE_MODEL = true
     const val DEFAULT_GBM = true
     const val DEFAULT_UNCERTAINTY_GATE = true
@@ -124,7 +129,8 @@ object SignalConstants {
 
     // --- v0.3.0 extended AI (10–19); advisory / gates only ---
 
-    const val DEFAULT_EXTENDED_AI = true
+    /** Master switch for 10–19. Default off (light mode) — see Heavy ML. */
+    const val DEFAULT_EXTENDED_AI = false
     const val DEFAULT_REGIME_CLASSIFIER = true
     const val DEFAULT_ANOMALY_GATE = true
     const val DEFAULT_SURVIVAL_MODEL = true

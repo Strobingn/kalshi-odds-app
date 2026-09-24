@@ -14,21 +14,41 @@ class TinyLstm(
     private val bHh: FloatArray
 ) {
     val hidden: Int get() = bIh.size / 4
+    private var gatesScratch: FloatArray? = null
+    private var hScratch: FloatArray? = null
+    private var cScratch: FloatArray? = null
+    private var hAlt: FloatArray? = null
+    private var cAlt: FloatArray? = null
 
     fun encode(frames: Array<FloatArray>): FloatArray {
         val hDim = hidden
-        var h = FloatArray(hDim)
-        var c = FloatArray(hDim)
+        val h0 = reuse(hScratch, hDim).also { hScratch = it; it.fill(0f) }
+        val c0 = reuse(cScratch, hDim).also { cScratch = it; it.fill(0f) }
+        val h1 = reuse(hAlt, hDim).also { hAlt = it }
+        val c1 = reuse(cAlt, hDim).also { cAlt = it }
+        var h = h0
+        var c = c0
+        var flip = false
         for (t in frames.indices) {
-            val step = lstmStep(frames[t], h, c, hDim)
-            h = step.first
-            c = step.second
+            val hn = if (flip) h0 else h1
+            val cn = if (flip) c0 else c1
+            lstmStep(frames[t], h, c, hn, cn, hDim)
+            h = hn
+            c = cn
+            flip = !flip
         }
-        return h
+        return h.copyOf()
     }
 
-    private fun lstmStep(x: FloatArray, hPrev: FloatArray, cPrev: FloatArray, hDim: Int): Pair<FloatArray, FloatArray> {
-        val gates = FloatArray(hDim * 4)
+    private fun lstmStep(
+        x: FloatArray,
+        hPrev: FloatArray,
+        cPrev: FloatArray,
+        h: FloatArray,
+        c: FloatArray,
+        hDim: Int
+    ) {
+        val gates = reuse(gatesScratch, hDim * 4).also { gatesScratch = it }
         for (i in gates.indices) {
             var acc = bIh.getOrElse(i) { 0f } + bHh.getOrElse(i) { 0f }
             val wi = wIh.getOrElse(i) { floatArrayOf() }
@@ -39,8 +59,6 @@ class TinyLstm(
             for (j in 0 until hn) acc += wh[j] * hPrev[j]
             gates[i] = acc
         }
-        val h = FloatArray(hDim)
-        val c = FloatArray(hDim)
         for (i in 0 until hDim) {
             val ii = sig(gates[i])
             val ff = sig(gates[hDim + i])
@@ -49,8 +67,10 @@ class TinyLstm(
             c[i] = ff * cPrev[i] + ii * gg
             h[i] = oo * tanh(c[i].toDouble()).toFloat()
         }
-        return h to c
     }
+
+    private fun reuse(existing: FloatArray?, size: Int): FloatArray =
+        if (existing != null && existing.size == size) existing else FloatArray(size)
 
     companion object {
         const val HIDDEN = 8

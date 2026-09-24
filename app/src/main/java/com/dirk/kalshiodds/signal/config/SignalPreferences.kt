@@ -211,6 +211,20 @@ class SignalPreferences(
 
     fun credentialSnapshot(): Pair<String, String> = secrets.snapshot()
 
+    /**
+     * 0.3.1 one-time: force light mode (Heavy ML + Extended AI off) so
+     * devices that persisted 0.3.0 defaults stop OOM-looping. Users can
+     * re-enable in Settings.
+     */
+    suspend fun applySafeLightDefaultsIfNeeded() {
+        app.signalDataStore.edit { prefs ->
+            if (prefs[KEY_SAFE_V031] == true) return@edit
+            prefs[KEY_HEAVY_ML] = false
+            prefs[KEY_EXT_AI] = false
+            prefs[KEY_SAFE_V031] = true
+        }
+    }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         app.signalDataStore.edit(block)
     }
@@ -317,6 +331,7 @@ class SignalPreferences(
         private val KEY_CONFORMAL = booleanPreferencesKey("conformal_enabled")
         private val KEY_META = booleanPreferencesKey("meta_label_enabled")
         private val KEY_PATH_SIM = booleanPreferencesKey("path_sim_enabled")
+        private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

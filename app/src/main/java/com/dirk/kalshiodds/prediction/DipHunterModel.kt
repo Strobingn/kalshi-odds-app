@@ -150,7 +150,11 @@ class DipHunterModel(
                 val output = Array(1) { FloatArray(2) }
                 tflite.run(input, output)
                 output[0]
-            }.getOrElse { FallbackWeights.forward(scaled) }
+            }.getOrElse { err ->
+                tfliteReady = false
+                com.dirk.kalshiodds.signal.ml.HeavyMlGuard.noteFailure(err, "tflite")
+                FallbackWeights.forward(scaled)
+            }
         }
         return FallbackWeights.forward(scaled)
     }

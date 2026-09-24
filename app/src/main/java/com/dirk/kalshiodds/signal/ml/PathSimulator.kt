@@ -9,7 +9,7 @@ import kotlin.math.sqrt
  * Returns P(predicted edge still has the same sign at expiry).
  */
 object PathSimulator {
-    const val DEFAULT_PATHS = 48
+    const val DEFAULT_PATHS = 16
     const val STEPS = 10
 
     data class Result(

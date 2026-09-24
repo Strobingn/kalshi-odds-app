@@ -4,17 +4,22 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.data.local.results.ResultsExporter
+import com.dirk.kalshiodds.data.local.results.ResultsFileExport
 import com.dirk.kalshiodds.signal.service.BatteryExemption
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.config.SecureCredentialStore
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.trade.PayoutGate
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class SettingsUiState(
     val settings: SignalSettings = SignalSettings(),
@@ -28,11 +33,14 @@ data class SettingsUiState(
     val pendingRaiseStake: Double? = null,
     val raiseDraft: String = "",
     val raiseError: String? = null,
-    val batteryUnrestricted: Boolean = false
+    val batteryUnrestricted: Boolean = false,
+    val exportMessage: String? = null,
+    val mlGuardNote: String? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
-    private val prefs = KalshiOddsApp.from(application).container.preferences
+    private val container = KalshiOddsApp.from(application).container
+    private val prefs = container.preferences
 
     private val _state = MutableStateFlow(SettingsUiState())
     val state: StateFlow<SettingsUiState> = _state.asStateFlow()
@@ -67,8 +75,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun refreshBatteryStatus() {
+        val persistReason = runCatching { container.oomFlag.reason() }.getOrNull()
+        val persistOn = runCatching { container.oomFlag.isDisabled() }.getOrElse { false }
         _state.update {
-            it.copy(batteryUnrestricted = BatteryExemption.isUnrestricted(getApplication()))
+            it.copy(
+                batteryUnrestricted = BatteryExemption.isUnrestricted(getApplication()),
+                mlGuardNote = when {
+                    HeavyMlGuard.lastReason != null ->
+                        "Heavy ML auto-disabled: ${HeavyMlGuard.lastReason}. Scoring is the 0.2.x blend. Re-enable only if you accept the heap risk."
+                    persistOn ->
+                        "Heavy ML stays off after an out-of-memory crash${persistReason?.let { r -> " ($r)" } ?: ""}. Scoring is the 0.2.x blend."
+                    else -> null
+                }
+            )
         }
     }
 
@@ -98,14 +117,35 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setResumeOnNewSession(v: Boolean) = viewModelScope.launch { prefs.updateResumeOnNewSession(v) }
     fun setTicketsEnabled(v: Boolean) = viewModelScope.launch { prefs.updateTicketsEnabled(v) }
     fun setTicketRespectGates(v: Boolean) = viewModelScope.launch { prefs.updateTicketRespectGates(v) }
-    fun setHeavyMl(v: Boolean) = viewModelScope.launch { prefs.updateHeavyMl(v) }
+    fun setLightMode(on: Boolean) = viewModelScope.launch {
+        if (on) {
+            prefs.updateHeavyMl(false)
+            prefs.updateExtendedAi(false)
+        } else {
+            clearOomLatch()
+            prefs.updateHeavyMl(true)
+        }
+    }
+    fun setHeavyMl(v: Boolean) = viewModelScope.launch {
+        if (v) clearOomLatch()
+        prefs.updateHeavyMl(v)
+    }
     fun setSequenceModel(v: Boolean) = viewModelScope.launch { prefs.updateSequenceModel(v) }
     fun setGbm(v: Boolean) = viewModelScope.launch { prefs.updateGbm(v) }
     fun setUncertaintyGate(v: Boolean) = viewModelScope.launch { prefs.updateUncertaintyGate(v) }
     fun setMaxUncertainty(v: Double) = viewModelScope.launch { prefs.updateMaxUncertainty(v) }
     fun setContinualFineTune(v: Boolean) = viewModelScope.launch { prefs.updateContinualFineTune(v) }
     fun setPolicyEvalStakeUsd(v: Double) = viewModelScope.launch { prefs.updatePolicyEvalStakeUsd(v) }
-    fun setExtendedAi(v: Boolean) = viewModelScope.launch { prefs.updateExtendedAi(v) }
+    fun setExtendedAi(v: Boolean) = viewModelScope.launch {
+        if (v) clearOomLatch()
+        prefs.updateExtendedAi(v)
+    }
+
+    private fun clearOomLatch() {
+        HeavyMlGuard.reset()
+        runCatching { container.oomFlag.clear() }
+        refreshBatteryStatus()
+    }
     fun setRegimeClassifier(v: Boolean) = viewModelScope.launch { prefs.updateRegimeClassifier(v) }
     fun setAnomalyGate(v: Boolean) = viewModelScope.launch { prefs.updateAnomalyGate(v) }
     fun setSurvivalModel(v: Boolean) = viewModelScope.launch { prefs.updateSurvivalModel(v) }
@@ -184,6 +224,25 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
         prefs.saveCredentials(keyId, pem)
         _state.update { it.copy(pemDraft = "", credentialMessage = "Key stored on device (PEM never logged)") }
+    }
+
+    fun exportResults() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val store = KalshiOddsApp.from(getApplication()).container.resultsStore
+                    val csv = ResultsExporter.csv(store.exportBundle())
+                    ResultsFileExport.write(getApplication(), csv)
+                }.getOrElse {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(
+                        false,
+                        null,
+                        it.message ?: "Export failed"
+                    )
+                }
+            }
+            _state.update { it.copy(exportMessage = result.message) }
+        }
     }
 
     fun clearCredentials() {

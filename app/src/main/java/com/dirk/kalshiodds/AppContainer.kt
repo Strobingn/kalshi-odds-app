@@ -3,6 +3,12 @@ package com.dirk.kalshiodds
 import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiTradeClient
 import com.dirk.kalshiodds.data.api.NetworkModule
+import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
+import com.dirk.kalshiodds.data.local.results.OomFlagStore
+import com.dirk.kalshiodds.data.local.results.ResultsStore
+import com.dirk.kalshiodds.data.local.results.RollingTextLog
+import com.dirk.kalshiodds.data.local.results.SqliteResultsStore
+import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
 import com.dirk.kalshiodds.data.repo.MarketRepository
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import com.dirk.kalshiodds.prediction.PredictionLogStore
@@ -20,6 +26,7 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlStore
 import com.dirk.kalshiodds.signal.ml.NewsPulseCache
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.trade.TicketSession
+import java.io.File
 
 class AppContainer(context: Context) {
     private val app = context.applicationContext
@@ -31,6 +38,11 @@ class AppContainer(context: Context) {
     val heavyStore = HeavyMlStore(app)
     val notifier = SignalNotifier(app)
     val newsCache = NewsPulseCache()
+    val oomFlag = OomFlagStore(app)
+    val resultsStore: ResultsStore = runCatching { SqliteResultsStore(app) }
+        .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
+    val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
+    val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
     val scoring = ScoringEngine(
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
@@ -41,10 +53,16 @@ class AppContainer(context: Context) {
         adapterStore = adapterStore,
         guardrailStore = guardrailStore,
         scoring = scoring,
-        heavyStore = heavyStore
+        heavyStore = heavyStore,
+        results = resultsWriter
     )
     val external = ExternalMarketCache()
-    val hub = SignalHub(scoring = scoring, notifier = notifier, logStore = logStore)
+    val hub = SignalHub(
+        scoring = scoring,
+        notifier = notifier,
+        logStore = logStore,
+        results = resultsWriter
+    )
     val tradeClient = KalshiTradeClient(
         api = NetworkModule.tradeApi { preferences.credentialSnapshot() },
         credentials = { preferences.credentialSnapshot() }
@@ -55,7 +73,8 @@ class AppContainer(context: Context) {
         },
         cancelOrder = { order ->
             runCatching { tradeClient.cancel(order) }
-        }
+        },
+        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
     )
     val repository = MarketRepository(
         context = app,
