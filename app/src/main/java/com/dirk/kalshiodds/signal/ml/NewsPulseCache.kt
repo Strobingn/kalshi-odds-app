@@ -3,8 +3,8 @@ package com.dirk.kalshiodds.signal.ml
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.nio.charset.Charsets
 import java.util.concurrent.TimeUnit
+import kotlin.text.Charsets
 
 /**
  * Fail-soft public headline fetch + cache. Any network error leaves the
