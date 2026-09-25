@@ -189,213 +189,222 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     docs = (meta or {}).get("docs") or {}
     cutoff = (meta or {}).get("cutoff") or {}
 
-    md = f"""# DipHunter vs Kalshi 15m crypto — backtest 2026-09-25
+    days = result.get("days") or ["?"]
+    is_days = result.get("is_days") or [""]
+    oos_days = result.get("oos_days") or [""]
+    by_coin = result.get("by_coin") or {}
+    hist_url = docs.get("historical", "https://docs.kalshi.com/getting_started/historical_data")
+    candles_url = docs.get("candles", "https://docs.kalshi.com/api-reference/market/get-market-candlesticks")
+    hist_candles_url = docs.get("hist_candles", "https://docs.kalshi.com/api-reference/historical/get-historical-market-candlesticks")
+    rule_json = json.dumps(
+        {k: rule[k] for k in rule if k in ("coin", "tte", "max_ask", "min_edge", "n", "wins", "win_rate", "pnl", "pnl_per_bet", "ci95")},
+        indent=2,
+        default=str,
+    )
+    rel_rows = "\n".join(
+        f"| {r['bin']} | {r['n']} | {r.get('pred')} | {r.get('obs')} |"
+        for r in (cal.get("reliability_model") or [])
+    )
+    is_rows = "\n".join(
+        f"| {label} {_fmt((result['strategies'].get(key) or {}).get('is_') or {})}"
+        for key, label in STRATS
+    )
+    app_dirk = result["strategies"].get("app_dirk") or {}
 
-Honest historical replay of the **as-shipped 0.3.10 decision path** on settled
-`KXBTC15M` / `KXETH15M` / `KXSOL15M` windows. No look-ahead. One bet per market
-(first qualifying minute). $5 max all-in including Kalshi taker fees.
-Dirk's rule: only take a bet if profit-if-win ≥ $10 (asks around 31¢ or less).
+    parts = []
+    parts.append("# DipHunter vs Kalshi 15m crypto — backtest 2026-09-25")
+    parts.append("")
+    parts.append(
+        "Honest historical replay of the **as-shipped 0.3.10 decision path** on settled "
+        "`KXBTC15M` / `KXETH15M` / `KXSOL15M` windows. No look-ahead. One bet per market "
+        "(first qualifying minute). $5 max all-in including Kalshi taker fees. "
+        "Dirk's rule: only take a bet if profit-if-win ≥ $10 (asks around 31¢ or less)."
+    )
+    parts.append("")
+    parts.append("## Data span")
+    parts.append("")
+    parts.append("| | |")
+    parts.append("|---|---|")
+    parts.append(f"| First open | {span[0]} |")
+    parts.append(f"| Last close | {span[1]} |")
+    parts.append(f"| UTC days | {len(days)} ({days[0]} → {days[-1]}) |")
+    parts.append(
+        f"| Settled markets used | **{result['n_markets']}** "
+        f"(BTC {by_coin.get('BTC', 0)}, ETH {by_coin.get('ETH', 0)}, SOL {by_coin.get('SOL', 0)}) |"
+    )
+    parts.append(f"| Decision minutes scored | {result['n_decisions']} |")
+    parts.append(f"| In-sample days (tune only) | {len(is_days)}: {is_days[0]} → {is_days[-1]} |")
+    parts.append(f"| **Out-of-sample days (what counts)** | {len(oos_days)}: {oos_days[0]} → {oos_days[-1]} |")
+    parts.append(f"| Kalshi `market_settled_ts` cutoff | {cutoff.get('market_settled_ts', 'see meta.json')} |")
+    parts.append("")
+    parts.append(
+        "Live settled markets (after the cutoff) come from `GET /markets?status=settled` "
+        "with `min_settled_ts` / `max_settled_ts`. Older windows, if requested, come from "
+        "`GET /historical/markets` and `GET /historical/markets/{ticker}/candlesticks` "
+        f"([historical data]({hist_url}), [candlesticks]({candles_url}), "
+        f"[historical candles]({hist_candles_url})). "
+        "Public market-data; no auth. Rate limit respected (~8 reads/s, well under the "
+        "basic 20/s). Coinbase Exchange 1-minute candles (`granularity=60`, 300/request) "
+        "for BTC-USD / ETH-USD / SOL-USD over the same span."
+    )
+    parts.append("")
+    parts.append("Raw cache is **not** committed (too large). A small fixture lives under `tools/backtest/fixtures/`.")
+    parts.append("")
+    parts.append("## What was replayed")
+    parts.append("")
+    parts.append(
+        "At elapsed minutes 1…13 the harness feeds **only data available at that minute** "
+        "into a port of the production classes:"
+    )
+    parts.append("")
+    parts.append("- `FeatureVector` + `FallbackWeights` / `DipHunterModel.predict` (TFLite unavailable on this JVM path → same embedded MLP the phone uses when TFLite fails)")
+    parts.append("- `ScoringEngine` light blend (Heavy ML and extended AI **default OFF** in 0.3.10)")
+    parts.append("- Reconstructable TickBook channels: mid history, 1-minute velocity/acceleration, volume-delta flow (no taker flag), related-crypto mid, Coinbase spot nudge")
+    parts.append("- `DigitalOptionFairValue`, `SpotFeatureMath`, `DirectionSanity`, `TapeConflict.primaryFromMarket`")
+    parts.append("- `NetExpectedValue`, `KalshiFee` (ceil_6dp then ceil_cent), `TicketBuilder.resolveSide`")
+    parts.append("- Skip filter / 5pp alert gate for strategy (a)")
+    parts.append("")
+    parts.append(
+        "**The shipped ticket side is the hero/primary side** (`TicketBuilder.resolveSide` "
+        "prefers `primaryHeroSide` from tape+spot over the model fade). That is what strategies (a) and (b) bet."
+    )
+    parts.append("")
+    parts.append("### Features that could not be reconstructed (neutral / dropped)")
+    parts.append("")
+    parts.append("| Feature | Why missing | What the engine does |")
+    parts.append("|---|---|---|")
+    parts.append("| Order-book imbalance / depth / decay | No historical L2 snapshots | Weight drops out, blend renormalizes |")
+    parts.append("| Quote-pull / cancel spike | WebSocket book deltas | Weight drops out |")
+    parts.append("| Taker aggressor | No public historical trade-side tape | `aggressorScore = 0`; flow uses mid-change sign only |")
+    parts.append("| Sub-second BTC lead–lag | 1-minute bars only | Weight drops out |")
+    parts.append("| Heavy ML sequence (30×10s bins) | Needs size/imbalance/aggressor/spot at 10s | Default off; not faked |")
+    parts.append("| News / rival flow / MM / conformal / meta / path | Live-only or default off | Off |")
+    parts.append("| OnlineAdapter / Calibrator | Need *this user's* prior settlements | Cold-start identity |")
+    parts.append("")
+    parts.append("We also run the **fair-value baseline alone** (digital Φ(d2) / spot vs strike) as strategy (c).")
+    parts.append("")
+    parts.append("## Fill and fee")
+    parts.append("")
+    parts.append("- Fill = conservative taker: **worse of candle close and high** on the side we buy. DOWN ask = `1 − yes_bid`; high DOWN ask = `1 − yes_bid.low`.")
+    parts.append("- Unusable 0.000 / 1.000 prints are dropped (`KalshiPrice` 0.1¢–99.9¢).")
+    parts.append("- Fee: `ceil_cent(C·P + ceil_6dp(0.07·C·P·(1−P)))` for a non-direct member. `C` is the max integer with that debit ≤ $5.")
+    parts.append("- P&L = `C × $1 − cost` if the side wins, else `−cost`.")
+    parts.append("- First qualifying minute only. **“Best minute” is not allowed.**")
+    parts.append("")
+    parts.append("## Out-of-sample results (what counts)")
+    parts.append("")
+    parts.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |")
+    parts.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    parts.append("\n".join(oos_rows))
+    parts.append("")
+    parts.append("In-sample tables are in the appendix — they were used only to tune the optional rule, never to pick the conclusion.")
+    parts.append("")
+    parts.append("![OOS cumulative P&L](backtest/oos_cumulative_pnl.png)")
+    parts.append("")
+    parts.append("## Walk-forward tuned rule")
+    parts.append("")
+    parts.append("Search grid (IS days only): coin ∈ {any,BTC,ETH,SOL}, time-left bucket, max ask ∈ {20,31,40,50}¢, min |net edge| ∈ {0,3,5,8} pp, plus Dirk's profit ≥ $10 filter. Minimum 20 IS bets to count.")
+    parts.append("")
+    parts.append("```")
+    parts.append(rule_json)
+    parts.append("```")
+    parts.append("")
+    parts.append("OOS application of that exact rule is the `IS-tuned rule` row above.")
+    parts.append("")
+    parts.append("## Breakdowns (OOS, app + Dirk)")
+    parts.append("")
+    parts.append(_brk_table("By coin", app_dirk.get("oos_by_coin") or {}))
+    parts.append(_brk_table("By time-left", app_dirk.get("oos_by_tte") or {}))
+    parts.append(_brk_table("By fill ask", app_dirk.get("oos_by_ask") or {}))
+    parts.append(_brk_table("By |spot − strike|", app_dirk.get("oos_by_dist") or {}))
+    parts.append("## Calibration (all decision minutes, not just bets)")
+    parts.append("")
+    parts.append("| Forecast | N | Brier | Log-loss |")
+    parts.append("|---|---:|---:|---:|")
+    parts.append(f"| Blended fair P(YES) | {cal.get('model', {}).get('n')} | {cal.get('model', {}).get('brier')} | {cal.get('model', {}).get('logloss')} |")
+    parts.append(f"| Fallback MLP P(YES) | {cal.get('mlp', {}).get('n')} | {cal.get('mlp', {}).get('brier')} | {cal.get('mlp', {}).get('logloss')} |")
+    parts.append(f"| Digital fair P(YES) | {cal.get('digital', {}).get('n')} | {cal.get('digital', {}).get('brier')} | {cal.get('digital', {}).get('logloss')} |")
+    parts.append(f"| Market mid | {cal.get('market', {}).get('n')} | {cal.get('market', {}).get('brier')} | {cal.get('market', {}).get('logloss')} |")
+    parts.append("")
+    parts.append("Reliability table (model):")
+    parts.append("")
+    parts.append("| Bin | N | Mean forecast | Observed YES |")
+    parts.append("|---|---:|---:|---:|")
+    parts.append(rel_rows)
+    parts.append("")
+    parts.append("![Calibration](backtest/calibration.png)")
+    parts.append("")
+    parts.append("Lower Brier is better. A well-calibrated 15m market mid is usually ~0.15–0.25.")
+    parts.append("**0.003 is not a plausible mean Brier on real 15-minute binaries** unless the forecast is already ~95% and almost always correct — which is the scorecard bug below, not a miracle model.")
+    parts.append("")
+    parts.append("## Conclusion")
+    parts.append("")
+    parts.append(concl)
+    parts.append("")
+    parts.append("## Scorecard bug (0/5 · Brier 0.003)")
+    parts.append("")
+    parts.append("The in-app line `Scorecard: 0/5 · Brier 0.003` mixes **two different questions**.")
+    parts.append("")
+    parts.append("1. **Hit rate** (`0/5`) uses the **picked side** (`predictedSide` / hero side) vs the settlement YES/NO.")
+    parts.append("2. **Brier** uses `(predictedYes − 1_{result=yes})²` — a P(YES) calibration score, *not* a score of the side you bet.")
+    parts.append("")
+    parts.append("`PredictionLogStore.applySettlement` (`app/src/main/java/com/dirk/kalshiodds/prediction/PredictionLogStore.kt` **184–193**):")
+    parts.append("")
+    parts.append("```kotlin")
+    parts.append("val predYes = when (e.predictedSide?.uppercase()) {")
+    parts.append('    "YES" -> true')
+    parts.append('    "NO" -> false')
+    parts.append("    else -> e.predictedYes > 0.5")
+    parts.append("}")
+    parts.append('val actualYes = normalized == "yes"')
+    parts.append("val score = if (predYes == actualYes) 1 else 0")
+    parts.append("val y = if (actualYes) 1.0 else 0.0")
+    parts.append("val brier = (e.predictedYes - y) * (e.predictedYes - y)")
+    parts.append("```")
+    parts.append("")
+    parts.append("The home-screen string (`OddsViewModel.kt` **868–871**) prints `scoreSummary().correct/total` next to `meanBrier` with `%.3f`.")
+    parts.append("")
+    parts.append("**How you get 0/5 and Brier 0.003 together**")
+    parts.append("")
+    parts.append("If the five settled logs have `predictedYes ≈ 0.945` and `result = yes` but `predictedSide = NO` (the engine faded a 96¢ YES because fair was 94.5¢):")
+    parts.append("")
+    parts.append("- side hit rate = 0/5")
+    parts.append("- Brier = (0.945 − 1)² ≈ **0.003**")
+    parts.append("")
+    parts.append("That Brier is in **probability² units on [0,1]** (proper Brier, not percent). It looks “excellent” because P(YES) agreed with the outcome. The **side you bet** was the opposite. The same inconsistency is in `ScorecardMetrics.brierOf` / `sideHit` (`ScorecardMetrics.kt` **257–269**).")
+    parts.append("")
+    parts.append(
+        f"Replay of first-alert minutes in this backtest (shadow, not the phone log): "
+        f"n={shadow.get('n')}, side hits={shadow.get('side_hits')}, "
+        f"mean P(YES) Brier={shadow.get('mean_brier_yes')}, "
+        f"mean **side** Brier={shadow.get('mean_brier_side')}."
+    )
+    parts.append("")
+    parts.append("**Fix (do not edit production in this PR — describe only)**")
+    parts.append("")
+    parts.append("- `PredictionLogStore.kt:184–193`: store *two* scores, or pick one definition. Recommended: keep P(YES) Brier (statistically correct) **and** a side-Brier `p_side = predictedSide==NO ? 1-predictedYes : predictedYes`, `y_side = side_hit ? 1 : 0`, `brier_side = (p_side - y_side)²`. Label the UI “P(YES) Brier” vs “side hit rate” so they cannot be read as the same experiment.")
+    parts.append("- `ScorecardMetrics.kt:257–269`: same split; `window().brier` should not silently average a P(YES) Brier next to a side hit rate.")
+    parts.append("- `OddsViewModel.kt:868`: if `total < 20` (or `< ScorecardMetrics.MIN_HONEST_SAMPLES`), do not print Brier at all — 5 samples of 0.003 is noise dressed as precision.")
+    parts.append("")
+    parts.append("`SettlementScorer` itself is fine; it only writes `result`. The bug is the scorecard **definition**, not settlement lookup.")
+    parts.append("")
+    parts.append("## Appendix — in-sample (do not use for the decision)")
+    parts.append("")
+    parts.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | CI95 $/bet |")
+    parts.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    parts.append(is_rows)
+    parts.append("")
+    parts.append("## Repro")
+    parts.append("")
+    parts.append("```bash")
+    parts.append("python3 tools/backtest/run.py --days 28 --cache tools/backtest/cache")
+    parts.append("# Kotlin parity (no network):")
+    parts.append("./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.backtest.PipelineParityTest")
+    parts.append("./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.backtest.ScorecardBrierDiagnosisTest")
+    parts.append("```")
+    parts.append("")
+    md = "\n".join(parts)
 
-## Data span
-
-| | |
-|---|---|
-| First open | {span[0]} |
-| Last close | {span[1]} |
-| UTC days | {len(result.get('days') or [])} ({(result.get('days') or ['?'])[0]} → {(result.get('days') or ['?'])[-1]}) |
-| Settled markets used | **{result['n_markets']}** (BTC {result['by_coin'].get('BTC',0)}, ETH {result['by_coin'].get('ETH',0)}, SOL {result['by_coin'].get('SOL',0)}) |
-| Decision minutes scored | {result['n_decisions']} |
-| In-sample days (tune only) | {len(result.get('is_days') or [])}: {(result.get('is_days') or [''])[0]} → {(result.get('is_days') or [''])[-1]} |
-| **Out-of-sample days (what counts)** | {len(result.get('oos_days') or [])}: {(result.get('oos_days') or [''])[0]} → {(result.get('oos_days') or [''])[-1]} |
-| Kalshi `market_settled_ts` cutoff | {cutoff.get('market_settled_ts', 'see meta.json')} |
-
-Live settled markets (after the cutoff) come from `GET /markets?status=settled`
-with `min_settled_ts` / `max_settled_ts`. Older windows, if requested, come from
-`GET /historical/markets` and `GET /historical/markets/{{ticker}}/candlesticks`
-([historical data]({docs.get('historical', 'https://docs.kalshi.com/getting_started/historical_data')}),
-[candlesticks]({docs.get('candles', 'https://docs.kalshi.com/api-reference/market/get-market-candlesticks')}),
-[historical candles]({docs.get('hist_candles', 'https://docs.kalshi.com/api-reference/historical/get-historical-market-candlesticks')})).
-Public market-data; no auth. Rate limit respected (~8 reads/s, well under the
-basic 20/s). Coinbase Exchange 1-minute candles (`granularity=60`, 300/request)
-for BTC-USD / ETH-USD / SOL-USD over the same span.
-
-Raw cache is **not** committed (too large). A small fixture lives under
-`tools/backtest/fixtures/`.
-
-## What was replayed
-
-At elapsed minutes 1…13 the harness feeds **only data available at that minute**
-into a port of the production classes:
-
-- `FeatureVector` + `FallbackWeights` / `DipHunterModel.predict` (TFLite unavailable
-  on this JVM path → same embedded MLP the phone uses when TFLite fails)
-- `ScoringEngine` light blend (Heavy ML and extended AI **default OFF** in 0.3.10)
-- Reconstructable TickBook channels: mid history, 1-minute velocity/acceleration,
-  volume-delta flow (no taker flag), related-crypto mid, Coinbase spot nudge
-- `DigitalOptionFairValue`, `SpotFeatureMath`, `DirectionSanity`, `TapeConflict.primaryFromMarket`
-- `NetExpectedValue`, `KalshiFee` (ceil_6dp then ceil_cent), `TicketBuilder.resolveSide`
-- Skip filter / 5pp alert gate for strategy (a)
-
-**The shipped ticket side is the hero/primary side** (`TicketBuilder.resolveSide`
-prefers `primaryHeroSide` from tape+spot over the model fade). That is what
-strategies (a) and (b) bet.
-
-### Features that could not be reconstructed (neutral / dropped)
-
-| Feature | Why missing | What the engine does |
-|---|---|---|
-| Order-book imbalance / depth / decay | No historical L2 snapshots | Weight drops out, blend renormalizes |
-| Quote-pull / cancel spike | WebSocket book deltas | Weight drops out |
-| Taker aggressor | No public historical trade-side tape | `aggressorScore = 0`; flow uses mid-change sign only |
-| Sub-second BTC lead–lag | 1-minute bars only | Weight drops out |
-| Heavy ML sequence (30×10s bins) | Needs size/imbalance/aggressor/spot at 10s | Default off; not faked |
-| News / rival flow / MM / conformal / meta / path | Live-only or default off | Off |
-| OnlineAdapter / Calibrator | Need *this user's* prior settlements | Cold-start identity |
-
-We also run the **fair-value baseline alone** (digital Φ(d2) / spot vs strike)
-as strategy (c).
-
-## Fill and fee
-
-- Fill = conservative taker: **worse of candle close and high** on the side we buy.
-  DOWN ask = `1 − yes_bid`; high DOWN ask = `1 − yes_bid.low`.
-- Unusable 0.000 / 1.000 prints are dropped (`KalshiPrice` 0.1¢–99.9¢).
-- Fee: `ceil_cent(C·P + ceil_6dp(0.07·C·P·(1−P)))` for a non-direct member.
-  `C` is the max integer with that debit ≤ $5.
-- P&L = `C × $1 − cost` if the side wins, else `−cost`.
-- First qualifying minute only. **“Best minute” is not allowed.**
-
-## Out-of-sample results (what counts)
-
-| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-{chr(10).join(oos_rows)}
-
-In-sample tables are in the appendix — they were used only to tune the optional
-rule, never to pick the conclusion.
-
-![OOS cumulative P&L](backtest/oos_cumulative_pnl.png)
-
-## Walk-forward tuned rule
-
-Search grid (IS days only): coin ∈ {{any,BTC,ETH,SOL}}, time-left bucket,
-max ask ∈ {{20,31,40,50}}¢, min |net edge| ∈ {{0,3,5,8}} pp, plus Dirk's
-profit ≥ $10 filter. Minimum 20 IS bets to count.
-
-```
-{json.dumps({k: rule[k] for k in rule if k in ('coin','tte','max_ask','min_edge','n','wins','win_rate','pnl','pnl_per_bet','ci95')}, indent=2, default=str)}
-```
-
-OOS application of that exact rule is the `IS-tuned rule` row above.
-
-## Breakdowns (OOS, app + Dirk)
-
-{_brk_table("By coin", (result["strategies"].get("app_dirk") or {}).get("oos_by_coin") or {})}
-{_brk_table("By time-left", (result["strategies"].get("app_dirk") or {}).get("oos_by_tte") or {})}
-{_brk_table("By fill ask", (result["strategies"].get("app_dirk") or {}).get("oos_by_ask") or {})}
-{_brk_table("By |spot − strike|", (result["strategies"].get("app_dirk") or {}).get("oos_by_dist") or {})}
-
-## Calibration (all decision minutes, not just bets)
-
-| Forecast | N | Brier | Log-loss |
-|---|---:|---:|---:|
-| Blended fair P(YES) | {cal.get('model',{}).get('n')} | {cal.get('model',{}).get('brier')} | {cal.get('model',{}).get('logloss')} |
-| Fallback MLP P(YES) | {cal.get('mlp',{}).get('n')} | {cal.get('mlp',{}).get('brier')} | {cal.get('mlp',{}).get('logloss')} |
-| Digital fair P(YES) | {cal.get('digital',{}).get('n')} | {cal.get('digital',{}).get('brier')} | {cal.get('digital',{}).get('logloss')} |
-| Market mid | {cal.get('market',{}).get('n')} | {cal.get('market',{}).get('brier')} | {cal.get('market',{}).get('logloss')} |
-
-Reliability table (model):
-
-| Bin | N | Mean forecast | Observed YES |
-|---|---:|---:|---:|
-{chr(10).join(f"| {r['bin']} | {r['n']} | {r.get('pred')} | {r.get('obs')} |" for r in (cal.get('reliability_model') or []))}
-
-![Calibration](backtest/calibration.png)
-
-Lower Brier is better. A well-calibrated 15m market mid is usually ~0.15–0.25.
-**0.003 is not a plausible mean Brier on real 15-minute binaries** unless the
-forecast is already ~95% and almost always correct — which is the scorecard bug
-below, not a miracle model.
-
-## Conclusion
-
-{concl}
-
-## Scorecard bug (0/5 · Brier 0.003)
-
-The in-app line `Scorecard: 0/5 · Brier 0.003` mixes **two different questions**.
-
-1. **Hit rate** (`0/5`) uses the **picked side** (`predictedSide` / hero side)
-   vs the settlement YES/NO.
-2. **Brier** uses `(predictedYes − 1_{result=yes})²` — a P(YES) calibration
-   score, *not* a score of the side you bet.
-
-`PredictionLogStore.applySettlement` (`app/src/main/java/com/dirk/kalshiodds/prediction/PredictionLogStore.kt` **184–193**):
-
-```kotlin
-val predYes = when (e.predictedSide?.uppercase()) {{
-    "YES" -> true
-    "NO" -> false
-    else -> e.predictedYes > 0.5
-}}
-val actualYes = normalized == "yes"
-val score = if (predYes == actualYes) 1 else 0
-val y = if (actualYes) 1.0 else 0.0
-val brier = (e.predictedYes - y) * (e.predictedYes - y)
-```
-
-The home-screen string (`OddsViewModel.kt` **868–871**) prints
-`scoreSummary().correct/total` next to `meanBrier` with `%.3f`.
-
-**How you get 0/5 and Brier 0.003 together**
-
-If the five settled logs have `predictedYes ≈ 0.945` and `result = yes` but
-`predictedSide = NO` (the engine faded a 96¢ YES because fair was 94.5¢):
-
-- side hit rate = 0/5
-- Brier = (0.945 − 1)² ≈ **0.003**
-
-That Brier is in **probability² units on [0,1]** (proper Brier, not percent).
-It looks “excellent” because P(YES) agreed with the outcome. The **side you
-bet** was the opposite. The same inconsistency is in
-`ScorecardMetrics.brierOf` / `sideHit` (`ScorecardMetrics.kt` **257–269**).
-
-Replay of first-alert minutes in this backtest (shadow, not the phone log):
-n={shadow.get('n')}, side hits={shadow.get('side_hits')},
-mean P(YES) Brier={shadow.get('mean_brier_yes')},
-mean **side** Brier={shadow.get('mean_brier_side')}.
-
-**Fix (do not edit production in this PR — describe only)**
-
-- `PredictionLogStore.kt:184–193`: store *two* scores, or pick one definition.
-  Recommended: keep P(YES) Brier (statistically correct) **and** a side-Brier
-  `p_side = predictedSide==NO ? 1-predictedYes : predictedYes`,
-  `y_side = side_hit ? 1 : 0`, `brier_side = (p_side - y_side)²`.
-  Label the UI “P(YES) Brier” vs “side hit rate” so they cannot be read as
-  the same experiment.
-- `ScorecardMetrics.kt:257–269`: same split; `window().brier` should not
-  silently average a P(YES) Brier next to a side hit rate.
-- `OddsViewModel.kt:868`: if `total < 20` (or `< ScorecardMetrics.MIN_HONEST_SAMPLES`),
-  do not print Brier at all — 5 samples of 0.003 is noise dressed as precision.
-
-`SettlementScorer` itself is fine; it only writes `result`. The bug is the
-scorecard **definition**, not settlement lookup.
-
-## Appendix — in-sample (do not use for the decision)
-
-| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | CI95 $/bet |
-|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
-{chr(10).join(f"| {label} {_fmt((result['strategies'].get(key) or {}).get('is_') or {{}})}" for key, label in STRATS)}
-
-## Repro
-
-```bash
-python3 tools/backtest/run.py --days 28 --cache tools/backtest/cache
-# Kotlin parity (no network):
-./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.backtest.PipelineParityTest
-./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.backtest.ScorecardBrierDiagnosisTest
-```
-"""
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(md)
 
