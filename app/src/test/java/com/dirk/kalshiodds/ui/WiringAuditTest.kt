@@ -97,7 +97,25 @@ class WiringAuditTest {
         Control("API key status line", ApiKeyUi::class.java, "statusLine"),
         Control("No-key banner visibility", ApiKeyUi::class.java, "showNoKeyBanner"),
         Control("App version label", AppVersion::class.java, "getLabel"),
-        Control("Approve PAPER/LIVE label", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove")
+        Control("Approve PAPER/LIVE label", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove"),
+        Control("Home title / this-window headline", HomeCopy::class.java, "thisWindowHeadline"),
+        Control("Home scorecard line", HomeCopy::class.java, "scorecardLine"),
+        Control("Home model vs market", HomeCopy::class.java, "modelVsMarket"),
+        Control("Home $5 all-in line", HomeCopy::class.java, "allInProfit"),
+        Control("Home primary Buy label", HomeCopy::class.java, "primaryButtonLabel"),
+        Control("Home Buy anyway side", HomeCopy::class.java, "buyAnywaySide"),
+        Control("Home current-window cards", HomeMarkets::class.java, "currentWindowCards"),
+        Control("Home rank (BetCall.sortKey)", HomeMarkets::class.java, "ranked"),
+        Control("Home best BetCall", HomeMarkets::class.java, "best"),
+        Control("Home refresh", OddsViewModel::class.java, "refresh"),
+        Control("Home Buy / Buy anyway", OddsViewModel::class.java, "buyMarket"),
+        Control("Home paper toggle", OddsViewModel::class.java, "setPaperTrading"),
+        Control("Home tickets Approve", OddsViewModel::class.java, "approveTicket"),
+        Control("Home tickets PAPER", OddsViewModel::class.java, "paperTicket"),
+        Control("Home scorecard tap", HomeCopy::class.java, "scorecardLine"),
+        Control("Home version label", AppVersion::class.java, "getLabel"),
+        Control("Home no-key banner", ApiKeyUi::class.java, "showNoKeyBanner"),
+        Control("Home mode chip", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove")
     )
 
     @Test

@@ -265,6 +265,31 @@ fun SettingsScreen(
                 color = colors.textSecondary
             )
 
+            Section(HomeHelp.HOME_TITLE)
+            Text(
+                HomeHelp.HOME_BODY,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                HomeHelp.TICKETS_BODY,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                HomeHelp.POSITIONS_BODY,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Text(
+                HomeHelp.PAPER_BODY,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+
             Section("Live signals")
             Text(
                 "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",

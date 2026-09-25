@@ -23,18 +23,23 @@ fun TimeLeftLabel(
     closeEpochMs: Long?,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
-    pill: Boolean = false
+    pill: Boolean = false,
+    nowMs: Long? = null
 ) {
     val colors = DipTheme.colors
-    var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(closeEpochMs) {
+    var clockMs by remember { mutableLongStateOf(nowMs ?: System.currentTimeMillis()) }
+    LaunchedEffect(closeEpochMs, nowMs) {
+        if (nowMs != null) {
+            clockMs = nowMs
+            return@LaunchedEffect
+        }
         while (true) {
-            nowMs = System.currentTimeMillis()
+            clockMs = System.currentTimeMillis()
             delay(1_000L)
         }
     }
-    val expired = TimeLeft.isExpired(closeEpochMs, nowMs)
-    val text = TimeLeft.format(closeEpochMs, nowMs)
+    val expired = TimeLeft.isExpired(closeEpochMs, clockMs)
+    val text = TimeLeft.format(closeEpochMs, clockMs)
     val color = when {
         closeEpochMs == null -> colors.textSecondary
         expired -> colors.accentOrange

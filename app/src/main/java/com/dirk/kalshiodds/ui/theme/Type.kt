@@ -13,10 +13,22 @@ val AppTypography = Typography(
         fontSize = 48.sp,
         lineHeight = 52.sp
     ),
+    headlineLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Bold,
+        fontSize = 32.sp,
+        lineHeight = 36.sp
+    ),
     headlineMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.SemiBold,
         fontSize = 22.sp
+    ),
+    titleLarge = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.SemiBold,
+        fontSize = 18.sp,
+        lineHeight = 22.sp
     ),
     titleMedium = TextStyle(
         fontFamily = FontFamily.SansSerif,
@@ -37,5 +49,10 @@ val AppTypography = Typography(
         fontFamily = FontFamily.SansSerif,
         fontWeight = FontWeight.Medium,
         fontSize = 12.sp
+    ),
+    labelSmall = TextStyle(
+        fontFamily = FontFamily.SansSerif,
+        fontWeight = FontWeight.Medium,
+        fontSize = 11.sp
     )
 )

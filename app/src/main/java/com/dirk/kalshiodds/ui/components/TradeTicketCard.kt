@@ -43,6 +43,7 @@ fun TradeTicketsSection(
     tickets: TicketUiState,
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
+    homeMode: Boolean = false,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
@@ -59,30 +60,32 @@ fun TradeTicketsSection(
     val working = tickets.working.filter { it.orderId != null && it.error?.startsWith("cancelled") != true }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            text = "Live Approve",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Paper trading ON does not swallow a keyed Live Approve. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
-        )
-        if (paperTradingEnabled && credentialsConfigured) {
+        if (!homeMode) {
             Text(
-                "Paper trading is ON for AI auto-log / the Paper button. Live Approve still sends a real Kalshi order after you confirm.",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.accentOrange,
-                fontWeight = FontWeight.SemiBold
+                text = "Live Approve",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground
             )
-        }
-        if (!credentialsConfigured) {
             Text(
-                text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
+                text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Paper trading ON does not swallow a keyed Live Approve. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
                 style = MaterialTheme.typography.labelMedium,
-                color = colors.accentOrange
+                color = colors.textSecondary
             )
+            if (paperTradingEnabled && credentialsConfigured) {
+                Text(
+                    "Paper trading is ON for AI auto-log / the Paper button. Live Approve still sends a real Kalshi order after you confirm.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.accentOrange,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (!credentialsConfigured) {
+                Text(
+                    text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.accentOrange
+                )
+            }
         }
         val visibleError = tickets.lastError
             ?.takeUnless { com.dirk.kalshiodds.signal.trade.TicketSession.stalePageError(it) }

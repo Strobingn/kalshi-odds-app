@@ -26,7 +26,8 @@ fun PositionsCard(
     positions: List<LivePosition>,
     note: String?,
     onSell: (ticker: String, side: String) -> Unit,
-    onViewHistory: (() -> Unit)? = null
+    onViewHistory: (() -> Unit)? = null,
+    homeMode: Boolean = false
 ) {
     val colors = DipTheme.colors
     Column(
@@ -37,16 +38,18 @@ fun PositionsCard(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            "Your positions",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            "Live Kalshi holdings (GET /portfolio/positions). Sell opens an approve-gated V2 reduce-only limit — never the retired v1 path.",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
-        )
+        if (!homeMode) {
+            Text(
+                "Your positions",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                "Live Kalshi holdings (GET /portfolio/positions). Sell opens an approve-gated V2 reduce-only limit — never the retired v1 path.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+        }
         if (onViewHistory != null) {
             OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
                 Text("View all")

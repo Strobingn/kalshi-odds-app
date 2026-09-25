@@ -30,7 +30,8 @@ fun PaperBookCard(
     onToggle: (Boolean) -> Unit,
     onReset: () -> Unit,
     onSell: ((ticker: String, side: String) -> Unit)? = null,
-    onViewHistory: (() -> Unit)? = null
+    onViewHistory: (() -> Unit)? = null,
+    homeMode: Boolean = false
 ) {
     val colors = DipTheme.colors
     Column(
@@ -47,17 +48,26 @@ fun PaperBookCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    "PAPER BOOK",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.accentGreen,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Start / reset $100 · win-target sizing · never hits Kalshi",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary
-                )
+                if (!homeMode) {
+                    Text(
+                        "PAPER BOOK",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accentGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Start / reset $100 · win-target sizing · never hits Kalshi",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                } else {
+                    Text(
+                        if (enabled) "Paper trading on" else "Paper trading off",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.accentGreen,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
@@ -71,15 +81,17 @@ fun PaperBookCard(
             }
             PaperStat("P&L", String.format(Locale.US, "%+.2f", paper.realizedPnlUsd), pnlColor)
         }
-        Text(
-            if (enabled) {
-                "AI hunter / LiveCall signals auto-log a paper fill here. Live Approve (below) is the only path that can place a real V2 order."
-            } else {
-                "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
-        )
+        if (!homeMode) {
+            Text(
+                if (enabled) {
+                    "AI hunter / LiveCall signals auto-log a paper fill here. Live Approve (below) is the only path that can place a real V2 order."
+                } else {
+                    "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+        }
         paper.lastMessage?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentGreen, fontWeight = FontWeight.SemiBold)
         }

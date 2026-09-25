@@ -36,6 +36,24 @@ fun TargetNowLine(market: MarketUiModel, modifier: Modifier = Modifier) {
     )
 }
 
+/** Home header: green when spot is above target, orange when below. */
+@Composable
+fun HomeSpotDelta(
+    market: MarketUiModel,
+    modifier: Modifier = Modifier
+) {
+    val colors = DipTheme.colors
+    val text = com.dirk.kalshiodds.ui.HomeCopy.spotDeltaText(market) ?: return
+    val above = com.dirk.kalshiodds.ui.HomeCopy.spotDeltaAbove(market)
+    Text(
+        text,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (above) colors.accentGreen else colors.accentOrange,
+        fontWeight = FontWeight.Bold,
+        modifier = modifier
+    )
+}
+
 @Composable
 fun TapeConflictBanner(market: MarketUiModel, modifier: Modifier = Modifier) {
     val colors = DipTheme.colors
