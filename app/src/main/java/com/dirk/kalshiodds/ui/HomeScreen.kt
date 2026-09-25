@@ -41,6 +41,7 @@ import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.ui.components.CollapsibleHomeSection
 import com.dirk.kalshiodds.ui.components.MarketCard
+import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.ui.components.PaperBookCard
 import com.dirk.kalshiodds.ui.components.PositionsCard
@@ -80,7 +81,8 @@ fun HomeScreen(
     val mode = TradeModeLabel.forApprove(state.settings)
     val hasKey = state.settings.tradingCredentialsConfigured()
     val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
-    val windowMarkets = HomeMarkets.currentWindowCards(state.snapshot?.allMarkets.orEmpty(), state.settings, nowMs)
+    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs)
+    val windowMarkets = coinCards.mapNotNull { it.market }
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
     val best = HomeMarkets.best(ranked, decisions)
@@ -192,21 +194,26 @@ fun HomeScreen(
                                 onOpenScorecard = onOpenScorecard
                             )
                         }
-                        items(ranked, key = { it.ticker }) { market ->
-                            val call = decisions[market.ticker] ?: BetCall.decide(market, ctx)
-                            MarketCard(
-                                market = market,
-                                decision = call,
-                                settings = state.settings,
-                                paperTradingEnabled = state.settings.paperTradingEnabled,
-                                nowMs = nowMs,
-                                onBuyYes = { onBuyMarket(market, "YES") },
-                                onBuyNo = { onBuyMarket(market, "NO") },
-                                onSell = state.positions.firstOrNull { it.ticker == market.ticker }?.let {
-                                    { onSellMarket(market) }
-                                },
-                                onOpenChart = { onOpenChart(market) }
-                            )
+                        items(coinCards, key = { it.series }) { card ->
+                            val market = card.market
+                            if (market == null) {
+                                NextWindowLoadingCard(card.series)
+                            } else {
+                                val call = decisions[market.ticker] ?: BetCall.decide(market, ctx)
+                                MarketCard(
+                                    market = market,
+                                    decision = call,
+                                    settings = state.settings,
+                                    paperTradingEnabled = state.settings.paperTradingEnabled,
+                                    nowMs = nowMs,
+                                    onBuyYes = { onBuyMarket(market, "YES") },
+                                    onBuyNo = { onBuyMarket(market, "NO") },
+                                    onSell = state.positions.firstOrNull { it.ticker == market.ticker }?.let {
+                                        { onSellMarket(market) }
+                                    },
+                                    onOpenChart = { onOpenChart(market) }
+                                )
+                            }
                         }
                         item {
                             CollapsibleHomeSection(

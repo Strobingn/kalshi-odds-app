@@ -106,6 +106,7 @@ class WiringAuditTest {
         Control("Home confirm-sheet Approve label", HomeCopy::class.java, "confirmApproveLabel"),
         Control("Home Buy anyway side", HomeCopy::class.java, "buyAnywaySide"),
         Control("Home current-window cards", HomeMarkets::class.java, "currentWindowCards"),
+        Control("Home fixed coin cards", HomeMarkets::class.java, "coinCards"),
         Control("Home rank (BetCall.sortKey)", HomeMarkets::class.java, "ranked"),
         Control("Home best BetCall", HomeMarkets::class.java, "best"),
         Control("Home refresh", OddsViewModel::class.java, "refresh"),

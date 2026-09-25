@@ -20,11 +20,13 @@ object HomeCopy {
     const val NEED_20 = "need 20+ results"
     const val WINDOW_LENGTH = "15m"
 
-    fun coinShort(market: MarketUiModel): String = when (CryptoMarkets.kindFor(market.ticker)) {
+    fun coinShort(market: MarketUiModel): String = coinShort(market.ticker, market.seriesLabel)
+
+    fun coinShort(seriesOrTicker: String, seriesLabel: String? = null): String = when (CryptoMarkets.kindFor(seriesOrTicker)) {
         SeriesKind.BTC -> "BTC"
         SeriesKind.ETH -> "ETH"
         SeriesKind.SOL -> "SOL"
-        SeriesKind.CRYPTO -> market.seriesLabel.take(3).uppercase(Locale.US)
+        SeriesKind.CRYPTO -> (seriesLabel ?: seriesOrTicker).take(3).uppercase(Locale.US)
     }
 
     fun thisWindowHeadline(

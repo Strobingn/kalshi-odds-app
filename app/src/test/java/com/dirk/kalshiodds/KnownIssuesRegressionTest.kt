@@ -53,7 +53,7 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * One named test per known 0.3.10–0.3.13 issue, on the real production
+ * One named test per known 0.3.10–0.3.13 issue (#11 = fixed BTC/SOL/ETH cards), on the real production
  * classes. No mocks of the logic under test.
  */
 class KnownIssuesRegressionTest {
@@ -763,6 +763,111 @@ class KnownIssuesRegressionTest {
         val window = ScorecardMetrics.window(listOf(noBet, scored))
         assertEquals(1, window.total)
         assertEquals(1, window.hits)
+    }
+
+    @Test
+    fun homeShowsFixedBtcSolEthCardsAcrossRollover() {
+        val t0 = 1_700_000_000_000L
+        val clock = FakeClock(t0 + 60_000L)
+        val windowMs = com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS
+        val closes = LongArray(6) { i -> t0 + (i + 1) * windowMs }
+        val series = listOf(
+            "KXBTC15M" to "Bitcoin",
+            "KXSOL15M" to "Solana",
+            "KXETH15M" to "Ethereum"
+        )
+        fun ticker(ser: String, step: Int) = "$ser-26SEP25${1200 + step * 15}-45"
+        fun coin(ser: String, label: String, step: Int, edge: Double): MarketUiModel =
+            sample(ticker(ser, step), 0.50, 0.50, 50.0 + edge, "YES").copy(
+                closeTimeEpochMs = closes[step],
+                openTimeEpochMs = closes[step] - windowMs,
+                status = "active",
+                seriesLabel = label,
+                edgePp = edge,
+                importedModelPp = 50.0 + edge,
+                aiYesPercent = 50.0 + edge
+            )
+
+        fun assertOrder(cards: List<HomeMarkets.CoinCard>, btc: String?, sol: String?, eth: String?) {
+            assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), cards.map { it.series })
+            assertEquals(btc, cards[0].market?.ticker)
+            assertEquals(sol, cards[1].market?.ticker)
+            assertEquals(eth, cards[2].market?.ticker)
+        }
+
+        // (a) closed-but-still-active BTC + next BTC window
+        val closedBtc = coin("KXBTC15M", "Bitcoin", 0, 12.0)
+        val nextBtc = coin("KXBTC15M", "Bitcoin", 1, 4.0)
+        val sol0 = coin("KXSOL15M", "Solana", 0, 2.0).copy(
+            closeTimeEpochMs = closes[1],
+            openTimeEpochMs = closes[0]
+        )
+        val eth0 = coin("KXETH15M", "Ethereum", 0, 1.0).copy(
+            closeTimeEpochMs = closes[1],
+            openTimeEpochMs = closes[0]
+        )
+        clock.set(closes[0] + 2_000L)
+        var listed = listOf(closedBtc, nextBtc, sol0, eth0)
+        assertOrder(
+            HomeMarkets.coinCards(listed, clock.nowMs()),
+            ticker("KXBTC15M", 1),
+            ticker("KXSOL15M", 0),
+            ticker("KXETH15M", 0)
+        )
+
+        // (b) future ETH window listed early must not replace the current ETH card
+        val futureEth = coin("KXETH15M", "Ethereum", 2, 40.0)
+        listed = listed + futureEth
+        assertOrder(
+            HomeMarkets.coinCards(listed, clock.nowMs()),
+            ticker("KXBTC15M", 1),
+            ticker("KXSOL15M", 0),
+            ticker("KXETH15M", 0)
+        )
+
+        // (c) SOL next listing missing for 10 s — slot stays, loading
+        listed = listOf(nextBtc, eth0.copy(closeTimeEpochMs = closes[1], openTimeEpochMs = closes[0]), futureEth)
+        clock.set(closes[0] + 6_000L)
+        val missingSol = HomeMarkets.coinCards(listed, clock.nowMs())
+        assertOrder(missingSol, ticker("KXBTC15M", 1), null, ticker("KXETH15M", 0))
+        assertTrue(missingSol[1].loading)
+        clock.advance(10_000L)
+        listed = listed + coin("KXSOL15M", "Solana", 1, 8.0)
+        assertOrder(
+            HomeMarkets.coinCards(listed, clock.nowMs()),
+            ticker("KXBTC15M", 1),
+            ticker("KXSOL15M", 1),
+            ticker("KXETH15M", 0)
+        )
+
+        // (d) edges flip across 3 rollovers; cards never reorder
+        val settings = SignalSettings(ticketsEnabled = true)
+        val edges = listOf(Triple(2.0, 25.0, 1.0), Triple(1.0, 2.0, 40.0), Triple(30.0, 3.0, 4.0))
+        for (step in 1..3) {
+            clock.set(closes[step - 1] + 4_000L)
+            val (btcE, solE, ethE) = edges[step - 1]
+            listed = series.mapIndexed { i, (ser, label) ->
+                coin(ser, label, step, listOf(btcE, solE, ethE)[i])
+            } + series.map { (ser, label) -> coin(ser, label, step - 1, 50.0) } +
+                coin("KXBTC15M", "Bitcoin", step + 1, 99.0)
+            val cards = HomeMarkets.coinCards(listed, clock.nowMs())
+            assertOrder(
+                cards,
+                ticker("KXBTC15M", step),
+                ticker("KXSOL15M", step),
+                ticker("KXETH15M", step)
+            )
+            val live = cards.mapNotNull { it.market }
+            val ctx = TicketBuilder.Context(settings = settings, alertsPaused = false, nowMs = clock.nowMs())
+            val decisions = HomeMarkets.decisions(live, ctx)
+            val best = HomeMarkets.best(HomeMarkets.ranked(live, decisions, settings), decisions)!!.first.ticker
+            val expectedBest = when (step) {
+                1 -> ticker("KXSOL15M", step)
+                2 -> ticker("KXETH15M", step)
+                else -> ticker("KXBTC15M", step)
+            }
+            assertEquals(expectedBest, best)
+        }
     }
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {

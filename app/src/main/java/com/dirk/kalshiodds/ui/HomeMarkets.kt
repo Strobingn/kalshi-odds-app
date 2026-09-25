@@ -1,36 +1,58 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
-import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import kotlin.math.abs
 
 /**
- * Home list = one current-window card per watched coin, actionable first.
- * Selection uses existing [MarketLifecycle.currentWindow] / [BetCall.sortKey].
+ * Home list = exactly three coin cards in fixed order: BTC, SOL, ETH.
+ * Each slot is keyed by series and shows only that coin's current window
+ * (`open_time <= now < close_time`). Missing listings keep the slot with
+ * [NEXT_WINDOW_LOADING]. Never sorted by edge — [ranked] / [best] feed
+ * "This window" only.
  */
 object HomeMarkets {
+    val CARD_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTC,
+        KalshiApi.SERIES_SOL,
+        KalshiApi.SERIES_ETH
+    )
+    const val NEXT_WINDOW_LOADING = "Next window loading"
 
+    data class CoinCard(
+        val series: String,
+        val market: MarketUiModel?
+    ) {
+        val loading: Boolean get() = market == null
+        val key: String get() = series
+    }
+
+    fun coinCards(
+        markets: List<MarketUiModel>,
+        nowMs: Long = System.currentTimeMillis()
+    ): List<CoinCard> = CARD_SERIES.map { series ->
+        val pool = markets.filter {
+            CryptoMarkets.inferSeries(it.ticker).equals(series, ignoreCase = true)
+        }
+        CoinCard(series, MarketLifecycle.currentOpenWindow(pool, nowMs))
+    }
+
+    @Suppress("UNUSED_PARAMETER")
     fun currentWindowCards(
         markets: List<MarketUiModel>,
         settings: SignalSettings,
         nowMs: Long = System.currentTimeMillis()
-    ): List<MarketUiModel> {
-        val live = MarketLifecycle.tradable(markets, nowMs)
-        val groups = buildList {
-            if (settings.watchBtc) add(live.filter { CryptoMarkets.kindFor(it.ticker) == SeriesKind.BTC })
-            if (settings.watchEth) add(live.filter { CryptoMarkets.kindFor(it.ticker) == SeriesKind.ETH })
-            if (settings.watchSol) add(live.filter { CryptoMarkets.kindFor(it.ticker) == SeriesKind.SOL })
-            val extra = live.filter { CryptoMarkets.kindFor(it.ticker) == SeriesKind.CRYPTO }
-            if (extra.isNotEmpty()) add(extra)
-        }
-        return groups.mapNotNull { MarketLifecycle.currentWindow(it) }
-    }
+    ): List<MarketUiModel> = coinCards(markets, nowMs).mapNotNull { it.market }
 
+    /**
+     * Rank for the "This window" summary only. The three home cards stay
+     * in [CARD_SERIES] order and are never reordered by this key.
+     */
     fun ranked(
         markets: List<MarketUiModel>,
         decisions: Map<String, BetCall.Decision>,

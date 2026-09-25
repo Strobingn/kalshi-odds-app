@@ -45,6 +45,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
 import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.HomeMarkets
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
@@ -52,6 +53,54 @@ import com.dirk.kalshiodds.ui.theme.checklistValueColor
 import java.util.Locale
 import kotlin.math.abs
 import com.dirk.kalshiodds.ui.theme.DipTheme
+
+@Composable
+fun NextWindowLoadingCard(
+    series: String,
+    modifier: Modifier = Modifier
+) {
+    val colors = DipTheme.colors
+    val scheme = MaterialTheme.colorScheme
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, scheme.outline, RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = scheme.surface,
+            contentColor = scheme.onSurface
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = HomeCopy.coinShort(series),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        HomeCopy.WINDOW_LENGTH,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                }
+            }
+            Text(
+                HomeMarkets.NEXT_WINDOW_LOADING,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
