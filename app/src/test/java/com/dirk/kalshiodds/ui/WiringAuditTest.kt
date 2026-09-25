@@ -1,14 +1,20 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.chart.ChartWindowService
+import com.dirk.kalshiodds.data.backfill.LiveWindowBackfill
+import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
+import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
+import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.signal.paper.PaperApprove
 import com.dirk.kalshiodds.signal.trade.ApproveRouter
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Dirk asked for a wiring audit of every 0.3.0–0.3.8 control.
+ * Dirk asked for a wiring audit of every 0.3.0–0.3.9 control.
  * Each row is a real method (not a TODO / stub / empty onClick).
  * Navigation empty-defaults were removed so a missing MainActivity
  * lambda is now a compile error.
@@ -53,7 +59,15 @@ class WiringAuditTest {
         Control("History tabs / paging", HistoryViewModel::class.java, "load"),
         Control("History restore settings", HistoryViewModel::class.java, "restoreSettings"),
         Control("Notification tap opens ticket", OddsViewModel::class.java, "focusTicket"),
-        Control("Kalshi demo toggle", SettingsViewModel::class.java, "setKalshiDemo")
+        Control("Kalshi demo toggle", SettingsViewModel::class.java, "setKalshiDemo"),
+        Control("Chart tick persist", AsyncResultsWriter::class.java, "enqueueChartTick"),
+        Control("Chart window restore", ChartWindowService::class.java, "restoreWindow"),
+        Control("Chart window persist", ChartWindowService::class.java, "persistPoints"),
+        Control("Live candlestick backfill", LiveWindowBackfill::class.java, "candles"),
+        Control("Quote header/labels/buttons", MarketQuoteView::class.java, "of"),
+        Control("Payout multiple", KalshiQuoteDisplay::class.java, "multiplier"),
+        Control("Kalshi fee per contract", KalshiFee::class.java, "perContract"),
+        Control("Chart seed after restart", OddsViewModel::class.java, "seedChartWindows")
     )
 
     @Test
@@ -74,5 +88,11 @@ class WiringAuditTest {
         assertNotNull(TicketBuilder::proposeHunter)
         assertNotNull(TicketBuilder::proposeHunterValue)
         assertNotNull(TicketBuilder::proposeManual)
+        assertNotNull(ChartWindowService::restoreWindow)
+        assertNotNull(ChartWindowService::persistPoints)
+        assertNotNull(LiveWindowBackfill::candles)
+        assertNotNull(KalshiQuoteDisplay::multiplier)
+        assertNotNull(KalshiFee::perContract)
+        assertNotNull(AsyncResultsWriter::enqueueChartTick)
     }
 }

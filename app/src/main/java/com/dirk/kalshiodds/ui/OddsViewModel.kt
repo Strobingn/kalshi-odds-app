@@ -21,8 +21,14 @@ import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.chart.ChartWindowService
+import com.dirk.kalshiodds.chart.hasQuote
 import com.dirk.kalshiodds.chart.hasSpot
+import com.dirk.kalshiodds.data.backfill.CoinbaseSpotBackfill
+import com.dirk.kalshiodds.data.backfill.LiveWindowBackfill
+import com.dirk.kalshiodds.data.backfill.OkHttpHistoryTransport
 import com.dirk.kalshiodds.domain.KalshiPrice
+import java.util.concurrent.ConcurrentHashMap
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import kotlin.math.max
@@ -88,6 +94,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         intervalMs = SCORE_OVERLAY_THROTTLE_MS
     )
     private var currentIntervalMs: Long = BASE_POLL_MS
+    private val chartWindows: ChartWindowService by lazy {
+        ChartWindowService(
+            archive = container.archive,
+            book = hub.scoring.book,
+            backfill = LiveWindowBackfill(
+                kalshi = OkHttpHistoryTransport.kalshi(),
+                spot = CoinbaseSpotBackfill(OkHttpHistoryTransport.coinbase())
+            )
+        )
+    }
+    private val backfillStarted = ConcurrentHashMap<String, Long>()
+    private var backfillJob: Job? = null
 
     init {
         ticketSession.onStart()
@@ -204,6 +222,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(settings = hydrated) }
         }
         seedOddsHistory()
+        seedChartWindows()
         val cached = runCatching { repository.cachedSnapshot.first() }.getOrNull()
         if (cached != null && (_state.value.snapshot == null || _state.value.snapshot!!.allMarkets.isEmpty())) {
             val overlaid = attachHistory(
@@ -216,6 +235,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     modelScoreLabel = scoreLabel(overlaid)
                 )
             }
+            seedChartWindows()
         }
         val rows = withContext(Dispatchers.IO) { container.resultsStore.recentSnapshots(24) }
         _state.update {
@@ -243,6 +263,27 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             }
+        }
+    }
+
+    internal fun seedChartWindows() {
+        runCatching {
+            val now = System.currentTimeMillis()
+            val markets = _state.value.snapshot?.allMarkets.orEmpty()
+            val keep = LinkedHashSet<String>()
+            for (m in markets) {
+                val end = m.closeTimeEpochMs ?: now
+                val start = end - ChartWindowService.WINDOW_MS
+                chartWindows.restoreWindow(m.ticker, start, end)
+                keep.add(m.ticker)
+            }
+            if (keep.isEmpty()) {
+                container.resultsStore.recentOddsMids(40).map { it.ticker }.distinct().forEach { ticker ->
+                    chartWindows.restoreWindow(ticker, now - ChartWindowService.WINDOW_MS, now)
+                    keep.add(ticker)
+                }
+            }
+            chartWindows.trimActive(keep, now - ChartWindowService.WINDOW_MS)
         }
     }
 
@@ -324,6 +365,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         publishSupportState()
         scheduleRebuildTickets()
         refreshPositions()
+        scheduleChartBackfill(overlaid)
     }
 
     private suspend fun refreshExternal() {
@@ -732,6 +774,38 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun scheduleChartBackfill(snap: MarketsSnapshot) {
+        val now = System.currentTimeMillis()
+        val targets = snap.allMarkets.filter { m ->
+            val end = m.closeTimeEpochMs ?: now
+            val start = end - ChartWindowService.WINDOW_MS
+            val last = backfillStarted[m.ticker]
+            if (last != null && now - last < 60_000L) return@filter false
+            chartWindows.needsBackfill(m.ticker, start, end)
+        }
+        if (targets.isEmpty()) return
+        targets.forEach { backfillStarted[it.ticker] = now }
+        backfillJob?.cancel()
+        backfillJob = viewModelScope.launch(Dispatchers.IO) {
+            for (m in targets) {
+                if (!isActive) break
+                val end = m.closeTimeEpochMs ?: now
+                val start = end - ChartWindowService.WINDOW_MS
+                runCatching {
+                    chartWindows.backfillWindow(
+                        ticker = m.ticker,
+                        series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker),
+                        windowStartMs = start,
+                        windowEndMs = end
+                    )
+                }
+            }
+            val latest = _state.value.snapshot ?: return@launch
+            val overlaid = attachHistory(latest)
+            _state.update { it.copy(snapshot = overlaid) }
+        }
+    }
+
     private fun attachHistory(snap: MarketsSnapshot): MarketsSnapshot {
         fun List<MarketUiModel>.withHist(): List<MarketUiModel> = map { m ->
             val pts = runCatching { hub.scoring.book.midHistoryPp(m.ticker) }.getOrElse { emptyList() }
@@ -741,25 +815,23 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 pts
             }
-            val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
-            val stored = runCatching {
-                container.archive.bidHistory(
-                    m.ticker,
-                    (m.closeTimeEpochMs ?: System.currentTimeMillis()) - 3_600_000L,
-                    240
+            val bids = runCatching { chartWindows.seriesForCard(m) }.getOrElse {
+                val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
+                val stored = runCatching {
+                    container.archive.bidHistory(
+                        m.ticker,
+                        (m.closeTimeEpochMs ?: System.currentTimeMillis()) - 3_600_000L,
+                        240
+                    )
+                }.getOrElse { emptyList() }
+                com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
+                    (stored + liveBids)
+                        .filter { it.hasQuote() || it.hasSpot() }
+                        .sortedBy { it.tMs }
+                        .distinctBy { it.tMs },
+                    com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
                 )
-            }.getOrElse { emptyList() }
-            val bids = com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
-                (stored + liveBids)
-                    .filter {
-                        com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.upBidCents) != null ||
-                            com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents) != null ||
-                            it.hasSpot()
-                    }
-                    .sortedBy { it.tMs }
-                    .distinctBy { it.tMs },
-                com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
-            )
+            }
             val past = runCatching {
                 container.archive.recentSettled(com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker), 8)
                     .map { it.result.equals("yes", true) }

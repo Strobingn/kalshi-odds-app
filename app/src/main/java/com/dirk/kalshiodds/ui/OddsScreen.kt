@@ -443,18 +443,19 @@ private fun LiveUpDownHero(
         market?.let { TapeConflictBanner(it, Modifier.padding(top = 8.dp)) }
         market?.let { m ->
             MarketAskHero(m, Modifier.padding(top = 10.dp))
+            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(m)
             Row(
                 Modifier.fillMaxWidth().padding(top = 6.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "UP bid ${m.yesBid?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}  ask ${m.yesAsk?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}",
+                    quotes.upHeader,
                     color = AccentGreen,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "DOWN bid ${m.noBid?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}  ask ${m.noAsk?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"}",
+                    quotes.downHeader,
                     color = AccentRed,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
@@ -481,7 +482,9 @@ private fun LiveUpDownHero(
                 windowEndMs = m.closeTimeEpochMs,
                 strikeLabel = m.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
                 spotUsd = m.spotUsd,
-                strikeUsd = m.floorStrike
+                strikeUsd = m.floorStrike,
+                liveUpLabel = quotes.upChartLabel,
+                liveDownLabel = quotes.downChartLabel
             )
         }
         Text(

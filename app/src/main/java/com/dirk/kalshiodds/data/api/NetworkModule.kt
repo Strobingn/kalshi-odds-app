@@ -69,5 +69,5 @@ object NetworkModule {
             .create(KalshiTradeApi::class.java)
     }
 
-    const val USER_AGENT = "DipHunter/0.3.8 (Android; Dirk Diggler)"
+    const val USER_AGENT = "DipHunter/0.3.9 (Android; Dirk Diggler)"
 }

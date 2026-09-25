@@ -1,46 +1,79 @@
 package com.dirk.kalshiodds.domain
 
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import java.util.Locale
 
 /**
- * Kalshi-app display: "Up 64¢ · 1.52x" from the **best ask**,
- * multiplier = 1 / ask. Never uses the AI probability as if it were the market.
+ * Kalshi-app display: "Up 64¢ · 1.53x" from the **best ask**.
+ *
+ * Multiple = [KalshiFee.netPayout] per dollar staked at that ask
+ * (`(1 − perContract fee) / ask`). Never uses the AI probability.
+ * 0¢ and missing asks return null — never divide by zero.
  */
 object KalshiQuoteDisplay {
 
     fun cents(ask: Double?): Int? {
         val p = KalshiPrice.usable(ask) ?: return null
-        return kotlin.math.round(p * 100.0).toInt().coerceIn(1, 99)
+        val c = kotlin.math.round(p * 100.0).toInt()
+        return c.takeIf { it in 1..99 }
     }
 
     /**
-     * Kalshi-app payout multiple on the buy button.
+     * Net payout per dollar staked at [ask], using [KalshiFee.perContract]
+     * (documented `round_up(0.07 × P × (1 − P))` to the next cent).
      *
-     * The official mobile buttons use the **raw** model fee
-     * `0.07 × P × (1−P)` inside `1 / (ask + fee)` — 64¢ → 1.52x, 37¢ → 2.59x.
-     * Paper fills and net-EV ranking use [com.dirk.kalshiodds.signal.trade.KalshiFee]
-     * (next-cent ceil). Do not swap those here or the hero no longer matches Kalshi.
+     * 1¢ → 99.00x, 99¢ → 1.00x. Null for 0¢ / no-ask.
      */
-    fun multiplier(ask: Double?, includeFee: Boolean = true, feeRate: Double = 0.07): Double? {
+    fun multiplier(ask: Double?, feeRate: Double = 0.07): Double? {
         val p = KalshiPrice.usable(ask) ?: return null
         if (p <= 0.0) return null
-        val fee = if (includeFee) (feeRate.coerceIn(0.0, 0.25) * p * (1.0 - p)).coerceAtLeast(0.0) else 0.0
-        val cost = p + fee
-        if (cost <= 0.0) return null
-        return 1.0 / cost
+        val fee = KalshiFee.perContract(p, feeRate)
+        val net = (1.0 - fee).coerceAtLeast(0.0)
+        return net / p
+    }
+
+    /** @deprecated Use [multiplier]; fee is always KalshiFee.perContract. */
+    fun multiplier(ask: Double?, includeFee: Boolean, feeRate: Double = 0.07): Double? {
+        if (!includeFee) return grossMultiplier(ask)
+        return multiplier(ask, feeRate)
     }
 
     /** Gross `1/ask` without the taker fee (tests / EV math). */
-    fun grossMultiplier(ask: Double?): Double? = multiplier(ask, includeFee = false)
+    fun grossMultiplier(ask: Double?): Double? {
+        val p = KalshiPrice.usable(ask) ?: return null
+        if (p <= 0.0) return null
+        return 1.0 / p
+    }
 
     fun impliedChance(ask: Double?): Double? = KalshiPrice.usable(ask)
 
-    fun buttonLabel(up: Boolean, ask: Double?): String {
-        val c = cents(ask)
-        val m = multiplier(ask)
+    fun formatAsk(ask: Double?): String {
+        val p = KalshiPrice.usable(ask) ?: return "—"
+        return formatPriceCents(p)
+    }
+
+    fun formatBid(bid: Double?): String {
+        if (bid == null || !bid.isFinite()) return "—"
+        if (bid <= 0.0 + 1e-12) return "—"
+        if (bid >= 1.0 - 1e-12) return "100¢"
+        return formatPriceCents(bid)
+    }
+
+    fun formatPriceCents(price: Double): String {
+        val c = price * 100.0
+        return if (c + 1e-9 < 1.0) {
+            String.format(Locale.US, "%.1f¢", c)
+        } else {
+            String.format(Locale.US, "%.0f¢", c)
+        }
+    }
+
+    fun buttonLabel(up: Boolean, ask: Double?, feeRate: Double = 0.07): String {
+        val price = formatAsk(ask)
+        val m = multiplier(ask, feeRate)
         val side = if (up) "Up" else "Down"
-        if (c == null || m == null) return if (up) "Buy UP" else "Buy DOWN"
-        return String.format(Locale.US, "%s %d¢ · %.2fx", side, c, m)
+        if (price == "—" || m == null) return if (up) "Buy UP" else "Buy DOWN"
+        return String.format(Locale.US, "%s %s · %.2fx", side, price, m)
     }
 
     fun targetNowLine(strike: Double?, spot: Double?): String? {

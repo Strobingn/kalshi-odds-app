@@ -36,8 +36,8 @@ class TickBook(private val maxPoints: Int = 80) {
     private val bidsByTicker = linkedMapOf<String, ArrayDeque<BidSample>>()
     private val spotsByTicker = linkedMapOf<String, ArrayDeque<SpotSample>>()
     private val lastSpotByTicker = linkedMapOf<String, Double>()
-    private val maxBidPoints = 64
-    private val maxSpotPoints = 96
+    private val maxBidPoints = 240
+    private val maxSpotPoints = 180
 
     data class BidSample(
         val tMs: Long,
@@ -160,12 +160,15 @@ class TickBook(private val maxPoints: Int = 80) {
         val noFromAsk = yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
         val rawNo = tick.noBid
         val no = if (QuoteSanity.isPlaceholder(rawNo)) noFromAsk else rawNo
-        if (yesBid == null && no == null) return
+        val chartYes = yesBid ?: chartablePrice(tick.yesBid)
+        val chartNo = no ?: chartablePrice(tick.noBid) ?: noFromAsk
+        if (isEmptyPlaceholderBook(tick)) return
+        if (chartYes == null && chartNo == null) return
         val q = bidsByTicker.getOrPut(tick.ticker) { ArrayDeque() }
         val last = q.lastOrNull()
         val spot = lastSpotByTicker[tick.ticker]
         if (last != null && nowMs - last.tMs < 400L &&
-            last.yesBid == yesBid && last.noBid == no
+            last.yesBid == chartYes && last.noBid == chartNo
         ) {
             if (spot != null && last.spotUsd == null) {
                 q.removeLast()
@@ -173,8 +176,62 @@ class TickBook(private val maxPoints: Int = 80) {
             }
             return
         }
-        q.addLast(BidSample(nowMs, yesBid, no, spot))
+        q.addLast(BidSample(nowMs, chartYes, chartNo, spot))
         while (q.size > maxBidPoints) q.removeFirst()
+    }
+
+    /** 0/1 complementary empty book — do not replace a good last print. */
+    private fun isEmptyPlaceholderBook(tick: MarketTick): Boolean {
+        val noRealYesBid = chartablePrice(tick.yesBid).let { it == null || it <= 0.0 }
+        val noRealNoBid = chartablePrice(tick.noBid).let { it == null || it <= 0.0 }
+        val asksArePlaceholders = QuoteSanity.isPlaceholder(tick.yesAsk) &&
+            (tick.noAsk == null || QuoteSanity.isPlaceholder(tick.noAsk))
+        return noRealYesBid && noRealNoBid && asksArePlaceholders
+    }
+
+    /** Inclusive 0–1 so a real 100¢ near-settlement bid can be charted. */
+    private fun chartablePrice(price: Double?): Double? {
+        if (price == null || !price.isFinite()) return null
+        if (price < 0.0 || price > 1.0) return null
+        return price
+    }
+
+    /**
+     * Restore bid + spot prints after process death. Merges by timestamp
+     * so live ticks already in the ring are not overwritten.
+     */
+    @Synchronized
+    fun seedBids(ticker: String, points: List<com.dirk.kalshiodds.chart.BidPoint>) {
+        if (!CryptoMarkets.isCryptoTicker(ticker) || points.isEmpty()) return
+        val q = bidsByTicker.getOrPut(ticker) { ArrayDeque() }
+        val existing = q.associateBy { it.tMs }.toMutableMap()
+        for (p in points.sortedBy { it.tMs }) {
+            val yes = p.upBidCents?.div(100.0)?.toDouble()
+            val no = p.downBidCents?.div(100.0)?.toDouble()
+            val spot = p.spotUsd?.takeIf { it.isFinite() && it > 0.0 }
+            if (yes == null && no == null && spot == null) continue
+            val prev = existing[p.tMs]
+            val merged = BidSample(
+                tMs = p.tMs,
+                yesBid = yes ?: prev?.yesBid,
+                noBid = no ?: prev?.noBid,
+                spotUsd = spot ?: prev?.spotUsd
+            )
+            existing[p.tMs] = merged
+            if (spot != null) lastSpotByTicker[ticker] = spot
+        }
+        q.clear()
+        existing.values.sortedBy { it.tMs }.forEach { q.addLast(it) }
+        while (q.size > maxBidPoints) q.removeFirst()
+        val spots = spotsByTicker.getOrPut(ticker) { ArrayDeque() }
+        val spotSeen = spots.map { it.tMs }.toHashSet()
+        for (p in points) {
+            val spot = p.spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: continue
+            if (p.tMs in spotSeen) continue
+            spots.addLast(SpotSample(p.tMs, spot))
+            spotSeen.add(p.tMs)
+        }
+        while (spots.size > maxSpotPoints) spots.removeFirst()
     }
 
     /**

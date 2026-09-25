@@ -151,6 +151,8 @@ object SignalConstants {
     /** Sparkline ring — copied under lock; persisted off the scan thread. */
     const val SPARKLINE_MAX_POINTS = 48
     const val ODDS_MID_PERSIST_MIN_MS = 2_000L
+    /** Chart ticks: one persist per ticker per second, even when mid is 0/1. */
+    const val CHART_TICK_PERSIST_MIN_MS = 1_000L
 
     /** Default: skip filter / mute / streak pause still gate tickets. */
     const val DEFAULT_TICKET_RESPECT_GATES = true

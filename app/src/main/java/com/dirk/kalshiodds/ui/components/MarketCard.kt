@@ -196,21 +196,22 @@ fun MarketCard(
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
+            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 SideQuote(
                     title = "UP  YES",
-                    bid = market.yesBid,
-                    ask = market.yesAsk,
+                    bidLabel = quotes.yesBidLabel,
+                    askLabel = quotes.yesAskLabel,
                     accent = AccentGreen,
                     modifier = Modifier.weight(1f)
                 )
                 SideQuote(
                     title = "DOWN  NO",
-                    bid = market.noBid,
-                    ask = market.noAsk,
+                    bidLabel = quotes.noBidLabel,
+                    askLabel = quotes.noAskLabel,
                     accent = AccentOrange,
                     modifier = Modifier.weight(1f)
                 )
@@ -249,7 +250,9 @@ fun MarketCard(
                 strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
                 spotUsd = market.spotUsd,
                 strikeUsd = market.floorStrike,
-                spotHeightDp = if (compact) 56 else 72
+                spotHeightDp = if (compact) 56 else 72,
+                liveUpLabel = quotes.upChartLabel,
+                liveDownLabel = quotes.downChartLabel
             )
             if (onOpenChart != null) {
                 Text(
@@ -287,8 +290,6 @@ fun MarketCard(
                 OddsColumn(
                     label = if (market.calibrated) "FV YES" else "AI YES",
                     percent = market.aiYesPercent,
-                    bid = null,
-                    ask = null,
                     accent = AccentGreen,
                     modifier = Modifier.weight(1f),
                     big = true
@@ -296,8 +297,6 @@ fun MarketCard(
                 OddsColumn(
                     label = if (market.calibrated) "FV NO" else "AI NO",
                     percent = market.aiNoPercent,
-                    bid = null,
-                    ask = null,
                     accent = AccentOrange,
                     modifier = Modifier.weight(1f),
                     endAligned = true,
@@ -427,13 +426,13 @@ fun MarketCard(
                         Button(
                             onClick = onBuyYes,
                             modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
+                        ) { Text(quotes.upButton) }
                     }
                     if (onBuyNo != null) {
                         OutlinedButton(
                             onClick = onBuyNo,
                             modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
+                        ) { Text(quotes.downButton) }
                     }
                     if (onSell != null) {
                         OutlinedButton(
@@ -467,8 +466,8 @@ fun MarketCard(
                     OddsColumn(
                         label = "Mkt YES",
                         percent = market.yesProbabilityPercent,
-                        bid = market.yesBid,
-                        ask = market.yesAsk,
+                        bidLabel = quotes.yesBidLabel,
+                        askLabel = quotes.yesAskLabel,
                         accent = valueColor,
                         modifier = Modifier.weight(1f),
                         big = false
@@ -476,8 +475,8 @@ fun MarketCard(
                     OddsColumn(
                         label = "Mkt NO",
                         percent = market.noProbabilityPercent,
-                        bid = market.noBid,
-                        ask = market.noAsk,
+                        bidLabel = quotes.noBidLabel,
+                        askLabel = quotes.noAskLabel,
                         accent = valueColor,
                         modifier = Modifier.weight(1f),
                         endAligned = true,
@@ -558,8 +557,8 @@ private fun ChecklistBlock(market: MarketUiModel) {
 @Composable
 private fun SideQuote(
     title: String,
-    bid: Double?,
-    ask: Double?,
+    bidLabel: String,
+    askLabel: String,
     accent: Color,
     modifier: Modifier = Modifier
 ) {
@@ -573,14 +572,14 @@ private fun SideQuote(
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
         Text(
-            formatCents(bid),
+            bidLabel,
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = valueColor,
             lineHeight = 36.sp
         )
         Text(
-            "bid  ·  ask ${formatCents(ask)}",
+            "bid  ·  ask $askLabel",
             style = MaterialTheme.typography.bodyMedium,
             color = labelColor,
             fontWeight = FontWeight.SemiBold
@@ -592,8 +591,8 @@ private fun SideQuote(
 private fun OddsColumn(
     label: String,
     percent: Double?,
-    bid: Double?,
-    ask: Double?,
+    bidLabel: String? = null,
+    askLabel: String? = null,
     accent: Color,
     modifier: Modifier = Modifier,
     endAligned: Boolean = false,
@@ -614,9 +613,9 @@ private fun OddsColumn(
             color = valueColor,
             lineHeight = if (big) 40.sp else 26.sp
         )
-        if (bid != null || ask != null) {
+        if (bidLabel != null || askLabel != null) {
             Text(
-                text = "Bid ${formatCents(bid)} · Ask ${formatCents(ask)}",
+                text = "Bid ${bidLabel ?: "—"} · Ask ${askLabel ?: "—"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = labelColor,
                 modifier = Modifier.padding(top = 4.dp)
@@ -656,9 +655,6 @@ private fun StatusChip(status: String?) {
         fontWeight = FontWeight.Bold
     )
 }
-
-private fun formatCents(dollars: Double?): String =
-    dollars?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
 
 private fun formatCompact(value: Double?): String {
     if (value == null) return "—"

@@ -336,8 +336,126 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
+    override fun insertChartTicks(rows: List<com.dirk.kalshiodds.data.local.archive.ChartTickRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    TABLE_CHART,
+                    null,
+                    ContentValues().apply {
+                        put("ticker", r.ticker)
+                        put("t_ms", r.tMs)
+                        put("yes_bid", r.yesBid)
+                        put("no_bid", r.noBid)
+                        put("yes_ask", r.yesAsk)
+                        put("no_ask", r.noAsk)
+                        put("spot_usd", r.spotUsd)
+                        put("source", r.source)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE
+                )
+            }
+            w.execSQL(
+                "DELETE FROM $TABLE_CHART WHERE id NOT IN (SELECT id FROM $TABLE_CHART ORDER BY t_ms DESC LIMIT $MAX_CHART)"
+            )
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    override fun chartTicks(
+        ticker: String,
+        startMs: Long,
+        endMs: Long,
+        limit: Int
+    ): List<com.dirk.kalshiodds.data.local.archive.ChartTickRow> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.archive.ChartTickRow>(limit)
+        db.readableDatabase.query(
+            TABLE_CHART,
+            null,
+            "ticker = ? AND t_ms >= ? AND t_ms <= ?",
+            arrayOf(ticker, startMs.toString(), endMs.toString()),
+            null,
+            null,
+            "t_ms ASC",
+            limit.coerceIn(1, 2_000).toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.archive.ChartTickRow(
+                        ticker = c.str("ticker"),
+                        tMs = c.long("t_ms"),
+                        yesBid = c.dblOrNull("yes_bid"),
+                        noBid = c.dblOrNull("no_bid"),
+                        yesAsk = c.dblOrNull("yes_ask"),
+                        noAsk = c.dblOrNull("no_ask"),
+                        spotUsd = c.dblOrNull("spot_usd"),
+                        source = c.strOrNull("source") ?: com.dirk.kalshiodds.data.local.archive.ChartTickRow.SOURCE_LIVE
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    override fun trimChartTicks(keepTickers: Set<String>, olderThanMs: Long) {
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            if (keepTickers.isNotEmpty()) {
+                val placeholders = keepTickers.joinToString(",") { "?" }
+                val args = keepTickers.map { it }.toTypedArray() + olderThanMs.toString()
+                w.execSQL(
+                    "DELETE FROM $TABLE_CHART WHERE ticker NOT IN ($placeholders) OR t_ms < ?",
+                    args
+                )
+            } else {
+                w.execSQL("DELETE FROM $TABLE_CHART WHERE t_ms < ?", arrayOf(olderThanMs.toString()))
+            }
+            w.execSQL(
+                """
+                DELETE FROM $TABLE_CHART WHERE id NOT IN (
+                  SELECT id FROM $TABLE_CHART
+                  WHERE ticker IN (SELECT DISTINCT ticker FROM $TABLE_CHART)
+                  ORDER BY t_ms DESC
+                  LIMIT $MAX_CHART
+                )
+                """.trimIndent()
+            )
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
     override fun bidHistory(ticker: String, sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.chart.BidPoint> {
         val out = ArrayList<com.dirk.kalshiodds.chart.BidPoint>(limit)
+        db.readableDatabase.query(
+            TABLE_CHART,
+            arrayOf("t_ms", "yes_bid", "no_bid", "spot_usd"),
+            "ticker = ? AND t_ms >= ?",
+            arrayOf(ticker, sinceMs.toString()),
+            null,
+            null,
+            "t_ms ASC",
+            limit.coerceIn(1, 2_000).toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.chart.BidPoint(
+                        tMs = c.long("t_ms"),
+                        upBidCents = c.dblOrNull("yes_bid")?.times(100.0)?.toFloat(),
+                        downBidCents = c.dblOrNull("no_bid")?.times(100.0)?.toFloat(),
+                        spotUsd = c.dblOrNull("spot_usd")
+                    )
+                )
+            }
+        }
+        if (out.size >= 4) return out.sortedBy { it.tMs }
         db.readableDatabase.query(
             TABLE_ODDS,
             arrayOf("created_at_ms", "yes_bid", "no_bid", "mid01"),
@@ -758,6 +876,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createOddsTable(db)
             createArchiveTables(db)
             createHistoryTables(db)
+            createChartTickTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -767,6 +886,13 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 createArchiveTables(db)
             }
             if (oldVersion < 4) createHistoryTables(db)
+            if (oldVersion < 5) createChartTickTable(db)
+        }
+
+        private fun createChartTickTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.chart.ChartTickSchema.upgradeSql(4)) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createOddsTable(db: SQLiteDatabase) {
@@ -871,7 +997,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 4
+        const val DB_VERSION = 5
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
@@ -885,6 +1011,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val TABLE_SPOT = "spot_candles"
         const val TABLE_FILL = "imported_fills"
         const val TABLE_CURSOR = "backfill_cursor"
+        const val TABLE_CHART = com.dirk.kalshiodds.data.local.chart.ChartTickSchema.TABLE
         const val MAX_SNAP = 1_200
         const val MAX_ALERT = 400
         const val MAX_CARD = 600
@@ -892,6 +1019,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val MAX_ODDS = 2_400
         const val MAX_PATH = 8_000
         const val MAX_SPOT = 12_000
+        const val MAX_CHART = 2_880
     }
 }
 

@@ -56,6 +56,7 @@ fun TapeConflictBanner(market: MarketUiModel, modifier: Modifier = Modifier) {
 
 @Composable
 fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
+    val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
     Row(
         modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceEvenly,
@@ -63,13 +64,15 @@ fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
     ) {
         AskHeroSide(
             title = "UP",
-            ask = market.yesAsk,
+            price = quotes.upHero,
+            multiple = quotes.upMultiple,
             color = AccentGreen,
             emphasized = market.primaryHeroSide != "NO"
         )
         AskHeroSide(
             title = "DOWN",
-            ask = market.noAsk,
+            price = quotes.downHero,
+            multiple = quotes.downMultiple,
             color = AccentRed,
             emphasized = market.primaryHeroSide == "NO"
         )
@@ -77,9 +80,13 @@ fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun AskHeroSide(title: String, ask: Double?, color: androidx.compose.ui.graphics.Color, emphasized: Boolean) {
-    val cents = KalshiQuoteDisplay.cents(ask)
-    val mult = KalshiQuoteDisplay.multiplier(ask)
+private fun AskHeroSide(
+    title: String,
+    price: String,
+    multiple: Double?,
+    color: androidx.compose.ui.graphics.Color,
+    emphasized: Boolean
+) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             title,
@@ -88,14 +95,14 @@ private fun AskHeroSide(title: String, ask: Double?, color: androidx.compose.ui.
             fontWeight = FontWeight.Bold
         )
         Text(
-            cents?.let { String.format(Locale.US, "%d¢", it) } ?: "—",
+            price,
             fontSize = if (emphasized) 40.sp else 32.sp,
             fontWeight = FontWeight.Bold,
             color = if (emphasized) color else color.copy(alpha = 0.7f),
             lineHeight = if (emphasized) 44.sp else 36.sp
         )
         Text(
-            mult?.let { String.format(Locale.US, "%.2fx", it) } ?: "",
+            multiple?.let { String.format(Locale.US, "%.2fx", it) } ?: "",
             style = MaterialTheme.typography.labelMedium,
             color = if (emphasized) color else TextSecondary,
             fontWeight = FontWeight.SemiBold
@@ -144,8 +151,9 @@ fun UpDownBuyButtons(
     onBuyNo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
     val tapeUp = market.primaryHeroSide == "YES" ||
-        (market.primaryHeroSide == null && (market.yesAsk ?: 0.5) >= 0.5)
+        (market.primaryHeroSide == null && (quotes.yesAsk ?: 0.5) >= 0.5)
     Row(
         modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -156,11 +164,11 @@ fun UpDownBuyButtons(
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                 containerColor = if (tapeUp) AccentGreen else AccentGreen.copy(alpha = 0.75f)
             )
-        ) { Text(KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
+        ) { Text(quotes.upButton) }
         Button(
             onClick = onBuyNo,
             modifier = Modifier.weight(1f).height(52.dp),
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentRed)
-        ) { Text(KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
+        ) { Text(quotes.downButton) }
     }
 }

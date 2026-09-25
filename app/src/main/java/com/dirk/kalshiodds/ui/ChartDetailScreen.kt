@@ -84,6 +84,7 @@ fun ChartDetailScreen(
             MarketAskHero(market, Modifier.padding(top = 12.dp))
             AiFairLabel(market, Modifier.padding(top = 8.dp))
             PastSettlementsRow(market.pastSettlements, Modifier.padding(top = 8.dp, bottom = 12.dp))
+            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
             BidChart(
                 points = points,
                 modifier = Modifier.fillMaxWidth(),
@@ -94,7 +95,9 @@ fun ChartDetailScreen(
                 strikeLabel = null,
                 spotUsd = market.spotUsd,
                 strikeUsd = market.floorStrike,
-                spotHeightDp = 180
+                spotHeightDp = 180,
+                liveUpLabel = quotes.upChartLabel,
+                liveDownLabel = quotes.downChartLabel
             )
             Text(
                 "Orange = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids. Drag to scrub.",

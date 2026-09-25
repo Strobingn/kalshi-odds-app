@@ -57,7 +57,9 @@ fun BidChart(
     spotUsd: Double? = null,
     strikeUsd: Double? = null,
     spotHeightDp: Int = if (scrub) 168 else 72,
-    showSpotPanel: Boolean = true
+    showSpotPanel: Boolean = true,
+    liveUpLabel: String? = null,
+    liveDownLabel: String? = null
 ) {
     val bg = MaterialTheme.colorScheme.surface
     val labelColor = checklistLabelColor(bg)
@@ -183,11 +185,21 @@ fun BidChart(
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("UP bid ${fmtCents(pick.upBidCents)}", color = AccentGreen, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(
+                if (scrubIdx == null && liveUpLabel != null) liveUpLabel else "UP bid ${fmtCents(pick.upBidCents)}",
+                color = AccentGreen,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.weight(1f))
             Text(fmtTime(pick.tMs), color = labelColor, style = MaterialTheme.typography.labelMedium)
             Spacer(Modifier.weight(1f))
-            Text("DOWN bid ${fmtCents(pick.downBidCents)}", color = AccentRed, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(
+                if (scrubIdx == null && liveDownLabel != null) liveDownLabel else "DOWN bid ${fmtCents(pick.downBidCents)}",
+                color = AccentRed,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
         }
         strikeLabel?.let {
             Text(it, color = labelColor, style = MaterialTheme.typography.labelMedium)

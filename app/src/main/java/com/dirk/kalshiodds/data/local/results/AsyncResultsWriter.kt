@@ -26,6 +26,7 @@ class AsyncResultsWriter(
     private val scorecards = ConcurrentLinkedQueue<ScorecardRow>()
     private val tickets = ConcurrentLinkedQueue<TicketAttemptRow>()
     private val odds = ConcurrentLinkedQueue<OddsMidRow>()
+    private val chartTicks = ConcurrentLinkedQueue<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
     private val flushScheduled = AtomicBoolean(false)
 
     fun enqueueSnapshot(row: ScoredSnapshotRow) {
@@ -56,6 +57,11 @@ class AsyncResultsWriter(
         schedule()
     }
 
+    fun enqueueChartTick(row: com.dirk.kalshiodds.data.local.archive.ChartTickRow) {
+        chartTicks.add(row)
+        schedule()
+    }
+
     fun flushNow() {
         drain()
     }
@@ -74,7 +80,7 @@ class AsyncResultsWriter(
 
     private fun pending(): Boolean =
         snapshots.isNotEmpty() || alerts.isNotEmpty() || scorecards.isNotEmpty() ||
-            tickets.isNotEmpty() || odds.isNotEmpty()
+            tickets.isNotEmpty() || odds.isNotEmpty() || chartTicks.isNotEmpty()
 
     @Synchronized
     private fun drain() {
@@ -111,6 +117,19 @@ class AsyncResultsWriter(
                 batch.add(next)
             }
             if (batch.isNotEmpty()) store.insertOddsMids(batch)
+        }
+        runCatching {
+            val archive = store as? com.dirk.kalshiodds.data.local.archive.DataArchive
+            if (archive != null) {
+                val batch = ArrayList<com.dirk.kalshiodds.data.local.archive.ChartTickRow>(maxBatch)
+                while (batch.size < maxBatch) {
+                    val next = chartTicks.poll() ?: break
+                    batch.add(next)
+                }
+                if (batch.isNotEmpty()) archive.insertChartTicks(batch)
+            } else {
+                while (chartTicks.poll() != null) Unit
+            }
         }
     }
 }
