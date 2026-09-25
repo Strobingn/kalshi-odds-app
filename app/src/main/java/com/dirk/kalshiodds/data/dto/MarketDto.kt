@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.data.dto
 
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -81,6 +82,7 @@ data class MarketDto(
  * Accepts documented string FixedPointDollars (`"0.0150"`) or a JSON number
  * (`0.015`) so a typed payload cannot drop the ask.
  */
+@OptIn(ExperimentalSerializationApi::class)
 object FixedPointDollarsSerializer : KSerializer<String?> {
     override val descriptor: SerialDescriptor =
         PrimitiveSerialDescriptor("FixedPointDollars", PrimitiveKind.STRING).nullable
