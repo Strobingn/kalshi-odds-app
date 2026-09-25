@@ -1134,42 +1134,63 @@ class KnownIssuesRegressionTest {
         val staleOpen = rollover.refreshFromRest()
         assertTrue(staleOpen.retrying.containsAll(listOf("KXBTC15M", "KXSOL15M", "KXETH15M")))
         assertTrue(staleOpen.activeTickers.isEmpty())
-        val loading = HomeSnapshotMerge.apply(snap0, staleOpen, clock.nowMs())
+        val loading = paintHome(snap0, staleOpen, clock.nowMs())
         val cards = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
         assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), cards.map { it.series })
         assertTrue(cards.all { it.market == null })
+
+        clock.advance(2_500L)
+        val stillStale = rollover.refreshFromRest()
+        assertTrue(stillStale.retrying.isNotEmpty())
+        clock.advance(5_000L)
+        val stillLoading = paintHome(loading, stillStale, clock.nowMs())
+        assertTrue(HomeMarkets.coinCards(stillLoading.allMarkets, clock.nowMs()).all { it.market == null })
 
         throw429 = true
         clock.advance(5_000L)
         val limited = rollover.refreshFromRest()
         assertTrue(limited.rateLimited.isNotEmpty())
         assertTrue(limited.retrying.isNotEmpty())
+        val after429 = paintHome(stillLoading, limited, clock.nowMs())
+        assertTrue(HomeMarkets.coinCards(after429.allMarkets, clock.nowMs()).all { it.market == null })
         throw429 = false
 
         clock.set(close0 + 42_000L)
         listed = next
         val swapped = rollover.refreshFromRest()
         assertEquals(next.map { it.ticker }.toSet(), swapped.activeTickers)
-        val painted = HomeSnapshotMerge.apply(loading, swapped, clock.nowMs())
+        val painted = paintHome(loading, swapped, clock.nowMs())
         val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs())
         assertEquals(next[0].ticker, after[0].market?.ticker)
         assertEquals(next[1].ticker, after[1].market?.ticker)
         assertEquals(next[2].ticker, after[2].market?.ticker)
+        assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), after.map { it.series })
 
         val resume = rollover.refreshFromRest()
         assertEquals(swapped.activeTickers, resume.activeTickers)
         val replay = rollover.onReconnect()
         assertTrue(replay.reconnect)
         assertEquals(swapped.activeTickers, replay.activeTickers)
+        val afterResume = paintHome(painted, resume, clock.nowMs())
+        assertEquals(next[0].ticker, HomeMarkets.coinCards(afterResume.allMarkets, clock.nowMs())[0].market?.ticker)
 
         val vm = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt"),
             File("src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt")
         ).first { it.isFile }.readText()
         assertTrue(vm.contains("bindRollover"))
+        assertTrue(vm.contains("container.rollover.start(viewModelScope)"))
         assertTrue(vm.contains("applyRolloverEvent"))
         assertTrue(vm.contains("fun onForeground"))
+        assertTrue(vm.contains("container.rollover.refreshFromRest()"))
+        assertTrue(vm.contains("container.rollover.onReconnect()"))
+        assertTrue(vm.contains("val event = container.rollover.applyListed"))
         assertTrue(vm.contains("HomeSnapshotMerge.apply"))
+        val activity = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/MainActivity.kt"),
+            File("src/main/java/com/dirk/kalshiodds/MainActivity.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(activity.contains("oddsViewModel.onForeground()"))
         assertTrue(calls.get() >= 9)
     }
 
@@ -1247,6 +1268,13 @@ class KnownIssuesRegressionTest {
         assertFalse(loading.contains("tileAi"))
         assertFalse(loading.contains("AI "))
     }
+
+    /** Same paint path as [com.dirk.kalshiodds.ui.OddsViewModel.applyResult] / applyRolloverEvent. */
+    private fun paintHome(
+        snapshot: com.dirk.kalshiodds.data.repo.MarketsSnapshot,
+        event: com.dirk.kalshiodds.signal.market.MarketRollover.Event,
+        nowMs: Long
+    ) = HomeSnapshotMerge.apply(snapshot, event, nowMs)
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {
         val cards = HomeMarkets.currentWindowCards(markets, SignalSettings(), nowMs)

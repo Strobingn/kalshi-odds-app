@@ -41,8 +41,15 @@ class LiveRolloverProofTest {
 
         val soonestClose = first.values.mapNotNull { parseIso(it?.closeTime) }.minOrNull()
         val now = System.currentTimeMillis()
-        val waitMs = soonestClose?.let { (it - now + 45_000L).coerceIn(0L, 15_000L) } ?: 8_000L
-        log.appendLine("polling ${waitMs}ms for a later close_time (boundary wait capped at 180s)")
+        val untilAfterClose = soonestClose?.let { it - now + 90_000L }
+        val waitMs = when {
+            untilAfterClose != null && untilAfterClose in 1L..(8 * 60_000L) -> untilAfterClose
+            else -> 15_000L
+        }
+        log.appendLine(
+            "polling ${waitMs}ms for a later close_time " +
+                "(wait through the next 15m close + 90s when that is within 8 min)"
+        )
 
         val clock = Clock { System.currentTimeMillis() }
         val rollover = MarketRollover(
