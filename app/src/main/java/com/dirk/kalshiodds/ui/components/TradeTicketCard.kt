@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -156,6 +157,7 @@ fun TradeTicketsSection(
 
     val awaiting = tickets.phase as? TicketPhase.AwaitingApprove
     if (awaiting != null) {
+        BackHandler(enabled = true) { onCancelApprove() }
         ApproveTicketDialog(
             ticket = awaiting.ticket,
             credentialsConfigured = credentialsConfigured,

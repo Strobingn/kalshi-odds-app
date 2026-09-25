@@ -21,6 +21,16 @@ object HomeCopy {
     const val WINDOW_LENGTH = "15m"
     const val SIGNAL_HISTORY = "Signal history"
     const val NO_SETTLED_PICKS = HomeScorecardSummary.NO_SETTLED
+    const val SCORECARD_CONTENT_DESCRIPTION = "Scorecard"
+    const val SETTINGS_CONTENT_DESCRIPTION = "Settings"
+    const val REFRESH_CONTENT_DESCRIPTION = "Refresh"
+
+    /** 0.3.12 top bar: title, LIVE chip, scorecard, settings, refresh. */
+    val TOP_BAR_ACTIONS: List<String> = listOf(
+        SCORECARD_CONTENT_DESCRIPTION,
+        SETTINGS_CONTENT_DESCRIPTION,
+        REFRESH_CONTENT_DESCRIPTION
+    )
 
     /** Home never renders a Signals list; cards live on [SignalHistoryScreen]. */
     const val SHOWS_SIGNAL_LIST = false

@@ -117,6 +117,22 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightNextWindow() = snap("home_light_next_window", dark = false, HomeFixtures.state(
+        HomeFixtures.actionableBtc().copy(closeTimeEpochMs = HomeFixtures.NOW_MS - 1_000L),
+        HomeFixtures.noBetEth(),
+        HomeFixtures.noBetSol(),
+        hasKey = true
+    ))
+
+    @Test
+    fun darkNextWindow() = snap("home_dark_next_window", dark = true, HomeFixtures.state(
+        HomeFixtures.actionableBtc().copy(closeTimeEpochMs = HomeFixtures.NOW_MS - 1_000L),
+        HomeFixtures.noBetEth(),
+        HomeFixtures.noBetSol(),
+        hasKey = true
+    ))
+
+    @Test
     fun lightScorecardEmpty() = snap("home_light_scorecard_empty", dark = false, HomeFixtures.state(
         HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(),
         hasKey = true,
@@ -391,6 +407,7 @@ class HomeScreenScreenshotTest {
             "home_light_nokey", "home_dark_nokey",
             "home_light_disagreement", "home_dark_disagreement",
             "home_light_scorecard_empty", "home_dark_scorecard_empty",
+            "home_light_next_window", "home_dark_next_window",
             "scorecard_light", "scorecard_dark",
             "settings_light", "settings_dark",
             "signals_light", "signals_dark",

@@ -131,6 +131,11 @@ class HomeCopyTest {
     }
 
     @Test
+    fun topBarKeeps0312ActionsPlusScorecard() {
+        assertEquals(listOf("Scorecard", "Settings", "Refresh"), HomeCopy.TOP_BAR_ACTIONS)
+    }
+
+    @Test
     fun homeHasNoSignalListOnlyAHistoryLink() {
         assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
         assertEquals("Signal history", HomeCopy.signalHistoryLink())

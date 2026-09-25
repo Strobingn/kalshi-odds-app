@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -39,7 +40,6 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
-import com.dirk.kalshiodds.ui.components.HomeScorecardLine
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
@@ -99,11 +99,14 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenScorecard) {
+                        Icon(Icons.Default.Assessment, contentDescription = HomeCopy.SCORECARD_CONTENT_DESCRIPTION)
+                    }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(Icons.Default.Settings, contentDescription = HomeCopy.SETTINGS_CONTENT_DESCRIPTION)
                     }
                     IconButton(onClick = onRefresh, enabled = !state.isLoading) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = HomeCopy.REFRESH_CONTENT_DESCRIPTION)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -175,12 +178,8 @@ fun HomeScreen(
                             ThisWindowCard(
                                 market = best?.first,
                                 decision = best?.second,
-                                nowMs = nowMs
-                            )
-                        }
-                        item {
-                            HomeScorecardLine(
-                                summary = state.scorecardSummary,
+                                nowMs = nowMs,
+                                scorecard = state.scorecardSummary,
                                 onOpenScorecard = onOpenScorecard
                             )
                         }

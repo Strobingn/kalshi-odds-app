@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Info
@@ -58,6 +59,8 @@ fun ThisWindowCard(
     market: MarketUiModel?,
     decision: BetCall.Decision?,
     nowMs: Long,
+    scorecard: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
+    onOpenScorecard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = DipTheme.colors
@@ -82,6 +85,7 @@ fun ThisWindowCard(
             color = accent,
             fontWeight = FontWeight.SemiBold
         )
+        HomeScorecardLine(summary = scorecard, onOpenScorecard = onOpenScorecard)
     }
 }
 
@@ -92,15 +96,26 @@ fun HomeScorecardLine(
     modifier: Modifier = Modifier
 ) {
     val colors = DipTheme.colors
-    Text(
-        HomeCopy.scorecardSummaryLine(summary),
-        style = MaterialTheme.typography.labelMedium,
-        color = colors.textSecondary,
-        modifier = modifier
+    Row(
+        modifier
             .fillMaxWidth()
             .clickable(onClick = onOpenScorecard)
-            .padding(horizontal = 4.dp, vertical = 2.dp)
-    )
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            HomeCopy.scorecardSummaryLine(summary),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = HomeCopy.SCORECARD_CONTENT_DESCRIPTION,
+            tint = colors.textSecondary
+        )
+    }
 }
 
 @Composable

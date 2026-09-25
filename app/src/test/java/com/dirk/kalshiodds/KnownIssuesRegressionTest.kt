@@ -36,6 +36,7 @@ import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.HomeFixtures
 import com.dirk.kalshiodds.ui.HomeMarkets
 import com.dirk.kalshiodds.ui.HomeScorecardSummary
+import com.dirk.kalshiodds.ui.HomeSnapshotMerge
 import com.dirk.kalshiodds.ui.SignalCopy
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.WindowLabel
@@ -953,11 +954,11 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }
         val home = homeSrc.readText()
         val thisWindow = home.indexOf("ThisWindowCard")
-        val scoreLine = home.indexOf("HomeScorecardLine")
         val coins = home.indexOf("items(coinCards")
-        assertTrue(thisWindow >= 0 && scoreLine > thisWindow && coins > scoreLine)
+        assertTrue(thisWindow >= 0 && coins > thisWindow)
+        assertTrue(home.contains("scorecard = state.scorecardSummary"))
         assertTrue(home.contains("onOpenScorecard"))
-        assertTrue(home.contains("state.scorecardSummary"))
+        assertTrue(home.contains("Icons.Default.Assessment"))
         assertFalse(home.contains("Color.Green"))
         assertFalse(home.contains("Color.Red"))
         assertFalse(home.contains("SignalSummaryCard"))
@@ -967,10 +968,13 @@ class KnownIssuesRegressionTest {
             File("src/main/java/com/dirk/kalshiodds/ui/components/HomeChrome.kt")
         ).first { it.isFile }
         val chrome = chromeSrc.readText()
+        val cardFn = chrome.indexOf("fun ThisWindowCard")
         val lineFn = chrome.indexOf("fun HomeScorecardLine")
-        assertTrue(lineFn >= 0)
-        val snippet = chrome.substring(lineFn, (lineFn + 600).coerceAtMost(chrome.length))
+        assertTrue(cardFn >= 0 && lineFn > cardFn)
+        assertTrue(chrome.substring(cardFn, lineFn).contains("HomeScorecardLine"))
+        val snippet = chrome.substring(lineFn, (lineFn + 800).coerceAtMost(chrome.length))
         assertTrue(snippet.contains("textSecondary"))
+        assertTrue(snippet.contains("KeyboardArrowRight"))
         assertFalse(snippet.contains("Color.Green"))
         assertFalse(snippet.contains("Color.Red"))
         assertFalse(snippet.contains("accentGreen"))
@@ -982,8 +986,195 @@ class KnownIssuesRegressionTest {
             File("src/main/java/com/dirk/kalshiodds/MainActivity.kt")
         ).first { it.isFile }
         val activity = activitySrc.readText()
-        assertTrue(activity.contains("onOpenScorecard = { screen = \"scorecard\" }"))
+        assertTrue(activity.contains("navigator.open(AppRoutes.SCORECARD)"))
         assertTrue(activity.contains("ScorecardScreen"))
+        assertTrue(activity.contains("DipApp"))
+    }
+
+    @Test
+    fun backNavigatesToPreviousScreen() {
+        val nav = com.dirk.kalshiodds.ui.AppNavigator()
+        assertTrue(nav.isHome())
+        assertFalse(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
+
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.SCORECARD)
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.SETTINGS)
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.DATA)
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.HISTORY)
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.CHART)
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.CHART, nav.current)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HISTORY, nav.current)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.DATA, nav.current)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.SETTINGS, nav.current)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.SCORECARD, nav.current)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
+        assertFalse(nav.back())
+
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.SIGNAL_HISTORY)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
+
+        val dip = File("app/src/main/java/com/dirk/kalshiodds/ui/DipApp.kt").takeIf { it.isFile }
+            ?: File("src/main/java/com/dirk/kalshiodds/ui/DipApp.kt")
+        val dipSrc = dip.readText()
+        assertTrue(dipSrc.contains("BackHandler"))
+        assertTrue(dipSrc.contains("onCancelSheet"))
+        assertTrue(dipSrc.contains("sheetOpen"))
+
+        val tickets = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/components/TradeTicketCard.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/components/TradeTicketCard.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(tickets.contains("BackHandler(enabled = true) { onCancelApprove() }"))
+
+        val manifest = listOf(
+            File("app/src/main/AndroidManifest.xml"),
+            File("src/main/AndroidManifest.xml")
+        ).first { it.isFile }.readText()
+        assertTrue(manifest.contains("android:enableOnBackInvokedCallback=\"true\""))
+
+        val session = TicketSession(placeOrder = { _, _ -> error("Back must not place") })
+        val ticket = TicketBuilder.proposeManual(
+            sample("KXBTC15M-BACK", 0.25, 0.75, 80.0, "YES"),
+            "YES",
+            TicketBuilder.Context(settings = SignalSettings(ticketsEnabled = true), alertsPaused = false, nowMs = nowMs)
+        )!!
+        session.addManual(ticket)
+        session.openApprove(ticket.id)
+        assertTrue(session.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
+        session.cancelApprove()
+        assertFalse(session.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
+    }
+
+    @Test
+    fun rolloverSwitchesTickerWithoutRestart() = runBlocking {
+        val t0 = 1_700_000_000_000L
+        val close0 = t0 + 900_000L
+        val close1 = close0 + 900_000L
+        val clock = FakeClock(t0 + 60_000L)
+        val old = listOf("KXBTC15M", "KXSOL15M", "KXETH15M").map { ser ->
+            sample("$ser-26SEP251745-45", 0.25, 0.75, 80.0, "YES").copy(
+                closeTimeEpochMs = close0,
+                openTimeEpochMs = close0 - 900_000L,
+                status = "active"
+            )
+        }
+        val next = listOf("KXBTC15M", "KXSOL15M", "KXETH15M").map { ser ->
+            sample("$ser-26SEP251800-00", 0.25, 0.75, 80.0, "YES").copy(
+                closeTimeEpochMs = close1,
+                openTimeEpochMs = close0,
+                status = "active"
+            )
+        }
+        var listed = old
+        var throw429 = false
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val rollover = com.dirk.kalshiodds.signal.market.MarketRollover(
+            clock = clock,
+            listOpen = { series ->
+                calls.incrementAndGet()
+                if (throw429) {
+                    throw retrofit2.HttpException(
+                        retrofit2.Response.error<Any>(
+                            429,
+                            okhttp3.ResponseBody.create(
+                                okhttp3.MediaType.parse("text/plain"),
+                                "rate limited"
+                            )
+                        )
+                    )
+                }
+                listed.filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) == series }
+            },
+            sleeper = { }
+        )
+        val first = rollover.refreshFromRest()
+        assertEquals(old.map { it.ticker }.toSet(), first.activeTickers)
+        val snap0 = com.dirk.kalshiodds.data.repo.MarketsSnapshot(
+            btc = listOf(old[0]),
+            sol = listOf(old[1]),
+            eth = listOf(old[2]),
+            fetchedAtEpochMs = clock.nowMs(),
+            fromCache = false
+        )
+        assertEquals(old[0].ticker, HomeMarkets.coinCards(snap0.allMarkets, clock.nowMs())[0].market?.ticker)
+
+        clock.set(close0 + 1_000L)
+        val staleOpen = rollover.refreshFromRest()
+        assertTrue(staleOpen.retrying.containsAll(listOf("KXBTC15M", "KXSOL15M", "KXETH15M")))
+        assertTrue(staleOpen.activeTickers.isEmpty())
+        val loading = HomeSnapshotMerge.apply(snap0, staleOpen, clock.nowMs())
+        val cards = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
+        assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), cards.map { it.series })
+        assertTrue(cards.all { it.market == null })
+
+        throw429 = true
+        clock.advance(5_000L)
+        val limited = rollover.refreshFromRest()
+        assertTrue(limited.rateLimited.isNotEmpty())
+        assertTrue(limited.retrying.isNotEmpty())
+        throw429 = false
+
+        clock.set(close0 + 42_000L)
+        listed = next
+        val swapped = rollover.refreshFromRest()
+        assertEquals(next.map { it.ticker }.toSet(), swapped.activeTickers)
+        val painted = HomeSnapshotMerge.apply(loading, swapped, clock.nowMs())
+        val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs())
+        assertEquals(next[0].ticker, after[0].market?.ticker)
+        assertEquals(next[1].ticker, after[1].market?.ticker)
+        assertEquals(next[2].ticker, after[2].market?.ticker)
+
+        val resume = rollover.refreshFromRest()
+        assertEquals(swapped.activeTickers, resume.activeTickers)
+        val replay = rollover.onReconnect()
+        assertTrue(replay.reconnect)
+        assertEquals(swapped.activeTickers, replay.activeTickers)
+
+        val vm = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(vm.contains("bindRollover"))
+        assertTrue(vm.contains("applyRolloverEvent"))
+        assertTrue(vm.contains("fun onForeground"))
+        assertTrue(vm.contains("HomeSnapshotMerge.apply"))
+        assertTrue(calls.get() >= 9)
+    }
+
+    @Test
+    fun homeKeeps0312Layout() {
+        assertEquals(
+            listOf("Scorecard", "Settings", "Refresh"),
+            HomeCopy.TOP_BAR_ACTIONS
+        )
+        val home = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(home.contains("Icons.Default.Assessment"))
+        assertTrue(home.contains("Icons.Default.Settings"))
+        assertTrue(home.contains("Icons.Default.Refresh"))
+        assertFalse(home.contains("Icons.Default.History"))
+        assertFalse(home.contains("Icons.Default.Folder"))
+        assertTrue(home.contains("scorecard = state.scorecardSummary"))
+        assertTrue(home.contains("SIGNAL_HISTORY"))
+        assertTrue(home.contains("onOpenSignalHistory"))
+        assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
+
+        val nav = com.dirk.kalshiodds.ui.AppNavigator()
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.SCORECARD)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
+        nav.open(com.dirk.kalshiodds.ui.AppRoutes.SIGNAL_HISTORY)
+        assertTrue(nav.back())
+        assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
     }
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {

@@ -10,18 +10,18 @@ package com.dirk.kalshiodds.domain
  * the contract is not tradable even if Kalshi has not flipped the status yet.
  */
 object ActiveMarketResolver {
-    const val GRACE_AFTER_CLOSE_MS = 3_000L
-    const val RETRY_MS = 5_000L
+    const val GRACE_AFTER_CLOSE_MS = 0L
+    const val RETRY_MS = 2_500L
 
     fun forSeries(
         series: String,
         markets: List<MarketUiModel>,
         nowMs: Long
     ): MarketUiModel? {
-        val live = MarketLifecycle.tradable(markets, nowMs).filter {
+        val live = markets.filter {
             CryptoMarkets.inferSeries(it.ticker).equals(series, ignoreCase = true)
         }
-        return MarketLifecycle.currentWindow(live)
+        return MarketLifecycle.currentOpenWindow(live, nowMs)
     }
 
     fun activeBySeries(

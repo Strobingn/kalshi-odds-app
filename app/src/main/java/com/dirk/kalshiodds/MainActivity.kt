@@ -12,6 +12,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -22,10 +23,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
+import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.ui.AppNavigator
+import com.dirk.kalshiodds.ui.AppRoutes
 import com.dirk.kalshiodds.ui.ChartDetailScreen
 import com.dirk.kalshiodds.ui.DataScreen
 import com.dirk.kalshiodds.ui.DataViewModel
+import com.dirk.kalshiodds.ui.DipApp
 import com.dirk.kalshiodds.ui.OddsScreen
 import com.dirk.kalshiodds.ui.OddsViewModel
 import com.dirk.kalshiodds.ui.ScorecardScreen
@@ -74,85 +79,133 @@ class MainActivity : ComponentActivity() {
         setContent {
             KalshiOddsTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    var screen by rememberSaveable { mutableStateOf("odds") }
+                    val navigator = rememberSaveable(saver = AppNavigator.Saver) { AppNavigator() }
                     var settingsFocusApiKey by rememberSaveable { mutableStateOf(false) }
                     var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
+                    val sheetOpen = oddsState.tickets.phase is TicketPhase.AwaitingApprove
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
                         oddsState.snapshot?.allMarkets?.firstOrNull { it.ticker == t }
                             ?: historyViewModel.marketModel(t)
                     }
-                    when {
-                        screen == "settings" -> SettingsScreen(
-                            viewModel = settingsViewModel,
-                            onBack = {
-                                settingsFocusApiKey = false
-                                screen = "odds"
-                            },
-                            onOpenData = { screen = "data" },
-                            scrollToApiKey = settingsFocusApiKey
-                        )
-                        screen == "scorecard" -> ScorecardScreen(
-                            viewModel = scorecardViewModel,
-                            onBack = { screen = "odds" }
-                        )
-                        screen == "data" -> DataScreen(
-                            viewModel = dataViewModel,
-                            onBack = { screen = "odds" },
-                            onOpenHistory = { screen = "history" }
-                        )
-                        screen == "signal-history" -> com.dirk.kalshiodds.ui.SignalHistoryScreen(
-                            cards = com.dirk.kalshiodds.ui.signalHistoryCards(oddsState.recentAlerts),
-                            onBack = { screen = "odds" }
-                        )
-                        screen == "history" -> com.dirk.kalshiodds.ui.HistoryScreen(
-                            viewModel = historyViewModel,
-                            onBack = { screen = "odds" },
-                            onOpenMarket = { m ->
-                                chartTicker = m.ticker
-                                screen = "odds"
-                            }
-                        )
-                        chartMarket != null -> ChartDetailScreen(
-                            market = chartMarket,
-                            points = chartMarket.bidHistory.ifEmpty {
-                                chartMarket.oddsHistory.mapIndexed { i, mid ->
-                                    com.dirk.kalshiodds.chart.BidPoint(
-                                        tMs = (chartMarket.closeTimeEpochMs ?: 0L) -
-                                            (chartMarket.oddsHistory.size - 1 - i) * 2_000L,
-                                        upBidCents = mid,
-                                        downBidCents = 100f - mid,
-                                        spotUsd = chartMarket.spotUsd
-                                    )
+                    DipApp(
+                        navigator = navigator,
+                        sheetOpen = sheetOpen,
+                        onCancelSheet = { oddsViewModel.cancelTicketApprove() },
+                        home = {
+                            OddsScreen(
+                                viewModel = oddsViewModel,
+                                onOpenSettings = {
+                                    settingsFocusApiKey = false
+                                    navigator.open(AppRoutes.SETTINGS)
+                                },
+                                onOpenApiKeySettings = {
+                                    settingsFocusApiKey = true
+                                    navigator.open(AppRoutes.SETTINGS)
+                                },
+                                onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                onOpenData = { navigator.open(AppRoutes.DATA) },
+                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
+                                onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                onOpenChart = {
+                                    chartTicker = it.ticker
+                                    navigator.open(AppRoutes.CHART)
                                 }
-                            },
-                            onBack = { chartTicker = null },
-                            onBuyYes = { m ->
-                                oddsViewModel.buyMarket(m, "YES")
-                                chartTicker = null
-                            },
-                            onBuyNo = { m ->
-                                oddsViewModel.buyMarket(m, "NO")
-                                chartTicker = null
+                            )
+                        },
+                        settings = {
+                            SettingsScreen(
+                                viewModel = settingsViewModel,
+                                onBack = {
+                                    settingsFocusApiKey = false
+                                    navigator.back()
+                                },
+                                onOpenData = { navigator.open(AppRoutes.DATA) },
+                                scrollToApiKey = settingsFocusApiKey
+                            )
+                        },
+                        scorecard = {
+                            ScorecardScreen(
+                                viewModel = scorecardViewModel,
+                                onBack = { navigator.back() }
+                            )
+                        },
+                        data = {
+                            DataScreen(
+                                viewModel = dataViewModel,
+                                onBack = { navigator.back() },
+                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) }
+                            )
+                        },
+                        history = {
+                            com.dirk.kalshiodds.ui.HistoryScreen(
+                                viewModel = historyViewModel,
+                                onBack = { navigator.back() },
+                                onOpenMarket = { m ->
+                                    chartTicker = m.ticker
+                                    navigator.open(AppRoutes.CHART)
+                                }
+                            )
+                        },
+                        signalHistory = {
+                            com.dirk.kalshiodds.ui.SignalHistoryScreen(
+                                cards = com.dirk.kalshiodds.ui.signalHistoryCards(oddsState.recentAlerts),
+                                onBack = { navigator.back() }
+                            )
+                        },
+                        chart = {
+                            val market = chartMarket
+                            if (market == null) {
+                                LaunchedEffect(chartTicker) {
+                                    if (navigator.current == AppRoutes.CHART) {
+                                        chartTicker = null
+                                        navigator.back()
+                                    }
+                                }
+                                OddsScreen(
+                                    viewModel = oddsViewModel,
+                                    onOpenSettings = { navigator.open(AppRoutes.SETTINGS) },
+                                    onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                    onOpenData = { navigator.open(AppRoutes.DATA) },
+                                    onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
+                                    onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                    onOpenChart = {
+                                        chartTicker = it.ticker
+                                        navigator.open(AppRoutes.CHART)
+                                    }
+                                )
+                            } else {
+                                ChartDetailScreen(
+                                    market = market,
+                                    points = market.bidHistory.ifEmpty {
+                                        market.oddsHistory.mapIndexed { i, mid ->
+                                            com.dirk.kalshiodds.chart.BidPoint(
+                                                tMs = (market.closeTimeEpochMs ?: 0L) -
+                                                    (market.oddsHistory.size - 1 - i) * 2_000L,
+                                                upBidCents = mid,
+                                                downBidCents = 100f - mid,
+                                                spotUsd = market.spotUsd
+                                            )
+                                        }
+                                    },
+                                    onBack = {
+                                        chartTicker = null
+                                        navigator.back()
+                                    },
+                                    onBuyYes = { m ->
+                                        oddsViewModel.buyMarket(m, "YES")
+                                        chartTicker = null
+                                        navigator.back()
+                                    },
+                                    onBuyNo = { m ->
+                                        oddsViewModel.buyMarket(m, "NO")
+                                        chartTicker = null
+                                        navigator.back()
+                                    }
+                                )
                             }
-                        )
-                        else -> OddsScreen(
-                            viewModel = oddsViewModel,
-                            onOpenSettings = {
-                                settingsFocusApiKey = false
-                                screen = "settings"
-                            },
-                            onOpenApiKeySettings = {
-                                settingsFocusApiKey = true
-                                screen = "settings"
-                            },
-                            onOpenScorecard = { screen = "scorecard" },
-                            onOpenData = { screen = "data" },
-                            onOpenHistory = { screen = "history" },
-                            onOpenSignalHistory = { screen = "signal-history" },
-                            onOpenChart = { chartTicker = it.ticker }
-                        )
-                    }
+                        }
+                    )
                 }
             }
         }
@@ -161,6 +214,12 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         LiveSignalsKeepAlive.ensureServiceFromUi(this)
+        oddsViewModel.onForeground()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        oddsViewModel.onForeground()
     }
 
     override fun onStop() {
