@@ -68,7 +68,16 @@ object WinTargetSizer {
                 capped = true
                 break
             }
-            val take = min(floor(size + 1e-9).toInt().coerceAtLeast(0), room)
+            val available = min(floor(size + 1e-9).toInt().coerceAtLeast(0), room)
+            if (available <= 0) continue
+            val take = contractsToHitTarget(
+                filled = filled,
+                cost = cost,
+                price = price,
+                available = available,
+                target = target,
+                feeRate = feeRate
+            )
             if (take <= 0) continue
             filled += take
             cost += take * price
@@ -114,5 +123,36 @@ object WinTargetSizer {
             insufficientDepth = insufficient,
             note = note
         )
+    }
+
+    /**
+     * Smallest add-on at [price] that reaches [target], or all of [available]
+     * if the level still falls short. Walks the book one level at a time so a
+     * deep top-of-book does not oversize past the $50 win target.
+     */
+    private fun contractsToHitTarget(
+        filled: Int,
+        cost: Double,
+        price: Double,
+        available: Int,
+        target: Double,
+        feeRate: Double
+    ): Int {
+        if (available <= 0) return 0
+        fun profitAfter(take: Int): Double {
+            val n = filled + take
+            if (n <= 0) return 0.0
+            val nextCost = cost + take * price
+            return KalshiFee.netProfit(n, nextCost / n, feeRate)
+        }
+        if (profitAfter(1) + 1e-9 >= target) return 1
+        if (profitAfter(available) + 1e-9 < target) return available
+        var lo = 1
+        var hi = available
+        while (lo < hi) {
+            val mid = (lo + hi) / 2
+            if (profitAfter(mid) + 1e-9 >= target) hi = mid else lo = mid + 1
+        }
+        return lo
     }
 }

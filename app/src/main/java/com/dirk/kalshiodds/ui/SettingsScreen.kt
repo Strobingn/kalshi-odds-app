@@ -505,12 +505,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 "On by default. Size every Buy UP/DOWN and hunter card (including Long-shot) so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
                     "Live Approve uses GET /portfolio/balance cash; Paper uses paper-book equity. " +
                     "Stake is capped at a % of that bankroll (default 10%) and an optional $ cap. " +
-                    "When the cap or book depth limits size, the card shows Capped: wins $X. " +
+                    "When the cap or book depth limits size, the card shows Capped: wins \$X. " +
                     "Still Approve-only — never auto-placed.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
-            ToggleRow("Win-target sizing (default on · $50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
+            ToggleRow("Win-target sizing (default on · \$50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
             Text(
                 String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
                 style = MaterialTheme.typography.bodyMedium,
