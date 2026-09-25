@@ -13,6 +13,7 @@ import com.dirk.kalshiodds.R
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import com.dirk.kalshiodds.ui.WindowLabel
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -46,13 +47,13 @@ class OpportunityNotifier(private val context: Context) {
 
     fun notify(ticket: TradeTicket, quiet: Boolean): Boolean {
         val title = when (ticket.kind) {
-            TicketKind.HUNTER_VALUE -> context.getString(R.string.opportunity_longshot_title, ticket.ticker)
-            TicketKind.HUNTER -> context.getString(R.string.opportunity_hunter_title, ticket.ticker)
-            else -> context.getString(R.string.opportunity_wintarget_title, ticket.ticker)
+            TicketKind.HUNTER_VALUE -> context.getString(R.string.opportunity_longshot_title, WindowLabel.of(ticket.ticker))
+            TicketKind.HUNTER -> context.getString(R.string.opportunity_hunter_title, WindowLabel.of(ticket.ticker))
+            else -> context.getString(R.string.opportunity_wintarget_title, WindowLabel.of(ticket.ticker))
         }
         val text = context.getString(
             R.string.opportunity_body,
-            ticket.displaySide,
+            com.dirk.kalshiodds.ui.SignalCopy.callLabel(ticket.side),
             ticket.contracts,
             String.format(java.util.Locale.US, "%.2f", ticket.stakeUsd)
         )

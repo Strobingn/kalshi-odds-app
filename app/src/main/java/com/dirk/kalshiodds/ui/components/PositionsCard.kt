@@ -97,7 +97,7 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
             TimeLeftLabel(pos.closeTimeEpochMs, compact = true)
         }
         Text(
-            pos.ticker,
+            com.dirk.kalshiodds.ui.WindowLabel.of(pos.ticker, pos.closeTimeEpochMs),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Bold

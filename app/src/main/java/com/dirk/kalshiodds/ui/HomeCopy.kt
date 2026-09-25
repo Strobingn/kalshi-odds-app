@@ -85,22 +85,12 @@ object HomeCopy {
     fun modelVsMarket(market: MarketUiModel, decision: BetCall.Decision): String {
         val modelYes = market.importedModelPp ?: market.aiYesPercent
         val marketYes = market.yesProbabilityPercent
-        val up = when (decision.headline) {
-            BetCall.Headline.BET_DOWN -> false
-            BetCall.Headline.BET_UP -> true
-            BetCall.Headline.NO_BET -> (modelYes ?: 50.0) >= 50.0
+        val side = when (decision.headline) {
+            BetCall.Headline.BET_DOWN -> "DOWN"
+            BetCall.Headline.BET_UP -> "UP"
+            BetCall.Headline.NO_BET -> if ((modelYes ?: 50.0) >= 50.0) "UP" else "DOWN"
         }
-        val side = if (up) "UP" else "DOWN"
-        val modelSide = modelYes?.let { if (up) it else 100.0 - it }
-        val marketSide = marketYes?.let { if (up) it else 100.0 - it }
-        val edge = when {
-            modelSide != null && marketSide != null -> modelSide - marketSide
-            else -> market.edgePp?.let { if (up) it else -it }
-        }
-        val modelTxt = modelSide?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
-        val marketTxt = marketSide?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
-        val edgeTxt = edge?.let { String.format(Locale.US, "%+.0f pts", it) } ?: "—"
-        return "Model $modelTxt $side vs market $marketTxt · edge $edgeTxt"
+        return SignalCopy.modelVsMarketLine(modelYes, marketYes, side)
     }
 
     fun allInProfit(decision: BetCall.Decision): String? {

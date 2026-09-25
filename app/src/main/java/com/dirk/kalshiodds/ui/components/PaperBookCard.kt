@@ -182,8 +182,8 @@ private fun PaperLedgerRow(
             String.format(
                 Locale.US,
                 "%s %s · %d ct @ %s",
-                fill.displaySide,
-                fill.ticker,
+                com.dirk.kalshiodds.ui.SignalCopy.callLabel(fill.side),
+                com.dirk.kalshiodds.ui.WindowLabel.of(fill.ticker),
                 fill.contracts,
                 com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(fill.limitPrice)
             ),

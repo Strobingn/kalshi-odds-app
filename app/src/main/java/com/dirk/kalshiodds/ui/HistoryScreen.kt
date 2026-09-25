@@ -48,6 +48,7 @@ import com.dirk.kalshiodds.data.local.history.HistoryAssembler
 import com.dirk.kalshiodds.data.local.history.HistoryBet
 import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
+import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.domain.MarketUiModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -111,7 +112,9 @@ fun HistoryScreen(
                         }
                         items(state.bets, key = { it.id }) { BetRow(it) }
                     }
-                    1 -> items(state.signals, key = { it.id }) { SignalRow(it) }
+                    1 -> items(state.signals, key = { it.id }) { row ->
+                        SignalSummaryCard(signalCard(row))
+                    }
                     2 -> items(state.sessions, key = { it.id }) { SessionRow(it) }
                     3 -> {
                         state.currentSettingsJson?.let { json ->
@@ -264,7 +267,7 @@ private fun BetRow(b: HistoryBet) {
             .padding(10.dp)
     ) {
         Text(
-            "${historyTime(b.createdAtMs)}  ${b.ticker}  ${b.side.uppercase()}",
+            "${WindowLabel.of(b.ticker)}  ·  ${SignalCopy.callLabel(b.side)}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = colors.textPrimary
@@ -284,26 +287,18 @@ private fun BetRow(b: HistoryBet) {
     }
 }
 
-@Composable
-private fun SignalRow(s: HistoryAssembler.SignalLine) {
-    val colors = DipTheme.colors
-    Text(
-        String.format(
-            Locale.US,
-            "%s  %s  %s  mkt %.0f¢  AI %.0f¢  edge %+.1f pp%s",
-            historyTime(s.createdAtMs),
-            s.ticker,
-            s.side,
-            s.marketPp,
-            s.fairPp,
-            s.edgePp,
-            s.settled?.let { "  settled ${it.uppercase()}" } ?: "  unsettled"
-        ),
-        style = MaterialTheme.typography.bodyMedium,
-        color = colors.accentBlue,
-        modifier = Modifier.fillMaxWidth()
-    )
-}
+internal fun signalCard(s: HistoryAssembler.SignalLine): SignalCopy.Card = SignalCopy.card(
+    ticker = s.ticker,
+    side = s.side,
+    modelYes = s.fairPp,
+    marketYes = s.marketPp,
+    settled = s.settled,
+    details = buildString {
+        s.note?.takeIf { it.isNotBlank() }?.let { append(it) }
+        if (isNotEmpty()) append('\n')
+        append(String.format(Locale.US, "Stored Δ %+.1f pp (not the card edge)", s.edgePp))
+    }
+)
 
 @Composable
 private fun SessionRow(s: HistorySession) {
@@ -355,7 +350,7 @@ private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(row.ticker, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+            Text(WindowLabel.of(row.ticker, row.closeMs), fontWeight = FontWeight.Bold, color = colors.textPrimary)
             Text(
                 "${row.closeMs?.let { historyTime(it) } ?: "—"}  ${row.result.uppercase()}  " +
                     (row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: ""),

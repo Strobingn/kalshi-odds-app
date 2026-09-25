@@ -1,8 +1,17 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.ui.components.SignalSummaryCard
+import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Guardrails
 import com.dirk.kalshiodds.signal.feedback.OnlineAdapter
@@ -112,6 +121,12 @@ class HomeScreenScreenshotTest {
     fun darkScorecard() = snapScorecard("scorecard_dark", dark = true)
 
     @Test
+    fun lightSignals() = snapSignals("signals_light", dark = false)
+
+    @Test
+    fun darkSignals() = snapSignals("signals_dark", dark = true)
+
+    @Test
     fun lightSettings() = snapSettings("settings_light", dark = false)
 
     @Test
@@ -177,6 +192,41 @@ class HomeScreenScreenshotTest {
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
                 ScorecardScreen(ui = scorecardUi(), onBack = {})
+            }
+        }
+        copyLatest(name)
+    }
+
+    private fun snapSignals(name: String, dark: Boolean) {
+        val cards = listOf(
+            SignalCopy.card(
+                ticker = "KXBTC15M-26SEP251345-45",
+                side = "YES",
+                modelYes = 68.0,
+                marketYes = 64.0,
+                settled = null,
+                details = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ -11.4pp"
+            ),
+            SignalCopy.card(
+                ticker = "KXETH15M-26SEP251400-40",
+                side = "NO",
+                modelYes = 30.0,
+                marketYes = 48.0,
+                settled = "no",
+                details = "QUIET/MID · AI 30% vs mkt 48%"
+            )
+        )
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                androidx.compose.foundation.layout.Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    cards.forEach { SignalSummaryCard(it) }
+                }
             }
         }
         copyLatest(name)
@@ -256,6 +306,7 @@ class HomeScreenScreenshotTest {
             "home_light_disagreement", "home_dark_disagreement",
             "scorecard_light", "scorecard_dark",
             "settings_light", "settings_dark",
+            "signals_light", "signals_dark",
             "before_0_3_11_light_actionable", "before_0_3_11_dark_actionable",
             "before_0_3_11_light_nokey"
         ).forEach(::copyLatest)

@@ -225,13 +225,13 @@ private fun ProposedTicketCard(
                     fontWeight = FontWeight.Bold
                 )
             }
-            Text(
-                "${ticket.displaySide} · ${ticket.ticker}",
-                style = MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 4.dp)
-            )
+                Text(
+                    "${com.dirk.kalshiodds.ui.SignalCopy.callLabel(ticket.side)} · ${com.dirk.kalshiodds.ui.WindowLabel.of(ticket.ticker)}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             ticket.title?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             }
@@ -402,7 +402,7 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
             .padding(12.dp)
     ) {
         Text(
-            "Working limit · ${order.ticket.displaySide} ${order.ticket.ticker}",
+            "Working limit · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(order.ticket.ticker)}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = colors.accentBlue

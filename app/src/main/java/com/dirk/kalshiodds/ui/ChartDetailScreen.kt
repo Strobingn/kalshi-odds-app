@@ -49,7 +49,7 @@ fun ChartDetailScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text(market.title.ifBlank { market.ticker }) },
+                title = { Text(com.dirk.kalshiodds.ui.WindowLabel.of(market.ticker, market.closeTimeEpochMs)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -75,7 +75,11 @@ fun ChartDetailScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(market.ticker, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                Text(
+                    "Details · ${market.ticker}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
                 Spacer(Modifier.weight(1f))
             }
             TargetNowLine(market, Modifier.padding(top = 8.dp))

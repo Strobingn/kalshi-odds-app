@@ -105,7 +105,7 @@ class HomeCopyTest {
             contracts = 24,
             noBetReason = null
         )
-        assertEquals("Model 62% UP vs market 58% · edge +4 pts", HomeCopy.modelVsMarket(market, call))
+        assertEquals("Model 62% vs market 58% · edge +4 pts", HomeCopy.modelVsMarket(market, call))
     }
 
     @Test
