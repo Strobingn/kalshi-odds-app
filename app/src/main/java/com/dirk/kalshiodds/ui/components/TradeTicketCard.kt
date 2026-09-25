@@ -36,6 +36,7 @@ import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import java.util.Locale
+import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
@@ -293,7 +294,11 @@ private fun ProposedTicketCard(
                 )
             }
             ticket.winTargetNote?.let {
-                TicketMetricRow(if (ticket.winTargetCapped) "Win target (capped)" else "Win target", it)
+                val label = when {
+                    ticket.paperOnly -> if (ticket.winTargetCapped) "Paper size (capped)" else "Paper size"
+                    else -> "Live size"
+                }
+                TicketMetricRow(label, it)
             }
             ticket.netEvUsd?.let {
                 TicketMetricRow("Net EV", String.format(Locale.US, "%+.2f  (%+.1f pp)", it, ticket.netEdgePp ?: 0.0))
@@ -353,11 +358,7 @@ private fun ProposedTicketCard(
                                     canApprove = true,
                                     blockedReason = ticket.blockedReason
                                 )
-                                if (mode == TradeModeLabel.LIVE) {
-                                    String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
-                                } else {
-                                    mode
-                                }
+                                HomeCopy.confirmApproveLabel(mode, ticket.stakeUsd, ticket.isSell)
                             }
                         }
                     )
@@ -559,14 +560,7 @@ private fun ApproveTicketDialog(
                     canApprove = ticket.canApprove,
                     blockedReason = ticket.blockedReason
                 )
-                Text(
-                    when {
-                        ticket.isSell && mode == TradeModeLabel.PAPER -> "PAPER sell"
-                        ticket.isSell && mode == TradeModeLabel.LIVE -> "LIVE $ sell"
-                        mode == TradeModeLabel.LIVE -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
-                        else -> mode
-                    }
-                )
+                Text(HomeCopy.confirmApproveLabel(mode, ticket.stakeUsd, ticket.isSell))
             }
         },
         dismissButton = {

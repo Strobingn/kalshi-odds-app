@@ -383,7 +383,7 @@ fun SettingsScreen(
 
             Section("Alerts")
             ToggleRow("Notifications", s.notificationsEnabled, viewModel::setNotifications)
-            ToggleRow("Long-shot / $50 win-target cards", s.opportunityAlertsEnabled, viewModel::setOpportunityAlerts)
+            ToggleRow("Long-shot / hunter cards", s.opportunityAlertsEnabled, viewModel::setOpportunityAlerts)
             ToggleRow("Quiet opportunity alerts (no sound)", s.opportunityQuiet, viewModel::setOpportunityQuiet)
             Text(
                 "Opportunity notifications open the ticket. Approve is still required — they never place an order.",

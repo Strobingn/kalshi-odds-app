@@ -28,6 +28,15 @@ class HomeCopyTest {
     }
 
     @Test
+    fun confirmApproveLabelMatchesTradeMode() {
+        assertEquals("LIVE $5.00", HomeCopy.confirmApproveLabel("LIVE $", 5.0, isSell = false))
+        assertEquals("LIVE $ sell", HomeCopy.confirmApproveLabel("LIVE $", 5.0, isSell = true))
+        assertEquals("PAPER", HomeCopy.confirmApproveLabel("PAPER", 5.0, isSell = false))
+        assertEquals("PAPER sell", HomeCopy.confirmApproveLabel("PAPER", 5.0, isSell = true))
+        assertEquals("NO KEY", HomeCopy.confirmApproveLabel("NO KEY", 5.0, isSell = false))
+    }
+
+    @Test
     fun thisWindowShowsBetUpThenFallsBackToNoBetReason() {
         val up = HomeFixtures.market(
             ticker = "KXBTC15M-WIN-50",

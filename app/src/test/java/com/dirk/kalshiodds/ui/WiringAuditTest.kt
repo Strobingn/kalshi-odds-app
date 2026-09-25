@@ -103,6 +103,7 @@ class WiringAuditTest {
         Control("Home model vs market", HomeCopy::class.java, "modelVsMarket"),
         Control("Home $5 all-in line", HomeCopy::class.java, "allInProfit"),
         Control("Home primary Buy label", HomeCopy::class.java, "primaryButtonLabel"),
+        Control("Home confirm-sheet Approve label", HomeCopy::class.java, "confirmApproveLabel"),
         Control("Home Buy anyway side", HomeCopy::class.java, "buyAnywaySide"),
         Control("Home current-window cards", HomeMarkets::class.java, "currentWindowCards"),
         Control("Home rank (BetCall.sortKey)", HomeMarkets::class.java, "ranked"),

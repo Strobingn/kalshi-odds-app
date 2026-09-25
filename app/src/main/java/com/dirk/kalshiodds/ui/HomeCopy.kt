@@ -117,6 +117,15 @@ object HomeCopy {
         return "$mode  $side"
     }
 
+    /** Confirm-sheet / ticket Approve button — same [mode] as [TradeModeLabel.forApprove]. */
+    fun confirmApproveLabel(mode: String, stakeUsd: Double, isSell: Boolean): String = when {
+        isSell && mode == com.dirk.kalshiodds.signal.trade.TradeModeLabel.PAPER -> "PAPER sell"
+        isSell && mode == com.dirk.kalshiodds.signal.trade.TradeModeLabel.LIVE -> "LIVE $ sell"
+        mode == com.dirk.kalshiodds.signal.trade.TradeModeLabel.LIVE ->
+            String.format(Locale.US, "LIVE $%.2f", stakeUsd)
+        else -> mode
+    }
+
     fun buyAnywaySide(market: MarketUiModel, decision: BetCall.Decision): String {
         val raw = decision.side ?: market.predictedSide ?: market.primaryHeroSide ?: "YES"
         return if (raw.equals("NO", true)) "NO" else "YES"

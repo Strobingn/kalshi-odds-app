@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Local notifications when a Long-shot or $50 win-target card appears.
+ * Local notifications when a Long-shot or hunter card appears.
  * Tapping opens the ticket. Placing still requires an in-app Approve.
  */
 class OpportunityNotifier(private val context: Context) {
