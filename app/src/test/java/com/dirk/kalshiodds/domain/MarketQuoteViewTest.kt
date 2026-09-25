@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.domain
 
+import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -99,8 +100,12 @@ class MarketQuoteViewTest {
         val q = MarketQuoteView.of(yesBid = 1.0, yesAsk = null, noBid = null, noAsk = null)
         assertNull(q.upMultiple)
         assertNull(q.downMultiple)
+        assertEquals("no ask", q.upMultipleLabel)
+        assertEquals("no ask", q.downMultipleLabel)
         assertEquals("Buy UP", q.upButton)
         assertEquals("Buy DOWN", q.downButton)
+        assertEquals("no ask", KalshiQuoteDisplay.multipleLabel(null))
+        assertEquals("no ask", KalshiQuoteDisplay.multipleLabel(0.0))
     }
 
     @Test
@@ -161,12 +166,15 @@ class MarketQuoteViewTest {
             assertEquals("same source $ask", KalshiQuoteDisplay.multiplier(ask)!!, q.upMultiple!!, 1e-9)
             assertTrue(q.upButton.contains(q.upHero))
             assertTrue(q.upHeader.contains("ask $label"))
+            assertTrue("hero $ask never blank multiple", q.upMultipleLabel.isNotBlank())
+            assertFalse("hero $ask not a silent hide", q.upMultipleLabel.isEmpty())
             if (ask < 0.10) {
                 assertTrue("sub-10c $ask must not exceed 1/P", q.upMultiple!! <= 1.0 / ask + 1e-9)
                 assertTrue("sub-10c $ask must not be the 0.1c 934x unless it is 0.1c", ask < 0.0015 || q.upMultiple!! < 200.0)
             } else {
                 assertNotNull("10c+ $ask must show a multiple", q.upMultiple)
                 assertTrue("10c+ $ask multiple", q.upMultiple!! > 1.0)
+                assertTrue("10c+ $ask label", q.upMultipleLabel.endsWith("x"))
             }
         }
         assertEquals("Down 1.5¢ · 62.36x", KalshiQuoteDisplay.buttonLabel(false, 0.015))
@@ -193,5 +201,108 @@ class MarketQuoteViewTest {
         assertTrue(q.upButton.contains("1.5¢"))
         assertTrue(q.downButton.contains("25¢"))
         assertFalse(q.downButton.contains("934"))
+    }
+
+    @Test
+    fun liveRestPayloadOverTenCentsShowsMultiple() {
+        // Captured 2026-09-25 GET /markets?series_ticker=KXBTC15M — no integer fields.
+        val raw = """
+            {
+              "ticker": "KXBTC15M-26SEP251200-00",
+              "yes_ask_dollars": "0.4400",
+              "yes_bid_dollars": "0.4300",
+              "no_ask_dollars": "0.5700",
+              "no_bid_dollars": "0.5600",
+              "last_price_dollars": "0.4300",
+              "price_level_structure": "tapered_deci_cent",
+              "price_ranges": [
+                {"start": "0.0000", "end": "0.1000", "step": "0.0010"},
+                {"start": "0.1000", "end": "0.9000", "step": "0.0100"},
+                {"start": "0.9000", "end": "1.0000", "step": "0.0010"}
+              ]
+            }
+        """.trimIndent()
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+        val dto = json.decodeFromString<com.dirk.kalshiodds.data.dto.MarketDto>(raw)
+        assertEquals("tapered_deci_cent", dto.priceLevelStructure)
+        assertEquals(3, dto.priceRanges.size)
+        assertEquals("0.0010", dto.priceRanges[0].step)
+        assertEquals("0.0100", dto.priceRanges[1].step)
+        val ui = dto.toUiModel(SeriesKind.BTC)
+        assertEquals(0.44, ui.yesAsk!!, 1e-12)
+        val q = MarketQuoteView.of(ui)
+        assertEquals("44¢", q.upHero)
+        assertNotNull(q.upMultiple)
+        assertTrue(q.upMultiple!! > 1.0)
+        assertTrue(q.upMultipleLabel.endsWith("x"))
+        assertFalse(q.upMultipleLabel == "no ask")
+    }
+
+    @Test
+    fun liveRestNumberTypedDollarsStillParse() {
+        val raw = """
+            {
+              "ticker": "KXETH15M-26SEP251200-00",
+              "yes_ask_dollars": 0.015,
+              "no_ask_dollars": 0.25
+            }
+        """.trimIndent()
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+        val dto = json.decodeFromString<com.dirk.kalshiodds.data.dto.MarketDto>(raw)
+        val ui = dto.toUiModel(SeriesKind.ETH)
+        assertEquals(0.015, ui.yesAsk!!, 1e-12)
+        assertEquals(0.25, ui.noAsk!!, 1e-12)
+        val q = MarketQuoteView.of(ui)
+        assertEquals("1.5¢", q.upHero)
+        assertEquals(333.0 / 5.34, q.upMultiple!!, 1e-9)
+        assertTrue(q.upMultiple!! < 1.0 / 0.015 + 1e-9)
+        assertTrue(q.downMultipleLabel.endsWith("x"))
+    }
+
+    @Test
+    fun centsWithDecimalWireDoesNotHideTenCentsPlusOrInflateSubTen() {
+        val oneFive = MarketQuoteView.of(yesBid = null, yesAsk = KalshiPrice.parseDollars("1.5"), noBid = null, noAsk = null)
+        assertEquals("1.5¢", oneFive.upHero)
+        assertEquals(333.0 / 5.34, oneFive.upMultiple!!, 1e-9)
+        assertTrue(oneFive.upMultiple!! < 200.0)
+        val twentyFive = MarketQuoteView.of(yesBid = null, yesAsk = KalshiPrice.parseDollars("25.00"), noBid = null, noAsk = null)
+        assertEquals("25¢", twentyFive.upHero)
+        assertEquals(20.0 / 5.27, twentyFive.upMultiple!!, 1e-9)
+        val deci = MarketQuoteView.of(yesBid = null, yesAsk = KalshiPrice.parseDollars("440"), noBid = null, noAsk = null)
+        assertEquals("44¢", deci.upHero)
+        assertNotNull(deci.upMultiple)
+    }
+
+    @Test
+    fun liveTickerAskOverlaysStaleRestWithoutSplittingDisplayAndMath() {
+        val rest = MarketDto(
+            ticker = "KXBTC15M-26SEP251200-00",
+            yesAskDollars = "0.0010",
+            noAskDollars = "0.2500"
+        ).toUiModel(SeriesKind.BTC)
+        val stale = MarketQuoteView.of(rest)
+        assertEquals("0.1¢", stale.upHero)
+        assertEquals(5000.0 / 5.35, stale.upMultiple!!, 1e-9)
+        val tick = com.dirk.kalshiodds.signal.model.MarketTick(
+            ticker = "KXBTC15M-26SEP251200-00",
+            series = "KXBTC15M",
+            yesBid = 0.014,
+            yesAsk = 0.015,
+            lastPrice = 0.25,
+            volume = null,
+            openInterest = null,
+            closeTimeEpochMs = null,
+            source = com.dirk.kalshiodds.signal.model.TickSource.WS_TICKER,
+            receiveElapsedNanos = 1L,
+            noAsk = 0.25
+        )
+        val live = rest.withLiveQuote(tick)
+        val q = MarketQuoteView.of(live)
+        assertEquals(0.015, live.yesAsk!!, 1e-12)
+        assertEquals("1.5¢", q.upHero)
+        assertEquals(333.0 / 5.34, q.upMultiple!!, 1e-9)
+        assertEquals(q.upMultiple, KalshiQuoteDisplay.multiplier(live.yesAsk)!!, 1e-9)
+        assertFalse(q.upButton.contains("934"))
+        assertEquals("25¢", q.downHero)
     }
 }

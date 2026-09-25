@@ -234,6 +234,10 @@ object KalshiWsMessages {
 
     /**
      * Prefers FixedPointDollars (`yes_ask_dollars` = `"0.0150"`).
+     * Current ticker / orderbook schemas require `*_dollars` /
+     * `yes_dollars_fp` and do not list legacy integer fields
+     * (https://docs.kalshi.com/websockets/market-ticker,
+     * https://docs.kalshi.com/websockets/orderbook-updates).
      * Legacy integer-cent fields (`"15"`) are 15¢. `"1"` is 1¢, not $1.
      * Unusable placeholders (`"0.0000"`, `"1.0000"`) fall through to the
      * next name so a dollars miss can still use a legacy integer.

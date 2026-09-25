@@ -31,6 +31,7 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import java.util.concurrent.ConcurrentHashMap
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.domain.withLiveQuote
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
@@ -807,7 +808,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun attachHistory(snap: MarketsSnapshot): MarketsSnapshot {
-        fun List<MarketUiModel>.withHist(): List<MarketUiModel> = map { m ->
+        fun List<MarketUiModel>.withHist(): List<MarketUiModel> = map { raw ->
+            val tick = runCatching { hub.scoring.book.lastTick(raw.ticker) }.getOrNull()
+            val m = raw.withLiveQuote(tick)
             val pts = runCatching { hub.scoring.book.midHistoryPp(m.ticker) }.getOrElse { emptyList() }
             val last = m.yesProbabilityPercent?.toFloat()
             val merged = if (last != null && (pts.isEmpty() || kotlin.math.abs(pts.last() - last) > 0.05f)) {

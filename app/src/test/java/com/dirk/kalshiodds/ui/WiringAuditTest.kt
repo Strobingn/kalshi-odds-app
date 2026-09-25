@@ -78,6 +78,7 @@ class WiringAuditTest {
         Control("Live candlestick backfill", LiveWindowBackfill::class.java, "candles"),
         Control("Quote header/labels/buttons", MarketQuoteView::class.java, "of"),
         Control("Payout multiple", KalshiQuoteDisplay::class.java, "multiplier"),
+        Control("Payout multiple label", KalshiQuoteDisplay::class.java, "multipleLabel"),
         Control("Kalshi order-level fee", KalshiFee::class.java, "total"),
         Control("Kalshi payout multiple", KalshiFee::class.java, "payoutMultiple"),
         Control("Kalshi amortized fee", KalshiFee::class.java, "perContract"),
@@ -123,6 +124,7 @@ class WiringAuditTest {
         assertNotNull(com.dirk.kalshiodds.signal.config.CredentialWriteGuard::rejectReason)
         assertNotNull(com.dirk.kalshiodds.domain.KalshiPrice::parseDollars)
         assertNotNull(KalshiQuoteDisplay::formatPriceCents)
+        assertNotNull(KalshiQuoteDisplay::multipleLabel)
         assertNotNull(SettingsViewModel::backupCredentials)
         assertNotNull(SettingsViewModel::restoreCredentials)
     }

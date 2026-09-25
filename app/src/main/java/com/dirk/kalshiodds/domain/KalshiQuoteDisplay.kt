@@ -80,6 +80,20 @@ object KalshiQuoteDisplay {
         }
     }
 
+    /**
+     * Always a visible string: `"62.36x"`, `"no ask"`, or `"can't size $5"`.
+     * Never a blank — 10¢+ asks must not disappear.
+     */
+    fun multipleLabel(
+        ask: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): String {
+        if (KalshiPrice.usable(ask) == null) return "no ask"
+        val m = multiplier(ask, feeRate, stakeUsd) ?: return "can't size $${stakeUsd.toInt()}"
+        return String.format(Locale.US, "%.2fx", m)
+    }
+
     fun buttonLabel(
         up: Boolean,
         ask: Double?,

@@ -64,14 +64,14 @@ fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
         AskHeroSide(
             title = "UP",
             price = quotes.upHero,
-            multiple = quotes.upMultiple,
+            multipleLabel = quotes.upMultipleLabel,
             color = colors.accentGreen,
             emphasized = market.primaryHeroSide != "NO"
         )
         AskHeroSide(
             title = "DOWN",
             price = quotes.downHero,
-            multiple = quotes.downMultiple,
+            multipleLabel = quotes.downMultipleLabel,
             color = colors.accentRed,
             emphasized = market.primaryHeroSide == "NO"
         )
@@ -82,7 +82,7 @@ fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
 private fun AskHeroSide(
     title: String,
     price: String,
-    multiple: Double?,
+    multipleLabel: String,
     color: androidx.compose.ui.graphics.Color,
     emphasized: Boolean
 ) {
@@ -102,7 +102,7 @@ private fun AskHeroSide(
             lineHeight = if (emphasized) 44.sp else 36.sp
         )
         Text(
-            multiple?.let { String.format(Locale.US, "%.2fx", it) } ?: "",
+            multipleLabel,
             style = MaterialTheme.typography.labelMedium,
             color = if (emphasized) color else colors.textSecondary,
             fontWeight = FontWeight.SemiBold

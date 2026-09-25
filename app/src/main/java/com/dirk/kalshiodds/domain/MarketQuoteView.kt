@@ -18,7 +18,9 @@ data class MarketQuoteView(
     val upHero: String,
     val downHero: String,
     val upMultiple: Double?,
-    val downMultiple: Double?
+    val downMultiple: Double?,
+    val upMultipleLabel: String,
+    val downMultipleLabel: String
 ) {
     val upHeader: String get() = "UP bid $yesBidLabel  ask $yesAskLabel"
     val downHeader: String get() = "DOWN bid $noBidLabel  ask $noAskLabel"
@@ -61,7 +63,9 @@ data class MarketQuoteView(
                 upHero = KalshiQuoteDisplay.formatAsk(ya),
                 downHero = KalshiQuoteDisplay.formatAsk(na),
                 upMultiple = KalshiQuoteDisplay.multiplier(ya, feeRate, stakeUsd),
-                downMultiple = KalshiQuoteDisplay.multiplier(na, feeRate, stakeUsd)
+                downMultiple = KalshiQuoteDisplay.multiplier(na, feeRate, stakeUsd),
+                upMultipleLabel = KalshiQuoteDisplay.multipleLabel(ya, feeRate, stakeUsd),
+                downMultipleLabel = KalshiQuoteDisplay.multipleLabel(na, feeRate, stakeUsd)
             )
         }
 
