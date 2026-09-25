@@ -31,7 +31,8 @@ class KalshiWsClient(
     private val onLog: (String) -> Unit = {},
     private val onBookSnapshot: (KalshiWsMessages.Parsed.OrderbookSnapshot) -> Unit = {},
     private val onBookDelta: (KalshiWsMessages.Parsed.OrderbookDelta) -> Unit = {},
-    private val httpClient: OkHttpClient = defaultClient()
+    private val httpClient: OkHttpClient = defaultClient(),
+    private val urls: List<String> = KalshiWsAuth.WS_URLS
 ) {
     data class State(
         val connected: Boolean,
@@ -84,7 +85,7 @@ class KalshiWsClient(
 
     private fun connect() {
         if (!running.get()) return
-        val host = KalshiWsAuth.WS_URLS[hostIndex % KalshiWsAuth.WS_URLS.size]
+        val host = urls[hostIndex % urls.size]
         onState(State(connected = false, reconnecting = hostIndex > 0 || backoffMs > INITIAL_BACKOFF_MS, host = host, detail = "connecting"))
         val headers = try {
             KalshiWsAuth.handshakeHeaders(keyId, pem)
@@ -121,7 +122,7 @@ class KalshiWsClient(
             State(
                 connected = false,
                 reconnecting = true,
-                host = KalshiWsAuth.WS_URLS[hostIndex % KalshiWsAuth.WS_URLS.size],
+                host = urls[hostIndex % urls.size],
                 detail = "retry in ${delayMs}ms"
             )
         )

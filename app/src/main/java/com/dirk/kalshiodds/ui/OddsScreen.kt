@@ -76,9 +76,9 @@ fun OddsScreen(
     viewModel: OddsViewModel,
     onOpenSettings: () -> Unit,
     onOpenScorecard: () -> Unit,
-    onOpenData: () -> Unit = {},
-    onOpenHistory: () -> Unit = {},
-    onOpenChart: (MarketUiModel) -> Unit = {}
+    onOpenData: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenChart: (MarketUiModel) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -144,7 +144,7 @@ fun OddsScreen(
                                 else abs(it.edgePp ?: 0.0)
                             }
                     )
-                val threshold = state.settings.edgeThresholdPp
+                val threshold = state.settings.effectiveEdgeThresholdPp()
                 val alertCount = allMarkets.count { it.edgeAlert && it.passedFilter }
 
                 LazyColumn(
@@ -186,6 +186,7 @@ fun OddsScreen(
                         TradeTicketsSection(
                             tickets = state.tickets,
                             credentialsConfigured = state.settings.credentialsConfigured,
+                            paperTradingEnabled = state.settings.paperTradingEnabled,
                             onReview = { viewModel.openTicketApprove(it) },
                             onDismiss = { viewModel.dismissTicket(it) },
                             onApprove = { viewModel.approveTicket(it) },
@@ -416,7 +417,7 @@ private fun LiveUpDownHero(
     market: MarketUiModel?,
     onBuyYes: (MarketUiModel) -> Unit,
     onBuyNo: (MarketUiModel) -> Unit,
-    onOpenChart: (MarketUiModel) -> Unit = {}
+    onOpenChart: (MarketUiModel) -> Unit
 ) {
     Column(
         modifier = Modifier

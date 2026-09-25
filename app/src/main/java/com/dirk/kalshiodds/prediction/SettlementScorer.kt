@@ -9,11 +9,17 @@ import kotlinx.coroutines.sync.withLock
  * against settled Kalshi markets.
  */
 class SettlementScorer(
-    private val api: KalshiApi,
+    private val resolveApi: () -> KalshiApi,
     private val logStore: PredictionLogStore,
     private val extraOpenTickers: () -> Set<String> = { emptySet() },
     private val onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> }
 ) {
+    constructor(
+        api: KalshiApi,
+        logStore: PredictionLogStore,
+        extraOpenTickers: () -> Set<String> = { emptySet() },
+        onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> }
+    ) : this({ api }, logStore, extraOpenTickers, onMarketSettled)
     private val mutex = Mutex()
     @Volatile private var lastRunMs: Long = 0L
 
@@ -43,7 +49,7 @@ class SettlementScorer(
         }
         for ((series, tickers) in bySeries) {
             try {
-                val settled = api.getMarkets(seriesTicker = series, status = "settled", limit = 100)
+                val settled = resolveApi().getMarkets(seriesTicker = series, status = "settled", limit = 100)
                 for (m in settled.markets) {
                     if (m.ticker in tickers) {
                         applyResult(m.ticker, m.result)
@@ -54,7 +60,7 @@ class SettlementScorer(
                         extra.any { it.equals(t, ignoreCase = true) }
                     if (!stillOpen) continue
                     try {
-                        val resp = api.getMarkets(seriesTicker = series, status = "settled", ticker = t, limit = 5)
+                        val resp = resolveApi().getMarkets(seriesTicker = series, status = "settled", ticker = t, limit = 5)
                         val hit = resp.markets.firstOrNull { it.ticker == t }
                         applyResult(t, hit?.result)
                     } catch (_: Exception) {

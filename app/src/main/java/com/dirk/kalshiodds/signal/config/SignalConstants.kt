@@ -59,6 +59,24 @@ object SignalConstants {
      */
     const val DEFAULT_FEE_RATE = 0.07
 
+    const val DEFAULT_EDGE_THRESHOLD_PP = 5.0
+
+    const val DEFAULT_AUTO_TUNE = true
+    const val DEFAULT_AUTO_TUNE_OVERRIDE = false
+    const val AUTO_TUNE_MIN_SAMPLES = 30
+
+    const val DEFAULT_OPPORTUNITY_ALERTS = true
+    const val DEFAULT_OPPORTUNITY_QUIET = false
+    const val OPPORTUNITY_DEDUPE_MS = 15 * 60_000L
+
+    const val DEFAULT_CLOUD_SYNC = true
+
+    const val SCORECARD_BUCKET_MIN_SAMPLES = 20
+
+    const val GITHUB_OWNER = "Strobingn"
+    const val GITHUB_REPO = "kalshi-odds-app"
+    const val EDGE_MODEL_RELEASE_TAG = "edge-model-latest"
+
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true
 

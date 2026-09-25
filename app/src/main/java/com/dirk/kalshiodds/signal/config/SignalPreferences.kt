@@ -33,8 +33,15 @@ data class SignalSettings(
     val watchSol: Boolean = true,
     val extraTickers: List<String> = emptyList(),
     val extraTickersText: String = "",
-    val edgeThresholdPp: Double = 5.0,
+    val edgeThresholdPp: Double = SignalConstants.DEFAULT_EDGE_THRESHOLD_PP,
+    val autoTuneEnabled: Boolean = SignalConstants.DEFAULT_AUTO_TUNE,
+    val autoTuneManualOverride: Boolean = SignalConstants.DEFAULT_AUTO_TUNE_OVERRIDE,
+    val sitOut: Boolean = false,
+    val tunedEdgeThresholdPp: Double? = null,
+    val autoTuneNote: String = "",
     val notificationsEnabled: Boolean = true,
+    val opportunityAlertsEnabled: Boolean = SignalConstants.DEFAULT_OPPORTUNITY_ALERTS,
+    val opportunityQuiet: Boolean = SignalConstants.DEFAULT_OPPORTUNITY_QUIET,
     val liveSignalsEnabled: Boolean = false,
     val subscribeTrades: Boolean = true,
     val debounceMs: Long = 10_000L,
@@ -84,9 +91,15 @@ data class SignalSettings(
     val metaLabelEnabled: Boolean = SignalConstants.DEFAULT_META_LABEL,
     val pathSimEnabled: Boolean = SignalConstants.DEFAULT_PATH_SIM,
     val apiKeyId: String = "",
-    val hasPrivateKey: Boolean = false
+    val hasPrivateKey: Boolean = false,
+    val kalshiDemoEnabled: Boolean = false,
+    val demoCredentialsConfigured: Boolean = false
 ) {
     val credentialsConfigured: Boolean get() = apiKeyId.isNotBlank() && hasPrivateKey
+
+    /** Live / demo V2 orders. Paper Buy never consults this. */
+    fun tradingCredentialsConfigured(): Boolean =
+        if (kalshiDemoEnabled) demoCredentialsConfigured else credentialsConfigured
 
     val watchedSeries: Set<String>
         get() = buildSet {
@@ -106,11 +119,23 @@ data class SignalSettings(
     }
 
     fun extraTickerList(): List<String> = CryptoMarkets.filterCrypto(extraTickers)
+
+    fun isSittingOut(): Boolean =
+        autoTuneEnabled && !autoTuneManualOverride && sitOut
+
+    fun effectiveEdgeThresholdPp(): Double {
+        if (isSittingOut()) return 1_000.0
+        if (autoTuneEnabled && !autoTuneManualOverride) {
+            tunedEdgeThresholdPp?.let { return it }
+        }
+        return edgeThresholdPp
+    }
 }
 
 class SignalPreferences(
     private val context: Context,
     private val secrets: SecureCredentialStore = SecureCredentialStore(context),
+    private val extras: SecureExtraStore? = null,
     defaults: DefaultSignalConfig = DefaultSignalConfig.load(context)
 ) {
     private val app = context.applicationContext
@@ -125,7 +150,8 @@ class SignalPreferences(
         .combine(secretRevision) { s, _ ->
             s.copy(
                 apiKeyId = secrets.apiKeyId,
-                hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
+                hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem),
+                demoCredentialsConfigured = extras?.hasDemoCredentials == true
             )
         }
 
@@ -145,6 +171,16 @@ class SignalPreferences(
         it[KEY_THRESHOLD] = value.coerceIn(0.5, 40.0)
     }
     suspend fun updateNotifications(value: Boolean) = edit { it[KEY_NOTIF] = value }
+    suspend fun updateAutoTuneEnabled(value: Boolean) = edit { it[KEY_AUTO_TUNE] = value }
+    suspend fun updateAutoTuneOverride(value: Boolean) = edit { it[KEY_AUTO_TUNE_OVERRIDE] = value }
+    suspend fun updateSitOut(value: Boolean) = edit { it[KEY_SIT_OUT] = value }
+    suspend fun updateTunedEdgeThresholdPp(value: Double?) = edit {
+        if (value == null || !value.isFinite()) it.remove(KEY_TUNED_THRESHOLD)
+        else it[KEY_TUNED_THRESHOLD] = value.coerceIn(0.5, 40.0)
+    }
+    suspend fun updateAutoTuneNote(value: String) = edit { it[KEY_AUTO_TUNE_NOTE] = value }
+    suspend fun updateOpportunityAlerts(value: Boolean) = edit { it[KEY_OPP_ALERTS] = value }
+    suspend fun updateOpportunityQuiet(value: Boolean) = edit { it[KEY_OPP_QUIET] = value }
     suspend fun updateLiveSignals(value: Boolean) {
         LiveSignalsKeepAlive.setEnabled(app, value)
         edit { it[KEY_LIVE] = value }
@@ -190,6 +226,17 @@ class SignalPreferences(
     suspend fun updateResumeOnNewSession(value: Boolean) = edit { it[KEY_RESUME_SESSION] = value }
     suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
     suspend fun updatePaperTrading(value: Boolean) = edit { it[KEY_PAPER] = value }
+    suspend fun updateKalshiDemo(value: Boolean) = edit { it[KEY_KALSHI_DEMO] = value }
+
+    fun saveDemoCredentials(keyId: String, pem: String) {
+        extras?.saveDemoCredentials(keyId, pem)
+        secretRevision.value += 1
+    }
+
+    fun clearDemoCredentials() {
+        extras?.clearDemoCredentials()
+        secretRevision.value += 1
+    }
     suspend fun updateTicketStakeUsd(value: Double) = edit {
         it[KEY_TICKET_STAKE] = value.coerceIn(
             SignalConstants.TICKET_STAKE_MIN_USD,
@@ -311,7 +358,14 @@ class SignalPreferences(
             extraTickers = CryptoMarkets.filterCrypto(parseTickerList(extraText)),
             extraTickersText = extraText,
             edgeThresholdPp = this[KEY_THRESHOLD] ?: def.edgeThresholdPp,
+            autoTuneEnabled = this[KEY_AUTO_TUNE] ?: SignalConstants.DEFAULT_AUTO_TUNE,
+            autoTuneManualOverride = this[KEY_AUTO_TUNE_OVERRIDE] ?: SignalConstants.DEFAULT_AUTO_TUNE_OVERRIDE,
+            sitOut = this[KEY_SIT_OUT] ?: false,
+            tunedEdgeThresholdPp = this[KEY_TUNED_THRESHOLD],
+            autoTuneNote = this[KEY_AUTO_TUNE_NOTE].orEmpty(),
             notificationsEnabled = this[KEY_NOTIF] ?: def.notificationsEnabled,
+            opportunityAlertsEnabled = this[KEY_OPP_ALERTS] ?: SignalConstants.DEFAULT_OPPORTUNITY_ALERTS,
+            opportunityQuiet = this[KEY_OPP_QUIET] ?: SignalConstants.DEFAULT_OPPORTUNITY_QUIET,
             liveSignalsEnabled = this[KEY_LIVE] ?: def.liveSignalsEnabled,
             subscribeTrades = this[KEY_TRADES] ?: def.subscribeTrades,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
@@ -362,7 +416,9 @@ class SignalPreferences(
             metaLabelEnabled = this[KEY_META] ?: def.metaLabelEnabled,
             pathSimEnabled = this[KEY_PATH_SIM] ?: def.pathSimEnabled,
             apiKeyId = secrets.apiKeyId,
-            hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
+            hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem),
+            kalshiDemoEnabled = this[KEY_KALSHI_DEMO] ?: false,
+            demoCredentialsConfigured = extras?.hasDemoCredentials == true
         )
     }
 
@@ -372,7 +428,14 @@ class SignalPreferences(
         private val KEY_WATCH_SOL = booleanPreferencesKey("watch_sol")
         private val KEY_EXTRA = stringPreferencesKey("extra_tickers")
         private val KEY_THRESHOLD = doublePreferencesKey("edge_threshold_pp")
+        private val KEY_AUTO_TUNE = booleanPreferencesKey("auto_tune_enabled")
+        private val KEY_AUTO_TUNE_OVERRIDE = booleanPreferencesKey("auto_tune_manual_override")
+        private val KEY_SIT_OUT = booleanPreferencesKey("auto_tune_sit_out")
+        private val KEY_TUNED_THRESHOLD = doublePreferencesKey("tuned_edge_threshold_pp")
+        private val KEY_AUTO_TUNE_NOTE = stringPreferencesKey("auto_tune_note")
         private val KEY_NOTIF = booleanPreferencesKey("notifications_enabled")
+        private val KEY_OPP_ALERTS = booleanPreferencesKey("opportunity_alerts_enabled")
+        private val KEY_OPP_QUIET = booleanPreferencesKey("opportunity_quiet")
         private val KEY_LIVE = booleanPreferencesKey("live_signals_enabled")
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
@@ -394,6 +457,7 @@ class SignalPreferences(
         private val KEY_RESUME_SESSION = booleanPreferencesKey("resume_on_new_session")
         private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
         private val KEY_PAPER = booleanPreferencesKey("paper_trading_enabled")
+        private val KEY_KALSHI_DEMO = booleanPreferencesKey("kalshi_demo_enabled")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
         private val KEY_HUNTER_VALUE_STAKE = doublePreferencesKey("hunter_value_stake_usd")

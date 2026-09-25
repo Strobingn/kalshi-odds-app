@@ -25,12 +25,39 @@ data class ScorecardUi(
     val adapter: OnlineAdapter.State,
     val guardrails: Guardrails.State,
     val extendedLine: String? = null,
-    val exportMessage: String? = null
+    val exportMessage: String? = null,
+    val sitOut: Boolean = false,
+    val autoTuneNote: String = "",
+    val modelNote: String? = null
 )
 
 class ScorecardViewModel(application: Application) : AndroidViewModel(application) {
     private val container = KalshiOddsApp.from(application).container
     private val _exportMessage = MutableStateFlow<String?>(null)
+    private val _modelNote = MutableStateFlow<String?>(null)
+
+    fun getLatestModel() {
+        viewModelScope.launch {
+            _modelNote.value = "Fetching latest model…"
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = container.extraSecrets.githubToken
+                    when (val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)) {
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready -> {
+                            if (out.fetch.decision.activate) {
+                                container.importedModel.activate(out.fetch.model, out.fetch.manifest)
+                                container.scoring.edgeModel = out.fetch.model
+                            }
+                            out.fetch.decision.reason
+                        }
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.NeedsAuth -> out.message
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Failed -> out.message
+                    }
+                }.getOrElse { it.message ?: "download failed" }
+            }
+            _modelNote.value = result
+        }
+    }
 
     fun exportResults() {
         viewModelScope.launch {
@@ -50,15 +77,16 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         container.logStore.entriesFlow,
         container.adapterStore.stateFlow,
         container.guardrailStore.stateFlow,
-        _exportMessage
-    ) { entries, adapter, guard, export ->
+        _exportMessage,
+        _modelNote
+    ) { entries, adapter, guard, export, modelNote ->
         val settings = container.hub.settings
         ScorecardUi(
             metrics = ScorecardMetrics.compute(
                 entries = entries,
                 calibration = container.scoring.calibration,
                 policyStakeUsd = settings.policyEvalStakeUsd,
-                edgeThresholdPp = settings.edgeThresholdPp,
+                edgeThresholdPp = settings.effectiveEdgeThresholdPp(),
                 minConfidence = settings.minConfidence,
                 requireUncertaintyPass = settings.uncertaintyGateEnabled,
                 maxUncertainty = settings.maxUncertainty
@@ -67,7 +95,10 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             adapter = adapter,
             guardrails = guard,
             extendedLine = extendedLine(),
-            exportMessage = export
+            exportMessage = export,
+            sitOut = settings.isSittingOut(),
+            autoTuneNote = settings.autoTuneNote,
+            modelNote = modelNote
         )
     }.stateIn(
         viewModelScope,

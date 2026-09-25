@@ -53,13 +53,13 @@ data class EdgeModel(
     }
 
     /**
-     * Flag an edge only when |model − market| clears the fee + margin.
-     * [feeRate] is the Kalshi-style P(1−P) coefficient (default 0.07).
+     * Flag an edge only when |model − market| clears the official
+     * next-cent taker fee + [confidenceMargin].
      */
     fun qualifiesEdge(modelYes: Double, marketMid: Double, feeRate: Double = feeMargin.toDouble()): Boolean {
         val m = marketMid.coerceIn(0.02, 0.98)
         val gap = kotlin.math.abs(modelYes - m)
-        val fee = feeRate * m * (1.0 - m)
+        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.perContract(m, feeRate)
         return gap > fee + confidenceMargin
     }
 

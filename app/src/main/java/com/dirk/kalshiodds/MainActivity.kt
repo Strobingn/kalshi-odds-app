@@ -3,6 +3,7 @@ package com.dirk.kalshiodds
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -51,12 +52,22 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SignalNotifier.ensureChannels(this)
+        com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this)
+        handleOpportunityIntent(intent)
         lifecycleScope.launch {
             KalshiOddsApp.from(this@MainActivity).container.preferences.settings
                 .map { it.notificationsEnabled || it.liveSignalsEnabled }
                 .distinctUntilChanged()
                 .collect { wantsNotify ->
                     if (wantsNotify) requestNotificationPermission()
+                }
+        }
+        lifecycleScope.launch {
+            KalshiOddsApp.from(this@MainActivity).container.preferences.settings
+                .map { it.opportunityAlertsEnabled }
+                .distinctUntilChanged()
+                .collect { wants ->
+                    if (wants) requestNotificationPermission()
                 }
         }
         enableEdgeToEdge()
@@ -138,6 +149,22 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         LiveSignalsKeepAlive.markUiInForeground(false)
         super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleOpportunityIntent(intent)
+    }
+
+    private fun handleOpportunityIntent(intent: Intent?) {
+        if (intent?.getBooleanExtra(com.dirk.kalshiodds.signal.notify.OpportunityNotifier.EXTRA_OPEN_TICKET, false) != true &&
+            intent?.getStringExtra(SignalNotifier.EXTRA_TICKER) == null
+        ) {
+            return
+        }
+        val ticker = intent.getStringExtra(SignalNotifier.EXTRA_TICKER)
+        val ticketId = intent.getStringExtra(com.dirk.kalshiodds.signal.notify.OpportunityNotifier.EXTRA_TICKET_ID)
+        oddsViewModel.focusTicket(ticker, ticketId)
     }
 
     private fun requestNotificationPermission() {

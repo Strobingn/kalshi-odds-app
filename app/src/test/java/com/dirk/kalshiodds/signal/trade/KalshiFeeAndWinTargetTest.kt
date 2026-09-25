@@ -12,10 +12,15 @@ import kotlin.math.abs
 class KalshiFeeAndWinTargetTest {
     @Test
     fun feeAtTwentyCents() {
+        // Official: ceil(0.07 × C × P × (1−P) × 100) / 100. 1 ct @ 20¢ → $0.02.
         val fee = KalshiFee.perContract(0.20)
-        assertEquals(0.07 * 0.20 * 0.80, fee, 1e-9)
+        assertEquals(0.02, fee, 1e-9)
         val net = KalshiFee.netPayout(5, 0.20)
-        assertEquals(5.0 - 5 * fee, net, 1e-9)
+        assertEquals(5.0 - KalshiFee.total(5, 0.20), net, 1e-9)
+        assertEquals(0.02, KalshiFee.perContract(0.50), 1e-9)
+        // GET /series/fee_changes?series_ticker=KXBTC15M|KXETH15M|KXSOL15M returned []
+        // on 2026-09-25 — no multiplier, so default 0.07 applies to these 15m markets.
+        assertEquals(0.07, SignalConstants.DEFAULT_FEE_RATE, 1e-12)
     }
 
     @Test
@@ -168,8 +173,8 @@ class KalshiFeeAndWinTargetTest {
     fun twentyCentNetPayoutAfterFeesIsJustUnderFive() {
         val fee = KalshiFee.perContract(0.20, 0.07)
         val net = KalshiFee.netPayout(5, 0.20, 0.07)
-        assertEquals(0.0112, fee, 1e-9)
-        assertEquals(4.944, net, 1e-9)
+        assertEquals(0.02, fee, 1e-9)
+        assertEquals(4.94, net, 1e-9)
         assertTrue(net < 5.0)
         val profit = KalshiFee.netProfit(5, 0.20, 0.07)
         assertEquals(net - 1.0, profit, 1e-9)
@@ -267,7 +272,8 @@ class KalshiFeeAndWinTargetTest {
         assertTrue(fill != null)
         assertEquals(ticket.contracts, fill!!.contracts)
         assertEquals(ticket.stakeUsd, fill.stakeUsd, 1e-9)
-        assertTrue(abs(100.0 - ticket.stakeUsd - book.snapshot().cashUsd) < 1e-6)
+        val fees = KalshiFee.total(fill.contracts, fill.limitPrice)
+        assertTrue(abs(100.0 - ticket.stakeUsd - fees - book.snapshot().cashUsd) < 1e-6)
         assertTrue(fill.note.contains("win-target"))
     }
 

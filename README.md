@@ -18,7 +18,16 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.7**
+Package: `com.dirk.kalshiodds` · version **0.3.8**
+
+## 0.3.8
+
+- **Paper Buy fix:** Paper mode Approve / Paper tap fills the paper book with no Kalshi key. Win-target size above paper cash is capped, not blocked. Failures show a reason on the card.
+- Weekly edge-model retrain (`edge-model-latest`) + one-tap **Get latest model** (activate only if holdout beats the market; rollback kept).
+- Auto-tune edge threshold from settled history; sit out when the model loses to the market (manual override in Settings).
+- Optional Supabase sync of History / bets / signals / settings (never the Kalshi key).
+- Notifications when a Long-shot or $50 win-target card appears (Approve still required).
+- Adaptive launcher icon + per-coin / 4-hour ET scorecard breakdowns.
 
 ## Stable debug signing (0.3.7)
 

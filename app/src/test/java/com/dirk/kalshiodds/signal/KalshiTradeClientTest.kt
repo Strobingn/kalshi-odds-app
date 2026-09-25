@@ -46,6 +46,9 @@ class KalshiTradeClientTest {
         assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals("cid-1", body.clientOrderId)
         assertFalse(body.reduceOnly)
+        assertFalse(body.cancelOrderOnPause)
+        assertEquals("good_till_canceled", body.timeInForce)
+        assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals(KalshiTradeClient.V2_CREATE_PATH, "/trade-api/v2/portfolio/events/orders")
         assertFalse(KalshiTradeClient.LEGACY_CREATE_PATH.contains("events"))
     }
@@ -99,6 +102,34 @@ class KalshiTradeClientTest {
         assertEquals(1, primary.creates.size)
         assertEquals(1, secondary.creates.size)
         assertEquals("bid", secondary.creates.single().side)
+    }
+
+    @Test
+    fun demoFlagUsesDemoHostNotProduction() = runBlocking {
+        val live = RecordingTradeApi(
+            create = Response.success(
+                201,
+                CreateOrderV2Response(orderId = "live-ord", remainingCount = "1.00", fillCount = "0.00")
+            )
+        )
+        val demo = RecordingTradeApi(
+            create = Response.success(
+                201,
+                CreateOrderV2Response(orderId = "demo-ord", remainingCount = "1.00", fillCount = "0.00")
+            )
+        )
+        val client = KalshiTradeClient(
+            primary = live,
+            demoPrimary = demo,
+            credentials = { "demo-key" to "pem" },
+            useDemo = { true }
+        )
+        val placed = client.createLimit(sampleTicket(), "cid-demo")
+        assertEquals("demo-ord", placed.orderId)
+        assertTrue(live.creates.isEmpty())
+        assertEquals(1, demo.creates.size)
+        assertEquals("good_till_canceled", demo.creates.single().timeInForce)
+        assertEquals("taker_at_cross", demo.creates.single().selfTradePreventionType)
     }
 
     @Test

@@ -80,8 +80,26 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
             Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
             }
+            Button(onClick = viewModel::getLatestModel, modifier = Modifier.fillMaxWidth()) {
+                Text("Get latest model")
+            }
             ui.exportMessage?.let {
                 Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
+            ui.modelNote?.let {
+                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (ui.sitOut) {
+                Text(
+                    "SIT OUT — ${ui.autoTuneNote.ifBlank { "the model is not beating the market on settled history." }}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(AccentOrange.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                        .padding(12.dp)
+                )
             }
             CalibrationBanner(snap)
             AdapterBanner(ui.adapter)
@@ -265,7 +283,41 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
                 )
             }
         }
+        if (h.perCoin.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text("Per coin", style = MaterialTheme.typography.labelMedium, color = TextSecondary, fontWeight = FontWeight.Bold)
+            h.perCoin.forEach { b -> BreakdownRow(b) }
+        }
+        if (h.perTimeOfDay.isNotEmpty()) {
+            Spacer(Modifier.height(10.dp))
+            Text("Time of day (4-hour ET)", style = MaterialTheme.typography.labelMedium, color = TextSecondary, fontWeight = FontWeight.Bold)
+            h.perTimeOfDay.forEach { b -> BreakdownRow(b) }
+        }
     }
+}
+
+@Composable
+private fun BreakdownRow(b: ScorecardMetrics.Breakdown) {
+    val line = if (!b.enoughData) {
+        "${b.label}  ${b.honestLabel}"
+    } else {
+        String.format(
+            Locale.US,
+            "%s  %s  hit %s  Brier %.3f vs mkt %.3f  P&L %+.2f",
+            b.label,
+            b.n,
+            b.hitRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—",
+            b.modelBrier ?: 0.0,
+            b.marketBrier ?: 0.0,
+            b.pnlUsd ?: 0.0
+        )
+    }
+    Text(
+        line,
+        style = MaterialTheme.typography.labelMedium,
+        color = if (b.enoughData) TextSecondary else AccentOrange,
+        modifier = Modifier.padding(top = 2.dp)
+    )
 }
 
 @Composable

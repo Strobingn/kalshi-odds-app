@@ -29,12 +29,21 @@ import retrofit2.Response
 class KalshiTradeClient(
     private val primary: KalshiTradeApi,
     private val fallback: KalshiTradeApi? = null,
-    private val credentials: () -> Pair<String, String>
+    private val demoPrimary: KalshiTradeApi? = null,
+    private val demoFallback: KalshiTradeApi? = null,
+    private val credentials: () -> Pair<String, String>,
+    private val useDemo: () -> Boolean = { false }
 ) {
     constructor(
         api: KalshiTradeApi,
         credentials: () -> Pair<String, String>
     ) : this(primary = api, fallback = null, credentials = credentials)
+
+    private fun activePrimary(): KalshiTradeApi =
+        if (useDemo()) demoPrimary ?: primary else primary
+
+    private fun activeFallback(): KalshiTradeApi? =
+        if (useDemo()) demoFallback ?: fallback else fallback
 
     suspend fun createLimit(ticket: TradeTicket, clientOrderId: String): PlacedOrder {
         if (!ticket.canApprove) {
@@ -43,8 +52,8 @@ class KalshiTradeClient(
         ensureKeys()
         val body = v2Body(ticket, clientOrderId)
         return try {
-            val first = primary.createOrderV2(body)
-            val chosen = chooseHost(first) { fallback?.createOrderV2(body) }
+            val first = activePrimary().createOrderV2(body)
+            val chosen = chooseHost(first) { activeFallback()?.createOrderV2(body) }
             mapV2(ticket, clientOrderId, chosen)
         } catch (e: Exception) {
             throw softFailure(e)
@@ -56,9 +65,9 @@ class KalshiTradeClient(
         val id = order.orderId ?: throw IllegalStateException("No order id to cancel")
         return try {
             val ticker = order.ticket.ticker
-            val first = primary.cancelOrderV2(id, marketTicker = ticker, exchangeIndex = -1)
+            val first = activePrimary().cancelOrderV2(id, marketTicker = ticker, exchangeIndex = -1)
             val chosen = chooseHost(first) {
-                fallback?.cancelOrderV2(id, marketTicker = ticker, exchangeIndex = -1)
+                activeFallback()?.cancelOrderV2(id, marketTicker = ticker, exchangeIndex = -1)
             }
             if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
             val reduced = chosen.body()?.reducedBy
@@ -92,8 +101,8 @@ class KalshiTradeClient(
     suspend fun getCashUsd(): Double? {
         ensureKeys()
         return try {
-            val first = primary.getBalance()
-            val chosen = chooseHost(first) { fallback?.getBalance() }
+            val first = activePrimary().getBalance()
+            val chosen = chooseHost(first) { activeFallback()?.getBalance() }
             if (!chosen.isSuccessful) return null
             chosen.body()?.cashUsd()
         } catch (_: Exception) {
@@ -104,8 +113,8 @@ class KalshiTradeClient(
     suspend fun listMarketPositions(): List<MarketPositionDto> {
         ensureKeys()
         return try {
-            val first = primary.getPositions(countFilter = "position", limit = 200)
-            val chosen = chooseHost(first) { fallback?.getPositions(countFilter = "position", limit = 200) }
+            val first = activePrimary().getPositions(countFilter = "position", limit = 200)
+            val chosen = chooseHost(first) { activeFallback()?.getPositions(countFilter = "position", limit = 200) }
             if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
             chosen.body()?.marketPositions.orEmpty()
         } catch (e: Exception) {

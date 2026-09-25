@@ -43,8 +43,8 @@ fun ChartDetailScreen(
     market: MarketUiModel,
     points: List<BidPoint>,
     onBack: () -> Unit,
-    onBuyYes: (MarketUiModel) -> Unit = {},
-    onBuyNo: (MarketUiModel) -> Unit = {}
+    onBuyYes: (MarketUiModel) -> Unit,
+    onBuyNo: (MarketUiModel) -> Unit
 ) {
     Scaffold(
         containerColor = Bg,

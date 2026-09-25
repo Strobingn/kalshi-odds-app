@@ -48,7 +48,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit = {}) {
+fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current
@@ -144,8 +144,28 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             )
 
             Section("Edge threshold")
+            if (s.isSittingOut()) {
+                Text(
+                    "SIT OUT — auto-tune says the model is not beating the market. ${s.autoTuneNote}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold
+                )
+            } else if (s.autoTuneEnabled && !s.autoTuneManualOverride && s.tunedEdgeThresholdPp != null) {
+                Text(
+                    String.format(
+                        Locale.US,
+                        "Auto-tune  %.1f pp  — %s",
+                        s.tunedEdgeThresholdPp,
+                        s.autoTuneNote.ifBlank { "from settled history" }
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             Text(
-                String.format(Locale.US, "%.1f pp  — alert when |fair − mid| crosses this", s.edgeThresholdPp),
+                String.format(Locale.US, "Manual slider  %.1f pp  — used when override is on", s.edgeThresholdPp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = AccentGreen,
                 fontWeight = FontWeight.SemiBold
@@ -156,9 +176,18 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 valueRange = 1f..20f,
                 steps = 18
             )
+            ToggleRow("Auto-tune edge from settled history", s.autoTuneEnabled, viewModel::setAutoTuneEnabled)
+            ToggleRow("Manual override (use slider, ignore sit-out)", s.autoTuneManualOverride, viewModel::setAutoTuneOverride)
 
             Section("Alerts")
             ToggleRow("Notifications", s.notificationsEnabled, viewModel::setNotifications)
+            ToggleRow("Long-shot / $50 win-target cards", s.opportunityAlertsEnabled, viewModel::setOpportunityAlerts)
+            ToggleRow("Quiet opportunity alerts (no sound)", s.opportunityQuiet, viewModel::setOpportunityQuiet)
+            Text(
+                "Opportunity notifications open the ticket. Approve is still required — they never place an order.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
             ToggleRow("Subscribe public trades", s.subscribeTrades, viewModel::setSubscribeTrades)
 
             Section("Skip filter")
@@ -262,7 +291,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Fees & net EV")
             Text(
-                "Kalshi-style taker fee ≈ feeRate × P × (1−P) per contract, plus half-spread. Ranking and alerts use net EV when the toggle is on. Raw edge still shows on cards.",
+                "Official Kalshi taker fee is ceil-to-the-next-cent of feeRate × C × P × (1−P) (default 7%). Crypto 15-minute series (KXBTC15M / KXETH15M / KXSOL15M) have no series fee override. Ranking and alerts add half-spread when net EV is on. Raw edge still shows on cards.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
@@ -601,9 +630,47 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
+            Section("Kalshi demo (play money)")
+            Text(
+                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                    "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
+                    "Paper Buy still works with no key and never hits this host.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Kalshi demo environment", s.kalshiDemoEnabled, viewModel::setKalshiDemo)
+            if (s.demoCredentialsConfigured) {
+                Text(
+                    "Demo key saved",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            OutlinedTextField(
+                value = state.demoKeyIdDraft,
+                onValueChange = viewModel::setDemoKeyIdDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Demo API Key ID") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = state.demoPemDraft,
+                onValueChange = viewModel::setDemoPemDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(if (s.demoCredentialsConfigured) "Replace demo PEM" else "Demo private key PEM") },
+                minLines = 4
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = viewModel::saveDemoCredentials) {
+                    Text(if (s.demoCredentialsConfigured) "Update demo key" else "Save demo key")
+                }
+                OutlinedButton(onClick = viewModel::clearDemoCredentials) { Text("Clear demo") }
+            }
+
             Spacer(Modifier.height(24.dp))
             Text(
-                "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2",
+                "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. Live WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2. Demo WS: wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

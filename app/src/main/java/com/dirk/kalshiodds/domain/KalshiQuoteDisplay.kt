@@ -16,9 +16,10 @@ object KalshiQuoteDisplay {
     /**
      * Kalshi-app payout multiple on the buy button.
      *
-     * Gross `1/ask` for 64¢ is 1.56x; the official app shows **1.52x / 2.59x**
-     * because the taker fee (`0.07 × P × (1−P)`) is included in the cost:
-     * `1 / (ask + fee)`. Match that so the hero is identical to Kalshi.
+     * The official mobile buttons use the **raw** model fee
+     * `0.07 × P × (1−P)` inside `1 / (ask + fee)` — 64¢ → 1.52x, 37¢ → 2.59x.
+     * Paper fills and net-EV ranking use [com.dirk.kalshiodds.signal.trade.KalshiFee]
+     * (next-cent ceil). Do not swap those here or the hero no longer matches Kalshi.
      */
     fun multiplier(ask: Double?, includeFee: Boolean = true, feeRate: Double = 0.07): Double? {
         val p = KalshiPrice.usable(ask) ?: return null

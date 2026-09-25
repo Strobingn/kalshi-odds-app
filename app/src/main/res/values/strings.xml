@@ -20,4 +20,10 @@
     <string name="live_signals_allow_background">Allow background</string>
     <string name="signal_alert_title">Dip Hunter · %1$s</string>
     <string name="scorecard">Scorecard</string>
+    <string name="opportunity_channel_name">Long-shot and win-target cards</string>
+    <string name="opportunity_channel_desc">Fires when a Long-shot or $50 win-target ticket appears. Tapping opens the ticket. Approve is still required — never auto-placed.</string>
+    <string name="opportunity_longshot_title">Long-shot · %1$s</string>
+    <string name="opportunity_hunter_title">Hunter · %1$s</string>
+    <string name="opportunity_wintarget_title">$50 win-target · %1$s</string>
+    <string name="opportunity_body">%1$s · %2$d ct · $%3$s stake. Tap to open the ticket. Approve still required.</string>
 </resources>
