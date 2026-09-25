@@ -114,6 +114,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
+                    tickets.lastError?.takeIf { it.isNotBlank() && !it.startsWith("PAPER ", true) }?.let { err ->
+                        container.lastOrderError.record(err)
+                    }
                     _state.update { it.copy(tickets = tickets) }
                 }
             }
@@ -464,7 +467,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 resizeSell(t, count, price)
             }
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
-            if (ticket != null && !ticket.canApprove) return@launch
+            if (ticket != null && !ticket.canApprove) {
+                ticketSession.failSoft(ticket.blockedReason ?: "Ticket cannot be approved")
+                return@launch
+            }
             ticketSession.approve(ticketId)
         }
     }
@@ -601,7 +607,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val all = s.snapshot?.allMarkets.orEmpty()
         val target = MarketLifecycle.resolveLive(market, all, now)
         val ticketCtx = ticketContext(s, now)
-        val ticket = TicketBuilder.proposeManual(target, side, ticketCtx) ?: return
+        val ticket = TicketBuilder.proposeManual(target, side, ticketCtx)
+        if (ticket == null) {
+            ticketSession.failSoft("Could not build a buy ticket — turn on trade tickets in Settings")
+            return
+        }
         ticketSession.addManual(ticket)
     }
 

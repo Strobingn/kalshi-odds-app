@@ -93,4 +93,34 @@ class ApproveRouterTest {
         )
         assertEquals(ApproveRouter.Decision.Live, d)
     }
+
+    @Test
+    fun paperOnWithKeyIsLiveNotPaper() {
+        val d = ApproveRouter.decide(
+            paperTradingEnabled = true,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = true,
+            canApprove = true
+        )
+        assertEquals(
+            "0.3.9 swallowed Live Approve when paper was on (default) after the user pasted a key",
+            ApproveRouter.Decision.Live,
+            d
+        )
+    }
+
+    @Test
+    fun blockedTicketSurfacesReason() {
+        val d = ApproveRouter.decide(
+            paperTradingEnabled = false,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = true,
+            canApprove = false,
+            blockedReason = "No sellers on YES right now"
+        )
+        val blocked = d as ApproveRouter.Decision.Blocked
+        assertEquals("No sellers on YES right now", blocked.reason)
+    }
 }

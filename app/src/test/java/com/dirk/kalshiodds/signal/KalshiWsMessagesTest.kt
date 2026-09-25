@@ -31,6 +31,8 @@ class KalshiWsMessagesTest {
         assertEquals("KXBTC15M", tick.series)
         assertEquals(0.45, tick.yesBid!!, 1e-6)
         assertEquals(0.53, tick.yesAsk!!, 1e-6)
+        assertEquals(0.47, tick.noBid!!, 1e-6)
+        assertEquals(0.55, tick.noAsk!!, 1e-6)
         assertEquals(49.0, tick.midPp!!, 0.01)
         assertEquals(99L, tick.receiveElapsedNanos)
     }

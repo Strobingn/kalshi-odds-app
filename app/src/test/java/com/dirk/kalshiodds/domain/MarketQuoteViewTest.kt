@@ -303,6 +303,65 @@ class MarketQuoteViewTest {
         assertEquals(333.0 / 5.34, q.upMultiple!!, 1e-9)
         assertEquals(q.upMultiple, KalshiQuoteDisplay.multiplier(live.yesAsk)!!, 1e-9)
         assertFalse(q.upButton.contains("934"))
-        assertEquals("25¢", q.downHero)
+        // Tick YES is source of truth; NO is derived (1 − yes), never stale REST 25¢.
+        assertEquals(0.985, live.noBid!!, 1e-12)
+        assertEquals(0.986, live.noAsk!!, 1e-12)
+        assertEquals("98.5¢", q.noBidLabel)
+    }
+
+    @Test
+    fun screenshotKxeth15mMixedYesAndNoIsRejectedAndRepaired() {
+        // User phone 0.3.9: LIVE BOOK UP 55/63 + DOWN 37/50. 55+50=105 is impossible.
+        // REST NO ask 50¢ left over; WS ticker only sent yes_bid/yes_ask 55/63.
+        val rest = MarketUiModel(
+            ticker = "KXETH15M-26SEP251230-30",
+            title = "ETH price up in next 15 mins?",
+            subtitle = null,
+            floorStrike = 2691.74,
+            yesBid = 0.55,
+            yesAsk = 0.63,
+            noBid = 0.37,
+            noAsk = 0.50,
+            lastPrice = 0.55,
+            yesProbabilityPercent = 59.0,
+            noProbabilityPercent = 41.0,
+            volume = null,
+            volume24h = null,
+            closeTimeLocal = null,
+            closeTimeEpochMs = null,
+            status = "active",
+            seriesLabel = "Ethereum"
+        )
+        val tick = com.dirk.kalshiodds.signal.model.MarketTick(
+            ticker = "KXETH15M-26SEP251230-30",
+            series = "KXETH15M",
+            yesBid = 0.55,
+            yesAsk = 0.63,
+            lastPrice = 0.55,
+            volume = null,
+            openInterest = null,
+            closeTimeEpochMs = null,
+            source = com.dirk.kalshiodds.signal.model.TickSource.WS_TICKER,
+            receiveElapsedNanos = 1L
+        )
+        val mixedView = MarketQuoteView.of(0.55, 0.63, 0.37, 0.50)
+        assertEquals(0.55, mixedView.yesBid!!, 1e-12)
+        assertEquals(0.45, mixedView.noAsk!!, 1e-12)
+        assertEquals(0.37, mixedView.noBid!!, 1e-12)
+        assertTrue(kotlin.math.abs(mixedView.yesBid!! + mixedView.noAsk!! - 1.0) < 0.0015)
+
+        val live = rest.withLiveQuote(tick)
+        assertEquals(0.55, live.yesBid!!, 1e-12)
+        assertEquals(0.63, live.yesAsk!!, 1e-12)
+        assertEquals(0.37, live.noBid!!, 1e-12)
+        assertEquals(0.45, live.noAsk!!, 1e-12)
+        assertTrue(kotlin.math.abs(live.yesBid!! + live.noAsk!! - 1.0) < 1e-12)
+        assertTrue(kotlin.math.abs(live.noBid!! + live.yesAsk!! - 1.0) < 1e-12)
+        val q = MarketQuoteView.of(live)
+        assertEquals("55¢", q.yesBidLabel)
+        assertEquals("63¢", q.yesAskLabel)
+        assertEquals("37¢", q.noBidLabel)
+        assertEquals("45¢", q.noAskLabel)
+        assertFalse(q.downHeader.contains("ask 50¢"))
     }
 }

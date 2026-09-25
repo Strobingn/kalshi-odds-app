@@ -18,7 +18,15 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.9**
+Package: `com.dirk.kalshiodds` · version **0.3.10**
+
+## 0.3.10
+
+- **Live Approve after API key:** Paper trading ON (default) no longer reroutes a keyed Live Approve into the paper book. Paper fills stay on the Paper button. Manual Buy is a fee-inclusive $5 (Settings stake) GTC limit — not resized to the $50 win target.
+- **PEM paste:** PKCS#1 `BEGIN RSA PRIVATE KEY` and PKCS#8 `BEGIN PRIVATE KEY` accept CRLF, whitespace, one-line pastes, and missing newlines. Key ID alone is rejected on-screen (`CredentialWriteGuard.REJECT_KEY_ONLY`).
+- **Settings → Test connection:** signed `GET /trade-api/v2/portfolio/balance` shows cash or the exact Kalshi body (401 `INCORRECT_API_KEY_SIGNATURE`, clock skew, missing PEM). Copyable Last order error panel.
+- **4xx/5xx verbatim:** create-order failures keep the Kalshi JSON on the ticket, snackbar, SQLite ticket attempt, and Settings last-error.
+- **Consistent live book:** WS ticker is YES-only; NO bid/ask are derived from the same update (`yes_bid = 1 − no_ask`). Stops the 0.3.9 mixed book (UP 55/63 + DOWN 37/50).
 
 ## 0.3.9
 

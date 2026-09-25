@@ -50,6 +50,18 @@ class KalshiTradeClient(
             throw IllegalStateException(ticket.blockedReason ?: "Market closed")
         }
         ensureKeys()
+        if (!ticket.isSell) {
+            val cost = com.dirk.kalshiodds.signal.trade.KalshiFee.totalCost(
+                ticket.contracts,
+                ticket.limitPrice
+            )
+            val hard = com.dirk.kalshiodds.signal.config.SignalConstants.TICKET_STAKE_HARD_CAP_USD
+            if (cost > hard + 0.009) {
+                throw IllegalStateException(
+                    "Order \$${String.format(java.util.Locale.US, "%.2f", cost)} including fees exceeds the \$${hard.toInt()} hard cap"
+                )
+            }
+        }
         val body = v2Body(ticket, clientOrderId)
         return try {
             val first = activePrimary().createOrderV2(body)
@@ -99,15 +111,87 @@ class KalshiTradeClient(
      * Returns null if the key cannot read `portfolio/balance`.
      */
     suspend fun getCashUsd(): Double? {
-        ensureKeys()
+        return when (val r = testConnection()) {
+            is ConnectionTestResult.Ok -> r.cashUsd
+            is ConnectionTestResult.Fail -> null
+        }
+    }
+
+    /**
+     * Settings → Test connection. GET /portfolio/balance with the stored key.
+     * https://docs.kalshi.com/api-reference/portfolio/get-balance
+     * https://docs.kalshi.com/getting_started/quick_start_authenticated_requests
+     */
+    suspend fun testConnection(): ConnectionTestResult {
+        val (id, pem) = credentials()
+        if (id.isBlank() && pem.isBlank()) {
+            return ConnectionTestResult.Fail("No Key ID or PEM stored — paste both in Settings")
+        }
+        if (id.isBlank()) {
+            return ConnectionTestResult.Fail(com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_PEM_ONLY)
+        }
+        if (pem.isBlank() || !com.dirk.kalshiodds.signal.config.PemNormalizer.looksLikePem(pem)) {
+            return ConnectionTestResult.Fail(com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_KEY_ONLY)
+        }
+        val parseErr = runCatching {
+            com.dirk.kalshiodds.signal.ws.KalshiWsAuth.parsePrivateKey(pem)
+        }.exceptionOrNull()
+        if (parseErr != null) {
+            return ConnectionTestResult.Fail(
+                "PEM parse failed — ${parseErr.message ?: "unsupported key"}. " +
+                    "Kalshi RSA keys use BEGIN RSA PRIVATE KEY; openssl/Ed25519 use BEGIN PRIVATE KEY."
+            )
+        }
+        val host = if (useDemo()) {
+            KalshiApi.DEMO_TRADE_BASE_URL
+        } else {
+            KalshiApi.TRADE_BASE_URL
+        }
         return try {
             val first = activePrimary().getBalance()
             val chosen = chooseHost(first) { activeFallback()?.getBalance() }
-            if (!chosen.isSuccessful) return null
-            chosen.body()?.cashUsd()
-        } catch (_: Exception) {
-            null
+            if (!chosen.isSuccessful) {
+                val raw = chosen.errorBody()?.string()
+                return ConnectionTestResult.Fail(
+                    reason = balanceFailure(chosen.code(), raw),
+                    httpCode = chosen.code(),
+                    rawBody = raw
+                )
+            }
+            val cash = chosen.body()?.cashUsd()
+                ?: return ConnectionTestResult.Fail("Balance response had no cash field")
+            ConnectionTestResult.Ok(
+                cashUsd = cash,
+                host = host,
+                rawSummary = String.format(
+                    java.util.Locale.US,
+                    "GET /portfolio/balance ok · $%.2f available · %s",
+                    cash,
+                    host.trimEnd('/')
+                )
+            )
+        } catch (e: Exception) {
+            ConnectionTestResult.Fail(
+                e.message?.takeIf { !it.contains("PRIVATE", ignoreCase = true) }
+                    ?: "Trade request failed — check network and Settings keys"
+            )
         }
+    }
+
+    private fun balanceFailure(code: Int, rawBody: String?): String {
+        val parsed = parseError(rawBody)
+        val codeName = parsed?.code.orEmpty()
+        val hint = when {
+            code == 401 && codeName.equals("INCORRECT_API_KEY_SIGNATURE", ignoreCase = true) ->
+                "401 INCORRECT_API_KEY_SIGNATURE — Key ID / PEM mismatch, or phone clock skew (timestamp must be Unix ms). See https://docs.kalshi.com/getting_started/api_keys"
+            code == 401 ->
+                "401 Unauthorized — check Key ID + PEM, signing path /trade-api/v2/portfolio/balance, and that the phone clock is correct"
+            else -> "HTTP $code"
+        }
+        val detail = listOfNotNull(parsed?.code, parsed?.message, parsed?.details)
+            .joinToString(" · ")
+            .ifBlank { rawBody?.trim().orEmpty() }
+        return if (detail.isNotBlank()) "$hint — $detail" else hint
     }
 
     suspend fun listMarketPositions(): List<MarketPositionDto> {
@@ -185,7 +269,16 @@ class KalshiTradeClient(
                     ?.trim()
                     .orEmpty()
             }
-        val suffix = if (detail.isNotBlank() && !hint.contains(detail.take(24))) " — $detail" else ""
+        val verbatim = rawBody
+            ?.replace(Regex("(?is)-----BEGIN[^-]*PRIVATE[^-]*-----.*?-----END[^-]*PRIVATE[^-]*-----"), "[redacted-pem]")
+            ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
+            ?.trim()
+            .orEmpty()
+        val suffix = when {
+            verbatim.isNotBlank() -> " — $verbatim"
+            detail.isNotBlank() && !hint.contains(detail.take(24)) -> " — $detail"
+            else -> ""
+        }
         return IllegalStateException("$hint$suffix")
     }
 

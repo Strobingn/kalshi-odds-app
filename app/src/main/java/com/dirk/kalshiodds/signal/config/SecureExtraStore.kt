@@ -46,7 +46,7 @@ class SecureExtraStore(context: Context) {
     fun saveDemoCredentials(keyId: String, pem: String) {
         prefs.edit()
             .putString(KEY_DEMO_ID, keyId.trim())
-            .putString(KEY_DEMO_PEM, pem.trim())
+            .putString(KEY_DEMO_PEM, PemNormalizer.normalize(pem))
             .commit()
     }
 

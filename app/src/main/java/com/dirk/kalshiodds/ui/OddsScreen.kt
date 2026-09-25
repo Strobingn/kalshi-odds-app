@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.domain.MarketLifecycle
@@ -79,9 +82,10 @@ fun OddsScreen(
 
     Scaffold(
         containerColor = colors.bg,
+        contentWindowInsets = WindowInsets.safeDrawing,
         topBar = {
             TopAppBar(
-                title = { Text("Dip Hunter") },
+                title = { Text("Dip Hunter", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                 actions = {
                     IconButton(onClick = onOpenHistory) {
                         Icon(Icons.Default.History, contentDescription = "History")
@@ -180,7 +184,7 @@ fun OddsScreen(
                     item {
                         TradeTicketsSection(
                             tickets = state.tickets,
-                            credentialsConfigured = state.settings.credentialsConfigured,
+                            credentialsConfigured = state.settings.tradingCredentialsConfigured(),
                             paperTradingEnabled = state.settings.paperTradingEnabled,
                             onReview = { viewModel.openTicketApprove(it) },
                             onDismiss = { viewModel.dismissTicket(it) },
@@ -432,7 +436,9 @@ private fun LiveUpDownHero(
                 text = market?.title?.takeIf { it.isNotBlank() } ?: "Live scan",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary,
-                modifier = Modifier.weight(1f)
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f).padding(end = 8.dp)
             )
             TimeLeftLabel(market?.closeTimeEpochMs, pill = true)
         }
@@ -639,6 +645,8 @@ private fun MetaHeader(
             text = pollLabel,
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.padding(top = 4.dp)
         )
         modelScoreLabel?.let {
@@ -647,6 +655,8 @@ private fun MetaHeader(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.accentBlue,
                 fontWeight = FontWeight.SemiBold,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
                     .padding(top = 2.dp)
                     .background(colors.accentBlue.copy(alpha = 0.10f), RoundedCornerShape(8.dp))

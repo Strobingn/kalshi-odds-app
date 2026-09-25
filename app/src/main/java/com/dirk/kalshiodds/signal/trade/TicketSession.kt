@@ -178,7 +178,10 @@ class TicketSession(
             return _state.value
         }
         if (!ticket.canApprove) {
-            return cur
+            val reason = ticket.blockedReason?.takeIf { it.isNotBlank() }
+                ?: "Ticket cannot be approved — Approve stays off (no silent skip)"
+            _state.update { it.copy(lastError = reason) }
+            return _state.value
         }
         if (cur.phase is TicketPhase.Submitting) return cur
 
@@ -285,7 +288,7 @@ class TicketSession(
             ) {
                 return raw.take(240)
             }
-            return raw.take(240)
+            return LastOrderErrorStore.redact(raw).take(2_000)
         }
     }
 }

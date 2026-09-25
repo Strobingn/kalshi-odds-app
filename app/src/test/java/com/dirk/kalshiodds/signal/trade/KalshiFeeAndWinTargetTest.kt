@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -201,8 +202,30 @@ class KalshiFeeAndWinTargetTest {
 
         val manual = TicketBuilder.proposeManual(fiveCent, "YES", ctx)
         assertEquals(TicketKind.MANUAL, manual!!.kind)
-        assertEquals(50.0, manual.winTargetUsd!!, 1e-9)
-        assertTrue((manual.profitIfWinUsd ?: 0.0) + 1e-6 >= 50.0)
+        assertNull(manual.winTargetUsd)
+        assertTrue(KalshiFee.totalCost(manual.contracts, manual.limitPrice) <= 5.0 + 1e-9)
+    }
+
+    @Test
+    fun screenshotSixtyThreeCentFiveDollarManualIsApprovable() {
+        val market = sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 55.0).copy(
+            ticker = "KXETH15M-26SEP251230-30",
+            predictedSide = "YES",
+            yesBid = 0.55,
+            noBid = 0.37
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(ticketStakeUsd = 5.0, winTargetEnabled = true),
+            alertsPaused = false
+        )
+        val ticket = TicketBuilder.proposeManual(market, "YES", ctx)!!
+        assertEquals(TicketKind.MANUAL, ticket.kind)
+        assertTrue(ticket.canApprove)
+        assertTrue(ticket.contracts >= 1)
+        assertTrue(KalshiFee.totalCost(ticket.contracts, ticket.limitPrice) <= 5.0 + 1e-9)
+        assertTrue(ticket.stakeUsd <= 5.0 + 1e-9)
+        assertNull(ticket.winTargetUsd)
+        assertNull(ticket.blockedReason)
     }
 
     @Test

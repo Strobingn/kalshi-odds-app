@@ -67,7 +67,7 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun push(tick: MarketTick, nowMs: Long = System.currentTimeMillis()): Point? {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return last(tick.ticker)
-        lastTickByTicker[tick.ticker] = tick
+        lastTickByTicker[tick.ticker] = com.dirk.kalshiodds.domain.ConsistentQuote.completeTick(tick)
         tick.closeTimeEpochMs?.let { closeByTicker[tick.ticker] = it }
         tick.openInterest?.let { oiByTicker[tick.ticker] = it }
         tick.volume?.let { volumeByTicker[tick.ticker] = it }
@@ -545,8 +545,8 @@ class TickBook(private val maxPoints: Int = 80) {
             source = TickSource.WS_ORDERBOOK,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = nowMs,
-            noBid = last?.noBid ?: ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
-            noAsk = last?.noAsk ?: bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+            noBid = ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
+            noAsk = bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
         )
     }
 

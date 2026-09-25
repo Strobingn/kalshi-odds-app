@@ -64,10 +64,18 @@ fun TradeTicketsSection(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper uses the same win-target size as the card (default profit \$50) on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Long-shot cards appear at asks ≤20¢ when AI beats implied after fees. Cancel leaves no live order.",
+            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. The Paper button fills the \$100 paper book and never hits Kalshi. Paper trading ON does not block Live Approve when a key is saved. Manual Buy is a \$5 (Settings stake) order including fees. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
+        if (paperTradingEnabled && credentialsConfigured) {
+            Text(
+                "Paper trading is ON for AI auto-log / the Paper button. Live Approve still sends a real Kalshi order after you confirm.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
         if (!credentialsConfigured) {
             Text(
                 text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
@@ -316,19 +324,28 @@ private fun ProposedTicketCard(
                 Button(
                     onClick = { onReview(ticket.id) },
                     enabled = when {
-                        paperTradingEnabled || ticket.paperOnly ->
+                        ticket.paperOnly ->
                             ticket.canPaper || ticket.blockedReason != null
-                        else -> credentialsConfigured && ticket.canApprove
+                        credentialsConfigured ->
+                            ticket.canApprove || ticket.blockedReason != null
+                        paperTradingEnabled ->
+                            ticket.canPaper || ticket.blockedReason != null
+                        else -> ticket.blockedReason != null
                     },
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
                         when {
-                            ticket.paperOnly || paperTradingEnabled ->
+                            ticket.paperOnly ->
+                                if (ticket.canPaper || ticket.blockedReason != null) "Paper Approve…"
+                                else ticket.blockedReason ?: "Unavailable"
+                            credentialsConfigured && !ticket.canApprove ->
+                                ticket.blockedReason ?: "Unavailable"
+                            credentialsConfigured -> "Live Approve…"
+                            paperTradingEnabled ->
                                 if (ticket.canPaper || ticket.blockedReason != null) "Paper Approve…"
                                 else ticket.blockedReason ?: "Unavailable"
                             !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
-                            credentialsConfigured -> "Live Approve…"
                             else -> "Needs API key"
                         }
                     )
@@ -394,7 +411,7 @@ private fun ApproveTicketDialog(
     val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
     val paperSell = ticket.paperOnly && ticket.isSell
-    val paperBuy = paperTradingEnabled && !ticket.isSell
+    val paperBuy = !ticket.isSell && (ticket.paperOnly || (paperTradingEnabled && !credentialsConfigured))
     var countText by remember(ticket.id) { mutableStateOf(ticket.contracts.toString()) }
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
