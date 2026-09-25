@@ -867,10 +867,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val c = result.modelScoreCorrect ?: return null
         val total = result.modelScoreTotal ?: return null
         if (total <= 0) return null
-        val brier = result.modelMeanBrier?.let { String.format(java.util.Locale.US, " · Brier %.3f", it) }.orEmpty()
-        val right = result.avgEdgeWhenRight?.let { String.format(java.util.Locale.US, " · Δ✓ %+.1f", it) }.orEmpty()
-        val wrong = result.avgEdgeWhenWrong?.let { String.format(java.util.Locale.US, " · Δ✗ %+.1f", it) }.orEmpty()
-        return "Scorecard: $c/$total$brier$right$wrong"
+        return HomeCopy.scorecardLine(c, total, result.modelMeanBrier)
     }
 
     private fun nextDelayMs(): Long {

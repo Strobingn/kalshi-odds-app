@@ -185,7 +185,7 @@ class PredictionLogStore(private val context: Context) {
                         val hit = com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(next)
                         list[i] = next.copy(
                             score = if (hit) 1 else 0,
-                            brier = com.dirk.kalshiodds.signal.feedback.ForecastUnits.brier(next)
+                            brier = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideBrier(next)
                         )
                     }
                     changed = true
@@ -198,11 +198,11 @@ class PredictionLogStore(private val context: Context) {
     data class ScoreSummary(val correct: Int, val total: Int, val meanBrier: Double?)
 
     suspend fun scoreSummary(): ScoreSummary {
+        // Recompute from predictedSide / predictedYes / outcome. Ignore stored
+        // score and brier columns so existing logs are rescored on read.
         val scored = readAll().filter { it.outcome != null && !it.outcome.equals("void", true) }
-        val correct = scored.count { com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(it) }
-        val briers = scored.map { com.dirk.kalshiodds.signal.feedback.ForecastUnits.brier(it) }
-        val meanBrier = if (briers.isNotEmpty()) briers.average() else null
-        return ScoreSummary(correct, scored.size, meanBrier)
+        val stats = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.window(scored)
+        return ScoreSummary(stats.hits, stats.total, stats.brier)
     }
 
     private fun decode(raw: String?): List<PredictionLogEntry> {

@@ -263,22 +263,34 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
             )
         }
         Spacer(Modifier.height(8.dp))
+        Text(
+            HomeCopy.pickedSideLine(h.hits, h.n.takeIf { it > 0 }),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onBackground,
+            fontWeight = FontWeight.SemiBold
+        )
+        Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Stat("Model Brier", h.modelBrier?.let { String.format(Locale.US, "%.3f", it) } ?: "—")
-            Stat("Market Brier", h.marketBrier?.let { String.format(Locale.US, "%.3f", it) } ?: "—")
-            Stat("Hit rate", h.hitRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—")
+            Stat("Picked-side Brier", scorecardBrierValue(h.n, h.sideBrier))
+            Stat("P(UP) Brier", scorecardBrierValue(h.n, h.modelBrier))
+            Stat("Market Brier", scorecardBrierValue(h.n, h.marketBrier))
         }
         Spacer(Modifier.height(6.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Stat("Hit rate", h.hitRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—")
             Stat("Edge if right", h.avgEdgeWhenRight?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
             Stat("Edge if wrong", h.avgEdgeWhenWrong?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
-            Stat("N", if (h.n == 0) "—" else h.n.toString())
         }
         if (h.perAsset.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
             h.perAsset.forEach { row ->
+                val side = if (row.stats.showBrier) {
+                    row.stats.brier?.let { String.format(Locale.US, "Picked-side Brier %.3f", it) } ?: "—"
+                } else {
+                    HomeCopy.NEED_20
+                }
                 Text(
-                    "${row.label}  ${row.stats.label}  Brier ${row.stats.brier?.let { String.format(Locale.US, "%.3f", it) } ?: "—"}",
+                    "${row.label}  ${row.stats.label}  $side",
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.textSecondary
                 )
@@ -305,7 +317,7 @@ private fun BreakdownRow(b: ScorecardMetrics.Breakdown) {
     } else {
         String.format(
             Locale.US,
-            "%s  %s  hit %s  Brier %.3f vs mkt %.3f  P&L %+.2f",
+            "%s  %s  hit %s  P(UP) Brier %.3f vs mkt %.3f  P&L %+.2f",
             b.label,
             b.n,
             b.hitRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—",
@@ -333,11 +345,11 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(
-            text = stats.hitRate?.let { String.format(Locale.US, "%.0f%% hit", it * 100.0) } ?: "No samples",
-            fontSize = 28.sp,
+            text = if (stats.total <= 0) "No samples" else HomeCopy.pickedSideLine(stats.hits, stats.total),
+            fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
             color = if ((stats.hitRate ?: 0.0) >= 0.5) colors.accentGreen else MaterialTheme.colorScheme.onBackground,
-            lineHeight = 32.sp
+            lineHeight = 28.sp
         )
         Text(
             "${stats.label} settled",
@@ -346,7 +358,11 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
         )
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Stat("Brier", stats.brier?.let { String.format(Locale.US, "%.3f", it) } ?: "—")
+            Stat("Picked-side Brier", scorecardBrierValue(stats.total, stats.brier))
+            Stat("P(UP) Brier", scorecardBrierValue(stats.total, stats.pUpBrier))
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Stat("Edge if right", stats.avgEdgeWhenRight?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
             Stat("Edge if wrong", stats.avgEdgeWhenWrong?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
         }
@@ -434,6 +450,11 @@ private fun SeriesRow(row: ScorecardMetrics.SeriesStats) {
             Text(s.label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         }
     }
+}
+
+private fun scorecardBrierValue(n: Int, value: Double?): String {
+    if (n < ScorecardMetrics.MIN_BRIER_DISPLAY) return HomeCopy.NEED_20
+    return value?.let { String.format(Locale.US, "%.3f", it) } ?: "—"
 }
 
 @Composable

@@ -27,9 +27,12 @@ class HonestScorecardTest {
         }
         val h = ScorecardMetrics.honest(rows)
         assertEquals(20, h.n)
+        assertEquals(20, h.hits)
         assertFalse(h.enoughData)
+        assertTrue(h.showBrier)
         assertTrue(h.modelBrier != null)
         assertTrue(h.marketBrier != null)
+        assertTrue(h.sideBrier != null)
     }
 
     @Test

@@ -13,9 +13,18 @@ class HomeCopyTest {
 
     @Test
     fun scorecardHidesBrierUntilTwentyResults() {
-        assertEquals("Model: — · need 20+ results", HomeCopy.scorecardLine(null, null, 0.2))
-        assertEquals("Model: 12/18 correct (66%) · need 20+ results", HomeCopy.scorecardLine(12, 18, 0.211))
-        assertEquals("Model: 14/20 correct (70%) · Brier 0.180", HomeCopy.scorecardLine(14, 20, 0.180))
+        assertEquals("Picked side: — · need 20+ results", HomeCopy.scorecardLine(null, null, 0.2))
+        assertEquals("Picked side: 0/5 correct (0%) · need 20+ results", HomeCopy.scorecardLine(0, 5, 0.893))
+        assertEquals("Picked side: 12/18 correct (66%) · need 20+ results", HomeCopy.scorecardLine(12, 18, 0.211))
+        assertFalse(HomeCopy.scorecardLine(0, 5, 0.893).contains("Brier"))
+        assertEquals("need 20+ results", HomeCopy.pickedSideBrierLine(5, 0.893))
+        assertEquals("need 20+ results", HomeCopy.pUpBrierLine(5, 0.003))
+        assertEquals(
+            "Picked side: 14/20 correct (70%) · Picked-side Brier 0.180",
+            HomeCopy.scorecardLine(14, 20, 0.180)
+        )
+        assertEquals("Picked-side Brier 0.180", HomeCopy.pickedSideBrierLine(20, 0.180))
+        assertEquals("P(UP) Brier 0.003", HomeCopy.pUpBrierLine(20, 0.003))
     }
 
     @Test

@@ -52,17 +52,32 @@ object HomeCopy {
     /**
      * Compact scorecard line from the existing snapshot totals
      * (`modelScoreCorrect` / `modelScoreTotal` / `modelMeanBrier`).
-     * Brier stays hidden until N ≥ 20 — display only.
+     * [brier] is the picked-side Brier. Hidden until N ≥ 20.
      */
-    fun scorecardLine(correct: Int?, total: Int?, brier: Double?): String {
-        if (correct == null || total == null || total <= 0) return "Model: — · $NEED_20"
+    fun pickedSideLine(correct: Int?, total: Int?): String {
+        if (correct == null || total == null || total <= 0) return "Picked side: —"
         val pct = ((100.0 * correct) / total).toInt()
-        val base = "Model: $correct/$total correct ($pct%)"
+        return "Picked side: $correct/$total correct ($pct%)"
+    }
+
+    fun pickedSideBrierLine(total: Int?, brier: Double?): String {
+        if (total == null || total < 20) return NEED_20
+        return brier?.let { String.format(Locale.US, "Picked-side Brier %.3f", it) } ?: "—"
+    }
+
+    fun pUpBrierLine(total: Int?, brier: Double?): String {
+        if (total == null || total < 20) return NEED_20
+        return brier?.let { String.format(Locale.US, "P(UP) Brier %.3f", it) } ?: "—"
+    }
+
+    fun scorecardLine(correct: Int?, total: Int?, brier: Double?): String {
+        val head = pickedSideLine(correct, total)
+        if (correct == null || total == null || total <= 0) return "$head · $NEED_20"
         return if (total < 20) {
-            "$base · $NEED_20"
+            "$head · $NEED_20"
         } else {
-            val brierPart = brier?.let { String.format(Locale.US, " · Brier %.3f", it) }.orEmpty()
-            base + brierPart
+            val brierPart = pickedSideBrierLine(total, brier)
+            if (brierPart == NEED_20 || brierPart == "—") head else "$head · $brierPart"
         }
     }
 
