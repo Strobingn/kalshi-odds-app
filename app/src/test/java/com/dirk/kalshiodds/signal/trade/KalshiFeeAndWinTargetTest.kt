@@ -12,15 +12,51 @@ import kotlin.math.abs
 class KalshiFeeAndWinTargetTest {
     @Test
     fun feeAtTwentyCents() {
-        // Official: ceil(0.07 × C × P × (1−P) × 100) / 100. 1 ct @ 20¢ → $0.02.
-        val fee = KalshiFee.perContract(0.20)
-        assertEquals(0.02, fee, 1e-9)
-        val net = KalshiFee.netPayout(5, 0.20)
-        assertEquals(5.0 - KalshiFee.total(5, 0.20), net, 1e-9)
-        assertEquals(0.02, KalshiFee.perContract(0.50), 1e-9)
-        // GET /series/fee_changes?series_ticker=KXBTC15M|KXETH15M|KXSOL15M returned []
-        // on 2026-09-25 — no multiplier, so default 0.07 applies to these 15m markets.
+        // 1 ct @ 20¢: model 0.07×1×0.20×0.80 = 0.0112 → ceil_6dp 0.011200
+        // debit = ceil_cent(0.20 + 0.0112) = 0.22, order fee = $0.02
+        assertEquals(0.02, KalshiFee.total(1, 0.20), 1e-9)
+        // $5 ticket: C=25, model = 0.28, order fee = $0.28, amortized = 0.0112
+        assertEquals(25, KalshiFee.contractsForStake(5.0, 0.20))
+        assertEquals(0.28, KalshiFee.total(25, 0.20), 1e-9)
+        assertEquals(0.0112, KalshiFee.perContract(0.20), 1e-9)
+        // $5 @ 50¢: C=10, fee $0.18, amortized $0.018
+        assertEquals(0.018, KalshiFee.perContract(0.50), 1e-9)
+        // Settlement is C × $1 — fee is not taken from the payout.
+        assertEquals(5.0, KalshiFee.netPayout(5, 0.20), 1e-9)
+        assertEquals(5.0, KalshiFee.settlementPayout(5), 1e-9)
+        // GET /series/KXBTC15M|KXETH15M|KXSOL15M → fee_type=quadratic, multiplier=1
+        // GET /series/fee_changes?series_ticker=KXBTC15M returned [] on 2026-09-25.
         assertEquals(0.07, SignalConstants.DEFAULT_FEE_RATE, 1e-12)
+        assertEquals(0.07, KalshiFee.TAKER_COEFFICIENT, 1e-12)
+        assertEquals(0.0175, KalshiFee.MAKER_COEFFICIENT, 1e-12)
+    }
+
+    @Test
+    fun publishedScheduleTableMatchesOrderLevelFee() {
+        // https://kalshi.com/docs/kalshi-fee-schedule.pdf General Trading Fees Table
+        assertEquals(0.01, KalshiFee.total(1, 0.01), 1e-9)
+        assertEquals(0.07, KalshiFee.total(100, 0.01), 1e-9)
+        assertEquals(0.01, KalshiFee.total(1, 0.05), 1e-9)
+        assertEquals(0.34, KalshiFee.total(100, 0.05), 1e-9)
+        assertEquals(0.02, KalshiFee.total(1, 0.20), 1e-9)
+        assertEquals(1.12, KalshiFee.total(100, 0.20), 1e-9)
+        assertEquals(0.02, KalshiFee.total(1, 0.50), 1e-9)
+        assertEquals(1.75, KalshiFee.total(100, 0.50), 1e-9)
+        assertEquals(0.01, KalshiFee.total(1, 0.99), 1e-9)
+        assertEquals(0.07, KalshiFee.total(100, 0.99), 1e-9)
+    }
+
+    @Test
+    fun feeRoundingDocExample() {
+        // docs.kalshi.com/getting_started/fee_rounding FCM-cleared fill:
+        // model $0.00363825 → trade fee ceil_6dp = $0.003639
+        assertEquals(0.003639, KalshiFee.ceil6dp(0.00363825), 1e-12)
+        // revenue −$0.055, aligned floor_cent(−0.055 − 0.003639) = −$0.06
+        // order fee = $0.06 − $0.055 = $0.005
+        val trade = KalshiFee.ceil6dp(0.00363825)
+        val debit = KalshiFee.ceilCent(0.055 + trade)
+        assertEquals(0.06, debit, 1e-12)
+        assertEquals(0.005, debit - 0.055, 1e-12)
     }
 
     @Test
@@ -170,14 +206,14 @@ class KalshiFeeAndWinTargetTest {
     }
 
     @Test
-    fun twentyCentNetPayoutAfterFeesIsJustUnderFive() {
-        val fee = KalshiFee.perContract(0.20, 0.07)
-        val net = KalshiFee.netPayout(5, 0.20, 0.07)
-        assertEquals(0.02, fee, 1e-9)
-        assertEquals(4.94, net, 1e-9)
-        assertTrue(net < 5.0)
+    fun twentyCentProfitAfterFeesUsesBuySideCost() {
+        // 5 ct @ 20¢: model 0.07×5×0.20×0.80 = 0.056 → fee $0.06
+        // settlement $5.00, cost $1.00 + $0.06 = $1.06, profit $3.94
+        assertEquals(0.06, KalshiFee.total(5, 0.20, 0.07), 1e-9)
+        assertEquals(5.0, KalshiFee.netPayout(5, 0.20, 0.07), 1e-9)
         val profit = KalshiFee.netProfit(5, 0.20, 0.07)
-        assertEquals(net - 1.0, profit, 1e-9)
+        assertEquals(3.94, profit, 1e-9)
+        assertEquals(5.0 - 1.06, profit, 1e-9)
     }
 
     @Test

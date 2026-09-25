@@ -291,7 +291,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Fees & net EV")
             Text(
-                "Official Kalshi taker fee is ceil-to-the-next-cent of feeRate × C × P × (1−P) (default 7%). Crypto 15-minute series (KXBTC15M / KXETH15M / KXSOL15M) have no series fee override. Ranking and alerts add half-spread when net EV is on. Raw edge still shows on cards.",
+                "Official Kalshi taker fee is ceil_6dp(feeRate × C × P × (1−P)), then the whole order is aligned to $0.01 (non-direct). Default coefficient 7%. Crypto 15-minute series (KXBTC15M / KXETH15M / KXSOL15M) are quadratic with multiplier 1 — no special fee. Ranking and alerts add half-spread when net EV is on. Raw edge still shows on cards.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

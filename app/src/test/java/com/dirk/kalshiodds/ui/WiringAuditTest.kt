@@ -66,7 +66,9 @@ class WiringAuditTest {
         Control("Live candlestick backfill", LiveWindowBackfill::class.java, "candles"),
         Control("Quote header/labels/buttons", MarketQuoteView::class.java, "of"),
         Control("Payout multiple", KalshiQuoteDisplay::class.java, "multiplier"),
-        Control("Kalshi fee per contract", KalshiFee::class.java, "perContract"),
+        Control("Kalshi order-level fee", KalshiFee::class.java, "total"),
+        Control("Kalshi payout multiple", KalshiFee::class.java, "payoutMultiple"),
+        Control("Kalshi amortized fee", KalshiFee::class.java, "perContract"),
         Control("Chart seed after restart", OddsViewModel::class.java, "seedChartWindows")
     )
 
@@ -91,6 +93,8 @@ class WiringAuditTest {
         assertNotNull(ChartWindowService::restoreWindow)
         assertNotNull(ChartWindowService::persistPoints)
         assertNotNull(LiveWindowBackfill::candles)
+        assertNotNull(KalshiFee::total)
+        assertNotNull(KalshiFee::payoutMultiple)
         assertNotNull(KalshiFee::perContract)
         assertNotNull(AsyncResultsWriter::enqueueChartTick)
     }

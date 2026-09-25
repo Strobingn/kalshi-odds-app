@@ -1,14 +1,16 @@
 package com.dirk.kalshiodds.domain
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import java.util.Locale
 
 /**
- * Kalshi-app display: "Up 64¢ · 1.53x" from the **best ask**.
+ * Kalshi-app display: "Up 64¢ · 1.52x" from the **best ask**.
  *
- * Multiple = [KalshiFee.netPayout] per dollar staked at that ask
- * (`(1 − perContract fee) / ask`). Never uses the AI probability.
- * 0¢ and missing asks return null — never divide by zero.
+ * Multiple = settlement / total cost on the default card stake
+ * (`C × $1 / (C×P + orderFee)`, `C = floor(stake / P)`).
+ * Fee is paid on top of the purchase, not taken from the $1 payout.
+ * Never uses the AI probability. 0¢ and missing asks return null.
  */
 object KalshiQuoteDisplay {
 
@@ -19,21 +21,17 @@ object KalshiQuoteDisplay {
     }
 
     /**
-     * Net payout per dollar staked at [ask], using [KalshiFee.perContract]
-     * (documented `round_up(0.07 × P × (1 − P))` to the next cent).
-     *
-     * 1¢ → 99.00x, 99¢ → 1.00x. Null for 0¢ / no-ask.
+     * Payout multiple at [stakeUsd] (default $5 ticket).
+     * 1¢ @ $5 → ~93.46x (not 99x). Null for 0¢ / no-ask.
      */
-    fun multiplier(ask: Double?, feeRate: Double = 0.07): Double? {
-        val p = KalshiPrice.usable(ask) ?: return null
-        if (p <= 0.0) return null
-        val fee = KalshiFee.perContract(p, feeRate)
-        val net = (1.0 - fee).coerceAtLeast(0.0)
-        return net / p
-    }
+    fun multiplier(
+        ask: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Double? = KalshiFee.payoutMultiple(ask ?: return null, stakeUsd, feeRate)
 
-    /** @deprecated Use [multiplier]; fee is always KalshiFee.perContract. */
-    fun multiplier(ask: Double?, includeFee: Boolean, feeRate: Double = 0.07): Double? {
+    /** @deprecated Use [multiplier]; fee is always the order-level KalshiFee. */
+    fun multiplier(ask: Double?, includeFee: Boolean, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double? {
         if (!includeFee) return grossMultiplier(ask)
         return multiplier(ask, feeRate)
     }
@@ -68,9 +66,14 @@ object KalshiQuoteDisplay {
         }
     }
 
-    fun buttonLabel(up: Boolean, ask: Double?, feeRate: Double = 0.07): String {
+    fun buttonLabel(
+        up: Boolean,
+        ask: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): String {
         val price = formatAsk(ask)
-        val m = multiplier(ask, feeRate)
+        val m = multiplier(ask, feeRate, stakeUsd)
         val side = if (up) "Up" else "Down"
         if (price == "—" || m == null) return if (up) "Buy UP" else "Buy DOWN"
         return String.format(Locale.US, "%s %s · %.2fx", side, price, m)

@@ -12,7 +12,7 @@ import kotlin.math.min
  * Kalshi event contracts settle at **$1.00** if the chosen side wins, else **$0**.
  *
  *     contracts             = floor(stakeUsd / conservativeLimitPrice)
- *     maxSettlementPayout   = contracts × $1.00
+ *     maxSettlementPayout   = contracts × $1.00   (fee is paid on the buy, not taken from $1)
  *     propose iff           maxSettlementPayout ≥ minPayoutUsd
  *
  * Equivalently, the conservative limit (average fill) must satisfy
@@ -68,11 +68,10 @@ object PayoutGate {
         val c = limitPrice
         val minTick = com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS
         if (!stakeUsd.isFinite() || !c.isFinite() || c < minTick - 1e-12 || c > 0.99 + 1e-12) return 0
-        return floor((stakeUsd / c) + 1e-9).toInt().coerceAtLeast(0)
+        return KalshiFee.contractsForStake(stakeUsd, c)
     }
 
-    fun maxPayoutUsd(contracts: Int): Double =
-        contracts.coerceAtLeast(0) * SignalConstants.CONTRACT_SETTLEMENT_USD
+    fun maxPayoutUsd(contracts: Int): Double = KalshiFee.settlementPayout(contracts)
 
     /**
      * Walk ask levels cheapest-first, never paying more than [maxPrice].
@@ -202,6 +201,6 @@ object PayoutGate {
         reason = reason
     )
 
-    private fun cents(p: Double): String = String.format(java.util.Locale.US, "%.0f¢", p * 100.0)
+    private fun cents(p: Double): String = com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(p)
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.2f", v)
 }

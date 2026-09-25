@@ -21,9 +21,11 @@ import org.junit.Test
 class NetExpectedValueTest {
     @Test
     fun feeMatchesKalshiStyleFormula() {
-        // Official: ceil(0.07 × 0.50 × 0.50 × 100) / 100 = $0.02
-        assertEquals(0.02, NetExpectedValue.feePerContract(0.50, 0.07), 1e-9)
+        // $5 @ 50¢: C=10, model 0.175, order fee $0.18, amortized $0.018
+        assertEquals(0.018, NetExpectedValue.feePerContract(0.50, 0.07), 1e-9)
         assertEquals(0.0, NetExpectedValue.feePerContract(0.50, 0.0), 1e-9)
+        // One-contract schedule number is still $0.02
+        assertEquals(0.02, com.dirk.kalshiodds.signal.trade.KalshiFee.total(1, 0.50), 1e-9)
     }
 
     @Test
@@ -35,8 +37,10 @@ class NetExpectedValueTest {
             feeRate = 0.07,
             preferSide = "YES"
         )
-        // paid = 0.50 + 0.02 = 0.52; official 1-ct fee rounds 0.017472 → $0.02
-        val fee = 0.02
+        // paid = 0.50 + 0.02 = 0.52; C = floor(5/0.52) = 9
+        // model = 0.07×9×0.52×0.48 = 0.157248 → debit ceil_cent(4.837248) = 4.84
+        // order fee $0.16, amortized 0.16/9
+        val fee = 0.16 / 9.0
         assertEquals("YES", r.side)
         assertEquals(0.02, r.halfSpread, 1e-9)
         assertEquals(fee, r.feePerContract, 1e-9)

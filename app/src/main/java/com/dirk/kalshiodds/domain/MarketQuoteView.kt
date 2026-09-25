@@ -27,8 +27,12 @@ data class MarketQuoteView(
 
     companion object {
         @JvmStatic
-        fun of(market: MarketUiModel, feeRate: Double = 0.07): MarketQuoteView =
-            of(market.yesBid, market.yesAsk, market.noBid, market.noAsk, feeRate)
+        fun of(
+            market: MarketUiModel,
+            feeRate: Double = 0.07,
+            stakeUsd: Double = 5.0
+        ): MarketQuoteView =
+            of(market.yesBid, market.yesAsk, market.noBid, market.noAsk, feeRate, stakeUsd)
 
         @JvmStatic
         fun of(
@@ -36,7 +40,8 @@ data class MarketQuoteView(
             yesAsk: Double?,
             noBid: Double?,
             noAsk: Double?,
-            feeRate: Double = 0.07
+            feeRate: Double = 0.07,
+            stakeUsd: Double = 5.0
         ): MarketQuoteView {
             val yb = displayBid(yesBid)
             val ya = KalshiPrice.usable(yesAsk)
@@ -51,12 +56,12 @@ data class MarketQuoteView(
                 yesAskLabel = KalshiQuoteDisplay.formatAsk(ya),
                 noBidLabel = KalshiQuoteDisplay.formatBid(nb),
                 noAskLabel = KalshiQuoteDisplay.formatAsk(na),
-                upButton = KalshiQuoteDisplay.buttonLabel(true, ya, feeRate),
-                downButton = KalshiQuoteDisplay.buttonLabel(false, na, feeRate),
+                upButton = KalshiQuoteDisplay.buttonLabel(true, ya, feeRate, stakeUsd),
+                downButton = KalshiQuoteDisplay.buttonLabel(false, na, feeRate, stakeUsd),
                 upHero = KalshiQuoteDisplay.formatAsk(ya),
                 downHero = KalshiQuoteDisplay.formatAsk(na),
-                upMultiple = KalshiQuoteDisplay.multiplier(ya, feeRate),
-                downMultiple = KalshiQuoteDisplay.multiplier(na, feeRate)
+                upMultiple = KalshiQuoteDisplay.multiplier(ya, feeRate, stakeUsd),
+                downMultiple = KalshiQuoteDisplay.multiplier(na, feeRate, stakeUsd)
             )
         }
 

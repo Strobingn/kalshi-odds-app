@@ -51,8 +51,8 @@ object PaperBuy {
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
     ): Double {
         val n = contracts.coerceAtLeast(0)
-        val px = price.coerceIn(0.01, 0.99)
-        return n * px + KalshiFee.total(n, px, feeRate)
+        val px = com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(price)
+        return KalshiFee.totalCost(n, px, feeRate)
     }
 
     /**
@@ -65,7 +65,7 @@ object PaperBuy {
         price: Double,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
     ): Pair<Int, Boolean> {
-        val px = price.coerceIn(0.01, 0.99)
+        val px = com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(price)
         var qty = want.coerceAtLeast(0)
         while (qty > 0 && costUsd(qty, px, feeRate) > cashUsd + 1e-9) {
             qty--

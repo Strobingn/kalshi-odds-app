@@ -54,7 +54,7 @@ data class EdgeModel(
 
     /**
      * Flag an edge only when |model − market| clears the official
-     * next-cent taker fee + [confidenceMargin].
+     * order-level taker fee (amortized at the $5 ticket) + [confidenceMargin].
      */
     fun qualifiesEdge(modelYes: Double, marketMid: Double, feeRate: Double = feeMargin.toDouble()): Boolean {
         val m = marketMid.coerceIn(0.02, 0.98)
