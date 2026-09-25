@@ -45,6 +45,8 @@ import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.WsConnectionState
+import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.ui.components.AiFairLabel
 import com.dirk.kalshiodds.ui.components.BidChart
 import com.dirk.kalshiodds.ui.components.MarketAskHero
@@ -121,6 +123,11 @@ fun OddsScreen(
                 }
             } else {
                 val allMarkets = snapshot?.allMarkets.orEmpty()
+                val ticketCtx = TicketBuilder.Context(
+                    settings = state.settings,
+                    alertsPaused = state.alertsPaused
+                )
+                fun decisionOf(m: MarketUiModel) = BetCall.decide(m, ticketCtx)
                 val ranked = allMarkets
                     .filter { it.edgePp != null }
                     .filter {
@@ -133,7 +140,8 @@ fun OddsScreen(
                         )
                     }
                     .sortedWith(
-                        compareByDescending<MarketUiModel> { it.passedFilter && !it.muted }
+                        compareBy<MarketUiModel> { BetCall.sortKey(decisionOf(it)) }
+                            .thenByDescending { it.passedFilter && !it.muted }
                             .thenByDescending {
                                 if (state.settings.rankByNetEv) abs(it.netEdgePp ?: it.edgePp ?: 0.0)
                                 else abs(it.edgePp ?: 0.0)
@@ -146,9 +154,24 @@ fun OddsScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .background(colors.bg),
-                    contentPadding = PaddingValues(16.dp),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    item {
+                        MetaHeader(
+                            fetchedAtEpochMs = snapshot?.fetchedAtEpochMs ?: 0L,
+                            fromCache = snapshot?.fromCache == true,
+                            message = state.userMessage,
+                            pollLabel = state.pollLabel,
+                            modelScoreLabel = state.modelScoreLabel,
+                            chipLabel = state.signalStatus.chipLabel(),
+                            chipState = state.signalStatus.state,
+                            onOpenScorecard = onOpenScorecard,
+                            pauseBanner = state.pauseBanner,
+                            mutedSummary = state.mutedSummary,
+                            onResumeAlerts = { viewModel.resumeAlerts() }
+                        )
+                    }
                     item {
                         LiveUpDownHero(
                             market = featuredLiveMarket(allMarkets),
@@ -198,21 +221,6 @@ fun OddsScreen(
                             enabled = state.settings.liveSignalsEnabled,
                             connection = state.signalStatus.state,
                             onToggle = viewModel::setLiveSignals
-                        )
-                    }
-                    item {
-                        MetaHeader(
-                            fetchedAtEpochMs = snapshot?.fetchedAtEpochMs ?: 0L,
-                            fromCache = snapshot?.fromCache == true,
-                            message = state.userMessage,
-                            pollLabel = state.pollLabel,
-                            modelScoreLabel = state.modelScoreLabel,
-                            chipLabel = state.signalStatus.chipLabel(),
-                            chipState = state.signalStatus.state,
-                            onOpenScorecard = onOpenScorecard,
-                            pauseBanner = state.pauseBanner,
-                            mutedSummary = state.mutedSummary,
-                            onResumeAlerts = { viewModel.resumeAlerts() }
                         )
                     }
                     state.mlGuardNote?.let { note ->
@@ -290,9 +298,13 @@ fun OddsScreen(
                             )
                         }
                         items(ranked.take(8), key = { "rank-${it.ticker}" }) { market ->
+                            val call = decisionOf(market)
                             MarketCard(
                                 market,
                                 compact = true,
+                                decision = call,
+                                settings = state.settings,
+                                paperTradingEnabled = state.settings.paperTradingEnabled,
                                 onBuyYes = { viewModel.buyMarket(market, "YES") },
                                 onBuyNo = { viewModel.buyMarket(market, "NO") },
                                 onSell = sellAction(state, viewModel, market),
@@ -341,9 +353,15 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
             )
         }
     } else {
-        items(markets, key = { "$section-${it.ticker}" }) { market ->
+        val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused)
+        val sorted = markets.sortedBy { BetCall.sortKey(BetCall.decide(it, ctx)) }
+        items(sorted, key = { "$section-${it.ticker}" }) { market ->
+            val call = BetCall.decide(market, ctx)
             MarketCard(
                 market,
+                decision = call,
+                settings = state.settings,
+                paperTradingEnabled = state.settings.paperTradingEnabled,
                 onBuyYes = { viewModel.buyMarket(market, "YES") },
                 onBuyNo = { viewModel.buyMarket(market, "NO") },
                 onSell = sellAction(state, viewModel, market),

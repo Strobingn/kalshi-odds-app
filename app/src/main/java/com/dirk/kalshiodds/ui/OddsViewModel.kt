@@ -442,7 +442,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     isSell = ticket?.isSell == true,
                     liveCredentialsConfigured = settings.tradingCredentialsConfigured(),
                     canApprove = ticket?.canApprove == true,
-                    blockedReason = ticket?.blockedReason
+                    blockedReason = ticket?.blockedReason,
+                    intent = com.dirk.kalshiodds.signal.trade.ApproveRouter.Intent.Live,
+                    keyIdWithoutPem = settings.keyIdWithoutPem()
                 )
             ) {
                 com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Paper -> applyPaperBuy(ticketId)

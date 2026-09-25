@@ -73,9 +73,9 @@ object KalshiWsAuth {
     }
 
     fun parsePrivateKey(pem: String): ParsedKey {
-        val trimmed = pem.trim()
+        val trimmed = com.dirk.kalshiodds.signal.config.PemNormalizer.normalize(pem)
         require(trimmed.contains("BEGIN") && trimmed.contains("PRIVATE")) {
-            "Not a PEM private key"
+            "Not a PEM private key — paste BEGIN RSA PRIVATE KEY or BEGIN PRIVATE KEY"
         }
         PEMParser(StringReader(trimmed)).use { parser ->
             val obj = parser.readObject()

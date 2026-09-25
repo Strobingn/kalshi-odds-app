@@ -42,7 +42,9 @@ data class SettingsUiState(
     val batteryUnrestricted: Boolean = false,
     val exportMessage: String? = null,
     val mlGuardNote: String? = null,
-    val credPassphrase: String = ""
+    val credPassphrase: String = "",
+    val connectionMessage: String? = null,
+    val lastOrderError: String? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -167,6 +169,29 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
     fun setWinTargetAbsCapUsd(v: Double?) = track("win_target_abs_cap", _state.value.settings.winTargetAbsCapUsd, v) {
         prefs.updateWinTargetAbsCapUsd(v)
+    }
+    fun setMinProfitIfWinUsd(v: Double) = track("min_profit_if_win", _state.value.settings.minProfitIfWinUsd, v) {
+        prefs.updateMinProfitIfWinUsd(v)
+    }
+
+    fun testConnection() {
+        viewModelScope.launch {
+            val probe = withContext(Dispatchers.IO) {
+                runCatching { container.tradeClient.getBalanceResult() }.getOrElse {
+                    com.dirk.kalshiodds.data.api.BalanceProbe(false, null, it.message ?: "Test connection failed")
+                }
+            }
+            _state.update { it.copy(connectionMessage = probe.detail) }
+        }
+    }
+
+    fun refreshLastOrderError() {
+        _state.update { it.copy(lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderError.message) }
+    }
+
+    fun clearLastOrderError() {
+        com.dirk.kalshiodds.signal.trade.LastOrderError.clear()
+        _state.update { it.copy(lastOrderError = null) }
     }
     fun setPaperTrading(v: Boolean) = track("paper_trading", _state.value.settings.paperTradingEnabled, v) {
         prefs.updatePaperTrading(v)

@@ -100,6 +100,15 @@ object SignalConstants {
 
     // --- v0.2.2 approve-gated tickets ---
 
+    /**
+     * Hard all-in cap on a live Approve, including Kalshi fees.
+     * `count` is the largest integer with count×P + fee ≤ this.
+     */
+    const val LIVE_ALL_IN_CAP_USD = 5.0
+
+    /** Hide / disable a ticket when profit-if-win is below this. */
+    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 10.0
+
     /** Default USD risked on one approved ticket. */
     const val DEFAULT_TICKET_STAKE_USD = 5.0
 
@@ -140,8 +149,11 @@ object SignalConstants {
     const val HUNTER_VALUE_STAKE_USD = 1.0
     const val HUNTER_VALUE_PAYOUT_USD = 5.0
 
-    /** Size every approve-gated buy so profit-if-win ≥ this target. */
-    const val DEFAULT_WIN_TARGET_ENABLED = true
+    /**
+     * Legacy $50 profit sizer — off for live. Live uses [LIVE_ALL_IN_CAP_USD]
+     * and [DEFAULT_MIN_PROFIT_IF_WIN_USD]. Kept so History restore still reads.
+     */
+    const val DEFAULT_WIN_TARGET_ENABLED = false
     const val DEFAULT_WIN_TARGET_USD = 50.0
     const val DEFAULT_WIN_TARGET_BANKROLL_PCT = 10.0
 

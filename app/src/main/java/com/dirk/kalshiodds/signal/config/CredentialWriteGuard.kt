@@ -5,10 +5,14 @@ package com.dirk.kalshiodds.signal.config
  * Both Key ID and a PEM-shaped private key are required to write.
  */
 object CredentialWriteGuard {
-    const val REJECT_BLANK = "Need Key ID + PEM private key (BEGIN/END PRIVATE KEY)"
-    const val REJECT_DEMO = "Need demo Key ID + PEM (BEGIN/END PRIVATE KEY)"
+    const val REJECT_BLANK = "Need Key ID + PEM private key (BEGIN RSA PRIVATE KEY or BEGIN PRIVATE KEY)"
+    const val REJECT_DEMO = "Need demo Key ID + PEM (BEGIN RSA PRIVATE KEY or BEGIN PRIVATE KEY)"
+    const val REJECT_KEY_ID_ONLY = PemNormalizer.MISSING_PEM
 
     fun rejectReason(keyId: String, pem: String, demo: Boolean = false): String? {
+        if (keyId.isNotBlank() && pem.isBlank()) {
+            return REJECT_KEY_ID_ONLY
+        }
         if (keyId.isBlank() || !SecureCredentialStore.looksLikePem(pem)) {
             return if (demo) REJECT_DEMO else REJECT_BLANK
         }

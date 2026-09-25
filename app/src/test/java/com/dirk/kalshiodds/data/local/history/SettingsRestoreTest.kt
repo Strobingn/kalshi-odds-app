@@ -55,7 +55,7 @@ class SettingsRestoreTest {
         )
         assertTrue(label.contains("long-shot"))
         assertTrue(label.contains("20¢") || label.contains("20"))
-        assertTrue(label.contains("$50"))
+        assertTrue(label.contains("$10") || label.contains("min profit"))
         assertFalse(label.contains("$1→$5"))
         assertFalse(label.contains("$1 → $5"))
     }

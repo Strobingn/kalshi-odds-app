@@ -18,7 +18,16 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.9**
+Package: `com.dirk.kalshiodds` · version **0.3.10**
+
+## 0.3.10
+
+- **Paper never blocks Live.** Live Approve uses `ApproveRouter.Intent.Live` and live positions (`GET /portfolio/positions`). A paper fill on ticker X cannot stop a live order on X.
+- **$5 all-in live size** including fees (`LiveOrderSizer`). Default min profit if win is **$10**. Tickets below that stay disabled. The $100-payout long-shot remains its own path.
+- **Settings:** Test connection → `GET /portfolio/balance`. Copyable last-order-error panel (Kalshi 4xx/5xx bodies verbatim).
+- **Crossed book fix:** `withLiveQuote` uses one consistent snapshot (`yes_bid = 1 − no_ask`). Dirk's 55/63 vs 37/50 case becomes 55/63 / 37/45.
+- **Scorecard:** hits and Brier both use 0–1 probability (`ForecastUnits`), not edge-sign vs percent mix.
+- **UI:** each market card leads with BET UP / BET DOWN / NO BET from the same ticket decision. PAPER vs LIVE $ on Approve.
 
 ## 0.3.9
 

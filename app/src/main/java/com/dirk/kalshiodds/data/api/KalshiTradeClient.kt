@@ -49,12 +49,13 @@ class KalshiTradeClient(
         if (!ticket.canApprove) {
             throw IllegalStateException(ticket.blockedReason ?: "Market closed")
         }
+        val sized = enforceLiveCap(ticket)
         ensureKeys()
-        val body = v2Body(ticket, clientOrderId)
+        val body = v2Body(sized, clientOrderId)
         return try {
             val first = activePrimary().createOrderV2(body)
             val chosen = chooseHost(first) { activeFallback()?.createOrderV2(body) }
-            mapV2(ticket, clientOrderId, chosen)
+            mapV2(sized, clientOrderId, chosen)
         } catch (e: Exception) {
             throw softFailure(e)
         }
@@ -98,15 +99,39 @@ class KalshiTradeClient(
      * Available cash for Live Approve sizing. Never logs the body.
      * Returns null if the key cannot read `portfolio/balance`.
      */
-    suspend fun getCashUsd(): Double? {
-        ensureKeys()
+    suspend fun getCashUsd(): Double? = getBalanceResult().cashUsd
+
+    /**
+     * Settings "Test connection" — GET /portfolio/balance.
+     * Returns the Kalshi body verbatim on 4xx/5xx.
+     */
+    suspend fun getBalanceResult(): BalanceProbe {
+        val (id, pem) = credentials()
+        if (id.isBlank() && pem.isBlank()) {
+            return BalanceProbe(false, null, "Add Kalshi API Key ID + PEM in Settings")
+        }
+        if (com.dirk.kalshiodds.signal.config.PemNormalizer.onlyKeyIdSaved(id, pem)) {
+            return BalanceProbe(false, null, com.dirk.kalshiodds.signal.trade.LiveOrderGates.PEM_ONLY_KEY_ID)
+        }
         return try {
             val first = activePrimary().getBalance()
             val chosen = chooseHost(first) { activeFallback()?.getBalance() }
-            if (!chosen.isSuccessful) return null
-            chosen.body()?.cashUsd()
-        } catch (_: Exception) {
-            null
+            if (!chosen.isSuccessful) {
+                val raw = chosen.errorBody()?.string().orEmpty()
+                return BalanceProbe(false, null, verbatimHttp(chosen.code(), raw))
+            }
+            val cash = chosen.body()?.cashUsd()
+            BalanceProbe(
+                ok = cash != null,
+                cashUsd = cash,
+                detail = if (cash != null) {
+                    String.format(java.util.Locale.US, "GET /portfolio/balance · cash $%.2f", cash)
+                } else {
+                    "GET /portfolio/balance succeeded but cash was missing"
+                }
+            )
+        } catch (e: Exception) {
+            BalanceProbe(false, null, e.message ?: "Balance request failed")
         }
     }
 
@@ -151,42 +176,75 @@ class KalshiTradeClient(
         )
     }
 
+    private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
+        if (ticket.isSell) return ticket
+        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.enforce(ticket)
+        if (!clip.ok) {
+            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
+        }
+        if (clip.allInUsd > com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
+            throw IllegalStateException(
+                String.format(
+                    java.util.Locale.US,
+                    "Live order all-in $%.2f exceeds the $%.2f cap",
+                    clip.allInUsd,
+                    com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+                )
+            )
+        }
+        val yesLimit = if (ticket.side.equals("NO", true)) {
+            com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(1.0 - clip.price)
+        } else {
+            com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(clip.price)
+        }
+        return ticket.copy(
+            contracts = clip.count,
+            limitPrice = clip.price,
+            yesLimitPrice = yesLimit,
+            stakeUsd = clip.allInUsd,
+            estimatedFillUsd = clip.allInUsd,
+            estimatedAvgFill = clip.price,
+            feeUsd = clip.feeUsd,
+            allInUsd = clip.allInUsd,
+            profitIfWinUsd = clip.profitIfWinUsd,
+            maxPayoutUsd = clip.count * com.dirk.kalshiodds.signal.config.SignalConstants.CONTRACT_SETTLEMENT_USD
+        )
+    }
+
     private fun ensureKeys() {
         val (id, pem) = credentials()
+        if (com.dirk.kalshiodds.signal.config.PemNormalizer.onlyKeyIdSaved(id, pem)) {
+            throw IllegalStateException(com.dirk.kalshiodds.signal.trade.LiveOrderGates.PEM_ONLY_KEY_ID)
+        }
         if (id.isBlank() || pem.isBlank()) {
             throw IllegalStateException("Kalshi API key missing — add Key ID + PEM in Settings")
+        }
+        if (!com.dirk.kalshiodds.signal.config.PemNormalizer.looksLikePem(pem)) {
+            throw IllegalStateException(com.dirk.kalshiodds.signal.trade.LiveOrderGates.PEM_ONLY_KEY_ID)
         }
     }
 
     private fun httpFailure(code: Int, rawBody: String?): IllegalStateException {
-        val parsed = parseError(rawBody)
-        val deprecated = code == 410 ||
-            parsed?.code.equals("deprecated_v1_order_endpoint", ignoreCase = true) ||
-            parsed?.message?.contains("switch to the V2", ignoreCase = true) == true
-        val hint = when {
-            deprecated ->
-                "Kalshi retired the v1 order API (HTTP $code). This build submits V2 POST /portfolio/events/orders only — tap Live Approve again."
-            code == 401 -> "Unauthorized — check Key ID + PEM in Settings"
-            code == 400 -> "Rejected — check price / size / market status"
-            code == 403 -> "Forbidden — this API key may not trade"
-            code == 404 -> "V2 create-order not found on Kalshi hosts — not falling back to deprecated v1 /portfolio/orders"
-            code == 409 -> "Duplicate client_order_id — not re-sent"
-            code == 429 -> "Rate limited — wait and Approve again"
-            code == 503 -> "Kalshi unavailable — try again shortly"
-            else -> "HTTP $code"
-        }
         warn("trade API $code")
-        val detail = listOfNotNull(parsed?.code, parsed?.message)
-            .joinToString(" · ")
-            .ifBlank {
-                rawBody
-                    ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
-                    ?.take(160)
-                    ?.trim()
-                    .orEmpty()
-            }
-        val suffix = if (detail.isNotBlank() && !hint.contains(detail.take(24))) " — $detail" else ""
-        return IllegalStateException("$hint$suffix")
+        return IllegalStateException(verbatimHttp(code, rawBody))
+    }
+
+    companion object {
+        private const val TAG = "DipHunterTrade"
+        private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+        /** Documented V2 write path — never POST `/portfolio/orders`. */
+        const val V2_CREATE_PATH = "/trade-api/v2/portfolio/events/orders"
+        const val LEGACY_CREATE_PATH = "/trade-api/v2/portfolio/orders"
+
+        fun verbatimHttp(code: Int, rawBody: String?): String {
+            val body = rawBody
+                ?.replace(Regex("(?i)-----BEGIN[\\s\\S]+?-----END[\\s\\S]+?-----"), "[redacted PEM]")
+                ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
+                ?.trim()
+                .orEmpty()
+            return if (body.isBlank()) "HTTP $code" else "HTTP $code\n$body"
+        }
     }
 
     private fun parseError(rawBody: String?): com.dirk.kalshiodds.data.dto.KalshiErrorBody? {
@@ -218,13 +276,10 @@ class KalshiTradeClient(
 
     private fun String?.toDoubleOrNullSafe(): Double? =
         this?.trim()?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()
-
-    companion object {
-        private const val TAG = "DipHunterTrade"
-        private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
-
-        /** Documented V2 write path — never POST `/portfolio/orders`. */
-        const val V2_CREATE_PATH = "/trade-api/v2/portfolio/events/orders"
-        const val LEGACY_CREATE_PATH = "/trade-api/v2/portfolio/orders"
-    }
 }
+
+data class BalanceProbe(
+    val ok: Boolean,
+    val cashUsd: Double?,
+    val detail: String
+)

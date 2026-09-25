@@ -178,7 +178,10 @@ class TicketSession(
             return _state.value
         }
         if (!ticket.canApprove) {
-            return cur
+            val reason = ticket.blockedReason ?: "Ticket cannot be approved"
+            LastOrderError.record(reason)
+            _state.update { it.copy(lastError = reason) }
+            return _state.value
         }
         if (cur.phase is TicketPhase.Submitting) return cur
 
@@ -214,7 +217,7 @@ class TicketSession(
                     phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == ticket.id }),
                     proposals = cur.proposals.filterNot { it.id == ticket.id },
                     working = working,
-                    lastError = ack.error,
+                    lastError = ack.error.also { LastOrderError.record(it) },
                     placementCount = cur.placementCount + 1
                 )
             },
@@ -224,7 +227,7 @@ class TicketSession(
                     phase = TicketPhase.Failed(ticket, msg, cur.proposals),
                     proposals = cur.proposals,
                     working = cur.working,
-                    lastError = msg,
+                    lastError = msg.also { LastOrderError.record(it) },
                     placementCount = cur.placementCount
                 )
             }
@@ -257,6 +260,7 @@ class TicketSession(
     }
 
     fun failSoft(message: String) {
+        LastOrderError.record(message)
         _state.update { it.copy(lastError = message) }
     }
 
@@ -284,6 +288,9 @@ class TicketSession(
                 (lower.contains("http 410") && lower.contains("v2"))
             ) {
                 return raw.take(240)
+            }
+            if (raw.startsWith("HTTP ") || raw.contains("{\"error\"") || raw.contains("\"code\"")) {
+                return LastOrderError.redact(raw).take(4000)
             }
             return raw.take(240)
         }

@@ -34,7 +34,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -58,8 +60,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
     val importKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::restoreCredentials) }
+    val clipboard = LocalClipboardManager.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
+        viewModel.refreshLastOrderError()
     }
 
     Scaffold(
@@ -479,20 +483,27 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Three approve-gated live paths, each sized so a win pays the target (default \$50): " +
-                    "(1) Long-shot hunter — sides priced ≤20¢ (editable) when AI/fair beats implied after fees; " +
-                    "(2) hunter — still surfaces when a \$1 stake can settle ≥\$25 (ask ≤~4¢); " +
-                    "(3) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
-                    "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
-                    "Expired 15m windows drop or move to the live contract; a missing ask shows on that ticket " +
-                    "(Approve stays off). Your positions load from GET /portfolio/positions; Sell is a reduce-only V2 " +
-                    "limit (ask to sell YES, bid to sell NO) capped at held size. " +
-                    "Live Approve uses POST /trade-api/v2/portfolio/events/orders only (no v1 fallback). " +
-                    "Raising stake above \$5 requires typing " +
-                    "${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
-                    "High variance: you can lose the full stake.",
+                "Live Approve is \$5 all-in including Kalshi fees. Count is the largest integer with " +
+                    "count×price + fee ≤ \$5 (fee = ceil_cent(0.07×count×P×(1−P))). " +
+                    "Tickets below the min-profit-if-win setting (default \$10) stay disabled. " +
+                    "The \$100-payout long-shot (ask ≤5¢ / configured stake) is still its own option. " +
+                    "Hunter still surfaces when \$1 can settle ≥\$25. Long-shot hunter still needs ask ≤20¢ " +
+                    "and AI beating implied after fees. Paper fills never block Live. " +
+                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. No auto-fire.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
+            )
+            Text(
+                String.format(Locale.US, "Min profit if win  $%.0f", s.minProfitIfWinUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.accentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.minProfitIfWinUsd.toFloat().coerceIn(0f, 50f),
+                onValueChange = { viewModel.setMinProfitIfWinUsd(it.toDouble()) },
+                valueRange = 0f..50f,
+                steps = 49
             )
             ToggleRow("Show live trade tickets", s.ticketsEnabled, viewModel::setTicketsEnabled)
             Text(
@@ -515,9 +526,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(
                     Locale.US,
-                    "Long-shot hunter  max ask ≤ %.0f¢  · sized to win $%.0f when AI beats implied after fees",
+                    "Long-shot hunter  max ask ≤ %.0f¢  · $5 all-in · disabled if profit < $%.0f",
                     s.longShotMaxAsk * 100.0,
-                    s.winTargetUsd
+                    s.minProfitIfWinUsd
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
@@ -535,17 +546,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 steps = 34
             )
 
-            Section("Win target sizing")
+            Section("Legacy win-target (History / paper only)")
             Text(
-                "On by default. Size every Buy UP/DOWN and hunter card (including Long-shot) so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
-                    "Live Approve uses GET /portfolio/balance cash; Paper uses paper-book equity. " +
-                    "Stake is capped at a % of that bankroll (default 10%) and an optional $ cap. " +
-                    "When the cap or book depth limits size, the card shows Capped: wins \$X. " +
-                    "Still Approve-only — never auto-placed.",
+                "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
+                    "This leftover \$50 sizer is kept so History restore still reads old snapshots.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Win-target sizing (default on · \$50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
+            ToggleRow("Legacy win-target sizing (default off · \$50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
             Text(
                 String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
                 style = MaterialTheme.typography.bodyMedium,
@@ -631,6 +639,33 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     Text(if (s.hasPrivateKey) "Update key" else "Save key")
                 }
                 OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
+            }
+            OutlinedButton(
+                onClick = viewModel::testConnection,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text("Test connection (GET /portfolio/balance)")
+            }
+            state.connectionMessage?.let {
+                Text(it, color = if (it.startsWith("GET /portfolio/balance")) colors.accentGreen else colors.accentRed,
+                    style = MaterialTheme.typography.bodyMedium)
+            }
+            Section("Last order error")
+            val lastErr = state.lastOrderError
+            if (lastErr.isNullOrBlank()) {
+                Text(
+                    "No live-order error yet. Failed Live Approve bodies show here verbatim.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            } else {
+                Text(lastErr, style = MaterialTheme.typography.bodyMedium, color = colors.accentRed)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    OutlinedButton(onClick = { clipboard.setText(AnnotatedString(lastErr)) }) {
+                        Text("Copy last error")
+                    }
+                    TextButton(onClick = viewModel::clearLastOrderError) { Text("Clear") }
+                }
             }
             Text(
                 "Export writes a passphrase-encrypted file you pick (Downloads or Drive). " +

@@ -93,4 +93,17 @@ class ApproveRouterTest {
         )
         assertEquals(ApproveRouter.Decision.Live, d)
     }
+
+    @Test
+    fun liveIntentNeverRoutesToPaperEvenWhenPaperToggleOn() {
+        val d = ApproveRouter.decide(
+            paperTradingEnabled = true,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = true,
+            canApprove = true,
+            intent = ApproveRouter.Intent.Live
+        )
+        assertEquals(ApproveRouter.Decision.Live, d)
+    }
 }

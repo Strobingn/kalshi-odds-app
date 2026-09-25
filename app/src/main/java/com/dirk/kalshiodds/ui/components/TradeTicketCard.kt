@@ -64,7 +64,7 @@ fun TradeTicketsSection(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper uses the same win-target size as the card (default profit \$50) on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Long-shot cards appear at asks ≤20¢ when AI beats implied after fees. Cancel leaves no live order.",
+            text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
@@ -183,7 +183,7 @@ private fun ProposedTicketCard(
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
-                    },
+                    } + if (ticket.paperOnly || paperTradingEnabled) " · PAPER" else " · LIVE \$",
                     style = MaterialTheme.typography.labelMedium,
                     color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) colors.accentOrange else colors.accentBlue,
                     fontWeight = FontWeight.Bold
@@ -309,27 +309,24 @@ private fun ProposedTicketCard(
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
-                        if (ticket.isSell) "Paper sell"
-                        else String.format(Locale.US, "Paper $%.2f", ticket.stakeUsd)
+                        if (ticket.isSell) "PAPER sell"
+                        else String.format(Locale.US, "PAPER $%.2f", ticket.stakeUsd)
                     )
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = when {
-                        paperTradingEnabled || ticket.paperOnly ->
-                            ticket.canPaper || ticket.blockedReason != null
-                        else -> credentialsConfigured && ticket.canApprove
-                    },
+                    enabled = credentialsConfigured && ticket.canApprove,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accentOrange,
+                        contentColor = colors.onAccentOrange
+                    ),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
                         when {
-                            ticket.paperOnly || paperTradingEnabled ->
-                                if (ticket.canPaper || ticket.blockedReason != null) "Paper Approve…"
-                                else ticket.blockedReason ?: "Unavailable"
-                            !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
-                            credentialsConfigured -> "Live Approve…"
-                            else -> "Needs API key"
+                            !ticket.canApprove -> ticket.blockedReason ?: "NO BET"
+                            credentialsConfigured -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
+                            else -> "LIVE $ — needs API key"
                         }
                     )
                 }
@@ -394,20 +391,19 @@ private fun ApproveTicketDialog(
     val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
     val paperSell = ticket.paperOnly && ticket.isSell
-    val paperBuy = paperTradingEnabled && !ticket.isSell
+    val paperBuy = false
     var countText by remember(ticket.id) { mutableStateOf(ticket.contracts.toString()) }
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+                title = {
             Text(
                 when {
-                    paperSell -> "Paper sell this position?"
-                    paperBuy -> "Paper buy this ticket?"
-                    ticket.isSell -> "Live Approve this sell?"
-                    else -> "Live Approve this ticket?"
+                    paperSell -> "PAPER sell this position?"
+                    ticket.isSell -> "LIVE $ Approve this sell?"
+                    else -> "LIVE $ Approve this ticket?"
                 }
             )
         },
@@ -500,23 +496,30 @@ private fun ApproveTicketDialog(
                     else -> credentialsConfigured && ticket.canApprove
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = colors.accentGreen,
-                    contentColor = colors.onAccentGreen
+                    containerColor = if (paperSell) colors.accentGreen else colors.accentOrange,
+                    contentColor = if (paperSell) colors.onAccentGreen else colors.onAccentOrange
                 ),
                 modifier = Modifier.height(48.dp)
             ) {
                 Text(
                     when {
-                        paperSell -> "Paper sell"
-                        paperBuy -> "Paper Approve"
-                        ticket.isSell -> "Live Approve sell"
-                        else -> "Live Approve"
+                        paperSell -> "PAPER sell"
+                        ticket.isSell -> "LIVE $ sell"
+                        else -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
                     }
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!ticket.isSell) {
+                    TextButton(
+                        onClick = onPaper,
+                        enabled = ticket.canPaper
+                    ) { Text(String.format(Locale.US, "PAPER $%.2f", ticket.stakeUsd)) }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
         }
     )
 }

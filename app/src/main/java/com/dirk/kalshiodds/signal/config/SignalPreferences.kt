@@ -72,6 +72,7 @@ data class SignalSettings(
     val winTargetUsd: Double = SignalConstants.DEFAULT_WIN_TARGET_USD,
     val winTargetBankrollPct: Double = SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
     val winTargetAbsCapUsd: Double? = null,
+    val minProfitIfWinUsd: Double = SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD,
     val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,
     val sequenceModelEnabled: Boolean = SignalConstants.DEFAULT_SEQUENCE_MODEL,
     val gbmEnabled: Boolean = SignalConstants.DEFAULT_GBM,
@@ -100,6 +101,8 @@ data class SignalSettings(
     /** Live / demo V2 orders. Paper Buy never consults this. */
     fun tradingCredentialsConfigured(): Boolean =
         if (kalshiDemoEnabled) demoCredentialsConfigured else credentialsConfigured
+
+    fun keyIdWithoutPem(): Boolean = apiKeyId.isNotBlank() && !hasPrivateKey
 
     val watchedSeries: Set<String>
         get() = buildSet {
@@ -267,6 +270,9 @@ class SignalPreferences(
             it[KEY_WIN_TARGET_ABS] = value.coerceIn(1.0, 10_000.0)
         }
     }
+    suspend fun updateMinProfitIfWinUsd(value: Double) = edit {
+        it[KEY_MIN_PROFIT] = value.coerceIn(0.0, 100.0)
+    }
     suspend fun updateHeavyMl(value: Boolean) = edit { it[KEY_HEAVY_ML] = value }
     suspend fun updateSequenceModel(value: Boolean) = edit { it[KEY_SEQ_MODEL] = value }
     suspend fun updateGbm(value: Boolean) = edit { it[KEY_GBM] = value }
@@ -295,7 +301,7 @@ class SignalPreferences(
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
-        secrets.privateKeyPem = pem
+        secrets.privateKeyPem = PemNormalizer.normalize(pem)
         secretRevision.value += 1
     }
 
@@ -333,6 +339,7 @@ class SignalPreferences(
         r.winTargetUsd?.let { updateWinTargetUsd(it) }
         r.winTargetBankrollPct?.let { updateWinTargetBankrollPct(it) }
         r.winTargetAbsCapUsd?.let { updateWinTargetAbsCapUsd(it) }
+        r.minProfitIfWinUsd?.let { updateMinProfitIfWinUsd(it) }
         r.ticketStakeUsd?.let { updateTicketStakeUsd(it) }
         r.bankrollUsd?.let { updateBankrollUsd(it) }
         r.edgeThresholdPp?.let { updateEdgeThresholdPp(it) }
@@ -407,6 +414,7 @@ class SignalPreferences(
             winTargetUsd = this[KEY_WIN_TARGET_USD] ?: SignalConstants.DEFAULT_WIN_TARGET_USD,
             winTargetBankrollPct = this[KEY_WIN_TARGET_PCT] ?: SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
             winTargetAbsCapUsd = this[KEY_WIN_TARGET_ABS],
+            minProfitIfWinUsd = this[KEY_MIN_PROFIT] ?: SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD,
             heavyMlEnabled = this[KEY_HEAVY_ML] ?: def.heavyMlEnabled,
             sequenceModelEnabled = this[KEY_SEQ_MODEL] ?: def.sequenceModelEnabled,
             gbmEnabled = this[KEY_GBM] ?: def.gbmEnabled,
@@ -486,6 +494,7 @@ class SignalPreferences(
         private val KEY_WIN_TARGET_USD = doublePreferencesKey("win_target_usd")
         private val KEY_WIN_TARGET_PCT = doublePreferencesKey("win_target_bankroll_pct")
         private val KEY_WIN_TARGET_ABS = doublePreferencesKey("win_target_abs_cap_usd")
+        private val KEY_MIN_PROFIT = doublePreferencesKey("min_profit_if_win_usd")
         private val KEY_HEAVY_ML = booleanPreferencesKey("heavy_ml_enabled")
         private val KEY_SEQ_MODEL = booleanPreferencesKey("sequence_model_enabled")
         private val KEY_GBM = booleanPreferencesKey("gbm_enabled")
