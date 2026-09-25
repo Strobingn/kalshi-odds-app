@@ -24,7 +24,8 @@ data class CreateOrderV2Request(
     @SerialName("self_trade_prevention_type") val selfTradePreventionType: String = "taker_at_cross",
     @SerialName("client_order_id") val clientOrderId: String,
     @SerialName("post_only") val postOnly: Boolean = false,
-    @SerialName("cancel_order_on_pause") val cancelOrderOnPause: Boolean = true,
+    /** Official Create Order V2 example is `false`. */
+    @SerialName("cancel_order_on_pause") val cancelOrderOnPause: Boolean = false,
     @SerialName("reduce_only") val reduceOnly: Boolean = false
 )
 

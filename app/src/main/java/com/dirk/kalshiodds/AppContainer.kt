@@ -104,6 +104,7 @@ class AppContainer(context: Context) {
     )
     val repository = MarketRepository(
         context = app,
+        resolveApi = { NetworkModule.publicApi(hub.settings.kalshiDemoEnabled) },
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },

@@ -36,8 +36,14 @@ object KalshiWsAuth {
 
     const val PRIMARY_WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
     const val ELECTIONS_WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+    /** https://docs.kalshi.com/getting_started/api_environments */
+    const val DEMO_PRIMARY_WS_URL = "wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2"
+    const val DEMO_SHARED_WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
 
     val WS_URLS: List<String> = listOf(PRIMARY_WS_URL, ELECTIONS_WS_URL)
+    val DEMO_WS_URLS: List<String> = listOf(DEMO_PRIMARY_WS_URL, DEMO_SHARED_WS_URL)
+
+    fun wsUrls(demo: Boolean): List<String> = if (demo) DEMO_WS_URLS else WS_URLS
 
     init {
         ensureProvider()

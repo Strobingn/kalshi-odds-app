@@ -8,7 +8,10 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.repo.MarketRepository
+import com.dirk.kalshiodds.signal.config.SecureExtraStore
+import com.dirk.kalshiodds.signal.config.SignalPreferences
 import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
 import java.util.concurrent.TimeUnit
 
@@ -20,7 +23,12 @@ class MarketRefreshWorker(
     override suspend fun doWork(): Result {
         LiveSignalsKeepAlive.ensureService(applicationContext)
         return try {
-            val snapshot = MarketRepository(applicationContext).refresh()
+            val extras = SecureExtraStore(applicationContext)
+            val settings = SignalPreferences(applicationContext, extras = extras).hydrate()
+            val snapshot = MarketRepository(
+                applicationContext,
+                api = NetworkModule.publicApi(settings.kalshiDemoEnabled)
+            ).refresh()
             if (snapshot.errorMessage != null && !snapshot.fromCache && snapshot.allMarkets.isEmpty()) {
                 Result.retry()
             } else {

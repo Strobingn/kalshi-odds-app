@@ -32,8 +32,10 @@ data class MarketDto(
     @SerialName("close_time") val closeTime: String? = null,
     @SerialName("expiration_time") val expirationTime: String? = null,
     @SerialName("expected_expiration_time") val expectedExpirationTime: String? = null,
+    @SerialName("latest_expiration_time") val latestExpirationTime: String? = null,
+    @SerialName("settlement_ts") val settlementTs: String? = null,
     val status: String? = null,
-    /** Settled markets: "yes" or "no". */
+    /** Determined/settled: `yes`, `no`, or `scalar` (docs.kalshi.com/getting_started/market_lifecycle). */
     val result: String? = null,
     @SerialName("floor_strike") val floorStrike: Double? = null,
     @SerialName("event_ticker") val eventTicker: String? = null

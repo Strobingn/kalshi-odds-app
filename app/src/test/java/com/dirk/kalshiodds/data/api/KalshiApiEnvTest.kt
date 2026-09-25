@@ -16,5 +16,6 @@ class KalshiApiEnvTest {
         assertEquals(KalshiApi.TRADE_BASE_URL, KalshiApi.tradePrimary(false))
         assertEquals(KalshiApi.DEMO_SHARED_BASE_URL, KalshiApi.tradeFallback(true))
         assertTrue(KalshiApi.publicBase(true).contains("demo-api.kalshi.co"))
+        assertEquals(KalshiApi.BASE_URL, KalshiApi.publicBase(false))
     }
 }

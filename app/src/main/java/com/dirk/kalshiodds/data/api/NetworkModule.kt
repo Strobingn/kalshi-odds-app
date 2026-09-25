@@ -35,14 +35,20 @@ object NetworkModule {
             .build()
     }
 
-    val api: KalshiApi by lazy {
+    val api: KalshiApi by lazy { publicClient(KalshiApi.BASE_URL) }
+
+    /** Unauthenticated demo market data — https://demo-api.kalshi.co/trade-api/v2 */
+    val demoApi: KalshiApi by lazy { publicClient(KalshiApi.DEMO_SHARED_BASE_URL) }
+
+    fun publicApi(demo: Boolean): KalshiApi = if (demo) demoApi else api
+
+    private fun publicClient(baseUrl: String): KalshiApi =
         Retrofit.Builder()
-            .baseUrl(KalshiApi.BASE_URL)
+            .baseUrl(baseUrl)
             .client(okHttp)
             .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
             .build()
             .create(KalshiApi::class.java)
-    }
 
     /**
      * Authenticated trade client. [credentials] returns (keyId, pem) from

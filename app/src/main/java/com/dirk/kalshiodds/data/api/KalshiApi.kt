@@ -27,12 +27,18 @@ interface KalshiApi {
          * Docs (Create Order V2): https://docs.kalshi.com/api-reference/orders/create-order-v2
          */
         const val TRADE_BASE_URL = "https://external-api.kalshi.com/trade-api/v2/"
-        /** Demo (play-money) Trade API — https://docs.kalshi.com/getting_started/api_keys */
+        /**
+         * Demo (play-money) Trade API — recommended host.
+         * https://docs.kalshi.com/getting_started/demo_env
+         * https://docs.kalshi.com/getting_started/api_environments
+         */
         const val DEMO_TRADE_BASE_URL = "https://external-api.demo.kalshi.co/trade-api/v2/"
+        /** Demo shared host, also supported. */
         const val DEMO_SHARED_BASE_URL = "https://demo-api.kalshi.co/trade-api/v2/"
 
         fun tradePrimary(demo: Boolean): String = if (demo) DEMO_TRADE_BASE_URL else TRADE_BASE_URL
         fun tradeFallback(demo: Boolean): String = if (demo) DEMO_SHARED_BASE_URL else BASE_URL
+        /** Unauthenticated GET /markets + orderbook. Shared hosts; paper Buy never calls these. */
         fun publicBase(demo: Boolean): String = if (demo) DEMO_SHARED_BASE_URL else BASE_URL
 
         const val SERIES_BTC = "KXBTC15M"

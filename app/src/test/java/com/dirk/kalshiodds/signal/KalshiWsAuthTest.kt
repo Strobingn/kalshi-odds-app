@@ -107,6 +107,15 @@ class KalshiWsAuthTest {
     fun wsUrlsIncludePrimaryAndElections() {
         assertEquals("wss://external-api-ws.kalshi.com/trade-api/ws/v2", KalshiWsAuth.PRIMARY_WS_URL)
         assertTrue(KalshiWsAuth.WS_URLS.contains(KalshiWsAuth.ELECTIONS_WS_URL))
+        assertEquals(
+            "wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2",
+            KalshiWsAuth.DEMO_PRIMARY_WS_URL
+        )
+        assertEquals(
+            listOf(KalshiWsAuth.DEMO_PRIMARY_WS_URL, KalshiWsAuth.DEMO_SHARED_WS_URL),
+            KalshiWsAuth.wsUrls(true)
+        )
+        assertEquals(KalshiWsAuth.WS_URLS, KalshiWsAuth.wsUrls(false))
     }
 
     private fun toPkcs1Pem(key: RSAPrivateCrtKey): String {

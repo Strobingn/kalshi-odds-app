@@ -51,6 +51,7 @@ class LiveSignalsService : Service() {
     @Volatile private var lastTickerCount = 0
     @Volatile private var foregroundFailed = false
     @Volatile private var foregroundTypeInUse = 0
+    @Volatile private var wsUsesDemo = false
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -170,7 +171,7 @@ class LiveSignalsService : Service() {
             stopSelf()
             return
         }
-        if (!LiveSignalsPolicy.shouldConnectWs(true, settings.credentialsConfigured)) {
+        if (!LiveSignalsPolicy.shouldConnectWs(true, settings.tradingCredentialsConfigured())) {
             client?.stop()
             client = null
             hub.wsLive = false
@@ -181,6 +182,11 @@ class LiveSignalsService : Service() {
         val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades, tickers.filter {
             settings.isWatchedTicker(it)
         })
+        val demo = settings.kalshiDemoEnabled
+        if (client != null && wsUsesDemo != demo) {
+            client?.stop()
+            client = null
+        }
         val existing = client
         if (existing == null) {
             hub.setConnection(WsConnectionState.CONNECTING)
@@ -229,11 +235,15 @@ class LiveSignalsService : Service() {
                         )
                     }
                 },
-                onLog = { msg -> Log.d(TAG, msg) }
+                onLog = { msg -> Log.d(TAG, msg) },
+                urls = com.dirk.kalshiodds.signal.ws.KalshiWsAuth.wsUrls(demo)
             )
             client = ws
-            val (keyId, pem) = runCatching { container.preferences.credentialSnapshot() }
-                .getOrElse { "" to "" }
+            wsUsesDemo = demo
+            val (keyId, pem) = runCatching {
+                if (demo) container.extraSecrets.demoSnapshot()
+                else container.preferences.credentialSnapshot()
+            }.getOrElse { "" to "" }
             ws.start(keyId, pem, plan.channels, plan.marketTickers)
         } else {
             existing.updateSubscriptions(plan.channels, plan.marketTickers)

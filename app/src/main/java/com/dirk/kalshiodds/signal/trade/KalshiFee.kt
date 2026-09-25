@@ -3,9 +3,17 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.signal.config.SignalConstants
 
 /**
- * Official Kalshi taker fee (CFTC fee schedule / docs.kalshi.com):
- * `round_up_to_cent(feeRate × C × P × (1 − P))` with default rate 0.07.
- * Pure math — never places an order.
+ * Official Kalshi binary taker fee.
+ *
+ * Published schedule (CFTC / fee page): `round_up(0.07 × C × P × (1 − P))`
+ * to the next cent, where P is the contract price in dollars.
+ * Docs: https://docs.kalshi.com/getting_started/fee_rounding
+ * Series overrides: GET /series/fee_changes
+ * (https://docs.kalshi.com/api-reference/exchange/get-series-fee-changes).
+ * KXBTC15M / KXETH15M / KXSOL15M currently return an empty override list,
+ * so the quadratic 0.07 coefficient applies. Fill-level `ceil_6dp` plus a
+ * rounding fee converges to this next-cent total for typical (non-direct)
+ * members. Pure math — never places an order.
  */
 object KalshiFee {
 

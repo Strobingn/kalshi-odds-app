@@ -291,7 +291,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Fees & net EV")
             Text(
-                "Kalshi-style taker fee ≈ feeRate × P × (1−P) per contract, plus half-spread. Ranking and alerts use net EV when the toggle is on. Raw edge still shows on cards.",
+                "Official Kalshi taker fee is ceil-to-the-next-cent of feeRate × C × P × (1−P) (default 7%). Crypto 15-minute series (KXBTC15M / KXETH15M / KXSOL15M) have no series fee override. Ranking and alerts add half-spread when net EV is on. Raw edge still shows on cards.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
@@ -670,7 +670,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Spacer(Modifier.height(24.dp))
             Text(
-                "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2",
+                "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. Live WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2. Demo WS: wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )

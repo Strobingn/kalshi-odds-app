@@ -46,6 +46,9 @@ class KalshiTradeClientTest {
         assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals("cid-1", body.clientOrderId)
         assertFalse(body.reduceOnly)
+        assertFalse(body.cancelOrderOnPause)
+        assertEquals("good_till_canceled", body.timeInForce)
+        assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals(KalshiTradeClient.V2_CREATE_PATH, "/trade-api/v2/portfolio/events/orders")
         assertFalse(KalshiTradeClient.LEGACY_CREATE_PATH.contains("events"))
     }

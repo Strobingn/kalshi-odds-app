@@ -18,6 +18,9 @@ class KalshiFeeAndWinTargetTest {
         val net = KalshiFee.netPayout(5, 0.20)
         assertEquals(5.0 - KalshiFee.total(5, 0.20), net, 1e-9)
         assertEquals(0.02, KalshiFee.perContract(0.50), 1e-9)
+        // GET /series/fee_changes?series_ticker=KXBTC15M|KXETH15M|KXSOL15M returned []
+        // on 2026-09-25 — no multiplier, so default 0.07 applies to these 15m markets.
+        assertEquals(0.07, SignalConstants.DEFAULT_FEE_RATE, 1e-12)
     }
 
     @Test

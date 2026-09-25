@@ -60,13 +60,14 @@ data class MarketsSnapshot(
 class MarketRepository(
     context: Context,
     private val api: KalshiApi = NetworkModule.api,
+    private val resolveApi: () -> KalshiApi = { api },
     private val cache: MarketCache = MarketCache(context.applicationContext),
     private val model: DipHunterModel = DipHunterModel(context.applicationContext),
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
     extraOpenTickers: () -> Set<String> = { emptySet() },
     onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
     private val scorer: SettlementScorer = SettlementScorer(
-        api,
+        resolveApi,
         logStore,
         extraOpenTickers,
         onMarketSettled
@@ -107,14 +108,15 @@ class MarketRepository(
         edgeThresholdPp: Double
     ): MarketsSnapshot = coroutineScope {
         try {
+            val client = resolveApi()
             val btcDeferred = async {
-                if (watchBtc) api.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
+                if (watchBtc) client.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
             }
             val ethDeferred = async {
-                if (watchEth) api.getMarkets(KalshiApi.SERIES_ETH, status = "open") else null
+                if (watchEth) client.getMarkets(KalshiApi.SERIES_ETH, status = "open") else null
             }
             val solDeferred = async {
-                if (watchSol) api.getMarkets(KalshiApi.SERIES_SOL, status = "open") else null
+                if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open") else null
             }
             val extrasDeferred = CryptoMarkets.filterCrypto(extraTickers).map { ticker ->
                 async { fetchExtra(ticker) }
@@ -205,7 +207,7 @@ class MarketRepository(
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val series = CryptoMarkets.inferSeries(ticker)
         return runCatching {
-            api.getMarkets(seriesTicker = series, ticker = ticker, limit = 5)
+            resolveApi().getMarkets(seriesTicker = series, ticker = ticker, limit = 5)
                 .markets.firstOrNull { it.ticker.equals(ticker, ignoreCase = true) }
                 ?.takeIf { CryptoMarkets.isCryptoTicker(it.ticker) }
         }.getOrNull()

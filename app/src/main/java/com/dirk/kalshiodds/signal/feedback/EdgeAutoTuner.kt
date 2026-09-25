@@ -54,7 +54,7 @@ object EdgeAutoTuner {
             if (outcome != "yes" && outcome != "no") return@mapNotNull null
             val mid = e.marketMid.coerceIn(0.02, 0.98)
             val model = e.predictedYes.coerceIn(0.02, 0.98)
-            val fee = feeRate * mid * (1.0 - mid)
+            val fee = KalshiFee.perContract(mid, feeRate)
             val rawEdge = kotlin.math.abs(model - mid)
             val afterFees = (rawEdge - fee) * 100.0
             Sample(

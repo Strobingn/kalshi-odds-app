@@ -91,6 +91,10 @@ class TickBookMathTest {
             noLevels = listOf(0.50 to 80.0),
             seq = 1
         )
+        // Official orderbook: bids only; YES ask = 1 − best NO bid.
+        // https://docs.kalshi.com/getting_started/orderbook_responses
+        assertEquals(0.48, book.bestYesBid()!!, 1e-9)
+        assertEquals(0.50, book.bestYesAsk()!!, 1e-9)
         // best YES bid 0.48, best YES ask 1-0.50=0.50, mid=0.49
         assertEquals(0.49, book.mid01()!!, 1e-9)
         // 3¢ band includes both YES levels and the NO level
