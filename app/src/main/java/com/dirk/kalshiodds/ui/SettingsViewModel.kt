@@ -48,6 +48,7 @@ data class SettingsUiState(
     val credPassphrase: String = "",
     val connectionTestBusy: Boolean = false,
     val connectionTestMessage: String? = null,
+    val connectionTestOk: Boolean = false,
     val lastOrderError: String? = null,
     val lastOrderErrorAtMs: Long = 0L
 )
@@ -336,6 +337,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 it.copy(
                     connectionTestBusy = false,
                     connectionTestMessage = message,
+                    connectionTestOk = result is ConnectionTestResult.Ok,
                     lastOrderError = container.lastOrderError.snapshot()?.first,
                     lastOrderErrorAtMs = container.lastOrderError.snapshot()?.second ?: 0L
                 )
@@ -366,7 +368,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             return
         }
         prefs.saveCredentials(keyId, pem)
-        _state.update { it.copy(pemDraft = "", credentialMessage = "Key stored on device (PEM never logged)") }
+        _state.update {
+            it.copy(
+                pemDraft = "",
+                credentialMessage = "Key stored on device (PEM never logged)",
+                connectionTestOk = false,
+                connectionTestMessage = null
+            )
+        }
     }
 
     fun backupCredentials(uri: Uri) {
@@ -410,7 +419,14 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     }
                 }
             }
-            _state.update { it.copy(credentialMessage = result) }
+            val restored = result.startsWith("Kalshi key restored")
+            _state.update {
+                it.copy(
+                    credentialMessage = result,
+                    connectionTestOk = if (restored) false else it.connectionTestOk,
+                    connectionTestMessage = if (restored) null else it.connectionTestMessage
+                )
+            }
         }
     }
 
@@ -441,7 +457,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun clearCredentials() {
         prefs.clearCredentials()
-        _state.update { it.copy(keyIdDraft = "", pemDraft = "", credentialMessage = "Credentials cleared") }
+        _state.update {
+            it.copy(
+                keyIdDraft = "",
+                pemDraft = "",
+                credentialMessage = "Credentials cleared",
+                connectionTestOk = false,
+                connectionTestMessage = null
+            )
+        }
     }
 
     fun saveDemoCredentials() {

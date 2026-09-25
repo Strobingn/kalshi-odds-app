@@ -74,6 +74,7 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 fun OddsScreen(
     viewModel: OddsViewModel,
     onOpenSettings: () -> Unit,
+    onOpenApiKeySettings: () -> Unit = onOpenSettings,
     onOpenScorecard: () -> Unit,
     onOpenData: () -> Unit,
     onOpenHistory: () -> Unit,
@@ -176,10 +177,10 @@ fun OddsScreen(
                             onResumeAlerts = { viewModel.resumeAlerts() }
                         )
                     }
-                    if (!state.settings.tradingCredentialsConfigured()) {
+                    if (ApiKeyUi.showNoKeyBanner(state.settings.tradingCredentialsConfigured())) {
                         item {
                             Text(
-                                "No Kalshi API key — Live Approve is off. Paste Key ID + PEM at the top of Settings. Paper still works.",
+                                ApiKeyUi.BANNER,
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = colors.accentOrange,
                                 fontWeight = FontWeight.SemiBold,
@@ -187,7 +188,7 @@ fun OddsScreen(
                                     .fillMaxWidth()
                                     .background(colors.accentOrange.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                                     .padding(12.dp)
-                                    .clickable(onClick = onOpenSettings)
+                                    .clickable(onClick = onOpenApiKeySettings)
                             )
                         }
                     }

@@ -93,7 +93,9 @@ class WiringAuditTest {
         Control("Screen contrast roles", ThemeRoles::class.java, "forPalette"),
         Control("WCAG contrast helper", Contrast::class.java, "readable"),
         Control("Settings Test connection", SettingsViewModel::class.java, "testConnection"),
-        Control("Settings last order error", SettingsViewModel::class.java, "refreshLastOrderError")
+        Control("Settings last order error", SettingsViewModel::class.java, "refreshLastOrderError"),
+        Control("API key status line", ApiKeyUi::class.java, "statusLine"),
+        Control("No-key banner visibility", ApiKeyUi::class.java, "showNoKeyBanner")
     )
 
     @Test

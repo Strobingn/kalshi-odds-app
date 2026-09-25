@@ -33,9 +33,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -52,11 +57,18 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit) {
+fun SettingsScreen(
+    viewModel: SettingsViewModel,
+    onBack: () -> Unit,
+    onOpenData: () -> Unit,
+    scrollToApiKey: Boolean = false
+) {
     val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current
+    val scroll = rememberScrollState()
+    val apiKeyY = remember { mutableIntStateOf(0) }
     val exportKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? -> uri?.let(viewModel::backupCredentials) }
@@ -67,6 +79,11 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
         viewModel.refreshLastOrderError()
+    }
+    LaunchedEffect(scrollToApiKey, apiKeyY.intValue) {
+        if (scrollToApiKey) {
+            scroll.animateScrollTo(apiKeyY.intValue.coerceAtLeast(0))
+        }
     }
 
     Scaffold(
@@ -91,32 +108,33 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .verticalScroll(rememberScrollState())
+                .verticalScroll(scroll)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            Column(
+                modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+            Section(ApiKeyUi.HEADER)
+            val hasKey = s.tradingCredentialsConfigured()
             Text(
-                "Crypto-only analysis plus optional approve-gated tickets. Nothing is sent to Kalshi without an explicit Approve tap on that ticket. WTI and other non-crypto markets are ignored. Not financial advice.",
+                ApiKeyUi.statusLine(hasKey = hasKey, connectionOk = state.connectionTestOk),
                 style = MaterialTheme.typography.bodyMedium,
-                color = colors.textSecondary
-            )
-
-            Section("Kalshi API key (WS + approve-gated orders)")
-            Text(
-                when {
-                    s.hasPrivateKey && s.apiKeyId.isNotBlank() ->
-                        "Status: key saved · ${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)} · Live Approve is real money"
-                    s.hasPrivateKey ->
-                        "Status: PEM saved · add the API Key ID"
-                    s.apiKeyId.isNotBlank() ->
-                        "Status: Key ID only — paste the PEM (Live Approve stays off)"
-                    else ->
-                        "Status: no key — Live Approve is off. Paper still works."
+                color = when {
+                    hasKey && state.connectionTestOk -> colors.accentGreen
+                    hasKey -> colors.accentOrange
+                    else -> colors.accentOrange
                 },
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (s.hasPrivateKey) colors.accentGreen else colors.accentOrange,
                 fontWeight = FontWeight.Bold
             )
+            if (hasKey && s.apiKeyId.isNotBlank()) {
+                Text(
+                    "Saved ${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
                     "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
@@ -234,6 +252,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             state.credentialMessage?.let {
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
+            }
+
+            Text(
+                "Crypto-only analysis plus optional approve-gated tickets. Nothing is sent to Kalshi without an explicit Approve tap on that ticket. WTI and other non-crypto markets are ignored. Not financial advice.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
 
             Section("Live signals")
             Text(

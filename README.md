@@ -25,7 +25,7 @@ Package: `com.dirk.kalshiodds` · version **0.3.11**
 - **Paper never blocks Live.** `ApproveRouter.Intent.Live` + live positions (`GET /portfolio/positions`). A paper fill on ticker X cannot stop a live order on X (`LiveApprovePaperIsolationTest`). Keyed Approve is Live even when the Paper toggle is ON (`ApproveRouterTest.paperOnWithKeyIsLiveNotPaper`); the Paper button is the only paper path.
 - **$5 all-in live size** at the final order-build step (`LiveOrderSizer` + `KalshiTradeClient.enforceLiveCap`). Default **Min profit if win $10**. Tickets below that stay disabled. A leftover $50 win-target cannot resize a LIVE order above $5. Sizing tests at 1¢, 5¢, 10¢, 25¢, 31¢, 50¢, 63¢.
 - **Scorecard:** hits and Brier both use 0–1 probability (`ForecastUnits`). 0/5 with Brier 0.003 was a percent-vs-unit mix.
-- **UI:** BET UP / BET DOWN / NO BET from the same ticket decision. PAPER vs LIVE $ on buttons. Live confirm sheet says **REAL MONEY** with count, price, fee, total cost, profit if win. Kalshi API key section at the top of Settings with a status line. No-key banner on the home screen.
+- **UI:** BET UP / BET DOWN / NO BET from the same ticket decision. PAPER vs LIVE $ on buttons. Live confirm sheet says **REAL MONEY** with count, price, fee, total cost, profit if win. Settings opens with **Kalshi API key** first: status is `Live trading ready` / `Key saved - tap Test connection` / `No key - live orders disabled`. Home banner **Add your Kalshi API key to place real bets** (only when no key) opens Settings scrolled to that section.
 - Reuses 0.3.10 (PR #20): PEM paste, Test connection, Last order error, consistent quotes, keyed Approve → Live, toolbar insets.
 
 ## 0.3.10
