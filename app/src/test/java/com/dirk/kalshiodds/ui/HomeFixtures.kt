@@ -5,7 +5,11 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.trade.LivePosition
+import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.signal.trade.TradeTicket
 
 object HomeFixtures {
     const val NOW_MS = 1_700_000_000_000L
@@ -145,6 +149,58 @@ object HomeFixtures {
         paper = PaperBookState(),
         positions = emptyList(),
         recentAlerts = sampleAlerts()
+    )
+
+    fun openPosition(): LivePosition = LivePosition(
+        ticker = "KXBTC15M-26SEP251530-30",
+        side = "YES",
+        contracts = 50.0,
+        exposureUsd = 16.0,
+        avgCost = 0.32,
+        bestBid = 0.001,
+        unrealizedPnlUsd = -15.95
+    )
+
+    fun sellMarket(bid: Double?): MarketUiModel = market(
+        ticker = "KXBTC15M-26SEP251530-30",
+        seriesLabel = "Bitcoin",
+        yesAsk = 0.02,
+        aiYes = 40.0,
+        predicted = "YES"
+    ).copy(
+        yesBid = bid,
+        noAsk = bid?.let { (1.0 - it).coerceIn(0.01, 0.99) },
+        closeTimeEpochMs = NOW_MS + 600_000L,
+        status = "active"
+    )
+
+    fun sellTicketWithBid(): TradeTicket = TicketBuilder.proposeSell(
+        market = sellMarket(0.001),
+        side = "YES",
+        heldContracts = 50,
+        ctx = TicketBuilder.Context(
+            settings = settings(hasKey = true),
+            alertsPaused = false,
+            idFactory = { "sell-bid" },
+            nowMs = NOW_MS
+        )
+    )!!
+
+    fun sellTicketNoBid(): TradeTicket = TicketBuilder.proposeSell(
+        market = sellMarket(null).copy(yesBid = null, noAsk = null),
+        side = "YES",
+        heldContracts = 50,
+        ctx = TicketBuilder.Context(
+            settings = settings(hasKey = true),
+            alertsPaused = false,
+            idFactory = { "sell-nobid" },
+            nowMs = NOW_MS
+        )
+    )!!
+
+    fun awaitingSell(ticket: TradeTicket): TicketUiState = TicketUiState(
+        phase = TicketPhase.AwaitingApprove(ticket),
+        proposals = listOf(ticket)
     )
 
     fun sampleAlerts(): List<SignalAlert> = listOf(

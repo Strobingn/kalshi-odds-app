@@ -295,6 +295,7 @@ internal fun signalCard(s: HistoryAssembler.SignalLine): SignalCopy.Card {
         modelYes = parsed?.first ?: s.fairPp,
         marketYes = parsed?.second ?: s.marketPp,
         settled = s.settled,
+        fairYes = s.fairPp,
         details = buildString {
             s.note?.takeIf { it.isNotBlank() }?.let { append(it) }
             if (isNotEmpty()) append('\n')

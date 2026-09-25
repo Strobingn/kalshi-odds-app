@@ -1,14 +1,16 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.BetCall
 import java.util.Locale
 
 /**
- * Display-only signal card copy. Edge on the card is always
- * model% − market% for the shown side — same definition as
- * [HomeCopy.modelVsMarket]. Stored `deltaPp` is blended fair − mid
- * (YES-centric) and stays in [Card.details], not the header.
+ * Display-only signal card copy. Side, percents, and edge all use
+ * [SignalStance] — the same model-vs-market definition as
+ * [HomeCopy.modelVsMarket] (`importedModelPp ?: AI` vs market).
+ * Stored `deltaPp` is blended fair − mid (YES-centric) and stays in
+ * [Card.details], not the header.
  */
 object SignalCopy {
     data class Card(
@@ -19,31 +21,26 @@ object SignalCopy {
         val details: String?
     )
 
-    fun callLabel(side: String?): String = when {
-        side.equals("NO", true) || side.equals("DOWN", true) -> "DOWN"
-        side.equals("YES", true) || side.equals("UP", true) -> "UP"
-        else -> "NO BET"
+    fun callLabel(side: String?): String = when (SignalStance.normalizeSide(side)) {
+        SignalStance.NO -> SignalStance.CALL_DOWN
+        SignalStance.YES -> SignalStance.CALL_UP
+        else -> SignalStance.CALL_NO_BET
     }
 
     fun headline(side: String?): BetCall.Headline = when (callLabel(side)) {
-        "DOWN" -> BetCall.Headline.BET_DOWN
-        "UP" -> BetCall.Headline.BET_UP
+        SignalStance.CALL_DOWN -> BetCall.Headline.BET_DOWN
+        SignalStance.CALL_UP -> BetCall.Headline.BET_UP
         else -> BetCall.Headline.NO_BET
     }
 
-    fun sideIsUp(side: String?): Boolean = callLabel(side) != "DOWN"
+    fun sideIsUp(side: String?): Boolean = callLabel(side) != SignalStance.CALL_DOWN
 
     /** [modelYes] / [marketYes] are P(YES) percents (0–100). */
-    fun displayedEdgePts(modelYes: Double?, marketYes: Double?, side: String?): Double? {
-        val model = sidePercent(modelYes, side) ?: return null
-        val market = sidePercent(marketYes, side) ?: return null
-        return model - market
-    }
+    fun displayedEdgePts(modelYes: Double?, marketYes: Double?, side: String?): Double? =
+        SignalStance.edgeFor(modelYes, marketYes, side)
 
-    fun sidePercent(yesPercent: Double?, side: String?): Double? {
-        val p = yesPercent?.takeIf { it.isFinite() } ?: return null
-        return if (sideIsUp(side)) p else 100.0 - p
-    }
+    fun sidePercent(yesPercent: Double?, side: String?): Double? =
+        SignalStance.sidePercent(yesPercent, side)
 
     fun modelVsMarketLine(modelYes: Double?, marketYes: Double?, side: String?): String {
         val model = sidePercent(modelYes, side)
@@ -54,6 +51,25 @@ object SignalCopy {
         val edgeTxt = edge?.let { String.format(Locale.US, "%+.0f pts", it) } ?: "—"
         return "Model $modelTxt vs market $marketTxt · edge $edgeTxt"
     }
+
+    fun resolve(
+        storedSide: String?,
+        modelYes: Double?,
+        marketYes: Double?,
+        fairYes: Double? = null
+    ): SignalStance.Resolved = SignalStance.resolve(storedSide, modelYes, marketYes, fairYes)
+
+    fun resolve(alert: SignalAlert): SignalStance.Resolved {
+        val parsed = parseAiVsMarket(alert.reason)
+        return SignalStance.fromAlert(
+            predictedSide = alert.predictedSide,
+            modelYes = parsed?.first ?: alert.fairValuePp,
+            marketYes = parsed?.second ?: alert.marketMidPp,
+            fairYes = alert.fairValuePp
+        )
+    }
+
+    fun shouldNotify(alert: SignalAlert): Boolean = SignalStance.shouldNotify(resolve(alert))
 
     fun outcomeLabel(settled: String?): String = when {
         settled.isNullOrBlank() -> "Pending"
@@ -72,14 +88,18 @@ object SignalCopy {
         marketYes: Double?,
         settled: String? = null,
         details: String? = null,
-        closeEpochMs: Long? = null
-    ): Card = Card(
-        title = WindowLabel.of(ticker, closeEpochMs),
-        call = callLabel(side),
-        modelLine = modelVsMarketLine(modelYes, marketYes, side),
-        outcome = outcomeLabel(settled),
-        details = details?.trim()?.takeIf { it.isNotEmpty() }
-    )
+        closeEpochMs: Long? = null,
+        fairYes: Double? = null
+    ): Card {
+        val resolved = resolve(side, modelYes, marketYes, fairYes)
+        return Card(
+            title = WindowLabel.of(ticker, closeEpochMs),
+            call = resolved.call,
+            modelLine = modelVsMarketLine(modelYes, marketYes, resolved.lineSide),
+            outcome = outcomeLabel(settled),
+            details = mergeDetails(resolved.detailsExtra, details)
+        )
+    }
 
     /**
      * Live-alert mapper. Prefers `AI N% vs mkt M%` from [SignalAlert.reason]
@@ -88,14 +108,13 @@ object SignalCopy {
      * diagnostic has no AI pair. Stored [SignalAlert.deltaPp] is fair − mid.
      */
     fun card(alert: SignalAlert, settled: String? = null): Card {
-        val parsed = parseAiVsMarket(alert.reason)
-        return card(
-            ticker = alert.ticker,
-            side = alert.predictedSide,
-            modelYes = parsed?.first ?: alert.fairValuePp,
-            marketYes = parsed?.second ?: alert.marketMidPp,
-            settled = settled,
-            details = detailsForAlert(alert)
+        val resolved = resolve(alert)
+        return Card(
+            title = WindowLabel.of(alert.ticker),
+            call = resolved.call,
+            modelLine = modelVsMarketLine(resolved.modelYes, resolved.marketYes, resolved.lineSide),
+            outcome = outcomeLabel(settled),
+            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert))
         )
     }
 
@@ -108,6 +127,14 @@ object SignalCopy {
         alert.reason.trim().takeIf { it.isNotEmpty() }?.let { append(it) }
         if (isNotEmpty()) append('\n')
         append(String.format(Locale.US, "Stored Δ %+.1f pp (fair − mid, not the card edge)", alert.deltaPp))
+    }
+
+    private fun mergeDetails(extra: String?, body: String?): String? {
+        val parts = listOfNotNull(
+            extra?.trim()?.takeIf { it.isNotEmpty() },
+            body?.trim()?.takeIf { it.isNotEmpty() }
+        )
+        return parts.takeIf { it.isNotEmpty() }?.joinToString("\n")
     }
 
     private val AI_VS_MKT = Regex("""AI\s+(\d+(?:\.\d+)?)%\s+vs\s+mkt\s+(\d+(?:\.\d+)?)%""", RegexOption.IGNORE_CASE)

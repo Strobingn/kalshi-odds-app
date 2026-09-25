@@ -18,6 +18,7 @@ import com.dirk.kalshiodds.signal.sizing.NetExpectedValue
 import com.dirk.kalshiodds.signal.sizing.PositionSizer
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.model.TickSource
 import java.util.UUID
 import kotlin.math.abs
@@ -809,6 +810,12 @@ class ScoringEngine(
         val last = lastAlertMs[tick.ticker] ?: 0L
         if (nowMs - last < settings.debounceMs) return null
         lastAlertMs[tick.ticker] = nowMs
+        val stance = SignalStance.resolve(
+            storedSide = scored.predictedSide,
+            modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+            marketYes = scored.marketMidPp,
+            fairYes = scored.fairValuePp
+        )
         return SignalAlert(
             id = idFactory(),
             ticker = tick.ticker,
@@ -823,7 +830,7 @@ class ScoringEngine(
             tteRegime = scored.tteRegime.shortLabel,
             confidence = scored.confidence,
             passedFilter = true,
-            predictedSide = scored.predictedSide
+            predictedSide = stance.storedSide
         )
     }
 

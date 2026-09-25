@@ -10,6 +10,9 @@ import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.trade.TradeTicket
+import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
+import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.signal.feedback.Allowlist
@@ -127,6 +130,24 @@ class HomeScreenScreenshotTest {
     fun darkSignals() = snapSignals("signals_dark", dark = true)
 
     @Test
+    fun lightPositionsOpen() = snapPositions("positions_light_open", dark = false)
+
+    @Test
+    fun darkPositionsOpen() = snapPositions("positions_dark_open", dark = true)
+
+    @Test
+    fun lightSellConfirmBid() = snapSell("sell_confirm_light_bid", dark = false, HomeFixtures.sellTicketWithBid())
+
+    @Test
+    fun darkSellConfirmBid() = snapSell("sell_confirm_dark_bid", dark = true, HomeFixtures.sellTicketWithBid())
+
+    @Test
+    fun lightSellConfirmNoBid() = snapSell("sell_confirm_light_nobid", dark = false, HomeFixtures.sellTicketNoBid())
+
+    @Test
+    fun darkSellConfirmNoBid() = snapSell("sell_confirm_dark_nobid", dark = true, HomeFixtures.sellTicketNoBid())
+
+    @Test
     fun lightSettings() = snapSettings("settings_light", dark = false)
 
     @Test
@@ -165,7 +186,7 @@ class HomeScreenScreenshotTest {
                     onCancelApprove = {},
                     onCancelOrder = {},
                     nowMs = HomeFixtures.NOW_MS,
-                    versionLabel = "DipHunter v0.3.12 (27)"
+                    versionLabel = "DipHunter v0.3.13 (28)"
                 )
             }
         }
@@ -197,15 +218,57 @@ class HomeScreenScreenshotTest {
         copyLatest(name)
     }
 
+    private fun snapPositions(name: String, dark: Boolean) {
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                androidx.compose.foundation.layout.Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    PositionsCard(
+                        positions = listOf(HomeFixtures.openPosition()),
+                        note = null,
+                        onSell = { _, _ -> },
+                        homeMode = false
+                    )
+                }
+            }
+        }
+        copyLatest(name)
+    }
+
+    private fun snapSell(name: String, dark: Boolean, ticket: TradeTicket) {
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                ) {
+                    LiveSellConfirmSheet(
+                        ticket = ticket,
+                        credentialsConfigured = true,
+                        paperTradingEnabled = false
+                    )
+                }
+            }
+        }
+        copyLatest(name)
+    }
+
     private fun snapSignals(name: String, dark: Boolean) {
         val cards = listOf(
+            SignalCopy.card(HomeFixtures.sampleAlerts()[0]),
             SignalCopy.card(
                 ticker = "KXBTC15M-26SEP251345-45",
                 side = "YES",
                 modelYes = 68.0,
                 marketYes = 64.0,
                 settled = null,
-                details = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ -11.4pp"
+                fairYes = 68.0,
+                details = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ +4.0pp"
             ),
             SignalCopy.card(
                 ticker = "KXETH15M-26SEP251400-40",
@@ -213,6 +276,7 @@ class HomeScreenScreenshotTest {
                 modelYes = 30.0,
                 marketYes = 48.0,
                 settled = "no",
+                fairYes = 30.0,
                 details = "QUIET/MID · AI 30% vs mkt 48%"
             )
         )
@@ -307,6 +371,9 @@ class HomeScreenScreenshotTest {
             "scorecard_light", "scorecard_dark",
             "settings_light", "settings_dark",
             "signals_light", "signals_dark",
+            "positions_light_open", "positions_dark_open",
+            "sell_confirm_light_bid", "sell_confirm_dark_bid",
+            "sell_confirm_light_nobid", "sell_confirm_dark_nobid",
             "before_0_3_11_light_actionable", "before_0_3_11_dark_actionable",
             "before_0_3_11_light_nokey"
         ).forEach(::copyLatest)

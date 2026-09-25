@@ -127,6 +127,28 @@ class ForecastUnitsTest {
         assertEquals("YES", ForecastUnits.sideFromProbability(94.5))
     }
 
+    @Test
+    fun noBetIsNotCountedAsWinOrLoss() {
+        val noBet = row(
+            ticker = "KXBTC15M-NB",
+            predictedYes = 0.58,
+            outcome = "yes",
+            predictedSide = "NO_BET"
+        )
+        val scored = row(
+            ticker = "KXBTC15M-UP",
+            predictedYes = 0.68,
+            outcome = "yes",
+            predictedSide = "YES"
+        )
+        assertFalse(ForecastUnits.isScoredPick(noBet))
+        assertFalse(ForecastUnits.hit(noBet))
+        assertTrue(ForecastUnits.isScoredPick(scored))
+        val card = ScorecardMetrics.window(listOf(noBet, scored))
+        assertEquals(1, card.total)
+        assertEquals(1, card.hits)
+    }
+
     private fun row(
         ticker: String,
         predictedYes: Double,

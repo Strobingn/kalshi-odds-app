@@ -30,10 +30,16 @@ import com.dirk.kalshiodds.domain.FakeClock
 import com.dirk.kalshiodds.signal.market.MarketRollover
 import com.dirk.kalshiodds.signal.service.LiveSignalsPolicy
 import com.dirk.kalshiodds.signal.ws.WsSubscriptionSwitch
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.HomeFixtures
 import com.dirk.kalshiodds.ui.HomeMarkets
+import com.dirk.kalshiodds.ui.SignalCopy
+import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.WindowLabel
+import com.dirk.kalshiodds.ui.theme.DarkPalette
+import com.dirk.kalshiodds.ui.theme.LightPalette
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
@@ -47,7 +53,7 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * One named test per known 0.3.10–0.3.12 issue, on the real production
+ * One named test per known 0.3.10–0.3.13 issue, on the real production
  * classes. No mocks of the logic under test.
  */
 class KnownIssuesRegressionTest {
@@ -709,6 +715,54 @@ class KnownIssuesRegressionTest {
         )
         assertEquals("subscribe", switch.cmd)
         assertEquals(ws.tickers.toSet(), switch.marketTickers.toSet())
+    }
+
+    @Test
+    fun signalSideNeverContradictsModelEdge() {
+        val a1 = HomeFixtures.sampleAlerts()[0]
+        val card = SignalCopy.card(a1)
+        assertEquals("NO BET", card.call)
+        assertEquals(BetCall.Headline.NO_BET, SignalCopy.headline(card.call))
+        assertEquals("Model 58% vs market 44% · edge +14 pts", card.modelLine)
+        assertTrue(card.details!!.contains(SignalStance.DISAGREE_NOTE))
+        assertFalse(SignalCopy.shouldNotify(a1))
+        for (p in listOf(LightPalette, DarkPalette)) {
+            assertEquals(p.textSecondary, SideColor.of(SignalCopy.headline(card.call), p))
+        }
+        assertTrue(SignalCopy.displayedEdgePts(58.0, 44.0, "NO")!! < 0.0)
+
+        val down = SignalCopy.card(
+            ticker = "KXETH15M-26SEP251400-40",
+            side = "NO",
+            modelYes = 30.0,
+            marketYes = 48.0,
+            fairYes = 30.0
+        )
+        assertEquals("DOWN", down.call)
+        assertEquals("Model 70% vs market 52% · edge +18 pts", down.modelLine)
+        assertTrue(SignalCopy.displayedEdgePts(30.0, 48.0, "NO")!! > 0.0)
+
+        val up = SignalCopy.card(HomeFixtures.sampleAlerts()[1])
+        assertEquals("UP", up.call)
+        assertEquals("Model 68% vs market 64% · edge +4 pts", up.modelLine)
+
+        val noBet = log(
+            ticker = "KXBTC15M-nobet",
+            predictedYes = 0.58,
+            outcome = "yes",
+            predictedSide = SignalStance.NO_BET
+        )
+        val scored = log(
+            ticker = "KXBTC15M-up",
+            predictedYes = 0.68,
+            outcome = "yes",
+            predictedSide = "YES"
+        )
+        assertFalse(ForecastUnits.isScoredPick(noBet))
+        assertFalse(ForecastUnits.hit(noBet))
+        val window = ScorecardMetrics.window(listOf(noBet, scored))
+        assertEquals(1, window.total)
+        assertEquals(1, window.hits)
     }
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {

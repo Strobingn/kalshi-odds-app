@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal.paper
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlin.math.floor
@@ -126,6 +127,7 @@ class PaperBook(
 
     fun considerAlert(alert: SignalAlert, ask: Double?, enabled: Boolean): PaperFill? {
         if (!enabled) return null
+        if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
         return fill(
             ticker = alert.ticker,

@@ -438,7 +438,22 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
 }
 
 @Composable
-private fun ApproveTicketDialog(
+fun LiveSellConfirmSheet(
+    ticket: TradeTicket,
+    credentialsConfigured: Boolean = true,
+    paperTradingEnabled: Boolean = false
+) {
+    ApproveTicketDialog(
+        ticket = ticket,
+        credentialsConfigured = credentialsConfigured,
+        paperTradingEnabled = paperTradingEnabled,
+        onApprove = {},
+        onDismiss = {}
+    )
+}
+
+@Composable
+internal fun ApproveTicketDialog(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
@@ -476,7 +491,7 @@ private fun ApproveTicketDialog(
                         paperBuy ->
                             "Simulated fill on the paper book. This never places a live order."
                         ticket.isSell && ticket.blockedReason != null ->
-                            ticket.blockedReason
+                            com.dirk.kalshiodds.ui.PositionCopy.sellBlockedMessage(ticket.blockedReason)
                         ticket.isSell ->
                             "Sells at the current bid. Leftover size is canceled."
                         else ->

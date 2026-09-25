@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.TickSource
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -367,7 +368,12 @@ class SignalHub(
                         timestampMs = System.currentTimeMillis(),
                         closeTimeMs = tick.closeTimeEpochMs ?: scoring.book.closeTime(tick.ticker),
                         snapshot = SignalSnapshot(
-                            predictedSide = scored.predictedSide,
+                            predictedSide = SignalStance.resolve(
+                                storedSide = scored.predictedSide,
+                                modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                                marketYes = scored.marketMidPp,
+                                fairYes = scored.fairValuePp
+                            ).storedSide,
                             edgePp = scored.deltaPp,
                             confidence = scored.confidence,
                             regime = scored.regime.name,
