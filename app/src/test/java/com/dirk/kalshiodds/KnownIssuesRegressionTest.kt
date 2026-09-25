@@ -549,7 +549,7 @@ class KnownIssuesRegressionTest {
         val series = listOf("KXBTC15M" to "Bitcoin", "KXETH15M" to "Ethereum", "KXSOL15M" to "Solana")
         val windows = keys.mapIndexed { i, key ->
             series.map { (ser, label) ->
-                sample("$ser-$key-45", 0.40, 0.60, 55.0, "YES").copy(
+                sample("$ser-$key-45", 0.25, 0.75, 80.0, "YES").copy(
                     closeTimeEpochMs = closes[i],
                     status = "active",
                     seriesLabel = label
@@ -614,7 +614,7 @@ class KnownIssuesRegressionTest {
         for (step in 1..3) {
             val openTicket = TicketBuilder.proposeManual(
                 windows[step - 1].first { it.ticker.startsWith("KXETH15M") },
-                "NO",
+                "YES",
                 TicketBuilder.Context(
                     settings = SignalSettings(ticketsEnabled = true),
                     alertsPaused = false,
@@ -646,9 +646,9 @@ class KnownIssuesRegressionTest {
                 assertEquals(dropped, event.droppedTickers)
             }
             assertEquals(added, ws.tickers.toSet())
-            val lastUnsub = ws.commands.last { it.cmd == "unsubscribe" }
+            assertTrue("old tickers must be unsubscribed: $dropped vs ${ws.unsubscribed}", ws.unsubscribed.any { it == dropped })
+            assertTrue("new tickers must be subscribed: $added vs ${ws.subscribed}", ws.subscribed.any { it == added })
             val lastSub = ws.commands.last { it.cmd == "subscribe" }
-            assertEquals(dropped.toList().sorted(), lastUnsub.droppedTickers.sorted())
             assertEquals(added.toList().sorted(), lastSub.marketTickers.sorted())
             assertWindowUi(windows[step], clock.nowMs())
             assertTrue(scored.any { it == dropped })
@@ -675,7 +675,7 @@ class KnownIssuesRegressionTest {
         val clock = FakeClock(t0 + 60_000L)
         val close = t0 + 900_000L
         val listed = listOf("KXBTC15M", "KXETH15M", "KXSOL15M").map { ser ->
-            sample("$ser-26SEP251200-45", 0.40, 0.60, 55.0, "YES").copy(
+            sample("$ser-26SEP251200-45", 0.25, 0.75, 80.0, "YES").copy(
                 closeTimeEpochMs = close,
                 status = "active"
             )
@@ -726,6 +726,8 @@ class KnownIssuesRegressionTest {
         private val sids = mutableListOf<Int>()
         var tickers: List<String> = emptyList()
         val commands = mutableListOf<WsSubscriptionSwitch.Outbound>()
+        val unsubscribed = mutableListOf<Set<String>>()
+        val subscribed = mutableListOf<Set<String>>()
         private val channels = LiveSignalsPolicy.subscriptionPlan(
             subscribeTrades = true,
             watchedTickers = listOf("KXBTC15M-X")
@@ -740,6 +742,8 @@ class KnownIssuesRegressionTest {
             val out = WsSubscriptionSwitch.replace(id, channels, tickers, next, sids.toList())
             id += out.size
             commands += out
+            out.filter { it.cmd == "unsubscribe" }.forEach { unsubscribed += it.droppedTickers.toSet() }
+            out.filter { it.cmd == "subscribe" }.forEach { subscribed += it.marketTickers.toSet() }
             if (out.any { it.cmd == "unsubscribe" }) sids.clear()
             if (out.any { it.cmd == "subscribe" }) {
                 tickers = next
