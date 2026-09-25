@@ -448,6 +448,7 @@ fun LiveSellConfirmSheet(
         credentialsConfigured = credentialsConfigured,
         paperTradingEnabled = paperTradingEnabled,
         onApprove = {},
+        onPaper = {},
         onDismiss = {}
     )
 }
@@ -508,7 +509,7 @@ internal fun ApproveTicketDialog(
                     }
                 )
                 Spacer(Modifier.height(8.dp))
-                if (ticket.isSell && !paperSell) {
+                if (ticket.isSell && !paperSell && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())
                     TicketMetricRow("Bid", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
                     TicketMetricRow(
@@ -519,7 +520,7 @@ internal fun ApproveTicketDialog(
                         "Expected proceeds",
                         String.format(Locale.US, "$%.2f", ticket.stakeUsd)
                     )
-                } else if (!paperSell && !paperBuy) {
+                } else if (!paperSell && !paperBuy && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())
                     TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
                     TicketMetricRow(

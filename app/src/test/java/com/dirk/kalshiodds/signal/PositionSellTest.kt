@@ -393,6 +393,7 @@ class SellTicketTest {
             "BTC · 3:30 PM window · UP · 50 contracts · avg 32¢ · now 0.1¢ · -$15.95",
             PositionCopy.row(pos)
         )
+        assertEquals("No buyers right now", PositionCopy.sellBlockedMessage(TicketBuilder.NO_BUYERS))
     }
 
     @Test
