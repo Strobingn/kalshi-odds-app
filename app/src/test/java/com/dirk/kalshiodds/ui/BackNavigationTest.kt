@@ -94,58 +94,13 @@ class BackNavigationTest {
     }
 
     @Test
-    fun pressBackOnTicketAndSellDialogsSendNoOrder() {
-        val placed = AtomicInteger(0)
-        val session = TicketSession(placeOrder = { _, _ ->
-            placed.incrementAndGet()
-            error("Back must not place")
-        })
-        val buy = TicketBuilder.proposeManual(
-            HomeFixtures.actionableBtc(),
-            "YES",
-            TicketBuilder.Context(
-                settings = SignalSettings(ticketsEnabled = true),
-                alertsPaused = false,
-                nowMs = HomeFixtures.NOW_MS
-            )
-        )!!
-        session.addManual(buy)
-        var tickets by mutableStateOf(session.snapshot())
-        rule.setContent {
-            KalshiOddsTheme {
-                TradeTicketsSection(
-                    tickets = tickets,
-                    credentialsConfigured = true,
-                    paperTradingEnabled = false,
-                    listVisible = false,
-                    onReview = {},
-                    onDismiss = {},
-                    onApprove = { error("Approve must not run on Back") },
-                    onPaper = { error("Paper must not run on Back") },
-                    onCancelApprove = {
-                        session.cancelApprove()
-                        tickets = session.snapshot()
-                    },
-                    onCancelOrder = {}
-                )
-            }
-        }
-        assertTrue(tickets.phase is TicketPhase.AwaitingApprove)
-        rule.activity.onBackPressedDispatcher.onBackPressed()
-        rule.waitForIdle()
-        assertEquals(0, placed.get())
-        assertFalse(session.snapshot().phase is TicketPhase.AwaitingApprove)
+    fun pressBackOnTicketDialogSendsNoOrder() {
+        assertTicketSectionBackCancels(sell = false)
+    }
 
-        val sell = HomeFixtures.sellTicketWithBid()
-        assertTrue(sell.isSell)
-        session.addManual(sell)
-        rule.runOnIdle { tickets = session.snapshot() }
-        assertTrue(tickets.phase is TicketPhase.AwaitingApprove)
-        rule.activity.onBackPressedDispatcher.onBackPressed()
-        rule.waitForIdle()
-        assertEquals(0, placed.get())
-        assertFalse(session.snapshot().phase is TicketPhase.AwaitingApprove)
-        assertFalse((rule.activity as Activity).isFinishing)
+    @Test
+    fun pressBackOnSellDialogSendsNoOrder() {
+        assertTicketSectionBackCancels(sell = true)
     }
 
     @Test
@@ -203,5 +158,54 @@ class BackNavigationTest {
         assertEquals(AppRoutes.SCORECARD, nav.current)
         assertFalse((rule.activity as Activity).isFinishing)
         assertTrue(sheetOpen.not())
+    }
+
+    private fun assertTicketSectionBackCancels(sell: Boolean) {
+        val placed = AtomicInteger(0)
+        val session = TicketSession(placeOrder = { _, _ ->
+            placed.incrementAndGet()
+            error("Back must not place")
+        })
+        val ticket = if (sell) {
+            HomeFixtures.sellTicketWithBid()
+        } else {
+            TicketBuilder.proposeManual(
+                HomeFixtures.actionableBtc(),
+                "YES",
+                TicketBuilder.Context(
+                    settings = SignalSettings(ticketsEnabled = true),
+                    alertsPaused = false,
+                    nowMs = HomeFixtures.NOW_MS
+                )
+            )!!
+        }
+        if (sell) assertTrue(ticket.isSell) else assertFalse(ticket.isSell)
+        session.addManual(ticket)
+        var tickets by mutableStateOf(session.snapshot())
+        rule.setContent {
+            KalshiOddsTheme {
+                TradeTicketsSection(
+                    tickets = tickets,
+                    credentialsConfigured = true,
+                    paperTradingEnabled = false,
+                    listVisible = false,
+                    onReview = {},
+                    onDismiss = {},
+                    onApprove = { error("Approve must not run on Back") },
+                    onPaper = { error("Paper must not run on Back") },
+                    onCancelApprove = {
+                        session.cancelApprove()
+                        tickets = session.snapshot()
+                    },
+                    onCancelOrder = {}
+                )
+            }
+        }
+        assertTrue(tickets.phase is TicketPhase.AwaitingApprove)
+        rule.activity.onBackPressedDispatcher.onBackPressed()
+        rule.waitForIdle()
+        assertEquals(0, placed.get())
+        assertFalse(session.snapshot().phase is TicketPhase.AwaitingApprove)
+        assertFalse((rule.activity as Activity).isFinishing)
     }
 }
