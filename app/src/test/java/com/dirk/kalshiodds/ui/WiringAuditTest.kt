@@ -96,7 +96,8 @@ class WiringAuditTest {
         Control("Settings last order error", SettingsViewModel::class.java, "refreshLastOrderError"),
         Control("API key status line", ApiKeyUi::class.java, "statusLine"),
         Control("No-key banner visibility", ApiKeyUi::class.java, "showNoKeyBanner"),
-        Control("App version label", AppVersion::class.java, "getLabel")
+        Control("App version label", AppVersion::class.java, "getLabel"),
+        Control("Approve PAPER/LIVE label", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove")
     )
 
     @Test

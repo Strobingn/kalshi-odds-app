@@ -26,6 +26,7 @@ import androidx.compose.material3.Text
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -160,7 +161,7 @@ fun MarketCard(
                 } else {
                     ButtonDefaults.buttonColors(containerColor = colors.accentOrange, contentColor = colors.onAccentOrange)
                 }
-                val mode = if (paperTradingEnabled) "PAPER" else "LIVE $"
+                val mode = TradeModeLabel.forApprove(settings, call.ticket)
                 Spacer(Modifier.height(10.dp))
                 if (primaryClick != null) {
                     Button(

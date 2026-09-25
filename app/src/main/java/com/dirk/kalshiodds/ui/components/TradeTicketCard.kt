@@ -32,6 +32,7 @@ import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import java.util.Locale
@@ -191,7 +192,14 @@ private fun ProposedTicketCard(
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
-                    } + if (ticket.paperOnly || paperTradingEnabled) " · PAPER" else " · LIVE \$",
+                    } + " · " + TradeModeLabel.forApprove(
+                        paperTradingEnabled = paperTradingEnabled,
+                        liveCredentialsConfigured = credentialsConfigured,
+                        paperOnly = ticket.paperOnly,
+                        isSell = ticket.isSell,
+                        canApprove = ticket.canApprove,
+                        blockedReason = ticket.blockedReason
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) colors.accentOrange else colors.accentBlue,
                     fontWeight = FontWeight.Bold
@@ -333,8 +341,21 @@ private fun ProposedTicketCard(
                     Text(
                         when {
                             !ticket.canApprove -> ticket.blockedReason ?: "NO BET"
-                            credentialsConfigured -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
-                            else -> "LIVE $ — needs API key"
+                            else -> {
+                                val mode = TradeModeLabel.forApprove(
+                                    paperTradingEnabled = paperTradingEnabled,
+                                    liveCredentialsConfigured = credentialsConfigured,
+                                    paperOnly = ticket.paperOnly,
+                                    isSell = ticket.isSell,
+                                    canApprove = true,
+                                    blockedReason = ticket.blockedReason
+                                )
+                                if (mode == TradeModeLabel.LIVE) {
+                                    String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
+                                } else {
+                                    mode
+                                }
+                            }
                         }
                     )
                 }
@@ -527,11 +548,20 @@ private fun ApproveTicketDialog(
                 ),
                 modifier = Modifier.height(48.dp)
             ) {
+                val mode = TradeModeLabel.forApprove(
+                    paperTradingEnabled = paperTradingEnabled,
+                    liveCredentialsConfigured = credentialsConfigured,
+                    paperOnly = ticket.paperOnly,
+                    isSell = ticket.isSell,
+                    canApprove = ticket.canApprove,
+                    blockedReason = ticket.blockedReason
+                )
                 Text(
                     when {
-                        paperSell -> "PAPER sell"
-                        ticket.isSell -> "LIVE $ sell"
-                        else -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
+                        ticket.isSell && mode == TradeModeLabel.PAPER -> "PAPER sell"
+                        ticket.isSell && mode == TradeModeLabel.LIVE -> "LIVE $ sell"
+                        mode == TradeModeLabel.LIVE -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
+                        else -> mode
                     }
                 )
             }

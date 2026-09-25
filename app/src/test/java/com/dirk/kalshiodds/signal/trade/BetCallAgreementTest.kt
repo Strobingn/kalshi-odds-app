@@ -46,6 +46,28 @@ class BetCallAgreementTest {
     }
 
     @Test
+    fun cheapHunterWithoutModelEdgeIsNoBetHeadline() {
+        val market = sample(yesAsk = 0.03, noAsk = 0.97, aiYes = 4.0, predicted = "YES")
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
+        val hunter = TicketBuilder.proposeHunter(market, ctx)
+        assertTrue("hunter ticket still appears in the list", hunter != null)
+        assertEquals(TicketKind.HUNTER, hunter!!.kind)
+        assertFalse(
+            "3¢ print the model does not favor is not an edge",
+            hunter.modelEdge || TicketBuilder.modelBeatsImplied(
+                hunter.modelChance,
+                hunter.impliedChance,
+                ctx.settings.feeRate,
+                stakeUsd = ctx.settings.ticketStakeUsd
+            )
+        )
+        assertFalse(BetCall.qualifies(hunter, market, ctx))
+        val decision = BetCall.decide(market, ctx)
+        assertEquals(BetCall.Headline.NO_BET, decision.headline)
+        assertFalse(decision.isActionable)
+    }
+
+    @Test
     fun sortPutsActionableFirst() {
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 70.0, "YES"), SignalSettings())) == 1)

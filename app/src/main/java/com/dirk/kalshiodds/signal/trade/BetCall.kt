@@ -81,7 +81,6 @@ object BetCall {
         if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isPlaceholder(ask)) return false
         val bid = if (ticket.side.equals("NO", true)) market.noBid else market.yesBid
         if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isCrossed(bid, ask)) return false
-        if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.CONFIGURED) return true
         return ticket.modelEdge || TicketBuilder.modelBeatsImplied(
             ticket.modelChance,
             ticket.impliedChance,
