@@ -182,6 +182,7 @@ fun MarketCard(
                     title = "UP",
                     askLabel = quotes.yesAskLabel,
                     bidLabel = quotes.yesBidLabel,
+                    aiLabel = HomeCopy.tileAiUp(market),
                     accent = colors.up,
                     container = colors.upContainer,
                     highlighted = call.headline == BetCall.Headline.BET_UP,
@@ -191,6 +192,7 @@ fun MarketCard(
                     title = "DOWN",
                     askLabel = quotes.noAskLabel,
                     bidLabel = quotes.noBidLabel,
+                    aiLabel = HomeCopy.tileAiDown(market),
                     accent = colors.down,
                     container = colors.downContainer,
                     highlighted = call.headline == BetCall.Headline.BET_DOWN,
@@ -532,6 +534,7 @@ private fun PriceTile(
     title: String,
     askLabel: String,
     bidLabel: String,
+    aiLabel: String,
     accent: Color,
     container: Color,
     highlighted: Boolean,
@@ -563,6 +566,12 @@ private fun PriceTile(
             "bid $bidLabel",
             style = MaterialTheme.typography.labelMedium,
             color = labelColor
+        )
+        Text(
+            aiLabel,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor
         )
     }
 }

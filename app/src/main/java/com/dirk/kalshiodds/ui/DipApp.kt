@@ -4,9 +4,14 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 
 /**
- * Screen switcher with a real back stack. System Back pops; on home it is
- * not intercepted so the activity finishes. An open ticket/sell sheet wins
- * over screen pop and only cancels — never Approve.
+ * Screen switcher with a real back stack. Official guidance
+ * (developer.android.com predictive-back-gesture, Navigation Compose /
+ * BackHandler): one enabled [BackHandler] per responsibility, disabled when
+ * that UI state is gone so the next callback — or the system — runs.
+ *
+ * Ticket/sell sheet: cancel only, never Approve. In-app destination: pop.
+ * Home with no sheet: neither callback is enabled, so Android 14+ gesture
+ * Back finishes the activity (predictive back-to-home).
  */
 @Composable
 fun DipApp(
@@ -21,12 +26,11 @@ fun DipApp(
     signalHistory: @Composable () -> Unit,
     chart: @Composable () -> Unit
 ) {
-    BackHandler(enabled = sheetOpen || navigator.canPop) {
-        if (sheetOpen) {
-            onCancelSheet()
-            return@BackHandler
-        }
+    BackHandler(enabled = navigator.canPop && !sheetOpen) {
         navigator.back()
+    }
+    BackHandler(enabled = sheetOpen) {
+        onCancelSheet()
     }
     when (navigator.current) {
         AppRoutes.SETTINGS -> settings()

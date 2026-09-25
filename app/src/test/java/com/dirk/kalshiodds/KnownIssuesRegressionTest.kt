@@ -45,6 +45,7 @@ import com.dirk.kalshiodds.ui.theme.LightPalette
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -1028,20 +1029,35 @@ class KnownIssuesRegressionTest {
         assertTrue(dipSrc.contains("BackHandler"))
         assertTrue(dipSrc.contains("onCancelSheet"))
         assertTrue(dipSrc.contains("sheetOpen"))
+        assertTrue(dipSrc.contains("BackHandler(enabled = sheetOpen)"))
+        assertTrue(dipSrc.contains("BackHandler(enabled = navigator.canPop && !sheetOpen)"))
 
         val tickets = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/components/TradeTicketCard.kt"),
             File("src/main/java/com/dirk/kalshiodds/ui/components/TradeTicketCard.kt")
         ).first { it.isFile }.readText()
         assertTrue(tickets.contains("BackHandler(enabled = true) { onCancelApprove() }"))
+        assertTrue(tickets.contains("onDismiss = onCancelApprove"))
 
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
         ).first { it.isFile }.readText()
         assertTrue(manifest.contains("android:enableOnBackInvokedCallback=\"true\""))
+        assertTrue(manifest.contains("android:name=\".MainActivity\""))
+        val activityBlock = manifest.substringAfter("android:name=\".MainActivity\"")
+            .substringBefore("</activity>")
+        assertTrue(activityBlock.contains("android:enableOnBackInvokedCallback=\"true\""))
 
-        val session = TicketSession(placeOrder = { _, _ -> error("Back must not place") })
+        val gradle = listOf(File("app/build.gradle.kts"), File("build.gradle.kts"))
+            .first { it.isFile && it.readText().contains("targetSdk") }.readText()
+        assertTrue(gradle.contains("targetSdk = 35"))
+
+        val placed = AtomicInteger(0)
+        val session = TicketSession(placeOrder = { _, _ ->
+            placed.incrementAndGet()
+            error("Back must not place")
+        })
         val ticket = TicketBuilder.proposeManual(
             sample("KXBTC15M-BACK", 0.25, 0.75, 80.0, "YES"),
             "YES",
@@ -1052,6 +1068,20 @@ class KnownIssuesRegressionTest {
         assertTrue(session.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
         session.cancelApprove()
         assertFalse(session.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
+        assertEquals(0, placed.get())
+
+        val sellPlaced = AtomicInteger(0)
+        val sellSession = TicketSession(placeOrder = { _, _ ->
+            sellPlaced.incrementAndGet()
+            error("Back must not place sell")
+        })
+        val sell = HomeFixtures.sellTicketWithBid()
+        assertTrue(sell.isSell)
+        sellSession.addManual(sell)
+        assertTrue(sellSession.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
+        sellSession.cancelApprove()
+        assertFalse(sellSession.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
+        assertEquals(0, sellPlaced.get())
     }
 
     @Test
@@ -1170,6 +1200,52 @@ class KnownIssuesRegressionTest {
         nav.open(com.dirk.kalshiodds.ui.AppRoutes.SIGNAL_HISTORY)
         assertTrue(nav.back())
         assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
+
+        val up = HomeFixtures.actionableBtc()
+        assertEquals("AI 80%", HomeCopy.tileAiUp(up))
+        assertEquals("AI 20%", HomeCopy.tileAiDown(up))
+    }
+
+    @Test
+    fun aiPercentInTilesMatchesModel() {
+        val up = HomeFixtures.actionableBtc()
+        val upTiles = HomeCopy.tileAiPercents(up)
+        assertEquals("AI 80%", upTiles.up)
+        assertEquals("AI 20%", upTiles.down)
+        assertEquals(100, upTiles.upPct!! + upTiles.downPct!!)
+        val modelUp = SignalStance.homeModelYes(up.importedModelPp, up.aiYesPercent)!!
+        assertEquals(modelUp.roundToInt(), upTiles.upPct)
+
+        val down = HomeFixtures.actionableDownBtc()
+        val downTiles = HomeCopy.tileAiPercents(down)
+        assertEquals("AI 10%", downTiles.up)
+        assertEquals("AI 90%", downTiles.down)
+        assertEquals(100, downTiles.upPct!! + downTiles.downPct!!)
+
+        val noBet = HomeFixtures.noBetEth()
+        val noBetTiles = HomeCopy.tileAiPercents(noBet)
+        assertEquals("AI 70%", noBetTiles.up)
+        assertEquals("AI 30%", noBetTiles.down)
+        val mixed = HomeFixtures.disagreementBtc()
+        val mixedTiles = HomeCopy.tileAiPercents(mixed)
+        val mixedYes = SignalStance.homeModelYes(mixed.importedModelPp, mixed.aiYesPercent)!!
+        assertEquals("AI ${mixedYes.roundToInt()}%", mixedTiles.up)
+        assertEquals(100, mixedTiles.upPct!! + mixedTiles.downPct!!)
+
+        val none = up.copy(importedModelPp = null, aiYesPercent = null)
+        assertEquals(HomeCopy.AI_EM_DASH, HomeCopy.tileAiUp(none))
+        assertEquals(HomeCopy.AI_EM_DASH, HomeCopy.tileAiDown(none))
+
+        val card = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(card.contains("HomeCopy.tileAiUp(market)"))
+        assertTrue(card.contains("HomeCopy.tileAiDown(market)"))
+        assertTrue(card.contains("titleSmall"))
+        val loading = card.substringAfter("fun NextWindowLoadingCard").substringBefore("fun MarketCard")
+        assertFalse(loading.contains("tileAi"))
+        assertFalse(loading.contains("AI "))
     }
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {

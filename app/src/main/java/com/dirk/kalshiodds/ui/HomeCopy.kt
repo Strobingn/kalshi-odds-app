@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.TimeLeft
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.BetCall
 import java.util.Locale
 import kotlin.math.abs
@@ -122,8 +123,34 @@ object HomeCopy {
         }
     }
 
+    const val AI_EM_DASH = "AI —"
+
+    data class TileAiPercents(
+        val up: String,
+        val down: String,
+        val upPct: Int?,
+        val downPct: Int?
+    )
+
+    /**
+     * UP / DOWN tile AI lines. Same [SignalStance.homeModelYes] used by the
+     * model-vs-market line, signal side, and ticket. DOWN is 100 − rounded UP
+     * so the two always sum to 100. Missing model → [AI_EM_DASH].
+     */
+    fun tileAiPercents(market: MarketUiModel): TileAiPercents {
+        val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+            ?: return TileAiPercents(AI_EM_DASH, AI_EM_DASH, null, null)
+        val up = modelYes.roundToInt().coerceIn(0, 100)
+        val down = 100 - up
+        return TileAiPercents("AI $up%", "AI $down%", up, down)
+    }
+
+    fun tileAiUp(market: MarketUiModel): String = tileAiPercents(market).up
+
+    fun tileAiDown(market: MarketUiModel): String = tileAiPercents(market).down
+
     fun modelVsMarket(market: MarketUiModel, decision: BetCall.Decision): String {
-        val modelYes = market.importedModelPp ?: market.aiYesPercent
+        val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
         val marketYes = market.yesProbabilityPercent
         val side = when (decision.headline) {
             BetCall.Headline.BET_DOWN -> "DOWN"
