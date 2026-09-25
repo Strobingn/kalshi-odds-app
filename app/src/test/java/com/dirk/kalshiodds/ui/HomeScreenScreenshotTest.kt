@@ -117,6 +117,20 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightScorecardEmpty() = snap("home_light_scorecard_empty", dark = false, HomeFixtures.state(
+        HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(),
+        hasKey = true,
+        scorecard = HomeScorecardSummary.EMPTY
+    ))
+
+    @Test
+    fun darkScorecardEmpty() = snap("home_dark_scorecard_empty", dark = true, HomeFixtures.state(
+        HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(),
+        hasKey = true,
+        scorecard = HomeScorecardSummary.EMPTY
+    ))
+
+    @Test
     fun lightScorecard() = snapScorecard("scorecard_light", dark = false)
 
     @Test
@@ -348,6 +362,16 @@ class HomeScreenScreenshotTest {
                     avgEdgeWhenWrong = -2.0,
                     enoughData = false,
                     perAsset = emptyList(),
+                    perCoin = listOf(
+                        ScorecardMetrics.Breakdown("BTC", "Bitcoin", 24, 0.67, 0.200, 0.220, 8.40, true),
+                        ScorecardMetrics.Breakdown("ETH", "Ethereum", 22, 0.59, 0.230, 0.250, 2.10, true),
+                        ScorecardMetrics.Breakdown("SOL", "Solana", 8, null, null, null, null, false)
+                    ),
+                    perTimeOfDay = listOf(
+                        ScorecardMetrics.Breakdown("08-12", "8–12 ET", 20, 0.70, 0.180, 0.210, 6.00, true),
+                        ScorecardMetrics.Breakdown("12-16", "12–16 ET", 21, 0.62, 0.220, 0.240, 3.50, true),
+                        ScorecardMetrics.Breakdown("16-20", "16–20 ET", 5, null, null, null, null, false)
+                    ),
                     sideBrier = 0.211,
                     hits = 12
                 )
@@ -366,6 +390,7 @@ class HomeScreenScreenshotTest {
             "home_light_all_nobet", "home_dark_all_nobet",
             "home_light_nokey", "home_dark_nokey",
             "home_light_disagreement", "home_dark_disagreement",
+            "home_light_scorecard_empty", "home_dark_scorecard_empty",
             "scorecard_light", "scorecard_dark",
             "settings_light", "settings_dark",
             "signals_light", "signals_dark",

@@ -43,6 +43,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -68,7 +69,8 @@ data class OddsUiState(
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
     val liveCashUsd: Double? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
-    val mlGuardNote: String? = null
+    val mlGuardNote: String? = null,
+    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY
 )
 
 /**
@@ -124,6 +126,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
+                    HomeScorecardSummary.of(entries, paper.realizedPnlUsd)
+                }.collect { summary ->
+                    _state.update { it.copy(scorecardSummary = summary) }
                 }
             }
         }

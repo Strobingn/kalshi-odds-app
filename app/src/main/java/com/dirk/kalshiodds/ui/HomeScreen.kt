@@ -39,6 +39,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
+import com.dirk.kalshiodds.ui.components.HomeScorecardLine
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
@@ -83,11 +84,6 @@ fun HomeScreen(
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
     val best = HomeMarkets.best(ranked, decisions)
-    val scoreLine = HomeCopy.scorecardLine(
-        state.snapshot?.modelScoreCorrect,
-        state.snapshot?.modelScoreTotal,
-        state.snapshot?.modelMeanBrier
-    )
     Scaffold(
         containerColor = colors.bg,
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -179,8 +175,12 @@ fun HomeScreen(
                             ThisWindowCard(
                                 market = best?.first,
                                 decision = best?.second,
-                                scorecardLine = scoreLine,
-                                nowMs = nowMs,
+                                nowMs = nowMs
+                            )
+                        }
+                        item {
+                            HomeScorecardLine(
+                                summary = state.scorecardSummary,
                                 onOpenScorecard = onOpenScorecard
                             )
                         }

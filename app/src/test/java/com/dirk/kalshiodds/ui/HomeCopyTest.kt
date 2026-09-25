@@ -137,4 +137,29 @@ class HomeCopyTest {
         assertTrue(HomeCopy.signalCardsOnHome(HomeFixtures.sampleAlerts()).isEmpty())
         assertTrue(HomeHelp.HOME_BODY.contains("no Signals list"))
     }
+
+    @Test
+    fun scorecardSummaryLineUsesRecordWinRateAndPaperPnl() {
+        assertEquals(
+            "12-6 · 67% · paper +$12.40",
+            HomeCopy.scorecardSummaryLine(HomeFixtures.SAMPLE_SCORECARD)
+        )
+        assertEquals(
+            HomeScorecardSummary.NO_SETTLED,
+            HomeCopy.scorecardSummaryLine(HomeScorecardSummary.EMPTY)
+        )
+        assertEquals("No settled picks yet", HomeCopy.NO_SETTLED_PICKS)
+        assertEquals(
+            "0-3 · 0% · paper −$3.10",
+            HomeCopy.scorecardSummaryLine(
+                HomeScorecardSummary(wins = 0, losses = 3, hitRate = 0.0, paperPnlUsd = -3.10, settledCount = 3)
+            )
+        )
+        assertEquals(
+            "2-0 · 100% · paper $0.00",
+            HomeCopy.scorecardSummaryLine(
+                HomeScorecardSummary(wins = 2, losses = 0, hitRate = 1.0, paperPnlUsd = 0.0, settledCount = 2)
+            )
+        )
+    }
 }

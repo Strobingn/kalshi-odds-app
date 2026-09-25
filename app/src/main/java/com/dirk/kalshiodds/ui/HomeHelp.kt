@@ -27,7 +27,8 @@ object HomeHelp {
         "This window is the single best BetCall across the current BTC / SOL / ETH 15m windows. " +
             "The three cards stay Bitcoin, Solana, Ethereum in that order. " +
             "Home has no Signals list — Signal history is a text link. " +
+            "A compact scorecard line (W-L, win rate, paper P&L) sits under This window and opens the full scorecard. " +
             "Tap a card for the full-screen chart. The primary button opens an approve-gated ticket — " +
             "nothing is sent until you tap Approve. NO BET cards keep Buy anyway for a manual ticket. " +
-            "The scorecard line opens hit rate. $10 min profit and $5 all-in are Settings; home only displays them."
+            "$10 min profit and $5 all-in are Settings; home only displays them."
 }

@@ -124,6 +124,14 @@ object HomeFixtures {
         ticketsEnabled = true
     )
 
+    val SAMPLE_SCORECARD = HomeScorecardSummary(
+        wins = 12,
+        losses = 6,
+        hitRate = 12.0 / 18.0,
+        paperPnlUsd = 12.40,
+        settledCount = 18
+    )
+
     fun state(
         btc: MarketUiModel,
         eth: MarketUiModel,
@@ -131,7 +139,8 @@ object HomeFixtures {
         hasKey: Boolean,
         correct: Int = 12,
         total: Int = 18,
-        brier: Double? = 0.211
+        brier: Double? = 0.211,
+        scorecard: HomeScorecardSummary = SAMPLE_SCORECARD
     ): OddsUiState = OddsUiState(
         isLoading = false,
         snapshot = MarketsSnapshot(
@@ -148,7 +157,8 @@ object HomeFixtures {
         tickets = TicketUiState(),
         paper = PaperBookState(),
         positions = emptyList(),
-        recentAlerts = sampleAlerts()
+        recentAlerts = sampleAlerts(),
+        scorecardSummary = scorecard
     )
 
     fun openPosition(): LivePosition = LivePosition(

@@ -20,11 +20,28 @@ object HomeCopy {
     const val NEED_20 = "need 20+ results"
     const val WINDOW_LENGTH = "15m"
     const val SIGNAL_HISTORY = "Signal history"
+    const val NO_SETTLED_PICKS = HomeScorecardSummary.NO_SETTLED
 
     /** Home never renders a Signals list; cards live on [SignalHistoryScreen]. */
     const val SHOWS_SIGNAL_LIST = false
 
     fun signalHistoryLink(): String = SIGNAL_HISTORY
+
+    fun scorecardSummaryOf(
+        entries: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
+        paperPnlUsd: Double
+    ): HomeScorecardSummary = HomeScorecardSummary.of(entries, paperPnlUsd)
+
+    fun scorecardSummaryLine(summary: HomeScorecardSummary): String {
+        if (summary.settledCount <= 0) return HomeScorecardSummary.NO_SETTLED
+        val pct = ((summary.hitRate ?: 0.0) * 100.0).roundToInt()
+        return "${summary.wins}-${summary.losses} · $pct% · ${HomeScorecardSummary.paperPnlPart(summary.paperPnlUsd)}"
+    }
+
+    fun scorecardSummaryLine(
+        entries: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
+        paperPnlUsd: Double
+    ): String = scorecardSummaryLine(scorecardSummaryOf(entries, paperPnlUsd))
 
     fun signalCardsOnHome(alerts: List<com.dirk.kalshiodds.signal.model.SignalAlert>): List<SignalCopy.Card> {
         if (SHOWS_SIGNAL_LIST) return alerts.map { SignalCopy.card(it) }

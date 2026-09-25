@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.HomeScorecardSummary
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
@@ -56,9 +57,7 @@ fun TradeModeChip(label: String, modifier: Modifier = Modifier) {
 fun ThisWindowCard(
     market: MarketUiModel?,
     decision: BetCall.Decision?,
-    scorecardLine: String,
     nowMs: Long,
-    onOpenScorecard: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val colors = DipTheme.colors
@@ -83,16 +82,25 @@ fun ThisWindowCard(
             color = accent,
             fontWeight = FontWeight.SemiBold
         )
-        Text(
-            scorecardLine,
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textPrimary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onOpenScorecard)
-                .padding(vertical = 4.dp)
-        )
     }
+}
+
+@Composable
+fun HomeScorecardLine(
+    summary: HomeScorecardSummary,
+    onOpenScorecard: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = DipTheme.colors
+    Text(
+        HomeCopy.scorecardSummaryLine(summary),
+        style = MaterialTheme.typography.labelMedium,
+        color = colors.textSecondary,
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenScorecard)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
+    )
 }
 
 @Composable

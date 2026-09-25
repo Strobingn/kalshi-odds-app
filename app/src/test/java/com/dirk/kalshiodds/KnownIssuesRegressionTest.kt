@@ -35,6 +35,7 @@ import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.HomeFixtures
 import com.dirk.kalshiodds.ui.HomeMarkets
+import com.dirk.kalshiodds.ui.HomeScorecardSummary
 import com.dirk.kalshiodds.ui.SignalCopy
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.WindowLabel
@@ -53,7 +54,7 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * One named test per known 0.3.10–0.3.13 issue (#11 = fixed BTC/SOL/ETH cards), on the real production
+ * One named test per known 0.3.10–0.3.13 issue (#13 = home scorecard summary), on the real production
  * classes. No mocks of the logic under test.
  */
 class KnownIssuesRegressionTest {
@@ -898,6 +899,91 @@ class KnownIssuesRegressionTest {
         assertTrue(history.contains("SignalSummaryCard"))
         assertTrue(history.contains("HomeCopy.SIGNAL_HISTORY"))
         assertFalse(SignalCopy.shouldNotify(HomeFixtures.sampleAlerts()[0]))
+    }
+
+    @Test
+    fun homeShowsScorecardSummary() {
+        val wins = (0 until 12).map { i ->
+            log(
+                ticker = "KXBTC15M-$i",
+                predictedYes = 0.70,
+                outcome = "yes",
+                predictedSide = "YES",
+                score = 1
+            )
+        }
+        val losses = (0 until 6).map { i ->
+            log(
+                ticker = "KXETH15M-$i",
+                predictedYes = 0.70,
+                outcome = "no",
+                predictedSide = "YES",
+                score = 0
+            )
+        }
+        val noBet = log(
+            ticker = "KXSOL15M-nb",
+            predictedYes = 0.55,
+            outcome = "yes",
+            predictedSide = "NO_BET",
+            score = null
+        )
+        val unsettled = log(
+            ticker = "KXBTC15M-open",
+            predictedYes = 0.70,
+            outcome = "void",
+            predictedSide = "YES",
+            score = null
+        ).copy(outcome = null)
+        val summary = HomeScorecardSummary.of(wins + losses + noBet + unsettled, 12.40)
+        assertEquals(12, summary.wins)
+        assertEquals(6, summary.losses)
+        assertEquals(18, summary.settledCount)
+        assertEquals("12-6 · 67% · paper +$12.40", summary.line())
+        assertEquals(
+            "12-6 · 67% · paper +$12.40",
+            HomeCopy.scorecardSummaryLine(wins + losses + noBet + unsettled, 12.40)
+        )
+        assertEquals(HomeScorecardSummary.NO_SETTLED, HomeScorecardSummary.of(emptyList(), 99.0).line())
+        assertEquals(HomeScorecardSummary.NO_SETTLED, HomeScorecardSummary.of(listOf(noBet), 1.0).line())
+
+        val homeSrc = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt")
+        ).first { it.isFile }
+        val home = homeSrc.readText()
+        val thisWindow = home.indexOf("ThisWindowCard")
+        val scoreLine = home.indexOf("HomeScorecardLine")
+        val coins = home.indexOf("items(coinCards")
+        assertTrue(thisWindow >= 0 && scoreLine > thisWindow && coins > scoreLine)
+        assertTrue(home.contains("onOpenScorecard"))
+        assertTrue(home.contains("state.scorecardSummary"))
+        assertFalse(home.contains("Color.Green"))
+        assertFalse(home.contains("Color.Red"))
+        assertFalse(home.contains("SignalSummaryCard"))
+
+        val chromeSrc = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/components/HomeChrome.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/components/HomeChrome.kt")
+        ).first { it.isFile }
+        val chrome = chromeSrc.readText()
+        val lineFn = chrome.indexOf("fun HomeScorecardLine")
+        assertTrue(lineFn >= 0)
+        val snippet = chrome.substring(lineFn, (lineFn + 600).coerceAtMost(chrome.length))
+        assertTrue(snippet.contains("textSecondary"))
+        assertFalse(snippet.contains("Color.Green"))
+        assertFalse(snippet.contains("Color.Red"))
+        assertFalse(snippet.contains("accentGreen"))
+        assertFalse(snippet.contains("accentRed"))
+        assertTrue(snippet.contains("onOpenScorecard"))
+
+        val activitySrc = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/MainActivity.kt"),
+            File("src/main/java/com/dirk/kalshiodds/MainActivity.kt")
+        ).first { it.isFile }
+        val activity = activitySrc.readText()
+        assertTrue(activity.contains("onOpenScorecard = { screen = \"scorecard\" }"))
+        assertTrue(activity.contains("ScorecardScreen"))
     }
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {
