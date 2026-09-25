@@ -33,6 +33,23 @@ class TickBook(private val maxPoints: Int = 80) {
     private val strikeByTicker = linkedMapOf<String, Double>()
     private val seriesHistory = linkedMapOf<String, ArrayDeque<Pair<Long, Double>>>()
     private val maxSeriesPoints = 48
+    private val bidsByTicker = linkedMapOf<String, ArrayDeque<BidSample>>()
+    private val spotsByTicker = linkedMapOf<String, ArrayDeque<SpotSample>>()
+    private val lastSpotByTicker = linkedMapOf<String, Double>()
+    private val maxBidPoints = 64
+    private val maxSpotPoints = 96
+
+    data class BidSample(
+        val tMs: Long,
+        val yesBid: Double?,
+        val noBid: Double?,
+        val spotUsd: Double? = null
+    )
+
+    data class SpotSample(
+        val tMs: Long,
+        val spotUsd: Double
+    )
 
     /**
      * Immutable book metrics copied under the TickBook lock. Scoring / Extended
@@ -61,6 +78,7 @@ class TickBook(private val maxPoints: Int = 80) {
         }
         // Order-book-derived ticks refresh last mid / meta but do not pollute
         // the velocity / volume-flow series (those stay ticker/trade/REST).
+        recordBid(tick, nowMs)
         if (tick.source == TickSource.WS_ORDERBOOK) return last(tick.ticker)
         if (mid == null) return last(tick.ticker)
         val q = byTicker.getOrPut(tick.ticker) { ArrayDeque() }
@@ -84,6 +102,80 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun midHistoryPp(ticker: String): List<Float> =
         byTicker[ticker]?.map { (it.mid01 * 100.0).toFloat() }.orEmpty()
+
+    @Synchronized
+    fun bidHistory(ticker: String): List<com.dirk.kalshiodds.chart.BidPoint> {
+        val bids = bidsByTicker[ticker]?.toList().orEmpty()
+        val spots = spotsByTicker[ticker]?.toList().orEmpty()
+        if (bids.isEmpty() && spots.isEmpty()) return emptyList()
+        if (bids.isEmpty()) {
+            return spots.map {
+                com.dirk.kalshiodds.chart.BidPoint(
+                    tMs = it.tMs,
+                    upBidCents = null,
+                    downBidCents = null,
+                    spotUsd = it.spotUsd
+                )
+            }
+        }
+        var si = 0
+        return bids.map { b ->
+            while (si + 1 < spots.size && spots[si + 1].tMs <= b.tMs) si++
+            val spot = when {
+                spots.isNotEmpty() && spots[si].tMs <= b.tMs -> spots[si].spotUsd
+                else -> b.spotUsd ?: lastSpotByTicker[ticker]
+            }
+            com.dirk.kalshiodds.chart.BidPoint(
+                tMs = b.tMs,
+                upBidCents = b.yesBid?.times(100.0)?.toFloat(),
+                downBidCents = b.noBid?.times(100.0)?.toFloat(),
+                spotUsd = spot
+            )
+        }
+    }
+
+    /**
+     * Last Coinbase/Binance print for [ticker]. Used so the hero spot
+     * panel has a dashed TARGET line in real USD space.
+     */
+    @Synchronized
+    fun noteSpot(ticker: String, spotUsd: Double?, nowMs: Long = System.currentTimeMillis()) {
+        if (!CryptoMarkets.isCryptoTicker(ticker)) return
+        val px = spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return
+        lastSpotByTicker[ticker] = px
+        val q = spotsByTicker.getOrPut(ticker) { ArrayDeque() }
+        val last = q.lastOrNull()
+        if (last != null && nowMs - last.tMs < 400L && kotlin.math.abs(last.spotUsd - px) < 0.01) {
+            return
+        }
+        q.addLast(SpotSample(nowMs, px))
+        while (q.size > maxSpotPoints) q.removeFirst()
+    }
+
+    @Synchronized
+    fun lastSpot(ticker: String): Double? = lastSpotByTicker[ticker]
+
+    private fun recordBid(tick: MarketTick, nowMs: Long) {
+        val (yesBid, yesAsk) = QuoteSanity.usablePair(tick.yesBid, tick.yesAsk)
+        val noFromAsk = yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+        val rawNo = tick.noBid
+        val no = if (QuoteSanity.isPlaceholder(rawNo)) noFromAsk else rawNo
+        if (yesBid == null && no == null) return
+        val q = bidsByTicker.getOrPut(tick.ticker) { ArrayDeque() }
+        val last = q.lastOrNull()
+        val spot = lastSpotByTicker[tick.ticker]
+        if (last != null && nowMs - last.tMs < 400L &&
+            last.yesBid == yesBid && last.noBid == no
+        ) {
+            if (spot != null && last.spotUsd == null) {
+                q.removeLast()
+                q.addLast(last.copy(spotUsd = spot))
+            }
+            return
+        }
+        q.addLast(BidSample(nowMs, yesBid, no, spot))
+        while (q.size > maxBidPoints) q.removeFirst()
+    }
 
     /**
      * Seed sparkline history after process death. No-op once live ticks
@@ -366,6 +458,9 @@ class TickBook(private val maxPoints: Int = 80) {
         volumeByTicker.drop()
         books.drop()
         strikeByTicker.drop()
+        bidsByTicker.drop()
+        spotsByTicker.drop()
+        lastSpotByTicker.drop()
     }
 
     @Synchronized
@@ -391,7 +486,9 @@ class TickBook(private val maxPoints: Int = 80) {
             closeTimeEpochMs = last?.closeTimeEpochMs ?: closeByTicker[ticker],
             source = TickSource.WS_ORDERBOOK,
             receiveElapsedNanos = receiveElapsedNanos,
-            exchangeTsMs = nowMs
+            exchangeTsMs = nowMs,
+            noBid = last?.noBid ?: ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
+            noAsk = last?.noAsk ?: bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
         )
     }
 

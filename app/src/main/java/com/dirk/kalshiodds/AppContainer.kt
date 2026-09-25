@@ -40,15 +40,21 @@ class AppContainer(context: Context) {
     val notifier = SignalNotifier(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
-    val resultsStore: ResultsStore = runCatching { SqliteResultsStore(app) }
+    private val resultsImpl = runCatching { SqliteResultsStore(app) as ResultsStore }
         .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
+    val resultsStore: ResultsStore = resultsImpl
+    val archive: com.dirk.kalshiodds.data.local.archive.DataArchive =
+        resultsImpl as com.dirk.kalshiodds.data.local.archive.DataArchive
+    val sessionId: String = java.util.UUID.randomUUID().toString()
+    val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
+    val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
     val scoring = ScoringEngine(
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
         extended = ExtendedAiRuntime()
-    )
+    ).also { it.edgeModel = importedModel.current() }
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,
@@ -97,4 +103,29 @@ class AppContainer(context: Context) {
             paper.book.settleFromLog(logStore.readAll())
         }
     )
+
+    init {
+        runCatching {
+            archive.insertSession(
+                com.dirk.kalshiodds.data.local.history.HistorySession(
+                    id = sessionId,
+                    startedAtMs = System.currentTimeMillis()
+                )
+            )
+        }
+    }
+
+    fun endSession() {
+        val paperSnap = runCatching { paper.book.snapshot() }.getOrNull()
+        runCatching {
+            archive.closeSession(
+                id = sessionId,
+                endedAtMs = System.currentTimeMillis(),
+                markets = resultsStore.recentOddsMids(40).map { it.ticker }.distinct().size,
+                signals = resultsStore.recentSnapshots(200).size,
+                bets = resultsStore.recentTickets(200).size + (paperSnap?.fills?.size ?: 0),
+                pnlUsd = paperSnap?.realizedPnlUsd
+            )
+        }
+    }
 }

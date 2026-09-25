@@ -48,7 +48,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
+fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current
@@ -345,10 +345,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
             Text(
                 "Scored snapshots, alerts, scorecard rows, and Approve-ticket attempts are written to on-device SQLite " +
                     "and a rolling results.log. Export writes a CSV you can open after a kill. " +
+                    "Import, Kalshi backfill, spot candles, Supabase restore, and model weights live on the Data screen. " +
                     "Tickets are still Approve-only — never unsupervised bets.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
+            Button(onClick = onOpenData, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+                Text("Open Data (import / backfill)")
+            }
             Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
             }
@@ -427,21 +431,23 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \$100, auto-logs a \$5 simulated fill when an AI hunter / LiveCall " +
+                "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
                     "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
                     "card is the ledger — you do not need to dig here to see it.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
-            ToggleRow("Paper trading (AI auto-log \$5 fills)", s.paperTradingEnabled, viewModel::setPaperTrading)
+            ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, viewModel::setPaperTrading)
             OutlinedButton(onClick = viewModel::resetPaperBook, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Two approve-gated live paths: (1) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
-                    "(2) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
+                "Three approve-gated live paths, each sized so a win pays the target (default \$50): " +
+                    "(1) Long-shot hunter — sides priced ≤20¢ (editable) when AI/fair beats implied after fees; " +
+                    "(2) hunter — still surfaces when a \$1 stake can settle ≥\$25 (ask ≤~4¢); " +
+                    "(3) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
                     "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
                     "Expired 15m windows drop or move to the live contract; a missing ask shows on that ticket " +
                     "(Approve stays off). Your positions load from GET /portfolio/positions; Sell is a reduce-only V2 " +
@@ -471,8 +477,92 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 s.ticketRespectGates,
                 viewModel::setTicketRespectGates
             )
+            Text(
+                String.format(
+                    Locale.US,
+                    "Long-shot hunter  max ask ≤ %.0f¢  · sized to win $%.0f when AI beats implied after fees",
+                    s.longShotMaxAsk * 100.0,
+                    s.winTargetUsd
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+            Text(
+                "Max ask ¢ — sides cheaper than this can appear as Long-shot cards (default 20¢).",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            Slider(
+                value = (s.longShotMaxAsk * 100.0).toFloat().coerceIn(5f, 40f),
+                onValueChange = { viewModel.setLongShotMaxAsk(it.toDouble() / 100.0) },
+                valueRange = 5f..40f,
+                steps = 34
+            )
+
+            Section("Win target sizing")
+            Text(
+                "On by default. Size every Buy UP/DOWN and hunter card (including Long-shot) so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
+                    "Live Approve uses GET /portfolio/balance cash; Paper uses paper-book equity. " +
+                    "Stake is capped at a % of that bankroll (default 10%) and an optional $ cap. " +
+                    "When the cap or book depth limits size, the card shows Capped: wins \$X. " +
+                    "Still Approve-only — never auto-placed.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Win-target sizing (default on · \$50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
+            Text(
+                String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.winTargetUsd.toFloat().coerceIn(5f, 200f),
+                onValueChange = { viewModel.setWinTargetUsd(it.toDouble()) },
+                valueRange = 5f..200f,
+                steps = 38
+            )
+            Text(
+                String.format(Locale.US, "Max stake  %.0f%% of bankroll", s.winTargetBankrollPct),
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.winTargetBankrollPct.toFloat().coerceIn(1f, 50f),
+                onValueChange = { viewModel.setWinTargetBankrollPct(it.toDouble()) },
+                valueRange = 1f..50f,
+                steps = 48
+            )
+            Text(
+                if (s.winTargetAbsCapUsd == null) {
+                    "Optional $ cap  off"
+                } else {
+                    String.format(Locale.US, "Optional $ cap  $%.0f", s.winTargetAbsCapUsd)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentGreen,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = (s.winTargetAbsCapUsd ?: 0.0).toFloat().coerceIn(0f, 200f),
+                onValueChange = {
+                    viewModel.setWinTargetAbsCapUsd(if (it < 1f) null else it.toDouble())
+                },
+                valueRange = 0f..200f,
+                steps = 39
+            )
 
             Section("Kalshi API key (WS + approve-gated orders)")
+            if (s.hasPrivateKey) {
+                Text(
+                    "Kalshi key saved (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)})",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
+            }
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
                     "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
@@ -502,8 +592,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit) {
                 }
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = viewModel::saveCredentials) { Text("Save key") }
-                OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear key") }
+                Button(onClick = viewModel::saveCredentials) {
+                    Text(if (s.hasPrivateKey) "Update key" else "Save key")
+                }
+                OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
             }
             state.credentialMessage?.let {
                 Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)

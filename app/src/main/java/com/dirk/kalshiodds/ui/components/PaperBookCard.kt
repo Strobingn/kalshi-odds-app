@@ -34,7 +34,8 @@ fun PaperBookCard(
     enabled: Boolean,
     onToggle: (Boolean) -> Unit,
     onReset: () -> Unit,
-    onSell: ((ticker: String, side: String) -> Unit)? = null
+    onSell: ((ticker: String, side: String) -> Unit)? = null,
+    onViewHistory: (() -> Unit)? = null
 ) {
     Column(
         modifier = Modifier
@@ -57,7 +58,7 @@ fun PaperBookCard(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Start / reset $100 · $5 per AI fill · never hits Kalshi",
+                    "Start / reset $100 · win-target sizing · never hits Kalshi",
                     style = MaterialTheme.typography.labelMedium,
                     color = TextSecondary
                 )
@@ -86,8 +87,15 @@ fun PaperBookCard(
         paper.lastMessage?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentGreen, fontWeight = FontWeight.SemiBold)
         }
-        OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
-            Text("Reset paper to $100")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
+                Text("Reset paper to $100")
+            }
+            if (onViewHistory != null) {
+                OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
+                    Text("View all")
+                }
+            }
         }
         if (paper.fills.isEmpty()) {
             Text(

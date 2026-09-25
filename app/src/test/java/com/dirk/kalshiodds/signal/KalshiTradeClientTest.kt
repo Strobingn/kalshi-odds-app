@@ -145,6 +145,9 @@ class KalshiTradeClientTest {
             return create
         }
 
+        override suspend fun getBalance() =
+            Response.success(com.dirk.kalshiodds.data.dto.GetBalanceResponse(balance = 12_500, balanceDollars = "125.00"))
+
         override suspend fun getPositions(
             countFilter: String,
             limit: Int,

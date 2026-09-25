@@ -252,7 +252,8 @@ class TicketBuilderGateTest {
             settings = SignalSettings(
                 ticketRespectGates = false,
                 ticketsEnabled = true,
-                ticketStakeUsd = 5.0
+                ticketStakeUsd = 5.0,
+                winTargetEnabled = false
             ),
             alertsPaused = true,
             idFactory = { "id" },
@@ -271,7 +272,12 @@ class TicketBuilderGateTest {
     @Test
     fun cheapLiquidClearedMarketIsProposed() {
         val ctx = TicketBuilder.Context(
-            settings = SignalSettings(ticketRespectGates = true, ticketsEnabled = true, ticketStakeUsd = 5.0),
+            settings = SignalSettings(
+                ticketRespectGates = true,
+                ticketsEnabled = true,
+                ticketStakeUsd = 5.0,
+                winTargetEnabled = false
+            ),
             alertsPaused = false,
             idFactory = { "id" },
             nowMs = 1L
@@ -306,7 +312,12 @@ class TicketBuilderGateTest {
         val quoted = TicketBuilder.quotedSize(m, "YES", book)
         assertTrue(quoted != null && quoted >= 200.0)
         val ctx = TicketBuilder.Context(
-            settings = SignalSettings(ticketRespectGates = true, ticketsEnabled = true, ticketStakeUsd = 5.0),
+            settings = SignalSettings(
+                ticketRespectGates = true,
+                ticketsEnabled = true,
+                ticketStakeUsd = 5.0,
+                winTargetEnabled = false
+            ),
             alertsPaused = false,
             books = mapOf(m.ticker to book),
             idFactory = { "snap" },
@@ -320,7 +331,11 @@ class TicketBuilderGateTest {
     @Test
     fun hunterIgnoresQualityGatesAndUsesOneDollar() {
         val ctx = TicketBuilder.Context(
-            settings = SignalSettings(ticketRespectGates = true, ticketsEnabled = true),
+            settings = SignalSettings(
+                ticketRespectGates = true,
+                ticketsEnabled = true,
+                winTargetEnabled = false
+            ),
             alertsPaused = true,
             idFactory = { "hunter" },
             nowMs = 1L

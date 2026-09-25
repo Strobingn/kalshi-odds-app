@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -53,7 +54,9 @@ fun MarketCard(
     modifier: Modifier = Modifier,
     compact: Boolean = false,
     onBuyYes: (() -> Unit)? = null,
-    onBuyNo: (() -> Unit)? = null
+    onBuyNo: (() -> Unit)? = null,
+    onSell: (() -> Unit)? = null,
+    onOpenChart: (() -> Unit)? = null
 ) {
     val scheme = MaterialTheme.colorScheme
     val cardBg = scheme.surface
@@ -185,14 +188,79 @@ fun MarketCard(
                 }
             }
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             Text(
-                text = "Odds (YES mid)",
+                text = "LIVE BOOK · UP / DOWN",
                 style = MaterialTheme.typography.labelMedium,
                 color = AccentBlue,
                 fontWeight = FontWeight.Bold
             )
-            OddsSparkline(market.oddsHistory, modifier = Modifier.fillMaxWidth().padding(top = 4.dp))
+            Spacer(Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                SideQuote(
+                    title = "UP  YES",
+                    bid = market.yesBid,
+                    ask = market.yesAsk,
+                    accent = AccentGreen,
+                    modifier = Modifier.weight(1f)
+                )
+                SideQuote(
+                    title = "DOWN  NO",
+                    bid = market.noBid,
+                    ask = market.noAsk,
+                    accent = AccentOrange,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            market.digitalFairPp?.let { fv ->
+                Text(
+                    text = String.format(
+                        Locale.US,
+                        "Fair value %.0f¢  ·  model %s",
+                        fv,
+                        market.importedModelPp?.let { String.format(Locale.US, "%.0f¢", it) } ?: "baseline"
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentBlue,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            BidChart(
+                points = market.bidHistory.ifEmpty {
+                    market.oddsHistory.mapIndexed { i, mid ->
+                        com.dirk.kalshiodds.chart.BidPoint(
+                            tMs = (market.closeTimeEpochMs ?: 0L) - (market.oddsHistory.size - 1 - i) * 2_000L,
+                            upBidCents = mid,
+                            downBidCents = 100f - mid
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
+                heightDp = if (compact) 72 else 110,
+                windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
+                windowEndMs = market.closeTimeEpochMs,
+                strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
+                spotUsd = market.spotUsd,
+                strikeUsd = market.floorStrike,
+                spotHeightDp = if (compact) 56 else 72
+            )
+            if (onOpenChart != null) {
+                Text(
+                    "Tap chart for full-screen scrub",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = labelColor,
+                    modifier = Modifier
+                        .clickable(onClick = onOpenChart)
+                        .padding(top = 2.dp)
+                )
+            }
 
             Spacer(Modifier.height(10.dp))
             Text(
@@ -349,7 +417,7 @@ fun MarketCard(
                 }
             }
 
-            if (onBuyYes != null || onBuyNo != null) {
+            if (onBuyYes != null || onBuyNo != null || onSell != null) {
                 Spacer(Modifier.height(12.dp))
                 Row(
                     Modifier.fillMaxWidth(),
@@ -358,14 +426,20 @@ fun MarketCard(
                     if (onBuyYes != null) {
                         Button(
                             onClick = onBuyYes,
-                            modifier = Modifier.weight(1f).height(48.dp)
-                        ) { Text("Buy YES") }
+                            modifier = Modifier.weight(1f).height(52.dp)
+                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
                     }
                     if (onBuyNo != null) {
                         OutlinedButton(
                             onClick = onBuyNo,
-                            modifier = Modifier.weight(1f).height(48.dp)
-                        ) { Text("Buy NO") }
+                            modifier = Modifier.weight(1f).height(52.dp)
+                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
+                    }
+                    if (onSell != null) {
+                        OutlinedButton(
+                            onClick = onSell,
+                            modifier = Modifier.weight(1f).height(52.dp)
+                        ) { Text("Sell") }
                     }
                 }
                 Text(
@@ -477,6 +551,39 @@ private fun ChecklistBlock(market: MarketUiModel) {
         Text(
             if (copied) "Copied" else "Copy checklist",
             modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
+
+@Composable
+private fun SideQuote(
+    title: String,
+    bid: Double?,
+    ask: Double?,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    val bg = MaterialTheme.colorScheme.surface
+    val labelColor = checklistLabelColor(bg)
+    val valueColor = Contrast.readable(accent, bg, minRatio = Contrast.AA_LARGE)
+    Column(
+        modifier
+            .background(accent.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
+        Text(
+            formatCents(bid),
+            fontSize = 32.sp,
+            fontWeight = FontWeight.Bold,
+            color = valueColor,
+            lineHeight = 36.sp
+        )
+        Text(
+            "bid  ·  ask ${formatCents(ask)}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = labelColor,
+            fontWeight = FontWeight.SemiBold
         )
     }
 }

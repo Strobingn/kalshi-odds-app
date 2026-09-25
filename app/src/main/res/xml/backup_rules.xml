@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <exclude domain="sharedpref" path="kalshi_signal_secrets.xml" />
+    <exclude domain="sharedpref" path="kalshi_signal_secrets_fallback.xml" />
+    <exclude domain="sharedpref" path="kalshi_signal_secrets_legacy.xml" />
+    <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_file_pref__" />
+</full-backup-content>

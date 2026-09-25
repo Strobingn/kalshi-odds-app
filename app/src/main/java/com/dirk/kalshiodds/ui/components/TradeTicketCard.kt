@@ -55,7 +55,7 @@ fun TradeTicketsSection(
     onCancelOrder: (String) -> Unit
 ) {
     val proposals = tickets.proposals.sortedByDescending {
-        if (it.kind == TicketKind.HUNTER) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
+        if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
     val working = tickets.working.filter { it.orderId != null && it.error?.startsWith("cancelled") != true }
 
@@ -66,7 +66,7 @@ fun TradeTicketsSection(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper \$5 (above, or on the card) is a simulated fill on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
+            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper uses the same win-target size as the card (default profit \$50) on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Long-shot cards appear at asks ≤20¢ when AI beats implied after fees. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary
         )
@@ -106,7 +106,7 @@ fun TradeTicketsSection(
         }
         if (proposals.isEmpty() && working.isEmpty() && visibleError == null) {
             Text(
-                "No pending tickets. Use Buy YES / Buy NO on the hero, or Sell on Your positions.",
+                "No pending tickets. Use Buy UP / Buy DOWN on a market, or Sell on Positions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = TextSecondary,
                 modifier = Modifier
@@ -144,12 +144,18 @@ private fun ProposedTicketCard(
     onDismiss: (String) -> Unit,
     onPaper: (String) -> Unit
 ) {
-    val hunter = ticket.kind == TicketKind.HUNTER
-    val border = if (hunter) AccentOrange else AccentBlue
+    val hunter = ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE
+    val highlightEdge = hunter && ticket.modelEdge
+    val border = when {
+        highlightEdge -> AccentOrange
+        ticket.kind == TicketKind.HUNTER_VALUE -> TextSecondary
+        hunter -> AccentOrange
+        else -> AccentBlue
+    }
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(if (hunter) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
+            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
         colors = CardDefaults.cardColors(containerColor = Surface),
         shape = RoundedCornerShape(16.dp)
     ) {
@@ -157,13 +163,14 @@ private fun ProposedTicketCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     when (ticket.kind) {
-                        TicketKind.HUNTER -> "PENDING APPROVAL · $1 → ≥$25"
+                        TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
+                        TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (hunter) AccentOrange else AccentBlue,
+                    color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) AccentOrange else AccentBlue,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
@@ -196,17 +203,58 @@ private fun ProposedTicketCard(
                 }
             } else {
             Spacer(Modifier.height(8.dp))
-            TicketMetricRow("Stake", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
-            TicketMetricRow("Ask / limit", String.format(Locale.US, "%.0f¢  (never market)", ticket.limitPrice * 100))
-            TicketMetricRow("Est. fill", String.format(Locale.US, "$%.2f", ticket.estimatedFillUsd))
+            TicketMetricRow("Stake needed", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
+            TicketMetricRow("Contracts", String.format(Locale.US, "%d", ticket.contracts))
+            TicketMetricRow(
+                "Avg price",
+                String.format(Locale.US, "%.1f¢  (never market)", ticket.estimatedAvgFill * 100)
+            )
             TicketMetricRow(
                 "Max payout",
                 String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)
             )
-            TicketMetricRow(
-                "Potential gain",
-                String.format(Locale.US, "$%.0f", ticket.potentialGainUsd)
-            )
+            run {
+                val profit = ticket.profitIfWinUsd ?: ticket.potentialGainUsd
+                val target = ticket.winTargetUsd ?: profit
+                val winsLabel = if (ticket.winTargetCapped) {
+                    String.format(Locale.US, "Capped: wins $%.0f", profit)
+                } else {
+                    String.format(Locale.US, "Wins $%.0f", target)
+                }
+                TicketMetricRow(winsLabel, String.format(Locale.US, "$%.2f", profit))
+            }
+            ticket.bankrollUsd?.let { roll ->
+                val src = when (ticket.bankrollSource) {
+                    "live" -> "Kalshi cash"
+                    "paper" -> "paper book"
+                    else -> "settings bankroll"
+                }
+                TicketMetricRow("Bankroll", String.format(Locale.US, "$%.0f · %s", roll, src))
+            }
+            ticket.impliedChance?.let {
+                TicketMetricRow("Implied chance", String.format(Locale.US, "%.0f%%", it * 100.0))
+            }
+            ticket.modelChance?.let {
+                TicketMetricRow(
+                    if (ticket.modelEdge) "AI chance (edge)" else "AI chance",
+                    String.format(Locale.US, "%.0f%%", it * 100.0)
+                )
+            }
+            ticket.fairChance?.let { fair ->
+                if (ticket.modelChance == null || kotlin.math.abs(fair - ticket.modelChance) > 0.005) {
+                    TicketMetricRow("Fair value", String.format(Locale.US, "%.0f%%", fair * 100.0))
+                }
+            }
+            if (ticket.kind == TicketKind.HUNTER_VALUE) {
+                TicketMetricRow(
+                    if (ticket.modelEdge) "Edge vs market" else "Edge vs market",
+                    if (ticket.modelEdge) "YES — model beats implied after fees + margin"
+                    else "No — model does not clear fees + margin"
+                )
+            }
+            ticket.winTargetNote?.let {
+                TicketMetricRow(if (ticket.winTargetCapped) "Win target (capped)" else "Win target", it)
+            }
             ticket.netEvUsd?.let {
                 TicketMetricRow("Net EV", String.format(Locale.US, "%+.2f  (%+.1f pp)", it, ticket.netEdgePp ?: 0.0))
             }
@@ -239,7 +287,10 @@ private fun ProposedTicketCard(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text(if (ticket.isSell) "Paper sell" else "Paper $5")
+                    Text(
+                        if (ticket.isSell) "Paper sell"
+                        else String.format(Locale.US, "Paper $%.2f", ticket.stakeUsd)
+                    )
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
@@ -384,9 +435,9 @@ private fun ApproveTicketDialog(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     )
                 }
-                if (ticket.kind == TicketKind.HUNTER) {
+                if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE) {
                     Text(
-                        "Hunter path: $1 stake, ≥$25 max payout.",
+                        ticket.gateNote ?: "Hunter path · Approve still required — never auto-placed.",
                         style = MaterialTheme.typography.labelMedium,
                         color = AccentOrange,
                         modifier = Modifier.padding(top = 6.dp)

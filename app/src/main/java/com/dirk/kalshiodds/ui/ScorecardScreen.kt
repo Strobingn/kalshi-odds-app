@@ -87,6 +87,7 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
             AdapterBanner(ui.adapter)
             GuardBanner(ui.guardrails)
             MuteBanner(ui.allowlist)
+            HonestCard(snap.honest)
             WindowCard("Today", snap.daily)
             WindowCard("Rolling 7 days", snap.rolling)
             WindowCard("All time", snap.allTime)
@@ -215,6 +216,56 @@ private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
             .background(AccentOrange.copy(alpha = if (muted.isEmpty()) 0.06f else 0.12f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     )
+}
+
+@Composable
+private fun HonestCard(h: ScorecardMetrics.Honest) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        if (!h.enoughData) {
+            Text(
+                "Not enough data yet — ${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled signals. Numbers below are provisional.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = AccentOrange,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 6.dp)
+            )
+        } else {
+            Text(
+                String.format(Locale.US, "%d settled signals", h.n),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Stat("Model Brier", h.modelBrier?.let { String.format(Locale.US, "%.3f", it) } ?: "—")
+            Stat("Market Brier", h.marketBrier?.let { String.format(Locale.US, "%.3f", it) } ?: "—")
+            Stat("Hit rate", h.hitRate?.let { String.format(Locale.US, "%.0f%%", it * 100) } ?: "—")
+        }
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Stat("Edge if right", h.avgEdgeWhenRight?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
+            Stat("Edge if wrong", h.avgEdgeWhenWrong?.let { String.format(Locale.US, "%+.1fpp", it) } ?: "—")
+            Stat("N", if (h.n == 0) "—" else h.n.toString())
+        }
+        if (h.perAsset.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            h.perAsset.forEach { row ->
+                Text(
+                    "${row.label}  ${row.stats.label}  Brier ${row.stats.brier?.let { String.format(Locale.US, "%.3f", it) } ?: "—"}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TextSecondary
+                )
+            }
+        }
+    }
 }
 
 @Composable

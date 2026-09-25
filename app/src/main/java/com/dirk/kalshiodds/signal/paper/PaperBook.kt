@@ -29,17 +29,28 @@ data class PaperFill(
     val outcome: String? = null,
     val won: Boolean? = null,
     val pnlUsd: Double? = null,
-    val note: String
+    val note: String,
+    val winTargetUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 }
+
+@Serializable
+data class PaperArchive(
+    val archivedAtMs: Long,
+    val startingUsd: Double,
+    val cashUsd: Double,
+    val fills: List<PaperFill>,
+    val note: String = "paper reset"
+)
 
 @Serializable
 data class PaperBookState(
     val startingUsd: Double = SignalConstants.PAPER_START_USD,
     val cashUsd: Double = SignalConstants.PAPER_START_USD,
     val fills: List<PaperFill> = emptyList(),
-    val lastMessage: String? = null
+    val lastMessage: String? = null,
+    val archived: List<PaperArchive> = emptyList()
 ) {
     val openStakeUsd: Double get() = fills.filter { !it.settled }.sumOf { it.stakeUsd }
     val realizedPnlUsd: Double get() = fills.mapNotNull { it.pnlUsd }.sum()
@@ -65,7 +76,20 @@ class PaperBook(
 
     fun reset() {
         synchronized(lock) {
-            publish(PaperBookState(lastMessage = "Paper book reset to $100 — no Kalshi orders"))
+            val cur = _state.value
+            val archive = PaperArchive(
+                archivedAtMs = nowMs(),
+                startingUsd = cur.startingUsd,
+                cashUsd = cur.cashUsd,
+                fills = cur.fills,
+                note = "Paper book reset — ledger archived"
+            )
+            publish(
+                PaperBookState(
+                    lastMessage = "Paper book reset to $100 — prior run archived",
+                    archived = cur.archived + archive
+                )
+            )
         }
     }
 
@@ -89,7 +113,14 @@ class PaperBook(
             side = ticket.side,
             limitPrice = ticket.limitPrice,
             source = source,
-            note = "Paper $5 · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
+            note = if (ticket.winTargetUsd != null) {
+                "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
+            } else {
+                "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
+            },
+            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
+            winTargetUsd = ticket.winTargetUsd
         )
     }
 
@@ -112,9 +143,16 @@ class PaperBook(
         return fill(
             ticker = ticket.ticker,
             side = ticket.side,
-            limitPrice = ticket.limitPrice,
+            limitPrice = ticket.estimatedAvgFill.takeIf { it > 0 } ?: ticket.limitPrice,
             source = "manual paper",
-            note = "Paper $5 from ticket · never sent to Kalshi"
+            note = if (ticket.winTargetUsd != null) {
+                "Paper win-target from ticket · never sent to Kalshi"
+            } else {
+                "Paper fill from ticket · never sent to Kalshi"
+            },
+            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
+            winTargetUsd = ticket.winTargetUsd
         )
     }
 
@@ -247,19 +285,22 @@ class PaperBook(
         side: String,
         limitPrice: Double,
         source: String,
-        note: String
+        note: String,
+        contracts: Int? = null,
+        stakeUsd: Double? = null,
+        winTargetUsd: Double? = null
     ): PaperFill? {
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = limitPrice.coerceIn(0.01, 0.99)
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { it.ticker.equals(ticker, ignoreCase = true) }) return null
-            val contracts = floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
-            if (contracts < 1) {
+            val qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            if (qty < 1) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
                 return null
             }
-            val stake = contracts * px
+            val stake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)
             if (cur.cashUsd + 1e-9 < stake) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — need $100 reset (cash ${fmt(cur.cashUsd)})"))
                 return null
@@ -269,11 +310,12 @@ class PaperBook(
                 ticker = ticker,
                 side = want,
                 stakeUsd = stake,
-                contracts = contracts,
+                contracts = qty,
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),
-                note = note
+                note = note,
+                winTargetUsd = winTargetUsd
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(

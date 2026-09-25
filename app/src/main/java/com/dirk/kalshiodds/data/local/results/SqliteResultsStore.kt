@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * a process kill. Writes are serialized by SQLite; callers should use
  * [AsyncResultsWriter] so scoring never blocks.
  */
-class SqliteResultsStore(context: Context) : ResultsStore {
+class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
     private val db = Helper(context.applicationContext)
 
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -152,6 +152,8 @@ class SqliteResultsStore(context: Context) : ResultsStore {
         put("ticker", r.ticker)
         put("mid01", r.mid01)
         put("created_at_ms", r.createdAtMs)
+        put("yes_bid", r.yesBid)
+        put("no_bid", r.noBid)
     }
 
     private fun ticketValues(r: TicketAttemptRow) = ContentValues().apply {
@@ -213,8 +215,461 @@ class SqliteResultsStore(context: Context) : ResultsStore {
         id = c.long("id"),
         ticker = c.str("ticker"),
         mid01 = c.dbl("mid01"),
-        createdAtMs = c.long("created_at_ms")
+        createdAtMs = c.long("created_at_ms"),
+        yesBid = c.dblOrNull("yes_bid"),
+        noBid = c.dblOrNull("no_bid")
     )
+
+    override fun upsertSettled(rows: List<com.dirk.kalshiodds.data.local.archive.SettledWindowRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    TABLE_SETTLED,
+                    null,
+                    ContentValues().apply {
+                        put("ticker", r.ticker)
+                        put("series", r.series)
+                        put("result", r.result)
+                        put("strike", r.strikeUsd)
+                        put("open_ms", r.openMs)
+                        put("close_ms", r.closeMs)
+                        put("imported_at_ms", r.importedAtMs)
+                        put("source", r.source)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE
+                )
+            }
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    override fun insertPricePath(rows: List<com.dirk.kalshiodds.data.local.archive.PricePathRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    TABLE_PATH,
+                    null,
+                    ContentValues().apply {
+                        put("ticker", r.ticker)
+                        put("t_ms", r.tMs)
+                        put("yes_bid", r.yesBid)
+                        put("no_bid", r.noBid)
+                        put("mid", r.mid)
+                    },
+                    SQLiteDatabase.CONFLICT_IGNORE
+                )
+            }
+            w.execSQL(
+                "DELETE FROM $TABLE_PATH WHERE id NOT IN (SELECT id FROM $TABLE_PATH ORDER BY id DESC LIMIT $MAX_PATH)"
+            )
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    override fun insertSpotCandles(rows: List<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    TABLE_SPOT,
+                    null,
+                    ContentValues().apply {
+                        put("product", r.product)
+                        put("t_ms", r.tMs)
+                        put("open", r.open)
+                        put("high", r.high)
+                        put("low", r.low)
+                        put("close", r.close)
+                        put("volume", r.volume)
+                    },
+                    SQLiteDatabase.CONFLICT_IGNORE
+                )
+            }
+            w.execSQL(
+                "DELETE FROM $TABLE_SPOT WHERE id NOT IN (SELECT id FROM $TABLE_SPOT ORDER BY id DESC LIMIT $MAX_SPOT)"
+            )
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    override fun insertFills(rows: List<com.dirk.kalshiodds.data.importing.ImportedFill>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    TABLE_FILL,
+                    null,
+                    ContentValues().apply {
+                        put("fill_id", r.id)
+                        put("ticker", r.ticker)
+                        put("side", r.side)
+                        put("action", r.action)
+                        put("count", r.count)
+                        put("price", r.price)
+                        put("created_at_ms", r.createdAtMs)
+                        put("source", r.source)
+                    },
+                    SQLiteDatabase.CONFLICT_IGNORE
+                )
+            }
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
+
+    override fun bidHistory(ticker: String, sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.chart.BidPoint> {
+        val out = ArrayList<com.dirk.kalshiodds.chart.BidPoint>(limit)
+        db.readableDatabase.query(
+            TABLE_ODDS,
+            arrayOf("created_at_ms", "yes_bid", "no_bid", "mid01"),
+            "ticker = ? AND created_at_ms >= ?",
+            arrayOf(ticker, sinceMs.toString()),
+            null,
+            null,
+            "created_at_ms ASC",
+            limit.coerceIn(1, 2_000).toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                val yes = c.dblOrNull("yes_bid")
+                val no = c.dblOrNull("no_bid")
+                val mid = c.dblOrNull("mid01")
+                out.add(
+                    com.dirk.kalshiodds.chart.BidPoint(
+                        tMs = c.long("created_at_ms"),
+                        upBidCents = yes?.times(100.0)?.toFloat() ?: mid?.times(100.0)?.toFloat(),
+                        downBidCents = no?.times(100.0)?.toFloat()
+                            ?: mid?.let { ((1.0 - it) * 100.0).toFloat() }
+                    )
+                )
+            }
+        }
+        if (out.size < 4) {
+            db.readableDatabase.query(
+                TABLE_PATH,
+                arrayOf("t_ms", "yes_bid", "no_bid", "mid"),
+                "ticker = ? AND t_ms >= ?",
+                arrayOf(ticker, sinceMs.toString()),
+                null,
+                null,
+                "t_ms ASC",
+                limit.coerceIn(1, 2_000).toString()
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val yes = c.dblOrNull("yes_bid")
+                    val no = c.dblOrNull("no_bid")
+                    val mid = c.dblOrNull("mid")
+                    out.add(
+                        com.dirk.kalshiodds.chart.BidPoint(
+                            tMs = c.long("t_ms"),
+                            upBidCents = yes?.times(100.0)?.toFloat() ?: mid?.times(100.0)?.toFloat(),
+                            downBidCents = no?.times(100.0)?.toFloat()
+                                ?: mid?.let { ((1.0 - it) * 100.0).toFloat() }
+                        )
+                    )
+                }
+            }
+        }
+        return out.sortedBy { it.tMs }
+    }
+
+    override fun pricePath(ticker: String, limit: Int): List<com.dirk.kalshiodds.data.local.archive.PricePathRow> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.archive.PricePathRow>(limit)
+        db.readableDatabase.query(
+            TABLE_PATH,
+            null,
+            "ticker = ?",
+            arrayOf(ticker),
+            null,
+            null,
+            "t_ms DESC",
+            limit.coerceIn(1, 2_000).toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.archive.PricePathRow(
+                        ticker = c.str("ticker"),
+                        tMs = c.long("t_ms"),
+                        yesBid = c.dblOrNull("yes_bid"),
+                        noBid = c.dblOrNull("no_bid"),
+                        mid = c.dblOrNull("mid")
+                    )
+                )
+            }
+        }
+        return out.asReversed()
+    }
+
+    override fun spotCloses(product: String, startMs: Long, endMs: Long): List<Double> {
+        val out = ArrayList<Double>()
+        db.readableDatabase.query(
+            TABLE_SPOT,
+            arrayOf("close"),
+            "product = ? AND t_ms >= ? AND t_ms <= ?",
+            arrayOf(product, startMs.toString(), endMs.toString()),
+            null,
+            null,
+            "t_ms ASC",
+            "400"
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.dbl("close"))
+        }
+        return out
+    }
+
+    override fun stats(): com.dirk.kalshiodds.data.local.archive.DataStats {
+        val r = db.readableDatabase
+        fun count(sql: String): Int = r.rawQuery(sql, null).use { c ->
+            if (c.moveToFirst()) c.getInt(0) else 0
+        }
+        fun longOrNull(sql: String): Long? = r.rawQuery(sql, null).use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) c.getLong(0) else null
+        }
+        return com.dirk.kalshiodds.data.local.archive.DataStats(
+            settledCount = count("SELECT COUNT(*) FROM $TABLE_SETTLED"),
+            minCloseMs = longOrNull("SELECT MIN(close_ms) FROM $TABLE_SETTLED"),
+            maxCloseMs = longOrNull("SELECT MAX(close_ms) FROM $TABLE_SETTLED"),
+            btc = count("SELECT COUNT(*) FROM $TABLE_SETTLED WHERE series LIKE '%BTC%'"),
+            eth = count("SELECT COUNT(*) FROM $TABLE_SETTLED WHERE series LIKE '%ETH%'"),
+            sol = count("SELECT COUNT(*) FROM $TABLE_SETTLED WHERE series LIKE '%SOL%'"),
+            pathPoints = count("SELECT COUNT(*) FROM $TABLE_PATH"),
+            spotCandles = count("SELECT COUNT(*) FROM $TABLE_SPOT"),
+            fills = count("SELECT COUNT(*) FROM $TABLE_FILL"),
+            yesSettled = count("SELECT COUNT(*) FROM $TABLE_SETTLED WHERE result = 'yes'"),
+            noSettled = count("SELECT COUNT(*) FROM $TABLE_SETTLED WHERE result = 'no'")
+        ).let { s ->
+            s.copy(other = (s.settledCount - s.btc - s.eth - s.sol).coerceAtLeast(0))
+        }
+    }
+
+    override fun settledTickers(): Set<String> {
+        val out = HashSet<String>()
+        db.readableDatabase.rawQuery("SELECT ticker FROM $TABLE_SETTLED", null).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    override fun recentSettled(series: String?, limit: Int): List<com.dirk.kalshiodds.data.local.archive.SettledWindowRow> {
+        val sql = if (series.isNullOrBlank()) {
+            "SELECT ticker, series, result, strike, open_ms, close_ms, imported_at_ms, source FROM $TABLE_SETTLED ORDER BY close_ms DESC LIMIT ?"
+        } else {
+            "SELECT ticker, series, result, strike, open_ms, close_ms, imported_at_ms, source FROM $TABLE_SETTLED WHERE series = ? OR ticker LIKE ? ORDER BY close_ms DESC LIMIT ?"
+        }
+        val args = if (series.isNullOrBlank()) {
+            arrayOf(limit.toString())
+        } else {
+            arrayOf(series, "$series%", limit.toString())
+        }
+        val out = ArrayList<com.dirk.kalshiodds.data.local.archive.SettledWindowRow>()
+        db.readableDatabase.rawQuery(sql, args).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+                        ticker = c.getString(0),
+                        series = c.getString(1) ?: "",
+                        result = c.getString(2) ?: "",
+                        strikeUsd = if (c.isNull(3)) null else c.getDouble(3),
+                        openMs = if (c.isNull(4)) null else c.getLong(4),
+                        closeMs = if (c.isNull(5)) null else c.getLong(5),
+                        importedAtMs = if (c.isNull(6)) 0L else c.getLong(6),
+                        source = c.getString(7) ?: "kalshi"
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    override fun existingFillIds(): Set<String> {
+        val out = HashSet<String>()
+        db.readableDatabase.rawQuery("SELECT fill_id FROM $TABLE_FILL", null).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    override fun existingSnapshotKeys(): Set<String> {
+        val out = HashSet<String>()
+        db.readableDatabase.rawQuery("SELECT ticker, created_at_ms FROM $TABLE_SNAP", null).use { c ->
+            while (c.moveToNext()) out.add("${c.getString(0)}|${c.getLong(1)}")
+        }
+        return out
+    }
+
+    override fun existingAlertIds(): Set<String> {
+        val out = HashSet<String>()
+        db.readableDatabase.rawQuery("SELECT alert_id FROM $TABLE_ALERT", null).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0).orEmpty())
+        }
+        return out
+    }
+
+    override fun existingTicketKeys(): Set<String> {
+        val out = HashSet<String>()
+        db.readableDatabase.rawQuery(
+            "SELECT COALESCE(client_order_id, ticker || '|' || created_at_ms) FROM $TABLE_TICKET",
+            null
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0).orEmpty())
+        }
+        return out
+    }
+
+    override fun readCursor(job: String): com.dirk.kalshiodds.data.local.archive.BackfillCursorRow? {
+        db.readableDatabase.query(
+            TABLE_CURSOR,
+            null,
+            "job = ?",
+            arrayOf(job),
+            null, null, null, "1"
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return com.dirk.kalshiodds.data.local.archive.BackfillCursorRow(
+                job = c.str("job"),
+                series = c.str("series"),
+                cursor = c.strOrNull("cursor"),
+                minCloseMs = c.long("min_close_ms").takeIf { it > 0L },
+                lastTicker = c.strOrNull("last_ticker"),
+                updatedAtMs = c.long("updated_at_ms"),
+                status = c.str("status"),
+                days = c.long("days").toInt().coerceAtLeast(1),
+                processed = c.long("processed").toInt()
+            )
+        }
+    }
+
+    override fun writeCursor(row: com.dirk.kalshiodds.data.local.archive.BackfillCursorRow) {
+        db.writableDatabase.insertWithOnConflict(
+            TABLE_CURSOR,
+            null,
+            ContentValues().apply {
+                put("job", row.job)
+                put("series", row.series)
+                put("cursor", row.cursor)
+                put("min_close_ms", row.minCloseMs)
+                put("last_ticker", row.lastTicker)
+                put("updated_at_ms", row.updatedAtMs)
+                put("status", row.status)
+                put("days", row.days)
+                put("processed", row.processed)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun clearCursor(job: String) {
+        db.writableDatabase.delete(TABLE_CURSOR, "job = ?", arrayOf(job))
+    }
+
+    override fun insertSettingsChange(row: com.dirk.kalshiodds.data.local.history.SettingsChange) {
+        db.writableDatabase.insert(
+            TABLE_SETTINGS,
+            null,
+            ContentValues().apply {
+                put("created_at_ms", row.createdAtMs)
+                put("key", row.key)
+                put("old_value", row.oldValue)
+                put("new_value", row.newValue)
+                put("snapshot_json", row.snapshotJson)
+            }
+        )
+        prune(db.writableDatabase, TABLE_SETTINGS, MAX_SETTINGS)
+    }
+
+    override fun recentSettingsChanges(limit: Int, offset: Int): List<com.dirk.kalshiodds.data.local.history.SettingsChange> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.history.SettingsChange>()
+        db.readableDatabase.rawQuery(
+            "SELECT id, created_at_ms, key, old_value, new_value, snapshot_json FROM $TABLE_SETTINGS ORDER BY created_at_ms DESC LIMIT ? OFFSET ?",
+            arrayOf(limit.coerceIn(1, 400).toString(), offset.coerceAtLeast(0).toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.history.SettingsChange(
+                        id = c.getLong(0),
+                        createdAtMs = c.getLong(1),
+                        key = c.getString(2).orEmpty(),
+                        oldValue = c.getString(3).orEmpty(),
+                        newValue = c.getString(4).orEmpty(),
+                        snapshotJson = c.getString(5)
+                    )
+                )
+            }
+        }
+        return out
+    }
+
+    override fun insertSession(row: com.dirk.kalshiodds.data.local.history.HistorySession) {
+        db.writableDatabase.insertWithOnConflict(
+            TABLE_SESSION,
+            null,
+            ContentValues().apply {
+                put("id", row.id)
+                put("started_at_ms", row.startedAtMs)
+                put("ended_at_ms", row.endedAtMs)
+                put("markets", row.markets)
+                put("signals", row.signals)
+                put("bets", row.bets)
+                put("pnl_usd", row.pnlUsd)
+            },
+            SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun closeSession(
+        id: String,
+        endedAtMs: Long,
+        markets: Int,
+        signals: Int,
+        bets: Int,
+        pnlUsd: Double?
+    ) {
+        db.writableDatabase.execSQL(
+            "UPDATE $TABLE_SESSION SET ended_at_ms = ?, markets = ?, signals = ?, bets = ?, pnl_usd = ? WHERE id = ?",
+            arrayOf(endedAtMs, markets, signals, bets, pnlUsd, id)
+        )
+    }
+
+    override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.history.HistorySession>()
+        db.readableDatabase.rawQuery(
+            "SELECT id, started_at_ms, ended_at_ms, markets, signals, bets, pnl_usd FROM $TABLE_SESSION ORDER BY started_at_ms DESC LIMIT ?",
+            arrayOf(limit.coerceIn(1, 200).toString())
+        ).use { c ->
+            while (c.moveToNext()) {
+                out.add(
+                    com.dirk.kalshiodds.data.local.history.HistorySession(
+                        id = c.getString(0),
+                        startedAtMs = c.getLong(1),
+                        endedAtMs = if (c.isNull(2)) null else c.getLong(2),
+                        markets = c.getInt(3),
+                        signals = c.getInt(4),
+                        bets = c.getInt(5),
+                        pnlUsd = if (c.isNull(6)) null else c.getDouble(6)
+                    )
+                )
+            }
+        }
+        return out
+    }
 
     private fun cursorToTicket(c: Cursor) = TicketAttemptRow(
         id = c.long("id"),
@@ -301,10 +756,17 @@ class SqliteResultsStore(context: Context) : ResultsStore {
             db.execSQL("CREATE INDEX idx_snap_created ON $TABLE_SNAP(created_at_ms)")
             db.execSQL("CREATE INDEX idx_alert_created ON $TABLE_ALERT(created_at_ms)")
             createOddsTable(db)
+            createArchiveTables(db)
+            createHistoryTables(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
             if (oldVersion < 2) createOddsTable(db)
+            if (oldVersion < 3) {
+                addBidColumns(db)
+                createArchiveTables(db)
+            }
+            if (oldVersion < 4) createHistoryTables(db)
         }
 
         private fun createOddsTable(db: SQLiteDatabase) {
@@ -319,22 +781,117 @@ class SqliteResultsStore(context: Context) : ResultsStore {
                 """.trimIndent()
             )
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_odds_ticker_time ON $TABLE_ODDS(ticker, created_at_ms)")
+            addBidColumns(db)
+        }
+
+        private fun addBidColumns(db: SQLiteDatabase) {
+            runCatching { db.execSQL("ALTER TABLE $TABLE_ODDS ADD COLUMN yes_bid REAL") }
+            runCatching { db.execSQL("ALTER TABLE $TABLE_ODDS ADD COLUMN no_bid REAL") }
+        }
+
+        private fun createArchiveTables(db: SQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_SETTLED (
+                  ticker TEXT PRIMARY KEY,
+                  series TEXT,
+                  result TEXT,
+                  strike REAL,
+                  open_ms INTEGER,
+                  close_ms INTEGER,
+                  imported_at_ms INTEGER,
+                  source TEXT
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_PATH (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  ticker TEXT NOT NULL,
+                  t_ms INTEGER NOT NULL,
+                  yes_bid REAL,
+                  no_bid REAL,
+                  mid REAL,
+                  UNIQUE(ticker, t_ms)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_SPOT (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  product TEXT NOT NULL,
+                  t_ms INTEGER NOT NULL,
+                  open REAL, high REAL, low REAL, close REAL, volume REAL,
+                  UNIQUE(product, t_ms)
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_FILL (
+                  fill_id TEXT PRIMARY KEY,
+                  ticker TEXT,
+                  side TEXT,
+                  action TEXT,
+                  count REAL,
+                  price REAL,
+                  created_at_ms INTEGER,
+                  source TEXT
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_CURSOR (
+                  job TEXT PRIMARY KEY,
+                  series TEXT,
+                  cursor TEXT,
+                  min_close_ms INTEGER,
+                  last_ticker TEXT,
+                  updated_at_ms INTEGER,
+                  status TEXT,
+                  days INTEGER,
+                  processed INTEGER
+                )
+                """.trimIndent()
+            )
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_settled_close ON $TABLE_SETTLED(close_ms)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_path_ticker ON $TABLE_PATH(ticker, t_ms)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_spot_prod ON $TABLE_SPOT(product, t_ms)")
+        }
+
+        private fun createHistoryTables(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.history.ArchiveSchema.upgradeSql(3)) {
+                db.execSQL(sql)
+            }
         }
     }
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 2
+        const val DB_VERSION = 4
+        const val TABLE_SETTINGS = "settings_history"
+        const val TABLE_SESSION = "sessions"
+        const val MAX_SETTINGS = 400
         const val TABLE_SNAP = "scored_snapshots"
         const val TABLE_ALERT = "alerts_fired"
         const val TABLE_CARD = "scorecard_rows"
         const val TABLE_TICKET = "ticket_attempts"
         const val TABLE_ODDS = "odds_mids"
+        const val TABLE_SETTLED = "settled_windows"
+        const val TABLE_PATH = "price_path"
+        const val TABLE_SPOT = "spot_candles"
+        const val TABLE_FILL = "imported_fills"
+        const val TABLE_CURSOR = "backfill_cursor"
         const val MAX_SNAP = 1_200
         const val MAX_ALERT = 400
         const val MAX_CARD = 600
         const val MAX_TICKET = 300
         const val MAX_ODDS = 2_400
+        const val MAX_PATH = 8_000
+        const val MAX_SPOT = 12_000
     }
 }
 

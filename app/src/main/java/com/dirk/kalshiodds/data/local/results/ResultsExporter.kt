@@ -16,6 +16,105 @@ object ResultsExporter {
     const val TICKET_HEADER =
         "kind,ticker,side,stake_usd,approved,result,created_at_ms,client_order_id,note"
 
+    fun json(bundle: ResultsBundle): String {
+        val root = org.json.JSONObject()
+        root.put("format", "diphunter-results-v1")
+        val snaps = org.json.JSONArray()
+        for (r in bundle.snapshots) {
+            snaps.put(
+                org.json.JSONObject()
+                    .put("kind", "snapshot")
+                    .put("ticker", r.ticker)
+                    .put("series", r.series)
+                    .put("side", r.side)
+                    .put("edge_pp", r.edgePp)
+                    .put("fair_pp", r.fairPp)
+                    .put("market_pp", r.marketPp)
+                    .put("created_at_ms", r.createdAtMs)
+            )
+        }
+        root.put("snapshots", snaps)
+        val alerts = org.json.JSONArray()
+        for (r in bundle.alerts) {
+            alerts.put(
+                org.json.JSONObject()
+                    .put("kind", "alert")
+                    .put("alert_id", r.alertId)
+                    .put("ticker", r.ticker)
+                    .put("series", r.series)
+                    .put("side", r.side)
+                    .put("edge_pp", r.edgePp)
+                    .put("created_at_ms", r.createdAtMs)
+                    .put("reason", r.reason)
+            )
+        }
+        root.put("alerts", alerts)
+        val cards = org.json.JSONArray()
+        for (r in bundle.scorecards) {
+            cards.put(
+                org.json.JSONObject()
+                    .put("kind", "scorecard")
+                    .put("ticker", r.ticker)
+                    .put("series", r.series)
+                    .put("outcome", r.outcome)
+                    .put("created_at_ms", r.createdAtMs)
+            )
+        }
+        root.put("scorecards", cards)
+        val tickets = org.json.JSONArray()
+        for (r in bundle.tickets) {
+            tickets.put(
+                org.json.JSONObject()
+                    .put("kind", "ticket")
+                    .put("ticker", r.ticker)
+                    .put("side", r.side)
+                    .put("stake_usd", r.stakeUsd)
+                    .put("approved", r.approved)
+                    .put("result", r.result)
+                    .put("created_at_ms", r.createdAtMs)
+                    .put("client_order_id", r.clientOrderId)
+            )
+        }
+        root.put("tickets", tickets)
+        return root.toString()
+    }
+
+    fun jsonWithHistory(
+        bundle: ResultsBundle,
+        settings: List<com.dirk.kalshiodds.data.local.history.SettingsChange> = emptyList(),
+        sessions: List<com.dirk.kalshiodds.data.local.history.HistorySession> = emptyList()
+    ): String {
+        val root = org.json.JSONObject(json(bundle))
+        val sc = org.json.JSONArray()
+        for (r in settings) {
+            sc.put(
+                org.json.JSONObject()
+                    .put("kind", "settings_change")
+                    .put("created_at_ms", r.createdAtMs)
+                    .put("key", r.key)
+                    .put("old_value", r.oldValue)
+                    .put("new_value", r.newValue)
+                    .put("snapshot_json", r.snapshotJson)
+            )
+        }
+        root.put("settings_changes", sc)
+        val sess = org.json.JSONArray()
+        for (r in sessions) {
+            sess.put(
+                org.json.JSONObject()
+                    .put("kind", "session")
+                    .put("id", r.id)
+                    .put("started_at_ms", r.startedAtMs)
+                    .put("ended_at_ms", r.endedAtMs)
+                    .put("markets", r.markets)
+                    .put("signals", r.signals)
+                    .put("bets", r.bets)
+            )
+        }
+        root.put("sessions", sess)
+        return root.toString()
+    }
+
     fun csv(bundle: ResultsBundle): String = buildString {
         appendLine("# DipHunter results export")
         appendLine("# Approve-gated tickets only — never unsupervised bets.")

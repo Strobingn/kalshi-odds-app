@@ -149,13 +149,13 @@ class DirectionSanityTest {
         assertNotNull(score)
         assertTrue(score!!.directionalLock)
         assertEquals("YES", score.predictedSide)
-        assertTrue(score.tapeConflict)
-        assertEquals("NO", score.primaryHeroSide)
-        assertEquals("YES", score.modelLeanSide)
-        assertTrue(score.tapeConflictNote!!.contains("AI says UP, but live chart shows DOWN"))
+        // Primary follows spot vs strike + market (64¢+ UP), not a falling sparkline.
+        assertEquals("YES", score.primaryHeroSide)
+        assertFalse(score.tapeConflict)
+        assertEquals(null, score.tapeConflictNote)
         val ui = sampleMarket().withSignalScore(score, thresholdPp = 5.0)
         assertEquals("Lean UP / YES", ui.stance)
-        assertEquals("NO", ui.primaryHeroSide)
+        assertEquals("YES", ui.primaryHeroSide)
         assertTrue((ui.aiYesPercent ?: 0.0) > 50.0)
     }
 

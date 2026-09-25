@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.data.api
 import com.dirk.kalshiodds.data.dto.CancelOrderV2Response
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
+import com.dirk.kalshiodds.data.dto.GetBalanceResponse
 import com.dirk.kalshiodds.data.dto.PositionsResponse
 import retrofit2.Response
 import retrofit2.http.Body
@@ -26,6 +27,9 @@ import retrofit2.http.Query
  * Signing is applied by [KalshiAuthInterceptor] — never log PEM.
  */
 interface KalshiTradeApi {
+
+    @GET("portfolio/balance")
+    suspend fun getBalance(): Response<GetBalanceResponse>
 
     @GET("portfolio/positions")
     suspend fun getPositions(

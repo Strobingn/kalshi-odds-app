@@ -21,6 +21,7 @@ import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.chart.hasSpot
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -58,6 +59,8 @@ data class OddsUiState(
     val paper: PaperBookState = PaperBookState(),
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
+    /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
+    val liveCashUsd: Double? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null
 )
@@ -418,7 +421,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resetPaperBook() {
+        val before = paperBook.snapshot().cashUsd
+        val snap = _state.value.settings
         paperBook.reset()
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                container.archive.insertSettingsChange(
+                    com.dirk.kalshiodds.data.local.history.SettingsChange(
+                        createdAtMs = System.currentTimeMillis(),
+                        key = "paper_reset",
+                        oldValue = before.toString(),
+                        newValue = "100.0",
+                        snapshotJson = com.dirk.kalshiodds.data.local.history.SettingsRestore.snapshot(snap)
+                    )
+                )
+            }
+        }
     }
 
     /**
@@ -429,7 +447,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             ?: return
         if (!ticket.canPaper) return
-        paperBook.manualFill(ticket)
+        paperBook.manualFill(paperSized(ticket))
         if (ticket.isSell) ticketSession.dismiss(ticketId)
     }
 
@@ -551,7 +569,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val tickets = TicketBuilder.proposeAll(live, ctx) + remappedManuals
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         if (s.settings.paperTradingEnabled) {
-            tickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            val paperCtx = ctx.copy(
+                bankrollUsd = paperBook.snapshot().equityUsd,
+                bankrollSource = "paper"
+            )
+            val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
+            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
         refreshPositionMarks()
     }
@@ -570,8 +593,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             books = books,
             ticks = ticks,
             positions = s.positions,
-            nowMs = nowMs
+            nowMs = nowMs,
+            bankrollUsd = s.liveCashUsd ?: s.settings.bankrollUsd,
+            bankrollSource = if (s.liveCashUsd != null) "live" else "settings"
         )
+    }
+
+    private fun paperSized(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket): com.dirk.kalshiodds.signal.trade.TradeTicket {
+        if (ticket.isSell || !_state.value.settings.winTargetEnabled) return ticket
+        val s = _state.value
+        val market = s.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticket.ticker, true) }
+            ?: return ticket
+        val ctx = ticketContext(s, System.currentTimeMillis()).copy(
+            bankrollUsd = paperBook.snapshot().equityUsd,
+            bankrollSource = "paper"
+        )
+        return TicketBuilder.resizeForBankroll(ticket, market, ctx)
     }
 
     /** Re-mark cached holdings from the latest book / WS tick. No REST. */
@@ -588,8 +625,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 decoratePositions(_state.value.positions)
                 return@launch
             }
-            val rows = withContext(Dispatchers.IO) {
-                runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
+            val (rows, cash) = withContext(Dispatchers.IO) {
+                val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
+                val cashUsd = runCatching { container.tradeClient.getCashUsd() }.getOrNull()
+                positions to cashUsd
+            }
+            if (cash != null) {
+                _state.update { it.copy(liveCashUsd = cash) }
             }
             val parsed = PositionParser.parseAll(rows)
             decoratePositions(parsed)
@@ -660,7 +702,32 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 pts
             }
-            if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
+            val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
+            val stored = runCatching {
+                container.archive.bidHistory(
+                    m.ticker,
+                    (m.closeTimeEpochMs ?: System.currentTimeMillis()) - 3_600_000L,
+                    240
+                )
+            }.getOrElse { emptyList() }
+            val bids = com.dirk.kalshiodds.chart.ChartDownsampler.downsample(
+                (stored + liveBids)
+                    .filter {
+                        com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.upBidCents) != null ||
+                            com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents) != null ||
+                            it.hasSpot()
+                    }
+                    .sortedBy { it.tMs }
+                    .distinctBy { it.tMs },
+                com.dirk.kalshiodds.chart.ChartDownsampler.CARD_POINTS
+            )
+            val past = runCatching {
+                container.archive.recentSettled(com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker), 8)
+                    .map { it.result.equals("yes", true) }
+            }.getOrElse { emptyList() }
+            val withOdds = if (merged.isEmpty() && m.oddsHistory.isEmpty()) m else m.copy(oddsHistory = merged.ifEmpty { m.oddsHistory })
+            val withBids = if (bids.isEmpty() && withOdds.bidHistory.isEmpty()) withOdds else withOdds.copy(bidHistory = bids.ifEmpty { withOdds.bidHistory })
+            if (past.isEmpty()) withBids else withBids.copy(pastSettlements = past)
         }
         return snap.copy(
             btc = snap.btc.withHist(),

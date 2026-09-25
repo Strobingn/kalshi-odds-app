@@ -139,6 +139,24 @@ class PaperBookTest {
         assertTrue(book.snapshot().fills.single().source.contains("hunter"))
     }
 
+    @Test
+    fun winTargetPaperFillUsesTicketSizeNotFive() {
+        val book = PaperBook(idFactory = { "pw" }, nowMs = { 11L })
+        val ticket = hunterTicket().copy(
+            winTargetUsd = 50.0,
+            contracts = 20,
+            stakeUsd = 8.0,
+            limitPrice = 0.40,
+            estimatedAvgFill = 0.40,
+            ticker = "KXBTC15M-WT"
+        )
+        val fill = book.considerTicket(ticket, enabled = true)
+        assertEquals(20, fill!!.contracts)
+        assertEquals(8.0, fill.stakeUsd, 1e-9)
+        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
+        assertTrue(fill.note.contains("win-target"))
+    }
+
     private fun hunterTicket(
         id: String = "t1",
         ticker: String = "KXBTC15M-26SEP241445-45",

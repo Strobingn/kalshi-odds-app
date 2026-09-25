@@ -5,6 +5,8 @@ enum class TicketKind {
     CONFIGURED,
     /** Automatic hunter: $1 stake → ≥$25 max payout. */
     HUNTER,
+    /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */
+    HUNTER_VALUE,
     /** User tapped Buy on a market card / hero. */
     MANUAL,
     /** Sell / reduce a held YES or NO position. Reduce-only V2 limit. */
@@ -52,7 +54,18 @@ data class TradeTicket(
     /** Shown when a buy would net against an existing position. */
     val closeNote: String? = null,
     /** Paper-originated sell — never sent to Kalshi. */
-    val paperOnly: Boolean = false
+    val paperOnly: Boolean = false,
+    val impliedChance: Double? = null,
+    val modelChance: Double? = null,
+    val fairChance: Double? = null,
+    val modelEdge: Boolean = false,
+    val profitIfWinUsd: Double? = null,
+    val winTargetUsd: Double? = null,
+    val winTargetCapped: Boolean = false,
+    val winTargetNote: String? = null,
+    /** `live` = Kalshi cash, `paper` = paper equity, `settings` = advisory bankroll. */
+    val bankrollSource: String? = null,
+    val bankrollUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

@@ -248,6 +248,41 @@ class TickBookMathTest {
         assertTrue(errors.joinToString { it.toString() }, errors.isEmpty())
     }
 
+    @Test
+    fun placeholderQuoteIsNotRecordedInBidHistory() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-TAPE"
+        book.push(tick(ticker, 0.63, 0.64), nowMs = 1_000L)
+        book.push(tick(ticker, 0.0, 1.0), nowMs = 2_000L)
+        book.noteSpot(ticker, 84_311.58, nowMs = 2_000L)
+        val hist = book.bidHistory(ticker)
+        assertTrue(hist.none { it.upBidCents != null && it.upBidCents!! < 1f })
+        assertEquals(1, hist.count { it.upBidCents != null })
+        assertTrue(hist.any { it.spotUsd != null && it.spotUsd!! > 80_000 })
+    }
+
+    @Test
+    fun crossedBookDoesNotReplaceGoodBid() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-X"
+        book.push(tick(ticker, 0.63, 0.64), nowMs = 1_000L)
+        book.push(tick(ticker, 0.80, 0.10), nowMs = 2_000L)
+        val hist = book.bidHistory(ticker)
+        assertEquals(1, hist.size)
+        assertEquals(63f, hist.single().upBidCents!!, 0.01f)
+    }
+
+    @Test
+    fun noteSpotAttachesToBidHistory() {
+        val book = TickBook()
+        val ticker = "KXETH15M-SPOT"
+        book.noteSpot(ticker, 4_200.0, nowMs = 500L)
+        book.push(tick(ticker, 0.50, 0.52), nowMs = 1_000L)
+        val hist = book.bidHistory(ticker)
+        assertEquals(1, hist.size)
+        assertEquals(4_200.0, hist.single().spotUsd!!, 1e-6)
+    }
+
     private fun tick(ticker: String, bid: Double, ask: Double) = MarketTick(
         ticker = ticker,
         series = MarketTick.inferSeries(ticker),

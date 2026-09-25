@@ -17,6 +17,9 @@ import androidx.security.crypto.MasterKeys
  */
 class SecureCredentialStore(context: Context) {
 
+    val keystoreInvalidated: Boolean
+        get() = lastKeystoreInvalidated
+
     private val prefs: SharedPreferences = createPrefs(context.applicationContext)
 
     var apiKeyId: String
@@ -44,8 +47,13 @@ class SecureCredentialStore(context: Context) {
         private const val TAG = "DipHunterSecure"
         private const val PREFS_NAME = "kalshi_signal_secrets"
         private const val FALLBACK_NAME = "kalshi_signal_secrets_fallback"
+        private const val LEGACY_PLAIN = "kalshi_signal_secrets_legacy"
         private const val KEY_ID = "api_key_id"
         private const val KEY_PEM = "private_key_pem"
+
+        @Volatile
+        var lastKeystoreInvalidated: Boolean = false
+            private set
 
         fun looksLikePem(pem: String): Boolean {
             val t = pem.trim()
@@ -54,30 +62,48 @@ class SecureCredentialStore(context: Context) {
 
         private fun createPrefs(context: Context): SharedPreferences {
             val fallback = context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)
+            val legacy = context.getSharedPreferences(LEGACY_PLAIN, Context.MODE_PRIVATE)
             val encrypted = tryCreateEncrypted(context)
             if (encrypted != null) {
                 migrateIfEmpty(from = fallback, to = encrypted)
-                if (encrypted.getString(KEY_ID, "").isNullOrBlank()) {
-                    migrateIfEmpty(from = fallback, to = encrypted)
-                }
+                migrateIfEmpty(from = legacy, to = encrypted)
                 return encrypted
             }
             Log.w(TAG, "EncryptedSharedPreferences unavailable; using private prefs")
+            migrateIfEmpty(from = legacy, to = fallback)
             return fallback
         }
 
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
             return try {
                 val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                EncryptedSharedPreferences.create(
+                val prefs = EncryptedSharedPreferences.create(
                     PREFS_NAME,
                     masterKey,
                     context,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
+                lastKeystoreInvalidated = false
+                prefs
+            } catch (e: javax.crypto.AEADBadTagException) {
+                lastKeystoreInvalidated = true
+                Log.w(TAG, "Encrypted prefs Keystore tag invalid — using fallback, re-enter key")
+                null
+            } catch (e: java.security.KeyStoreException) {
+                lastKeystoreInvalidated = true
+                Log.w(TAG, "Keystore unavailable (${e.javaClass.simpleName})")
+                null
             } catch (e: Exception) {
-                Log.w(TAG, "EncryptedSharedPreferences unavailable (${e.javaClass.simpleName})")
+                val name = e.javaClass.simpleName
+                if (name.contains("AEAD", true) || name.contains("KeyStore", true) ||
+                    e.cause is javax.crypto.AEADBadTagException
+                ) {
+                    lastKeystoreInvalidated = true
+                    Log.w(TAG, "Encrypted prefs invalidated ($name) — using fallback")
+                    return null
+                }
+                Log.w(TAG, "EncryptedSharedPreferences unavailable ($name)")
                 null
             }
         }
@@ -85,10 +111,9 @@ class SecureCredentialStore(context: Context) {
         private fun migrateIfEmpty(from: SharedPreferences, to: SharedPreferences) {
             val destId = to.getString(KEY_ID, "").orEmpty()
             val destPem = to.getString(KEY_PEM, "").orEmpty()
-            if (destId.isNotBlank() && looksLikePem(destPem)) return
             val srcId = from.getString(KEY_ID, "").orEmpty()
             val srcPem = from.getString(KEY_PEM, "").orEmpty()
-            if (srcId.isBlank() && !looksLikePem(srcPem)) return
+            if (!CredentialMigration.destNeedsSource(destId, destPem, srcId, srcPem)) return
             to.edit().putString(KEY_ID, srcId).putString(KEY_PEM, srcPem).commit()
             from.edit().remove(KEY_ID).remove(KEY_PEM).commit()
         }
