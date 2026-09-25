@@ -6,6 +6,31 @@ import org.junit.Test
 
 class ApproveRouterTest {
 
+    /**
+     * Broke in 0.3.6 (`e48258e` / v0.3.6-debug / versionCode 21).
+     * Still reproduced on 0.3.7 (`a558f6c`): `approveTicket` ran
+     * `if (!credentialsConfigured) failSoft(...); return` **before**
+     * looking at paper mode, and the Approve dialog confirm was
+     * `enabled = credentialsConfigured && canApprove`. Hero Buy UP/DOWN
+     * opens that dialog, so Dirk could not paper-buy without a Kalshi key.
+     * 0.3.8 routes paper-on + no key to [ApproveRouter.Decision.Paper].
+     */
+    @Test
+    fun regression036HeroApproveWithNoKeyIsPaper_037DidNotFix() {
+        val paperOnNoKey = ApproveRouter.decide(
+            paperTradingEnabled = true,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = false,
+            canApprove = true
+        )
+        assertEquals(
+            "0.3.6/0.3.7 required a Kalshi key for hero Approve even in paper mode",
+            ApproveRouter.Decision.Paper,
+            paperOnNoKey
+        )
+    }
+
     @Test
     fun paperOnNoCredentialsIsPaperNotLive() {
         val d = ApproveRouter.decide(

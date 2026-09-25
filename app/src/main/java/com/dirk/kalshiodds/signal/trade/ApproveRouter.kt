@@ -4,6 +4,9 @@ package com.dirk.kalshiodds.signal.trade
  * Hero Buy / ticket Approve routing. Paper never depends on a Kalshi key,
  * live cash, or the V2 client. Live sells of real positions stay live even
  * when the paper-book toggle is on.
+ *
+ * 0.3.6 / 0.3.7 bug: `approveTicket` gated on `credentialsConfigured` first,
+ * so paper mode with no Kalshi key could not Approve. Fixed here.
  */
 object ApproveRouter {
 
