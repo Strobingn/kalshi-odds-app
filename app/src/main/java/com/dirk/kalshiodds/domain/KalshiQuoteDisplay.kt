@@ -28,7 +28,10 @@ object KalshiQuoteDisplay {
         ask: Double?,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
         stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
-    ): Double? = KalshiFee.payoutMultiple(ask ?: return null, stakeUsd, feeRate)
+    ): Double? {
+        val p = ask ?: return null
+        return KalshiFee.payoutMultiple(p, stakeUsd, feeRate)
+    }
 
     /** @deprecated Use [multiplier]; fee is always the order-level KalshiFee. */
     fun multiplier(ask: Double?, includeFee: Boolean, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double? {
