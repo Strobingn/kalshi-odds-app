@@ -870,6 +870,36 @@ class KnownIssuesRegressionTest {
         }
     }
 
+    @Test
+    fun homeHasNoSignalList() {
+        assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
+        assertEquals("Signal history", HomeCopy.SIGNAL_HISTORY)
+        assertTrue(HomeCopy.signalCardsOnHome(HomeFixtures.sampleAlerts()).isEmpty())
+        assertTrue(HomeFixtures.sampleAlerts().isNotEmpty())
+        val homeSrc = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt")
+        ).first { it.isFile }
+        val home = homeSrc.readText()
+        assertFalse(home.contains("SignalSummaryCard"))
+        assertFalse(home.contains("title = \"Signals\""))
+        assertFalse(home.contains("recentAlerts"))
+        assertFalse(home.contains("signalCount"))
+        assertTrue(home.contains("SIGNAL_HISTORY"))
+        assertTrue(home.contains("onOpenSignalHistory"))
+        assertFalse(home.contains("title = \"Tickets\""))
+        assertFalse(home.contains("title = \"Positions\""))
+        assertFalse(home.contains("title = \"Paper\""))
+        val historySrc = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/SignalHistoryScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/SignalHistoryScreen.kt")
+        ).first { it.isFile }
+        val history = historySrc.readText()
+        assertTrue(history.contains("SignalSummaryCard"))
+        assertTrue(history.contains("HomeCopy.SIGNAL_HISTORY"))
+        assertFalse(SignalCopy.shouldNotify(HomeFixtures.sampleAlerts()[0]))
+    }
+
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {
         val cards = HomeMarkets.currentWindowCards(markets, SignalSettings(), nowMs)
         assertEquals(3, cards.size)

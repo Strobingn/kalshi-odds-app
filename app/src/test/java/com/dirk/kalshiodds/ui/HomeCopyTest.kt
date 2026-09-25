@@ -129,4 +129,12 @@ class HomeCopyTest {
         assertEquals("Tickets wait for your Approve. Nothing is sent until you confirm.", HomeHelp.TICKETS_BODY)
         assertEquals("Open Kalshi positions. Sell closes them at the current bid.", HomeHelp.POSITIONS_BODY)
     }
+
+    @Test
+    fun homeHasNoSignalListOnlyAHistoryLink() {
+        assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
+        assertEquals("Signal history", HomeCopy.signalHistoryLink())
+        assertTrue(HomeCopy.signalCardsOnHome(HomeFixtures.sampleAlerts()).isEmpty())
+        assertTrue(HomeHelp.HOME_BODY.contains("no Signals list"))
+    }
 }

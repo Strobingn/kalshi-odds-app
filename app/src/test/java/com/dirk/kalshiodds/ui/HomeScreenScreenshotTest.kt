@@ -13,7 +13,6 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
 import com.dirk.kalshiodds.ui.components.PositionsCard
-import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Guardrails
@@ -130,6 +129,12 @@ class HomeScreenScreenshotTest {
     fun darkSignals() = snapSignals("signals_dark", dark = true)
 
     @Test
+    fun lightSignalHistory() = snapSignals("signal_history_light", dark = false)
+
+    @Test
+    fun darkSignalHistory() = snapSignals("signal_history_dark", dark = true)
+
+    @Test
     fun lightPositionsOpen() = snapPositions("positions_light_open", dark = false)
 
     @Test
@@ -170,6 +175,7 @@ class HomeScreenScreenshotTest {
                     onOpenSettings = {},
                     onOpenScorecard = {},
                     onOpenHistory = {},
+                    onOpenSignalHistory = {},
                     onOpenChart = {},
                     onRefresh = {},
                     onBuyMarket = { _, _ -> },
@@ -282,15 +288,7 @@ class HomeScreenScreenshotTest {
         )
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
-                androidx.compose.foundation.layout.Column(
-                    Modifier
-                        .fillMaxSize()
-                        .background(DipTheme.colors.bg)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    cards.forEach { SignalSummaryCard(it) }
-                }
+                SignalHistoryScreen(cards = cards, onBack = {})
             }
         }
         copyLatest(name)
@@ -371,6 +369,7 @@ class HomeScreenScreenshotTest {
             "scorecard_light", "scorecard_dark",
             "settings_light", "settings_dark",
             "signals_light", "signals_dark",
+            "signal_history_light", "signal_history_dark",
             "positions_light_open", "positions_dark_open",
             "sell_confirm_light_bid", "sell_confirm_dark_bid",
             "sell_confirm_light_nobid", "sell_confirm_dark_nobid",

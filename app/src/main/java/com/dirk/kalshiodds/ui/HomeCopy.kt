@@ -19,6 +19,17 @@ object HomeCopy {
     const val BUY_ANYWAY = "Buy anyway"
     const val NEED_20 = "need 20+ results"
     const val WINDOW_LENGTH = "15m"
+    const val SIGNAL_HISTORY = "Signal history"
+
+    /** Home never renders a Signals list; cards live on [SignalHistoryScreen]. */
+    const val SHOWS_SIGNAL_LIST = false
+
+    fun signalHistoryLink(): String = SIGNAL_HISTORY
+
+    fun signalCardsOnHome(alerts: List<com.dirk.kalshiodds.signal.model.SignalAlert>): List<SignalCopy.Card> {
+        if (SHOWS_SIGNAL_LIST) return alerts.map { SignalCopy.card(it) }
+        return emptyList()
+    }
 
     fun coinShort(market: MarketUiModel): String = coinShort(market.ticker, market.seriesLabel)
 

@@ -46,6 +46,7 @@ fun TradeTicketsSection(
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
     homeMode: Boolean = false,
+    listVisible: Boolean = true,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
@@ -61,7 +62,7 @@ fun TradeTicketsSection(
     }
     val working = tickets.working.filter { it.isResting && it.error?.startsWith("cancelled") != true }
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (listVisible) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!homeMode) {
             Text(
                 text = "Live Approve",

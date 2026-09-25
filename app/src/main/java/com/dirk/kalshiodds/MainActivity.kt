@@ -101,6 +101,10 @@ class MainActivity : ComponentActivity() {
                             onBack = { screen = "odds" },
                             onOpenHistory = { screen = "history" }
                         )
+                        screen == "signal-history" -> com.dirk.kalshiodds.ui.SignalHistoryScreen(
+                            cards = com.dirk.kalshiodds.ui.signalHistoryCards(oddsState.recentAlerts),
+                            onBack = { screen = "odds" }
+                        )
                         screen == "history" -> com.dirk.kalshiodds.ui.HistoryScreen(
                             viewModel = historyViewModel,
                             onBack = { screen = "odds" },
@@ -145,6 +149,7 @@ class MainActivity : ComponentActivity() {
                             onOpenScorecard = { screen = "scorecard" },
                             onOpenData = { screen = "data" },
                             onOpenHistory = { screen = "history" },
+                            onOpenSignalHistory = { screen = "signal-history" },
                             onOpenChart = { chartTicker = it.ticker }
                         )
                     }
