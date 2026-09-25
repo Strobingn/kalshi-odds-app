@@ -248,7 +248,7 @@ class MarketRollover(
     }
 
     private fun nextBackoff(series: String): Long {
-        val cur = backoffBySeries[series] ?: retryMs
+        val cur = backoffBySeries[series] ?: BACKOFF_START_MS
         val next = (cur * 2).coerceAtMost(pollCapMs)
         val jitter = Random.nextLong(0, (next / 5).coerceAtLeast(1))
         return next + jitter
@@ -256,8 +256,11 @@ class MarketRollover(
 
     companion object {
         const val POLL_MS = 2_500L
+        /** First 429 backoff when Retry-After is absent (18:00 ET measure). */
+        const val BACKOFF_START_MS = 2_000L
         const val POLL_CAP_MS = 10_000L
         const val STAGGER_MS = 250L
+        /** Keep "Next window loading" at least this long; never an error at 20s. */
         const val LOADING_MAX_MS = 120_000L
         const val STALE_FORCE_MS = 20_000L
         val LIFECYCLE_REFRESH = setOf(

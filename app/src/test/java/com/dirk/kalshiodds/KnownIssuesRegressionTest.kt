@@ -1132,19 +1132,35 @@ class KnownIssuesRegressionTest {
 
         clock.set(close0 + 1_000L)
         val staleOpen = rollover.refreshFromRest()
-        assertTrue(staleOpen.retrying.containsAll(listOf("KXBTC15M", "KXSOL15M", "KXETH15M")))
+        assertTrue(
+            "open list still returning the closed ticker is not a rollover",
+            staleOpen.retrying.containsAll(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"))
+        )
         assertTrue(staleOpen.activeTickers.isEmpty())
+        assertNull(rollover.successor("KXBTC15M", old, clock.nowMs(), close0, old[0]))
         val loading = paintHome(snap0, staleOpen, clock.nowMs())
         val cards = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
         assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), cards.map { it.series })
         assertTrue(cards.all { it.market == null })
 
-        clock.advance(2_500L)
+        clock.set(close0 + 20_000L)
+        val at20s = rollover.refreshFromRest()
+        assertTrue(at20s.retrying.isNotEmpty())
+        assertTrue(at20s.activeTickers.isEmpty())
+        val loadingAt20 = paintHome(loading, at20s, clock.nowMs())
+        assertTrue(HomeMarkets.coinCards(loadingAt20.allMarkets, clock.nowMs()).all { it.market == null })
+
+        clock.set(close0 + 21_000L)
         val stillStale = rollover.refreshFromRest()
         assertTrue(stillStale.retrying.isNotEmpty())
-        clock.advance(5_000L)
         val stillLoading = paintHome(loading, stillStale, clock.nowMs())
         assertTrue(HomeMarkets.coinCards(stillLoading.allMarkets, clock.nowMs()).all { it.market == null })
+
+        clock.set(close0 + MarketRollover.LOADING_MAX_MS)
+        val twoMin = rollover.refreshFromRest()
+        assertTrue(twoMin.retrying.isNotEmpty())
+        val loadingTwoMin = paintHome(stillLoading, twoMin, clock.nowMs())
+        assertTrue(HomeMarkets.coinCards(loadingTwoMin.allMarkets, clock.nowMs()).all { it.market == null })
 
         throw429 = true
         clock.advance(5_000L)
@@ -1154,6 +1170,23 @@ class KnownIssuesRegressionTest {
         val after429 = paintHome(stillLoading, limited, clock.nowMs())
         assertTrue(HomeMarkets.coinCards(after429.allMarkets, clock.nowMs()).all { it.market == null })
         throw429 = false
+
+        val retryBody = "rate limited".toResponseBody("text/plain".toMediaType())
+        val retryRaw = okhttp3.Response.Builder()
+            .request(okhttp3.Request.Builder().url("https://api.elections.kalshi.com/trade-api/v2/markets").build())
+            .protocol(okhttp3.Protocol.HTTP_1_1)
+            .code(429)
+            .message("Too Many Requests")
+            .header("Retry-After", "4")
+            .body(retryBody)
+            .build()
+        val retryEx = retrofit2.HttpException(retrofit2.Response.error<Any>(retryBody, retryRaw))
+        assertEquals(4_000L, MarketRollover.retryAfterMs(retryEx))
+        assertEquals(2_000L, MarketRollover.BACKOFF_START_MS)
+        assertEquals(10_000L, MarketRollover.POLL_CAP_MS)
+        assertEquals(250L, MarketRollover.STAGGER_MS)
+        assertEquals(120_000L, MarketRollover.LOADING_MAX_MS)
+        assertEquals(20_000L, MarketRollover.STALE_FORCE_MS)
 
         clock.set(close0 + 42_000L)
         listed = next
@@ -1186,6 +1219,13 @@ class KnownIssuesRegressionTest {
         assertTrue(vm.contains("container.rollover.onReconnect()"))
         assertTrue(vm.contains("val event = container.rollover.applyListed"))
         assertTrue(vm.contains("HomeSnapshotMerge.apply"))
+        assertTrue(vm.contains("event.retrying.isNotEmpty() -> null"))
+        val net = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/data/api/NetworkModule.kt"),
+            File("src/main/java/com/dirk/kalshiodds/data/api/NetworkModule.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(net.contains("fun marketsApi"))
+        assertTrue(net.contains("KalshiAuthInterceptor"))
         val activity = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/MainActivity.kt"),
             File("src/main/java/com/dirk/kalshiodds/MainActivity.kt")
