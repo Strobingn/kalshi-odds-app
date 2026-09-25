@@ -71,6 +71,13 @@ class CredentialSurvivalTest {
     }
 
     @Test
+    fun decryptFailureShowsBannerInsteadOfSilentBlank() {
+        assertTrue(CredentialWriteGuard.needsReenterBanner(hasCredentials = false, keystoreInvalidated = true))
+        assertTrue(!CredentialWriteGuard.needsReenterBanner(hasCredentials = true, keystoreInvalidated = true))
+        assertTrue(!CredentialWriteGuard.needsReenterBanner(hasCredentials = false, keystoreInvalidated = false))
+    }
+
+    @Test
     fun extraSecretsAreExcludedFromBackupRules() {
         val roots = listOf(
             java.io.File("src/main/res/xml"),

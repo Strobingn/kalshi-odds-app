@@ -61,10 +61,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         settings = s,
                         keyIdDraft = s.apiKeyId,
                         bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd),
-                        credentialMessage = if (prefs.needsReenterKey()) {
-                            "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
-                        } else {
-                            it.credentialMessage
+                        credentialMessage = when {
+                            prefs.needsReenterKey() ->
+                                "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                            prefs.needsReenterDemoKey() ->
+                                "Re-enter demo key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                            else -> it.credentialMessage
                         }
                     )
                 }

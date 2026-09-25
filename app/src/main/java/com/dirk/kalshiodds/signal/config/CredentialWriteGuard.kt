@@ -14,4 +14,8 @@ object CredentialWriteGuard {
         }
         return null
     }
+
+    /** Banner, not a silent empty field, when Keystore died and nothing loaded. */
+    fun needsReenterBanner(hasCredentials: Boolean, keystoreInvalidated: Boolean): Boolean =
+        !hasCredentials && keystoreInvalidated
 }

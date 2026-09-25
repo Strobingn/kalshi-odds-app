@@ -56,6 +56,8 @@ class WiringAuditTest {
         Control("Settings import keys", SettingsViewModel::class.java, "restoreCredentials"),
         Control("Settings backup passphrase", SettingsViewModel::class.java, "setCredPassphrase"),
         Control("Credential write guard", com.dirk.kalshiodds.signal.config.CredentialWriteGuard::class.java, "rejectReason"),
+        Control("Live keystore re-enter", com.dirk.kalshiodds.signal.config.SignalPreferences::class.java, "needsReenterKey"),
+        Control("Demo keystore re-enter", com.dirk.kalshiodds.signal.config.SignalPreferences::class.java, "needsReenterDemoKey"),
         Control("Price parse dollars", com.dirk.kalshiodds.domain.KalshiPrice::class.java, "parseDollars"),
         Control("Price format cents", KalshiQuoteDisplay::class.java, "formatPriceCents"),
         Control("Import model JSON", DataViewModel::class.java, "importModelUri"),
