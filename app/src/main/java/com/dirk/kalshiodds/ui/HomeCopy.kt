@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.TimeLeft
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.BetCall
 import java.util.Locale
 import kotlin.math.abs
@@ -19,12 +20,52 @@ object HomeCopy {
     const val BUY_ANYWAY = "Buy anyway"
     const val NEED_20 = "need 20+ results"
     const val WINDOW_LENGTH = "15m"
+    const val SIGNAL_HISTORY = "Signal history"
+    const val NO_SETTLED_PICKS = HomeScorecardSummary.NO_SETTLED
+    const val SCORECARD_CONTENT_DESCRIPTION = "Scorecard"
+    const val SETTINGS_CONTENT_DESCRIPTION = "Settings"
+    const val REFRESH_CONTENT_DESCRIPTION = "Refresh"
 
-    fun coinShort(market: MarketUiModel): String = when (CryptoMarkets.kindFor(market.ticker)) {
+    /** 0.3.12 top bar: title, LIVE chip, scorecard, settings, refresh. */
+    val TOP_BAR_ACTIONS: List<String> = listOf(
+        SCORECARD_CONTENT_DESCRIPTION,
+        SETTINGS_CONTENT_DESCRIPTION,
+        REFRESH_CONTENT_DESCRIPTION
+    )
+
+    /** Home never renders a Signals list; cards live on [SignalHistoryScreen]. */
+    const val SHOWS_SIGNAL_LIST = false
+
+    fun signalHistoryLink(): String = SIGNAL_HISTORY
+
+    fun scorecardSummaryOf(
+        entries: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
+        paperPnlUsd: Double
+    ): HomeScorecardSummary = HomeScorecardSummary.of(entries, paperPnlUsd)
+
+    fun scorecardSummaryLine(summary: HomeScorecardSummary): String {
+        if (summary.settledCount <= 0) return HomeScorecardSummary.NO_SETTLED
+        val pct = ((summary.hitRate ?: 0.0) * 100.0).roundToInt()
+        return "${summary.wins}-${summary.losses} · $pct% · ${HomeScorecardSummary.paperPnlPart(summary.paperPnlUsd)}"
+    }
+
+    fun scorecardSummaryLine(
+        entries: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
+        paperPnlUsd: Double
+    ): String = scorecardSummaryLine(scorecardSummaryOf(entries, paperPnlUsd))
+
+    fun signalCardsOnHome(alerts: List<com.dirk.kalshiodds.signal.model.SignalAlert>): List<SignalCopy.Card> {
+        if (SHOWS_SIGNAL_LIST) return alerts.map { SignalCopy.card(it) }
+        return emptyList()
+    }
+
+    fun coinShort(market: MarketUiModel): String = coinShort(market.ticker, market.seriesLabel)
+
+    fun coinShort(seriesOrTicker: String, seriesLabel: String? = null): String = when (CryptoMarkets.kindFor(seriesOrTicker)) {
         SeriesKind.BTC -> "BTC"
         SeriesKind.ETH -> "ETH"
         SeriesKind.SOL -> "SOL"
-        SeriesKind.CRYPTO -> market.seriesLabel.take(3).uppercase(Locale.US)
+        SeriesKind.CRYPTO -> (seriesLabel ?: seriesOrTicker).take(3).uppercase(Locale.US)
     }
 
     fun thisWindowHeadline(
@@ -82,8 +123,34 @@ object HomeCopy {
         }
     }
 
+    const val AI_EM_DASH = "AI —"
+
+    data class TileAiPercents(
+        val up: String,
+        val down: String,
+        val upPct: Int?,
+        val downPct: Int?
+    )
+
+    /**
+     * UP / DOWN tile AI lines. Same [SignalStance.homeModelYes] used by the
+     * model-vs-market line, signal side, and ticket. DOWN is 100 − rounded UP
+     * so the two always sum to 100. Missing model → [AI_EM_DASH].
+     */
+    fun tileAiPercents(market: MarketUiModel): TileAiPercents {
+        val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+            ?: return TileAiPercents(AI_EM_DASH, AI_EM_DASH, null, null)
+        val up = modelYes.roundToInt().coerceIn(0, 100)
+        val down = 100 - up
+        return TileAiPercents("AI $up%", "AI $down%", up, down)
+    }
+
+    fun tileAiUp(market: MarketUiModel): String = tileAiPercents(market).up
+
+    fun tileAiDown(market: MarketUiModel): String = tileAiPercents(market).down
+
     fun modelVsMarket(market: MarketUiModel, decision: BetCall.Decision): String {
-        val modelYes = market.importedModelPp ?: market.aiYesPercent
+        val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
         val marketYes = market.yesProbabilityPercent
         val side = when (decision.headline) {
             BetCall.Headline.BET_DOWN -> "DOWN"

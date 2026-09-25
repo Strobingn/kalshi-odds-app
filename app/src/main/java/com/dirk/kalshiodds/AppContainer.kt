@@ -109,7 +109,13 @@ class AppContainer(context: Context) {
     val clock: Clock = Clock.System
     val repository = MarketRepository(
         context = app,
-        resolveApi = { NetworkModule.publicApi(hub.settings.kalshiDemoEnabled) },
+        resolveApi = {
+            val keyed = hub.settings.tradingCredentialsConfigured()
+            NetworkModule.marketsApi(
+                demo = hub.settings.kalshiDemoEnabled,
+                credentials = if (keyed) ({ tradingCredentials() }) else null
+            )
+        },
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },

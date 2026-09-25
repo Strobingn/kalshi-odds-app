@@ -20,6 +20,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,6 +47,7 @@ fun TradeTicketsSection(
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
     homeMode: Boolean = false,
+    listVisible: Boolean = true,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
@@ -61,7 +63,7 @@ fun TradeTicketsSection(
     }
     val working = tickets.working.filter { it.isResting && it.error?.startsWith("cancelled") != true }
 
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (listVisible) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!homeMode) {
             Text(
                 text = "Live Approve",
@@ -155,6 +157,7 @@ fun TradeTicketsSection(
 
     val awaiting = tickets.phase as? TicketPhase.AwaitingApprove
     if (awaiting != null) {
+        BackHandler(enabled = true) { onCancelApprove() }
         ApproveTicketDialog(
             ticket = awaiting.ticket,
             credentialsConfigured = credentialsConfigured,
@@ -438,7 +441,23 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
 }
 
 @Composable
-private fun ApproveTicketDialog(
+fun LiveSellConfirmSheet(
+    ticket: TradeTicket,
+    credentialsConfigured: Boolean = true,
+    paperTradingEnabled: Boolean = false
+) {
+    ApproveTicketDialog(
+        ticket = ticket,
+        credentialsConfigured = credentialsConfigured,
+        paperTradingEnabled = paperTradingEnabled,
+        onApprove = {},
+        onPaper = {},
+        onDismiss = {}
+    )
+}
+
+@Composable
+internal fun ApproveTicketDialog(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
@@ -476,7 +495,7 @@ private fun ApproveTicketDialog(
                         paperBuy ->
                             "Simulated fill on the paper book. This never places a live order."
                         ticket.isSell && ticket.blockedReason != null ->
-                            ticket.blockedReason
+                            com.dirk.kalshiodds.ui.PositionCopy.sellBlockedMessage(ticket.blockedReason)
                         ticket.isSell ->
                             "Sells at the current bid. Leftover size is canceled."
                         else ->
@@ -493,7 +512,7 @@ private fun ApproveTicketDialog(
                     }
                 )
                 Spacer(Modifier.height(8.dp))
-                if (ticket.isSell && !paperSell) {
+                if (ticket.isSell && !paperSell && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())
                     TicketMetricRow("Bid", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
                     TicketMetricRow(
@@ -504,7 +523,7 @@ private fun ApproveTicketDialog(
                         "Expected proceeds",
                         String.format(Locale.US, "$%.2f", ticket.stakeUsd)
                     )
-                } else if (!paperSell && !paperBuy) {
+                } else if (!paperSell && !paperBuy && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())
                     TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
                     TicketMetricRow(
@@ -519,7 +538,7 @@ private fun ApproveTicketDialog(
                         "Profit if win",
                         String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
                     )
-                } else {
+                } else if (paperSell || paperBuy) {
                     Text(
                         String.format(
                             Locale.US,
@@ -546,7 +565,7 @@ private fun ApproveTicketDialog(
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
-                if (ticket.isSell) {
+                if (ticket.isSell && ticket.blockedReason == null) {
                     OutlinedTextField(
                         value = countText,
                         onValueChange = { countText = it.filter { ch -> ch.isDigit() }.take(6) },

@@ -45,6 +45,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
 import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.HomeMarkets
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
@@ -52,6 +53,54 @@ import com.dirk.kalshiodds.ui.theme.checklistValueColor
 import java.util.Locale
 import kotlin.math.abs
 import com.dirk.kalshiodds.ui.theme.DipTheme
+
+@Composable
+fun NextWindowLoadingCard(
+    series: String,
+    modifier: Modifier = Modifier
+) {
+    val colors = DipTheme.colors
+    val scheme = MaterialTheme.colorScheme
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .border(1.dp, scheme.outline, RoundedCornerShape(16.dp)),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = scheme.surface,
+            contentColor = scheme.onSurface
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = HomeCopy.coinShort(series),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        HomeCopy.WINDOW_LENGTH,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                }
+            }
+            Text(
+                HomeMarkets.NEXT_WINDOW_LOADING,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+        }
+    }
+}
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -133,6 +182,7 @@ fun MarketCard(
                     title = "UP",
                     askLabel = quotes.yesAskLabel,
                     bidLabel = quotes.yesBidLabel,
+                    aiLabel = HomeCopy.tileAiUp(market),
                     accent = colors.up,
                     container = colors.upContainer,
                     highlighted = call.headline == BetCall.Headline.BET_UP,
@@ -142,6 +192,7 @@ fun MarketCard(
                     title = "DOWN",
                     askLabel = quotes.noAskLabel,
                     bidLabel = quotes.noBidLabel,
+                    aiLabel = HomeCopy.tileAiDown(market),
                     accent = colors.down,
                     container = colors.downContainer,
                     highlighted = call.headline == BetCall.Headline.BET_DOWN,
@@ -483,6 +534,7 @@ private fun PriceTile(
     title: String,
     askLabel: String,
     bidLabel: String,
+    aiLabel: String,
     accent: Color,
     container: Color,
     highlighted: Boolean,
@@ -514,6 +566,12 @@ private fun PriceTile(
             "bid $bidLabel",
             style = MaterialTheme.typography.labelMedium,
             color = labelColor
+        )
+        Text(
+            aiLabel,
+            style = MaterialTheme.typography.titleSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor
         )
     }
 }

@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.signal.feedback
 
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
+import com.dirk.kalshiodds.signal.model.SignalStance
 import kotlin.math.abs
 
 /**
@@ -37,6 +38,10 @@ object ForecastUnits {
         }
     }
 
+    /** NO BET / unset directional picks are excluded from hit-rate and Brier. */
+    fun isScoredPick(e: PredictionLogEntry): Boolean =
+        !SignalStance.isNoBetSide(e.predictedSide)
+
     /** Probability assigned to the picked side, 0–1. */
     fun sideProbability01(e: PredictionLogEntry): Double {
         val pYes = probability01(e.predictedYes)
@@ -44,6 +49,7 @@ object ForecastUnits {
     }
 
     fun hit(e: PredictionLogEntry): Boolean {
+        if (!isScoredPick(e)) return false
         val o = e.outcome ?: return false
         if (o.equals("void", ignoreCase = true)) return false
         return pickedSideIsYes(e) == outcomeYes(o)

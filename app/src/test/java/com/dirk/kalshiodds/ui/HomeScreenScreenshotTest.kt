@@ -10,7 +10,9 @@ import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.config.SignalSettings
-import com.dirk.kalshiodds.ui.components.SignalSummaryCard
+import com.dirk.kalshiodds.signal.trade.TradeTicket
+import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
+import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Guardrails
@@ -42,6 +44,32 @@ class HomeScreenScreenshotTest {
     fun lightActionable() = snap("home_light_actionable", dark = false, HomeFixtures.state(
         HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
     ))
+
+    @Test
+    fun lightS24ScorecardVisibleWithoutScroll() {
+        val tall = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
+        try {
+            paparazzi.unsafeUpdateConfig(
+                deviceConfig = DeviceConfig.PIXEL_6.copy(
+                    softButtons = false,
+                    screenWidth = 1080,
+                    screenHeight = 2340
+                )
+            )
+            snap(
+                "home_light_s24_scorecard_visible",
+                dark = false,
+                HomeFixtures.state(
+                    HomeFixtures.actionableBtc(),
+                    HomeFixtures.noBetEth(),
+                    HomeFixtures.noBetSol(),
+                    hasKey = true
+                )
+            )
+        } finally {
+            paparazzi.unsafeUpdateConfig(deviceConfig = tall)
+        }
+    }
 
     @Test
     fun darkActionable() = snap("home_dark_actionable", dark = true, HomeFixtures.state(
@@ -115,6 +143,36 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightNextWindow() = snap("home_light_next_window", dark = false, HomeFixtures.state(
+        HomeFixtures.actionableBtc().copy(closeTimeEpochMs = HomeFixtures.NOW_MS - 1_000L),
+        HomeFixtures.noBetEth(),
+        HomeFixtures.noBetSol(),
+        hasKey = true
+    ))
+
+    @Test
+    fun darkNextWindow() = snap("home_dark_next_window", dark = true, HomeFixtures.state(
+        HomeFixtures.actionableBtc().copy(closeTimeEpochMs = HomeFixtures.NOW_MS - 1_000L),
+        HomeFixtures.noBetEth(),
+        HomeFixtures.noBetSol(),
+        hasKey = true
+    ))
+
+    @Test
+    fun lightScorecardEmpty() = snap("home_light_scorecard_empty", dark = false, HomeFixtures.state(
+        HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(),
+        hasKey = true,
+        scorecard = HomeScorecardSummary.EMPTY
+    ))
+
+    @Test
+    fun darkScorecardEmpty() = snap("home_dark_scorecard_empty", dark = true, HomeFixtures.state(
+        HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(),
+        hasKey = true,
+        scorecard = HomeScorecardSummary.EMPTY
+    ))
+
+    @Test
     fun lightScorecard() = snapScorecard("scorecard_light", dark = false)
 
     @Test
@@ -125,6 +183,30 @@ class HomeScreenScreenshotTest {
 
     @Test
     fun darkSignals() = snapSignals("signals_dark", dark = true)
+
+    @Test
+    fun lightSignalHistory() = snapSignals("signal_history_light", dark = false)
+
+    @Test
+    fun darkSignalHistory() = snapSignals("signal_history_dark", dark = true)
+
+    @Test
+    fun lightPositionsOpen() = snapPositions("positions_light_open", dark = false)
+
+    @Test
+    fun darkPositionsOpen() = snapPositions("positions_dark_open", dark = true)
+
+    @Test
+    fun lightSellConfirmBid() = snapSell("sell_confirm_light_bid", dark = false, HomeFixtures.sellTicketWithBid())
+
+    @Test
+    fun darkSellConfirmBid() = snapSell("sell_confirm_dark_bid", dark = true, HomeFixtures.sellTicketWithBid())
+
+    @Test
+    fun lightSellConfirmNoBid() = snapSell("sell_confirm_light_nobid", dark = false, HomeFixtures.sellTicketNoBid())
+
+    @Test
+    fun darkSellConfirmNoBid() = snapSell("sell_confirm_dark_nobid", dark = true, HomeFixtures.sellTicketNoBid())
 
     @Test
     fun lightSettings() = snapSettings("settings_light", dark = false)
@@ -149,6 +231,7 @@ class HomeScreenScreenshotTest {
                     onOpenSettings = {},
                     onOpenScorecard = {},
                     onOpenHistory = {},
+                    onOpenSignalHistory = {},
                     onOpenChart = {},
                     onRefresh = {},
                     onBuyMarket = { _, _ -> },
@@ -165,7 +248,7 @@ class HomeScreenScreenshotTest {
                     onCancelApprove = {},
                     onCancelOrder = {},
                     nowMs = HomeFixtures.NOW_MS,
-                    versionLabel = "DipHunter v0.3.12 (27)"
+                    versionLabel = "DipHunter v0.3.13 (28)"
                 )
             }
         }
@@ -197,15 +280,57 @@ class HomeScreenScreenshotTest {
         copyLatest(name)
     }
 
+    private fun snapPositions(name: String, dark: Boolean) {
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                androidx.compose.foundation.layout.Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    PositionsCard(
+                        positions = listOf(HomeFixtures.openPosition()),
+                        note = null,
+                        onSell = { _, _ -> },
+                        homeMode = false
+                    )
+                }
+            }
+        }
+        copyLatest(name)
+    }
+
+    private fun snapSell(name: String, dark: Boolean, ticket: TradeTicket) {
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                androidx.compose.foundation.layout.Box(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                ) {
+                    LiveSellConfirmSheet(
+                        ticket = ticket,
+                        credentialsConfigured = true,
+                        paperTradingEnabled = false
+                    )
+                }
+            }
+        }
+        copyLatest(name)
+    }
+
     private fun snapSignals(name: String, dark: Boolean) {
         val cards = listOf(
+            SignalCopy.card(HomeFixtures.sampleAlerts()[0]),
             SignalCopy.card(
                 ticker = "KXBTC15M-26SEP251345-45",
                 side = "YES",
                 modelYes = 68.0,
                 marketYes = 64.0,
                 settled = null,
-                details = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ -11.4pp"
+                fairYes = 68.0,
+                details = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ +4.0pp"
             ),
             SignalCopy.card(
                 ticker = "KXETH15M-26SEP251400-40",
@@ -213,20 +338,13 @@ class HomeScreenScreenshotTest {
                 modelYes = 30.0,
                 marketYes = 48.0,
                 settled = "no",
+                fairYes = 30.0,
                 details = "QUIET/MID · AI 30% vs mkt 48%"
             )
         )
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
-                androidx.compose.foundation.layout.Column(
-                    Modifier
-                        .fillMaxSize()
-                        .background(DipTheme.colors.bg)
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    cards.forEach { SignalSummaryCard(it) }
-                }
+                SignalHistoryScreen(cards = cards, onBack = {})
             }
         }
         copyLatest(name)
@@ -286,6 +404,16 @@ class HomeScreenScreenshotTest {
                     avgEdgeWhenWrong = -2.0,
                     enoughData = false,
                     perAsset = emptyList(),
+                    perCoin = listOf(
+                        ScorecardMetrics.Breakdown("BTC", "Bitcoin", 24, 0.67, 0.200, 0.220, 8.40, true),
+                        ScorecardMetrics.Breakdown("ETH", "Ethereum", 22, 0.59, 0.230, 0.250, 2.10, true),
+                        ScorecardMetrics.Breakdown("SOL", "Solana", 8, null, null, null, null, false)
+                    ),
+                    perTimeOfDay = listOf(
+                        ScorecardMetrics.Breakdown("08-12", "8–12 ET", 20, 0.70, 0.180, 0.210, 6.00, true),
+                        ScorecardMetrics.Breakdown("12-16", "12–16 ET", 21, 0.62, 0.220, 0.240, 3.50, true),
+                        ScorecardMetrics.Breakdown("16-20", "16–20 ET", 5, null, null, null, null, false)
+                    ),
                     sideBrier = 0.211,
                     hits = 12
                 )
@@ -298,18 +426,8 @@ class HomeScreenScreenshotTest {
 
     @After
     fun flushArtifacts() {
-        listOf(
-            "home_light_actionable", "home_dark_actionable",
-            "home_light_actionable_down", "home_dark_actionable_down",
-            "home_light_all_nobet", "home_dark_all_nobet",
-            "home_light_nokey", "home_dark_nokey",
-            "home_light_disagreement", "home_dark_disagreement",
-            "scorecard_light", "scorecard_dark",
-            "settings_light", "settings_dark",
-            "signals_light", "signals_dark",
-            "before_0_3_11_light_actionable", "before_0_3_11_dark_actionable",
-            "before_0_3_11_light_nokey"
-        ).forEach(::copyLatest)
+        // Each snap() already copies; avoid re-scanning every run file here
+        // (/opt/cursor/artifacts File.delete can stall on overwrite).
     }
 
     private fun copyLatest(name: String) {
@@ -319,22 +437,24 @@ class HomeScreenScreenshotTest {
             File("app/build/reports/paparazzi/debug/runs")
         ).filter { it.isDirectory }
         val latest = runDirs.flatMap { dir ->
-            dir.listFiles().orEmpty().filter { it.isFile }.sortedByDescending { it.name }
-        }
+            dir.listFiles().orEmpty().filter { it.isFile }
+        }.sortedByDescending { it.name }
         for (js in latest) {
             val text = js.readText()
             if (!text.contains("\"name\": \"$name\"")) continue
             val rel = Regex("\"file\": \"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: continue
             val parent = js.parentFile?.parentFile ?: continue
             val src = File(parent, rel)
-            if (src.isFile) {
-                try {
-                    src.copyTo(File(destDir, "$name.png"), overwrite = true)
-                } catch (_: Exception) {
-                    // /opt/cursor/artifacts can flake on close; the PNG is still in paparazzi/images.
+            if (!src.isFile) continue
+            val dest = File(destDir, "$name.png")
+            try {
+                src.inputStream().use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
                 }
-                return
+            } catch (_: Exception) {
+                // /opt/cursor/artifacts can flake; the PNG is still in paparazzi/images.
             }
+            return
         }
     }
 }

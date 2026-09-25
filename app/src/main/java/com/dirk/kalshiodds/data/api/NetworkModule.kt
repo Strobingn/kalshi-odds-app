@@ -42,6 +42,31 @@ object NetworkModule {
 
     fun publicApi(demo: Boolean): KalshiApi = if (demo) demoApi else api
 
+    /**
+     * Markets GET. Signed against the trade host when [credentials] yield a
+     * key (Kalshi raises 429 less often on authed reads); otherwise public.
+     * https://docs.kalshi.com/api-reference/market/get-markets
+     */
+    fun marketsApi(
+        demo: Boolean,
+        credentials: (() -> Pair<String, String>)? = null
+    ): KalshiApi {
+        val creds = credentials?.invoke()
+        if (creds == null || creds.first.isBlank() || creds.second.isBlank()) {
+            return publicApi(demo)
+        }
+        val base = if (demo) KalshiApi.DEMO_TRADE_BASE_URL else KalshiApi.TRADE_BASE_URL
+        val client = okHttp.newBuilder()
+            .addInterceptor(KalshiAuthInterceptor { creds })
+            .build()
+        return Retrofit.Builder()
+            .baseUrl(base)
+            .client(client)
+            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .build()
+            .create(KalshiApi::class.java)
+    }
+
     private fun publicClient(baseUrl: String): KalshiApi =
         Retrofit.Builder()
             .baseUrl(baseUrl)

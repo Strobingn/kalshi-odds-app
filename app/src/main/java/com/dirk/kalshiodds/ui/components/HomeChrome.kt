@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.outlined.Info
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.HomeScorecardSummary
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
@@ -56,9 +58,9 @@ fun TradeModeChip(label: String, modifier: Modifier = Modifier) {
 fun ThisWindowCard(
     market: MarketUiModel?,
     decision: BetCall.Decision?,
-    scorecardLine: String,
     nowMs: Long,
-    onOpenScorecard: () -> Unit,
+    scorecard: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
+    onOpenScorecard: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val colors = DipTheme.colors
@@ -83,14 +85,35 @@ fun ThisWindowCard(
             color = accent,
             fontWeight = FontWeight.SemiBold
         )
+        HomeScorecardLine(summary = scorecard, onOpenScorecard = onOpenScorecard)
+    }
+}
+
+@Composable
+fun HomeScorecardLine(
+    summary: HomeScorecardSummary,
+    onOpenScorecard: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val colors = DipTheme.colors
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clickable(onClick = onOpenScorecard)
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
         Text(
-            scorecardLine,
+            HomeCopy.scorecardSummaryLine(summary),
             style = MaterialTheme.typography.labelMedium,
-            color = colors.textPrimary,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable(onClick = onOpenScorecard)
-                .padding(vertical = 4.dp)
+            color = colors.textSecondary,
+            modifier = Modifier.weight(1f)
+        )
+        Icon(
+            Icons.AutoMirrored.Filled.KeyboardArrowRight,
+            contentDescription = HomeCopy.SCORECARD_CONTENT_DESCRIPTION,
+            tint = colors.textSecondary
         )
     }
 }

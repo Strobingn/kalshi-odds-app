@@ -96,7 +96,10 @@ object ScorecardMetrics {
         requireUncertaintyPass: Boolean = false,
         maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY
     ): Snapshot {
-        val settled = entries.filter { it.outcome.equals("yes", true) || it.outcome.equals("no", true) }
+        val settled = entries.filter {
+            (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
+                ForecastUnits.isScoredPick(it)
+        }
         val voids = entries.count { it.outcome.equals("void", true) }
         val open = entries.count { it.outcome == null }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
@@ -136,29 +139,30 @@ object ScorecardMetrics {
         rows: List<PredictionLogEntry>,
         zoneId: ZoneId = ZoneId.of("America/New_York")
     ): Honest {
-        if (rows.isEmpty()) {
+        val scored = rows.filter { ForecastUnits.isScoredPick(it) }
+        if (scored.isEmpty()) {
             return Honest(0, null, null, null, null, null, false, emptyList())
         }
-        val all = window(rows)
-        val modelBriers = rows.map { ForecastUnits.brier(it) }
-        val marketBriers = rows.map { ForecastUnits.marketBrier(it) }
-        val sideBriers = rows.map { ForecastUnits.sideBrier(it) }
-        val per = rows.groupBy { it.series.ifBlank { "unknown" } }
+        val all = window(scored)
+        val modelBriers = scored.map { ForecastUnits.brier(it) }
+        val marketBriers = scored.map { ForecastUnits.marketBrier(it) }
+        val sideBriers = scored.map { ForecastUnits.sideBrier(it) }
+        val per = scored.groupBy { it.series.ifBlank { "unknown" } }
             .toSortedMap()
             .map { (series, group) ->
                 SeriesStats(series = series, label = seriesLabel(series), stats = window(group))
             }
         return Honest(
-            n = rows.size,
+            n = scored.size,
             modelBrier = modelBriers.average(),
             marketBrier = marketBriers.average(),
             hitRate = all.hitRate,
             avgEdgeWhenRight = all.avgEdgeWhenRight,
             avgEdgeWhenWrong = all.avgEdgeWhenWrong,
-            enoughData = rows.size >= MIN_HONEST_SAMPLES,
+            enoughData = scored.size >= MIN_HONEST_SAMPLES,
             perAsset = per,
-            perCoin = coinBreakdowns(rows),
-            perTimeOfDay = timeOfDayBreakdowns(rows, zoneId),
+            perCoin = coinBreakdowns(scored),
+            perTimeOfDay = timeOfDayBreakdowns(scored, zoneId),
             sideBrier = sideBriers.average(),
             hits = all.hits
         )
@@ -215,13 +219,14 @@ object ScorecardMetrics {
     }
 
     private fun breakdown(key: String, label: String, rows: List<PredictionLogEntry>): Breakdown {
-        if (rows.isEmpty()) {
+        val scored = rows.filter { ForecastUnits.isScoredPick(it) }
+        if (scored.isEmpty()) {
             return Breakdown(key, label, 0, null, null, null, null, false)
         }
-        val hits = rows.count { ForecastUnits.hit(it) }
-        val modelBrier = rows.map { ForecastUnits.brier(it) }.average()
-        val marketBrier = rows.map { ForecastUnits.marketBrier(it) }.average()
-        val pnl = rows.sumOf { e ->
+        val hits = scored.count { ForecastUnits.hit(it) }
+        val modelBrier = scored.map { ForecastUnits.brier(it) }.average()
+        val marketBrier = scored.map { ForecastUnits.marketBrier(it) }.average()
+        val pnl = scored.sumOf { e ->
             val won = ForecastUnits.hit(e)
             val stake = 1.0
             if (won) stake * kotlin.math.abs(e.edgePp ?: 0.0) / 100.0 else -stake * kotlin.math.abs(e.edgePp ?: 0.0) / 100.0
@@ -229,27 +234,28 @@ object ScorecardMetrics {
         return Breakdown(
             key = key,
             label = label,
-            n = rows.size,
-            hitRate = hits.toDouble() / rows.size,
+            n = scored.size,
+            hitRate = hits.toDouble() / scored.size,
             modelBrier = modelBrier,
             marketBrier = marketBrier,
             pnlUsd = pnl,
-            enoughData = rows.size >= MIN_BUCKET_SAMPLES
+            enoughData = scored.size >= MIN_BUCKET_SAMPLES
         )
     }
 
     fun window(rows: List<PredictionLogEntry>): WindowStats {
-        if (rows.isEmpty()) return WindowStats()
-        val hits = rows.count { ForecastUnits.hit(it) }
-        val sideBriers = rows.map { ForecastUnits.sideBrier(it) }
-        val yesBriers = rows.map { ForecastUnits.brier(it) }
-        val rightEdges = rows.filter { ForecastUnits.hit(it) }
+        val scored = rows.filter { ForecastUnits.isScoredPick(it) }
+        if (scored.isEmpty()) return WindowStats()
+        val hits = scored.count { ForecastUnits.hit(it) }
+        val sideBriers = scored.map { ForecastUnits.sideBrier(it) }
+        val yesBriers = scored.map { ForecastUnits.brier(it) }
+        val rightEdges = scored.filter { ForecastUnits.hit(it) }
             .mapNotNull { it.edgePp }
-        val wrongEdges = rows.filter { !ForecastUnits.hit(it) }
+        val wrongEdges = scored.filter { !ForecastUnits.hit(it) }
             .mapNotNull { it.edgePp }
         return WindowStats(
             hits = hits,
-            total = rows.size,
+            total = scored.size,
             hitRate = hits.toDouble() / rows.size,
             brier = if (sideBriers.isNotEmpty()) sideBriers.average() else null,
             pUpBrier = if (yesBriers.isNotEmpty()) yesBriers.average() else null,

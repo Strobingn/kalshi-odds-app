@@ -106,6 +106,23 @@ class HomeCopyTest {
             noBetReason = null
         )
         assertEquals("Model 62% vs market 58% · edge +4 pts", HomeCopy.modelVsMarket(market, call))
+        val tiles = HomeCopy.tileAiPercents(market)
+        assertEquals("AI 62%", tiles.up)
+        assertEquals("AI 38%", tiles.down)
+        assertEquals(100, tiles.upPct!! + tiles.downPct!!)
+    }
+
+    @Test
+    fun tileAiPercentsMatchModelAndSumTo100() {
+        val up = HomeFixtures.actionableBtc()
+        assertEquals("AI 80%", HomeCopy.tileAiUp(up))
+        assertEquals("AI 20%", HomeCopy.tileAiDown(up))
+        val down = HomeFixtures.actionableDownBtc()
+        assertEquals("AI 10%", HomeCopy.tileAiUp(down))
+        assertEquals("AI 90%", HomeCopy.tileAiDown(down))
+        val none = up.copy(importedModelPp = null, aiYesPercent = null)
+        assertEquals(HomeCopy.AI_EM_DASH, HomeCopy.tileAiUp(none))
+        assertEquals(HomeCopy.AI_EM_DASH, HomeCopy.tileAiDown(none))
     }
 
     @Test
@@ -128,5 +145,43 @@ class HomeCopyTest {
         }
         assertEquals("Tickets wait for your Approve. Nothing is sent until you confirm.", HomeHelp.TICKETS_BODY)
         assertEquals("Open Kalshi positions. Sell closes them at the current bid.", HomeHelp.POSITIONS_BODY)
+    }
+
+    @Test
+    fun topBarKeeps0312ActionsPlusScorecard() {
+        assertEquals(listOf("Scorecard", "Settings", "Refresh"), HomeCopy.TOP_BAR_ACTIONS)
+    }
+
+    @Test
+    fun homeHasNoSignalListOnlyAHistoryLink() {
+        assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
+        assertEquals("Signal history", HomeCopy.signalHistoryLink())
+        assertTrue(HomeCopy.signalCardsOnHome(HomeFixtures.sampleAlerts()).isEmpty())
+        assertTrue(HomeHelp.HOME_BODY.contains("no Signals list"))
+    }
+
+    @Test
+    fun scorecardSummaryLineUsesRecordWinRateAndPaperPnl() {
+        assertEquals(
+            "12-6 · 67% · paper +$12.40",
+            HomeCopy.scorecardSummaryLine(HomeFixtures.SAMPLE_SCORECARD)
+        )
+        assertEquals(
+            HomeScorecardSummary.NO_SETTLED,
+            HomeCopy.scorecardSummaryLine(HomeScorecardSummary.EMPTY)
+        )
+        assertEquals("No settled picks yet", HomeCopy.NO_SETTLED_PICKS)
+        assertEquals(
+            "0-3 · 0% · paper −$3.10",
+            HomeCopy.scorecardSummaryLine(
+                HomeScorecardSummary(wins = 0, losses = 3, hitRate = 0.0, paperPnlUsd = -3.10, settledCount = 3)
+            )
+        )
+        assertEquals(
+            "2-0 · 100% · paper $0.00",
+            HomeCopy.scorecardSummaryLine(
+                HomeScorecardSummary(wins = 2, losses = 0, hitRate = 1.0, paperPnlUsd = 0.0, settledCount = 2)
+            )
+        )
     }
 }

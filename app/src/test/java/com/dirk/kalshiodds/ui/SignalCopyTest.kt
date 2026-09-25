@@ -1,9 +1,12 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.signal.model.SignalAlert
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.BetCall
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SignalCopyTest {
@@ -45,29 +48,64 @@ class SignalCopyTest {
     }
 
     @Test
-    fun liveAlertUsesAiVsMarketNotStoredDelta() {
+    fun a1FixtureIsNoBetBecauseModelEdgeContradictsPickedSide() {
+        val a1 = HomeFixtures.sampleAlerts()[0]
+        assertEquals("NO", a1.predictedSide)
+        assertEquals(32.6, a1.fairValuePp, 1e-9)
+        assertEquals(44.0, a1.marketMidPp, 1e-9)
+        assertTrue(a1.reason.contains("AI 58% vs mkt 44%"))
+        assertEquals(58.0 to 44.0, SignalCopy.parseAiVsMarket(a1.reason))
+        assertEquals(-14.0, SignalCopy.displayedEdgePts(58.0, 44.0, "NO")!!, 1e-9)
+
+        val card = SignalCopy.card(a1)
+        assertEquals("NO BET", card.call)
+        assertEquals(BetCall.Headline.NO_BET, SignalCopy.headline(card.call))
+        assertEquals("Model 58% vs market 44% · edge +14 pts", card.modelLine)
+        assertTrue(card.details!!.contains(SignalStance.DISAGREE_NOTE))
+        assertTrue(card.details!!.contains("Stored Δ -11.4 pp"))
+        assertFalse(SignalCopy.shouldNotify(a1))
+        assertNull(SignalCopy.parseAiVsMarket("mkt 44% · Δ -11.4pp"))
+    }
+
+    @Test
+    fun consistentDownHasPositiveEdge() {
         val alert = SignalAlert(
-            id = "a",
-            ticker = "KXBTC15M-26SEP251400-00",
-            series = "KXBTC15M",
-            deltaPp = -11.4,
-            fairValuePp = 32.6,
-            marketMidPp = 44.0,
-            reason = "QUIET/EARLY · AI 58% vs mkt 44% · Δ -11.4pp (fv 33%)",
+            id = "down",
+            ticker = "KXETH15M-26SEP251400-40",
+            series = "KXETH15M",
+            deltaPp = -18.0,
+            fairValuePp = 30.0,
+            marketMidPp = 48.0,
+            reason = "QUIET/MID · AI 30% vs mkt 48%",
             createdAtMs = 0L,
             receiveElapsedNanos = 0L,
             predictedSide = "NO"
         )
-        assertEquals(58.0 to 44.0, SignalCopy.parseAiVsMarket(alert.reason))
         val card = SignalCopy.card(alert)
-        assertEquals("BTC · 2:00 PM window", card.title)
         assertEquals("DOWN", card.call)
-        assertEquals("Model 42% vs market 56% · edge -14 pts", card.modelLine)
-        assertEquals("Pending", card.outcome)
-        assertEquals(-14.0, SignalCopy.displayedEdgePts(58.0, 44.0, "NO")!!, 1e-9)
-        assertEquals(-11.4, alert.deltaPp, 1e-9)
-        assert(card.details!!.contains("Stored Δ -11.4 pp"))
-        assert(card.details!!.contains("QUIET/EARLY"))
-        assertNull(SignalCopy.parseAiVsMarket("mkt 44% · Δ -11.4pp"))
+        assertEquals(BetCall.Headline.BET_DOWN, SignalCopy.headline(card.call))
+        assertEquals("Model 70% vs market 52% · edge +18 pts", card.modelLine)
+        assertEquals(18.0, SignalCopy.displayedEdgePts(30.0, 48.0, "NO")!!, 1e-9)
+        assertTrue(SignalCopy.shouldNotify(alert))
+        assertFalse(card.details!!.contains(SignalStance.DISAGREE_NOTE))
+    }
+
+    @Test
+    fun consistentUpHasPositiveEdge() {
+        val a2 = HomeFixtures.sampleAlerts()[1]
+        val card = SignalCopy.card(a2)
+        assertEquals("UP", card.call)
+        assertEquals(BetCall.Headline.BET_UP, SignalCopy.headline(card.call))
+        assertEquals("Model 68% vs market 64% · edge +4 pts", card.modelLine)
+        assertTrue(SignalCopy.shouldNotify(a2))
+        assertFalse(card.details!!.contains(SignalStance.DISAGREE_NOTE))
+    }
+
+    @Test
+    fun noBetDoesNotFirePushAlert() {
+        val a1 = HomeFixtures.sampleAlerts()[0]
+        assertEquals("NO BET", SignalCopy.card(a1).call)
+        assertFalse(SignalCopy.shouldNotify(a1))
+        assertFalse(SignalCopy.shouldNotify(a1.copy(predictedSide = SignalStance.NO_BET)))
     }
 }

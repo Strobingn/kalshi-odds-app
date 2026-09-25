@@ -10,6 +10,8 @@ package com.dirk.kalshiodds.domain
  * is the soonest-closing open market in the same series.
  */
 object MarketLifecycle {
+    const val WINDOW_MS = 900_000L
+
     private val CLOSED_STATUSES = setOf(
         "closed", "determined", "disputed", "amended", "finalized", "settled"
     )
@@ -77,6 +79,27 @@ object MarketLifecycle {
             kotlin.math.abs((m.yesProbabilityPercent ?: m.aiYesPercent ?: 50.0) - 50.0)
         }
     }
+
+    fun openTimeEpochMs(market: MarketUiModel): Long? =
+        market.openTimeEpochMs ?: market.closeTimeEpochMs?.minus(WINDOW_MS)
+
+    /**
+     * The live 15m contract: [open_time, close_time). Closed and not-yet-open
+     * listings (Kalshi often returns the next window as `status=active`) are
+     * excluded even if they are still in the REST `status=open` set.
+     */
+    fun isCurrentWindow(market: MarketUiModel, nowMs: Long): Boolean {
+        val close = market.closeTimeEpochMs ?: return false
+        if (nowMs >= close) return false
+        val status = market.status?.trim()?.lowercase()
+        if (status != null && status in CLOSED_STATUSES) return false
+        if (status != null && status in NOT_TRADING_STATUSES) return false
+        val open = openTimeEpochMs(market) ?: return false
+        return nowMs >= open
+    }
+
+    fun currentOpenWindow(markets: List<MarketUiModel>, nowMs: Long): MarketUiModel? =
+        currentWindow(markets.filter { isCurrentWindow(it, nowMs) })
 
     fun featuredLive(
         markets: List<MarketUiModel>,

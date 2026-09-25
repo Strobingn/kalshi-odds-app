@@ -43,6 +43,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -68,7 +69,8 @@ data class OddsUiState(
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
     val liveCashUsd: Double? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
-    val mlGuardNote: String? = null
+    val mlGuardNote: String? = null,
+    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY
 )
 
 /**
@@ -106,6 +108,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
     private val backfillStarted = ConcurrentHashMap<String, Long>()
     private var backfillJob: Job? = null
+    private var lastWsState: WsConnectionState? = null
+    private var rolloverBound = false
 
     init {
         ticketSession.onStart()
@@ -124,6 +128,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
+                    HomeScorecardSummary.of(entries, paper.realizedPnlUsd)
+                }.collect { summary ->
+                    _state.update { it.copy(scorecardSummary = summary) }
                 }
             }
         }
@@ -181,9 +194,23 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        bindRollover()
         viewModelScope.launch {
             runCatching {
-                hub.status.collect { status -> _state.update { it.copy(signalStatus = status) } }
+                hub.status.collect { status ->
+                    val prev = lastWsState
+                    lastWsState = status.state
+                    _state.update { it.copy(signalStatus = status) }
+                    if (status.state == WsConnectionState.CONNECTED &&
+                        prev != null &&
+                        prev != WsConnectionState.CONNECTED
+                    ) {
+                        viewModelScope.launch {
+                            runCatching { container.rollover.refreshFromRest() }
+                            container.rollover.onReconnect()
+                        }
+                    }
+                }
             }
         }
         viewModelScope.launch {
@@ -294,6 +321,41 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { prefs.updateLiveSignals(enabled) }
     }
 
+    private fun bindRollover() {
+        if (rolloverBound) return
+        rolloverBound = true
+        container.rollover.addListener { event -> applyRolloverEvent(event) }
+        container.rollover.start(viewModelScope)
+    }
+
+    fun onForeground() {
+        viewModelScope.launch {
+            runCatching { container.rollover.refreshFromRest() }
+        }
+    }
+
+    internal fun applyRolloverEvent(event: com.dirk.kalshiodds.signal.market.MarketRollover.Event) {
+        val now = container.clock.nowMs()
+        _state.update { cur ->
+            val merged = HomeSnapshotMerge.apply(cur.snapshot, event, now)
+            val overlaid = attachHistory(
+                merged.overlayScores(hub.latestScores(), cur.settings.effectiveEdgeThresholdPp())
+            )
+            cur.copy(snapshot = overlaid, isLoading = false)
+        }
+        if (event.droppedTickers.isNotEmpty()) {
+            ticketSession.voidTickers(event.droppedTickers)
+            viewModelScope.launch {
+                runCatching { repository.scoreSettlementsNow(now) }
+            }
+        }
+        if (event.addedTickers.isNotEmpty()) {
+            applyRolloverCharts(event)
+        }
+        hub.setWatchTickers(event.activeTickers)
+        scheduleRebuildTickets()
+    }
+
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, userMessage = null) }
@@ -347,19 +409,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         val event = container.rollover.applyListed(result.allMarkets)
         hub.ingestRestSnapshot(result)
-        if (event.droppedTickers.isNotEmpty()) {
-            ticketSession.voidTickers(event.droppedTickers)
-            viewModelScope.launch {
-                runCatching { repository.scoreSettlementsNow(container.clock.nowMs()) }
-            }
-        }
-        if (event.addedTickers.isNotEmpty()) {
-            applyRolloverCharts(event)
-        }
         val series = _state.value.settings.watchedSeries.ifEmpty {
             com.dirk.kalshiodds.domain.CryptoMarkets.DEFAULT_SERIES
         }
-        val pruned = result.retainActiveWindows(container.clock.nowMs(), series)
+        val pruned = HomeSnapshotMerge.apply(
+            result.retainActiveWindows(container.clock.nowMs(), series),
+            event,
+            container.clock.nowMs()
+        )
         val overlaid = attachHistory(
             pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
         )
@@ -368,6 +425,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 isLoading = false,
                 snapshot = overlaid,
                 userMessage = when {
+                    event.retrying.isNotEmpty() -> null
                     result.errorMessage != null && result.fromCache ->
                         "Offline — showing cache (${result.errorMessage})"
                     result.errorMessage != null -> result.errorMessage

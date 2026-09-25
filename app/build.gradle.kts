@@ -14,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds"
         minSdk = 26
         targetSdk = 35
-        versionCode = 27
-        versionName = "0.3.12"
+        versionCode = 28
+        versionName = "0.3.13"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -130,6 +130,10 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // Real org.json for JVM unit tests (Android stubs JSONObject by default).
     testImplementation("org.json:json:20240303")
+    testImplementation("org.robolectric:robolectric:4.14.1")
+    testImplementation("androidx.test.ext:junit:1.2.1")
+    testImplementation("androidx.compose.ui:ui-test-junit4")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }

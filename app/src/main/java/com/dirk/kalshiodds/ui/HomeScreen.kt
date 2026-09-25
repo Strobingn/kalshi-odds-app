@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
@@ -39,11 +40,8 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
-import com.dirk.kalshiodds.ui.components.CollapsibleHomeSection
 import com.dirk.kalshiodds.ui.components.MarketCard
-import com.dirk.kalshiodds.ui.components.SignalSummaryCard
-import com.dirk.kalshiodds.ui.components.PaperBookCard
-import com.dirk.kalshiodds.ui.components.PositionsCard
+import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
 import com.dirk.kalshiodds.ui.components.TradeModeChip
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
@@ -57,6 +55,7 @@ fun HomeScreen(
     onOpenApiKeySettings: () -> Unit = onOpenSettings,
     onOpenScorecard: () -> Unit,
     onOpenHistory: () -> Unit,
+    onOpenSignalHistory: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit,
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
@@ -80,23 +79,11 @@ fun HomeScreen(
     val mode = TradeModeLabel.forApprove(state.settings)
     val hasKey = state.settings.tradingCredentialsConfigured()
     val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
-    val windowMarkets = HomeMarkets.currentWindowCards(state.snapshot?.allMarkets.orEmpty(), state.settings, nowMs)
+    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs)
+    val windowMarkets = coinCards.mapNotNull { it.market }
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
     val best = HomeMarkets.best(ranked, decisions)
-    val scoreLine = HomeCopy.scorecardLine(
-        state.snapshot?.modelScoreCorrect,
-        state.snapshot?.modelScoreTotal,
-        state.snapshot?.modelMeanBrier
-    )
-    val signalCount = state.recentAlerts.size
-    val ticketCount = state.tickets.proposals.size + state.tickets.working.count {
-        it.orderId != null && it.error?.startsWith("cancelled") != true
-    }
-    val ticketActionable = state.tickets.proposals.any { it.canApprove }
-    val positionCount = state.positions.size
-    val paperCount = state.paper.fills.size
-
     Scaffold(
         containerColor = colors.bg,
         contentWindowInsets = WindowInsets.safeDrawing,
@@ -112,11 +99,14 @@ fun HomeScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onOpenScorecard) {
+                        Icon(Icons.Default.Assessment, contentDescription = HomeCopy.SCORECARD_CONTENT_DESCRIPTION)
+                    }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Settings")
+                        Icon(Icons.Default.Settings, contentDescription = HomeCopy.SETTINGS_CONTENT_DESCRIPTION)
                     }
                     IconButton(onClick = onRefresh, enabled = !state.isLoading) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = HomeCopy.REFRESH_CONTENT_DESCRIPTION)
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -156,6 +146,7 @@ fun HomeScreen(
                         CircularProgressIndicator(color = colors.accentBlue)
                     }
                 } else {
+                    Box(Modifier.fillMaxSize()) {
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxSize()
@@ -187,119 +178,58 @@ fun HomeScreen(
                             ThisWindowCard(
                                 market = best?.first,
                                 decision = best?.second,
-                                scorecardLine = scoreLine,
                                 nowMs = nowMs,
+                                scorecard = state.scorecardSummary,
                                 onOpenScorecard = onOpenScorecard
                             )
                         }
-                        items(ranked, key = { it.ticker }) { market ->
-                            val call = decisions[market.ticker] ?: BetCall.decide(market, ctx)
-                            MarketCard(
-                                market = market,
-                                decision = call,
-                                settings = state.settings,
-                                paperTradingEnabled = state.settings.paperTradingEnabled,
-                                nowMs = nowMs,
-                                onBuyYes = { onBuyMarket(market, "YES") },
-                                onBuyNo = { onBuyMarket(market, "NO") },
-                                onSell = state.positions.firstOrNull { it.ticker == market.ticker }?.let {
-                                    { onSellMarket(market) }
-                                },
-                                onOpenChart = { onOpenChart(market) }
-                            )
-                        }
-                        item {
-                            CollapsibleHomeSection(
-                                title = "Signals",
-                                count = signalCount,
-                                autoExpand = signalCount > 0,
-                                infoTitle = HomeHelp.SIGNALS_TITLE,
-                                infoBody = HomeHelp.SIGNALS_BODY
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    if (state.recentAlerts.isEmpty()) {
-                                        Text(
-                                            "No live signals yet.",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = colors.textSecondary
-                                        )
-                                    } else {
-                                        state.recentAlerts.forEach { alert ->
-                                            SignalSummaryCard(SignalCopy.card(alert))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        item {
-                            CollapsibleHomeSection(
-                                title = "Tickets",
-                                count = ticketCount,
-                                autoExpand = ticketCount > 0 && ticketActionable,
-                                infoTitle = HomeHelp.TICKETS_TITLE,
-                                infoBody = HomeHelp.TICKETS_BODY,
-                                composeWhenCollapsed = true
-                            ) {
-                                TradeTicketsSection(
-                                    tickets = state.tickets,
-                                    credentialsConfigured = hasKey,
+                        items(coinCards, key = { it.series }) { card ->
+                            val market = card.market
+                            if (market == null) {
+                                NextWindowLoadingCard(card.series)
+                            } else {
+                                val call = decisions[market.ticker] ?: BetCall.decide(market, ctx)
+                                MarketCard(
+                                    market = market,
+                                    decision = call,
+                                    settings = state.settings,
                                     paperTradingEnabled = state.settings.paperTradingEnabled,
-                                    homeMode = true,
-                                    onReview = onReviewTicket,
-                                    onDismiss = onDismissTicket,
-                                    onApprove = onApproveTicket,
-                                    onApproveSell = onApproveSellTicket,
-                                    onPaper = onPaperTicket,
-                                    onPaperSell = onPaperSellTicket,
-                                    onCancelApprove = onCancelApprove,
-                                    onCancelOrder = onCancelOrder
-                                )
-                            }
-                        }
-                        item {
-                            CollapsibleHomeSection(
-                                title = "Positions",
-                                count = positionCount,
-                                autoExpand = positionCount > 0,
-                                infoTitle = HomeHelp.POSITIONS_TITLE,
-                                infoBody = HomeHelp.POSITIONS_BODY
-                            ) {
-                                PositionsCard(
-                                    positions = state.positions,
-                                    note = state.positionsNote,
-                                    onSell = onSellPosition,
-                                    onViewHistory = onOpenHistory,
-                                    homeMode = true
-                                )
-                            }
-                        }
-                        item {
-                            CollapsibleHomeSection(
-                                title = "Paper",
-                                count = paperCount,
-                                autoExpand = paperCount > 0,
-                                infoTitle = HomeHelp.PAPER_TITLE,
-                                infoBody = HomeHelp.PAPER_BODY
-                            ) {
-                                PaperBookCard(
-                                    paper = state.paper,
-                                    enabled = state.settings.paperTradingEnabled,
-                                    onToggle = onSetPaperTrading,
-                                    onReset = onResetPaper,
-                                    onSell = onSellPosition,
-                                    onViewHistory = onOpenHistory,
-                                    homeMode = true
+                                    nowMs = nowMs,
+                                    onBuyYes = { onBuyMarket(market, "YES") },
+                                    onBuyNo = { onBuyMarket(market, "NO") },
+                                    onSell = state.positions.firstOrNull { it.ticker == market.ticker }?.let {
+                                        { onSellMarket(market) }
+                                    },
+                                    onOpenChart = { onOpenChart(market) }
                                 )
                             }
                         }
                         item {
                             Text(
-                                versionLabel,
-                                style = MaterialTheme.typography.labelSmall,
+                                HomeCopy.SIGNAL_HISTORY,
+                                style = MaterialTheme.typography.labelMedium,
                                 color = colors.textSecondary,
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp)
+                                modifier = Modifier
+                                    .padding(top = 4.dp, bottom = 4.dp)
+                                    .clickable(onClick = onOpenSignalHistory)
                             )
                         }
+                    }
+                    TradeTicketsSection(
+                        tickets = state.tickets,
+                        credentialsConfigured = hasKey,
+                        paperTradingEnabled = state.settings.paperTradingEnabled,
+                        homeMode = true,
+                        listVisible = false,
+                        onReview = onReviewTicket,
+                        onDismiss = onDismissTicket,
+                        onApprove = onApproveTicket,
+                        onApproveSell = onApproveSellTicket,
+                        onPaper = onPaperTicket,
+                        onPaperSell = onPaperSellTicket,
+                        onCancelApprove = onCancelApprove,
+                        onCancelOrder = onCancelOrder
+                    )
                     }
                 }
             }

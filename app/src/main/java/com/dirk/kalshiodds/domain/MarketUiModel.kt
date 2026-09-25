@@ -101,7 +101,9 @@ data class MarketUiModel(
     val modelEdgeQualified: Boolean = true,
     val spotUsd: Double? = null,
     val spotVsTargetUsd: Double? = null,
-    val pastSettlements: List<Boolean> = emptyList()
+    val pastSettlements: List<Boolean> = emptyList(),
+    /** Kalshi `open_time`. When null, 15m windows infer close − [MarketLifecycle.WINDOW_MS]. */
+    val openTimeEpochMs: Long? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {

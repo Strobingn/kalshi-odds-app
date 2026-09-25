@@ -11,6 +11,15 @@ import kotlin.math.abs
  * Example: `BTC · 3:30 PM window · UP · 50 contracts · avg 32¢ · now 0.1¢ · -$15.95`
  */
 object PositionCopy {
+    const val NO_BUYERS = "No buyers right now"
+
+    fun sellBlockedMessage(reason: String?): String =
+        if (reason == com.dirk.kalshiodds.signal.trade.TicketBuilder.NO_BUYERS) {
+            NO_BUYERS
+        } else {
+            reason?.trim().orEmpty()
+        }
+
     fun row(pos: LivePosition): String {
         val window = WindowLabel.of(pos.ticker, pos.closeTimeEpochMs)
         val side = SignalCopy.callLabel(pos.side)

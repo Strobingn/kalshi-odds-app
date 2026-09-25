@@ -14,6 +14,7 @@ fun OddsScreen(
     onOpenScorecard: () -> Unit,
     onOpenData: () -> Unit,
     onOpenHistory: () -> Unit,
+    onOpenSignalHistory: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -23,6 +24,7 @@ fun OddsScreen(
         onOpenApiKeySettings = onOpenApiKeySettings,
         onOpenScorecard = onOpenScorecard,
         onOpenHistory = onOpenHistory,
+        onOpenSignalHistory = onOpenSignalHistory,
         onOpenChart = onOpenChart,
         onRefresh = { viewModel.refresh() },
         onBuyMarket = { market, side -> viewModel.buyMarket(market, side) },

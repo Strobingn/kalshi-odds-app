@@ -3,31 +3,36 @@ package com.dirk.kalshiodds.signal.market
 import com.dirk.kalshiodds.domain.ActiveMarketResolver
 import com.dirk.kalshiodds.domain.Clock
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import retrofit2.HttpException
 
 /**
- * Rolls KXBTC15M / KXETH15M / KXSOL15M to the next 15m contract at close.
+ * Clock-driven 15m window swap for BTC / SOL / ETH.
  *
- * Root cause this replaces: REST metadata only ran every 15s (UI + WS) or 45s
- * (foreground service while the Activity was up skipped entirely), WebSocket
- * [com.dirk.kalshiodds.signal.ws.KalshiWsClient.updateSubscriptions] sent a
- * new `subscribe` without `unsubscribe` / `update_subscription`, and
- * [com.dirk.kalshiodds.signal.SignalHub.ingestRestSnapshot] watched every
- * `status=open` ticker — including a just-closed window Kalshi still listed.
+ * Production bug this closes: [com.dirk.kalshiodds.ui.OddsViewModel] painted
+ * `repository.refresh()` snapshots and never applied [Event] to home, while
+ * [start] only ran inside [com.dirk.kalshiodds.signal.service.LiveSignalsService].
+ * Kalshi's `status=open` list also keeps the closed ticker until the next
+ * window is created (15–42s after close, with 429s). A successor is accepted
+ * only when its `close_time` is later than the one we just showed.
  */
 class MarketRollover(
     private val clock: Clock,
     private val listOpen: suspend (series: String) -> List<MarketUiModel>,
     private val watchedSeries: () -> List<String> = { CryptoMarkets.DEFAULT_SERIES },
-    private val graceAfterCloseMs: Long = ActiveMarketResolver.GRACE_AFTER_CLOSE_MS,
-    private val retryMs: Long = ActiveMarketResolver.RETRY_MS,
-    private val sleeper: suspend (Long) -> Unit = { delay(it) }
+    private val graceAfterCloseMs: Long = 0L,
+    private val retryMs: Long = POLL_MS,
+    private val sleeper: suspend (Long) -> Unit = { delay(it) },
+    private val staggerMs: Long = STAGGER_MS,
+    private val pollCapMs: Long = POLL_CAP_MS
 ) {
     data class Event(
         val active: Map<String, MarketUiModel>,
@@ -36,9 +41,12 @@ class MarketRollover(
         val addedTickers: Set<String>,
         val retrying: Set<String>,
         val nextWakeMs: Long?,
-        val reconnect: Boolean = false
+        val reconnect: Boolean = false,
+        val rateLimited: Set<String> = emptySet(),
+        val lastCloseMs: Map<String, Long> = emptyMap()
     ) {
         val activeTickers: Set<String> get() = active.values.map { it.ticker }.toSet()
+        fun displayed(series: String): MarketUiModel? = active[series]
     }
 
     fun interface Listener {
@@ -54,6 +62,8 @@ class MarketRollover(
         retrying = emptySet(),
         nextWakeMs = null
     )
+    @Volatile private var lastCloseBySeries: Map<String, Long> = emptyMap()
+    @Volatile private var backoffBySeries: Map<String, Long> = emptyMap()
     private var loop: Job? = null
 
     fun snapshot(): Event = last
@@ -110,15 +120,36 @@ class MarketRollover(
 
     suspend fun refreshFromRest(): Event {
         val series = watchedSeries()
-        val listed = series.flatMap { s ->
-            runCatching { listOpen(s) }.getOrElse { emptyList() }
+        val listed = mutableListOf<MarketUiModel>()
+        val failed = mutableSetOf<String>()
+        val limited = mutableSetOf<String>()
+        series.forEachIndexed { i, s ->
+            if (i > 0) sleeper(staggerMs)
+            try {
+                listed += listOpen(s)
+                backoffBySeries = backoffBySeries - s
+            } catch (e: HttpException) {
+                failed += s
+                if (e.code() == 429) {
+                    limited += s
+                    val wait = retryAfterMs(e) ?: nextBackoff(s)
+                    backoffBySeries = backoffBySeries + (s to wait)
+                }
+            } catch (_: Throwable) {
+                failed += s
+            }
         }
-        return applyListed(listed)
+        return applyListed(listed, failed, limited)
     }
 
-    fun applyListed(listed: List<MarketUiModel>): Event {
+    fun applyListed(
+        listed: List<MarketUiModel>,
+        fetchFailed: Set<String> = emptySet(),
+        rateLimited: Set<String> = emptySet()
+    ): Event {
         val series = watchedSeries()
-        val event = compute(listed, series, last.active, clock.nowMs())
+        val event = compute(listed, series, last.active, lastCloseBySeries, fetchFailed, rateLimited, clock.nowMs())
+        lastCloseBySeries = event.lastCloseMs
         last = event
         listeners.forEach { runCatching { it.onRollover(event) } }
         return event
@@ -128,10 +159,36 @@ class MarketRollover(
         listed: List<MarketUiModel>,
         series: List<String>,
         previous: Map<String, MarketUiModel>,
+        previousClose: Map<String, Long>,
+        fetchFailed: Set<String>,
+        rateLimited: Set<String>,
         nowMs: Long
     ): Event {
-        val active = ActiveMarketResolver.activeBySeries(listed, series, nowMs)
-        val retrying = series.filter { it !in active }.toSet()
+        val active = linkedMapOf<String, MarketUiModel>()
+        val retrying = linkedSetOf<String>()
+        val closes = previousClose.toMutableMap()
+        for (s in series) {
+            val prev = previous[s]
+            val keepPrev = prev != null && MarketLifecycle.isCurrentWindow(prev, nowMs)
+            if (s in fetchFailed && keepPrev) {
+                active[s] = prev
+                prev.closeTimeEpochMs?.let { closes[s] = it }
+                continue
+            }
+            val picked = successor(
+                series = s,
+                listed = listed,
+                nowMs = nowMs,
+                lastCloseMs = closes[s] ?: prev?.closeTimeEpochMs,
+                previous = prev
+            )
+            if (picked != null) {
+                active[s] = picked
+                picked.closeTimeEpochMs?.let { closes[s] = it }
+            } else {
+                retrying += s
+            }
+        }
         val prevTickers = previous.values.map { it.ticker }.toSet()
         val nextTickers = active.values.map { it.ticker }.toSet()
         return Event(
@@ -140,17 +197,72 @@ class MarketRollover(
             droppedTickers = prevTickers - nextTickers,
             addedTickers = nextTickers - prevTickers,
             retrying = retrying,
-            nextWakeMs = ActiveMarketResolver.nextWakeMs(
-                active = active.values,
-                retrying = retrying,
-                nowMs = nowMs,
-                graceAfterCloseMs = graceAfterCloseMs,
-                retryMs = retryMs
-            )
+            nextWakeMs = nextWakeMs(active.values, retrying, nowMs, rateLimited),
+            rateLimited = rateLimited,
+            lastCloseMs = closes
         )
     }
 
+    /**
+     * Keep the current window if it is still open. Otherwise require a listing
+     * whose close_time is strictly later than the window we just showed —
+     * Kalshi can keep the closed ticker in `status=open` for tens of seconds.
+     */
+    fun successor(
+        series: String,
+        listed: List<MarketUiModel>,
+        nowMs: Long,
+        lastCloseMs: Long?,
+        previous: MarketUiModel?
+    ): MarketUiModel? {
+        if (previous != null && MarketLifecycle.isCurrentWindow(previous, nowMs)) return previous
+        val pool = listed.filter {
+            CryptoMarkets.inferSeries(it.ticker).equals(series, ignoreCase = true)
+        }
+        val later = pool.filter { m ->
+            val close = m.closeTimeEpochMs ?: return@filter false
+            val floor = lastCloseMs ?: Long.MIN_VALUE
+            close > floor && MarketLifecycle.isCurrentWindow(m, nowMs)
+        }
+        return MarketLifecycle.currentOpenWindow(later, nowMs)
+    }
+
+    private fun nextWakeMs(
+        active: Collection<MarketUiModel>,
+        retrying: Collection<String>,
+        nowMs: Long,
+        rateLimited: Set<String>
+    ): Long? {
+        val closeWake = active.mapNotNull { it.closeTimeEpochMs }.minOrNull()?.plus(graceAfterCloseMs)
+        val pollWait = if (retrying.isNotEmpty()) {
+            val limitedWait = rateLimited.mapNotNull { backoffBySeries[it] }.minOrNull()
+            nowMs + (limitedWait ?: retryMs)
+        } else {
+            null
+        }
+        val staleWake = active.mapNotNull { m ->
+            val close = m.closeTimeEpochMs ?: return@mapNotNull null
+            if (nowMs > close + STALE_FORCE_MS) nowMs + retryMs else null
+        }.minOrNull()
+        return listOfNotNull(closeWake, pollWait, staleWake).minOrNull()
+    }
+
+    private fun nextBackoff(series: String): Long {
+        val cur = backoffBySeries[series] ?: BACKOFF_START_MS
+        val next = (cur * 2).coerceAtMost(pollCapMs)
+        val jitter = Random.nextLong(0, (next / 5).coerceAtLeast(1))
+        return next + jitter
+    }
+
     companion object {
+        const val POLL_MS = 2_500L
+        /** First 429 backoff when Retry-After is absent (18:00 ET measure). */
+        const val BACKOFF_START_MS = 2_000L
+        const val POLL_CAP_MS = 10_000L
+        const val STAGGER_MS = 250L
+        /** Keep "Next window loading" at least this long; never an error at 20s. */
+        const val LOADING_MAX_MS = 120_000L
+        const val STALE_FORCE_MS = 20_000L
         val LIFECYCLE_REFRESH = setOf(
             "deactivated",
             "determined",
@@ -159,5 +271,11 @@ class MarketRollover(
             "activated",
             "created"
         )
+
+        fun retryAfterMs(error: HttpException): Long? {
+            val raw = error.response()?.headers()?.get("Retry-After") ?: return null
+            val seconds = raw.trim().toLongOrNull() ?: return null
+            return (seconds * 1_000L).coerceIn(POLL_MS, POLL_CAP_MS)
+        }
     }
 }

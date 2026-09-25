@@ -30,13 +30,8 @@ class SignalNotifier(private val context: Context) {
     fun notify(alert: SignalAlert): Long {
         ensureChannels(context)
         val postedAt = SystemClock.elapsedRealtimeNanos()
-        val card = SignalCopy.card(
-            ticker = alert.ticker,
-            side = alert.predictedSide,
-            modelYes = alert.fairValuePp,
-            marketYes = alert.marketMidPp,
-            details = alert.reason
-        )
+        if (!SignalCopy.shouldNotify(alert)) return postedAt
+        val card = SignalCopy.card(alert)
         val title = context.getString(R.string.signal_alert_title, card.title)
         val text = "${card.call} · ${card.modelLine}"
         val intent = Intent(context, MainActivity::class.java).apply {
