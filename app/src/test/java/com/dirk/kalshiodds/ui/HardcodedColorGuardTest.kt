@@ -20,9 +20,23 @@ class HardcodedColorGuardTest {
         "import com.dirk.kalshiodds.ui.theme.TextSecondary",
         "import com.dirk.kalshiodds.ui.theme.AccentBlue",
         "import com.dirk.kalshiodds.ui.theme.AccentGreen",
+        "import com.dirk.kalshiodds.ui.theme.UpColor",
+        "import com.dirk.kalshiodds.ui.theme.DownColor",
         "import com.dirk.kalshiodds.ui.theme.AccentOrange",
         "import com.dirk.kalshiodds.ui.theme.AccentRed"
     )
+
+    @Test
+    fun uiOutsideThemeHasNoHardCodedHexLiterals() {
+        val files = uiComposableFiles()
+        assertTrue("no UI composable files found", files.isNotEmpty())
+        val hits = files.flatMap { f ->
+            f.readLines().mapIndexedNotNull { i, line ->
+                if (line.contains("Color(0x")) "${rel(f)}:${i + 1}: $line" else null
+            }
+        }
+        assertTrue("hard-coded Color(0x…) outside ui/theme:\n${hits.joinToString("\n")}", hits.isEmpty())
+    }
 
     @Test
     fun composablesDoNotImportDarkOnlyColorTokens() {
@@ -37,8 +51,8 @@ class HardcodedColorGuardTest {
             if (Regex("""Color\(0x""").containsMatchIn(text)) {
                 hits += "${rel(f)}: Color(0x…)"
             }
-            if (Regex("""color\s*=\s*Color\.(White|Black)""").containsMatchIn(text)) {
-                hits += "${rel(f)}: Color.White/Black as text"
+            if (Regex("""color\s*=\s*Color\.(White|Black|Green|Red)""").containsMatchIn(text)) {
+                hits += "${rel(f)}: Color.White/Black/Green/Red as text"
             }
         }
         assertTrue("hard-coded colors outside theme:\n${hits.joinToString("\n")}", hits.isEmpty())

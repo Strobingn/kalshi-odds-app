@@ -3,6 +3,7 @@ plugins {
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
     id("org.jetbrains.kotlin.plugin.serialization")
+    id("app.cash.paparazzi")
 }
 
 android {
@@ -13,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds"
         minSdk = 26
         targetSdk = 35
-        versionCode = 26
-        versionName = "0.3.11"
+        versionCode = 27
+        versionName = "0.3.12"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -75,6 +76,10 @@ android {
 
     androidResources {
         noCompress += "tflite"
+    }
+
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
     }
 }
 

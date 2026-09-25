@@ -48,6 +48,7 @@ import com.dirk.kalshiodds.data.local.history.HistoryAssembler
 import com.dirk.kalshiodds.data.local.history.HistoryBet
 import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
+import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.domain.MarketUiModel
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -93,7 +94,7 @@ fun HistoryScreen(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accentGreen,
+                    color = colors.textPrimary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
@@ -111,7 +112,9 @@ fun HistoryScreen(
                         }
                         items(state.bets, key = { it.id }) { BetRow(it) }
                     }
-                    1 -> items(state.signals, key = { it.id }) { SignalRow(it) }
+                    1 -> items(state.signals, key = { it.id }) { row ->
+                        SignalSummaryCard(signalCard(row))
+                    }
                     2 -> items(state.sessions, key = { it.id }) { SessionRow(it) }
                     3 -> {
                         state.currentSettingsJson?.let { json ->
@@ -220,7 +223,7 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
             ),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
-            color = if (t.pnlUsd >= 0) colors.accentGreen else colors.accentRed
+            color = colors.textPrimary
         )
     }
 }
@@ -228,7 +231,7 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
 @Composable
 private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
     val colors = DipTheme.colors
-    val color = if ((points.lastOrNull()?.second ?: 0.0) >= 0) colors.accentGreen else colors.accentRed
+    val color = colors.textPrimary
     Column(Modifier.fillMaxWidth()) {
         Text("Cumulative P&L", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 4.dp)) {
@@ -253,8 +256,8 @@ private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
 private fun BetRow(b: HistoryBet) {
     val colors = DipTheme.colors
     val resultColor = when (b.result.lowercase()) {
-        "won" -> colors.accentGreen
-        "lost" -> colors.accentRed
+        "won" -> colors.textPrimary
+        "lost" -> colors.textPrimary
         else -> colors.textSecondary
     }
     Column(
@@ -264,10 +267,10 @@ private fun BetRow(b: HistoryBet) {
             .padding(10.dp)
     ) {
         Text(
-            "${historyTime(b.createdAtMs)}  ${b.ticker}  ${b.side.uppercase()}",
+            "${WindowLabel.of(b.ticker)}  ·  ${SignalCopy.callLabel(b.side)}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = colors.accentGreen
+            color = colors.textPrimary
         )
         Text(
             buildString {
@@ -284,24 +287,19 @@ private fun BetRow(b: HistoryBet) {
     }
 }
 
-@Composable
-private fun SignalRow(s: HistoryAssembler.SignalLine) {
-    val colors = DipTheme.colors
-    Text(
-        String.format(
-            Locale.US,
-            "%s  %s  %s  mkt %.0f¢  AI %.0f¢  edge %+.1f pp%s",
-            historyTime(s.createdAtMs),
-            s.ticker,
-            s.side,
-            s.marketPp,
-            s.fairPp,
-            s.edgePp,
-            s.settled?.let { "  settled ${it.uppercase()}" } ?: "  unsettled"
-        ),
-        style = MaterialTheme.typography.bodyMedium,
-        color = colors.accentBlue,
-        modifier = Modifier.fillMaxWidth()
+internal fun signalCard(s: HistoryAssembler.SignalLine): SignalCopy.Card {
+    val parsed = SignalCopy.parseAiVsMarket(s.note)
+    return SignalCopy.card(
+        ticker = s.ticker,
+        side = s.side,
+        modelYes = parsed?.first ?: s.fairPp,
+        marketYes = parsed?.second ?: s.marketPp,
+        settled = s.settled,
+        details = buildString {
+            s.note?.takeIf { it.isNotBlank() }?.let { append(it) }
+            if (isNotEmpty()) append('\n')
+            append(String.format(Locale.US, "Stored Δ %+.1f pp (fair − mid, not the card edge)", s.edgePp))
+        }
     )
 }
 
@@ -355,7 +353,7 @@ private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(row.ticker, fontWeight = FontWeight.Bold, color = colors.accentGreen)
+            Text(WindowLabel.of(row.ticker, row.closeMs), fontWeight = FontWeight.Bold, color = colors.textPrimary)
             Text(
                 "${row.closeMs?.let { historyTime(it) } ?: "—"}  ${row.result.uppercase()}  " +
                     (row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: ""),

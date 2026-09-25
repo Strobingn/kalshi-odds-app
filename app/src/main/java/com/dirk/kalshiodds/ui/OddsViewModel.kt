@@ -19,7 +19,6 @@ import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
-import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.chart.ChartWindowService
 import com.dirk.kalshiodds.chart.hasQuote
@@ -346,9 +345,23 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             currentIntervalMs > BASE_POLL_MS + JITTER_MS -> "Backing off ~${currentIntervalMs / 1000}s"
             else -> "Polling ~${currentIntervalMs}ms (±${JITTER_MS}ms)"
         }
+        val event = container.rollover.applyListed(result.allMarkets)
         hub.ingestRestSnapshot(result)
+        if (event.droppedTickers.isNotEmpty()) {
+            ticketSession.voidTickers(event.droppedTickers)
+            viewModelScope.launch {
+                runCatching { repository.scoreSettlementsNow(container.clock.nowMs()) }
+            }
+        }
+        if (event.addedTickers.isNotEmpty()) {
+            applyRolloverCharts(event)
+        }
+        val series = _state.value.settings.watchedSeries.ifEmpty {
+            com.dirk.kalshiodds.domain.CryptoMarkets.DEFAULT_SERIES
+        }
+        val pruned = result.retainActiveWindows(container.clock.nowMs(), series)
         val overlaid = attachHistory(
-            result.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
+            pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
         )
         _state.update {
             it.copy(
@@ -465,12 +478,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
                 return@launch
             }
+            val now = System.currentTimeMillis()
+            val snap = _state.value
+            val ctx = ticketContext(snap, now)
             ticketSession.revise(ticketId) { t ->
-                resizeSell(t, count, price)
+                refreshSellAtConfirm(t, count, price, snap, ctx)
             }
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             if (ticket != null && !ticket.canApprove) {
-                ticketSession.failSoft(ticket.blockedReason ?: "Ticket cannot be approved")
+                ticketSession.failSoft(ticket.blockedReason ?: TicketBuilder.NO_BUYERS)
                 return@launch
             }
             ticketSession.approve(ticketId)
@@ -636,20 +652,26 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun applyRolloverCharts(event: com.dirk.kalshiodds.signal.market.MarketRollover.Event) {
+        val now = container.clock.nowMs()
+        for (ticker in event.addedTickers) {
+            val market = event.active.values.firstOrNull { it.ticker == ticker }
+            val end = market?.closeTimeEpochMs ?: now + ChartWindowService.WINDOW_MS
+            chartWindows.restoreWindow(ticker, end - ChartWindowService.WINDOW_MS, end)
+        }
+        chartWindows.trimActive(event.activeTickers, now - ChartWindowService.WINDOW_MS)
+    }
+
     private fun rebuildTickets() {
         val s = _state.value
-        val now = System.currentTimeMillis()
+        val now = container.clock.nowMs()
         val markets = s.snapshot?.allMarkets.orEmpty()
         val live = MarketLifecycle.tradable(markets, now)
         val liveTickers = live.map { it.ticker }.toSet()
         val ctx = ticketContext(s, now)
-        val remappedManuals = s.tickets.proposals.mapNotNull { existing ->
-            if (existing.kind != TicketKind.MANUAL) return@mapNotNull null
-            if (existing.ticker in liveTickers) return@mapNotNull null
-            val next = MarketLifecycle.liveSuccessor(existing.ticker, live, now) ?: return@mapNotNull null
-            TicketBuilder.proposeManual(next, existing.side, ctx)
-        }
-        val tickets = TicketBuilder.proposeAll(live, ctx) + remappedManuals
+        val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
+        if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
+        val tickets = TicketBuilder.proposeAll(live, ctx)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {
             container.opportunities.consider(
@@ -735,7 +757,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ctx = ticketContext(s, now)
         val decorated = raw.map { pos ->
             val market = markets[pos.ticker]
-            val bid = market?.let { TicketBuilder.bestBid(it, pos.side, ctx) } ?: pos.bestBid
+            val bid = market?.let { TicketBuilder.freshBestBid(it, pos.side, ctx) } ?: pos.bestBid
             PositionParser.decorate(pos, market, bid)
         }
         val note = when {
@@ -754,23 +776,61 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun refreshSellAtConfirm(
+        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
+        count: Int,
+        price: Double,
+        snap: OddsUiState,
+        ctx: TicketBuilder.Context
+    ): com.dirk.kalshiodds.signal.trade.TradeTicket {
+        if (!ticket.isSell) return ticket
+        if (ticket.paperOnly) {
+            return TicketBuilder.applySellQuote(ticket, count, KalshiPrice.usable(price) ?: ticket.limitPrice)
+        }
+        val market = snap.snapshot?.allMarkets.orEmpty()
+            .firstOrNull { it.ticker.equals(ticket.ticker, true) }
+            ?: sellMarketFallback(ticket, snap)
+        val fresh = market?.let { TicketBuilder.freshBestBid(it, ticket.side, ctx) }
+        if (fresh == null) {
+            return TicketBuilder.applySellQuote(ticket, count, bid = null)
+        }
+        // Live sell always uses the fresh book bid. Never a stale or higher limit.
+        return TicketBuilder.applySellQuote(ticket, count, fresh, snap.settings.feeRate)
+    }
+
+    private fun sellMarketFallback(
+        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
+        snap: OddsUiState
+    ): MarketUiModel? {
+        val pos = snap.positions.firstOrNull {
+            it.ticker.equals(ticket.ticker, true) && it.side.equals(ticket.side, true)
+        } ?: return null
+        return MarketUiModel(
+            ticker = ticket.ticker,
+            title = pos.title ?: ticket.title ?: ticket.ticker,
+            subtitle = null,
+            floorStrike = null,
+            yesBid = if (ticket.side == "YES") pos.bestBid else null,
+            yesAsk = null,
+            noBid = if (ticket.side == "NO") pos.bestBid else null,
+            noAsk = null,
+            lastPrice = pos.bestBid,
+            yesProbabilityPercent = null,
+            noProbabilityPercent = null,
+            volume = null,
+            volume24h = null,
+            openInterest = null,
+            liquidityDollars = null,
+            closeTimeLocal = null,
+            closeTimeEpochMs = pos.closeTimeEpochMs,
+            status = "active",
+            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticket.ticker).label
+        )
+    }
+
     private fun resizeSell(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, count: Int, price: Double): com.dirk.kalshiodds.signal.trade.TradeTicket {
         if (!ticket.isSell) return ticket
-        val held = ticket.heldContracts ?: ticket.contracts
-        val qty = count.coerceIn(1, held.coerceAtLeast(1))
-        val bid = KalshiPrice.usable(price) ?: ticket.limitPrice
-        val yesLimit = if (ticket.side == "YES") bid else (1.0 - bid)
-        val proceeds = qty * bid
-        return ticket.copy(
-            contracts = qty,
-            limitPrice = bid,
-            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
-            stakeUsd = proceeds,
-            estimatedFillUsd = proceeds,
-            maxPayoutUsd = proceeds,
-            estimatedAvgFill = bid,
-            sizingNote = "$qty ct · sell ${ticket.side} @ ${String.format(java.util.Locale.US, "%.1f¢", bid * 100.0)} · reduce-only"
-        )
+        return TicketBuilder.applySellQuote(ticket, count, KalshiPrice.usable(price) ?: ticket.limitPrice)
     }
 
     private fun paperFromAlerts(alerts: List<SignalAlert>) {
@@ -867,18 +927,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val c = result.modelScoreCorrect ?: return null
         val total = result.modelScoreTotal ?: return null
         if (total <= 0) return null
-        val brier = result.modelMeanBrier?.let { String.format(java.util.Locale.US, " · Brier %.3f", it) }.orEmpty()
-        val right = result.avgEdgeWhenRight?.let { String.format(java.util.Locale.US, " · Δ✓ %+.1f", it) }.orEmpty()
-        val wrong = result.avgEdgeWhenWrong?.let { String.format(java.util.Locale.US, " · Δ✗ %+.1f", it) }.orEmpty()
-        return "Scorecard: $c/$total$brier$right$wrong"
+        return HomeCopy.scorecardLine(c, total, result.modelMeanBrier)
     }
 
     private fun nextDelayMs(): Long {
         val wsConnected = _state.value.signalStatus.state == WsConnectionState.CONNECTED
-        if (wsConnected) return WS_METADATA_POLL_MS
-        val half = min(JITTER_MS, currentIntervalMs / 3)
-        val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
-        return (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
+        val poll = if (wsConnected) {
+            WS_METADATA_POLL_MS
+        } else {
+            val half = min(JITTER_MS, currentIntervalMs / 3)
+            val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
+            (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
+        }
+        return minOf(poll, container.rollover.nextDelayMs()).coerceAtLeast(50L)
     }
 
     companion object {

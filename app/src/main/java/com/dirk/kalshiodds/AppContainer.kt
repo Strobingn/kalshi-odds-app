@@ -26,6 +26,9 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlStore
 import com.dirk.kalshiodds.signal.ml.NewsPulseCache
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.paper.PaperBookStore
+import com.dirk.kalshiodds.domain.Clock
+import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.signal.market.MarketRollover
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import java.io.File
 
@@ -103,6 +106,7 @@ class AppContainer(context: Context) {
         },
         onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
     )
+    val clock: Clock = Clock.System
     val repository = MarketRepository(
         context = app,
         resolveApi = { NetworkModule.publicApi(hub.settings.kalshiDemoEnabled) },
@@ -128,6 +132,13 @@ class AppContainer(context: Context) {
                     autoTuneNote = tuned.reason
                 )
             }
+        }
+    )
+    val rollover = MarketRollover(
+        clock = clock,
+        listOpen = { series -> repository.listOpen(series) },
+        watchedSeries = {
+            hub.settings.watchedSeries.toList().ifEmpty { CryptoMarkets.DEFAULT_SERIES }
         }
     )
 

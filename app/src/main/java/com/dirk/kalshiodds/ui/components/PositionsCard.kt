@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.trade.LivePosition
-import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
@@ -26,7 +25,8 @@ fun PositionsCard(
     positions: List<LivePosition>,
     note: String?,
     onSell: (ticker: String, side: String) -> Unit,
-    onViewHistory: (() -> Unit)? = null
+    onViewHistory: (() -> Unit)? = null,
+    homeMode: Boolean = false
 ) {
     val colors = DipTheme.colors
     Column(
@@ -37,16 +37,18 @@ fun PositionsCard(
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(
-            "Your positions",
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onBackground
-        )
-        Text(
-            "Live Kalshi holdings (GET /portfolio/positions). Sell opens an approve-gated V2 reduce-only limit — never the retired v1 path.",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
-        )
+        if (!homeMode) {
+            Text(
+                "Your positions",
+                style = MaterialTheme.typography.headlineMedium,
+                color = MaterialTheme.colorScheme.onBackground
+            )
+            Text(
+                "Open Kalshi positions. Sell closes them at the current bid.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+        }
         if (onViewHistory != null) {
             OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
                 Text("View all")
@@ -71,13 +73,6 @@ fun PositionsCard(
 @Composable
 private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
     val colors = DipTheme.colors
-    val pnl = pos.unrealizedPnlUsd
-    val pnlColor = when {
-        pnl == null -> colors.textSecondary
-        pnl > 0 -> colors.accentGreen
-        pnl < 0 -> colors.accentRed
-        else -> colors.accentBlue
-    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -86,7 +81,7 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
-                pos.displaySide,
+                com.dirk.kalshiodds.ui.SignalCopy.callLabel(pos.side),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.accentBlue,
                 fontWeight = FontWeight.Bold
@@ -94,25 +89,10 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
             TimeLeftLabel(pos.closeTimeEpochMs, compact = true)
         }
         Text(
-            pos.ticker,
+            com.dirk.kalshiodds.ui.PositionCopy.row(pos),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Bold
-        )
-        pos.title?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        }
-        Text(
-            String.format(
-                Locale.US,
-                "%.2f sh · avg %s · bid %s · uP&L %s",
-                pos.contracts,
-                pos.avgCost?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—",
-                pos.bestBid?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—",
-                pnl?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
-            ),
-            style = MaterialTheme.typography.labelMedium,
-            color = pnlColor
         )
         Button(
             onClick = { onSell(pos.ticker, pos.side) },

@@ -275,4 +275,49 @@ class KalshiWsMessagesTest {
         assertEquals(0.015, tick.yesAsk!!, 1e-12)
         assertEquals(0.014, tick.yesBid!!, 1e-12)
     }
+
+    @Test
+    fun updateSubscriptionEncodesAddAndDeleteMarkets() {
+        val add = KalshiWsMessages.updateSubscription(
+            4,
+            11,
+            "add_markets",
+            listOf("KXBTC15M-26SEP251215-45")
+        )
+        assertTrue(add.contains("\"cmd\":\"update_subscription\""))
+        assertTrue(add.contains("\"action\":\"add_markets\""))
+        assertTrue(add.contains("KXBTC15M-26SEP251215-45"))
+        val del = KalshiWsMessages.updateSubscription(
+            5,
+            11,
+            "delete_markets",
+            listOf("KXBTC15M-26SEP251200-45")
+        )
+        assertTrue(del.contains("\"action\":\"delete_markets\""))
+        assertTrue(del.contains("KXBTC15M-26SEP251200-45"))
+    }
+
+    @Test
+    fun parseMarketLifecycleV2Deactivated() {
+        val raw = """
+            {
+              "type": "market_lifecycle_v2",
+              "msg": {
+                "market_ticker": "KXETH15M-26SEP251200-45",
+                "event_type": "deactivated",
+                "result": ""
+              }
+            }
+        """.trimIndent()
+        val parsed = KalshiWsMessages.parse(raw, 1L) as KalshiWsMessages.Parsed.Lifecycle
+        assertEquals("KXETH15M-26SEP251200-45", parsed.ticker)
+        assertEquals("deactivated", parsed.eventType)
+    }
+
+    @Test
+    fun parseUnsubscribedSids() {
+        val raw = """{"type":"unsubscribed","msg":{"sids":[2,3]}}"""
+        val parsed = KalshiWsMessages.parse(raw, 1L) as KalshiWsMessages.Parsed.Unsubscribed
+        assertEquals(listOf(2, 3), parsed.sids)
+    }
 }

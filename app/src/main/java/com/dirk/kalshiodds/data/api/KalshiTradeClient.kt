@@ -200,16 +200,26 @@ class KalshiTradeClient(
         }
     }
 
-    private fun v2Body(ticket: TradeTicket, clientOrderId: String): CreateOrderV2Request =
-        CreateOrderV2Request(
+    private fun v2Body(ticket: TradeTicket, clientOrderId: String): CreateOrderV2Request {
+        val reduceOnly = ticket.reduceOnly || ticket.isSell
+        // Official Create Order V2: reduce_only is rejected unless TIF is IoC.
+        // https://docs.kalshi.com/api-reference/orders/create-order-v2
+        val timeInForce = if (reduceOnly) {
+            CreateOrderV2Request.TIME_IN_FORCE_IOC
+        } else {
+            CreateOrderV2Request.TIME_IN_FORCE_GTC
+        }
+        return CreateOrderV2Request(
             ticker = ticket.ticker,
             side = ticket.bookSide,
             count = String.format(Locale.US, "%.2f", ticket.contracts.toDouble()),
             price = com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(ticket.yesLimitPrice)
                 ?: String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
+            timeInForce = timeInForce,
             clientOrderId = clientOrderId,
-            reduceOnly = ticket.reduceOnly || ticket.isSell
+            reduceOnly = reduceOnly
         )
+    }
 
     private fun mapV2(
         ticket: TradeTicket,

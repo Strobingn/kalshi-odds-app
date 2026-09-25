@@ -5,7 +5,7 @@ import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 
 /**
- * Per-market rate limit for long-shot / $50 win-target notifications.
+ * Per-market rate limit for long-shot / hunter notifications.
  * Notifications may open a ticket; they never place an order.
  */
 object OpportunityDedupe {

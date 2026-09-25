@@ -15,12 +15,17 @@ object ScorecardMetrics {
         val hits: Int = 0,
         val total: Int = 0,
         val hitRate: Double? = null,
+        /** Mean picked-side Brier. Hidden in the UI when [total] < [MIN_BRIER_DISPLAY]. */
         val brier: Double? = null,
+        /** Mean P(YES) / P(UP) Brier. Scorecard-only; hidden when N < 20. */
+        val pUpBrier: Double? = null,
         val avgEdgeWhenRight: Double? = null,
         val avgEdgeWhenWrong: Double? = null
     ) {
         val label: String
             get() = if (total <= 0) "—" else "$hits/$total"
+        val showBrier: Boolean
+            get() = total >= MIN_BRIER_DISPLAY
     }
 
     data class SeriesStats(
@@ -57,8 +62,13 @@ object ScorecardMetrics {
         val enoughData: Boolean,
         val perAsset: List<SeriesStats>,
         val perCoin: List<Breakdown> = emptyList(),
-        val perTimeOfDay: List<Breakdown> = emptyList()
-    )
+        val perTimeOfDay: List<Breakdown> = emptyList(),
+        val sideBrier: Double? = null,
+        val hits: Int = 0
+    ) {
+        val showBrier: Boolean
+            get() = n >= MIN_BRIER_DISPLAY
+    }
 
     data class Snapshot(
         val daily: WindowStats,
@@ -120,6 +130,7 @@ object ScorecardMetrics {
 
     const val MIN_HONEST_SAMPLES = 100
     const val MIN_BUCKET_SAMPLES = SignalConstants.SCORECARD_BUCKET_MIN_SAMPLES
+    const val MIN_BRIER_DISPLAY = 20
 
     fun honest(
         rows: List<PredictionLogEntry>,
@@ -131,6 +142,7 @@ object ScorecardMetrics {
         val all = window(rows)
         val modelBriers = rows.map { ForecastUnits.brier(it) }
         val marketBriers = rows.map { ForecastUnits.marketBrier(it) }
+        val sideBriers = rows.map { ForecastUnits.sideBrier(it) }
         val per = rows.groupBy { it.series.ifBlank { "unknown" } }
             .toSortedMap()
             .map { (series, group) ->
@@ -146,7 +158,9 @@ object ScorecardMetrics {
             enoughData = rows.size >= MIN_HONEST_SAMPLES,
             perAsset = per,
             perCoin = coinBreakdowns(rows),
-            perTimeOfDay = timeOfDayBreakdowns(rows, zoneId)
+            perTimeOfDay = timeOfDayBreakdowns(rows, zoneId),
+            sideBrier = sideBriers.average(),
+            hits = all.hits
         )
     }
 
@@ -227,7 +241,8 @@ object ScorecardMetrics {
     fun window(rows: List<PredictionLogEntry>): WindowStats {
         if (rows.isEmpty()) return WindowStats()
         val hits = rows.count { ForecastUnits.hit(it) }
-        val briers = rows.map { ForecastUnits.brier(it) }
+        val sideBriers = rows.map { ForecastUnits.sideBrier(it) }
+        val yesBriers = rows.map { ForecastUnits.brier(it) }
         val rightEdges = rows.filter { ForecastUnits.hit(it) }
             .mapNotNull { it.edgePp }
         val wrongEdges = rows.filter { !ForecastUnits.hit(it) }
@@ -236,7 +251,8 @@ object ScorecardMetrics {
             hits = hits,
             total = rows.size,
             hitRate = hits.toDouble() / rows.size,
-            brier = if (briers.isNotEmpty()) briers.average() else null,
+            brier = if (sideBriers.isNotEmpty()) sideBriers.average() else null,
+            pUpBrier = if (yesBriers.isNotEmpty()) yesBriers.average() else null,
             avgEdgeWhenRight = rightEdges.takeIf { it.isNotEmpty() }?.average(),
             avgEdgeWhenWrong = wrongEdges.takeIf { it.isNotEmpty() }?.average()
         )
@@ -244,7 +260,7 @@ object ScorecardMetrics {
 
     private fun sideHit(e: PredictionLogEntry): Boolean = ForecastUnits.hit(e)
 
-    private fun brierOf(e: PredictionLogEntry): Double = ForecastUnits.brier(e)
+    private fun brierOf(e: PredictionLogEntry): Double = ForecastUnits.sideBrier(e)
 
     private fun settledAt(e: PredictionLogEntry): Long = e.settledAtMs ?: e.timestampMs
 

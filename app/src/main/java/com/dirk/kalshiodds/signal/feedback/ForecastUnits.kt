@@ -5,10 +5,15 @@ import kotlin.math.abs
 
 /**
  * Prediction-log probabilities must be in **0–1** for Brier and hit-rate.
- * 0.3.9 stored some rows as percent (44.0) and some as unit (0.44), and
- * scored hits from [PredictionLogEntry.predictedSide] (edge sign) while
- * Brier used [PredictionLogEntry.predictedYes]. That produced 0/5 hits
- * with Brier 0.003 on the same five settlements.
+ *
+ * Hit rate scores the **picked side** ([PredictionLogEntry.predictedSide],
+ * falling back to P(YES) > 0.5) against settlement — the side the app
+ * actually showed / would have bet.
+ *
+ * P(YES) / P(UP) Brier is `(p − 1_{result=yes})²` and stays a calibration
+ * score of the YES probability. Picked-side Brier uses `p_side`
+ * (P(NO) when the pick is NO) against the YES settlement bit so a fade of
+ * p(YES)=0.945 that loses is ≈0.893, not the misleading P(YES) 0.003.
  */
 object ForecastUnits {
 
@@ -23,16 +28,47 @@ object ForecastUnits {
     fun predictedYesSide(e: PredictionLogEntry): Boolean =
         probability01(e.predictedYes) > 0.5
 
+    /** YES if the app picked YES / UP; NO otherwise. Null side → P(YES) > 0.5. */
+    fun pickedSideIsYes(e: PredictionLogEntry): Boolean {
+        return when (e.predictedSide?.trim()?.uppercase()) {
+            "YES" -> true
+            "NO" -> false
+            else -> predictedYesSide(e)
+        }
+    }
+
+    /** Probability assigned to the picked side, 0–1. */
+    fun sideProbability01(e: PredictionLogEntry): Double {
+        val pYes = probability01(e.predictedYes)
+        return if (pickedSideIsYes(e)) pYes else 1.0 - pYes
+    }
+
     fun hit(e: PredictionLogEntry): Boolean {
         val o = e.outcome ?: return false
         if (o.equals("void", ignoreCase = true)) return false
-        return predictedYesSide(e) == outcomeYes(o)
+        return pickedSideIsYes(e) == outcomeYes(o)
     }
 
+    /** P(YES) / P(UP) Brier — calibration of the YES probability. */
     fun brier(e: PredictionLogEntry): Double {
         val y = if (outcomeYes(e.outcome)) 1.0 else 0.0
         val p = probability01(e.predictedYes)
         val d = p - y
+        return d * d
+    }
+
+    /**
+     * Picked-side Brier: `p_side` is P(YES) when the pick is YES and
+     * `1 − P(YES)` when the pick is NO. Compared to the YES settlement
+     * bit so a losing fade does not collapse to the P(YES) Brier.
+     *
+     * predictedYes=0.945, predictedSide=NO, result=yes →
+     * p_side=0.055, y=1, (0.055−1)² ≈ 0.893 (not 0.003).
+     */
+    fun sideBrier(e: PredictionLogEntry): Double {
+        val pSide = sideProbability01(e)
+        val yYes = if (outcomeYes(e.outcome)) 1.0 else 0.0
+        val d = pSide - yYes
         return d * d
     }
 

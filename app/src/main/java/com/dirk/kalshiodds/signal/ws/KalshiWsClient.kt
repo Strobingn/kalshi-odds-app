@@ -31,6 +31,7 @@ class KalshiWsClient(
     private val onLog: (String) -> Unit = {},
     private val onBookSnapshot: (KalshiWsMessages.Parsed.OrderbookSnapshot) -> Unit = {},
     private val onBookDelta: (KalshiWsMessages.Parsed.OrderbookDelta) -> Unit = {},
+    private val onLifecycle: (ticker: String, eventType: String) -> Unit = { _, _ -> },
     private val httpClient: OkHttpClient = defaultClient(),
     private val urls: List<String> = KalshiWsAuth.WS_URLS
 ) {
@@ -66,11 +67,29 @@ class KalshiWsClient(
         connect()
     }
 
+    fun currentTickers(): List<String> = marketTickers
+
     fun updateSubscriptions(channels: List<String>, marketTickers: List<String>) {
-        this.channels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }.toList()
-        this.marketTickers = marketTickers.toList()
-        if (running.get() && socket != null) {
-            resubscribe()
+        val nextChannels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }.toList()
+        val nextTickers = marketTickers.toList()
+        val previousTickers = this.marketTickers
+        this.channels = nextChannels
+        this.marketTickers = nextTickers
+        if (!running.get() || socket == null) return
+        val cmds = WsSubscriptionSwitch.replace(
+            idStart = msgId.get(),
+            channels = nextChannels,
+            previousTickers = previousTickers,
+            nextTickers = nextTickers,
+            sids = subscribedSids.toList()
+        )
+        if (cmds.isEmpty()) return
+        msgId.addAndGet(cmds.size)
+        val ws = socket ?: return
+        for (cmd in cmds) {
+            ws.send(cmd.json)
+            onLog("${cmd.cmd} tickers=${cmd.marketTickers.size} sids=${cmd.sids}")
+            if (cmd.cmd == "unsubscribe") subscribedSids.clear()
         }
     }
 
@@ -136,6 +155,7 @@ class KalshiWsClient(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             runCatching {
                 backoffMs = INITIAL_BACKOFF_MS
+                subscribedSids.clear()
                 val host = webSocket.request().url.toString()
                 onLog("ws open $host")
                 onState(State(connected = true, reconnecting = false, host = host, detail = null))
@@ -173,6 +193,14 @@ class KalshiWsClient(
                 is KalshiWsMessages.Parsed.Subscribed -> {
                     parsed.sid?.let { subscribedSids += it }
                     onLog("subscribed sid=${parsed.sid}")
+                }
+                is KalshiWsMessages.Parsed.Unsubscribed -> {
+                    subscribedSids.removeAll(parsed.sids.toSet())
+                    onLog("unsubscribed sids=${parsed.sids}")
+                }
+                is KalshiWsMessages.Parsed.Lifecycle -> {
+                    onLog("lifecycle ${parsed.eventType} ${parsed.ticker}")
+                    runCatching { onLifecycle(parsed.ticker, parsed.eventType) }
                 }
                 is KalshiWsMessages.Parsed.Error -> {
                     onLog("ws error ${parsed.code}: ${parsed.message}")

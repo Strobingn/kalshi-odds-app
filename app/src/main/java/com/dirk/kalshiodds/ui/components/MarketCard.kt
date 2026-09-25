@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -23,7 +24,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
@@ -40,10 +40,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
+import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
+import com.dirk.kalshiodds.ui.DisagreementLabel
+import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
 import com.dirk.kalshiodds.ui.theme.checklistValueColor
@@ -60,6 +62,7 @@ fun MarketCard(
     decision: BetCall.Decision? = null,
     settings: SignalSettings = SignalSettings(),
     paperTradingEnabled: Boolean = false,
+    nowMs: Long? = null,
     onBuyYes: (() -> Unit)? = null,
     onBuyNo: (() -> Unit)? = null,
     onSell: (() -> Unit)? = null,
@@ -71,492 +74,447 @@ fun MarketCard(
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
     val call = decision ?: BetCall.decide(market, settings)
-    val headlineColor = when (call.headline) {
-        BetCall.Headline.BET_UP -> colors.accentGreen
-        BetCall.Headline.BET_DOWN -> colors.accentOrange
-        BetCall.Headline.NO_BET -> colors.textSecondary
-    }
-    val alertBorder = when (call.headline) {
-        BetCall.Headline.BET_UP -> colors.accentGreen
-        BetCall.Headline.BET_DOWN -> colors.accentOrange
-        BetCall.Headline.NO_BET -> scheme.outline
-    }
+    val headlineColor = SideColor.of(call.headline, colors)
+    val alertBorder = if (call.isActionable) headlineColor else scheme.outline
+    val quotes = MarketQuoteView.of(market)
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(if (market.edgeAlert) 2.dp else 1.dp, alertBorder, RoundedCornerShape(16.dp)),
+            .border(if (call.isActionable) 2.dp else 1.dp, alertBorder, RoundedCornerShape(16.dp))
+            .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
             containerColor = cardBg,
             contentColor = valueColor
         )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
                     Text(
-                        text = market.title,
-                        style = MaterialTheme.typography.titleMedium,
+                        text = HomeCopy.coinShort(market),
+                        style = MaterialTheme.typography.titleLarge,
                         color = valueColor,
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
-                    market.subtitle?.let {
+                    Text(
+                        HomeCopy.WINDOW_LENGTH,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = labelColor
+                    )
+                }
+                TimeLeftLabel(market.closeTimeEpochMs, compact = true, nowMs = nowMs)
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                HomeCopy.targetText(market)?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor)
+                }
+                HomeSpotDelta(market)
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                PriceTile(
+                    title = "UP",
+                    askLabel = quotes.yesAskLabel,
+                    bidLabel = quotes.yesBidLabel,
+                    accent = colors.up,
+                    container = colors.upContainer,
+                    highlighted = call.headline == BetCall.Headline.BET_UP,
+                    modifier = Modifier.weight(1f)
+                )
+                PriceTile(
+                    title = "DOWN",
+                    askLabel = quotes.noAskLabel,
+                    bidLabel = quotes.noBidLabel,
+                    accent = colors.down,
+                    container = colors.downContainer,
+                    highlighted = call.headline == BetCall.Headline.BET_DOWN,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            OddsSparkline(
+                points = market.oddsHistory,
+                modifier = Modifier.fillMaxWidth(),
+                color = colors.textSecondary
+            )
+
+            Text(
+                text = call.label,
+                style = MaterialTheme.typography.titleMedium,
+                color = headlineColor,
+                fontWeight = FontWeight.Bold
+            )
+            val disagreement = DisagreementLabel.of(market)
+            if (disagreement != null && call.headline != BetCall.Headline.NO_BET) {
+                DisagreementWarning(disagreement)
+            } else if (disagreement == null) {
+                Text(
+                    text = HomeCopy.modelVsMarket(market, call),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = valueColor
+                )
+            }
+
+            if (call.isActionable) {
+                HomeCopy.allInProfit(call)?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                val mode = TradeModeLabel.forApprove(settings, call.ticket)
+                val buy = if (call.headline == BetCall.Headline.BET_DOWN) onBuyNo else onBuyYes
+                if (buy != null) {
+                    Button(
+                        onClick = buy,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = headlineColor,
+                            contentColor = SideColor.on(call.headline, colors)
+                        ),
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    ) {
+                        Text(HomeCopy.primaryButtonLabel(mode, call), fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                if (disagreement != null && call.headline == BetCall.Headline.NO_BET) {
+                    DisagreementWarning(disagreement)
+                } else if (disagreement == null) {
+                    call.noBetReason?.let {
                         Text(
                             text = it,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = labelColor,
-                            modifier = Modifier.padding(top = 4.dp)
+                            color = colors.textSecondary
                         )
                     }
                 }
-                Column(horizontalAlignment = Alignment.End) {
-                    StatusChip(market.status)
-                    TimeLeftLabel(market.closeTimeEpochMs, compact = true)
-                    Text(
-                        text = market.ticker,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = labelColor,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
+                val anywaySide = HomeCopy.buyAnywaySide(market, call)
+                val anyway = if (anywaySide == "NO") onBuyNo else onBuyYes
+                if (anyway != null) {
+                    OutlinedButton(
+                        onClick = anyway,
+                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                    ) { Text(HomeCopy.BUY_ANYWAY) }
                 }
             }
-
-            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
-            Text(
-                text = call.label,
-                fontSize = 34.sp,
-                fontWeight = FontWeight.Black,
-                color = headlineColor,
-                lineHeight = 38.sp,
-                modifier = Modifier.padding(top = 10.dp)
-            )
-            val ask = call.ask ?: if (call.side.equals("NO", true)) market.noAsk else market.yesAsk
-            val askLabel = KalshiQuoteDisplay.formatAsk(ask)
-            val profit = call.profitIfWinUsd
-            Text(
-                text = buildString {
-                    append("Ask $askLabel")
-                    if (profit != null) append(String.format(Locale.US, "  ·  win $%.2f at $5 cap", profit))
-                    call.noBetReason?.let { append("  ·  $it") }
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = valueColor,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-            TimeLeftLabel(market.closeTimeEpochMs, compact = true)
-            if (onBuyYes != null || onBuyNo != null) {
-                val primaryYes = call.headline != BetCall.Headline.BET_DOWN
-                val primaryLabel = if (primaryYes) quotes.upButton else quotes.downButton
-                val secondaryLabel = if (primaryYes) quotes.downButton else quotes.upButton
-                val primaryClick = if (primaryYes) onBuyYes else onBuyNo
-                val secondaryClick = if (primaryYes) onBuyNo else onBuyYes
-                val primaryColors = if (primaryYes) {
-                    ButtonDefaults.buttonColors(containerColor = colors.accentGreen, contentColor = colors.onAccentGreen)
-                } else {
-                    ButtonDefaults.buttonColors(containerColor = colors.accentOrange, contentColor = colors.onAccentOrange)
-                }
-                val mode = TradeModeLabel.forApprove(settings, call.ticket)
-                Spacer(Modifier.height(10.dp))
-                if (primaryClick != null) {
-                    Button(
-                        onClick = primaryClick,
-                        enabled = call.isActionable,
-                        colors = primaryColors,
-                        modifier = Modifier.fillMaxWidth().height(56.dp)
-                    ) {
-                        Text(
-                            if (call.isActionable) "$mode  $primaryLabel" else "NO BET",
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                if (secondaryClick != null) {
-                    OutlinedButton(
-                        onClick = secondaryClick,
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
-                    ) { Text(secondaryLabel) }
-                }
-                if (onSell != null) {
-                    OutlinedButton(
-                        onClick = onSell,
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
-                    ) { Text("Sell") }
-                }
+            if (onSell != null) {
+                OutlinedButton(
+                    onClick = onSell,
+                    modifier = Modifier.fillMaxWidth().height(40.dp)
+                ) { Text("Sell") }
             }
-
-            Spacer(Modifier.height(8.dp))
-            BidChart(
-                points = market.bidHistory.ifEmpty {
-                    market.oddsHistory.mapIndexed { i, mid ->
-                        com.dirk.kalshiodds.chart.BidPoint(
-                            tMs = (market.closeTimeEpochMs ?: 0L) - (market.oddsHistory.size - 1 - i) * 2_000L,
-                            upBidCents = mid,
-                            downBidCents = 100f - mid
-                        )
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
-                heightDp = if (compact) 56 else 72,
-                windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
-                windowEndMs = market.closeTimeEpochMs,
-                strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
-                spotUsd = market.spotUsd,
-                strikeUsd = market.floorStrike,
-                spotHeightDp = if (compact) 40 else 48,
-                liveUpLabel = quotes.upChartLabel,
-                liveDownLabel = quotes.downChartLabel
-            )
 
             var detailsOpen by remember(market.ticker) { mutableStateOf(false) }
             Text(
                 text = if (detailsOpen) "Hide details" else "Details",
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.accentBlue,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
                 fontWeight = FontWeight.Bold,
                 modifier = Modifier
-                    .padding(top = 8.dp)
+                    .padding(top = 0.dp)
                     .clickable { detailsOpen = !detailsOpen }
             )
             if (detailsOpen) {
-
-            val chips = listOfNotNull(
-                market.regimeTag,
-                market.tteRegimeLabel,
-                if (market.calibrated) "Calibrated" else null,
-                if (market.adapterReady) "Adapter" else null,
-                if (market.heavyMl) "Heavy ML" else null,
-                if (market.uncertainty != null && !market.uncertaintyPassed) "Unc gated" else null,
-                market.sessionTag?.let { "Sess $it" },
-                if (market.newsShock) "News shock" else null,
-                market.anomalyNote,
-                if (market.conformalAmbiguous) "Conformal ?" else market.conformalSet,
-                market.flowNote?.takeIf { it == "smart-flow" },
-                if (market.muted) "Muted" else null,
-                market.suggestedContracts?.let { "$it contracts max" }
-            )
-            if (chips.isNotEmpty() || market.edgeAlert) {
-                Spacer(Modifier.height(8.dp))
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (market.edgeAlert) {
-                        Text(
-                            text = "⚡ Edge",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.accentGreen,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .background(colors.accentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                    chips.forEach { chip ->
-                        val mutedChip = chip == "Muted"
-                        val color = if (mutedChip) colors.accentOrange else colors.accentBlue
-                        Text(
-                            text = chip,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = color,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier
-                                .background(color.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
-                                .padding(horizontal = 8.dp, vertical = 3.dp)
-                        )
-                    }
-                }
-            }
-            if (market.muted && market.muteReason != null) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = market.muteReason.orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.accentOrange
+                DetailsBlock(
+                    market = market,
+                    quotes = quotes,
+                    compact = compact,
+                    labelColor = labelColor,
+                    valueColor = valueColor,
+                    nowMs = nowMs,
+                    onOpenChart = onOpenChart
                 )
-            } else if (!market.passedFilter && market.skipReason != null) {
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "Filtered · ${market.skipReason}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.accentOrange
-                )
-            }
-
-            if (market.tapeConflict && market.tapeConflictNote != null) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = market.tapeConflictNote.orEmpty(),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accentOrange,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(colors.accentOrange.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
-                        .padding(10.dp)
-                )
-                market.modelLeanSide?.let { lean ->
-                    Text(
-                        text = "Model lean ${if (lean == "NO") "DOWN / NO" else "UP / YES"} · primary follows live tape",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.accentOrange,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "LIVE BOOK · UP / DOWN",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.accentBlue,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                SideQuote(
-                    title = "UP  YES",
-                    bidLabel = quotes.yesBidLabel,
-                    askLabel = quotes.yesAskLabel,
-                    accent = colors.accentGreen,
-                    modifier = Modifier.weight(1f)
-                )
-                SideQuote(
-                    title = "DOWN  NO",
-                    bidLabel = quotes.noBidLabel,
-                    askLabel = quotes.noAskLabel,
-                    accent = colors.accentOrange,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            market.digitalFairPp?.let { fv ->
-                Text(
-                    text = String.format(
-                        Locale.US,
-                        "Fair value %.0f¢  ·  model %s",
-                        fv,
-                        market.importedModelPp?.let { String.format(Locale.US, "%.0f¢", it) } ?: "baseline"
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accentBlue,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = "DIP HUNTER AI",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.accentBlue,
-                fontWeight = FontWeight.Bold
-            )
-            market.aiNote?.let {
-                Text(
-                    text = it + market.aiConfidence?.let { c ->
-                        String.format(Locale.US, " · conf %.0f%%", c * 100)
-                    }.orEmpty(),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = labelColor,
-                    modifier = Modifier.padding(top = 2.dp, bottom = 6.dp)
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                OddsColumn(
-                    label = if (market.calibrated) "FV YES" else "AI YES",
-                    percent = market.aiYesPercent,
-                    accent = colors.accentGreen,
-                    modifier = Modifier.weight(1f),
-                    big = true
-                )
-                OddsColumn(
-                    label = if (market.calibrated) "FV NO" else "AI NO",
-                    percent = market.aiNoPercent,
-                    accent = colors.accentOrange,
-                    modifier = Modifier.weight(1f),
-                    endAligned = true,
-                    big = true
-                )
-            }
-
-            // Edge panel
-            market.edgePp?.let { edge ->
-                Spacer(Modifier.height(12.dp))
-                val edgeColor = when {
-                    abs(edge) >= EDGE_ALERT_THRESHOLD_PP -> colors.accentGreen
-                    abs(edge) >= 2.0 -> colors.accentBlue
-                    else -> labelColor
-                }
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(edgeColor.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
-                        .padding(12.dp)
-                ) {
-                    Text(
-                        text = "Dip Hunter edge",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = labelColor
-                    )
-                    Text(
-                        text = String.format(Locale.US, "%+.1f pp", edge),
-                        fontSize = 28.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = edgeColor,
-                        lineHeight = 32.sp
-                    )
-                    market.netEdgePp?.let { net ->
-                        Text(
-                            text = String.format(
-                                Locale.US,
-                                "Net EV %+.1f pp  ·  %+.3f $/ct  ·  fee %.1f¢",
-                                net,
-                                market.netEvDollars ?: 0.0,
-                                (market.feePerContract ?: 0.0) * 100.0
-                            ),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = edgeColor,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                    market.suggestedContracts?.let { n ->
-                        Text(
-                            text = "$n contracts max",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = colors.accentGreen,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                        market.sizingNote?.let { note ->
-                            Text(
-                                text = note,
-                                style = MaterialTheme.typography.labelMedium,
-                                color = labelColor
-                            )
-                        }
-                    }
-                    if (market.timeToMoveSec != null || market.pFill != null || market.uncertainty != null) {
-                        Text(
-                            text = listOfNotNull(
-                                market.timeToMoveSec?.let { String.format(Locale.US, "TTM %.0fs", it) },
-                                market.midVolPp?.let { String.format(Locale.US, "vol %.1fpp", it) },
-                                market.pFill?.let { String.format(Locale.US, "P(fill) %.0f%%", it * 100.0) },
-                                market.uncertainty?.let { String.format(Locale.US, "unc %.2f", it) }
-                            ).joinToString(" · "),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = if (market.uncertaintyPassed) labelColor else colors.accentOrange,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
-                    }
-                    market.ensembleNote?.let { note ->
-                        Text(
-                            text = note,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = labelColor,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                    market.extendedNote?.let { note ->
-                        Text(
-                            text = note,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = labelColor,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                    market.rlNote?.let { note ->
-                        Text(
-                            text = note,
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.accentBlue,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                    market.stance?.let { s ->
-                        Text(
-                            text = s,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = edgeColor,
-                            fontWeight = FontWeight.SemiBold,
-                            modifier = Modifier.padding(top = 2.dp)
-                        )
-                    }
-                    Text(
-                        text = "Fair − market (pp). Net EV subtracts Kalshi-style fee + half-spread. Analysis stays advisory; tickets need a separate Approve.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = labelColor,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
-            }
-
-            ChecklistBlock(market)
-
-            if (!compact) {
-                Spacer(Modifier.height(14.dp))
-                Text(
-                    text = "Kalshi market (reference)",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = labelColor
-                )
-                Spacer(Modifier.height(6.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    OddsColumn(
-                        label = "Mkt YES",
-                        percent = market.yesProbabilityPercent,
-                        bidLabel = quotes.yesBidLabel,
-                        askLabel = quotes.yesAskLabel,
-                        accent = valueColor,
-                        modifier = Modifier.weight(1f),
-                        big = false
-                    )
-                    OddsColumn(
-                        label = "Mkt NO",
-                        percent = market.noProbabilityPercent,
-                        bidLabel = quotes.noBidLabel,
-                        askLabel = quotes.noAskLabel,
-                        accent = valueColor,
-                        modifier = Modifier.weight(1f),
-                        endAligned = true,
-                        big = false
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("Spread", market.spreadDollars?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—")
-                Metric("Volume", formatCompact(market.volume))
-                Metric("OI", formatCompact(market.openInterest))
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Metric("24h vol", formatCompact(market.volume24h))
-                Metric("Liquidity", market.liquidityDollars?.let { formatCompact(it) } ?: "—")
-                Column {
-                    Text("Time left", style = MaterialTheme.typography.labelMedium, color = labelColor)
-                    TimeLeftLabel(market.closeTimeEpochMs)
-                    market.closeTimeLocal?.let {
-                        Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor)
-                    }
-                }
-            }
             }
         }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DetailsBlock(
+    market: MarketUiModel,
+    quotes: MarketQuoteView,
+    compact: Boolean,
+    labelColor: Color,
+    valueColor: Color,
+    nowMs: Long?,
+    onOpenChart: (() -> Unit)?
+) {
+    val colors = DipTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        val chips = listOfNotNull(
+            market.regimeTag,
+            market.tteRegimeLabel,
+            if (market.calibrated) "Calibrated" else null,
+            if (market.adapterReady) "Adapter" else null,
+            if (market.heavyMl) "Heavy ML" else null,
+            if (market.uncertainty != null && !market.uncertaintyPassed) "Unc gated" else null,
+            market.sessionTag?.let { "Sess $it" },
+            if (market.newsShock) "News shock" else null,
+            market.anomalyNote,
+            if (market.conformalAmbiguous) "Conformal ?" else market.conformalSet,
+            market.flowNote?.takeIf { it == "smart-flow" },
+            if (market.muted) "Muted" else null,
+            market.suggestedContracts?.let { "$it contracts max" }
+        )
+        if (chips.isNotEmpty() || market.edgeAlert) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (market.edgeAlert) {
+                    Text(
+                        text = "⚡ Edge",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(colors.textSecondary.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+                chips.forEach { chip ->
+                    val mutedChip = chip == "Muted"
+                    val color = if (mutedChip) colors.accentOrange else colors.textSecondary
+                    Text(
+                        text = chip,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = color,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .background(color.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+        }
+        if (market.muted && market.muteReason != null) {
+            Text(market.muteReason.orEmpty(), style = MaterialTheme.typography.labelMedium, color = colors.accentOrange)
+        } else if (!market.passedFilter && market.skipReason != null) {
+            Text("Filtered · ${market.skipReason}", style = MaterialTheme.typography.labelMedium, color = colors.accentOrange)
+        }
+        if (market.tapeConflict && market.tapeConflictNote != null) {
+            Text(
+                text = market.tapeConflictNote.orEmpty(),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.accentOrange.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                    .padding(10.dp)
+            )
+            market.modelLeanSide?.let { lean ->
+                Text(
+                    text = "Model lean ${if (lean == "NO") "DOWN / NO" else "UP / YES"} · primary follows live tape",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.accentOrange
+                )
+            }
+        }
+
+        market.digitalFairPp?.let { fv ->
+            Text(
+                text = String.format(
+                    Locale.US,
+                    "Fair value %.0f¢  ·  model %s",
+                    fv,
+                    market.importedModelPp?.let { String.format(Locale.US, "%.0f¢", it) } ?: "baseline"
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = valueColor,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text("Payout  UP ${quotes.upMultipleLabel}  ·  DOWN ${quotes.downMultipleLabel}", style = MaterialTheme.typography.labelMedium, color = labelColor)
+        market.aiNote?.let {
+            Text(
+                text = it + market.aiConfidence?.let { c ->
+                    String.format(Locale.US, " · conf %.0f%%", c * 100)
+                }.orEmpty(),
+                style = MaterialTheme.typography.labelMedium,
+                color = labelColor
+            )
+        }
+
+        market.edgePp?.let { edge ->
+            val edgeColor = when {
+                abs(edge) >= 2.0 -> valueColor
+                else -> labelColor
+            }
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(edgeColor.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            ) {
+                Text(String.format(Locale.US, "Edge %+.1f pp", edge), style = MaterialTheme.typography.bodyMedium, color = edgeColor, fontWeight = FontWeight.Bold)
+                market.netEdgePp?.let { net ->
+                    Text(
+                        text = String.format(
+                            Locale.US,
+                            "Net EV %+.1f pp  ·  %+.3f $/ct  ·  fee %.1f¢",
+                            net,
+                            market.netEvDollars ?: 0.0,
+                            (market.feePerContract ?: 0.0) * 100.0
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = edgeColor
+                    )
+                }
+                market.suggestedContracts?.let { n ->
+                    Text("$n contracts max", style = MaterialTheme.typography.labelMedium, color = valueColor, fontWeight = FontWeight.SemiBold)
+                    market.sizingNote?.let { note ->
+                        Text(note, style = MaterialTheme.typography.labelMedium, color = labelColor)
+                    }
+                }
+                if (market.timeToMoveSec != null || market.pFill != null || market.uncertainty != null) {
+                    Text(
+                        text = listOfNotNull(
+                            market.timeToMoveSec?.let { String.format(Locale.US, "TTM %.0fs", it) },
+                            market.midVolPp?.let { String.format(Locale.US, "vol %.1fpp", it) },
+                            market.pFill?.let { String.format(Locale.US, "P(fill) %.0f%%", it * 100.0) },
+                            market.uncertainty?.let { String.format(Locale.US, "unc %.2f", it) }
+                        ).joinToString(" · "),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (market.uncertaintyPassed) labelColor else colors.accentOrange
+                    )
+                }
+                market.ensembleNote?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor) }
+                market.extendedNote?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor) }
+                market.rlNote?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor) }
+                market.stance?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = edgeColor, fontWeight = FontWeight.SemiBold) }
+            }
+        }
+
+        BidChart(
+            points = market.bidHistory.ifEmpty {
+                market.oddsHistory.mapIndexed { i, mid ->
+                    com.dirk.kalshiodds.chart.BidPoint(
+                        tMs = (market.closeTimeEpochMs ?: 0L) - (market.oddsHistory.size - 1 - i) * 2_000L,
+                        upBidCents = mid,
+                        downBidCents = 100f - mid
+                    )
+                }
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
+            heightDp = if (compact) 56 else 72,
+            windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
+            windowEndMs = market.closeTimeEpochMs,
+            strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
+            spotUsd = market.spotUsd,
+            strikeUsd = market.floorStrike,
+            spotHeightDp = if (compact) 40 else 48,
+            liveUpLabel = quotes.upChartLabel,
+            liveDownLabel = quotes.downChartLabel
+        )
+
+        ChecklistBlock(market)
+
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Metric("Spread", market.spreadDollars?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—")
+            Metric("Volume", formatCompact(market.volume))
+            Metric("OI", formatCompact(market.openInterest))
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Metric("24h vol", formatCompact(market.volume24h))
+            Metric("Liquidity", market.liquidityDollars?.let { formatCompact(it) } ?: "—")
+            Column {
+                Text("Closes", style = MaterialTheme.typography.labelMedium, color = labelColor)
+                TimeLeftLabel(market.closeTimeEpochMs, nowMs = nowMs)
+                market.closeTimeLocal?.let {
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor)
+                }
+            }
+        }
+        Text(market.ticker, style = MaterialTheme.typography.labelMedium, color = labelColor)
+        StatusChip(market.status)
+    }
+}
+
+@Composable
+private fun DisagreementWarning(copy: DisagreementLabel.Copy) {
+    val colors = DipTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Filled.Warning,
+                contentDescription = copy.title,
+                tint = colors.accentOrange
+            )
+            Text(
+                copy.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text(
+            copy.detail,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
+    }
+}
+
+@Composable
+private fun PriceTile(
+    title: String,
+    askLabel: String,
+    bidLabel: String,
+    accent: Color,
+    container: Color,
+    highlighted: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val labelColor = Contrast.readable(
+        MaterialTheme.colorScheme.onSurfaceVariant,
+        container,
+        minRatio = Contrast.AA_LARGE
+    )
+    val valueColor = Contrast.readable(accent, container, minRatio = Contrast.AA)
+    Column(
+        modifier
+            .then(
+                if (highlighted) Modifier.border(2.dp, accent, RoundedCornerShape(12.dp))
+                else Modifier.border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+            )
+            .background(container, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+    ) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
+        Text(
+            askLabel,
+            style = MaterialTheme.typography.headlineLarge,
+            fontWeight = FontWeight.Bold,
+            color = valueColor
+        )
+        Text(
+            "bid $bidLabel",
+            style = MaterialTheme.typography.labelMedium,
+            color = labelColor
+        )
     }
 }
 
@@ -569,14 +527,13 @@ private fun ChecklistBlock(market: MarketUiModel) {
     val bg = MaterialTheme.colorScheme.surface
     val labelColor = checklistLabelColor(bg)
     val valueColor = checklistValueColor(bg)
-    Spacer(Modifier.height(12.dp))
+    Spacer(Modifier.height(4.dp))
     Text(
         text = "PRE-TRADE CHECKLIST",
         style = MaterialTheme.typography.labelMedium,
-        color = Contrast.readable(colors.accentBlue, bg, minRatio = Contrast.AA_LARGE),
+        color = Contrast.readable(colors.textSecondary, bg, minRatio = Contrast.AA_LARGE),
         fontWeight = FontWeight.Bold
     )
-    Spacer(Modifier.height(4.dp))
     items.forEach { item ->
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -609,76 +566,6 @@ private fun ChecklistBlock(market: MarketUiModel) {
 }
 
 @Composable
-private fun SideQuote(
-    title: String,
-    bidLabel: String,
-    askLabel: String,
-    accent: Color,
-    modifier: Modifier = Modifier
-) {
-    val bg = MaterialTheme.colorScheme.surface
-    val labelColor = checklistLabelColor(bg)
-    val valueColor = Contrast.readable(accent, bg, minRatio = Contrast.AA_LARGE)
-    Column(
-        modifier
-            .background(accent.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
-            .padding(12.dp)
-    ) {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
-        Text(
-            bidLabel,
-            fontSize = 32.sp,
-            fontWeight = FontWeight.Bold,
-            color = valueColor,
-            lineHeight = 36.sp
-        )
-        Text(
-            "bid  ·  ask $askLabel",
-            style = MaterialTheme.typography.bodyMedium,
-            color = labelColor,
-            fontWeight = FontWeight.SemiBold
-        )
-    }
-}
-
-@Composable
-private fun OddsColumn(
-    label: String,
-    percent: Double?,
-    bidLabel: String? = null,
-    askLabel: String? = null,
-    accent: Color,
-    modifier: Modifier = Modifier,
-    endAligned: Boolean = false,
-    big: Boolean = true
-) {
-    val bg = MaterialTheme.colorScheme.surface
-    val labelColor = checklistLabelColor(bg)
-    val valueColor = Contrast.readable(accent, bg, minRatio = Contrast.AA_LARGE)
-    Column(
-        modifier = modifier,
-        horizontalAlignment = if (endAligned) Alignment.End else Alignment.Start
-    ) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = labelColor)
-        Text(
-            text = percent?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—",
-            fontSize = if (big) 36.sp else 22.sp,
-            fontWeight = FontWeight.Bold,
-            color = valueColor,
-            lineHeight = if (big) 40.sp else 26.sp
-        )
-        if (bidLabel != null || askLabel != null) {
-            Text(
-                text = "Bid ${bidLabel ?: "—"} · Ask ${askLabel ?: "—"}",
-                style = MaterialTheme.typography.labelMedium,
-                color = labelColor,
-                modifier = Modifier.padding(top = 4.dp)
-            )
-        }
-    }
-}
-
-@Composable
 private fun Metric(label: String, value: String) {
     val bg = MaterialTheme.colorScheme.surface
     val labelColor = checklistLabelColor(bg)
@@ -699,9 +586,9 @@ private fun StatusChip(status: String?) {
     val colors = DipTheme.colors
     val label = status?.ifBlank { null } ?: "unknown"
     val color = when (label.lowercase(Locale.US)) {
-        "active", "open" -> colors.accentGreen
+        "active", "open" -> colors.textSecondary
         "closed", "determined" -> colors.accentOrange
-        else -> colors.accentBlue
+        else -> colors.textSecondary
     }
     Text(
         text = label.uppercase(Locale.US),

@@ -30,13 +30,14 @@ fun PaperBookCard(
     onToggle: (Boolean) -> Unit,
     onReset: () -> Unit,
     onSell: ((ticker: String, side: String) -> Unit)? = null,
-    onViewHistory: (() -> Unit)? = null
+    onViewHistory: (() -> Unit)? = null,
+    homeMode: Boolean = false
 ) {
     val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, colors.accentGreen.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+            .border(2.dp, colors.border, RoundedCornerShape(16.dp))
             .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -47,41 +48,52 @@ fun PaperBookCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(Modifier.weight(1f)) {
-                Text(
-                    "PAPER BOOK",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.accentGreen,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Start / reset $100 · win-target sizing · never hits Kalshi",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary
-                )
+                if (!homeMode) {
+                    Text(
+                        "PAPER BOOK",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Start / reset $100 · win-target sizing · never hits Kalshi",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                } else {
+                    Text(
+                        if (enabled) "Paper trading on" else "Paper trading off",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.accentGreen)
+            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)
             PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.accentOrange)
             val pnlColor = when {
-                paper.realizedPnlUsd > 0 -> colors.accentGreen
-                paper.realizedPnlUsd < 0 -> colors.accentRed
+                paper.realizedPnlUsd > 0 -> colors.textPrimary
+                paper.realizedPnlUsd < 0 -> colors.textPrimary
                 else -> colors.accentBlue
             }
             PaperStat("P&L", String.format(Locale.US, "%+.2f", paper.realizedPnlUsd), pnlColor)
         }
-        Text(
-            if (enabled) {
-                "AI hunter / LiveCall signals auto-log a paper fill here. Live Approve (below) is the only path that can place a real V2 order."
-            } else {
-                "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
-        )
+        if (!homeMode) {
+            Text(
+                if (enabled) {
+                    "AI hunter / LiveCall signals auto-log a paper fill here. Live Approve (below) is the only path that can place a real V2 order."
+                } else {
+                    "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+        }
         paper.lastMessage?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentGreen, fontWeight = FontWeight.SemiBold)
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
@@ -101,14 +113,14 @@ fun PaperBookCard(
                 color = colors.textSecondary,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.accentGreen.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                    .background(colors.textPrimary.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
                     .padding(10.dp)
             )
         } else {
             Text(
                 "Paper ledger (${paper.fills.size})",
                 style = MaterialTheme.typography.labelMedium,
-                color = colors.accentGreen,
+                color = colors.textPrimary,
                 fontWeight = FontWeight.Bold
             )
             paper.fills.take(12).forEach { fill ->
@@ -141,14 +153,14 @@ private fun PaperLedgerRow(
     }
     val color = when (status) {
         "OPEN" -> colors.accentOrange
-        "WIN" -> colors.accentGreen
-        "LOSS" -> colors.accentRed
+        "WIN" -> colors.textPrimary
+        "LOSS" -> colors.textPrimary
         else -> colors.accentBlue
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.accentGreen.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
+            .background(colors.textPrimary.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
             .padding(10.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -170,8 +182,8 @@ private fun PaperLedgerRow(
             String.format(
                 Locale.US,
                 "%s %s · %d ct @ %s",
-                fill.displaySide,
-                fill.ticker,
+                com.dirk.kalshiodds.ui.SignalCopy.callLabel(fill.side),
+                com.dirk.kalshiodds.ui.WindowLabel.of(fill.ticker),
                 fill.contracts,
                 com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(fill.limitPrice)
             ),

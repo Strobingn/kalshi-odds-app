@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.backtest
 
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
+import com.dirk.kalshiodds.signal.feedback.ForecastUnits
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -8,14 +9,9 @@ import org.junit.Test
 import kotlin.math.abs
 
 /**
- * Reproduces the in-app "0/5 · Brier 0.003" without touching production.
- *
- * Hit rate uses predictedSide; Brier uses (predictedYes − 1_{YES})².
- * Fading a 94.5¢ YES that settles YES yields 0/5 and Brier ≈ 0.003.
- *
- * Fix (describe only): PredictionLogStore.kt:184-193 and
- * ScorecardMetrics.kt:257-269 should either score the side-probability
- * or label P(YES) Brier separately from side hit rate.
+ * The pre-0.3.12 mix printed 0/5 hits next to P(YES) Brier 0.003.
+ * Production now scores hit + [ScorecardMetrics.WindowStats.brier] on the
+ * picked side; P(YES) Brier is [ScorecardMetrics.WindowStats.pUpBrier].
  */
 class ScorecardBrierDiagnosisTest {
 
@@ -40,15 +36,14 @@ class ScorecardBrierDiagnosisTest {
         val w = ScorecardMetrics.window(rows)
         assertEquals("0/5 side hits", 0, w.hits)
         assertEquals(5, w.total)
-        // (0.945 - 1)^2 = 0.003025
-        assertTrue("Brier should print as 0.003 with %.3f", abs(w.brier!! - 0.003025) < 1e-9)
-        assertEquals("0.003", String.format(java.util.Locale.US, "%.3f", w.brier))
-
-        val sideBriers = rows.map { e ->
-            val pSide = 1.0 - e.predictedYes
-            val ySide = 0.0 // faded YES, lost
-            (pSide - ySide) * (pSide - ySide)
-        }
-        assertTrue("side Brier is terrible (~0.89), not 0.003", sideBriers.average() > 0.8)
+        assertEquals(0, rows.count { ForecastUnits.hit(it) })
+        val side = rows.map { ForecastUnits.sideBrier(it) }.average()
+        val yes = rows.map { ForecastUnits.brier(it) }.average()
+        assertTrue("picked-side Brier is ~0.893, not the P(YES) 0.003", abs(side - 0.893) < 0.002)
+        assertEquals((0.945 - 1.0) * (0.945 - 1.0), yes, 1e-9)
+        assertEquals(side, w.brier!!, 1e-9)
+        assertEquals(yes, w.pUpBrier!!, 1e-9)
+        assertEquals("0.893", String.format(java.util.Locale.US, "%.3f", w.brier))
+        assertEquals("0.003", String.format(java.util.Locale.US, "%.3f", w.pUpBrier))
     }
 }

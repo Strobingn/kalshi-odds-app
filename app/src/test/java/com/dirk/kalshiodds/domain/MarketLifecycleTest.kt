@@ -276,8 +276,11 @@ class ExpiredMarketPruneTest {
         session.addManual(expiredManual)
         val liveHunter = sampleTicket("h1", "KXBTC15M-26SEP241700-00").copy(kind = TicketKind.HUNTER)
         session.replaceProposals(listOf(liveHunter), liveTickers = setOf("KXBTC15M-26SEP241700-00"))
-        assertTrue(session.snapshot().proposals.none { it.ticker.contains("1645") })
+        val voided = session.snapshot().proposals.first { it.ticker.contains("1645") }
+        assertEquals(TicketSession.WINDOW_CLOSED, voided.blockedReason)
+        assertFalse(voided.canApprove)
         assertTrue(session.snapshot().proposals.any { it.ticker.endsWith("1700-00") })
+        runBlocking { session.approve(voided.id) }
         assertEquals(0, placed.get())
     }
 

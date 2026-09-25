@@ -15,7 +15,7 @@ import com.dirk.kalshiodds.R
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.service.LiveSignalsPolicy
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
-import java.util.Locale
+import com.dirk.kalshiodds.ui.SignalCopy
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -30,13 +30,15 @@ class SignalNotifier(private val context: Context) {
     fun notify(alert: SignalAlert): Long {
         ensureChannels(context)
         val postedAt = SystemClock.elapsedRealtimeNanos()
-        val title = context.getString(R.string.signal_alert_title, alert.ticker)
-        val text = String.format(
-            Locale.US,
-            "Δ %+.1fpp · %s",
-            alert.deltaPp,
-            alert.reason
+        val card = SignalCopy.card(
+            ticker = alert.ticker,
+            side = alert.predictedSide,
+            modelYes = alert.fairValuePp,
+            marketYes = alert.marketMidPp,
+            details = alert.reason
         )
+        val title = context.getString(R.string.signal_alert_title, card.title)
+        val text = "${card.call} · ${card.modelLine}"
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_TICKER, alert.ticker)
@@ -51,7 +53,14 @@ class SignalNotifier(private val context: Context) {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
             .setContentText(text)
-            .setStyle(NotificationCompat.BigTextStyle().bigText("${alert.stance}\n$text"))
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    buildString {
+                        append(text)
+                        card.details?.let { append("\n").append(it) }
+                    }
+                )
+            )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setAutoCancel(true)

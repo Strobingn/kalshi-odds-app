@@ -44,6 +44,22 @@ data class MarketsSnapshot(
 ) {
     val allMarkets: List<MarketUiModel> get() = btc + eth + sol + extra
 
+    fun retainActiveWindows(
+        nowMs: Long,
+        series: Collection<String> = CryptoMarkets.DEFAULT_SERIES
+    ): MarketsSnapshot {
+        val keep = com.dirk.kalshiodds.domain.ActiveMarketResolver.tickers(allMarkets, series, nowMs)
+        fun List<MarketUiModel>.keep() = filter { it.ticker in keep }
+        return copy(
+            btc = btc.keep(),
+            eth = eth.keep(),
+            sol = sol.keep(),
+            extra = extra.filter {
+                it.ticker in keep || com.dirk.kalshiodds.domain.MarketLifecycle.isTradable(it, nowMs)
+            }
+        )
+    }
+
     fun overlayScores(
         scores: Map<String, com.dirk.kalshiodds.signal.engine.ScoringEngine.Score>,
         thresholdPp: Double
@@ -88,6 +104,23 @@ class MarketRepository(
 
     val cachedSnapshot: Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
         payload?.toSnapshot(fromCache = true)
+    }
+
+    suspend fun listOpen(series: String): List<MarketUiModel> {
+        val resp = resolveApi().getMarkets(seriesTicker = series, status = "open")
+        val kind = when (series.uppercase()) {
+            KalshiApi.SERIES_ETH -> SeriesKind.ETH
+            KalshiApi.SERIES_SOL -> SeriesKind.SOL
+            KalshiApi.SERIES_BTC -> SeriesKind.BTC
+            else -> CryptoMarkets.kindFor(series)
+        }
+        return resp.markets
+            .filter { CryptoMarkets.isCryptoTicker(it.ticker) }
+            .map { it.toUiModel(kind) }
+    }
+
+    suspend fun scoreSettlementsNow(nowMs: Long = System.currentTimeMillis()) {
+        scorer.maybeScore(nowMs, minIntervalMs = 0L)
     }
 
     suspend fun refresh(

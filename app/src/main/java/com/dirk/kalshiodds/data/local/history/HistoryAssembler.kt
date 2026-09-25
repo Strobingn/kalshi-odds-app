@@ -33,7 +33,8 @@ object HistoryAssembler {
         val marketPp: Double,
         val fairPp: Double,
         val edgePp: Double,
-        val settled: String?
+        val settled: String?,
+        val note: String? = null
     )
 
     fun sinceMs(filter: DateFilter, nowMs: Long): Long? = when (filter) {
@@ -170,7 +171,8 @@ object HistoryAssembler {
                 marketPp = s.marketPp,
                 fairPp = s.fairPp,
                 edgePp = s.edgePp,
-                settled = byTicker[s.ticker.uppercase()]?.result
+                settled = byTicker[s.ticker.uppercase()]?.result,
+                note = s.note
             )
         }
     }
