@@ -23,7 +23,7 @@ STRATS = [
 
 def _fmt(s: dict) -> str:
     if not s or s.get("n", 0) == 0:
-        return "| 0 | — | — | $0.00 | — | — | $0.00 | — |"
+        return "| 0 | 0 | — | — | $0.00 | — | — | $0.00 | — |"
     wr = f"{100*s['win_rate']:.1f}%" if s.get("win_rate") is not None else "—"
     avg = f"{100*s['avg_ask']:.1f}¢" if s.get("avg_ask") is not None else "—"
     pbet = f"${s['pnl_per_bet']:+.3f}" if s.get("pnl_per_bet") is not None else "—"
@@ -130,7 +130,8 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     for key, label in STRATS:
         s = (result["strategies"].get(key) or {}).get("oos") or {}
         ci = s.get("ci95") or (None, None, None)
-        if s.get("n", 0) and ci[1] is not None and ci[1] > 0:
+        # n=1 can exclude zero by construction; require a real sample.
+        if s.get("n", 0) >= 20 and ci[1] is not None and ci[1] > 0:
             positive.append((key, label, s, ci))
 
     if positive:
@@ -184,6 +185,13 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
             )
         if extra:
             concl += " " + " ".join(extra)
+        concl += (
+            " Dirk's ≤31¢ / ≥$10-profit filter almost never meets the shipped hero side "
+            "(2 IS bets, both losses; 0 OOS). Cheap-side hunting without a real edge "
+            "lost ~$2.17/bet OOS. Do not use the current one-pick-per-window recommendation "
+            "to chase a $50 profit target — the OOS app pick lost $0.58/bet after fees "
+            "(CI entirely below zero)."
+        )
 
     # meta docs
     docs = (meta or {}).get("docs") or {}
@@ -202,7 +210,9 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
         default=str,
     )
     rel_rows = "\n".join(
-        f"| {r['bin']} | {r['n']} | {r.get('pred')} | {r.get('obs')} |"
+        f"| {r['bin']} | {r['n']} | "
+        f"{'—' if r.get('pred') is None else f'{r['pred']:.3f}'} | "
+        f"{'—' if r.get('obs') is None else f'{r['obs']:.3f}'} |"
         for r in (cal.get("reliability_model") or [])
     )
     is_rows = "\n".join(
@@ -311,20 +321,35 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     parts.append("")
     parts.append("OOS application of that exact rule is the `IS-tuned rule` row above.")
     parts.append("")
-    parts.append("## Breakdowns (OOS, app + Dirk)")
+    app_shipped = result["strategies"].get("app_shipped") or {}
+    parts.append("## Breakdowns (OOS, app pick as shipped)")
     parts.append("")
-    parts.append(_brk_table("By coin", app_dirk.get("oos_by_coin") or {}))
-    parts.append(_brk_table("By time-left", app_dirk.get("oos_by_tte") or {}))
-    parts.append(_brk_table("By fill ask", app_dirk.get("oos_by_ask") or {}))
-    parts.append(_brk_table("By |spot − strike|", app_dirk.get("oos_by_dist") or {}))
+    parts.append(
+        "Dirk's cheap-side filter produced **0 OOS bets** on the shipped hero side "
+        "(that side is usually the 70–80¢ favorite). Tables below are the unfiltered "
+        "app pick — the only app strategy with enough OOS trades to slice."
+    )
+    parts.append("")
+    parts.append(_brk_table("By coin", app_shipped.get("oos_by_coin") or {}))
+    parts.append(_brk_table("By time-left", app_shipped.get("oos_by_tte") or {}))
+    parts.append(_brk_table("By fill ask", app_shipped.get("oos_by_ask") or {}))
+    parts.append(_brk_table("By |spot − strike|", app_shipped.get("oos_by_dist") or {}))
     parts.append("## Calibration (all decision minutes, not just bets)")
     parts.append("")
     parts.append("| Forecast | N | Brier | Log-loss |")
     parts.append("|---|---:|---:|---:|")
-    parts.append(f"| Blended fair P(YES) | {cal.get('model', {}).get('n')} | {cal.get('model', {}).get('brier')} | {cal.get('model', {}).get('logloss')} |")
-    parts.append(f"| Fallback MLP P(YES) | {cal.get('mlp', {}).get('n')} | {cal.get('mlp', {}).get('brier')} | {cal.get('mlp', {}).get('logloss')} |")
-    parts.append(f"| Digital fair P(YES) | {cal.get('digital', {}).get('n')} | {cal.get('digital', {}).get('brier')} | {cal.get('digital', {}).get('logloss')} |")
-    parts.append(f"| Market mid | {cal.get('market', {}).get('n')} | {cal.get('market', {}).get('brier')} | {cal.get('market', {}).get('logloss')} |")
+    def _cal(row, key):
+        v = (cal.get(row) or {}).get(key)
+        if v is None:
+            return "—"
+        if key == "n":
+            return str(int(v))
+        return f"{v:.4f}"
+
+    parts.append(f"| Blended fair P(YES) | {_cal('model','n')} | {_cal('model','brier')} | {_cal('model','logloss')} |")
+    parts.append(f"| Fallback MLP P(YES) | {_cal('mlp','n')} | {_cal('mlp','brier')} | {_cal('mlp','logloss')} |")
+    parts.append(f"| Digital fair P(YES) | {_cal('digital','n')} | {_cal('digital','brier')} | {_cal('digital','logloss')} |")
+    parts.append(f"| Market mid | {_cal('market','n')} | {_cal('market','brier')} | {_cal('market','logloss')} |")
     parts.append("")
     parts.append("Reliability table (model):")
     parts.append("")

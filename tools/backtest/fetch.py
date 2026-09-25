@@ -12,10 +12,12 @@ Docs cited:
 from __future__ import annotations
 
 import json
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -315,16 +317,29 @@ def run_fetch(cache: Path, days: int = 28, pause: float = 0.08) -> dict:
     have = {p.stem for p in candles_dir.glob("*.json")}
     todo = [m for m in all_markets if m["ticker"] not in have]
     print(f"[fetch] candles todo {len(todo)} / {len(all_markets)}")
-    for i, m in enumerate(todo):
+    lock = threading.Lock()
+    done = [0]
+
+    def _one(m: dict) -> None:
         hist = m.get("source") == "historical" or (cut_ms and (m.get("settled_ms") or 0) < cut_ms)
         try:
-            rows = fetch_candles(m["series"], m["ticker"], m["open_ms"], m["close_ms"], hist, pause=pause)
+            rows = fetch_candles(m["series"], m["ticker"], m["open_ms"], m["close_ms"], hist, pause=0.02)
         except Exception as e:
             print(f"[fetch] candle fail {m['ticker']}: {e}")
             rows = []
         (candles_dir / f"{m['ticker']}.json").write_text(json.dumps(rows, separators=(",", ":")))
-        if (i + 1) % 50 == 0:
-            print(f"[fetch] candles {i+1}/{len(todo)}")
+        with lock:
+            done[0] += 1
+            if done[0] % 100 == 0:
+                print(f"[fetch] candles {done[0]}/{len(todo)}")
+
+    # 3 workers × ~0.15s RTT ≈ 20 reads/s basic cap
+    # https://docs.kalshi.com/getting_started/rate_limits
+    workers = 3
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futs = [pool.submit(_one, m) for m in todo]
+        for fut in as_completed(futs):
+            fut.result()
 
     # spot span
     if all_markets:

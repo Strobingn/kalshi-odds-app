@@ -1,0 +1,20 @@
+{
+  "fetched_at": "2026-09-25T17:55:47.063978+00:00",
+  "days": 28,
+  "min_ms": 1787939746955,
+  "now_ms": 1790358946955,
+  "cutoff": {
+    "market_positions_last_updated_ts": "2026-07-27T00:00:00Z",
+    "market_settled_ts": "2026-07-27T00:00:00Z",
+    "orders_updated_ts": "2026-09-11T00:00:00Z",
+    "trades_created_ts": "2026-07-27T00:00:00Z"
+  },
+  "docs": {
+    "historical": "https://docs.kalshi.com/getting_started/historical_data",
+    "markets": "https://docs.kalshi.com/api-reference/market/get-markets",
+    "candles": "https://docs.kalshi.com/api-reference/market/get-market-candlesticks",
+    "hist_candles": "https://docs.kalshi.com/api-reference/historical/get-historical-market-candlesticks",
+    "rates": "https://docs.kalshi.com/getting_started/rate_limits",
+    "coinbase": "https://api.exchange.coinbase.com/products/{product}/candles?granularity=60"
+  }
+}
