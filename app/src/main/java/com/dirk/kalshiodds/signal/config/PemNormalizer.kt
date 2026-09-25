@@ -56,7 +56,7 @@ object PemNormalizer {
             .filter { !it.startsWith("-----") }
             .joinToString("")
             .trim()
-        return hasBegin && hasEnd && body.length > 80
+        return hasBegin && hasEnd && body.length >= 80
     }
 
     fun onlyKeyIdSaved(keyId: String, pem: String): Boolean =

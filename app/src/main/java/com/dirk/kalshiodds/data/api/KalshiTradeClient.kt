@@ -243,7 +243,12 @@ class KalshiTradeClient(
                 ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
                 ?.trim()
                 .orEmpty()
-            return if (body.isBlank()) "HTTP $code" else "HTTP $code\n$body"
+            val hint = when {
+                code == 404 -> " — not falling back to deprecated v1 /portfolio/orders"
+                code == 410 -> " — this build submits V2 POST /portfolio/events/orders only"
+                else -> ""
+            }
+            return if (body.isBlank()) "HTTP $code$hint" else "HTTP $code\n$body$hint"
         }
     }
 

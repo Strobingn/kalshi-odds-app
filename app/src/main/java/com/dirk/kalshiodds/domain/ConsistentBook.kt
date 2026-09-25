@@ -44,12 +44,18 @@ object ConsistentBook {
         if (nb == null && ya != null) nb = complement(ya)
 
         if (conflict(yb, na)) {
-            na = if (tickNa == null) complement(yb) else if (tickYb == null) complement(na) else complement(yb)
-            if (yb == null) yb = complement(na)
+            when {
+                tickNa == null -> na = complement(yb)
+                tickYb == null -> yb = complement(na)
+                else -> Unit
+            }
         }
         if (conflict(ya, nb)) {
-            nb = if (tickNb == null) complement(ya) else if (tickYa == null) complement(nb) else complement(ya)
-            if (ya == null) ya = complement(nb)
+            when {
+                tickNb == null -> nb = complement(ya)
+                tickYa == null -> ya = complement(nb)
+                else -> Unit
+            }
         }
         return Quad(yb, ya, nb, na)
     }
