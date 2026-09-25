@@ -43,4 +43,24 @@ class CreateOrderV2ContractTest {
         assertEquals("good_till_canceled", req.timeInForce)
         assertEquals("taker_at_cross", req.selfTradePreventionType)
     }
+
+    @Test
+    fun v2PriceKeepsSubPennyFixedPointDollars() {
+        assertEquals("0.0010", com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(0.001))
+        assertEquals("0.0150", com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(0.015))
+        assertEquals("0.0180", com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(0.018))
+        assertEquals("0.2500", com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(0.25))
+        assertEquals(null, com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(0.0))
+        assertEquals(null, com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(1.0))
+        val req = CreateOrderV2Request(
+            ticker = "KXBTC15M-26SEP251600-00",
+            side = "ask",
+            count = "5000.00",
+            price = com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(0.001)!!,
+            clientOrderId = "subpenny"
+        )
+        val encoded = json.encodeToString(CreateOrderV2Request.serializer(), req)
+        assertTrue(encoded, encoded.contains("\"price\":\"0.0010\""))
+        assertFalse(encoded, encoded.contains("\"price\":\"0.0100\""))
+    }
 }

@@ -58,7 +58,7 @@ object PositionSizer {
         netEvPositive: Boolean = true
     ): Advice {
         val bankroll = bankrollUsd.coerceIn(10.0, 1_000_000.0)
-        val c = contractPrice.coerceIn(0.01, 0.99)
+        val c = contractPrice.coerceIn(com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS, 0.99)
         val p = fairSide.coerceIn(0.02, 0.98)
         if (!netEvPositive) {
             return Advice(0, 0.0, 0.0, 0.0, mode, "no edge after fees/spread")
@@ -104,7 +104,7 @@ object PositionSizer {
 
     /** f* = (p − c) / (1 − c). Negative when there is no edge. */
     fun fullKelly(p: Double, c: Double): Double {
-        val price = c.coerceIn(0.01, 0.99)
+        val price = c.coerceIn(com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS, 0.99)
         val fair = p.coerceIn(0.0, 1.0)
         val denom = 1.0 - price
         if (denom <= 1e-9) return 0.0

@@ -127,7 +127,8 @@ class KalshiTradeClient(
             ticker = ticket.ticker,
             side = ticket.bookSide,
             count = String.format(Locale.US, "%.2f", ticket.contracts.toDouble()),
-            price = String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
+            price = com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(ticket.yesLimitPrice)
+                ?: String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
             clientOrderId = clientOrderId,
             reduceOnly = ticket.reduceOnly || ticket.isSell
         )

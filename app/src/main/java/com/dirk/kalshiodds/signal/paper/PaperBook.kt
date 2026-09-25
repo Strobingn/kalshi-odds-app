@@ -126,7 +126,7 @@ class PaperBook(
 
     fun considerAlert(alert: SignalAlert, ask: Double?, enabled: Boolean): PaperFill? {
         if (!enabled) return null
-        val px = ask?.coerceIn(0.01, 0.99) ?: return null
+        val px = KalshiPrice.usable(ask) ?: return null
         return fill(
             ticker = alert.ticker,
             side = alert.predictedSide,
@@ -156,7 +156,9 @@ class PaperBook(
         winTargetUsd: Double? = null
     ): PaperFill? {
         val want = if (side.equals("NO", true)) "NO" else "YES"
-        val px = limitPrice.coerceIn(0.01, 0.99)
+        val px = KalshiPrice.usable(limitPrice) ?: return null.also {
+            rememberMessage("Paper skip $ticker — unusable limit")
+        }
         val qty = contracts.coerceAtLeast(0)
         if (qty < 1) {
             rememberMessage("Paper skip $ticker — 0 contracts")
@@ -246,7 +248,8 @@ class PaperBook(
         winTargetUsd: Double? = null
     ): PaperBuy.Outcome {
         val want = if (side.equals("NO", true)) "NO" else "YES"
-        val px = limitPrice.coerceIn(0.01, 0.99)
+        val px = KalshiPrice.usable(limitPrice)
+            ?: return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — unusable limit")
         synchronized(lock) {
             val cur = _state.value
             val open = cur.fills.firstOrNull {
@@ -454,7 +457,7 @@ class PaperBook(
         winTargetUsd: Double? = null
     ): PaperFill? {
         val want = if (side.equals("NO", true)) "NO" else "YES"
-        val px = limitPrice.coerceIn(0.01, 0.99)
+        val px = KalshiPrice.usable(limitPrice) ?: return null
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null

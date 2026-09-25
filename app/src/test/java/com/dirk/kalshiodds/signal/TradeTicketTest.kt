@@ -107,6 +107,31 @@ class PayoutGateTest {
     }
 
     @Test
+    fun pointOneCentAskIsNotClampedAndShowsVisibleSize() {
+        val r = PayoutGate.evaluate(
+            stakeUsd = 5.0,
+            bestAsk = 0.001,
+            quotedSize = 8000.0,
+            minPayoutUsd = 100.0
+        )
+        assertTrue(r.reason, r.ok)
+        assertEquals(5000, r.contracts)
+        assertEquals(0.001, r.limitPrice, 1e-12)
+        assertEquals(8000, r.fillableContracts)
+        assertTrue(r.reason.contains("0.1¢"))
+        assertTrue(r.reason.contains("8000 visible"))
+        val thin = PayoutGate.evaluate(
+            stakeUsd = 5.0,
+            bestAsk = 0.001,
+            quotedSize = 10.0,
+            minPayoutUsd = 100.0
+        )
+        assertFalse(thin.ok)
+        assertTrue(thin.reason.contains("liquidity too thin"))
+        assertTrue(thin.reason.contains("0.1¢"))
+    }
+
+    @Test
     fun stakeClipAndRaiseConfirm() {
         assertEquals(25.0, PayoutGate.clipStake(99.0), 1e-9)
         assertEquals(1.0, PayoutGate.clipStake(0.1), 1e-9)

@@ -56,6 +56,8 @@ class KalshiPriceTest {
         assertEquals(0.905, KalshiPrice.parseDollars("0.9050")!!, 1e-12)
         assertNotNull(KalshiPrice.usable(0.001))
         assertNotNull(KalshiPrice.usable(0.015))
+        assertEquals("0.0010", KalshiPrice.toWireDollars(0.001))
+        assertEquals("0.0150", KalshiPrice.toWireDollars(0.015))
     }
 
     @Test

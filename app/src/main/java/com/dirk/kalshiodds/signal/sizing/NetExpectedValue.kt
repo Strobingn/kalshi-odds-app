@@ -68,7 +68,7 @@ object NetExpectedValue {
         }
         val pSide = if (side == "YES") pYes else 1.0 - pYes
         val paid = (if (side == "YES") m else 1.0 - m) + half
-        val clippedPaid = paid.coerceIn(0.01, 0.99)
+        val clippedPaid = paid.coerceIn(com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS, 0.99)
         val fee = feePerContract(clippedPaid, feeRate, stakeUsd)
         val gross = pSide - clippedPaid
         val net = gross - fee

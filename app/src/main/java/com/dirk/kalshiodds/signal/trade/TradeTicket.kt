@@ -27,7 +27,7 @@ data class TradeTicket(
      */
     val bookSide: String,
     val stakeUsd: Double,
-    /** Price paid per chosen-side contract (0.01–0.99). */
+    /** Price paid per chosen-side contract (0.001–0.999, including sub-cent). */
     val limitPrice: Double,
     /** YES-leg price sent to POST /portfolio/events/orders. */
     val yesLimitPrice: Double,
@@ -65,7 +65,9 @@ data class TradeTicket(
     val winTargetNote: String? = null,
     /** `live` = Kalshi cash, `paper` = paper equity, `settings` = advisory bankroll. */
     val bankrollSource: String? = null,
-    val bankrollUsd: Double? = null
+    val bankrollUsd: Double? = null,
+    /** Visible contracts at/under the limit (book or quoted size). */
+    val visibleContracts: Int? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

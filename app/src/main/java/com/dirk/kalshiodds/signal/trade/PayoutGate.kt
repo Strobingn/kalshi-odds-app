@@ -177,6 +177,7 @@ object PayoutGate {
             estimatedAvgFill = limit,
             fillableContracts = fillable ?: contracts,
             reason = "$contracts ct · limit ${cents(limit)} · " +
+                "${fillable ?: "?"} visible at that price · " +
                 "max payout \$${fmt(payout)} on \$${fmt(estFill)} risked"
         )
     }

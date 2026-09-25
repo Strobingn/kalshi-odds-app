@@ -222,8 +222,14 @@ private fun ProposedTicketCard(
             TicketMetricRow("Contracts", String.format(Locale.US, "%d", ticket.contracts))
             TicketMetricRow(
                 "Avg price",
-                String.format(Locale.US, "%.1f¢  (never market)", ticket.estimatedAvgFill * 100)
+                "${KalshiQuoteDisplay.formatPriceCents(ticket.estimatedAvgFill)}  (never market)"
             )
+            ticket.visibleContracts?.let { vis ->
+                TicketMetricRow(
+                    "Size at that price",
+                    String.format(Locale.US, "%d visible (need %d)", vis, ticket.contracts)
+                )
+            }
             TicketMetricRow(
                 "Max payout",
                 String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)

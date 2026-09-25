@@ -59,6 +59,7 @@ class WiringAuditTest {
         Control("Live keystore re-enter", com.dirk.kalshiodds.signal.config.SignalPreferences::class.java, "needsReenterKey"),
         Control("Demo keystore re-enter", com.dirk.kalshiodds.signal.config.SignalPreferences::class.java, "needsReenterDemoKey"),
         Control("Price parse dollars", com.dirk.kalshiodds.domain.KalshiPrice::class.java, "parseDollars"),
+        Control("Price wire dollars", com.dirk.kalshiodds.domain.KalshiPrice::class.java, "toWireDollars"),
         Control("Price format cents", KalshiQuoteDisplay::class.java, "formatPriceCents"),
         Control("Import model JSON", DataViewModel::class.java, "importModelUri"),
         Control("Get latest model (Data)", DataViewModel::class.java, "getLatestModel"),

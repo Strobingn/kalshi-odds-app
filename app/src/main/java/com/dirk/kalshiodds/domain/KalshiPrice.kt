@@ -67,5 +67,15 @@ object KalshiPrice {
     fun clipLimit(price: Double): Double =
         price.coerceIn(MIN_TICK_DOLLARS, MAX_TICK_DOLLARS)
 
+    /**
+     * V2 Create Order `price` FixedPointDollars string (4 dp).
+     * https://docs.kalshi.com/api-reference/orders/create-order-v2
+     * 0.1¢ → `"0.0010"`, 1.5¢ → `"0.0150"`.
+     */
+    fun toWireDollars(price: Double): String? {
+        val p = usable(price) ?: return null
+        return BigDecimal.valueOf(p).setScale(4, java.math.RoundingMode.HALF_UP).toPlainString()
+    }
+
     private val HUNDRED = BigDecimal("100")
 }

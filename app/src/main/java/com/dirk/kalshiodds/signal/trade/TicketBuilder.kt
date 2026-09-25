@@ -354,7 +354,8 @@ object TicketBuilder {
             winTargetCapped = win?.capped == true,
             winTargetNote = win?.note,
             bankrollSource = ctx.bankrollSource,
-            bankrollUsd = bankroll
+            bankrollUsd = bankroll,
+            visibleContracts = sizing.fillableContracts
         )
     }
 
