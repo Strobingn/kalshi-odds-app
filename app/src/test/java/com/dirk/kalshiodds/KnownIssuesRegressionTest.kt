@@ -1267,6 +1267,38 @@ class KnownIssuesRegressionTest {
         assertEquals("AI 20%", HomeCopy.tileAiDown(up))
     }
 
+    /**
+     * Original #16 name from the five-icon / "AI: UP 80%" request. Dirk then
+     * chose the 0.3.12 chrome; the AI call lives in the tiles ([aiPercentInTilesMatchesModel]).
+     */
+    @Test
+    fun homeTopBarAndAiCallProminent() {
+        assertEquals(
+            listOf("Scorecard", "Settings", "Refresh"),
+            HomeCopy.TOP_BAR_ACTIONS
+        )
+        val home = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt")
+        ).first { it.isFile }.readText()
+        assertFalse(home.contains("Icons.Default.History"))
+        assertFalse(home.contains("Icons.Default.Folder"))
+        assertTrue(home.contains("Icons.Default.Assessment"))
+        val up = HomeFixtures.actionableBtc()
+        val down = HomeFixtures.actionableDownBtc()
+        val no = HomeFixtures.noBetEth()
+        assertEquals("AI 80%", HomeCopy.tileAiUp(up))
+        assertEquals("AI 10%", HomeCopy.tileAiUp(down))
+        assertEquals("AI 70%", HomeCopy.tileAiUp(no))
+        val card = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt")
+        ).first { it.isFile }.readText()
+        assertFalse(card.contains("AI: UP"))
+        assertFalse(card.contains("AI: NO BET"))
+        assertTrue(card.contains("HomeCopy.tileAiUp"))
+    }
+
     @Test
     fun aiPercentInTilesMatchesModel() {
         val up = HomeFixtures.actionableBtc()
