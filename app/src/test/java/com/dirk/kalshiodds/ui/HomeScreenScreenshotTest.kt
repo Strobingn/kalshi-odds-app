@@ -411,8 +411,8 @@ class HomeScreenScreenshotTest {
             File("app/build/reports/paparazzi/debug/runs")
         ).filter { it.isDirectory }
         val latest = runDirs.flatMap { dir ->
-            dir.listFiles().orEmpty().filter { it.isFile }.sortedByDescending { it.name }
-        }.take(12)
+            dir.listFiles().orEmpty().filter { it.isFile }
+        }.sortedByDescending { it.name }
         for (js in latest) {
             val text = js.readText()
             if (!text.contains("\"name\": \"$name\"")) continue
