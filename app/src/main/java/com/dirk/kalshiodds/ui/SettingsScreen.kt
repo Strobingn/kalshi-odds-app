@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.ui
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -34,8 +36,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -58,8 +63,10 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
     val importKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(viewModel::restoreCredentials) }
+    val clipboard = LocalClipboardManager.current
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
+        viewModel.refreshLastOrderError()
     }
 
     Scaffold(
@@ -468,7 +475,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
                     "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
-                    "card is the ledger — you do not need to dig here to see it.",
+                    "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
+                    "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -537,7 +545,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Win target sizing")
             Text(
-                "On by default. Size every Buy UP/DOWN and hunter card (including Long-shot) so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
+                "On by default for hunter / Long-shot / configured cards. Manual Buy UP/DOWN stays a Settings-stake order (default \$5) including fees — not resized to the \$50 win target. " +
+                    "Hunter cards walk the ask book (VWAP, not top-of-book). " +
                     "Live Approve uses GET /portfolio/balance cash; Paper uses paper-book equity. " +
                     "Stake is capped at a % of that bankroll (default 10%) and an optional $ cap. " +
                     "When the cap or book depth limits size, the card shows Capped: wins \$X. " +
@@ -631,6 +640,65 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     Text(if (s.hasPrivateKey) "Update key" else "Save key")
                 }
                 OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
+            }
+            if (state.keyIdDraft.isNotBlank() && !s.hasPrivateKey && state.pemDraft.isBlank()) {
+                Text(
+                    com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_KEY_ONLY,
+                    color = colors.accentOrange,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                "Test connection calls GET /trade-api/v2/portfolio/balance with the stored key " +
+                    "(https://docs.kalshi.com/api-reference/portfolio/get-balance). Shows the cash " +
+                    "or the exact Kalshi error (401 INCORRECT_API_KEY_SIGNATURE, missing PEM, clock skew).",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Button(
+                onClick = viewModel::testConnection,
+                enabled = !state.connectionTestBusy,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text(if (state.connectionTestBusy) "Testing…" else "Test connection")
+            }
+            state.connectionTestMessage?.let {
+                Text(
+                    it,
+                    color = if (it.contains(" ok ", ignoreCase = true) || it.startsWith("GET /portfolio/balance ok")) {
+                        colors.accentGreen
+                    } else {
+                        colors.accentOrange
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Section("Last order error")
+            Text(
+                "Copyable last Live Approve / Test connection failure. Also written to SQLite + results.log on Approve.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            val lastErr = state.lastOrderError
+            Text(
+                lastErr ?: "No order error yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (lastErr == null) colors.textSecondary else colors.accentRed,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = { lastErr?.let { clipboard.setText(AnnotatedString(it)) } },
+                    enabled = lastErr != null
+                ) { Text("Copy last error") }
+                OutlinedButton(onClick = viewModel::clearLastOrderError, enabled = lastErr != null) {
+                    Text("Clear")
+                }
             }
             Text(
                 "Export writes a passphrase-encrypted file you pick (Downloads or Drive). " +

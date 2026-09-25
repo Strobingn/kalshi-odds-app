@@ -190,6 +190,33 @@ class TicketSessionTest {
     }
 
     @Test
+    fun lastOrderErrorRedactsPemAndKeepsKalshiBody() {
+        val raw = """401 {"error":{"code":"INCORRECT_API_KEY_SIGNATURE"}} -----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA
+-----END RSA PRIVATE KEY-----"""
+        val cleaned = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore.redact(raw)
+        assertFalse(cleaned.contains("BEGIN RSA"))
+        assertFalse(cleaned.contains("MIIEowIBAAKCAQEA"))
+        assertTrue(cleaned.contains("INCORRECT_API_KEY_SIGNATURE"))
+        assertTrue(cleaned.contains("[redacted"))
+    }
+
+    @Test
+    fun blockedTicketApproveShowsReasonAndDoesNotPlace() = runBlocking {
+        val placed = AtomicInteger(0)
+        val session = session(placed)
+        val blocked = sampleTicket("t1").copy(
+            contracts = 0,
+            blockedReason = "No sellers on YES right now"
+        )
+        session.replaceProposals(listOf(blocked))
+        session.openApprove("t1")
+        val after = session.approve("t1")
+        assertEquals(0, placed.get())
+        assertEquals("No sellers on YES right now", after.lastError)
+    }
+
+    @Test
     fun onlyMatchingApprovePlacesOnce() = runBlocking {
         val placed = AtomicInteger(0)
         val session = session(placed)

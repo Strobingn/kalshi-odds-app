@@ -12,7 +12,10 @@ import com.dirk.kalshiodds.signal.service.BatteryExemption
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import android.net.Uri
 import com.dirk.kalshiodds.signal.config.CredentialBackup
+import com.dirk.kalshiodds.data.api.ConnectionTestResult
 import com.dirk.kalshiodds.signal.config.CredentialWriteGuard
+import com.dirk.kalshiodds.signal.config.PemNormalizer
+import com.dirk.kalshiodds.signal.ws.KalshiWsAuth
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
@@ -42,7 +45,11 @@ data class SettingsUiState(
     val batteryUnrestricted: Boolean = false,
     val exportMessage: String? = null,
     val mlGuardNote: String? = null,
-    val credPassphrase: String = ""
+    val credPassphrase: String = "",
+    val connectionTestBusy: Boolean = false,
+    val connectionTestMessage: String? = null,
+    val lastOrderError: String? = null,
+    val lastOrderErrorAtMs: Long = 0L
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -71,6 +78,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
             }
+            refreshLastOrderError()
         }
         viewModelScope.launch {
             prefs.settings.collect { s ->
@@ -293,6 +301,43 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setKeyIdDraft(v: String) = _state.update { it.copy(keyIdDraft = v, credentialMessage = null) }
     fun setPemDraft(v: String) = _state.update { it.copy(pemDraft = v, credentialMessage = null) }
+
+    fun refreshLastOrderError() {
+        val snap = container.lastOrderError.snapshot()
+        _state.update {
+            it.copy(lastOrderError = snap?.first, lastOrderErrorAtMs = snap?.second ?: 0L)
+        }
+    }
+
+    fun clearLastOrderError() {
+        container.lastOrderError.clear()
+        _state.update { it.copy(lastOrderError = null, lastOrderErrorAtMs = 0L) }
+    }
+
+    fun testConnection() {
+        viewModelScope.launch {
+            _state.update { it.copy(connectionTestBusy = true, connectionTestMessage = "Testing GET /portfolio/balance…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching { container.tradeClient.testConnection() }
+                    .getOrElse { ConnectionTestResult.Fail(it.message ?: "test failed") }
+            }
+            val message = when (result) {
+                is ConnectionTestResult.Ok -> result.rawSummary
+                is ConnectionTestResult.Fail -> result.display
+            }
+            if (result is ConnectionTestResult.Fail) {
+                container.lastOrderError.record(result.display)
+            }
+            _state.update {
+                it.copy(
+                    connectionTestBusy = false,
+                    connectionTestMessage = message,
+                    lastOrderError = container.lastOrderError.snapshot()?.first,
+                    lastOrderErrorAtMs = container.lastOrderError.snapshot()?.second ?: 0L
+                )
+            }
+        }
+    }
     fun setDemoKeyIdDraft(v: String) = _state.update { it.copy(demoKeyIdDraft = v, credentialMessage = null) }
     fun setDemoPemDraft(v: String) = _state.update { it.copy(demoPemDraft = v, credentialMessage = null) }
 
@@ -300,10 +345,20 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun saveCredentials() {
         val keyId = _state.value.keyIdDraft.trim()
-        val pem = _state.value.pemDraft.trim()
+        val pem = PemNormalizer.normalize(_state.value.pemDraft)
         val reject = CredentialWriteGuard.rejectReason(keyId, pem)
         if (reject != null) {
             _state.update { it.copy(credentialMessage = reject) }
+            return
+        }
+        val parseErr = runCatching { KalshiWsAuth.parsePrivateKey(pem) }.exceptionOrNull()
+        if (parseErr != null) {
+            _state.update {
+                it.copy(
+                    credentialMessage = "PEM would not parse — ${parseErr.message}. " +
+                        "Kalshi RSA keys use BEGIN RSA PRIVATE KEY; openssl/Ed25519 use BEGIN PRIVATE KEY."
+                )
+            }
             return
         }
         prefs.saveCredentials(keyId, pem)
@@ -387,10 +442,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun saveDemoCredentials() {
         val keyId = _state.value.demoKeyIdDraft.trim()
-        val pem = _state.value.demoPemDraft.trim()
+        val pem = PemNormalizer.normalize(_state.value.demoPemDraft)
         val reject = CredentialWriteGuard.rejectReason(keyId, pem, demo = true)
         if (reject != null) {
             _state.update { it.copy(credentialMessage = reject) }
+            return
+        }
+        val parseErr = runCatching { KalshiWsAuth.parsePrivateKey(pem) }.exceptionOrNull()
+        if (parseErr != null) {
+            _state.update { it.copy(credentialMessage = "Demo PEM would not parse — ${parseErr.message}") }
             return
         }
         prefs.saveDemoCredentials(keyId, pem)

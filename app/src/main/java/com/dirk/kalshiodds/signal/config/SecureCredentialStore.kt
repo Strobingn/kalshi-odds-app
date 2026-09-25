@@ -31,7 +31,7 @@ class SecureCredentialStore(context: Context) {
     var privateKeyPem: String
         get() = prefs.getString(KEY_PEM, "").orEmpty()
         set(value) {
-            prefs.edit().putString(KEY_PEM, value.trim()).commit()
+            prefs.edit().putString(KEY_PEM, PemNormalizer.normalize(value)).commit()
         }
 
     val hasCredentials: Boolean
@@ -55,10 +55,7 @@ class SecureCredentialStore(context: Context) {
         var lastKeystoreInvalidated: Boolean = false
             private set
 
-        fun looksLikePem(pem: String): Boolean {
-            val t = pem.trim()
-            return t.contains("BEGIN") && t.contains("PRIVATE") && t.contains("END") && t.length > 80
-        }
+        fun looksLikePem(pem: String): Boolean = PemNormalizer.looksLikePem(pem)
 
         private fun createPrefs(context: Context): SharedPreferences {
             val fallback = context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)

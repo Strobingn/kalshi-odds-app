@@ -110,12 +110,15 @@ object KalshiWsMessages {
         val ticker = msg.stringField("market_ticker") ?: return null
         val bid = msg.dollarField("yes_bid_dollars", "yes_bid")
         val ask = msg.dollarField("yes_ask_dollars", "yes_ask")
+        val noBid = msg.dollarField("no_bid_dollars", "no_bid")
+        val noAsk = msg.dollarField("no_ask_dollars", "no_ask")
         val last = msg.dollarField("price_dollars", "last_price_dollars", "price")
+        val snap = com.dirk.kalshiodds.domain.ConsistentQuote.fromSameUpdate(bid, ask, noBid, noAsk)
         return MarketTick(
             ticker = ticker,
             series = MarketTick.inferSeries(ticker),
-            yesBid = bid,
-            yesAsk = ask,
+            yesBid = snap?.yesBid ?: bid,
+            yesAsk = snap?.yesAsk ?: ask,
             lastPrice = last,
             volume = msg.rawDouble("volume_fp", "volume"),
             openInterest = msg.rawDouble("open_interest_fp", "open_interest"),
@@ -123,7 +126,9 @@ object KalshiWsMessages {
             source = TickSource.WS_TICKER,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = msg.longField("ts_ms") ?: msg.longField("ts")?.times(1000),
-            tradeSize = msg.rawDouble("last_trade_size_fp")
+            tradeSize = msg.rawDouble("last_trade_size_fp"),
+            noBid = snap?.noBid ?: noBid,
+            noAsk = snap?.noAsk ?: noAsk
         )
     }
 

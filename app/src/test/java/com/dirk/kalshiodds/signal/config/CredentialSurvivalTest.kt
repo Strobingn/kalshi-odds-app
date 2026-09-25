@@ -24,8 +24,8 @@ class CredentialSurvivalTest {
         }
         assertNull(CredentialWriteGuard.rejectReason("keep-me", pem))
         assertEquals(CredentialWriteGuard.REJECT_BLANK, CredentialWriteGuard.rejectReason("", ""))
-        assertEquals(CredentialWriteGuard.REJECT_BLANK, CredentialWriteGuard.rejectReason("keep-me", ""))
-        assertEquals(CredentialWriteGuard.REJECT_BLANK, CredentialWriteGuard.rejectReason("", pem))
+        assertEquals(CredentialWriteGuard.REJECT_KEY_ONLY, CredentialWriteGuard.rejectReason("keep-me", ""))
+        assertEquals(CredentialWriteGuard.REJECT_PEM_ONLY, CredentialWriteGuard.rejectReason("", pem))
         if (CredentialWriteGuard.rejectReason("", "") == null) {
             store.apiKeyId = ""
             store.privateKeyPem = ""

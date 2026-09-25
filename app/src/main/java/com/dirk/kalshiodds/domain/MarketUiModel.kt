@@ -118,12 +118,13 @@ enum class SeriesKind(val ticker: String, val label: String) {
  * Book-implied ticks are not stored as lastTick (see TickBook.applySnapshot).
  */
 fun MarketUiModel.withLiveQuote(tick: com.dirk.kalshiodds.signal.model.MarketTick?): MarketUiModel {
-    if (tick == null || !tick.ticker.equals(ticker, ignoreCase = true)) return this
-    val yb = KalshiPrice.usable(tick.yesBid) ?: yesBid
-    val ya = KalshiPrice.usable(tick.yesAsk) ?: yesAsk
-    val nb = KalshiPrice.usable(tick.noBid) ?: noBid
-    val na = KalshiPrice.usable(tick.noAsk) ?: noAsk
-    val last = KalshiPrice.usable(tick.lastPrice) ?: lastPrice
+    val sameTicker = tick != null && tick.ticker.equals(ticker, ignoreCase = true)
+    val quote = ConsistentQuote.overlay(this, if (sameTicker) tick else null)
+    val yb = quote.yesBid
+    val ya = quote.yesAsk
+    val nb = quote.noBid
+    val na = quote.noAsk
+    val last = if (sameTicker) KalshiPrice.usable(tick?.lastPrice) ?: lastPrice else lastPrice
     if (yb == yesBid && ya == yesAsk && nb == noBid && na == noAsk && last == lastPrice) return this
     val yesImplied = when {
         yb != null && ya != null -> (yb + ya) / 2.0
