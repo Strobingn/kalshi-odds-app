@@ -151,13 +151,17 @@ class HomeScreenScreenshotTest {
             File("build/reports/paparazzi/debug/runs"),
             File("app/build/reports/paparazzi/debug/runs")
         ).filter { it.isDirectory }
-        for (dir in runDirs) {
-            dir.listFiles()?.forEach { js ->
-                val text = js.readText()
-                if (!text.contains("\"name\": \"$name\"")) return@forEach
-                val rel = Regex("\"file\": \"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: return@forEach
-                val src = File(dir.parentFile, rel)
-                if (src.isFile) src.copyTo(File(destDir, "$name.png"), overwrite = true)
+        val latest = runDirs.flatMap { dir ->
+            dir.listFiles().orEmpty().filter { it.isFile }.sortedByDescending { it.name }
+        }
+        for (js in latest) {
+            val text = js.readText()
+            if (!text.contains("\"name\": \"$name\"")) continue
+            val rel = Regex("\"file\": \"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: continue
+            val src = File(js.parentFile.parentFile, rel)
+            if (src.isFile) {
+                src.copyTo(File(destDir, "$name.png"), overwrite = true)
+                return
             }
         }
     }
