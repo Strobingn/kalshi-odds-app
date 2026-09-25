@@ -400,24 +400,8 @@ class HomeScreenScreenshotTest {
 
     @After
     fun flushArtifacts() {
-        listOf(
-            "home_light_actionable", "home_dark_actionable",
-            "home_light_actionable_down", "home_dark_actionable_down",
-            "home_light_all_nobet", "home_dark_all_nobet",
-            "home_light_nokey", "home_dark_nokey",
-            "home_light_disagreement", "home_dark_disagreement",
-            "home_light_scorecard_empty", "home_dark_scorecard_empty",
-            "home_light_next_window", "home_dark_next_window",
-            "scorecard_light", "scorecard_dark",
-            "settings_light", "settings_dark",
-            "signals_light", "signals_dark",
-            "signal_history_light", "signal_history_dark",
-            "positions_light_open", "positions_dark_open",
-            "sell_confirm_light_bid", "sell_confirm_dark_bid",
-            "sell_confirm_light_nobid", "sell_confirm_dark_nobid",
-            "before_0_3_11_light_actionable", "before_0_3_11_dark_actionable",
-            "before_0_3_11_light_nokey"
-        ).forEach(::copyLatest)
+        // Each snap() already copies; avoid re-scanning every run file here
+        // (/opt/cursor/artifacts File.delete can stall on overwrite).
     }
 
     private fun copyLatest(name: String) {
@@ -428,21 +412,23 @@ class HomeScreenScreenshotTest {
         ).filter { it.isDirectory }
         val latest = runDirs.flatMap { dir ->
             dir.listFiles().orEmpty().filter { it.isFile }.sortedByDescending { it.name }
-        }
+        }.take(12)
         for (js in latest) {
             val text = js.readText()
             if (!text.contains("\"name\": \"$name\"")) continue
             val rel = Regex("\"file\": \"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: continue
             val parent = js.parentFile?.parentFile ?: continue
             val src = File(parent, rel)
-            if (src.isFile) {
-                try {
-                    src.copyTo(File(destDir, "$name.png"), overwrite = true)
-                } catch (_: Exception) {
-                    // /opt/cursor/artifacts can flake on close; the PNG is still in paparazzi/images.
+            if (!src.isFile) continue
+            val dest = File(destDir, "$name.png")
+            try {
+                src.inputStream().use { input ->
+                    dest.outputStream().use { output -> input.copyTo(output) }
                 }
-                return
+            } catch (_: Exception) {
+                // /opt/cursor/artifacts can flake; the PNG is still in paparazzi/images.
             }
+            return
         }
     }
 }

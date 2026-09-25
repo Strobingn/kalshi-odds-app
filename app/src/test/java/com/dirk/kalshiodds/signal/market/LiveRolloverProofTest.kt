@@ -76,7 +76,13 @@ class LiveRolloverProofTest {
                     )
                 }
             }
-            if (detected) break
+            if (ev.active.size >= series.size &&
+                series.all { s ->
+                    val old = start.active[s]
+                    val m = ev.active[s]
+                    old != null && m != null && (m.closeTimeEpochMs ?: 0L) > (old.closeTimeEpochMs ?: 0L)
+                }
+            ) break
         }
         if (!detected) {
             log.appendLine(

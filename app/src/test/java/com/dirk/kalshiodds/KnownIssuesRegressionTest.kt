@@ -46,6 +46,8 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -1080,15 +1082,8 @@ class KnownIssuesRegressionTest {
             listOpen = { series ->
                 calls.incrementAndGet()
                 if (throw429) {
-                    throw retrofit2.HttpException(
-                        retrofit2.Response.error<Any>(
-                            429,
-                            okhttp3.ResponseBody.create(
-                                okhttp3.MediaType.parse("text/plain"),
-                                "rate limited"
-                            )
-                        )
-                    )
+                    val body = "rate limited".toResponseBody("text/plain".toMediaType())
+                    throw retrofit2.HttpException(retrofit2.Response.error<Any>(429, body))
                 }
                 listed.filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) == series }
             },
