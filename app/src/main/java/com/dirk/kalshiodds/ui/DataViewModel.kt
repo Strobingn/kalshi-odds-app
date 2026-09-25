@@ -36,7 +36,10 @@ data class DataUiState(
     val supabaseUrlDraft: String = "",
     val supabaseKeyDraft: String = "",
     val days: Int = 30,
-    val credPassphrase: String = ""
+    val credPassphrase: String = "",
+    val githubTokenDraft: String = "",
+    val syncLine: String? = null,
+    val modelBusy: Boolean = false
 )
 
 class DataViewModel(application: Application) : AndroidViewModel(application) {
@@ -58,14 +61,15 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                         days = s.backfillDays,
                         supabaseUrlDraft = s.supabaseUrl,
                         supabaseKeyDraft = s.supabaseAnonKey,
-                        modelNote = modelLabel()
+                        modelNote = modelLabel(),
+                        syncLine = syncLine(s)
                     )
                 }
             }
         }
         viewModelScope.launch {
             dataPrefs.settings.collect { s ->
-                _state.update { it.copy(settings = s, days = s.backfillDays) }
+                _state.update { it.copy(settings = s, days = s.backfillDays, syncLine = syncLine(s)) }
             }
         }
         viewModelScope.launch {
@@ -168,6 +172,79 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setCredPassphrase(v: String) = _state.update { it.copy(credPassphrase = v) }
 
+    fun setGithubTokenDraft(v: String) = _state.update { it.copy(githubTokenDraft = v) }
+
+    fun saveGithubToken() {
+        val token = _state.value.githubTokenDraft.trim()
+        container.extraSecrets.githubToken = token
+        _state.update {
+            it.copy(message = if (token.isBlank()) "GitHub token cleared" else "GitHub token stored (encrypted, not the Kalshi key)")
+        }
+    }
+
+    fun setSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            dataPrefs.updateSyncEnabled(enabled)
+            if (enabled) com.dirk.kalshiodds.worker.SyncWorker.enqueueOnce(getApplication())
+            _state.update { it.copy(message = if (enabled) "Cloud sync on" else "Cloud sync off") }
+        }
+    }
+
+    fun syncNow() {
+        com.dirk.kalshiodds.worker.SyncWorker.enqueueOnce(getApplication())
+        _state.update { it.copy(message = "Sync queued") }
+    }
+
+    fun getLatestModel() {
+        viewModelScope.launch {
+            _state.update { it.copy(modelBusy = true, message = "Fetching latest model…") }
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val token = _state.value.githubTokenDraft.trim().ifBlank {
+                        container.extraSecrets.githubToken
+                    }
+                    when (val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)) {
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready -> {
+                            val d = out.fetch.decision
+                            if (d.activate) {
+                                modelStore.activate(out.fetch.model, out.fetch.manifest)
+                                container.scoring.edgeModel = out.fetch.model
+                            }
+                            val m = out.fetch.manifest
+                            buildString {
+                                append(d.reason)
+                                append(" · n=")
+                                append(m.nSamples)
+                                append(" · Brier ")
+                                append("%.4f".format(m.modelBrier))
+                                append(" vs mkt ")
+                                append("%.4f".format(m.marketBrier))
+                            }
+                        }
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.NeedsAuth -> out.message
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Failed -> out.message
+                    }
+                }.getOrElse { it.message ?: "download failed" }
+            }
+            _state.update { it.copy(modelBusy = false, modelNote = result, message = result) }
+        }
+    }
+
+    fun rollbackModel() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val prev = modelStore.rollback()
+                if (prev != null) {
+                    container.scoring.edgeModel = prev
+                    "Rolled back to previous model v${prev.version}"
+                } else {
+                    "No previous model to roll back"
+                }
+            }
+            _state.update { it.copy(modelNote = result, message = result) }
+        }
+    }
+
     fun backupCredentials(uri: Uri) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -241,6 +318,16 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun modelLabel(): String? {
         val m: EdgeModel = modelStore.current() ?: return "No imported model yet"
-        return "Model ${m.kind} v${m.version} · blend ${"%.2f".format(m.blendWeight)}"
+        val man = modelStore.currentManifest()
+        val extra = man?.let {
+            " · n=${it.nSamples} · Brier ${"%.3f".format(it.modelBrier)} vs mkt ${"%.3f".format(it.marketBrier)}"
+        }.orEmpty()
+        return "Model ${m.kind} v${m.version} · blend ${"%.2f".format(m.blendWeight)}$extra"
+    }
+
+    private fun syncLine(s: DataHubSettings): String? {
+        if (!s.supabaseConfigured) return "Supabase not configured — History stays on this phone."
+        if (!s.syncEnabled) return "Cloud sync off"
+        return s.lastSyncMessage.ifBlank { "Cloud sync ready — never uploads the Kalshi key." }
     }
 }

@@ -144,7 +144,7 @@ fun OddsScreen(
                                 else abs(it.edgePp ?: 0.0)
                             }
                     )
-                val threshold = state.settings.edgeThresholdPp
+                val threshold = state.settings.effectiveEdgeThresholdPp()
                 val alertCount = allMarkets.count { it.edgeAlert && it.passedFilter }
 
                 LazyColumn(
@@ -186,6 +186,7 @@ fun OddsScreen(
                         TradeTicketsSection(
                             tickets = state.tickets,
                             credentialsConfigured = state.settings.credentialsConfigured,
+                            paperTradingEnabled = state.settings.paperTradingEnabled,
                             onReview = { viewModel.openTicketApprove(it) },
                             onDismiss = { viewModel.dismissTicket(it) },
                             onApprove = { viewModel.approveTicket(it) },

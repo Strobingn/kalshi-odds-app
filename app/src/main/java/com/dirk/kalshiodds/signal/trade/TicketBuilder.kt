@@ -48,6 +48,7 @@ object TicketBuilder {
 
     fun proposeAll(markets: List<MarketUiModel>, ctx: Context): List<TradeTicket> {
         if (!ctx.settings.ticketsEnabled) return emptyList()
+        if (ctx.settings.isSittingOut()) return emptyList()
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }

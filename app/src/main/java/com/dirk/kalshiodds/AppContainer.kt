@@ -38,6 +38,8 @@ class AppContainer(context: Context) {
     val guardrailStore = GuardrailStore(app)
     val heavyStore = HeavyMlStore(app)
     val notifier = SignalNotifier(app)
+    val opportunities = com.dirk.kalshiodds.signal.notify.OpportunityNotifier(app)
+    val extraSecrets = com.dirk.kalshiodds.signal.config.SecureExtraStore(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
     private val resultsImpl = runCatching { SqliteResultsStore(app) as ResultsStore }
@@ -101,6 +103,20 @@ class AppContainer(context: Context) {
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
             paper.book.settleFromLog(logStore.readAll())
+            val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
+                logStore.readAll(),
+                feeRate = hub.settings.feeRate
+            )
+            if (hub.settings.autoTuneEnabled && !hub.settings.autoTuneManualOverride) {
+                runCatching { preferences.updateSitOut(tuned.sitOut) }
+                runCatching { preferences.updateTunedEdgeThresholdPp(tuned.thresholdPp) }
+                runCatching { preferences.updateAutoTuneNote(tuned.reason) }
+                hub.settings = hub.settings.copy(
+                    sitOut = tuned.sitOut,
+                    tunedEdgeThresholdPp = tuned.thresholdPp,
+                    autoTuneNote = tuned.reason
+                )
+            }
         }
     )
 

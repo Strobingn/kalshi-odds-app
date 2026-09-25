@@ -26,8 +26,10 @@ python3 ml/train_edge.py --fixture   # no network; synthetic walk-forward
 
 Python 3.10+ standard library only (no pip packages).
 
-GitHub Actions: **Actions → Train edge model → Run workflow**. The JSON is
-uploaded as an artifact.
+GitHub Actions: **Actions → Train edge model → Run workflow**, or the weekly
+Monday cron. The JSON + `edge_model_manifest.json` are uploaded as an artifact
+and published on the rolling `edge-model-latest` release. In the app:
+**Data → Get latest model**.
 
 ## Features (order is the Android contract)
 

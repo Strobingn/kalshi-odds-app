@@ -29,6 +29,24 @@ object ScorecardMetrics {
         val stats: WindowStats
     )
 
+    data class Breakdown(
+        val key: String,
+        val label: String,
+        val n: Int,
+        val hitRate: Double?,
+        val modelBrier: Double?,
+        val marketBrier: Double?,
+        val pnlUsd: Double?,
+        val enoughData: Boolean
+    ) {
+        val honestLabel: String
+            get() = if (!enoughData) {
+                "Not enough data (${n}/${MIN_BUCKET_SAMPLES})"
+            } else {
+                "${n} settled"
+            }
+    }
+
     data class Honest(
         val n: Int,
         val modelBrier: Double?,
@@ -37,7 +55,9 @@ object ScorecardMetrics {
         val avgEdgeWhenRight: Double?,
         val avgEdgeWhenWrong: Double?,
         val enoughData: Boolean,
-        val perAsset: List<SeriesStats>
+        val perAsset: List<SeriesStats>,
+        val perCoin: List<Breakdown> = emptyList(),
+        val perTimeOfDay: List<Breakdown> = emptyList()
     )
 
     data class Snapshot(
@@ -86,7 +106,7 @@ object ScorecardMetrics {
             calibrationReady = calibration.ready,
             temperature = if (calibration.ready) calibration.temperature else null,
             calibrationSamples = calibration.sampleCount,
-            honest = honest(settled),
+            honest = honest(settled, zoneId),
             policy = PolicyEval.evaluate(
                 entries = entries,
                 stakeUsd = policyStakeUsd,
@@ -99,9 +119,15 @@ object ScorecardMetrics {
     }
 
     const val MIN_HONEST_SAMPLES = 100
+    const val MIN_BUCKET_SAMPLES = SignalConstants.SCORECARD_BUCKET_MIN_SAMPLES
 
-    fun honest(rows: List<PredictionLogEntry>): Honest {
-        if (rows.isEmpty()) return Honest(0, null, null, null, null, null, false, emptyList())
+    fun honest(
+        rows: List<PredictionLogEntry>,
+        zoneId: ZoneId = ZoneId.of("America/New_York")
+    ): Honest {
+        if (rows.isEmpty()) {
+            return Honest(0, null, null, null, null, null, false, emptyList())
+        }
         val all = window(rows)
         val modelBriers = rows.map { e ->
             val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
@@ -126,7 +152,87 @@ object ScorecardMetrics {
             avgEdgeWhenRight = all.avgEdgeWhenRight,
             avgEdgeWhenWrong = all.avgEdgeWhenWrong,
             enoughData = rows.size >= MIN_HONEST_SAMPLES,
-            perAsset = per
+            perAsset = per,
+            perCoin = coinBreakdowns(rows),
+            perTimeOfDay = timeOfDayBreakdowns(rows, zoneId)
+        )
+    }
+
+    fun coinBreakdowns(rows: List<PredictionLogEntry>): List<Breakdown> {
+        val order = listOf("BTC", "ETH", "SOL")
+        val groups = rows.groupBy { coinOf(it.series.ifBlank { it.ticker }) }
+        return order.map { coin ->
+            breakdown(coin, coinLabel(coin), groups[coin].orEmpty())
+        } + groups.keys.filter { it !in order && it != "OTHER" }.sorted().map { coin ->
+            breakdown(coin, coin, groups[coin].orEmpty())
+        }
+    }
+
+    fun timeOfDayBreakdowns(
+        rows: List<PredictionLogEntry>,
+        zoneId: ZoneId = ZoneId.of("America/New_York")
+    ): List<Breakdown> {
+        val buckets = (0 until 6).map { i ->
+            val start = i * 4
+            val end = start + 4
+            val key = "%02d-%02d".format(start, end)
+            val label = "%d–%d ET".format(start, end)
+            key to label
+        }
+        val groups = rows.groupBy { etBucketKey(settledAt(it), zoneId) }
+        return buckets.map { (key, label) ->
+            breakdown(key, label, groups[key].orEmpty())
+        }
+    }
+
+    fun etBucketKey(epochMs: Long, zoneId: ZoneId = ZoneId.of("America/New_York")): String {
+        val hour = Instant.ofEpochMilli(epochMs).atZone(zoneId).hour
+        val start = (hour / 4) * 4
+        return "%02d-%02d".format(start, start + 4)
+    }
+
+    fun coinOf(seriesOrTicker: String): String {
+        val u = seriesOrTicker.uppercase()
+        return when {
+            u.contains("BTC") -> "BTC"
+            u.contains("ETH") -> "ETH"
+            u.contains("SOL") -> "SOL"
+            else -> "OTHER"
+        }
+    }
+
+    private fun coinLabel(coin: String): String = when (coin) {
+        "BTC" -> "Bitcoin"
+        "ETH" -> "Ethereum"
+        "SOL" -> "Solana"
+        else -> coin
+    }
+
+    private fun breakdown(key: String, label: String, rows: List<PredictionLogEntry>): Breakdown {
+        if (rows.isEmpty()) {
+            return Breakdown(key, label, 0, null, null, null, null, false)
+        }
+        val hits = rows.count { it.score == 1 || (it.score == null && sideHit(it)) }
+        val modelBrier = rows.map { brierOf(it) }.average()
+        val marketBrier = rows.map { e ->
+            val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
+            val d = e.marketMid - y
+            d * d
+        }.average()
+        val pnl = rows.sumOf { e ->
+            val won = e.score == 1 || (e.score == null && sideHit(e))
+            val stake = 1.0
+            if (won) stake * kotlin.math.abs(e.edgePp ?: 0.0) / 100.0 else -stake * kotlin.math.abs(e.edgePp ?: 0.0) / 100.0
+        }
+        return Breakdown(
+            key = key,
+            label = label,
+            n = rows.size,
+            hitRate = hits.toDouble() / rows.size,
+            modelBrier = modelBrier,
+            marketBrier = marketBrier,
+            pnlUsd = pnl,
+            enoughData = rows.size >= MIN_BUCKET_SAMPLES
         )
     }
 

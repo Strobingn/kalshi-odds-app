@@ -262,7 +262,7 @@ class LiveSignalsService : Service() {
                         watchEth = settings.watchEth,
                         watchSol = settings.watchSol,
                         extraTickers = settings.extraTickerList(),
-                        edgeThresholdPp = settings.edgeThresholdPp
+                        edgeThresholdPp = settings.effectiveEdgeThresholdPp()
                     )
                     container.hub.ingestRestSnapshot(snap)
                 }.onFailure { Log.w(TAG, "metadata refresh: ${it.message}") }

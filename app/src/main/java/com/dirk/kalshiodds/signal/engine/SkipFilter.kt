@@ -51,7 +51,7 @@ object SkipFilter {
         val rank = if (settings.rankByNetEv) netEdgePp ?: edgePp else edgePp
         if (rank == null) return false
         if (!passedFilter && settings.hideWeakOpportunities) return false
-        if (settings.hideWeakOpportunities && abs(rank) < settings.edgeThresholdPp) return false
+        if (settings.hideWeakOpportunities && abs(rank) < settings.effectiveEdgeThresholdPp()) return false
         return true
     }
 

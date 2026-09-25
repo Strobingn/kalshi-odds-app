@@ -801,7 +801,8 @@ class ScoringEngine(
         } else {
             scored.deltaPp
         }
-        if (abs(edgeForAlert) < settings.edgeThresholdPp) return null
+        if (settings.isSittingOut()) return null
+        if (abs(edgeForAlert) < settings.effectiveEdgeThresholdPp()) return null
         if (edgeModel != null && !scored.modelEdgeQualified) return null
         val last = lastAlertMs[tick.ticker] ?: 0L
         if (nowMs - last < settings.debounceMs) return null

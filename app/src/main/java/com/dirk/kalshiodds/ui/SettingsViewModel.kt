@@ -113,6 +113,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setWatchEth(v: Boolean) = viewModelScope.launch { prefs.updateWatchEth(v) }
     fun setWatchSol(v: Boolean) = viewModelScope.launch { prefs.updateWatchSol(v) }
     fun setNotifications(v: Boolean) = viewModelScope.launch { prefs.updateNotifications(v) }
+    fun setAutoTuneOverride(v: Boolean) = viewModelScope.launch { prefs.updateAutoTuneOverride(v) }
+    fun setAutoTuneEnabled(v: Boolean) = viewModelScope.launch { prefs.updateAutoTuneEnabled(v) }
+    fun setOpportunityAlerts(v: Boolean) = viewModelScope.launch { prefs.updateOpportunityAlerts(v) }
+    fun setOpportunityQuiet(v: Boolean) = viewModelScope.launch { prefs.updateOpportunityQuiet(v) }
     fun setLiveSignals(v: Boolean) = viewModelScope.launch { prefs.updateLiveSignals(v) }
     fun setSubscribeTrades(v: Boolean) = viewModelScope.launch { prefs.updateSubscribeTrades(v) }
     fun setThreshold(v: Double) = viewModelScope.launch { prefs.updateEdgeThresholdPp(v) }

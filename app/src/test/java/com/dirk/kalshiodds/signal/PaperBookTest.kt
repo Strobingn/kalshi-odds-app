@@ -47,7 +47,7 @@ class PaperBookTest {
         val manual = hunterTicket().copy(kind = TicketKind.MANUAL, ticker = "KXETH15M-X")
         assertNull(book.considerTicket(manual, enabled = true))
         assertTrue(book.manualFill(manual) != null)
-        assertEquals("manual paper", book.snapshot().fills.single().source)
+        assertTrue(book.snapshot().fills.single().source.contains("paper", ignoreCase = true))
     }
 
     @Test

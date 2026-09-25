@@ -45,6 +45,7 @@ import java.util.Locale
 fun TradeTicketsSection(
     tickets: TicketUiState,
     credentialsConfigured: Boolean,
+    paperTradingEnabled: Boolean = false,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
@@ -80,7 +81,13 @@ fun TradeTicketsSection(
         val visibleError = tickets.lastError
             ?.takeUnless { com.dirk.kalshiodds.signal.trade.TicketSession.stalePageError(it) }
         visibleError?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentRed)
+            val paperOk = it.startsWith("PAPER ", ignoreCase = true)
+            Text(
+                it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (paperOk) AccentGreen else AccentRed,
+                fontWeight = FontWeight.SemiBold
+            )
         }
         when (val phase = tickets.phase) {
             is TicketPhase.Submitting -> {
@@ -128,8 +135,10 @@ fun TradeTicketsSection(
         ApproveTicketDialog(
             ticket = awaiting.ticket,
             credentialsConfigured = credentialsConfigured,
+            paperTradingEnabled = paperTradingEnabled,
             onApprove = { onApprove(awaiting.ticket.id) },
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
+            onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
             onDismiss = onCancelApprove
         )
@@ -356,13 +365,16 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
 private fun ApproveTicketDialog(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
+    paperTradingEnabled: Boolean = false,
     onApprove: () -> Unit,
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
+    onPaper: () -> Unit = {},
     onPaperSell: (Int, Double) -> Unit = { _, _ -> },
     onDismiss: () -> Unit
 ) {
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
     val paperSell = ticket.paperOnly && ticket.isSell
+    val paperBuy = paperTradingEnabled && !ticket.isSell
     var countText by remember(ticket.id) { mutableStateOf(ticket.contracts.toString()) }
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
@@ -373,6 +385,7 @@ private fun ApproveTicketDialog(
             Text(
                 when {
                     paperSell -> "Paper sell this position?"
+                    paperBuy -> "Paper buy this ticket?"
                     ticket.isSell -> "Live Approve this sell?"
                     else -> "Live Approve this ticket?"
                 }
@@ -385,6 +398,10 @@ private fun ApproveTicketDialog(
                         paperSell ->
                             "Simulated sell on the $100 paper book — never sent to Kalshi. " +
                                 "Count is capped at the paper fill so this cannot flip."
+                        paperBuy ->
+                            "Simulated fill on the paper book at the current walked ask, including fees. " +
+                                "No Kalshi key needed. This never places a live order. Win-target size above " +
+                                "paper cash is capped, not blocked."
                         ticket.isSell ->
                             "Places a real V2 reduce-only GTC limit (POST /portfolio/events/orders) to sell the held side. " +
                                 "Count is capped at your position so this cannot flip. Not a paper fill."
@@ -452,17 +469,23 @@ private fun ApproveTicketDialog(
                         val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
                         val px = (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
                         if (paperSell) onPaperSell(qty, px) else onApproveSell(qty, px)
+                    } else if (paperBuy) {
+                        onPaper()
                     } else {
                         onApprove()
                     }
                 },
-                enabled = if (paperSell) ticket.canPaper else credentialsConfigured && ticket.canApprove,
+                enabled = when {
+                    paperSell || paperBuy -> ticket.canPaper || ticket.contracts > 0 || ticket.blockedReason != null
+                    else -> credentialsConfigured && ticket.canApprove
+                },
                 colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
                 modifier = Modifier.height(48.dp)
             ) {
                 Text(
                     when {
                         paperSell -> "Paper sell"
+                        paperBuy -> "Paper Approve"
                         ticket.isSell -> "Live Approve sell"
                         else -> "Live Approve"
                     }

@@ -209,6 +209,23 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) { Text("Restore") }
             }
+            androidx.compose.material3.Switch(
+                checked = state.settings.syncEnabled,
+                onCheckedChange = viewModel::setSyncEnabled
+            )
+            Text(
+                "Live sync of History / bets / signals / settings (never the Kalshi key).",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            state.syncLine?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentBlue)
+            }
+            OutlinedButton(
+                onClick = viewModel::syncNow,
+                enabled = state.settings.supabaseConfigured && state.settings.syncEnabled,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) { Text("Sync now") }
 
             Section("Import model")
             Text(
@@ -216,10 +233,35 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
+            Text(
+                "Weekly GitHub Action publishes edge-model-latest. Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            Button(
+                onClick = viewModel::getLatestModel,
+                enabled = !state.modelBusy,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text(if (state.modelBusy) "Fetching…" else "Get latest model") }
+            OutlinedTextField(
+                value = state.githubTokenDraft,
+                onValueChange = viewModel::setGithubTokenDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("GitHub token (private repo)") },
+                singleLine = true
+            )
+            OutlinedButton(
+                onClick = viewModel::saveGithubToken,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) { Text("Save GitHub token") }
             Button(
                 onClick = { importModel.launch(arrayOf("application/json", "text/*", "*/*")) },
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text("Import model JSON") }
+            OutlinedButton(
+                onClick = viewModel::rollbackModel,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) { Text("Roll back previous model") }
             state.modelNote?.let {
                 Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
             }

@@ -144,8 +144,28 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             )
 
             Section("Edge threshold")
+            if (s.isSittingOut()) {
+                Text(
+                    "SIT OUT — auto-tune says the model is not beating the market. ${s.autoTuneNote}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentOrange,
+                    fontWeight = FontWeight.Bold
+                )
+            } else if (s.autoTuneEnabled && !s.autoTuneManualOverride && s.tunedEdgeThresholdPp != null) {
+                Text(
+                    String.format(
+                        Locale.US,
+                        "Auto-tune  %.1f pp  — %s",
+                        s.tunedEdgeThresholdPp,
+                        s.autoTuneNote.ifBlank { "from settled history" }
+                    ),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
             Text(
-                String.format(Locale.US, "%.1f pp  — alert when |fair − mid| crosses this", s.edgeThresholdPp),
+                String.format(Locale.US, "Manual slider  %.1f pp  — used when override is on", s.edgeThresholdPp),
                 style = MaterialTheme.typography.bodyMedium,
                 color = AccentGreen,
                 fontWeight = FontWeight.SemiBold
@@ -156,9 +176,18 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 valueRange = 1f..20f,
                 steps = 18
             )
+            ToggleRow("Auto-tune edge from settled history", s.autoTuneEnabled, viewModel::setAutoTuneEnabled)
+            ToggleRow("Manual override (use slider, ignore sit-out)", s.autoTuneManualOverride, viewModel::setAutoTuneOverride)
 
             Section("Alerts")
             ToggleRow("Notifications", s.notificationsEnabled, viewModel::setNotifications)
+            ToggleRow("Long-shot / $50 win-target cards", s.opportunityAlertsEnabled, viewModel::setOpportunityAlerts)
+            ToggleRow("Quiet opportunity alerts (no sound)", s.opportunityQuiet, viewModel::setOpportunityQuiet)
+            Text(
+                "Opportunity notifications open the ticket. Approve is still required — they never place an order.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
             ToggleRow("Subscribe public trades", s.subscribeTrades, viewModel::setSubscribeTrades)
 
             Section("Skip filter")

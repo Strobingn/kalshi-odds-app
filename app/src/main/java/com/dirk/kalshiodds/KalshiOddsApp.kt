@@ -56,6 +56,8 @@ class KalshiOddsApp : Application() {
         }
         runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
         runCatching { SignalNotifier.ensureChannels(this) }
+        runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
+        runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this) }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
         // a throw in Service.onCreate kills the whole process mid-session too
@@ -78,6 +80,7 @@ class KalshiOddsApp : Application() {
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
             runCatching { restorePersistedHistory() }
+            runCatching { firstLaunchSync() }
         }
         appScope.launch {
             runCatching {
@@ -93,6 +96,15 @@ class KalshiOddsApp : Application() {
                     }
             }
         }
+    }
+
+    private suspend fun firstLaunchSync() {
+        val hub = runCatching { container.dataPrefs.hydrate() }.getOrNull() ?: return
+        if (hub.firstRestoreDone) return
+        if (hub.supabaseConfigured && hub.syncEnabled) {
+            com.dirk.kalshiodds.worker.SyncWorker.enqueueOnce(this)
+        }
+        runCatching { container.dataPrefs.markFirstRestoreDone() }
     }
 
     private fun restorePersistedHistory() {

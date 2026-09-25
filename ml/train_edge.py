@@ -48,7 +48,7 @@ FEATURE_NAMES = [
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
-UA = "DipHunterTrainer/0.3.7"
+UA = "DipHunterTrainer/0.3.8"
 
 
 def http_get(url: str, retries: int = 5) -> Any:
@@ -430,6 +430,33 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
     return X, y, mids, times
 
 
+def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None) -> None:
+    n = int(metrics.get("n_holdout") or metrics.get("n_samples") or 0)
+    model_brier = float(metrics.get("model_brier", 1.0))
+    market_brier = float(metrics.get("market_brier", 1.0))
+    model_ll = float(metrics.get("model_logloss", 1.0))
+    market_ll = float(metrics.get("market_logloss", 1.0))
+    payload = {
+        "version": "1",
+        "trained_at": trained_at or datetime.now(timezone.utc).isoformat(),
+        "n_samples": n,
+        "n_holdout": n,
+        "model_brier": model_brier,
+        "market_brier": market_brier,
+        "model_logloss": model_ll,
+        "market_logloss": market_ll,
+        "sim_trades": metrics.get("sim_trades"),
+        "sim_pnl": metrics.get("sim_pnl"),
+        "sim_hit_rate": metrics.get("sim_hit_rate"),
+        "model_asset": "edge_model.json",
+        "tag": "edge-model-latest",
+        "beats_market": n > 0 and model_brier < market_brier and model_ll < market_ll,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f"wrote {path}", flush=True)
+
+
 def export(model: dict[str, Any], metrics: dict[str, Any], path: Path) -> None:
     payload = {
         "version": 1,
@@ -456,6 +483,7 @@ def main() -> int:
     ap.add_argument("--days", type=int, default=30)
     ap.add_argument("--max-markets", type=int, default=180)
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
+    ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
     ap.add_argument("--fixture", action="store_true")
     args = ap.parse_args()
     if args.fixture:
@@ -474,6 +502,7 @@ def main() -> int:
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y)
     export(model, metrics, Path(args.out))
+    write_manifest(metrics, Path(args.manifest))
     # Do not overwrite the hand-checked Android/Python parity fixture.
     # Write a sample next to the exported model for debugging only.
     if not args.fixture:

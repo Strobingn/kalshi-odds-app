@@ -153,7 +153,7 @@ class DecisionSupport(
             PolicyEval.evaluate(
                 settled,
                 stakeUsd = settings.policyEvalStakeUsd,
-                edgeThresholdPp = settings.edgeThresholdPp,
+                edgeThresholdPp = settings.effectiveEdgeThresholdPp(),
                 minConfidence = settings.minConfidence,
                 requireUncertaintyPass = settings.uncertaintyGateEnabled,
                 maxUncertainty = settings.maxUncertainty
