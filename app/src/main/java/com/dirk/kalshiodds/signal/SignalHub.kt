@@ -5,6 +5,7 @@ import android.util.Log
 import com.dirk.kalshiodds.data.local.results.AlertRow
 import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
 import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
+import com.dirk.kalshiodds.data.local.archive.ChartTickRow
 import com.dirk.kalshiodds.data.local.results.OddsMidRow
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.signal.config.SignalConstants
@@ -66,6 +67,7 @@ class SignalHub(
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
+    private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
     private val bookMailbox = LatestWinsMailbox<Long>()
     private val logWriteBusy = AtomicBoolean(false)
@@ -238,6 +240,7 @@ class SignalHub(
             persistScore(tick, scored)
             persistOddsMid(tick.ticker, scored.marketMidPp)
         }
+        persistChartTick(tick)
         val alert = if (notify && scored != null) {
             scoring.maybeAlert(tick, settings, precomputed = scored)
         } else {
@@ -263,6 +266,7 @@ class SignalHub(
         _scores.update { it + (ticker to scored) }
         persistScore(tick, scored)
         persistOddsMid(ticker, scored.marketMidPp)
+        persistChartTick(tick)
     }
 
     private fun persistOddsMid(ticker: String, marketMidPp: Double) {
@@ -287,6 +291,28 @@ class SignalHub(
                     createdAtMs = now,
                     yesBid = last?.yesBid,
                     noBid = last?.noBid ?: last?.yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+                )
+            )
+        }
+    }
+
+    private fun persistChartTick(tick: MarketTick) {
+        if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return
+        val now = System.currentTimeMillis()
+        val lastTs = lastChartPersistMs[tick.ticker] ?: 0L
+        if (now - lastTs < SignalConstants.CHART_TICK_PERSIST_MIN_MS) return
+        lastChartPersistMs[tick.ticker] = now
+        runCatching {
+            results?.enqueueChartTick(
+                ChartTickRow(
+                    ticker = tick.ticker,
+                    tMs = now,
+                    yesBid = tick.yesBid,
+                    noBid = tick.noBid ?: tick.yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) },
+                    yesAsk = tick.yesAsk,
+                    noAsk = tick.noAsk,
+                    spotUsd = scoring.book.lastSpot(tick.ticker),
+                    source = if (tick.source == TickSource.REST) ChartTickRow.SOURCE_REST else ChartTickRow.SOURCE_LIVE
                 )
             )
         }

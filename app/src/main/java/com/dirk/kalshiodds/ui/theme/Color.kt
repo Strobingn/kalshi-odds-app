@@ -2,6 +2,13 @@ package com.dirk.kalshiodds.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
+/**
+ * Raw palette tokens. Composables must read [DipTheme.colors], not these
+ * dark-only vals. Importing [Bg] / [TextSecondary] / [AccentGreen] from
+ * here is what made light mode unreadable: scaffolds stayed `#0D1117`
+ * while [androidx.compose.material3.MaterialTheme] `onBackground` flipped
+ * to [LightTextPrimary] (`#1F2328`).
+ */
 val Bg = Color(0xFF0D1117)
 val Surface = Color(0xFF161B22)
 val SurfaceAlt = Color(0xFF21262D)
@@ -12,14 +19,16 @@ val AccentBlue = Color(0xFF58A6FF)
 val AccentGreen = Color(0xFF3FB950)
 val AccentOrange = Color(0xFFD29922)
 val AccentRed = Color(0xFFF85149)
+val OnAccentDark = Color(0xFF0D1117)
 
 val LightBg = Color(0xFFF6F8FA)
 val LightSurface = Color(0xFFFFFFFF)
 val LightSurfaceAlt = Color(0xFFEEF2F6)
 val LightBorder = Color(0xFFD0D7DE)
 val LightTextPrimary = Color(0xFF1F2328)
-val LightTextSecondary = Color(0xFF656D76)
-val LightAccentBlue = Color(0xFF0969DA)
-val LightAccentGreen = Color(0xFF1A7F37)
-val LightAccentOrange = Color(0xFF9A6700)
-val LightAccentRed = Color(0xFFCF222E)
+val LightTextSecondary = Color(0xFF57606A)
+val LightAccentBlue = Color(0xFF0550AE)
+val LightAccentGreen = Color(0xFF116329)
+val LightAccentOrange = Color(0xFF7D4E00)
+val LightAccentRed = Color(0xFFA0111F)
+val OnAccentLight = Color(0xFFFFFFFF)

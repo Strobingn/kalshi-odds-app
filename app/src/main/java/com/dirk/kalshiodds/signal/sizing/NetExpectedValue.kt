@@ -7,15 +7,18 @@ import kotlin.math.abs
 /**
  * Expected value **net of Kalshi fees and half-spread**.
  *
- * ## Fee model (documented assumption — configurable)
+ * ## Fee model
  *
- * Kalshi has long published a binary-contract taker fee of the form:
+ * Official taker (https://kalshi.com/docs/kalshi-fee-schedule.pdf):
  *
- *     fee_dollars = round_up_cent(feeRate × C × P × (1 − P))
+ *     model_fee = feeRate × C × P × (1 − P)
+ *     trade_fee = ceil_6dp(model_fee)
+ *     order_fee = ceil_cent(C×P + trade_fee) − C×P
  *
- * where `P` is the contract price in dollars (0–1) and `C` is contracts.
- * The published coefficient is **0.07**. Ranking uses the official 1¢
- * round-up on one contract. Users can change [feeRate] in Settings.
+ * Rounding: https://docs.kalshi.com/getting_started/fee_rounding
+ * (non-direct member $0.01). Fee is paid on top of the buy, not taken
+ * from the $1 settlement. Ranking amortizes the order fee across the
+ * contracts a [stakeUsd] ticket (default $5) can buy.
  *
  * This is **not** an order ticket. The app never calls trade endpoints.
  *
@@ -27,7 +30,7 @@ import kotlin.math.abs
  * ## Per-contract net EV (chosen side)
  *
  *     P_paid = mid + halfSpread     (YES)  or  (1 − mid) + halfSpread (NO)
- *     fee    = round_up_cent(feeRate × P_paid × (1 − P_paid))
+ *     fee    = orderFee(C, P_paid) / C     C = floor(stake / P_paid)
  *     net    = p_side − P_paid − fee
  *
  * [netEdgePp] = net × 100 so it is comparable to raw fair−mid edge.
@@ -51,7 +54,8 @@ object NetExpectedValue {
         mid: Double,
         spreadDollars: Double?,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
-        preferSide: String? = null
+        preferSide: String? = null,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
     ): Result {
         val pYes = fairYes.coerceIn(0.02, 0.98)
         val m = mid.coerceIn(0.02, 0.98)
@@ -64,8 +68,8 @@ object NetExpectedValue {
         }
         val pSide = if (side == "YES") pYes else 1.0 - pYes
         val paid = (if (side == "YES") m else 1.0 - m) + half
-        val clippedPaid = paid.coerceIn(0.01, 0.99)
-        val fee = feePerContract(clippedPaid, feeRate)
+        val clippedPaid = paid.coerceIn(com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS, 0.99)
+        val fee = feePerContract(clippedPaid, feeRate, stakeUsd)
         val gross = pSide - clippedPaid
         val net = gross - fee
         return Result(
@@ -82,10 +86,13 @@ object NetExpectedValue {
     }
 
     /**
-     * Official Kalshi taker fee on one contract at price [p].
+     * Order-level taker fee amortized over the contracts [stakeUsd] buys at [p].
      */
-    fun feePerContract(p: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double =
-        KalshiFee.perContract(p, feeRate)
+    fun feePerContract(
+        p: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Double = KalshiFee.perContract(p, feeRate, stakeUsd)
 
     /** True when ranking/alerting on net EV is at least as selective as raw |edge|. */
     fun preferNetForFilter(netEdgePp: Double, rawEdgePp: Double): Boolean =

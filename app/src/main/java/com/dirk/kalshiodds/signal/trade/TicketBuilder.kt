@@ -301,7 +301,7 @@ object TicketBuilder {
 
         val model01 = modelProb(market, side)
         val implied = sizing.estimatedAvgFill
-        val edge = modelBeatsImplied(model01, implied, ctx.settings.feeRate)
+        val edge = modelBeatsImplied(model01, implied, ctx.settings.feeRate, stakeUsd = ctx.settings.ticketStakeUsd)
         if (kind == TicketKind.HUNTER_VALUE && !edge) return null
 
         val yesLimit = if (side == "YES") sizing.limitPrice else (1.0 - sizing.limitPrice)
@@ -354,7 +354,8 @@ object TicketBuilder {
             winTargetCapped = win?.capped == true,
             winTargetNote = win?.note,
             bankrollSource = ctx.bankrollSource,
-            bankrollUsd = bankroll
+            bankrollUsd = bankroll,
+            visibleContracts = sizing.fillableContracts
         )
     }
 
@@ -366,10 +367,16 @@ object TicketBuilder {
         return if (side == "NO") 1.0 - yes else yes
     }
 
-    fun modelBeatsImplied(model: Double?, implied: Double?, feeRate: Double, margin: Double = 0.03): Boolean {
+    fun modelBeatsImplied(
+        model: Double?,
+        implied: Double?,
+        feeRate: Double,
+        margin: Double = 0.03,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Boolean {
         val m = model?.takeIf { it.isFinite() } ?: return false
         val p = implied?.takeIf { it.isFinite() } ?: return false
-        val fee = KalshiFee.perContract(p, feeRate)
+        val fee = KalshiFee.perContract(p, feeRate, stakeUsd)
         return m > p + fee + margin
     }
 

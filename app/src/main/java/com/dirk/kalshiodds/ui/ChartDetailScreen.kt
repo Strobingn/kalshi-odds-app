@@ -33,9 +33,7 @@ import com.dirk.kalshiodds.ui.components.TapeConflictBanner
 import com.dirk.kalshiodds.ui.components.TargetNowLine
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.UpDownBuyButtons
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.Bg
-import com.dirk.kalshiodds.ui.theme.TextSecondary
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,8 +44,9 @@ fun ChartDetailScreen(
     onBuyYes: (MarketUiModel) -> Unit,
     onBuyNo: (MarketUiModel) -> Unit
 ) {
+    val colors = DipTheme.colors
     Scaffold(
-        containerColor = Bg,
+        containerColor = colors.bg,
         topBar = {
             TopAppBar(
                 title = { Text(market.title.ifBlank { market.ticker }) },
@@ -60,10 +59,10 @@ fun ChartDetailScreen(
                     TimeLeftLabel(market.closeTimeEpochMs, pill = true)
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Bg,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = AccentBlue,
-                    actionIconContentColor = AccentBlue
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.accentBlue,
+                    actionIconContentColor = colors.accentBlue
                 )
             )
         }
@@ -76,7 +75,7 @@ fun ChartDetailScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text(market.ticker, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                Text(market.ticker, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                 Spacer(Modifier.weight(1f))
             }
             TargetNowLine(market, Modifier.padding(top = 8.dp))
@@ -84,6 +83,7 @@ fun ChartDetailScreen(
             MarketAskHero(market, Modifier.padding(top = 12.dp))
             AiFairLabel(market, Modifier.padding(top = 8.dp))
             PastSettlementsRow(market.pastSettlements, Modifier.padding(top = 8.dp, bottom = 12.dp))
+            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
             BidChart(
                 points = points,
                 modifier = Modifier.fillMaxWidth(),
@@ -94,12 +94,14 @@ fun ChartDetailScreen(
                 strikeLabel = null,
                 spotUsd = market.spotUsd,
                 strikeUsd = market.floorStrike,
-                spotHeightDp = 180
+                spotHeightDp = 180,
+                liveUpLabel = quotes.upChartLabel,
+                liveDownLabel = quotes.downChartLabel
             )
             Text(
                 "Orange = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids. Drag to scrub.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 modifier = Modifier.padding(top = 12.dp)
             )
             UpDownBuyButtons(
@@ -111,7 +113,7 @@ fun ChartDetailScreen(
             Text(
                 "Approve on the ticket is the only path that can place a real V2 order.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 8.dp)
             )

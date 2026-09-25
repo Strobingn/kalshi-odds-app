@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <style name="Theme.KalshiOdds" parent="android:Theme.Material.Light.NoActionBar">
-        <item name="android:statusBarColor">#FF0D1117</item>
-        <item name="android:navigationBarColor">#FF0D1117</item>
-        <item name="android:windowBackground">#FF0D1117</item>
+        <item name="android:statusBarColor">#FFF6F8FA</item>
+        <item name="android:navigationBarColor">#FFF6F8FA</item>
+        <item name="android:windowBackground">#FFF6F8FA</item>
+        <item name="android:windowLightStatusBar">true</item>
+        <item name="android:windowLightNavigationBar">true</item>
     </style>
 </resources>

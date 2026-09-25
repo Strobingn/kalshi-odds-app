@@ -111,6 +111,43 @@ enum class SeriesKind(val ticker: String, val label: String) {
     CRYPTO("", "Crypto")
 }
 
+/**
+ * Overlay a live ticker / REST tick onto the snapshot quote so the hero,
+ * buttons, and [MarketQuoteView] multiple use the same ask the ticket path
+ * already reads from [com.dirk.kalshiodds.signal.engine.TickBook.lastTick].
+ * Book-implied ticks are not stored as lastTick (see TickBook.applySnapshot).
+ */
+fun MarketUiModel.withLiveQuote(tick: com.dirk.kalshiodds.signal.model.MarketTick?): MarketUiModel {
+    if (tick == null || !tick.ticker.equals(ticker, ignoreCase = true)) return this
+    val yb = KalshiPrice.usable(tick.yesBid) ?: yesBid
+    val ya = KalshiPrice.usable(tick.yesAsk) ?: yesAsk
+    val nb = KalshiPrice.usable(tick.noBid) ?: noBid
+    val na = KalshiPrice.usable(tick.noAsk) ?: noAsk
+    val last = KalshiPrice.usable(tick.lastPrice) ?: lastPrice
+    if (yb == yesBid && ya == yesAsk && nb == noBid && na == noAsk && last == lastPrice) return this
+    val yesImplied = when {
+        yb != null && ya != null -> (yb + ya) / 2.0
+        last != null -> last
+        else -> yesProbabilityPercent?.div(100.0)
+    }
+    val noImplied = when {
+        nb != null && na != null -> (nb + na) / 2.0
+        yesImplied != null -> 1.0 - yesImplied
+        else -> noProbabilityPercent?.div(100.0)
+    }
+    val spread = if (yb != null && ya != null) (ya - yb).coerceAtLeast(0.0) else spreadDollars
+    return copy(
+        yesBid = yb,
+        yesAsk = ya,
+        noBid = nb,
+        noAsk = na,
+        lastPrice = last,
+        yesProbabilityPercent = yesImplied?.times(100.0),
+        noProbabilityPercent = noImplied?.times(100.0),
+        spreadDollars = spread
+    )
+}
+
 fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
     val yesBid = KalshiPrice.parseDollars(yesBidDollars)
     val yesAsk = KalshiPrice.parseDollars(yesAskDollars)

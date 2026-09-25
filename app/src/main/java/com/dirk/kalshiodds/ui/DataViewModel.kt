@@ -253,8 +253,9 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     require(pass.length >= 6) { "Passphrase must be at least 6 characters" }
                     val (id, pem) = container.preferences.credentialSnapshot()
                     require(id.isNotBlank() && pem.isNotBlank()) { "No Kalshi key saved to back up" }
+                    val (demoId, demoPem) = container.preferences.demoSnapshot()
                     val bytes = com.dirk.kalshiodds.signal.config.CredentialBackup.encrypt(
-                        id, pem, pass.toCharArray()
+                        id, pem, pass.toCharArray(), demoId, demoPem
                     )
                     getApplication<Application>().contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
                         ?: error("could not write backup")
@@ -273,11 +274,14 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     require(pass.isNotBlank()) { "Enter the backup passphrase" }
                     val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
                         ?.use { it.readBytes() } ?: error("could not read backup")
-                    val (id, pem) = com.dirk.kalshiodds.signal.config.CredentialBackup.decrypt(
+                    val bundle = com.dirk.kalshiodds.signal.config.CredentialBackup.decryptAll(
                         bytes, pass.toCharArray()
                     )
-                    container.preferences.saveCredentials(id, pem)
-                    "Kalshi key restored (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(id)})"
+                    container.preferences.saveCredentials(bundle.keyId, bundle.pem)
+                    if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
+                        container.preferences.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
+                    }
+                    "Kalshi key restored (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(bundle.keyId)})"
                 }.getOrElse { it.message ?: "restore failed" }
             }
             _state.update { it.copy(message = result) }

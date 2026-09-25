@@ -11,7 +11,8 @@ class InMemoryResultsStore(
     private val maxAlerts: Int = 200,
     private val maxScorecards: Int = 400,
     private val maxTickets: Int = 200,
-    private val maxOdds: Int = 1_200
+    private val maxOdds: Int = 1_200,
+    private val maxChartTicks: Int = 2_880
 ) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
     private val nextId = AtomicLong(1L)
     private val snapshots = ArrayDeque<ScoredSnapshotRow>()
@@ -26,6 +27,7 @@ class InMemoryResultsStore(
     private val cursors = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.BackfillCursorRow>()
     private val settingsChanges = ArrayDeque<com.dirk.kalshiodds.data.local.history.SettingsChange>()
     private val sessions = LinkedHashMap<String, com.dirk.kalshiodds.data.local.history.HistorySession>()
+    private val chartTickRows = ArrayDeque<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
 
     @Synchronized
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -115,7 +117,42 @@ class InMemoryResultsStore(
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
     @Synchronized
+    override fun insertChartTicks(rows: List<com.dirk.kalshiodds.data.local.archive.ChartTickRow>) {
+        for (row in rows) {
+            chartTickRows.removeAll { it.ticker == row.ticker && it.tMs == row.tMs }
+            chartTickRows.addLast(row)
+        }
+        while (chartTickRows.size > maxChartTicks) chartTickRows.removeFirst()
+    }
+
+    @Synchronized
+    override fun chartTicks(
+        ticker: String,
+        startMs: Long,
+        endMs: Long,
+        limit: Int
+    ): List<com.dirk.kalshiodds.data.local.archive.ChartTickRow> =
+        chartTickRows.filter { it.ticker == ticker && it.tMs in startMs..endMs }
+            .sortedBy { it.tMs }
+            .takeLast(limit.coerceIn(1, 2_000))
+
+    @Synchronized
+    override fun trimChartTicks(keepTickers: Set<String>, olderThanMs: Long) {
+        chartTickRows.removeAll { row ->
+            (keepTickers.isNotEmpty() && row.ticker !in keepTickers) || row.tMs < olderThanMs
+        }
+        val byTicker = chartTickRows.groupBy { it.ticker }
+        chartTickRows.clear()
+        for ((_, rows) in byTicker) {
+            rows.sortedBy { it.tMs }.takeLast(240).forEach { chartTickRows.addLast(it) }
+        }
+    }
+
+    @Synchronized
     override fun bidHistory(ticker: String, sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.chart.BidPoint> {
+        val fromChart = chartTickRows.filter { it.ticker == ticker && it.tMs >= sinceMs }
+            .map { it.toBidPoint() }
+        if (fromChart.size >= 4) return fromChart.sortedBy { it.tMs }.takeLast(limit)
         val fromOdds = odds.filter { it.ticker == ticker && it.createdAtMs >= sinceMs }
             .map {
                 com.dirk.kalshiodds.chart.BidPoint(
@@ -132,7 +169,7 @@ class InMemoryResultsStore(
                     downBidCents = (it.noBid ?: it.mid?.let { m -> 1.0 - m })?.times(100.0)?.toFloat()
                 )
             }
-        return (fromOdds + fromPath).sortedBy { it.tMs }.takeLast(limit)
+        return (fromChart + fromOdds + fromPath).sortedBy { it.tMs }.takeLast(limit)
     }
 
     @Synchronized

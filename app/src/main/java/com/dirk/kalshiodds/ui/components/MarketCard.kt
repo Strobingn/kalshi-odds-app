@@ -38,14 +38,12 @@ import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
 import com.dirk.kalshiodds.ui.theme.checklistValueColor
 import java.util.Locale
 import kotlin.math.abs
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -58,11 +56,12 @@ fun MarketCard(
     onSell: (() -> Unit)? = null,
     onOpenChart: (() -> Unit)? = null
 ) {
+    val colors = DipTheme.colors
     val scheme = MaterialTheme.colorScheme
     val cardBg = scheme.surface
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
-    val alertBorder = if (market.edgeAlert) AccentGreen else scheme.outline
+    val alertBorder = if (market.edgeAlert) colors.accentGreen else scheme.outline
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -128,16 +127,16 @@ fun MarketCard(
                         Text(
                             text = "⚡ Edge",
                             style = MaterialTheme.typography.labelMedium,
-                            color = AccentGreen,
+                            color = colors.accentGreen,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier
-                                .background(AccentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                                .background(colors.accentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
                                 .padding(horizontal = 8.dp, vertical = 3.dp)
                         )
                     }
                     chips.forEach { chip ->
                         val mutedChip = chip == "Muted"
-                        val color = if (mutedChip) AccentOrange else AccentBlue
+                        val color = if (mutedChip) colors.accentOrange else colors.accentBlue
                         Text(
                             text = chip,
                             style = MaterialTheme.typography.labelMedium,
@@ -155,14 +154,14 @@ fun MarketCard(
                 Text(
                     text = market.muteReason.orEmpty(),
                     style = MaterialTheme.typography.labelMedium,
-                    color = AccentOrange
+                    color = colors.accentOrange
                 )
             } else if (!market.passedFilter && market.skipReason != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(
                     text = "Filtered · ${market.skipReason}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = AccentOrange
+                    color = colors.accentOrange
                 )
             }
 
@@ -171,18 +170,18 @@ fun MarketCard(
                 Text(
                     text = market.tapeConflictNote.orEmpty(),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentOrange,
+                    color = colors.accentOrange,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(AccentOrange.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
+                        .background(colors.accentOrange.copy(alpha = 0.14f), RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 )
                 market.modelLeanSide?.let { lean ->
                     Text(
                         text = "Model lean ${if (lean == "NO") "DOWN / NO" else "UP / YES"} · primary follows live tape",
                         style = MaterialTheme.typography.labelMedium,
-                        color = AccentOrange,
+                        color = colors.accentOrange,
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
@@ -192,26 +191,27 @@ fun MarketCard(
             Text(
                 text = "LIVE BOOK · UP / DOWN",
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentBlue,
+                color = colors.accentBlue,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
+            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 SideQuote(
                     title = "UP  YES",
-                    bid = market.yesBid,
-                    ask = market.yesAsk,
-                    accent = AccentGreen,
+                    bidLabel = quotes.yesBidLabel,
+                    askLabel = quotes.yesAskLabel,
+                    accent = colors.accentGreen,
                     modifier = Modifier.weight(1f)
                 )
                 SideQuote(
                     title = "DOWN  NO",
-                    bid = market.noBid,
-                    ask = market.noAsk,
-                    accent = AccentOrange,
+                    bidLabel = quotes.noBidLabel,
+                    askLabel = quotes.noAskLabel,
+                    accent = colors.accentOrange,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -224,7 +224,7 @@ fun MarketCard(
                         market.importedModelPp?.let { String.format(Locale.US, "%.0f¢", it) } ?: "baseline"
                     ),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentBlue,
+                    color = colors.accentBlue,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 8.dp)
                 )
@@ -249,7 +249,9 @@ fun MarketCard(
                 strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
                 spotUsd = market.spotUsd,
                 strikeUsd = market.floorStrike,
-                spotHeightDp = if (compact) 56 else 72
+                spotHeightDp = if (compact) 56 else 72,
+                liveUpLabel = quotes.upChartLabel,
+                liveDownLabel = quotes.downChartLabel
             )
             if (onOpenChart != null) {
                 Text(
@@ -266,7 +268,7 @@ fun MarketCard(
             Text(
                 text = "DIP HUNTER AI",
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentBlue,
+                color = colors.accentBlue,
                 fontWeight = FontWeight.Bold
             )
             market.aiNote?.let {
@@ -287,18 +289,14 @@ fun MarketCard(
                 OddsColumn(
                     label = if (market.calibrated) "FV YES" else "AI YES",
                     percent = market.aiYesPercent,
-                    bid = null,
-                    ask = null,
-                    accent = AccentGreen,
+                    accent = colors.accentGreen,
                     modifier = Modifier.weight(1f),
                     big = true
                 )
                 OddsColumn(
                     label = if (market.calibrated) "FV NO" else "AI NO",
                     percent = market.aiNoPercent,
-                    bid = null,
-                    ask = null,
-                    accent = AccentOrange,
+                    accent = colors.accentOrange,
                     modifier = Modifier.weight(1f),
                     endAligned = true,
                     big = true
@@ -309,8 +307,8 @@ fun MarketCard(
             market.edgePp?.let { edge ->
                 Spacer(Modifier.height(12.dp))
                 val edgeColor = when {
-                    abs(edge) >= EDGE_ALERT_THRESHOLD_PP -> AccentGreen
-                    abs(edge) >= 2.0 -> AccentBlue
+                    abs(edge) >= EDGE_ALERT_THRESHOLD_PP -> colors.accentGreen
+                    abs(edge) >= 2.0 -> colors.accentBlue
                     else -> labelColor
                 }
                 Column(
@@ -350,7 +348,7 @@ fun MarketCard(
                         Text(
                             text = "$n contracts max",
                             style = MaterialTheme.typography.titleMedium,
-                            color = AccentGreen,
+                            color = colors.accentGreen,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 4.dp)
                         )
@@ -371,7 +369,7 @@ fun MarketCard(
                                 market.uncertainty?.let { String.format(Locale.US, "unc %.2f", it) }
                             ).joinToString(" · "),
                             style = MaterialTheme.typography.labelMedium,
-                            color = if (market.uncertaintyPassed) labelColor else AccentOrange,
+                            color = if (market.uncertaintyPassed) labelColor else colors.accentOrange,
                             modifier = Modifier.padding(top = 4.dp)
                         )
                     }
@@ -395,7 +393,7 @@ fun MarketCard(
                         Text(
                             text = note,
                             style = MaterialTheme.typography.labelMedium,
-                            color = AccentBlue,
+                            color = colors.accentBlue,
                             modifier = Modifier.padding(top = 2.dp)
                         )
                     }
@@ -427,13 +425,13 @@ fun MarketCard(
                         Button(
                             onClick = onBuyYes,
                             modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(true, market.yesAsk)) }
+                        ) { Text(quotes.upButton) }
                     }
                     if (onBuyNo != null) {
                         OutlinedButton(
                             onClick = onBuyNo,
                             modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text(com.dirk.kalshiodds.domain.KalshiQuoteDisplay.buttonLabel(false, market.noAsk)) }
+                        ) { Text(quotes.downButton) }
                     }
                     if (onSell != null) {
                         OutlinedButton(
@@ -467,8 +465,8 @@ fun MarketCard(
                     OddsColumn(
                         label = "Mkt YES",
                         percent = market.yesProbabilityPercent,
-                        bid = market.yesBid,
-                        ask = market.yesAsk,
+                        bidLabel = quotes.yesBidLabel,
+                        askLabel = quotes.yesAskLabel,
                         accent = valueColor,
                         modifier = Modifier.weight(1f),
                         big = false
@@ -476,8 +474,8 @@ fun MarketCard(
                     OddsColumn(
                         label = "Mkt NO",
                         percent = market.noProbabilityPercent,
-                        bid = market.noBid,
-                        ask = market.noAsk,
+                        bidLabel = quotes.noBidLabel,
+                        askLabel = quotes.noAskLabel,
                         accent = valueColor,
                         modifier = Modifier.weight(1f),
                         endAligned = true,
@@ -510,6 +508,7 @@ fun MarketCard(
 
 @Composable
 private fun ChecklistBlock(market: MarketUiModel) {
+    val colors = DipTheme.colors
     val items = PreTradeChecklist.items(market)
     val clipboard = LocalClipboardManager.current
     var copied by remember(market.ticker) { mutableStateOf(false) }
@@ -520,7 +519,7 @@ private fun ChecklistBlock(market: MarketUiModel) {
     Text(
         text = "PRE-TRADE CHECKLIST",
         style = MaterialTheme.typography.labelMedium,
-        color = Contrast.readable(AccentBlue, bg, minRatio = Contrast.AA_LARGE),
+        color = Contrast.readable(colors.accentBlue, bg, minRatio = Contrast.AA_LARGE),
         fontWeight = FontWeight.Bold
     )
     Spacer(Modifier.height(4.dp))
@@ -558,8 +557,8 @@ private fun ChecklistBlock(market: MarketUiModel) {
 @Composable
 private fun SideQuote(
     title: String,
-    bid: Double?,
-    ask: Double?,
+    bidLabel: String,
+    askLabel: String,
     accent: Color,
     modifier: Modifier = Modifier
 ) {
@@ -573,14 +572,14 @@ private fun SideQuote(
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
         Text(
-            formatCents(bid),
+            bidLabel,
             fontSize = 32.sp,
             fontWeight = FontWeight.Bold,
             color = valueColor,
             lineHeight = 36.sp
         )
         Text(
-            "bid  ·  ask ${formatCents(ask)}",
+            "bid  ·  ask $askLabel",
             style = MaterialTheme.typography.bodyMedium,
             color = labelColor,
             fontWeight = FontWeight.SemiBold
@@ -592,8 +591,8 @@ private fun SideQuote(
 private fun OddsColumn(
     label: String,
     percent: Double?,
-    bid: Double?,
-    ask: Double?,
+    bidLabel: String? = null,
+    askLabel: String? = null,
     accent: Color,
     modifier: Modifier = Modifier,
     endAligned: Boolean = false,
@@ -614,9 +613,9 @@ private fun OddsColumn(
             color = valueColor,
             lineHeight = if (big) 40.sp else 26.sp
         )
-        if (bid != null || ask != null) {
+        if (bidLabel != null || askLabel != null) {
             Text(
-                text = "Bid ${formatCents(bid)} · Ask ${formatCents(ask)}",
+                text = "Bid ${bidLabel ?: "—"} · Ask ${askLabel ?: "—"}",
                 style = MaterialTheme.typography.labelMedium,
                 color = labelColor,
                 modifier = Modifier.padding(top = 4.dp)
@@ -643,11 +642,12 @@ private fun Metric(label: String, value: String) {
 
 @Composable
 private fun StatusChip(status: String?) {
+    val colors = DipTheme.colors
     val label = status?.ifBlank { null } ?: "unknown"
     val color = when (label.lowercase(Locale.US)) {
-        "active", "open" -> AccentGreen
-        "closed", "determined" -> AccentOrange
-        else -> AccentBlue
+        "active", "open" -> colors.accentGreen
+        "closed", "determined" -> colors.accentOrange
+        else -> colors.accentBlue
     }
     Text(
         text = label.uppercase(Locale.US),
@@ -656,9 +656,6 @@ private fun StatusChip(status: String?) {
         fontWeight = FontWeight.Bold
     )
 }
-
-private fun formatCents(dollars: Double?): String =
-    dollars?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
 
 private fun formatCompact(value: Double?): String {
     if (value == null) return "—"

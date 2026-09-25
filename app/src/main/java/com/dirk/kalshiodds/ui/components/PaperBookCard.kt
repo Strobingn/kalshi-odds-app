@@ -20,13 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.AccentRed
-import com.dirk.kalshiodds.ui.theme.Surface
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
 fun PaperBookCard(
@@ -37,11 +32,12 @@ fun PaperBookCard(
     onSell: ((ticker: String, side: String) -> Unit)? = null,
     onViewHistory: (() -> Unit)? = null
 ) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, AccentGreen.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
-            .background(Surface, RoundedCornerShape(16.dp))
+            .border(2.dp, colors.accentGreen.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -54,24 +50,24 @@ fun PaperBookCard(
                 Text(
                     "PAPER BOOK",
                     style = MaterialTheme.typography.labelMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     "Start / reset $100 · win-target sizing · never hits Kalshi",
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary
+                    color = colors.textSecondary
                 )
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), AccentGreen)
-            PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), AccentOrange)
+            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.accentGreen)
+            PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.accentOrange)
             val pnlColor = when {
-                paper.realizedPnlUsd > 0 -> AccentGreen
-                paper.realizedPnlUsd < 0 -> AccentRed
-                else -> AccentBlue
+                paper.realizedPnlUsd > 0 -> colors.accentGreen
+                paper.realizedPnlUsd < 0 -> colors.accentRed
+                else -> colors.accentBlue
             }
             PaperStat("P&L", String.format(Locale.US, "%+.2f", paper.realizedPnlUsd), pnlColor)
         }
@@ -82,10 +78,10 @@ fun PaperBookCard(
                 "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
             },
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary
+            color = colors.textSecondary
         )
         paper.lastMessage?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentGreen, fontWeight = FontWeight.SemiBold)
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentGreen, fontWeight = FontWeight.SemiBold)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
@@ -102,17 +98,17 @@ fun PaperBookCard(
                 if (enabled) "No paper fills yet — waiting for an AI hunter / signal."
                 else "Ledger empty.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(AccentGreen.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                    .background(colors.accentGreen.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
                     .padding(10.dp)
             )
         } else {
             Text(
                 "Paper ledger (${paper.fills.size})",
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.Bold
             )
             paper.fills.take(12).forEach { fill ->
@@ -124,8 +120,9 @@ fun PaperBookCard(
 
 @Composable
 private fun PaperStat(label: String, value: String, color: androidx.compose.ui.graphics.Color) {
+    val colors = DipTheme.colors
     Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.titleMedium, color = color, fontWeight = FontWeight.Bold)
     }
 }
@@ -135,6 +132,7 @@ private fun PaperLedgerRow(
     fill: PaperFill,
     onSell: ((ticker: String, side: String) -> Unit)? = null
 ) {
+    val colors = DipTheme.colors
     val status = when {
         !fill.settled -> "OPEN"
         fill.outcome == "void" -> "VOID"
@@ -142,15 +140,15 @@ private fun PaperLedgerRow(
         else -> "LOSS"
     }
     val color = when (status) {
-        "OPEN" -> AccentOrange
-        "WIN" -> AccentGreen
-        "LOSS" -> AccentRed
-        else -> AccentBlue
+        "OPEN" -> colors.accentOrange
+        "WIN" -> colors.accentGreen
+        "LOSS" -> colors.accentRed
+        else -> colors.accentBlue
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(AccentGreen.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
+            .background(colors.accentGreen.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
             .padding(10.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -171,11 +169,11 @@ private fun PaperLedgerRow(
         Text(
             String.format(
                 Locale.US,
-                "%s %s · %d ct @ %.0f¢",
+                "%s %s · %d ct @ %s",
                 fill.displaySide,
                 fill.ticker,
                 fill.contracts,
-                fill.limitPrice * 100
+                com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(fill.limitPrice)
             ),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurface

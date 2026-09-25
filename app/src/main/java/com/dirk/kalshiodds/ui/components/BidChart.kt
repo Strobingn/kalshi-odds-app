@@ -32,15 +32,13 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.chart.BidPoint
 import com.dirk.kalshiodds.chart.ChartDownsampler
 import com.dirk.kalshiodds.chart.SpotAxis
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.AccentRed
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 /**
  * Two-line UP/DOWN bid chart. Canvas only — no charting library.
@@ -57,8 +55,11 @@ fun BidChart(
     spotUsd: Double? = null,
     strikeUsd: Double? = null,
     spotHeightDp: Int = if (scrub) 168 else 72,
-    showSpotPanel: Boolean = true
+    showSpotPanel: Boolean = true,
+    liveUpLabel: String? = null,
+    liveDownLabel: String? = null
 ) {
+    val colors = DipTheme.colors
     val bg = MaterialTheme.colorScheme.surface
     val labelColor = checklistLabelColor(bg)
     val axisColor = Contrast.readable(MaterialTheme.colorScheme.onSurfaceVariant, bg, minRatio = Contrast.AA_LARGE)
@@ -170,24 +171,34 @@ fun BidChart(
                     drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                 }
             }
-            line({ it.upBidCents }, AccentGreen)
-            line({ it.downBidCents }, AccentRed)
+            line({ it.upBidCents }, colors.accentGreen)
+            line({ it.downBidCents }, colors.accentRed)
             if (scrub && scrubIdx != null) {
                 val x = xOf(pick.tMs)
                 drawLine(axisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
-                pick.upBidCents?.let { drawCircle(AccentGreen, 4.dp.toPx(), Offset(x, yOf(it))) }
-                pick.downBidCents?.let { drawCircle(AccentRed, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.upBidCents?.let { drawCircle(colors.accentGreen, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.accentRed, 4.dp.toPx(), Offset(x, yOf(it))) }
             } else {
-                pick.upBidCents?.let { drawCircle(AccentGreen, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
-                pick.downBidCents?.let { drawCircle(AccentRed, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.upBidCents?.let { drawCircle(colors.accentGreen, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.accentRed, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("UP bid ${fmtCents(pick.upBidCents)}", color = AccentGreen, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(
+                if (scrubIdx == null && liveUpLabel != null) liveUpLabel else "UP bid ${fmtCents(pick.upBidCents)}",
+                color = colors.accentGreen,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
             Spacer(Modifier.weight(1f))
             Text(fmtTime(pick.tMs), color = labelColor, style = MaterialTheme.typography.labelMedium)
             Spacer(Modifier.weight(1f))
-            Text("DOWN bid ${fmtCents(pick.downBidCents)}", color = AccentRed, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+            Text(
+                if (scrubIdx == null && liveDownLabel != null) liveDownLabel else "DOWN bid ${fmtCents(pick.downBidCents)}",
+                color = colors.accentRed,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold
+            )
         }
         strikeLabel?.let {
             Text(it, color = labelColor, style = MaterialTheme.typography.labelMedium)
@@ -206,6 +217,7 @@ private fun SpotPathCanvas(
     lastSpot: Double?,
     axisColor: androidx.compose.ui.graphics.Color
 ) {
+    val colors = DipTheme.colors
     val (minY, maxY) = range
     val t0 = windowStartMs
     val t1 = windowEndMs
@@ -240,19 +252,19 @@ private fun SpotPathCanvas(
                 val y = yOf(px)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, AccentOrange, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, colors.accentOrange, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
         }
         val endPx = lastSpot ?: series.lastOrNull()?.second
         val endT = series.lastOrNull()?.first ?: t1
         if (endPx != null) {
-            drawCircle(AccentOrange, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
+            drawCircle(colors.accentOrange, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
         }
     }
     Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         val now = lastSpot ?: series.lastOrNull()?.second
         Text(
             now?.let { String.format(Locale.US, "Now $%,.2f", it) } ?: "Spot",
-            color = AccentOrange,
+            color = colors.accentOrange,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold
         )
@@ -274,7 +286,7 @@ private fun indexAt(x: Float, width: Float, n: Int): Int {
 }
 
 private fun fmtCents(c: Float?): String =
-    c?.let { String.format(Locale.US, "%.0f¢", it) } ?: "—"
+    c?.let { com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(it / 100.0) } ?: "—"
 
 private fun fmtTime(ms: Long): String {
     val fmt = SimpleDateFormat("h:mm:ss a", Locale.US)

@@ -15,10 +15,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.TimeLeft
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import kotlinx.coroutines.delay
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
 fun TimeLeftLabel(
@@ -27,6 +25,7 @@ fun TimeLeftLabel(
     compact: Boolean = false,
     pill: Boolean = false
 ) {
+    val colors = DipTheme.colors
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(closeEpochMs) {
         while (true) {
@@ -37,9 +36,9 @@ fun TimeLeftLabel(
     val expired = TimeLeft.isExpired(closeEpochMs, nowMs)
     val text = TimeLeft.format(closeEpochMs, nowMs)
     val color = when {
-        closeEpochMs == null -> TextSecondary
-        expired -> AccentOrange
-        else -> AccentBlue
+        closeEpochMs == null -> colors.textSecondary
+        expired -> colors.accentOrange
+        else -> colors.accentBlue
     }
     Text(
         text = if (compact && text != "—" && text != "Expired") text else text,

@@ -1,14 +1,23 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.chart.ChartWindowService
+import com.dirk.kalshiodds.data.backfill.LiveWindowBackfill
+import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
+import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
+import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.signal.paper.PaperApprove
 import com.dirk.kalshiodds.signal.trade.ApproveRouter
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.ui.theme.Contrast
+import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.ThemeRoles
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * Dirk asked for a wiring audit of every 0.3.0–0.3.8 control.
+ * Dirk asked for a wiring audit of every 0.3.0–0.3.9 control.
  * Each row is a real method (not a TODO / stub / empty onClick).
  * Navigation empty-defaults were removed so a missing MainActivity
  * lambda is now a compile error.
@@ -43,6 +52,15 @@ class WiringAuditTest {
         Control("Supabase restore", DataViewModel::class.java, "restoreSupabase"),
         Control("Credential backup", DataViewModel::class.java, "backupCredentials"),
         Control("Credential restore", DataViewModel::class.java, "restoreCredentials"),
+        Control("Settings export keys", SettingsViewModel::class.java, "backupCredentials"),
+        Control("Settings import keys", SettingsViewModel::class.java, "restoreCredentials"),
+        Control("Settings backup passphrase", SettingsViewModel::class.java, "setCredPassphrase"),
+        Control("Credential write guard", com.dirk.kalshiodds.signal.config.CredentialWriteGuard::class.java, "rejectReason"),
+        Control("Live keystore re-enter", com.dirk.kalshiodds.signal.config.SignalPreferences::class.java, "needsReenterKey"),
+        Control("Demo keystore re-enter", com.dirk.kalshiodds.signal.config.SignalPreferences::class.java, "needsReenterDemoKey"),
+        Control("Price parse dollars", com.dirk.kalshiodds.domain.KalshiPrice::class.java, "parseDollars"),
+        Control("Price wire dollars", com.dirk.kalshiodds.domain.KalshiPrice::class.java, "toWireDollars"),
+        Control("Price format cents", KalshiQuoteDisplay::class.java, "formatPriceCents"),
         Control("Import model JSON", DataViewModel::class.java, "importModelUri"),
         Control("Get latest model (Data)", DataViewModel::class.java, "getLatestModel"),
         Control("Get latest model (Scorecard)", ScorecardViewModel::class.java, "getLatestModel"),
@@ -53,14 +71,32 @@ class WiringAuditTest {
         Control("History tabs / paging", HistoryViewModel::class.java, "load"),
         Control("History restore settings", HistoryViewModel::class.java, "restoreSettings"),
         Control("Notification tap opens ticket", OddsViewModel::class.java, "focusTicket"),
-        Control("Kalshi demo toggle", SettingsViewModel::class.java, "setKalshiDemo")
+        Control("Kalshi demo toggle", SettingsViewModel::class.java, "setKalshiDemo"),
+        Control("Chart tick persist", AsyncResultsWriter::class.java, "enqueueChartTick"),
+        Control("Chart window restore", ChartWindowService::class.java, "restoreWindow"),
+        Control("Chart window persist", ChartWindowService::class.java, "persistPoints"),
+        Control("Live candlestick backfill", LiveWindowBackfill::class.java, "candles"),
+        Control("Quote header/labels/buttons", MarketQuoteView::class.java, "of"),
+        Control("Payout multiple", KalshiQuoteDisplay::class.java, "multiplier"),
+        Control("Payout multiple label", KalshiQuoteDisplay::class.java, "multipleLabel"),
+        Control("Kalshi order-level fee", KalshiFee::class.java, "total"),
+        Control("Kalshi payout multiple", KalshiFee::class.java, "payoutMultiple"),
+        Control("Kalshi amortized fee", KalshiFee::class.java, "perContract"),
+        Control("Chart seed after restart", OddsViewModel::class.java, "seedChartWindows"),
+        Control("Light/dark palette", DipTheme::class.java, "palette"),
+        Control("Theme contrast pairs", DipTheme::class.java, "contrastPairs"),
+        Control("Screen contrast roles", ThemeRoles::class.java, "forPalette"),
+        Control("WCAG contrast helper", Contrast::class.java, "readable")
     )
 
     @Test
     fun everyAuditedControlResolvesToARealMethod() {
         val missing = catalog.mapNotNull { row ->
-            val found = row.owner.methods.any { it.name == row.method } ||
-                row.owner.declaredMethods.any { it.name == row.method }
+            val found = (row.owner.methods + row.owner.declaredMethods).any {
+                it.name == row.method ||
+                    it.name.startsWith("${row.method}\$") ||
+                    it.name.startsWith("${row.method}-")
+            }
             if (found) null else "${row.name} → ${row.owner.simpleName}.${row.method}"
         }
         assertTrue("Unwired controls: $missing", missing.isEmpty())
@@ -74,5 +110,22 @@ class WiringAuditTest {
         assertNotNull(TicketBuilder::proposeHunter)
         assertNotNull(TicketBuilder::proposeHunterValue)
         assertNotNull(TicketBuilder::proposeManual)
+        assertNotNull(ChartWindowService::restoreWindow)
+        assertNotNull(ChartWindowService::persistPoints)
+        assertNotNull(LiveWindowBackfill::candles)
+        assertNotNull(KalshiFee::total)
+        assertNotNull(KalshiFee::payoutMultiple)
+        assertNotNull(KalshiFee::perContract)
+        assertNotNull(AsyncResultsWriter::enqueueChartTick)
+        assertNotNull(DipTheme::palette)
+        assertNotNull(DipTheme::contrastPairs)
+        assertNotNull(ThemeRoles::forPalette)
+        assertNotNull(Contrast::readable)
+        assertNotNull(com.dirk.kalshiodds.signal.config.CredentialWriteGuard::rejectReason)
+        assertNotNull(com.dirk.kalshiodds.domain.KalshiPrice::parseDollars)
+        assertNotNull(KalshiQuoteDisplay::formatPriceCents)
+        assertNotNull(KalshiQuoteDisplay::multipleLabel)
+        assertNotNull(SettingsViewModel::backupCredentials)
+        assertNotNull(SettingsViewModel::restoreCredentials)
     }
 }

@@ -115,6 +115,19 @@ class PaperBuyTest {
     }
 
     @Test
+    fun subPennyAskIsNotClampedToOneCent() {
+        val book = PaperBook(idFactory = { "p1" }, nowMs = { 1L })
+        val out = PaperBuy.execute(
+            book,
+            ticket(TicketKind.MANUAL, ticker = "KXBTC15M-01", contracts = 100, stake = 0.10, px = 0.001)
+        )
+        assertTrue(out.message, out.ok)
+        assertEquals(0.001, out.fill!!.limitPrice, 1e-12)
+        assertEquals("0.1¢", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(out.fill!!.limitPrice))
+        assertEquals(100, out.fill!!.contracts)
+    }
+
+    @Test
     fun neverNeedsKalshiFields() {
         val book = PaperBook()
         val t = ticket(TicketKind.MANUAL, ticker = "KXBTC15M-K", contracts = 4, stake = 0.80, px = 0.20)

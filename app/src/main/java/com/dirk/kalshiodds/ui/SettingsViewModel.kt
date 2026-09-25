@@ -10,7 +10,9 @@ import com.dirk.kalshiodds.data.local.results.ResultsExporter
 import com.dirk.kalshiodds.data.local.results.ResultsFileExport
 import com.dirk.kalshiodds.signal.service.BatteryExemption
 import com.dirk.kalshiodds.domain.CryptoMarkets
-import com.dirk.kalshiodds.signal.config.SecureCredentialStore
+import android.net.Uri
+import com.dirk.kalshiodds.signal.config.CredentialBackup
+import com.dirk.kalshiodds.signal.config.CredentialWriteGuard
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
@@ -39,7 +41,8 @@ data class SettingsUiState(
     val raiseError: String? = null,
     val batteryUnrestricted: Boolean = false,
     val exportMessage: String? = null,
-    val mlGuardNote: String? = null
+    val mlGuardNote: String? = null,
+    val credPassphrase: String = ""
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -58,10 +61,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         settings = s,
                         keyIdDraft = s.apiKeyId,
                         bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd),
-                        credentialMessage = if (prefs.needsReenterKey()) {
-                            "Re-enter key — device Keystore was invalidated. Restore from Data → Restore credentials, or paste again."
-                        } else {
-                            it.credentialMessage
+                        credentialMessage = when {
+                            prefs.needsReenterKey() ->
+                                "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                            prefs.needsReenterDemoKey() ->
+                                "Re-enter demo key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                            else -> it.credentialMessage
                         }
                     )
                 }
@@ -291,15 +296,63 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setDemoKeyIdDraft(v: String) = _state.update { it.copy(demoKeyIdDraft = v, credentialMessage = null) }
     fun setDemoPemDraft(v: String) = _state.update { it.copy(demoPemDraft = v, credentialMessage = null) }
 
+    fun setCredPassphrase(v: String) = _state.update { it.copy(credPassphrase = v) }
+
     fun saveCredentials() {
         val keyId = _state.value.keyIdDraft.trim()
         val pem = _state.value.pemDraft.trim()
-        if (keyId.isBlank() || !SecureCredentialStore.looksLikePem(pem)) {
-            _state.update { it.copy(credentialMessage = "Need Key ID + PEM private key (BEGIN/END PRIVATE KEY)") }
+        val reject = CredentialWriteGuard.rejectReason(keyId, pem)
+        if (reject != null) {
+            _state.update { it.copy(credentialMessage = reject) }
             return
         }
         prefs.saveCredentials(keyId, pem)
         _state.update { it.copy(pemDraft = "", credentialMessage = "Key stored on device (PEM never logged)") }
+    }
+
+    fun backupCredentials(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pass = _state.value.credPassphrase
+                    require(pass.length >= 6) { "Passphrase must be at least 6 characters" }
+                    val (id, pem) = prefs.credentialSnapshot()
+                    require(id.isNotBlank() && pem.isNotBlank()) { "No Kalshi key saved to back up" }
+                    val (demoId, demoPem) = prefs.demoSnapshot()
+                    val bytes = CredentialBackup.encrypt(id, pem, pass.toCharArray(), demoId, demoPem)
+                    getApplication<Application>().contentResolver.openOutputStream(uri)?.use { it.write(bytes) }
+                        ?: error("could not write backup")
+                    "Keys backup written (passphrase-encrypted). Keep it in Downloads or Drive."
+                }.getOrElse { it.message ?: "backup failed" }
+            }
+            _state.update { it.copy(credentialMessage = result) }
+        }
+    }
+
+    fun restoreCredentials(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val pass = _state.value.credPassphrase
+                    require(pass.isNotBlank()) { "Enter the backup passphrase" }
+                    val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
+                        ?.use { it.readBytes() } ?: error("could not read backup")
+                    val bundle = CredentialBackup.decryptAll(bytes, pass.toCharArray())
+                    prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
+                        prefs.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
+                    }
+                    "Kalshi key restored (${CredentialBackup.maskedKeyId(bundle.keyId)})"
+                }.getOrElse { e ->
+                    when (e) {
+                        is CredentialBackup.WrongPassphrase -> "Wrong passphrase — key not changed"
+                        is CredentialBackup.BadFile -> "Not a DipHunter keys backup — key not changed"
+                        else -> e.message ?: "restore failed"
+                    }
+                }
+            }
+            _state.update { it.copy(credentialMessage = result) }
+        }
     }
 
     fun exportResults() {
@@ -335,8 +388,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun saveDemoCredentials() {
         val keyId = _state.value.demoKeyIdDraft.trim()
         val pem = _state.value.demoPemDraft.trim()
-        if (keyId.isBlank() || !SecureCredentialStore.looksLikePem(pem)) {
-            _state.update { it.copy(credentialMessage = "Need demo Key ID + PEM (BEGIN/END PRIVATE KEY)") }
+        val reject = CredentialWriteGuard.rejectReason(keyId, pem, demo = true)
+        if (reject != null) {
+            _state.update { it.copy(credentialMessage = reject) }
             return
         }
         prefs.saveDemoCredentials(keyId, pem)

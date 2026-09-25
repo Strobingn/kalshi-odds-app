@@ -13,6 +13,9 @@ class QuoteSanityTest {
         assertTrue(QuoteSanity.isPlaceholder(1.0))
         assertTrue(QuoteSanity.isPlaceholder(null))
         assertFalse(QuoteSanity.isPlaceholder(0.64))
+        assertFalse(QuoteSanity.isPlaceholder(0.001))
+        assertFalse(QuoteSanity.isPlaceholder(0.015))
+        assertFalse(QuoteSanity.isPlaceholder(0.018))
     }
 
     @Test
@@ -43,5 +46,6 @@ class QuoteSanityTest {
         assertNull(QuoteSanity.usableCents(0f))
         assertNull(QuoteSanity.usableCents(100f))
         assertEquals(64f, QuoteSanity.usableCents(64f)!!, 0.01f)
+        assertEquals(0.1f, QuoteSanity.usableCents(0.1f)!!, 0.001f)
     }
 }

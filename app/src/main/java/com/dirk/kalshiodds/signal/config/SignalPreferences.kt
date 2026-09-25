@@ -306,8 +306,18 @@ class SignalPreferences(
 
     fun credentialSnapshot(): Pair<String, String> = secrets.snapshot()
 
+    fun demoSnapshot(): Pair<String, String> = extras?.demoSnapshot() ?: ("" to "")
+
     /** True when EncryptedSharedPreferences died and no usable key loaded. */
-    fun needsReenterKey(): Boolean = !secrets.hasCredentials && secrets.keystoreInvalidated
+    fun needsReenterKey(): Boolean =
+        CredentialWriteGuard.needsReenterBanner(secrets.hasCredentials, secrets.keystoreInvalidated)
+
+    /** Demo vault died and no usable demo PEM loaded. */
+    fun needsReenterDemoKey(): Boolean =
+        extras != null && CredentialWriteGuard.needsReenterBanner(
+            extras.hasDemoCredentials,
+            extras.keystoreInvalidated
+        )
 
     suspend fun restoreSnapshot(json: String) {
         val r = com.dirk.kalshiodds.data.local.history.SettingsRestore.parse(json)

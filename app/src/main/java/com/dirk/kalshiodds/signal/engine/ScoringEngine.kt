@@ -441,7 +441,8 @@ class ScoringEngine(
             mid = mid01,
             spreadDollars = spread,
             feeRate = settings.feeRate,
-            preferSide = predictedSide
+            preferSide = predictedSide,
+            stakeUsd = settings.ticketStakeUsd
         )
         val liquidityObs = listOfNotNull(volume, oi, depthNear).maxOrNull()
         var size = PositionSizer.suggest(
@@ -583,7 +584,8 @@ class ScoringEngine(
                 mid = mid01,
                 spreadDollars = spread,
                 feeRate = settings.feeRate,
-                preferSide = predictedSide
+                preferSide = predictedSide,
+                stakeUsd = settings.ticketStakeUsd
             )
             size = PositionSizer.suggest(
                 fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,

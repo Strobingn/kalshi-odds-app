@@ -77,6 +77,9 @@ interface DataArchive {
     fun insertSpotCandles(rows: List<SpotCandleRow>)
     fun insertFills(rows: List<ImportedFill>)
     fun insertBidSnapshots(rows: List<OddsMidRow>)
+    fun insertChartTicks(rows: List<ChartTickRow>)
+    fun chartTicks(ticker: String, startMs: Long, endMs: Long, limit: Int = 240): List<ChartTickRow>
+    fun trimChartTicks(keepTickers: Set<String>, olderThanMs: Long)
     fun bidHistory(ticker: String, sinceMs: Long, limit: Int = 400): List<BidPoint>
     fun pricePath(ticker: String, limit: Int = 180): List<PricePathRow>
     fun spotCloses(product: String, startMs: Long, endMs: Long): List<Double>

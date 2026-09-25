@@ -18,7 +18,21 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.8**
+Package: `com.dirk.kalshiodds` · version **0.3.9**
+
+## 0.3.9
+
+- **Chart after kill/reopen:** Bid + spot ticks persist in SQLite (`chart_ticks`, DB v5), trimmed to active/recent 15m windows. A new process restores the current window and gap-fills from Kalshi `GET /series/{series_ticker}/markets/{ticker}/candlesticks` (`start_ts` / `end_ts` Unix seconds, `period_interval=1`, `*_dollars` FixedPointDollars). Spot backfill uses the existing Coinbase 1m candles.
+- **One quote source:** Header, chart labels, buttons, and payout multiple all read [MarketQuoteView] from the live book. 0¢ / missing asks render as **—** / **Buy UP|DOWN**.
+- **Payout multiple:** `C × $1 / (C×P + orderFee)` at the $5 ticket (`C = floor(stake / P)`). 1¢ @ $5 → **93.46x** (not 99x). Fee is paid on top of the buy. Never divides by zero.
+
+| Control | Code | Test |
+|---------|------|------|
+| Chart tick persist | `AsyncResultsWriter.enqueueChartTick` | `ChartWindowRestoreTest` |
+| Chart restore after process death | `ChartWindowService.restoreWindow` | `ChartWindowRestoreTest.persistAndRestoreTicksAcrossNewRepository` |
+| Candlestick backfill | `LiveWindowBackfill.candles` | `ChartWindowRestoreTest.parseDocAccurateCandlestickSample` |
+| Header / labels / buttons | `MarketQuoteView.of` | `MarketQuoteViewTest` + `ChartWindowRestoreTest.labelsHeaderButtonsShareOneQuoteSource` |
+| Payout multiple | `KalshiQuoteDisplay.multiplier` + `KalshiFee.payoutMultiple` | `MarketQuoteViewTest.oneCentAtFiveDollarsIsHandComputed93_46x` |
 
 ## 0.3.8
 

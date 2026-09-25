@@ -18,13 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.trade.LivePosition
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.AccentRed
-import com.dirk.kalshiodds.ui.theme.Surface
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
 fun PositionsCard(
@@ -33,11 +28,12 @@ fun PositionsCard(
     onSell: (ticker: String, side: String) -> Unit,
     onViewHistory: (() -> Unit)? = null
 ) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, AccentBlue.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
-            .background(Surface, RoundedCornerShape(16.dp))
+            .border(1.dp, colors.accentBlue.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -49,7 +45,7 @@ fun PositionsCard(
         Text(
             "Live Kalshi holdings (GET /portfolio/positions). Sell opens an approve-gated V2 reduce-only limit — never the retired v1 path.",
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary
+            color = colors.textSecondary
         )
         if (onViewHistory != null) {
             OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
@@ -57,13 +53,13 @@ fun PositionsCard(
             }
         }
         note?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentOrange)
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentOrange)
         }
         if (positions.isEmpty() && note == null) {
             Text(
                 "No open positions.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
         }
         positions.forEach { pos ->
@@ -74,24 +70,25 @@ fun PositionsCard(
 
 @Composable
 private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
+    val colors = DipTheme.colors
     val pnl = pos.unrealizedPnlUsd
     val pnlColor = when {
-        pnl == null -> TextSecondary
-        pnl > 0 -> AccentGreen
-        pnl < 0 -> AccentRed
-        else -> AccentBlue
+        pnl == null -> colors.textSecondary
+        pnl > 0 -> colors.accentGreen
+        pnl < 0 -> colors.accentRed
+        else -> colors.accentBlue
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(AccentBlue.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+            .background(colors.accentBlue.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 pos.displaySide,
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentBlue,
+                color = colors.accentBlue,
                 fontWeight = FontWeight.Bold
             )
             TimeLeftLabel(pos.closeTimeEpochMs, compact = true)
@@ -103,7 +100,7 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
             fontWeight = FontWeight.Bold
         )
         pos.title?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         }
         Text(
             String.format(

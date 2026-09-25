@@ -26,6 +26,21 @@ class CredentialBackupTest {
     }
 
     @Test
+    fun demoBlockRoundTrip() {
+        val pem = "-----BEGIN PRIVATE KEY-----\n${"A".repeat(80)}\n-----END PRIVATE KEY-----"
+        val demo = "-----BEGIN PRIVATE KEY-----\n${"D".repeat(80)}\n-----END PRIVATE KEY-----"
+        val bytes = CredentialBackup.encrypt("live-id", pem, "hunter2".toCharArray(), "demo-id", demo)
+        val all = CredentialBackup.decryptAll(bytes, "hunter2".toCharArray())
+        assertEquals("live-id", all.keyId)
+        assertEquals("demo-id", all.demoKeyId)
+        assertTrue(all.pem.contains("BEGIN PRIVATE KEY"))
+        assertTrue(all.demoPem.contains("BEGIN PRIVATE KEY"))
+        val liveOnly = CredentialBackup.encrypt("live-id", pem, "hunter2".toCharArray())
+        val back = CredentialBackup.decryptAll(liveOnly, "hunter2".toCharArray())
+        assertEquals("", back.demoKeyId)
+    }
+
+    @Test
     fun maskedShowsLast4() {
         assertEquals("····d233", CredentialBackup.maskedKeyId("kalshi-prod-d233"))
         assertEquals("(none)", CredentialBackup.maskedKeyId(""))

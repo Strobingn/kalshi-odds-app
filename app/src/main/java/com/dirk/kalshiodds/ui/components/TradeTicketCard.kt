@@ -33,13 +33,9 @@ import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.signal.trade.TradeTicket
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.AccentRed
-import com.dirk.kalshiodds.ui.theme.Surface
-import com.dirk.kalshiodds.ui.theme.TextSecondary
+import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
 fun TradeTicketsSection(
@@ -55,6 +51,7 @@ fun TradeTicketsSection(
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit
 ) {
+    val colors = DipTheme.colors
     val proposals = tickets.proposals.sortedByDescending {
         if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
@@ -69,13 +66,13 @@ fun TradeTicketsSection(
         Text(
             text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper uses the same win-target size as the card (default profit \$50) on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Long-shot cards appear at asks ≤20¢ when AI beats implied after fees. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary
+            color = colors.textSecondary
         )
         if (!credentialsConfigured) {
             Text(
                 text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentOrange
+                color = colors.accentOrange
             )
         }
         val visibleError = tickets.lastError
@@ -85,7 +82,7 @@ fun TradeTicketsSection(
             Text(
                 it,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (paperOk) AccentGreen else AccentRed,
+                color = if (paperOk) colors.accentGreen else colors.accentRed,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -93,7 +90,7 @@ fun TradeTicketsSection(
             is TicketPhase.Submitting -> {
                 Text(
                     "Submitting limit on ${phase.ticket.ticker}…",
-                    color = AccentBlue,
+                    color = colors.accentBlue,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -101,13 +98,13 @@ fun TradeTicketsSection(
             is TicketPhase.Submitted -> {
                 Text(
                     "Limit resting · ${phase.order.ticket.ticker} · order ${phase.order.orderId ?: "pending id"}",
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
             }
             is TicketPhase.Failed -> {
-                Text(phase.error, color = AccentRed, style = MaterialTheme.typography.bodyMedium)
+                Text(phase.error, color = colors.accentRed, style = MaterialTheme.typography.bodyMedium)
             }
             else -> Unit
         }
@@ -115,10 +112,10 @@ fun TradeTicketsSection(
             Text(
                 "No pending tickets. Use Buy UP / Buy DOWN on a market, or Sell on Positions.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(AccentBlue.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+                    .background(colors.accentBlue.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             )
         }
@@ -161,19 +158,20 @@ private fun ProposedTicketCard(
     onDismiss: (String) -> Unit,
     onPaper: (String) -> Unit
 ) {
+    val colors = DipTheme.colors
     val hunter = ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE
     val highlightEdge = hunter && ticket.modelEdge
     val border = when {
-        highlightEdge -> AccentOrange
-        ticket.kind == TicketKind.HUNTER_VALUE -> TextSecondary
-        hunter -> AccentOrange
-        else -> AccentBlue
+        highlightEdge -> colors.accentOrange
+        ticket.kind == TicketKind.HUNTER_VALUE -> colors.textSecondary
+        hunter -> colors.accentOrange
+        else -> colors.accentBlue
     }
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
-        colors = CardDefaults.cardColors(containerColor = Surface),
+        colors = CardDefaults.cardColors(containerColor = colors.surface),
         shape = RoundedCornerShape(16.dp)
     ) {
         Column(Modifier.padding(14.dp)) {
@@ -187,13 +185,13 @@ private fun ProposedTicketCard(
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) AccentOrange else AccentBlue,
+                    color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) colors.accentOrange else colors.accentBlue,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     String.format(Locale.US, "%d ct", ticket.contracts),
                     style = MaterialTheme.typography.titleMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -205,18 +203,18 @@ private fun ProposedTicketCard(
                 modifier = Modifier.padding(top = 4.dp)
             )
             ticket.title?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             }
             if (ticket.blockedReason != null) {
                 Text(
                     ticket.blockedReason,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentRed,
+                    color = colors.accentRed,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 8.dp)
                 )
                 ticket.gateNote?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+                    Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                 }
             } else {
             Spacer(Modifier.height(8.dp))
@@ -224,8 +222,14 @@ private fun ProposedTicketCard(
             TicketMetricRow("Contracts", String.format(Locale.US, "%d", ticket.contracts))
             TicketMetricRow(
                 "Avg price",
-                String.format(Locale.US, "%.1f¢  (never market)", ticket.estimatedAvgFill * 100)
+                "${KalshiQuoteDisplay.formatPriceCents(ticket.estimatedAvgFill)}  (never market)"
             )
+            ticket.visibleContracts?.let { vis ->
+                TicketMetricRow(
+                    "Size at that price",
+                    String.format(Locale.US, "%d visible (need %d)", vis, ticket.contracts)
+                )
+            }
             TicketMetricRow(
                 "Max payout",
                 String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)
@@ -278,17 +282,17 @@ private fun ProposedTicketCard(
             Text(
                 ticket.sizingNote,
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 modifier = Modifier.padding(top = 6.dp)
             )
             ticket.gateNote?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = AccentBlue)
+                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.accentBlue)
             }
             ticket.closeNote?.let {
                 Text(
                     it,
                     style = MaterialTheme.typography.labelMedium,
-                    color = AccentOrange,
+                    color = colors.accentOrange,
                     fontWeight = FontWeight.SemiBold,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -301,7 +305,7 @@ private fun ProposedTicketCard(
                 OutlinedButton(
                     onClick = { onPaper(ticket.id) },
                     enabled = ticket.canPaper,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accentGreen),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
@@ -342,31 +346,32 @@ private fun ProposedTicketCard(
 
 @Composable
 private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
+    val colors = DipTheme.colors
     val id = order.orderId ?: return
     Column(
         Modifier
             .fillMaxWidth()
-            .background(AccentBlue.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
+            .background(colors.accentBlue.copy(alpha = 0.10f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         Text(
             "Working limit · ${order.ticket.displaySide} ${order.ticket.ticker}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = AccentBlue
+            color = colors.accentBlue
         )
         Text(
             String.format(
                 Locale.US,
-                "%d ct @ %.0f¢ · filled %.0f · rest %.0f · id %s",
+                "%d ct @ %s · filled %.0f · rest %.0f · id %s",
                 order.ticket.contracts,
-                order.ticket.limitPrice * 100,
+                KalshiQuoteDisplay.formatPriceCents(order.ticket.limitPrice),
                 order.fillCount,
                 order.remainingCount,
                 id.take(8)
             ),
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary
+            color = colors.textSecondary
         )
         OutlinedButton(
             onClick = { onCancel(id) },
@@ -386,6 +391,7 @@ private fun ApproveTicketDialog(
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
     onDismiss: () -> Unit
 ) {
+    val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
     val paperSell = ticket.paperOnly && ticket.isSell
     val paperBuy = paperTradingEnabled && !ticket.isSell
@@ -430,12 +436,12 @@ private fun ApproveTicketDialog(
                 Text(
                     String.format(
                         Locale.US,
-                        "%s %s\n$%.2f stake · %d contracts @ %.0f¢\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
+                        "%s %s\n$%.2f stake · %d contracts @ %s\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
                         ticket.displaySide,
                         ticket.ticker,
                         ticket.stakeUsd,
                         ticket.contracts,
-                        ticket.limitPrice * 100,
+                        KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice),
                         ticket.estimatedFillUsd,
                         ticket.maxPayoutUsd,
                         ticket.potentialGainUsd
@@ -447,7 +453,7 @@ private fun ApproveTicketDialog(
                     Text(
                         it,
                         style = MaterialTheme.typography.labelMedium,
-                        color = AccentOrange,
+                        color = colors.accentOrange,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.padding(top = 6.dp)
                     )
@@ -470,7 +476,7 @@ private fun ApproveTicketDialog(
                     Text(
                         ticket.gateNote ?: "Hunter path · Approve still required — never auto-placed.",
                         style = MaterialTheme.typography.labelMedium,
-                        color = AccentOrange,
+                        color = colors.accentOrange,
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
@@ -493,7 +499,10 @@ private fun ApproveTicketDialog(
                     paperSell || paperBuy -> ticket.canPaper || ticket.contracts > 0 || ticket.blockedReason != null
                     else -> credentialsConfigured && ticket.canApprove
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = AccentGreen),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = colors.accentGreen,
+                    contentColor = colors.onAccentGreen
+                ),
                 modifier = Modifier.height(48.dp)
             ) {
                 Text(
@@ -514,8 +523,9 @@ private fun ApproveTicketDialog(
 
 @Composable
 private fun TicketMetricRow(label: String, value: String) {
+    val colors = DipTheme.colors
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
 }

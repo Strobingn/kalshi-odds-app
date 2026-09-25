@@ -1,46 +1,110 @@
 package com.dirk.kalshiodds.domain
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.trade.KalshiFee
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.Locale
 
 /**
- * Kalshi-app display: "Up 64¢ · 1.52x" from the **best ask**,
- * multiplier = 1 / ask. Never uses the AI probability as if it were the market.
+ * Kalshi-app display: "Up 64¢ · 1.52x" from the **best ask**.
+ *
+ * Multiple = settlement / total cost on the default card stake
+ * (`C × $1 / (C×P + orderFee)`, `C = floor(stake / P)`).
+ * Fee is paid on top of the purchase, not taken from the $1 payout.
+ * Never uses the AI probability. 0¢ and missing asks return null.
  */
 object KalshiQuoteDisplay {
 
+    /** Whole cents only. Sub-cent asks use [formatAsk], never this clamp. */
     fun cents(ask: Double?): Int? {
         val p = KalshiPrice.usable(ask) ?: return null
-        return kotlin.math.round(p * 100.0).toInt().coerceIn(1, 99)
+        val c = kotlin.math.round(p * 100.0).toInt()
+        return c.takeIf { it in 1..99 && kotlin.math.abs(p * 100.0 - c) < 1e-9 }
     }
 
     /**
-     * Kalshi-app payout multiple on the buy button.
-     *
-     * The official mobile buttons use the **raw** model fee
-     * `0.07 × P × (1−P)` inside `1 / (ask + fee)` — 64¢ → 1.52x, 37¢ → 2.59x.
-     * Paper fills and net-EV ranking use [com.dirk.kalshiodds.signal.trade.KalshiFee]
-     * (next-cent ceil). Do not swap those here or the hero no longer matches Kalshi.
+     * Payout multiple at [stakeUsd] (default $5 ticket).
+     * 1¢ @ $5 → ~93.46x (not 99x). Null for 0¢ / no-ask.
      */
-    fun multiplier(ask: Double?, includeFee: Boolean = true, feeRate: Double = 0.07): Double? {
-        val p = KalshiPrice.usable(ask) ?: return null
-        if (p <= 0.0) return null
-        val fee = if (includeFee) (feeRate.coerceIn(0.0, 0.25) * p * (1.0 - p)).coerceAtLeast(0.0) else 0.0
-        val cost = p + fee
-        if (cost <= 0.0) return null
-        return 1.0 / cost
+    fun multiplier(
+        ask: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Double? {
+        val p = ask ?: return null
+        return KalshiFee.payoutMultiple(p, stakeUsd, feeRate)
+    }
+
+    /** @deprecated Use [multiplier]; fee is always the order-level KalshiFee. */
+    fun multiplier(ask: Double?, includeFee: Boolean, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double? {
+        if (!includeFee) return grossMultiplier(ask)
+        return multiplier(ask, feeRate)
     }
 
     /** Gross `1/ask` without the taker fee (tests / EV math). */
-    fun grossMultiplier(ask: Double?): Double? = multiplier(ask, includeFee = false)
+    fun grossMultiplier(ask: Double?): Double? {
+        val p = KalshiPrice.usable(ask) ?: return null
+        if (p <= 0.0) return null
+        return 1.0 / p
+    }
 
     fun impliedChance(ask: Double?): Double? = KalshiPrice.usable(ask)
 
-    fun buttonLabel(up: Boolean, ask: Double?): String {
-        val c = cents(ask)
-        val m = multiplier(ask)
+    fun formatAsk(ask: Double?): String {
+        val p = KalshiPrice.usable(ask) ?: return "—"
+        return formatPriceCents(p)
+    }
+
+    fun formatBid(bid: Double?): String {
+        if (bid == null || !bid.isFinite()) return "—"
+        if (bid <= 0.0 + 1e-12) return "—"
+        if (bid >= 1.0 - 1e-12) return "100¢"
+        return formatPriceCents(bid)
+    }
+
+    /**
+     * Exact tick string: `0.1¢`, `1.5¢`, `1.8¢`, `12¢`, `99.9¢`.
+     * Never rounds 1.5¢ → `2¢` or 0.1¢ → `0¢` / `1¢`.
+     */
+    fun formatPriceCents(price: Double): String {
+        if (!price.isFinite()) return "—"
+        val cents = BigDecimal.valueOf(price)
+            .setScale(4, RoundingMode.HALF_UP)
+            .movePointRight(2)
+            .stripTrailingZeros()
+        return if (cents.scale() <= 0) {
+            "${cents.toPlainString()}¢"
+        } else {
+            String.format(Locale.US, "%.1f¢", cents.toDouble())
+        }
+    }
+
+    /**
+     * Always a visible string: `"62.36x"`, `"no ask"`, or `"can't size $5"`.
+     * Never a blank — 10¢+ asks must not disappear.
+     */
+    fun multipleLabel(
+        ask: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): String {
+        if (KalshiPrice.usable(ask) == null) return "no ask"
+        val m = multiplier(ask, feeRate, stakeUsd) ?: return "can't size $${stakeUsd.toInt()}"
+        return String.format(Locale.US, "%.2fx", m)
+    }
+
+    fun buttonLabel(
+        up: Boolean,
+        ask: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): String {
+        val price = formatAsk(ask)
+        val m = multiplier(ask, feeRate, stakeUsd)
         val side = if (up) "Up" else "Down"
-        if (c == null || m == null) return if (up) "Buy UP" else "Buy DOWN"
-        return String.format(Locale.US, "%s %d¢ · %.2fx", side, c, m)
+        if (price == "—" || m == null) return if (up) "Buy UP" else "Buy DOWN"
+        return String.format(Locale.US, "%s %s · %.2fx", side, price, m)
     }
 
     fun targetNowLine(strike: Double?, spot: Double?): String? {
