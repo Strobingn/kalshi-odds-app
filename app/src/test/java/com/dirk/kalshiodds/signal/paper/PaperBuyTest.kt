@@ -17,7 +17,8 @@ class PaperBuyTest {
         assertTrue(out.ok)
         assertEquals(10, out.contracts)
         assertEquals(2.0, out.stakeUsd, 1e-9)
-        assertEquals(98.0, book.snapshot().cashUsd, 1e-9)
+        val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(10, 0.20)
+        assertEquals(100.0 - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
         assertTrue(out.message.contains("PAPER"))
     }
 
@@ -51,7 +52,8 @@ class PaperBuyTest {
         )
         assertTrue(out.ok)
         assertEquals(20, out.contracts)
-        assertEquals(96.0, book.snapshot().cashUsd, 1e-9)
+        val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(20, 0.20)
+        assertEquals(100.0 - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
@@ -72,9 +74,12 @@ class PaperBuyTest {
         )
         assertTrue(out.message, out.ok)
         assertTrue(out.capped)
-        assertEquals(250, out.contracts) // floor(100 / 0.40)
-        assertEquals(100.0, out.stakeUsd, 1e-9)
-        assertEquals(0.0, book.snapshot().cashUsd, 1e-6)
+        val (maxQty, _) = PaperBuy.capContracts(400, 100.0, 0.40)
+        assertEquals(maxQty, out.contracts)
+        assertTrue(out.contracts in 1..249)
+        assertEquals(out.contracts * 0.40, out.stakeUsd, 1e-9)
+        assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
+        assertTrue(book.snapshot().cashUsd < 100.0 - out.stakeUsd + 1e-6)
     }
 
     @Test
@@ -101,8 +106,10 @@ class PaperBuyTest {
     @Test
     fun capContractsMath() {
         val (qty, capped) = PaperBuy.capContracts(400, 100.0, 0.40)
-        assertEquals(250, qty)
         assertTrue(capped)
+        assertTrue(qty in 1..249)
+        assertTrue(PaperBuy.costUsd(qty, 0.40) <= 100.0 + 1e-9)
+        assertTrue(PaperBuy.costUsd(qty + 1, 0.40) > 100.0)
         val (none, _) = PaperBuy.capContracts(10, 0.01, 0.50)
         assertEquals(0, none)
     }

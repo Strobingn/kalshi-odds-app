@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.signal.sizing
 
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import kotlin.math.abs
 
 /**
@@ -10,12 +11,11 @@ import kotlin.math.abs
  *
  * Kalshi has long published a binary-contract taker fee of the form:
  *
- *     fee_dollars ≈ feeRate × C × P × (1 − P)
+ *     fee_dollars = round_up_cent(feeRate × C × P × (1 − P))
  *
  * where `P` is the contract price in dollars (0–1) and `C` is contracts.
- * The historical published coefficient is **0.07**. We use the smooth
- * (unrounded) formula so ranking stays continuous; the 1¢ round-up is
- * ignored. Users can change [feeRate] in Settings if Kalshi updates fees.
+ * The published coefficient is **0.07**. Ranking uses the official 1¢
+ * round-up on one contract. Users can change [feeRate] in Settings.
  *
  * This is **not** an order ticket. The app never calls trade endpoints.
  *
@@ -27,7 +27,7 @@ import kotlin.math.abs
  * ## Per-contract net EV (chosen side)
  *
  *     P_paid = mid + halfSpread     (YES)  or  (1 − mid) + halfSpread (NO)
- *     fee    = feeRate × P_paid × (1 − P_paid)
+ *     fee    = round_up_cent(feeRate × P_paid × (1 − P_paid))
  *     net    = p_side − P_paid − fee
  *
  * [netEdgePp] = net × 100 so it is comparable to raw fair−mid edge.
@@ -82,13 +82,10 @@ object NetExpectedValue {
     }
 
     /**
-     * Kalshi-style taker fee on one contract at price [p].
-     * `feeRate * P * (1-P)` — see class KDoc.
+     * Official Kalshi taker fee on one contract at price [p].
      */
-    fun feePerContract(p: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
-        val x = p.coerceIn(0.01, 0.99)
-        return (feeRate.coerceIn(0.0, 0.25) * x * (1.0 - x)).coerceAtLeast(0.0)
-    }
+    fun feePerContract(p: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double =
+        KalshiFee.perContract(p, feeRate)
 
     /** True when ranking/alerting on net EV is at least as selective as raw |edge|. */
     fun preferNetForFilter(netEdgePp: Double, rawEdgePp: Double): Boolean =

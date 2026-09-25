@@ -261,15 +261,18 @@ class PaperBook(
             if (qty < 1) {
                 val msg = String.format(
                     java.util.Locale.US,
-                    "Paper cash %s cannot buy 1 ct @ %.1f¢ on %s",
+                    "Paper cash %s cannot buy 1 ct @ %.1f¢ on %s (need %s with fees)",
                     fmt(cur.cashUsd),
                     px * 100,
-                    ticker
+                    ticker,
+                    fmt(PaperBuy.costUsd(1, px))
                 )
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
             val stake = qty * px
+            val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(qty, px)
+            val debit = stake + fees
             val row = PaperFill(
                 id = idFactory(),
                 ticker = ticker,
@@ -279,23 +282,28 @@ class PaperBook(
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),
-                note = if (capped) "$note · capped to paper cash" else note,
+                note = buildString {
+                    append(note)
+                    if (capped) append(" · capped to paper cash")
+                    if (fees > 0.0) append(String.format(java.util.Locale.US, " · fee $%.2f", fees))
+                },
                 winTargetUsd = winTargetUsd
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             val msg = String.format(
                 java.util.Locale.US,
-                "PAPER %s %s · $%.2f · %d ct @ %.1f¢%s · never Kalshi",
+                "PAPER %s %s · $%.2f · %d ct @ %.1f¢%s · fee $%.2f · never Kalshi",
                 row.displaySide,
                 row.ticker,
                 row.stakeUsd,
                 row.contracts,
                 row.limitPrice * 100,
-                if (capped) " · capped" else ""
+                if (capped) " · capped" else "",
+                fees
             )
             publish(
                 cur.copy(
-                    cashUsd = cur.cashUsd - stake,
+                    cashUsd = cur.cashUsd - debit,
                     fills = fills,
                     lastMessage = msg
                 )

@@ -392,35 +392,28 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val settings = _state.value.settings
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
-            if (ticket != null && ticket.isSell && !ticket.paperOnly) {
-                if (!settings.credentialsConfigured) {
-                    ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving a live sell")
-                    return@launch
-                }
-                if (!ticket.canApprove) return@launch
-                ticketSession.approve(ticketId)
-                return@launch
+            when (
+                val decision = com.dirk.kalshiodds.signal.trade.ApproveRouter.decide(
+                    paperTradingEnabled = settings.paperTradingEnabled,
+                    paperOnly = ticket?.paperOnly == true,
+                    isSell = ticket?.isSell == true,
+                    liveCredentialsConfigured = settings.tradingCredentialsConfigured(),
+                    canApprove = ticket?.canApprove == true,
+                    blockedReason = ticket?.blockedReason
+                )
+            ) {
+                com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Paper -> applyPaperBuy(ticketId)
+                com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Live -> ticketSession.approve(ticketId)
+                is com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Blocked ->
+                    ticketSession.failSoft(decision.reason)
             }
-            if (settings.paperTradingEnabled || ticket?.paperOnly == true) {
-                applyPaperBuy(ticketId)
-                return@launch
-            }
-            if (!settings.credentialsConfigured) {
-                ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Live Approve — or turn on Paper trading")
-                return@launch
-            }
-            if (ticket != null && !ticket.canApprove) {
-                ticketSession.failSoft(ticket.blockedReason ?: "Ticket cannot be approved")
-                return@launch
-            }
-            ticketSession.approve(ticketId)
         }
     }
 
     fun approveSellTicket(ticketId: String, count: Int, price: Double) {
         viewModelScope.launch {
             val settings = _state.value.settings
-            if (!settings.credentialsConfigured) {
+            if (!settings.tradingCredentialsConfigured()) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
                 return@launch
             }
@@ -469,33 +462,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applyPaperBuy(ticketId: String) {
-        val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
-        if (ticket == null) {
-            ticketSession.failSoft("Paper buy ignored — no matching ticket")
-            return
-        }
-        val sized = if (ticket.isSell) ticket else paperSized(ticket)
-        val outcome = com.dirk.kalshiodds.signal.paper.PaperBuy.execute(paperBook, sized)
-        if (outcome.ok) {
-            ticketSession.failSoft(outcome.message)
-            _state.update { it.copy(userMessage = outcome.message, paper = paperBook.snapshot()) }
-            runCatching {
-                container.resultsWriter.enqueueTicket(
-                    com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
-                        ticker = ticket.ticker,
-                        side = ticket.side,
-                        stakeUsd = outcome.stakeUsd,
-                        approved = true,
-                        result = "paper filled",
-                        createdAtMs = System.currentTimeMillis(),
-                        note = outcome.message
-                    )
-                )
+        val outcome = com.dirk.kalshiodds.signal.paper.PaperApprove.apply(
+            session = ticketSession,
+            book = paperBook,
+            ticketId = ticketId,
+            size = { paperSized(it) },
+            onHistory = { row ->
+                runCatching { container.resultsWriter.enqueueTicket(row) }
             }
-            ticketSession.dismiss(ticketId)
-        } else {
-            ticketSession.failSoft(outcome.visibleReason)
-            _state.update { it.copy(userMessage = outcome.visibleReason, paper = paperBook.snapshot()) }
+        )
+        _state.update {
+            it.copy(
+                userMessage = if (outcome.ok) outcome.message else outcome.visibleReason,
+                paper = paperBook.snapshot()
+            )
         }
     }
 
@@ -676,7 +656,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private fun refreshPositions() {
         viewModelScope.launch {
             val settings = _state.value.settings
-            if (!settings.credentialsConfigured) {
+            if (!settings.tradingCredentialsConfigured()) {
                 decoratePositions(_state.value.positions)
                 return@launch
             }
@@ -704,8 +684,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             PositionParser.decorate(pos, market, bid)
         }
         val note = when {
-            !s.settings.credentialsConfigured ->
-                "Add Kalshi API Key ID + PEM in Settings to load live positions."
+            !s.settings.tradingCredentialsConfigured() ->
+                if (s.settings.kalshiDemoEnabled) {
+                    "Add a Kalshi demo Key ID + PEM in Settings to load demo positions."
+                } else {
+                    "Add Kalshi API Key ID + PEM in Settings to load live positions."
+                }
             decorated.isEmpty() -> "No open Kalshi positions."
             else -> null
         }

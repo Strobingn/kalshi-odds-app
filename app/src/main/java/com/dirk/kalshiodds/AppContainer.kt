@@ -31,7 +31,8 @@ import java.io.File
 
 class AppContainer(context: Context) {
     private val app = context.applicationContext
-    val preferences = SignalPreferences(app)
+    val extraSecrets = com.dirk.kalshiodds.signal.config.SecureExtraStore(app)
+    val preferences = SignalPreferences(app, extras = extraSecrets)
     val model = DipHunterModel(app)
     val logStore = PredictionLogStore(app)
     val adapterStore = LearnedWeightsStore(app)
@@ -39,7 +40,6 @@ class AppContainer(context: Context) {
     val heavyStore = HeavyMlStore(app)
     val notifier = SignalNotifier(app)
     val opportunities = com.dirk.kalshiodds.signal.notify.OpportunityNotifier(app)
-    val extraSecrets = com.dirk.kalshiodds.signal.config.SecureExtraStore(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
     private val resultsImpl = runCatching { SqliteResultsStore(app) as ResultsStore }
@@ -75,14 +75,23 @@ class AppContainer(context: Context) {
     val paper = PaperBookStore(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
-            { preferences.credentialSnapshot() },
+            { tradingCredentials() },
             com.dirk.kalshiodds.data.api.KalshiApi.TRADE_BASE_URL
         ),
         fallback = NetworkModule.tradeApi(
-            { preferences.credentialSnapshot() },
+            { tradingCredentials() },
             com.dirk.kalshiodds.data.api.KalshiApi.BASE_URL
         ),
-        credentials = { preferences.credentialSnapshot() }
+        demoPrimary = NetworkModule.tradeApi(
+            { tradingCredentials() },
+            com.dirk.kalshiodds.data.api.KalshiApi.DEMO_TRADE_BASE_URL
+        ),
+        demoFallback = NetworkModule.tradeApi(
+            { tradingCredentials() },
+            com.dirk.kalshiodds.data.api.KalshiApi.DEMO_SHARED_BASE_URL
+        ),
+        credentials = { tradingCredentials() },
+        useDemo = { hub.settings.kalshiDemoEnabled }
     )
     val tickets = TicketSession(
         placeOrder = { ticket, clientOrderId ->
@@ -130,6 +139,10 @@ class AppContainer(context: Context) {
             )
         }
     }
+
+    private fun tradingCredentials(): Pair<String, String> =
+        if (hub.settings.kalshiDemoEnabled) extraSecrets.demoSnapshot()
+        else preferences.credentialSnapshot()
 
     fun endSession() {
         val paperSnap = runCatching { paper.book.snapshot() }.getOrNull()

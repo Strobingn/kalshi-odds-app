@@ -1,10 +1,8 @@
 package com.dirk.kalshiodds.signal.paper
 
-import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TradeTicket
-import kotlin.math.floor
-import kotlin.math.min
 
 /**
  * Explicit paper buy / sell. Isolated from Kalshi credentials, live cash,
@@ -47,10 +45,31 @@ object PaperBuy {
         return book.explicitBuy(ticket)
     }
 
-    fun capContracts(want: Int, cashUsd: Double, price: Double): Pair<Int, Boolean> {
+    fun costUsd(
+        contracts: Int,
+        price: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): Double {
+        val n = contracts.coerceAtLeast(0)
         val px = price.coerceIn(0.01, 0.99)
-        val maxByCash = floor((cashUsd + 1e-9) / px).toInt()
-        val qty = min(want.coerceAtLeast(0), maxByCash.coerceAtLeast(0))
+        return n * px + KalshiFee.total(n, px, feeRate)
+    }
+
+    /**
+     * Cap [want] so contract cost + official taker fee fits in [cashUsd].
+     * Never returns a size that would overdraw the paper book.
+     */
+    fun capContracts(
+        want: Int,
+        cashUsd: Double,
+        price: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): Pair<Int, Boolean> {
+        val px = price.coerceIn(0.01, 0.99)
+        var qty = want.coerceAtLeast(0)
+        while (qty > 0 && costUsd(qty, px, feeRate) > cashUsd + 1e-9) {
+            qty--
+        }
         return qty to (want > 0 && qty < want)
     }
 }

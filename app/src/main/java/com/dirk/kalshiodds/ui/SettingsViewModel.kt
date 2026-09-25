@@ -27,6 +27,8 @@ data class SettingsUiState(
     val settings: SignalSettings = SignalSettings(),
     val keyIdDraft: String = "",
     val pemDraft: String = "",
+    val demoKeyIdDraft: String = "",
+    val demoPemDraft: String = "",
     val credentialMessage: String? = null,
     val extraRejected: String? = null,
     val bankrollDraft: String = "",
@@ -164,6 +166,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setPaperTrading(v: Boolean) = track("paper_trading", _state.value.settings.paperTradingEnabled, v) {
         prefs.updatePaperTrading(v)
     }
+    fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
     fun resetPaperBook() {
         val before = container.paper.book.snapshot().cashUsd
         container.paper.book.reset()
@@ -285,6 +288,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun setKeyIdDraft(v: String) = _state.update { it.copy(keyIdDraft = v, credentialMessage = null) }
     fun setPemDraft(v: String) = _state.update { it.copy(pemDraft = v, credentialMessage = null) }
+    fun setDemoKeyIdDraft(v: String) = _state.update { it.copy(demoKeyIdDraft = v, credentialMessage = null) }
+    fun setDemoPemDraft(v: String) = _state.update { it.copy(demoPemDraft = v, credentialMessage = null) }
 
     fun saveCredentials() {
         val keyId = _state.value.keyIdDraft.trim()
@@ -325,5 +330,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun clearCredentials() {
         prefs.clearCredentials()
         _state.update { it.copy(keyIdDraft = "", pemDraft = "", credentialMessage = "Credentials cleared") }
+    }
+
+    fun saveDemoCredentials() {
+        val keyId = _state.value.demoKeyIdDraft.trim()
+        val pem = _state.value.demoPemDraft.trim()
+        if (keyId.isBlank() || !SecureCredentialStore.looksLikePem(pem)) {
+            _state.update { it.copy(credentialMessage = "Need demo Key ID + PEM (BEGIN/END PRIVATE KEY)") }
+            return
+        }
+        prefs.saveDemoCredentials(keyId, pem)
+        _state.update { it.copy(demoPemDraft = "", credentialMessage = "Demo key stored separately (never the live Kalshi key)") }
+    }
+
+    fun clearDemoCredentials() {
+        prefs.clearDemoCredentials()
+        _state.update { it.copy(demoKeyIdDraft = "", demoPemDraft = "", credentialMessage = "Demo credentials cleared") }
     }
 }

@@ -29,7 +29,8 @@ object SyncMerge {
     val FORBIDDEN_KEYS = setOf(
         "apiKeyId", "api_key_id", "privateKeyPem", "private_key_pem",
         "pem", "secret", "apiSecret", "api_secret", "kalshiKey",
-        "githubToken", "github_token", "service_role", "serviceRole"
+        "githubToken", "github_token", "service_role", "serviceRole",
+        "demoApiKeyId", "demo_api_key_id", "demoPrivateKeyPem", "kalshi_demo_private_key_pem"
     )
 
     fun isForbiddenPayload(payload: String): Boolean {

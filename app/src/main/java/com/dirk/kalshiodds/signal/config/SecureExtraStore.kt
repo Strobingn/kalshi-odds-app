@@ -21,6 +21,34 @@ class SecureExtraStore(context: Context) {
             prefs.edit().putString(KEY_GITHUB, value.trim()).commit()
         }
 
+    var demoApiKeyId: String
+        get() = prefs.getString(KEY_DEMO_ID, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_DEMO_ID, value.trim()).commit()
+        }
+
+    var demoPrivateKeyPem: String
+        get() = prefs.getString(KEY_DEMO_PEM, "").orEmpty()
+        set(value) {
+            prefs.edit().putString(KEY_DEMO_PEM, value.trim()).commit()
+        }
+
+    val hasDemoCredentials: Boolean
+        get() = demoApiKeyId.isNotBlank() && SecureCredentialStore.looksLikePem(demoPrivateKeyPem)
+
+    fun demoSnapshot(): Pair<String, String> = demoApiKeyId to demoPrivateKeyPem
+
+    fun saveDemoCredentials(keyId: String, pem: String) {
+        prefs.edit()
+            .putString(KEY_DEMO_ID, keyId.trim())
+            .putString(KEY_DEMO_PEM, pem.trim())
+            .commit()
+    }
+
+    fun clearDemoCredentials() {
+        prefs.edit().remove(KEY_DEMO_ID).remove(KEY_DEMO_PEM).commit()
+    }
+
     fun clearGithubToken() {
         prefs.edit().remove(KEY_GITHUB).commit()
     }
@@ -30,6 +58,8 @@ class SecureExtraStore(context: Context) {
         private const val PREFS_NAME = "diphunter_extra_secrets"
         private const val FALLBACK_NAME = "diphunter_extra_secrets_fallback"
         private const val KEY_GITHUB = "github_token"
+        private const val KEY_DEMO_ID = "kalshi_demo_key_id"
+        private const val KEY_DEMO_PEM = "kalshi_demo_private_key_pem"
 
         private fun createPrefs(context: Context): SharedPreferences {
             val fallback = context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)

@@ -21,8 +21,8 @@ import org.junit.Test
 class NetExpectedValueTest {
     @Test
     fun feeMatchesKalshiStyleFormula() {
-        // feeRate * P * (1-P) at P=0.50 → 0.07 * 0.25 = 0.0175
-        assertEquals(0.0175, NetExpectedValue.feePerContract(0.50, 0.07), 1e-9)
+        // Official: ceil(0.07 × 0.50 × 0.50 × 100) / 100 = $0.02
+        assertEquals(0.02, NetExpectedValue.feePerContract(0.50, 0.07), 1e-9)
         assertEquals(0.0, NetExpectedValue.feePerContract(0.50, 0.0), 1e-9)
     }
 
@@ -35,8 +35,8 @@ class NetExpectedValueTest {
             feeRate = 0.07,
             preferSide = "YES"
         )
-        // paid = 0.50 + 0.02 = 0.52; fee = 0.07*0.52*0.48
-        val fee = 0.07 * 0.52 * 0.48
+        // paid = 0.50 + 0.02 = 0.52; official 1-ct fee rounds 0.017472 → $0.02
+        val fee = 0.02
         assertEquals("YES", r.side)
         assertEquals(0.02, r.halfSpread, 1e-9)
         assertEquals(fee, r.feePerContract, 1e-9)

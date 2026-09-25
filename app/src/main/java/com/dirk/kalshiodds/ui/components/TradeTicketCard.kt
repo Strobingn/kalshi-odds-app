@@ -126,7 +126,14 @@ fun TradeTicketsSection(
             WorkingOrderCard(order, onCancelOrder)
         }
         proposals.forEach { ticket ->
-            ProposedTicketCard(ticket, credentialsConfigured, onReview, onDismiss, onPaper)
+            ProposedTicketCard(
+                ticket,
+                credentialsConfigured,
+                paperTradingEnabled,
+                onReview,
+                onDismiss,
+                onPaper
+            )
         }
     }
 
@@ -149,6 +156,7 @@ fun TradeTicketsSection(
 private fun ProposedTicketCard(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
+    paperTradingEnabled: Boolean = false,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onPaper: (String) -> Unit
@@ -303,12 +311,18 @@ private fun ProposedTicketCard(
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = credentialsConfigured && ticket.canApprove,
+                    enabled = when {
+                        paperTradingEnabled || ticket.paperOnly ->
+                            ticket.canPaper || ticket.blockedReason != null
+                        else -> credentialsConfigured && ticket.canApprove
+                    },
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
                         when {
-                            ticket.paperOnly -> "Paper only"
+                            ticket.paperOnly || paperTradingEnabled ->
+                                if (ticket.canPaper || ticket.blockedReason != null) "Paper Approve…"
+                                else ticket.blockedReason ?: "Unavailable"
                             !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
                             credentialsConfigured -> "Live Approve…"
                             else -> "Needs API key"

@@ -630,6 +630,44 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
+            Section("Kalshi demo (play money)")
+            Text(
+                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                    "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
+                    "Paper Buy still works with no key and never hits this host.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
+            )
+            ToggleRow("Kalshi demo environment", s.kalshiDemoEnabled, viewModel::setKalshiDemo)
+            if (s.demoCredentialsConfigured) {
+                Text(
+                    "Demo key saved",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = AccentGreen,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            OutlinedTextField(
+                value = state.demoKeyIdDraft,
+                onValueChange = viewModel::setDemoKeyIdDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Demo API Key ID") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = state.demoPemDraft,
+                onValueChange = viewModel::setDemoPemDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(if (s.demoCredentialsConfigured) "Replace demo PEM" else "Demo private key PEM") },
+                minLines = 4
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = viewModel::saveDemoCredentials) {
+                    Text(if (s.demoCredentialsConfigured) "Update demo key" else "Save demo key")
+                }
+                OutlinedButton(onClick = viewModel::clearDemoCredentials) { Text("Clear demo") }
+            }
+
             Spacer(Modifier.height(24.dp))
             Text(
                 "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2",
