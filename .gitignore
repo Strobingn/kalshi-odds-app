@@ -64,3 +64,5 @@ ml/parity_sample.last.json
 
 # Backtest raw cache (re-fetch; only fixtures/ are committed)
 tools/backtest/cache/
+tools/backtest/**/__pycache__/
+tools/backtest/**/*.pyc
