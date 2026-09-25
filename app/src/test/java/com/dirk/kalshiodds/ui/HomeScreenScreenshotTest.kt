@@ -46,6 +46,27 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightS24ScorecardVisibleWithoutScroll() {
+        paparazzi.unsafeUpdateConfig(
+            deviceConfig = DeviceConfig.PIXEL_6.copy(
+                softButtons = false,
+                screenWidth = 1080,
+                screenHeight = 2340
+            )
+        )
+        snap(
+            "home_light_s24_scorecard_visible",
+            dark = false,
+            HomeFixtures.state(
+                HomeFixtures.actionableBtc(),
+                HomeFixtures.noBetEth(),
+                HomeFixtures.noBetSol(),
+                hasKey = true
+            )
+        )
+    }
+
+    @Test
     fun darkActionable() = snap("home_dark_actionable", dark = true, HomeFixtures.state(
         HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
     ))
