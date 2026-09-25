@@ -195,12 +195,14 @@ class MarketQuoteViewTest {
         assertEquals(0.25, sub.noAsk!!, 1e-12)
         val q = MarketQuoteView.of(sub)
         assertEquals("1.5¢", q.upHero)
-        assertEquals("25¢", q.downHero)
+        // REST fixture is mixed (1.5¢ YES vs 25¢ NO). Display derives NO from the same YES print.
+        assertEquals("98.6¢", q.downHero)
         assertEquals(333.0 / 5.34, q.upMultiple!!, 1e-9)
-        assertEquals(20.0 / 5.27, q.downMultiple!!, 1e-9)
+        assertEquals(KalshiQuoteDisplay.multiplier(0.986)!!, q.downMultiple!!, 1e-9)
         assertTrue(q.upButton.contains("1.5¢"))
-        assertTrue(q.downButton.contains("25¢"))
+        assertTrue(q.downButton.contains("98.6¢"))
         assertFalse(q.downButton.contains("934"))
+        assertFalse(q.downButton.contains("25¢"))
     }
 
     @Test
@@ -256,7 +258,10 @@ class MarketQuoteViewTest {
         assertEquals("1.5¢", q.upHero)
         assertEquals(333.0 / 5.34, q.upMultiple!!, 1e-9)
         assertTrue(q.upMultiple!! < 1.0 / 0.015 + 1e-9)
-        assertTrue(q.downMultipleLabel.endsWith("x"))
+        // YES-only parse: do not keep the mixed 25¢ NO ask. Complement of 1.5¢ ask is 98.5¢ bid.
+        assertEquals("—", q.downHero)
+        assertEquals("98.5¢", q.noBidLabel)
+        assertTrue(q.downMultiple == null || q.downMultipleLabel.endsWith("x"))
     }
 
     @Test

@@ -156,15 +156,16 @@ class ChartWindowRestoreTest {
 
     @Test
     fun labelsHeaderButtonsShareOneQuoteSource() {
-        val market = sampleMarket(yesBid = 1.0, yesAsk = null, noBid = null, noAsk = 0.01)
+        // One consistent snapshot: yes_bid = 1 − no_ask. 100¢ + 1¢ (sum 101) is mixed and is repaired.
+        val market = sampleMarket(yesBid = 0.99, yesAsk = null, noBid = null, noAsk = 0.01)
         val q = MarketQuoteView.of(market)
-        assertEquals("100¢", q.yesBidLabel)
+        assertEquals("99¢", q.yesBidLabel)
         assertEquals("—", q.yesAskLabel)
         assertEquals("—", q.noBidLabel)
         assertEquals("1¢", q.noAskLabel)
-        assertEquals(q.upHeader, "UP bid 100¢  ask —")
+        assertEquals(q.upHeader, "UP bid 99¢  ask —")
         assertEquals(q.downHeader, "DOWN bid —  ask 1¢")
-        assertEquals(q.upChartLabel, "UP bid 100¢")
+        assertEquals(q.upChartLabel, "UP bid 99¢")
         assertEquals(q.downChartLabel, "DOWN bid —")
         assertEquals("Buy UP", q.upButton)
         assertTrue(q.downButton.startsWith("Down 1¢"))
