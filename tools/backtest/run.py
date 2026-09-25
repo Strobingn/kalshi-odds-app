@@ -57,10 +57,13 @@ def main() -> None:
     meta = json.loads((cache / "meta.json").read_text()) if (cache / "meta.json").is_file() else {}
     run_report(result, ROOT, Path(args.artifacts), meta)
     write_sample_fixture(cache, Path(__file__).parent / "fixtures")
+    san = result.get("sanity") or {}
+    stl = result.get("settlement") or {}
     print("done", result["n_markets"], "markets", result["n_decisions"], "decisions")
+    print("sanity", san.get("passed"), "settlement", stl.get("passed"))
     for s, pack in result["strategies"].items():
         o = pack["oos"]
-        print(f"  {s:16s} oos n={o['n']:4d} pnl={o['pnl']:+8.2f} wr={o['win_rate']}")
+        print(f"  {s:20s} oos n={o['n']:4d} pnl={o['pnl']:+8.2f} wr={o['win_rate']}")
 
 
 if __name__ == "__main__":

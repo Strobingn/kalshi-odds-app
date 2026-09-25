@@ -559,6 +559,8 @@ class Decision:
     spread: float | None
     fill_yes: float | None
     fill_no: float | None
+    fill_yes_stress: float | None
+    fill_no_stress: float | None
     mlp_yes: float
     digital_fair: float | None
     fair_yes: float
@@ -579,15 +581,27 @@ class Decision:
     oi: float
 
 
+def close_fill(side: str, yes_ask_close: float | None, yes_bid_close: float | None) -> float | None:
+    """Primary taker fill: candle CLOSE ask.
+
+    YES ask = yes_ask.close_dollars.
+    NO / DOWN ask = 1 − yes_bid.close_dollars.
+    Docs: https://docs.kalshi.com/api-reference/market/get-market-candlesticks
+    """
+    if side == "YES":
+        return usable(yes_ask_close)
+    if yes_bid_close is None:
+        return None
+    return usable(1.0 - yes_bid_close)
+
+
 def conservative_fill(side: str, yes_ask_close: float | None, yes_ask_high: float | None, yes_bid_close: float | None, yes_bid_low: float | None) -> float | None:
-    """Worse of close/high for a buy. DOWN ask = 1 - yes_bid; high DOWN ask = 1 - low YES bid."""
+    """Stress-test only: worse of close/high. Not the primary fill."""
     if side == "YES":
         cands = [usable(yes_ask_close), usable(yes_ask_high)]
         vals = [x for x in cands if x is not None]
         return max(vals) if vals else None
-    # NO / DOWN
     close_no = usable(1.0 - yes_bid_close) if yes_bid_close is not None else None
-    # low yes bid → high down ask
     high_no = usable(1.0 - yes_bid_low) if yes_bid_low is not None else None
     vals = [x for x in (close_no, high_no) if x is not None]
     return max(vals) if vals else None
@@ -605,8 +619,10 @@ class DecisionEngine:
         if yes_bid is not None and yes_ask is not None:
             spread = max(0.0, yes_ask - yes_bid)
         no_ask = usable(1.0 - yes_bid) if yes_bid is not None else None
-        fill_yes = conservative_fill("YES", yes_ask, yes_ask_high, yes_bid, yes_bid_low)
-        fill_no = conservative_fill("NO", yes_ask, yes_ask_high, yes_bid, yes_bid_low)
+        fill_yes = close_fill("YES", yes_ask, yes_bid)
+        fill_no = close_fill("NO", yes_ask, yes_bid)
+        fill_yes_stress = conservative_fill("YES", yes_ask, yes_ask_high, yes_bid, yes_bid_low)
+        fill_no_stress = conservative_fill("NO", yes_ask, yes_ask_high, yes_bid, yes_bid_low)
 
         mlp = self.mlp.predict(ticker, mid, volume, close_ms, now_ms, oi)
         mlp_pp = mlp.yes * 100.0
@@ -676,8 +692,6 @@ class DecisionEngine:
         passed, _ = skip_filter(conf, spread, volume, oi)
         would = should_show(passed, delta, ev["net_edge_pp"])
 
-        primary = tape_primary(yes_ask, no_ask, spot, strike, fair / 100.0, self.last_primary.get(ticker), yes_bid, no_ask and None)
-        # tape_primary yes_bid/no_bid: pass yes_bid; no_bid ≈ 1-yes_ask
         no_bid = usable(1.0 - yes_ask) if yes_ask is not None else None
         primary = tape_primary(yes_ask, no_ask, spot, strike, fair / 100.0, self.last_primary.get(ticker), yes_bid, no_bid)
         self.last_primary[ticker] = primary
@@ -714,6 +728,8 @@ class DecisionEngine:
             spread=spread,
             fill_yes=fill_yes,
             fill_no=fill_no,
+            fill_yes_stress=fill_yes_stress,
+            fill_no_stress=fill_no_stress,
             mlp_yes=mlp.yes,
             digital_fair=digital,
             fair_yes=fair / 100.0,

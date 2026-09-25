@@ -10,7 +10,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-STRATS = [
+CORE_STRATS = [
     ("app_shipped", "App pick as shipped (alert gate)"),
     ("app_dirk", "App pick + Dirk filter (ask ≲ 31¢, profit ≥ $10)"),
     ("fair_dirk", "Fair-value baseline + Dirk filter"),
@@ -19,6 +19,15 @@ STRATS = [
     ("random_side", "Naive: random side (ticker-hash)"),
     ("tuned", "IS-tuned rule (reported OOS only)"),
 ]
+STRESS_STRATS = [
+    ("app_shipped_stress", "Stress only: app pick, worse-of-close/high fill"),
+]
+EXPLORATORY_STRATS = [
+    ("app_32_50", "Exploratory (OOS only, not tuned): app pick, ask 32–50¢"),
+    ("app_tte_11_9", "Exploratory (OOS only, not tuned): app pick, time-left 11–9m"),
+]
+STRATS = CORE_STRATS + STRESS_STRATS + EXPLORATORY_STRATS
+CLAIM_STRATS = CORE_STRATS + STRESS_STRATS + EXPLORATORY_STRATS
 
 
 def _fmt(s: dict) -> str:
@@ -68,12 +77,15 @@ def write_charts(result: dict, out_dir: Path, artifact_dir: Path) -> tuple[Path,
     out_dir.mkdir(parents=True, exist_ok=True)
     artifact_dir.mkdir(parents=True, exist_ok=True)
     fig, ax = plt.subplots(figsize=(10, 5.5))
+    styles = {k: "-" for k, _ in CORE_STRATS}
+    styles.update({k: ":" for k, _ in STRESS_STRATS})
+    styles.update({k: "--" for k, _ in EXPLORATORY_STRATS})
     for key, label in STRATS:
         pack = result["strategies"].get(key) or {}
         eq = _cum(pack.get("oos_equity") or [])
         if not eq:
             continue
-        ax.plot(range(1, len(eq) + 1), eq, label=label, linewidth=1.6)
+        ax.plot(range(1, len(eq) + 1), eq, label=label, linewidth=1.6, linestyle=styles.get(key, "-"))
     ax.axhline(0, color="#444", linewidth=0.8)
     ax.set_xlabel("OOS bet number (first qualifying minute, chronological)")
     ax.set_ylabel("Cumulative P&L after fees ($)")
@@ -115,26 +127,72 @@ def write_charts(result: dict, out_dir: Path, artifact_dir: Path) -> tuple[Path,
     return p1, p2
 
 
+def _pct(x) -> str:
+    if x is None:
+        return "—"
+    return f"{100 * x:.1f}¢" if abs(x) <= 2 else f"{x:.4f}"
+
+
+def _pct_prob(x) -> str:
+    if x is None:
+        return "—"
+    return f"{100 * x:.1f}%"
+
+
+def _wr_price_table(title: str, rows: list) -> str:
+    lines = [f"#### {title}", "", "| Bucket | N | Win% | Avg ask | Win% − ask |", "|---|---:|---:|---:|---:|"]
+    for r in rows or []:
+        wr = _pct_prob(r.get("win_rate"))
+        avg = f"{100 * r['avg_ask']:.1f}¢" if r.get("avg_ask") is not None else "—"
+        gap = f"{100 * r['wr_minus_ask']:+.1f}pp" if r.get("wr_minus_ask") is not None else "—"
+        lines.append(f"| {r.get('bucket')} | {r.get('n')} | {wr} | {avg} | {gap} |")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict | None) -> None:
     span = result.get("span") or (None, None)
     cal = result.get("calibration") or {}
     rule = result.get("tuned_rule") or {}
     shadow = result.get("scorecard_shadow") or {}
+    sanity = result.get("sanity") or {}
+    settle = result.get("settlement") or {}
     oos_rows = []
-    for key, label in STRATS:
+    for key, label in CORE_STRATS:
         s = (result["strategies"].get(key) or {}).get("oos") or {}
         oos_rows.append(f"| {label} {_fmt(s)}")
+    stress_rows = []
+    for key, label in STRESS_STRATS:
+        s = (result["strategies"].get(key) or {}).get("oos") or {}
+        stress_rows.append(f"| {label} {_fmt(s)}")
+    expl_rows = []
+    for key, label in EXPLORATORY_STRATS:
+        s = (result["strategies"].get(key) or {}).get("oos") or {}
+        expl_rows.append(f"| {label} {_fmt(s)}")
 
-    # conclusion
     positive = []
-    for key, label in STRATS:
+    exploratory_positive = []
+    for key, label in CLAIM_STRATS:
         s = (result["strategies"].get(key) or {}).get("oos") or {}
         ci = s.get("ci95") or (None, None, None)
-        # n=1 can exclude zero by construction; require a real sample.
         if s.get("n", 0) >= 20 and ci[1] is not None and ci[1] > 0:
-            positive.append((key, label, s, ci))
+            if key in {k for k, _ in EXPLORATORY_STRATS}:
+                exploratory_positive.append((key, label, s, ci))
+            else:
+                positive.append((key, label, s, ci))
 
-    if positive:
+    sanity_ok = bool(sanity.get("passed"))
+    settle_ok = bool(settle.get("passed"))
+    if not sanity_ok or not settle_ok:
+        failed = [c["name"] for c in (sanity.get("checks") or []) if not c.get("passed")]
+        if not settle_ok:
+            failed.append("settlement_audit")
+        concl = (
+            "**No conclusion — sanity or settlement checks failed.** "
+            f"Failed gates: {', '.join(failed) or 'unknown'}. "
+            "P&L tables below are printed but must not be read as an edge claim."
+        )
+    elif positive:
         best = max(positive, key=lambda x: x[2]["pnl"])
         if best[0] == "tuned" and rule:
             concl = (
@@ -153,16 +211,24 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
                 f"n={best[2]['n']}, P&L ${best[2]['pnl']:+.2f}, "
                 f"$/bet CI [{best[3][1]:+.3f}, {best[3][2]:+.3f}]."
             )
+    elif exploratory_positive:
+        best = max(exploratory_positive, key=lambda x: x[2]["pnl"])
+        concl = (
+            "**No claimed strategy has a positive OOS edge whose 95% CI excludes zero.** "
+            f"One *exploratory* (not tuned) slice does: {best[1]} "
+            f"(n={best[2]['n']}, P&L ${best[2]['pnl']:+.2f}, "
+            f"$/bet CI [{best[3][1]:+.3f}, {best[3][2]:+.3f}]). "
+            "Treat that as a hypothesis, not a result."
+        )
     else:
         concl = (
             "**No. No strategy has a positive out-of-sample per-bet P&L whose bootstrap 95% CI excludes zero.** "
-            "Kalshi 15-minute crypto mids are hard to beat after taker fees and a conservative (worse of close/high) fill. "
+            "Primary fills are the candle-close ask. Kalshi 15-minute crypto mids are still hard to beat after taker fees. "
             "The MLP / blend edge vs mid looks weak or harmful once you pay the ask; "
             "the digital-fair / spot-vs-strike baseline is the least-bad component and still does not clear fees in OOS. "
             "Book-flow features could not be reconstructed (see limitations) — they may or may not help live, "
             "but we will not claim an edge we did not measure."
         )
-        # name harmful components from calibration
         m = cal.get("model") or {}
         mk = cal.get("market") or {}
         mlp = cal.get("mlp") or {}
@@ -185,13 +251,16 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
             )
         if extra:
             concl += " " + " ".join(extra)
-        concl += (
-            " Dirk's ≤31¢ / ≥$10-profit filter almost never meets the shipped hero side "
-            "(2 IS bets, both losses; 0 OOS). Cheap-side hunting without a real edge "
-            "lost ~$2.17/bet OOS. Do not use the current one-pick-per-window recommendation "
-            "to chase a $50 profit target — the OOS app pick lost $0.58/bet after fees "
-            "(CI entirely below zero)."
-        )
+        app = (result["strategies"].get("app_shipped") or {}).get("oos") or {}
+        cheap = (result["strategies"].get("cheap_side") or {}).get("oos") or {}
+        if app.get("n"):
+            concl += (
+                f" Do not use the current one-pick-per-window recommendation to chase a $50 profit target — "
+                f"the OOS app pick is ${app['pnl']:+.2f} "
+                f"({app['n']} bets, ${app.get('pnl_per_bet') or 0:+.3f}/bet)."
+            )
+        if cheap.get("n") and cheap.get("pnl_per_bet") is not None:
+            concl += f" Cheap-side hunting lost ${cheap['pnl_per_bet']:+.3f}/bet OOS."
 
     # meta docs
     docs = (meta or {}).get("docs") or {}
@@ -217,9 +286,42 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     )
     is_rows = "\n".join(
         f"| {label} {_fmt((result['strategies'].get(key) or {}).get('is_') or {})}"
-        for key, label in STRATS
+        for key, label in CORE_STRATS + STRESS_STRATS
     )
     app_dirk = result["strategies"].get("app_dirk") or {}
+    yn = sanity.get("yes_plus_no") or {}
+    checks = sanity.get("checks") or []
+
+    def _val(v):
+        if v is None:
+            return "—"
+        if isinstance(v, float):
+            return f"{v:.4f}"
+        return str(v)
+
+    def _cents(v):
+        if v is None:
+            return "—"
+        return f"{100.0 * v:.1f}¢"
+
+    def _px(v):
+        if v is None:
+            return "—"
+        return f"{v:.2f}"
+
+    check_lines = []
+    for c in checks:
+        check_lines.append(
+            f"| {c.get('name')} | {_val(c.get('value'))} | {c.get('expect')} | {'PASS' if c.get('passed') else 'FAIL'} |"
+        )
+    check_rows = "\n".join(check_lines)
+    settle_lines = []
+    for r in settle.get("sample") or []:
+        settle_lines.append(
+            f"| {r.get('ticker')} | {r.get('strike')} | {r.get('result')} | {_px(r.get('coinbase_close'))} | "
+            f"{r.get('close_time')} | {r.get('coinbase_gt_strike')} | {r.get('result_yes_means_up')} |"
+        )
+    settle_rows = "\n".join(settle_lines)
 
     parts = []
     parts.append("# DipHunter vs Kalshi 15m crypto — backtest 2026-09-25")
@@ -229,6 +331,34 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
         "`KXBTC15M` / `KXETH15M` / `KXSOL15M` windows. No look-ahead. One bet per market "
         "(first qualifying minute). $5 max all-in including Kalshi taker fees. "
         "Dirk's rule: only take a bet if profit-if-win ≥ $10 (asks around 31¢ or less)."
+    )
+    parts.append("")
+    parts.append("## What changed from v1 and why")
+    parts.append("")
+    parts.append(
+        "v1 P&L tables failed basic sanity. Random-side average ask was **74.6¢** "
+        "(a coin-flip side at a 15m binary should average ~50–53¢). "
+        "Always-favorite won 57% at a 79¢ ask and cheap-side won 15% at 25¢ — "
+        "that contradicts the same report's market-mid calibration (Brier 0.159, reliability near the diagonal)."
+    )
+    parts.append("")
+    parts.append(
+        "**Cause:** the primary fill was `max(close, high)` on the YES ask and "
+        "`max(1 − yes_bid.close, 1 − yes_bid.low)` on NO. A typical candle has "
+        "`yes_ask.close = 0.47` and `yes_ask.high = 0.75`; `yes_bid.low` is often `0.000`. "
+        "That rule overpays ~25¢ per contract and makes favorites look too expensive "
+        "and longshots look too cheap relative to their win rates."
+    )
+    parts.append("")
+    parts.append(
+        "**v2 fill:** primary taker fill is the ask at the decision minute's candle **close**: "
+        "YES = `yes_ask.close`, NO = `1 − yes_bid.close` "
+        "([Kalshi candlesticks](https://docs.kalshi.com/api-reference/market/get-market-candlesticks)). "
+        "`end_period_ts` is the inclusive period end, so minute *t* uses the candle ending at *t*, not *t+1*. "
+        "Worse-of-close/high is kept only as a **stress-test row**. "
+        "Random-side now requires **both** close asks to be usable so skip-bias cannot inflate the average. "
+        "A sanity gate and a 20-market settlement audit must pass before any edge claim. "
+        "Same cached 28-day pull; no re-fetch."
     )
     parts.append("")
     parts.append("## Data span")
@@ -295,17 +425,76 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     parts.append("")
     parts.append("## Fill and fee")
     parts.append("")
-    parts.append("- Fill = conservative taker: **worse of candle close and high** on the side we buy. DOWN ask = `1 − yes_bid`; high DOWN ask = `1 − yes_bid.low`.")
+    parts.append("- **Primary fill** = candle **close** ask at the decision minute. YES = `yes_ask.close`; NO / DOWN = `1 − yes_bid.close`.")
+    parts.append("- **Stress-test fill** (one row only) = worse of close and high: YES `max(yes_ask.close, yes_ask.high)`; NO `max(1 − yes_bid.close, 1 − yes_bid.low)`.")
     parts.append("- Unusable 0.000 / 1.000 prints are dropped (`KalshiPrice` 0.1¢–99.9¢).")
     parts.append("- Fee: `ceil_cent(C·P + ceil_6dp(0.07·C·P·(1−P)))` for a non-direct member. `C` is the max integer with that debit ≤ $5.")
     parts.append("- P&L = `C × $1 − cost` if the side wins, else `−cost`.")
     parts.append("- First qualifying minute only. **“Best minute” is not allowed.**")
+    parts.append("")
+    parts.append("## Sanity (must pass before any conclusion)")
+    parts.append("")
+    parts.append(
+        f"Overall: **{'PASS' if sanity.get('passed') else 'FAIL'}**. "
+        f"Minutes with both close asks usable: {sanity.get('n_minutes_both_asks', 0)}."
+    )
+    parts.append("")
+    parts.append("| Check | Value | Expect | Result |")
+    parts.append("|---|---:|---|---|")
+    parts.append(check_rows)
+    parts.append("")
+    parts.append("| | Median | p95 | Mean |")
+    parts.append("|---|---:|---:|---:|")
+    parts.append(f"| YES ask + NO ask | {_cents(yn.get('median'))} | {_cents(yn.get('p95'))} | {_cents(yn.get('mean'))} |")
+    parts.append(f"| Random-side ask (all those minutes) | {_cents(sanity.get('random_side_avg_ask'))} | — | — |")
+    parts.append("")
+    parts.append(
+        "A calibrated book has YES ask + NO ask ≈ 100–105¢ (spread). "
+        "A random side must then average ~50–53¢. "
+        "Favorite / cheap-side win rate vs 10¢ price buckets should sit near the diagonal."
+    )
+    parts.append("")
+    parts.append(_wr_price_table("Favorite (first-bet) win rate vs price paid", sanity.get("favorite_by_10c") or []))
+    parts.append(_wr_price_table("Cheap side ≤31¢ (first-bet) win rate vs price paid", sanity.get("cheap_by_10c") or []))
+    parts.append(_wr_price_table("Favorite (every decision minute, both asks)", sanity.get("favorite_all_minutes_by_10c") or []))
+    parts.append(_wr_price_table("Cheaper close ask (every decision minute)", sanity.get("cheap_all_minutes_by_10c") or []))
+    parts.append("## Settlement mapping (20 random markets)")
+    parts.append("")
+    parts.append(
+        f"Sample agree {settle.get('sample_agree')}/{int(settle.get('sample_agree') or 0) + int(settle.get('sample_disagree') or 0)} "
+        f"(missing spot {settle.get('sample_missing', 0)}). "
+        f"All markets with a Coinbase print: {settle.get('overall_agree')}/{settle.get('overall_n')} "
+        f"({_pct_prob(settle.get('overall_agree_rate'))}). "
+        f"**{'PASS' if settle.get('passed') else 'FAIL'}** — `result=yes` means UP (Coinbase close > strike). "
+        f"{settle.get('note') or ''}"
+    )
+    parts.append("")
+    parts.append("| Ticker | Strike | Result | Coinbase close | close_time | spot>strike | yes=UP |")
+    parts.append("|---|---:|---|---:|---|---|---|")
+    parts.append(settle_rows)
     parts.append("")
     parts.append("## Out-of-sample results (what counts)")
     parts.append("")
     parts.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |")
     parts.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
     parts.append("\n".join(oos_rows))
+    parts.append("")
+    parts.append("### Stress-test fill (worse of close/high) — not the primary")
+    parts.append("")
+    parts.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |")
+    parts.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    parts.append("\n".join(stress_rows))
+    parts.append("")
+    parts.append("### Exploratory slices (out of sample only, **not tuned**)")
+    parts.append("")
+    parts.append(
+        "These two rows were added after v1 review. They are **not** in the walk-forward grid "
+        "and must not be read as a discovered edge."
+    )
+    parts.append("")
+    parts.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |")
+    parts.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    parts.append("\n".join(expl_rows))
     parts.append("")
     parts.append("In-sample tables are in the appendix — they were used only to tune the optional rule, never to pick the conclusion.")
     parts.append("")

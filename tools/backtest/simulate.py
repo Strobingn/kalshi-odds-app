@@ -7,7 +7,7 @@ import json
 import math
 import random
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -62,6 +62,10 @@ STRATEGIES = (
     "always_favorite",
     "random_side",
 )
+STRESS_STRATEGIES = ("app_shipped_stress",)
+# OOS only; not in the IS tune grid; do not treat as a claimed edge.
+EXPLORATORY_STRATEGIES = ("app_32_50", "app_tte_11_9")
+ALL_STRATEGIES = STRATEGIES + STRESS_STRATEGIES + EXPLORATORY_STRATEGIES
 
 
 def _day(ms: int) -> str:
@@ -241,12 +245,14 @@ def decisions_for_market(m: dict, rows: list[dict], spots: dict[str, dict[int, f
     return out
 
 
-def _fill_for(d: Decision, side: str) -> float | None:
+def _fill_for(d: Decision, side: str, stress: bool = False) -> float | None:
+    if stress:
+        return d.fill_yes_stress if side == "YES" else d.fill_no_stress
     return d.fill_yes if side == "YES" else d.fill_no
 
 
-def _place(d: Decision, strategy: str, side: str, split: str) -> Bet | None:
-    ask = _fill_for(d, side)
+def _place(d: Decision, strategy: str, side: str, split: str, stress: bool = False) -> Bet | None:
+    ask = _fill_for(d, side, stress=stress)
     if ask is None:
         return None
     c, cost, fee = size_all_in(ask, STAKE_USD)
@@ -335,6 +341,10 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
             if not d.would_alert:
                 continue
             return _place(d, strategy, d.app_side, split)
+        if strategy == "app_shipped_stress":
+            if not d.would_alert:
+                continue
+            return _place(d, strategy, d.app_side, split, stress=True)
         if strategy == "app_dirk":
             ask = _fill_for(d, d.app_side)
             if ask is None or not dirk_ok(ask):
@@ -364,10 +374,24 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
                 continue
             return _place(d, strategy, side, split)
         if strategy == "random_side":
-            side = _rand_side(d.ticker)
-            if _fill_for(d, side) is None:
+            # Both close asks must be usable so skip-bias cannot inflate the average.
+            if d.fill_yes is None or d.fill_no is None:
                 continue
+            side = _rand_side(d.ticker)
             return _place(d, strategy, side, split)
+        if strategy == "app_32_50":
+            if not d.would_alert:
+                continue
+            ask = _fill_for(d, d.app_side)
+            if ask is None or ask < 0.32 - 1e-12 or ask > 0.50 + 1e-12:
+                continue
+            return _place(d, strategy, d.app_side, split)
+        if strategy == "app_tte_11_9":
+            if not d.would_alert:
+                continue
+            if _tte_bucket(d.tte_sec) != "11-9m":
+                continue
+            return _place(d, strategy, d.app_side, split)
     return None
 
 
@@ -504,6 +528,221 @@ def tune_rule(is_decisions: dict[str, list[Decision]]) -> dict:
     return best or {}
 
 
+def _percentile(xs: list[float], q: float) -> float | None:
+    if not xs:
+        return None
+    ys = sorted(xs)
+    if len(ys) == 1:
+        return ys[0]
+    idx = q * (len(ys) - 1)
+    lo = int(idx)
+    hi = min(lo + 1, len(ys) - 1)
+    frac = idx - lo
+    return ys[lo] * (1.0 - frac) + ys[hi] * frac
+
+
+def _price_bucket_10c(ask: float) -> str:
+    c = max(0, min(99, int(math.floor(ask * 100.0))))
+    lo = (c // 10) * 10
+    return f"{lo}-{lo + 10}c"
+
+
+def _wr_vs_price(rows: list[tuple[float, bool]]) -> list[dict]:
+    g: dict[str, list[tuple[float, bool]]] = defaultdict(list)
+    for ask, won in rows:
+        g[_price_bucket_10c(ask)].append((ask, won))
+    out = []
+    for k in sorted(g):
+        items = g[k]
+        n = len(items)
+        wr = sum(1 for _, w in items if w) / n
+        avg = sum(a for a, _ in items) / n
+        out.append(dict(bucket=k, n=n, win_rate=wr, avg_ask=avg, wr_minus_ask=wr - avg))
+    return out
+
+
+def _tracking_mae(rows: list[dict], min_n: int = 30) -> tuple[float | None, bool]:
+    weighted = [(r["n"], abs(r["wr_minus_ask"])) for r in rows if r["n"] >= min_n and r.get("wr_minus_ask") is not None]
+    if not weighted:
+        return None, False
+    tot = sum(n for n, _ in weighted)
+    mae = sum(n * a for n, a in weighted) / tot
+    return mae, mae <= 0.12
+
+
+def sanity_checks(all_decisions: list[Decision], bets: dict[str, list[Bet]]) -> dict:
+    sums: list[float] = []
+    yes_asks: list[float] = []
+    no_asks: list[float] = []
+    rand_asks: list[float] = []
+    fav_pairs: list[tuple[float, bool]] = []
+    cheap_pairs: list[tuple[float, bool]] = []
+    for d in all_decisions:
+        y, n = d.fill_yes, d.fill_no
+        if y is None or n is None:
+            continue
+        sums.append(y + n)
+        yes_asks.append(y)
+        no_asks.append(n)
+        side = _rand_side(d.ticker)
+        rand_asks.append(y if side == "YES" else n)
+        fav = "YES" if d.mid >= 0.5 else "NO"
+        fav_ask = y if fav == "YES" else n
+        fav_won = (d.result == "yes" and fav == "YES") or (d.result == "no" and fav == "NO")
+        fav_pairs.append((fav_ask, fav_won))
+        cheap = "YES" if y <= n else "NO"
+        cheap_ask = y if cheap == "YES" else n
+        cheap_won = (d.result == "yes" and cheap == "YES") or (d.result == "no" and cheap == "NO")
+        cheap_pairs.append((cheap_ask, cheap_won))
+
+    fav_rows = _wr_vs_price([(b.ask, b.won) for b in (bets.get("always_favorite") or [])])
+    cheap_rows = _wr_vs_price([(b.ask, b.won) for b in (bets.get("cheap_side") or [])])
+    fav_all = _wr_vs_price(fav_pairs)
+    cheap_all = _wr_vs_price(cheap_pairs)
+    fav_mae, fav_ok = _tracking_mae(fav_rows)
+    cheap_mae, cheap_ok = _tracking_mae(cheap_rows)
+    fav_all_mae, fav_all_ok = _tracking_mae(fav_all)
+    cheap_all_mae, cheap_all_ok = _tracking_mae(cheap_all)
+
+    median_sum = _percentile(sums, 0.5)
+    p95_sum = _percentile(sums, 0.95)
+    rand_avg = (sum(rand_asks) / len(rand_asks)) if rand_asks else None
+    rand_bets = bets.get("random_side") or []
+    rand_bet_avg = (sum(b.ask for b in rand_bets) / len(rand_bets)) if rand_bets else None
+
+    checks = [
+        dict(
+            name="yes_plus_no_median",
+            value=median_sum,
+            expect="0.99–1.12 (99–112¢)",
+            passed=median_sum is not None and 0.99 <= median_sum <= 1.12,
+        ),
+        dict(
+            name="yes_plus_no_p95",
+            value=p95_sum,
+            expect="≤ 1.20",
+            passed=p95_sum is not None and p95_sum <= 1.20,
+        ),
+        dict(
+            name="random_side_avg_ask_all_minutes",
+            value=rand_avg,
+            expect="0.50–0.53",
+            passed=rand_avg is not None and 0.50 <= rand_avg <= 0.53,
+        ),
+        dict(
+            name="random_side_strategy_avg_ask",
+            value=rand_bet_avg,
+            expect="0.50–0.53",
+            passed=rand_bet_avg is not None and 0.50 <= rand_bet_avg <= 0.53,
+        ),
+        dict(
+            name="favorite_wr_tracks_price",
+            value=fav_mae,
+            expect="mean |win% − avg ask| ≤ 12pp on n≥30 buckets",
+            passed=fav_ok,
+        ),
+        dict(
+            name="cheap_wr_tracks_price",
+            value=cheap_mae,
+            expect="mean |win% − avg ask| ≤ 12pp on n≥30 buckets",
+            passed=cheap_ok,
+        ),
+        dict(
+            name="favorite_all_minutes_wr_tracks_price",
+            value=fav_all_mae,
+            expect="mean |win% − avg ask| ≤ 12pp on n≥30 buckets",
+            passed=fav_all_ok,
+        ),
+        dict(
+            name="cheap_all_minutes_wr_tracks_price",
+            value=cheap_all_mae,
+            expect="mean |win% − avg ask| ≤ 12pp on n≥30 buckets",
+            passed=cheap_all_ok,
+        ),
+    ]
+    return dict(
+        n_minutes_both_asks=len(sums),
+        yes_plus_no=dict(
+            n=len(sums),
+            median=median_sum,
+            p95=p95_sum,
+            mean=(sum(sums) / len(sums)) if sums else None,
+        ),
+        yes_ask=dict(median=_percentile(yes_asks, 0.5), p95=_percentile(yes_asks, 0.95)),
+        no_ask=dict(median=_percentile(no_asks, 0.5), p95=_percentile(no_asks, 0.95)),
+        random_side_avg_ask=rand_avg,
+        random_side_strategy_avg_ask=rand_bet_avg,
+        checks=checks,
+        passed=all(c["passed"] for c in checks),
+        favorite_by_10c=fav_rows,
+        cheap_by_10c=cheap_rows,
+        favorite_all_minutes_by_10c=fav_all,
+        cheap_all_minutes_by_10c=cheap_all,
+    )
+
+
+def settlement_audit(markets: list[dict], spots: dict[str, dict[int, float]], n: int = 20, seed: int = 25) -> dict:
+    rng = random.Random(seed)
+    eligible = [m for m in markets if m.get("floor_strike") and m.get("close_ms") and m.get("result") in ("yes", "no")]
+    sample = rng.sample(eligible, min(n, len(eligible))) if eligible else []
+    rows = []
+    agree = disagree = missing = 0
+    for m in sample:
+        coin = m.get("coin") or COIN.get(m["series"], "BTC")
+        idx = spots.get(coin, {})
+        close_sec = int(m["close_ms"] / 1000)
+        spot = _spot_at(idx, close_sec)
+        strike = float(m["floor_strike"])
+        result = m["result"]
+        up = None if spot is None else (spot > strike)
+        yes_is_up = None
+        if up is None:
+            missing += 1
+        else:
+            yes_is_up = (result == "yes") == up
+            if yes_is_up:
+                agree += 1
+            else:
+                disagree += 1
+        rows.append(
+            dict(
+                ticker=m["ticker"],
+                strike=strike,
+                result=result,
+                coinbase_close=spot,
+                close_time=datetime.fromtimestamp(close_sec, tz=timezone.utc).isoformat(),
+                coinbase_gt_strike=up,
+                result_yes_means_up=yes_is_up,
+            )
+        )
+    overall_agree = overall_n = 0
+    for m in eligible:
+        coin = m.get("coin") or COIN.get(m["series"], "BTC")
+        spot = _spot_at(spots.get(coin, {}), int(m["close_ms"] / 1000))
+        if spot is None:
+            continue
+        overall_n += 1
+        if (m["result"] == "yes") == (spot > float(m["floor_strike"])):
+            overall_agree += 1
+    rate = (agree / (agree + disagree)) if (agree + disagree) else None
+    overall_rate = (overall_agree / overall_n) if overall_n else None
+    return dict(
+        sample=rows,
+        sample_agree=agree,
+        sample_disagree=disagree,
+        sample_missing=missing,
+        sample_agree_rate=rate,
+        overall_n=overall_n,
+        overall_agree=overall_agree,
+        overall_agree_rate=overall_rate,
+        note=(
+            "Coinbase 1m close is a proxy for Kalshi's settlement index; a few mismatches are expected. "
+            "result=yes must mean UP (close > strike)."
+        ),
+        passed=(rate is not None and rate >= 0.85) and (overall_rate is not None and overall_rate >= 0.85),
+    )
+
+
 def apply_rule(decisions_by_ticker: dict[str, list[Decision]], rule: dict, split: str) -> list[Bet]:
     if not rule:
         return []
@@ -552,16 +791,21 @@ def run_sim(cache: Path) -> dict:
     def split_of(m) -> str:
         return "is" if _day(m["close_ms"]) in is_days else "oos"
 
-    bets: dict[str, list[Bet]] = {s: [] for s in STRATEGIES}
+    bets: dict[str, list[Bet]] = {s: [] for s in ALL_STRATEGIES}
     for m in markets_sorted:
         decs = decisions_by.get(m["ticker"]) or []
         if not decs:
             continue
         spl = split_of(m)
-        for s in STRATEGIES:
+        for s in STRATEGIES + STRESS_STRATEGIES:
             b = first_bet(decs, s, spl)
             if b:
                 bets[s].append(b)
+        if spl == "oos":
+            for s in EXPLORATORY_STRATEGIES:
+                b = first_bet(decs, s, spl)
+                if b:
+                    bets[s].append(b)
 
     is_decs = {t: d for t, d in decisions_by.items() if d and _day(d[0].now_ms) in is_days}
     oos_decs = {t: d for t, d in decisions_by.items() if d and _day(d[0].now_ms) in oos_days}
@@ -614,8 +858,18 @@ def run_sim(cache: Path) -> dict:
             oos_by_ask=breakdown(oos, lambda b: _ask_bucket(b.ask)),
             oos_by_dist=breakdown(oos, lambda b: _dist_bucket(b.dist_bps)),
             oos_equity=[b.pnl for b in oos],
-            oos_bets=[asdict(b) for b in oos],
         )
+
+    sanity = sanity_checks(all_decisions, bets)
+    settle = settlement_audit(markets, spots)
+    print(
+        f"[sanity] passed={sanity['passed']} yes+no median={sanity['yes_plus_no'].get('median')} "
+        f"p95={sanity['yes_plus_no'].get('p95')} random_ask={sanity.get('random_side_avg_ask')}"
+    )
+    print(
+        f"[settlement] passed={settle['passed']} sample {settle['sample_agree']}/{settle['sample_agree']+settle['sample_disagree']} "
+        f"overall {settle['overall_agree']}/{settle['overall_n']}"
+    )
 
     result = dict(
         n_markets=len(markets),
@@ -629,8 +883,10 @@ def run_sim(cache: Path) -> dict:
             datetime.fromtimestamp(min(m["open_ms"] for m in markets) / 1000, tz=timezone.utc).isoformat() if markets else None,
             datetime.fromtimestamp(max(m["close_ms"] for m in markets) / 1000, tz=timezone.utc).isoformat() if markets else None,
         ),
-        strategies={s: pack(s) for s in list(STRATEGIES) + ["tuned"]},
+        strategies={s: pack(s) for s in list(ALL_STRATEGIES) + ["tuned"]},
         tuned_rule=rule,
+        sanity=sanity,
+        settlement=settle,
         calibration=dict(model=cal_model, mlp=cal_mlp, market=cal_mkt, digital=cal_dig, reliability_model=rel_model, reliability_market=rel_mkt),
         scorecard_shadow=dict(
             n=len(scored),

@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pipeline import (
     DipHunterMlp,
     build_features,
+    close_fill,
+    conservative_fill,
     dirk_ok,
     kalshi_total_cost,
     net_profit_if_win,
@@ -49,6 +51,13 @@ def main() -> None:
     pred = mlp.predict("KXBTC15M-T", 0.55, 8_000.0, 900_000, 120_000, 400.0)
     assert 0.02 <= pred.yes <= 0.98
     assert abs(pred.yes + pred.no - 1.0) < 1e-6
+
+    assert abs(close_fill("YES", 0.47, 0.40) - 0.47) < 1e-12
+    assert abs(close_fill("NO", 0.47, 0.40) - 0.60) < 1e-12
+    assert close_fill("YES", 0.0, 0.40) is None
+    assert abs(conservative_fill("YES", 0.47, 0.75, 0.40, 0.10) - 0.75) < 1e-12
+    # bid.low=0 → 1-0=1.0 unusable; stress NO falls back to 1-close
+    assert abs(conservative_fill("NO", 0.47, 0.75, 0.40, 0.0) - 0.60) < 1e-12
     print("parity ok", p, "mlp", pred.yes)
 
 
