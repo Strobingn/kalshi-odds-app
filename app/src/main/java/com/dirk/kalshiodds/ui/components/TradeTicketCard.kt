@@ -37,6 +37,7 @@ import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import java.util.Locale
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
@@ -95,7 +96,7 @@ fun TradeTicketsSection(
             Text(
                 it,
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (paperOk) colors.accentGreen else colors.accentRed,
+                color = if (paperOk) colors.textPrimary else colors.accentRed,
                 fontWeight = FontWeight.SemiBold
             )
         }
@@ -111,13 +112,22 @@ fun TradeTicketsSection(
             is TicketPhase.Submitted -> {
                 Text(
                     "Limit resting · ${phase.order.ticket.ticker} · order ${phase.order.orderId ?: "pending id"}",
-                    color = colors.accentGreen,
+                    color = colors.textPrimary,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
                 )
             }
             is TicketPhase.Failed -> {
-                Text(phase.error, color = colors.accentRed, style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    phase.error,
+                    color = colors.accentRed,
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(10.dp))
+                        .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
+                        .padding(10.dp)
+                )
             }
             else -> Unit
         }
@@ -211,7 +221,7 @@ private fun ProposedTicketCard(
                 Text(
                     String.format(Locale.US, "%d ct", ticket.contracts),
                     style = MaterialTheme.typography.titleMedium,
-                    color = colors.accentGreen,
+                    color = colors.textPrimary,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -231,7 +241,12 @@ private fun ProposedTicketCard(
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.accentRed,
                     fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.padding(top = 8.dp)
+                    modifier = Modifier
+                        .padding(top = 8.dp)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(10.dp))
+                        .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
+                        .padding(10.dp)
                 )
                 ticket.gateNote?.let {
                     Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -329,7 +344,9 @@ private fun ProposedTicketCard(
                 OutlinedButton(
                     onClick = { onPaper(ticket.id) },
                     enabled = ticket.canPaper,
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = colors.accentGreen),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = SideColor.ofTicketSide(ticket.side, colors)
+                    ),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
@@ -341,8 +358,8 @@ private fun ProposedTicketCard(
                     onClick = { onReview(ticket.id) },
                     enabled = credentialsConfigured && ticket.canApprove,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.accentOrange,
-                        contentColor = colors.onAccentOrange
+                        containerColor = SideColor.ofTicketSide(ticket.side, colors),
+                        contentColor = SideColor.onTicketSide(ticket.side, colors)
                     ),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
@@ -547,8 +564,8 @@ private fun ApproveTicketDialog(
                     else -> credentialsConfigured && ticket.canApprove
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (paperSell) colors.accentGreen else colors.accentOrange,
-                    contentColor = if (paperSell) colors.onAccentGreen else colors.onAccentOrange
+                    containerColor = SideColor.ofTicketSide(ticket.side, colors),
+                    contentColor = SideColor.onTicketSide(ticket.side, colors)
                 ),
                 modifier = Modifier.height(48.dp)
             ) {

@@ -133,7 +133,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                     "${s.imported} imported · ${s.skipped} skipped · ${s.dateRangeLabel}\n" +
                         "snapshots ${s.snapshots} · alerts ${s.alerts} · fills ${s.fills} · tickets ${s.tickets}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accentGreen
+                    color = colors.textPrimary
                 )
             }
 
@@ -146,7 +146,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Lookback  ${state.days} days",
                 style = MaterialTheme.typography.bodyMedium,
-                color = colors.accentGreen,
+                color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -296,7 +296,7 @@ private fun StatsCard(state: DataUiState) {
                 s.btc, s.eth, s.sol, s.yesSettled, s.noSettled
             ),
             style = MaterialTheme.typography.bodyMedium,
-            color = colors.accentGreen,
+            color = colors.textPrimary,
             fontWeight = FontWeight.SemiBold
         )
         Text(

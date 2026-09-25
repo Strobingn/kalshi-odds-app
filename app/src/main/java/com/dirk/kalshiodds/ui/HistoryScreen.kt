@@ -93,7 +93,7 @@ fun HistoryScreen(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accentGreen,
+                    color = colors.textPrimary,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
@@ -220,7 +220,7 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
             ),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
-            color = if (t.pnlUsd >= 0) colors.accentGreen else colors.accentRed
+            color = colors.textPrimary
         )
     }
 }
@@ -228,7 +228,7 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
 @Composable
 private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
     val colors = DipTheme.colors
-    val color = if ((points.lastOrNull()?.second ?: 0.0) >= 0) colors.accentGreen else colors.accentRed
+    val color = colors.textPrimary
     Column(Modifier.fillMaxWidth()) {
         Text("Cumulative P&L", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 4.dp)) {
@@ -253,8 +253,8 @@ private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
 private fun BetRow(b: HistoryBet) {
     val colors = DipTheme.colors
     val resultColor = when (b.result.lowercase()) {
-        "won" -> colors.accentGreen
-        "lost" -> colors.accentRed
+        "won" -> colors.textPrimary
+        "lost" -> colors.textPrimary
         else -> colors.textSecondary
     }
     Column(
@@ -267,7 +267,7 @@ private fun BetRow(b: HistoryBet) {
             "${historyTime(b.createdAtMs)}  ${b.ticker}  ${b.side.uppercase()}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = colors.accentGreen
+            color = colors.textPrimary
         )
         Text(
             buildString {
@@ -355,7 +355,7 @@ private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(row.ticker, fontWeight = FontWeight.Bold, color = colors.accentGreen)
+            Text(row.ticker, fontWeight = FontWeight.Bold, color = colors.textPrimary)
             Text(
                 "${row.closeMs?.let { historyTime(it) } ?: "—"}  ${row.result.uppercase()}  " +
                     (row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: ""),

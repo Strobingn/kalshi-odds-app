@@ -39,8 +39,24 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
-    val colors = DipTheme.colors
     val ui by viewModel.snapshot.collectAsStateWithLifecycle()
+    ScorecardScreen(
+        ui = ui,
+        onBack = onBack,
+        onExport = viewModel::exportResults,
+        onGetLatestModel = viewModel::getLatestModel
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ScorecardScreen(
+    ui: ScorecardUi,
+    onBack: () -> Unit,
+    onExport: () -> Unit = {},
+    onGetLatestModel: () -> Unit = {}
+) {
+    val colors = DipTheme.colors
     val snap = ui.metrics
 
     Scaffold(
@@ -74,10 +90,10 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
-            Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
             }
-            Button(onClick = viewModel::getLatestModel, modifier = Modifier.fillMaxWidth()) {
+            Button(onClick = onGetLatestModel, modifier = Modifier.fillMaxWidth()) {
                 Text("Get latest model")
             }
             ui.exportMessage?.let {
@@ -139,7 +155,7 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
 private fun CalibrationBanner(snap: ScorecardMetrics.Snapshot) {
     val colors = DipTheme.colors
     val ready = snap.calibrationReady
-    val color = if (ready) colors.accentGreen else colors.accentOrange
+    val color = if (ready) colors.textPrimary else colors.accentOrange
     val text = if (ready) {
         String.format(
             Locale.US,
@@ -166,7 +182,7 @@ private fun CalibrationBanner(snap: ScorecardMetrics.Snapshot) {
 @Composable
 private fun AdapterBanner(adapter: com.dirk.kalshiodds.signal.feedback.OnlineAdapter.State) {
     val colors = DipTheme.colors
-    val color = if (adapter.ready) colors.accentGreen else colors.accentOrange
+    val color = if (adapter.ready) colors.textPrimary else colors.accentOrange
     val text = if (adapter.ready) {
         String.format(
             Locale.US,
@@ -349,7 +365,7 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
             text = if (stats.total <= 0) "No samples" else HomeCopy.pickedSideLine(stats.hits, stats.total),
             fontSize = 22.sp,
             fontWeight = FontWeight.Bold,
-            color = if ((stats.hitRate ?: 0.0) >= 0.5) colors.accentGreen else MaterialTheme.colorScheme.onBackground,
+            color = if ((stats.hitRate ?: 0.0) >= 0.5) colors.textPrimary else MaterialTheme.colorScheme.onBackground,
             lineHeight = 28.sp
         )
         Text(

@@ -33,18 +33,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
-import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
 fun TradeModeChip(label: String, modifier: Modifier = Modifier) {
     val colors = DipTheme.colors
-    val accent = when (label) {
-        TradeModeLabel.LIVE -> colors.accentOrange
-        TradeModeLabel.PAPER -> colors.accentGreen
-        else -> colors.accentOrange
-    }
+    val accent = colors.textSecondary
     Text(
         text = label,
         style = MaterialTheme.typography.labelMedium,
@@ -67,11 +63,7 @@ fun ThisWindowCard(
 ) {
     val colors = DipTheme.colors
     val headline = HomeCopy.thisWindowHeadline(decision, market, nowMs)
-    val accent = when (decision?.headline) {
-        BetCall.Headline.BET_UP -> colors.accentGreen
-        BetCall.Headline.BET_DOWN -> colors.accentOrange
-        else -> colors.textSecondary
-    }
+    val accent = SideColor.of(decision?.headline ?: BetCall.Headline.NO_BET, colors)
     Column(
         modifier
             .fillMaxWidth()

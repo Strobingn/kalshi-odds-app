@@ -42,6 +42,7 @@ import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
+
 /**
  * Reconstruction of the 0.3.11 home (f0e26ca) for before/after screenshots.
  * Same fake markets as the redesigned [HomeScreen] shots.
@@ -136,11 +137,7 @@ fun LegacyHome0311(
 private fun LegacyCard(market: MarketUiModel, settings: SignalSettings, nowMs: Long) {
     val colors = DipTheme.colors
     val call = BetCall.decide(market, settings, nowMs)
-    val headlineColor = when (call.headline) {
-        BetCall.Headline.BET_UP -> colors.accentGreen
-        BetCall.Headline.BET_DOWN -> colors.accentOrange
-        BetCall.Headline.NO_BET -> colors.textSecondary
-    }
+    val headlineColor = SideColor.of(call.headline, colors)
     Column(
         Modifier
             .fillMaxWidth()
@@ -177,7 +174,10 @@ private fun LegacyCard(market: MarketUiModel, settings: SignalSettings, nowMs: L
         Button(
             onClick = {},
             enabled = call.isActionable,
-            colors = ButtonDefaults.buttonColors(containerColor = headlineColor, contentColor = colors.onAccentGreen),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = headlineColor,
+                contentColor = SideColor.on(call.headline, colors)
+            ),
             modifier = Modifier.fillMaxWidth().padding(top = 10.dp).height(56.dp)
         ) {
             Text(if (call.isActionable) "$mode  Buy UP" else "NO BET", fontWeight = FontWeight.Bold)

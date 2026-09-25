@@ -26,17 +26,16 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 fun TargetNowLine(market: MarketUiModel, modifier: Modifier = Modifier) {
     val colors = DipTheme.colors
     val line = KalshiQuoteDisplay.targetNowLine(market.floorStrike, market.spotUsd) ?: return
-    val up = (market.spotVsTargetUsd ?: 0.0) >= 0.0
     Text(
         line,
         style = MaterialTheme.typography.bodyMedium,
-        color = if (up) colors.accentGreen else colors.accentRed,
+        color = colors.textPrimary,
         fontWeight = FontWeight.Bold,
         modifier = modifier.fillMaxWidth()
     )
 }
 
-/** Home header: green when spot is above target, orange when below. */
+/** Home header: spot vs target stays neutral — green/red are buy-side only. */
 @Composable
 fun HomeSpotDelta(
     market: MarketUiModel,
@@ -44,11 +43,10 @@ fun HomeSpotDelta(
 ) {
     val colors = DipTheme.colors
     val text = com.dirk.kalshiodds.ui.HomeCopy.spotDeltaText(market) ?: return
-    val above = com.dirk.kalshiodds.ui.HomeCopy.spotDeltaAbove(market)
     Text(
         text,
         style = MaterialTheme.typography.labelMedium,
-        color = if (above) colors.accentGreen else colors.accentOrange,
+        color = colors.textPrimary,
         fontWeight = FontWeight.Bold,
         modifier = modifier
     )
@@ -83,14 +81,14 @@ fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
             title = "UP",
             price = quotes.upHero,
             multipleLabel = quotes.upMultipleLabel,
-            color = colors.accentGreen,
+            color = colors.up,
             emphasized = market.primaryHeroSide != "NO"
         )
         AskHeroSide(
             title = "DOWN",
             price = quotes.downHero,
             multipleLabel = quotes.downMultipleLabel,
-            color = colors.accentRed,
+            color = colors.down,
             emphasized = market.primaryHeroSide == "NO"
         )
     }
@@ -156,7 +154,7 @@ fun PastSettlementsRow(results: List<Boolean>, modifier: Modifier = Modifier) {
         results.take(8).forEach { yes ->
             Text(
                 if (yes) "▲" else "▼",
-                color = if (yes) colors.accentGreen else colors.accentRed,
+                color = if (yes) colors.up else colors.down,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
@@ -183,16 +181,16 @@ fun UpDownBuyButtons(
             onClick = onBuyYes,
             modifier = Modifier.weight(1f).height(52.dp),
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = if (tapeUp) colors.accentGreen else colors.accentGreen.copy(alpha = 0.75f),
-                contentColor = colors.onAccentGreen
+                containerColor = if (tapeUp) colors.up else colors.up.copy(alpha = 0.75f),
+                contentColor = colors.onUp
             )
         ) { Text(quotes.upButton) }
         Button(
             onClick = onBuyNo,
             modifier = Modifier.weight(1f).height(52.dp),
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = colors.accentRed,
-                contentColor = colors.onAccentRed
+                containerColor = colors.down,
+                contentColor = colors.onDown
             )
         ) { Text(quotes.downButton) }
     }

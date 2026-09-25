@@ -46,6 +46,14 @@ class HomeCopyTest {
     }
 
     @Test
+    fun actionableDownFixtureIsBetDown() {
+        val down = HomeFixtures.actionableDownBtc()
+        val call = BetCall.decide(down, SignalSettings(), nowMs)
+        assertEquals(BetCall.Headline.BET_DOWN, call.headline)
+        assertTrue(call.isActionable)
+    }
+
+    @Test
     fun thisWindowShowsBetUpThenFallsBackToNoBetReason() {
         val up = HomeFixtures.market(
             ticker = "KXBTC15M-WIN-50",

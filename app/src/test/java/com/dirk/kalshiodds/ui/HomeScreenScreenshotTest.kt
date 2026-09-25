@@ -2,7 +2,13 @@ package com.dirk.kalshiodds.ui
 
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
+import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.feedback.Allowlist
+import com.dirk.kalshiodds.signal.feedback.Guardrails
+import com.dirk.kalshiodds.signal.feedback.OnlineAdapter
+import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
@@ -31,6 +37,16 @@ class HomeScreenScreenshotTest {
     @Test
     fun darkActionable() = snap("home_dark_actionable", dark = true, HomeFixtures.state(
         HomeFixtures.actionableBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
+    ))
+
+    @Test
+    fun lightActionableDown() = snap("home_light_actionable_down", dark = false, HomeFixtures.state(
+        HomeFixtures.actionableDownBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
+    ))
+
+    @Test
+    fun darkActionableDown() = snap("home_dark_actionable_down", dark = true, HomeFixtures.state(
+        HomeFixtures.actionableDownBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
     ))
 
     @Test
@@ -90,6 +106,18 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightScorecard() = snapScorecard("scorecard_light", dark = false)
+
+    @Test
+    fun darkScorecard() = snapScorecard("scorecard_dark", dark = true)
+
+    @Test
+    fun lightSettings() = snapSettings("settings_light", dark = false)
+
+    @Test
+    fun darkSettings() = snapSettings("settings_dark", dark = true)
+
+    @Test
     fun beforeLightActionable() = snapBefore("before_0_3_11_light_actionable", dark = false, keyed = true)
 
     @Test
@@ -143,6 +171,94 @@ class HomeScreenScreenshotTest {
             }
         }
         copyLatest(name)
+    }
+
+    private fun snapScorecard(name: String, dark: Boolean) {
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                ScorecardScreen(ui = scorecardUi(), onBack = {})
+            }
+        }
+        copyLatest(name)
+    }
+
+    private fun snapSettings(name: String, dark: Boolean) {
+        paparazzi.snapshot(name = name) {
+            KalshiOddsTheme(darkTheme = dark) {
+                SettingsContent(
+                    state = SettingsUiState(
+                        settings = SignalSettings(
+                            apiKeyId = "key-id",
+                            hasPrivateKey = true,
+                            paperTradingEnabled = true,
+                            ticketsEnabled = true
+                        ),
+                        connectionTestOk = true,
+                        batteryUnrestricted = true,
+                        lastOrderError = "example reject — not a DOWN button"
+                    ),
+                    onBack = {},
+                    onOpenData = {}
+                )
+            }
+        }
+        copyLatest(name)
+    }
+
+    private fun scorecardUi(): ScorecardUi {
+        val window = ScorecardMetrics.WindowStats(
+            hits = 12,
+            total = 18,
+            hitRate = 12.0 / 18.0,
+            brier = 0.211,
+            pUpBrier = 0.250,
+            avgEdgeWhenRight = 4.0,
+            avgEdgeWhenWrong = -2.0
+        )
+        return ScorecardUi(
+            metrics = ScorecardMetrics.Snapshot(
+                daily = window,
+                rolling = window,
+                allTime = window,
+                perSeries = emptyList(),
+                sampleCount = 18,
+                openCount = 2,
+                voidCount = 0,
+                calibrationReady = false,
+                temperature = null,
+                calibrationSamples = 18,
+                honest = ScorecardMetrics.Honest(
+                    n = 18,
+                    modelBrier = 0.250,
+                    marketBrier = 0.280,
+                    hitRate = 12.0 / 18.0,
+                    avgEdgeWhenRight = 4.0,
+                    avgEdgeWhenWrong = -2.0,
+                    enoughData = false,
+                    perAsset = emptyList(),
+                    sideBrier = 0.211,
+                    hits = 12
+                )
+            ),
+            allowlist = Allowlist.State(),
+            adapter = OnlineAdapter.State(),
+            guardrails = Guardrails.State()
+        )
+    }
+
+    @After
+    fun flushArtifacts() {
+        listOf(
+            "home_light_actionable", "home_dark_actionable",
+            "home_light_actionable_down", "home_dark_actionable_down",
+            "home_light_all_nobet", "home_dark_all_nobet",
+            "home_light_nokey", "home_dark_nokey",
+            "home_light_disagreement", "home_dark_disagreement",
+            "scorecard_light", "scorecard_dark",
+            "settings_light", "settings_dark",
+            "before_0_3_11_light_actionable", "before_0_3_11_dark_actionable",
+            "before_0_3_11_light_nokey"
+        ).forEach(::copyLatest)
     }
 
     private fun copyLatest(name: String) {

@@ -10,12 +10,8 @@ import org.junit.Test
 
 /**
  * WCAG AA (4.5:1) for every text/background pair the screens actually
- * paint: OddsScreen, MarketCard, hero / AI / Past / BidChart, buy
- * buttons, paper book, tickets, History, Data, Scorecard, Settings.
- *
- * Compose is not rendered on the JVM (no Robolectric / Paparazzi in
- * this module). These pairs are the same [DipPalette] fields those
- * composables read through [com.dirk.kalshiodds.ui.theme.DipTheme.colors].
+ * paint. Compose is not rendered on the JVM for this check — pairs are
+ * the same [DipPalette] fields those composables read.
  */
 class ThemeContrastTest {
 
@@ -28,10 +24,12 @@ class ThemeContrastTest {
         assertAa("light secondary / surface", p.textSecondary, p.surface)
         assertAa("light primary / surfaceAlt", p.textPrimary, p.surfaceAlt)
         assertAa("light secondary / surfaceAlt", p.textSecondary, p.surfaceAlt)
-        assertAa("light onAccentGreen / green", p.onAccentGreen, p.accentGreen)
-        assertAa("light onAccentRed / red", p.onAccentRed, p.accentRed)
+        assertAa("light onUp / up", p.onUp, p.up)
+        assertAa("light onDown / down", p.onDown, p.down)
         assertAa("light onAccentBlue / blue", p.onAccentBlue, p.accentBlue)
         assertAa("light onAccentOrange / orange", p.onAccentOrange, p.accentOrange)
+        assertAa("light UP on upContainer", p.up, p.upContainer)
+        assertAa("light DOWN on downContainer", p.down, p.downContainer)
     }
 
     @Test
@@ -43,10 +41,12 @@ class ThemeContrastTest {
         assertAa("dark secondary / surface", p.textSecondary, p.surface)
         assertAa("dark primary / surfaceAlt", p.textPrimary, p.surfaceAlt)
         assertAa("dark secondary / surfaceAlt", p.textSecondary, p.surfaceAlt)
-        assertAa("dark onAccentGreen / green", p.onAccentGreen, p.accentGreen)
-        assertAa("dark onAccentRed / red", p.onAccentRed, p.accentRed)
+        assertAa("dark onUp / up", p.onUp, p.up)
+        assertAa("dark onDown / down", p.onDown, p.down)
         assertAa("dark onAccentBlue / blue", p.onAccentBlue, p.accentBlue)
         assertAa("dark onAccentOrange / orange", p.onAccentOrange, p.accentOrange)
+        assertAa("dark UP on upContainer", p.up, p.upContainer)
+        assertAa("dark DOWN on downContainer", p.down, p.downContainer)
     }
 
     @Test
@@ -71,24 +71,22 @@ class ThemeContrastTest {
             val p = DipTheme.palette(dark)
             val pairs = listOf(
                 Triple("OddsScreen title", p.textPrimary, p.bg),
-                Triple("OddsScreen header UP/DOWN", p.accentGreen, p.bg),
+                Triple("OddsScreen header UP/DOWN", p.up, p.bg),
                 Triple("MarketCard bid/ask", p.textPrimary, p.surface),
                 Triple("MarketCard AI line", p.accentBlue, p.surface),
-                Triple("Past arrows UP", p.accentGreen, p.bg),
+                Triple("Past arrows UP", p.up, p.bg),
                 Triple("BidChart axis", p.textSecondary, p.surface),
-                Triple("UpDownBuyButtons UP", p.onAccentGreen, p.accentGreen),
-                Triple("UpDownBuyButtons DOWN", p.onAccentRed, p.accentRed),
-                Triple("PaperBookCard", p.accentGreen, p.surface),
+                Triple("UpDownBuyButtons UP", p.onUp, p.up),
+                Triple("UpDownBuyButtons DOWN", p.onDown, p.down),
+                Triple("PaperBookCard", p.textPrimary, p.surface),
                 Triple("TradeTicketCard body", p.textPrimary, p.surface),
                 Triple("History row", p.textPrimary, p.surfaceAlt),
                 Triple("Data stats", p.textPrimary, p.surface),
                 Triple("Scorecard title", p.textPrimary, p.bg),
                 Triple("Settings hint", p.textSecondary, p.bg),
-                Triple("BET UP headline", p.accentGreen, p.surface),
-                Triple("BET DOWN headline", p.accentOrange, p.surface),
-                Triple("NO BET headline", p.textSecondary, p.surface),
-                Triple("LIVE $ button", p.onAccentOrange, p.accentOrange),
-                Triple("PAPER button", p.onAccentGreen, p.accentGreen)
+                Triple("BET UP headline", p.up, p.surface),
+                Triple("BET DOWN headline", p.down, p.surface),
+                Triple("NO BET headline", p.textSecondary, p.surface)
             )
             for ((name, fg, bg) in pairs) {
                 assertAa("${if (dark) "dark" else "light"} $name", fg, bg)

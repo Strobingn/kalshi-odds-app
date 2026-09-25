@@ -55,6 +55,17 @@ object HomeFixtures {
         )
     }
 
+    fun actionableDownBtc() = market(
+        ticker = "KXBTC15M-25SEP181700-50",
+        seriesLabel = "Bitcoin",
+        yesAsk = 0.80,
+        aiYes = 10.0,
+        predicted = "NO",
+        floorStrike = 67_000.0,
+        spotUsd = 66_760.0,
+        spotDelta = -240.0
+    )
+
     fun actionableBtc() = market(
         ticker = "KXBTC15M-25SEP181700-50",
         seriesLabel = "Bitcoin",

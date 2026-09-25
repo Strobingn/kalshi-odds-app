@@ -40,12 +40,12 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
 import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
 import com.dirk.kalshiodds.ui.theme.checklistValueColor
@@ -74,16 +74,8 @@ fun MarketCard(
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
     val call = decision ?: BetCall.decide(market, settings)
-    val headlineColor = when (call.headline) {
-        BetCall.Headline.BET_UP -> colors.accentGreen
-        BetCall.Headline.BET_DOWN -> colors.accentOrange
-        BetCall.Headline.NO_BET -> colors.textSecondary
-    }
-    val alertBorder = when (call.headline) {
-        BetCall.Headline.BET_UP -> colors.accentGreen
-        BetCall.Headline.BET_DOWN -> colors.accentOrange
-        BetCall.Headline.NO_BET -> scheme.outline
-    }
+    val headlineColor = SideColor.of(call.headline, colors)
+    val alertBorder = if (call.isActionable) headlineColor else scheme.outline
     val quotes = MarketQuoteView.of(market)
     Card(
         modifier = modifier
@@ -141,7 +133,8 @@ fun MarketCard(
                     title = "UP",
                     askLabel = quotes.yesAskLabel,
                     bidLabel = quotes.yesBidLabel,
-                    accent = colors.accentGreen,
+                    accent = colors.up,
+                    container = colors.upContainer,
                     highlighted = call.headline == BetCall.Headline.BET_UP,
                     modifier = Modifier.weight(1f)
                 )
@@ -149,7 +142,8 @@ fun MarketCard(
                     title = "DOWN",
                     askLabel = quotes.noAskLabel,
                     bidLabel = quotes.noBidLabel,
-                    accent = colors.accentOrange,
+                    accent = colors.down,
+                    container = colors.downContainer,
                     highlighted = call.headline == BetCall.Headline.BET_DOWN,
                     modifier = Modifier.weight(1f)
                 )
@@ -158,11 +152,7 @@ fun MarketCard(
             OddsSparkline(
                 points = market.oddsHistory,
                 modifier = Modifier.fillMaxWidth(),
-                color = when (call.headline) {
-                    BetCall.Headline.BET_UP -> colors.accentGreen
-                    BetCall.Headline.BET_DOWN -> colors.accentOrange
-                    BetCall.Headline.NO_BET -> colors.textSecondary
-                }
+                color = colors.textSecondary
             )
 
             Text(
@@ -187,7 +177,7 @@ fun MarketCard(
                     Text(
                         text = it,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = headlineColor,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
@@ -198,11 +188,7 @@ fun MarketCard(
                         onClick = buy,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = headlineColor,
-                            contentColor = if (call.headline == BetCall.Headline.BET_DOWN) {
-                                colors.onAccentOrange
-                            } else {
-                                colors.onAccentGreen
-                            }
+                            contentColor = SideColor.on(call.headline, colors)
                         ),
                         modifier = Modifier.fillMaxWidth().height(56.dp)
                     ) {
@@ -296,10 +282,10 @@ private fun DetailsBlock(
                     Text(
                         text = "⚡ Edge",
                         style = MaterialTheme.typography.labelMedium,
-                        color = colors.accentGreen,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier
-                            .background(colors.accentGreen.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
+                            .background(colors.textSecondary.copy(alpha = 0.12f), RoundedCornerShape(8.dp))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     )
                 }
@@ -369,7 +355,6 @@ private fun DetailsBlock(
 
         market.edgePp?.let { edge ->
             val edgeColor = when {
-                abs(edge) >= EDGE_ALERT_THRESHOLD_PP -> colors.accentGreen
                 abs(edge) >= 2.0 -> valueColor
                 else -> labelColor
             }
@@ -499,19 +484,23 @@ private fun PriceTile(
     askLabel: String,
     bidLabel: String,
     accent: Color,
+    container: Color,
     highlighted: Boolean,
     modifier: Modifier = Modifier
 ) {
-    val bg = MaterialTheme.colorScheme.surface
-    val labelColor = checklistLabelColor(bg)
-    val valueColor = Contrast.readable(accent, bg, minRatio = Contrast.AA_LARGE)
+    val labelColor = Contrast.readable(
+        MaterialTheme.colorScheme.onSurfaceVariant,
+        container,
+        minRatio = Contrast.AA_LARGE
+    )
+    val valueColor = Contrast.readable(accent, container, minRatio = Contrast.AA)
     Column(
         modifier
             .then(
                 if (highlighted) Modifier.border(2.dp, accent, RoundedCornerShape(12.dp))
-                else Modifier
+                else Modifier.border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
             )
-            .background(accent.copy(alpha = if (highlighted) 0.16f else 0.08f), RoundedCornerShape(12.dp))
+            .background(container, RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
@@ -597,7 +586,7 @@ private fun StatusChip(status: String?) {
     val colors = DipTheme.colors
     val label = status?.ifBlank { null } ?: "unknown"
     val color = when (label.lowercase(Locale.US)) {
-        "active", "open" -> colors.accentGreen
+        "active", "open" -> colors.textSecondary
         "closed", "determined" -> colors.accentOrange
         else -> colors.textSecondary
     }

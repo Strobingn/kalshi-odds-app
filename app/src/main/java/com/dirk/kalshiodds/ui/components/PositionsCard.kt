@@ -77,8 +77,8 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
     val pnl = pos.unrealizedPnlUsd
     val pnlColor = when {
         pnl == null -> colors.textSecondary
-        pnl > 0 -> colors.accentGreen
-        pnl < 0 -> colors.accentRed
+        pnl > 0 -> colors.textPrimary
+        pnl < 0 -> colors.textPrimary
         else -> colors.accentBlue
     }
     Column(

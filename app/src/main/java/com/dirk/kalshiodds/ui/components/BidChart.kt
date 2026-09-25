@@ -171,22 +171,22 @@ fun BidChart(
                     drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                 }
             }
-            line({ it.upBidCents }, colors.accentGreen)
-            line({ it.downBidCents }, colors.accentRed)
+            line({ it.upBidCents }, colors.up)
+            line({ it.downBidCents }, colors.down)
             if (scrub && scrubIdx != null) {
                 val x = xOf(pick.tMs)
                 drawLine(axisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
-                pick.upBidCents?.let { drawCircle(colors.accentGreen, 4.dp.toPx(), Offset(x, yOf(it))) }
-                pick.downBidCents?.let { drawCircle(colors.accentRed, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.upBidCents?.let { drawCircle(colors.up, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.down, 4.dp.toPx(), Offset(x, yOf(it))) }
             } else {
-                pick.upBidCents?.let { drawCircle(colors.accentGreen, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
-                pick.downBidCents?.let { drawCircle(colors.accentRed, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.upBidCents?.let { drawCircle(colors.up, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.down, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(
                 if (scrubIdx == null && liveUpLabel != null) liveUpLabel else "UP bid ${fmtCents(pick.upBidCents)}",
-                color = colors.accentGreen,
+                color = colors.up,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )
@@ -195,7 +195,7 @@ fun BidChart(
             Spacer(Modifier.weight(1f))
             Text(
                 if (scrubIdx == null && liveDownLabel != null) liveDownLabel else "DOWN bid ${fmtCents(pick.downBidCents)}",
-                color = colors.accentRed,
+                color = colors.down,
                 style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold
             )

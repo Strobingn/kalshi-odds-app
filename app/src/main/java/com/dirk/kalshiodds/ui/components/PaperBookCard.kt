@@ -37,7 +37,7 @@ fun PaperBookCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, colors.accentGreen.copy(alpha = 0.7f), RoundedCornerShape(16.dp))
+            .border(2.dp, colors.border, RoundedCornerShape(16.dp))
             .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -52,7 +52,7 @@ fun PaperBookCard(
                     Text(
                         "PAPER BOOK",
                         style = MaterialTheme.typography.labelMedium,
-                        color = colors.accentGreen,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
@@ -64,7 +64,7 @@ fun PaperBookCard(
                     Text(
                         if (enabled) "Paper trading on" else "Paper trading off",
                         style = MaterialTheme.typography.titleMedium,
-                        color = colors.accentGreen,
+                        color = colors.textPrimary,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -72,11 +72,11 @@ fun PaperBookCard(
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.accentGreen)
+            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)
             PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.accentOrange)
             val pnlColor = when {
-                paper.realizedPnlUsd > 0 -> colors.accentGreen
-                paper.realizedPnlUsd < 0 -> colors.accentRed
+                paper.realizedPnlUsd > 0 -> colors.textPrimary
+                paper.realizedPnlUsd < 0 -> colors.textPrimary
                 else -> colors.accentBlue
             }
             PaperStat("P&L", String.format(Locale.US, "%+.2f", paper.realizedPnlUsd), pnlColor)
@@ -93,7 +93,7 @@ fun PaperBookCard(
             )
         }
         paper.lastMessage?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentGreen, fontWeight = FontWeight.SemiBold)
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
@@ -113,14 +113,14 @@ fun PaperBookCard(
                 color = colors.textSecondary,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(colors.accentGreen.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
+                    .background(colors.textPrimary.copy(alpha = 0.08f), RoundedCornerShape(10.dp))
                     .padding(10.dp)
             )
         } else {
             Text(
                 "Paper ledger (${paper.fills.size})",
                 style = MaterialTheme.typography.labelMedium,
-                color = colors.accentGreen,
+                color = colors.textPrimary,
                 fontWeight = FontWeight.Bold
             )
             paper.fills.take(12).forEach { fill ->
@@ -153,14 +153,14 @@ private fun PaperLedgerRow(
     }
     val color = when (status) {
         "OPEN" -> colors.accentOrange
-        "WIN" -> colors.accentGreen
-        "LOSS" -> colors.accentRed
+        "WIN" -> colors.textPrimary
+        "LOSS" -> colors.textPrimary
         else -> colors.accentBlue
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.accentGreen.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
+            .background(colors.textPrimary.copy(alpha = 0.06f), RoundedCornerShape(10.dp))
             .padding(10.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
