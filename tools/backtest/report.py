@@ -489,7 +489,9 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     parts.append("")
     parts.append(
         "These two rows were added after v1 review. They are **not** in the walk-forward grid "
-        "and must not be read as a discovered edge."
+        "and must not be read as a discovered edge. "
+        "`app_32_50` waits for a later alert in the 32–50¢ band; that is why it has more bets "
+        "than the first-alert 32–50¢ slice in the app-pick breakdown."
     )
     parts.append("")
     parts.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |")
@@ -515,7 +517,7 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     parts.append("")
     parts.append(
         "Dirk's cheap-side filter produced **0 OOS bets** on the shipped hero side "
-        "(that side is usually the 70–80¢ favorite). Tables below are the unfiltered "
+        "(that side is usually the favorite, ~66¢ close-ask). Tables below are the unfiltered "
         "app pick — the only app strategy with enough OOS trades to slice."
     )
     parts.append("")
@@ -625,7 +627,10 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
 
 def run_report(result: dict, repo: Path, artifact: Path, meta: dict | None) -> None:
     charts = write_charts(result, repo / "docs" / "backtest", artifact)
-    write_report(result, repo / "docs" / "backtest-2026-09-25.md", charts, meta)
+    dest = repo / "docs" / "backtest-2026-09-25.md"
+    write_report(result, dest, charts, meta)
+    artifact.mkdir(parents=True, exist_ok=True)
+    (artifact / "backtest-2026-09-25.md").write_text(dest.read_text())
 
 
 if __name__ == "__main__":
