@@ -77,6 +77,19 @@ object HomeFixtures {
         spotDelta = -20.0
     )
 
+    fun disagreementBtc() = actionableBtc().copy(
+        tapeConflict = true,
+        tapeConflictNote = "AI says UP, market + spot say DOWN",
+        modelLeanSide = "YES",
+        primaryHeroSide = "NO",
+        importedModelPp = 58.0,
+        aiYesPercent = 58.0,
+        aiNoPercent = 42.0,
+        edgePp = 38.0,
+        spotVsTargetUsd = -240.0,
+        spotUsd = 66_760.0
+    )
+
     fun noBetSol() = market(
         ticker = "KXSOL15M-25SEP181700-20",
         seriesLabel = "Solana",

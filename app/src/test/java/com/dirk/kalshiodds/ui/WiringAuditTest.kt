@@ -115,7 +115,8 @@ class WiringAuditTest {
         Control("Home scorecard tap", HomeCopy::class.java, "scorecardLine"),
         Control("Home version label", AppVersion::class.java, "getLabel"),
         Control("Home no-key banner", ApiKeyUi::class.java, "showNoKeyBanner"),
-        Control("Home mode chip", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove")
+        Control("Home mode chip", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove"),
+        Control("Home disagreement label", DisagreementLabel::class.java, "of")
     )
 
     @Test

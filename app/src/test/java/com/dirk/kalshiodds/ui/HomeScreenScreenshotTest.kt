@@ -80,6 +80,16 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightDisagreement() = snap("home_light_disagreement", dark = false, HomeFixtures.state(
+        HomeFixtures.disagreementBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
+    ))
+
+    @Test
+    fun darkDisagreement() = snap("home_dark_disagreement", dark = true, HomeFixtures.state(
+        HomeFixtures.disagreementBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
+    ))
+
+    @Test
     fun beforeLightActionable() = snapBefore("before_0_3_11_light_actionable", dark = false, keyed = true)
 
     @Test

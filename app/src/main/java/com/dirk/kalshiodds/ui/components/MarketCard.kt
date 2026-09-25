@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -43,6 +44,7 @@ import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.checklist.PreTradeChecklist
+import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.theme.Contrast
 import com.dirk.kalshiodds.ui.theme.checklistLabelColor
@@ -169,11 +171,16 @@ fun MarketCard(
                 color = headlineColor,
                 fontWeight = FontWeight.Bold
             )
-            Text(
-                text = HomeCopy.modelVsMarket(market, call),
-                style = MaterialTheme.typography.bodyMedium,
-                color = valueColor
-            )
+            val disagreement = DisagreementLabel.of(market)
+            if (disagreement != null && call.headline != BetCall.Headline.NO_BET) {
+                DisagreementWarning(disagreement)
+            } else if (disagreement == null) {
+                Text(
+                    text = HomeCopy.modelVsMarket(market, call),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = valueColor
+                )
+            }
 
             if (call.isActionable) {
                 HomeCopy.allInProfit(call)?.let {
@@ -203,12 +210,16 @@ fun MarketCard(
                     }
                 }
             } else {
-                call.noBetReason?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = colors.textSecondary
-                    )
+                if (disagreement != null && call.headline == BetCall.Headline.NO_BET) {
+                    DisagreementWarning(disagreement)
+                } else if (disagreement == null) {
+                    call.noBetReason?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textSecondary
+                        )
+                    }
                 }
                 val anywaySide = HomeCopy.buyAnywaySide(market, call)
                 val anyway = if (anywaySide == "NO") onBuyNo else onBuyYes
@@ -451,6 +462,34 @@ private fun DetailsBlock(
         }
         Text(market.ticker, style = MaterialTheme.typography.labelMedium, color = labelColor)
         StatusChip(market.status)
+    }
+}
+
+@Composable
+private fun DisagreementWarning(copy: DisagreementLabel.Copy) {
+    val colors = DipTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Icon(
+                Icons.Filled.Warning,
+                contentDescription = copy.title,
+                tint = colors.accentOrange
+            )
+            Text(
+                copy.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Text(
+            copy.detail,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
     }
 }
 
