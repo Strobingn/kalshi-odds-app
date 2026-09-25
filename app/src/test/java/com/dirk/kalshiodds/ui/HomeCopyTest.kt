@@ -28,7 +28,7 @@ class HomeCopyTest {
             predicted = "YES",
             closeMs = nowMs + 372_000L
         )
-        val upCall = BetCall.decide(up, SignalSettings())
+        val upCall = BetCall.decide(up, SignalSettings(), nowMs)
         assertTrue(upCall.isActionable)
         val line = HomeCopy.thisWindowHeadline(upCall, up, nowMs)
         assertTrue(line.startsWith("BET UP  BTC"))
@@ -43,7 +43,7 @@ class HomeCopyTest {
             predicted = "YES",
             closeMs = nowMs + 372_000L
         )
-        val no = BetCall.decide(dead, SignalSettings())
+        val no = BetCall.decide(dead, SignalSettings(), nowMs)
         assertFalse(no.isActionable)
         val noLine = HomeCopy.thisWindowHeadline(no, dead, nowMs)
         assertTrue(noLine.startsWith("NO BET this window"))

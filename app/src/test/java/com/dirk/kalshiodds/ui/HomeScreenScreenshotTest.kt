@@ -15,7 +15,10 @@ class HomeScreenScreenshotTest {
 
     @get:Rule
     val paparazzi = Paparazzi(
-        deviceConfig = DeviceConfig.PIXEL_6.copy(softButtons = false),
+        deviceConfig = DeviceConfig.PIXEL_6.copy(
+            softButtons = false,
+            screenHeight = 4200
+        ),
         theme = "android:Theme.Material3.DayNight.NoActionBar",
         maxPercentDifference = 1.0
     )
@@ -133,16 +136,19 @@ class HomeScreenScreenshotTest {
     }
 
     private fun copyLatest(name: String) {
-        val roots = listOf(
-            File("src/test/snapshots/images"),
-            File("app/src/test/snapshots/images"),
-            File("build/reports/paparazzi"),
-            File("app/build/reports/paparazzi")
-        )
         val destDir = File("/opt/cursor/artifacts").apply { mkdirs() }
-        val hits = roots.filter { it.isDirectory }.flatMap { it.walkTopDown().filter { f -> f.isFile && f.extension == "png" && f.name.contains(name) } }
-        val src = hits.maxByOrNull { it.lastModified() } ?: return
-        src.copyTo(File(destDir, "$name.png"), overwrite = true)
-        if (src.name != "$name.png") src.copyTo(File(destDir, src.name), overwrite = true)
+        val runDirs = listOf(
+            File("build/reports/paparazzi/debug/runs"),
+            File("app/build/reports/paparazzi/debug/runs")
+        ).filter { it.isDirectory }
+        for (dir in runDirs) {
+            dir.listFiles()?.forEach { js ->
+                val text = js.readText()
+                if (!text.contains("\"name\": \"$name\"")) return@forEach
+                val rel = Regex("\"file\": \"([^\"]+)\"").find(text)?.groupValues?.get(1) ?: return@forEach
+                val src = File(dir.parentFile, rel)
+                if (src.isFile) src.copyTo(File(destDir, "$name.png"), overwrite = true)
+            }
+        }
     }
 }

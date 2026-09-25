@@ -135,7 +135,7 @@ fun LegacyHome0311(
 @Composable
 private fun LegacyCard(market: MarketUiModel, settings: SignalSettings, nowMs: Long) {
     val colors = DipTheme.colors
-    val call = BetCall.decide(market, settings)
+    val call = BetCall.decide(market, settings, nowMs)
     val headlineColor = when (call.headline) {
         BetCall.Headline.BET_UP -> colors.accentGreen
         BetCall.Headline.BET_DOWN -> colors.accentOrange
