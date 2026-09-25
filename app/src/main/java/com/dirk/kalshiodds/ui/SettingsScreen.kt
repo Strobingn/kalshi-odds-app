@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.ui
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -12,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,6 +40,7 @@ import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -97,6 +100,140 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
+
+            Section("Kalshi API key (WS + approve-gated orders)")
+            Text(
+                when {
+                    s.hasPrivateKey && s.apiKeyId.isNotBlank() ->
+                        "Status: key saved · ${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)} · Live Approve is real money"
+                    s.hasPrivateKey ->
+                        "Status: PEM saved · add the API Key ID"
+                    s.apiKeyId.isNotBlank() ->
+                        "Status: Key ID only — paste the PEM (Live Approve stays off)"
+                    else ->
+                        "Status: no key — Live Approve is off. Paper still works."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (s.hasPrivateKey) colors.accentGreen else colors.accentOrange,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
+                    "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
+                    "Used for the public ticker / trade / orderbook_delta WebSocket and, after Live Approve, " +
+                    "POST /trade-api/v2/portfolio/events/orders (V2 limit only — never /portfolio/orders).",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedTextField(
+                value = state.keyIdDraft,
+                onValueChange = viewModel::setKeyIdDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("API Key ID") },
+                singleLine = true
+            )
+            OutlinedTextField(
+                value = state.pemDraft,
+                onValueChange = viewModel::setPemDraft,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(if (s.hasPrivateKey) "Replace private key PEM" else "Private key PEM") },
+                minLines = 5,
+                supportingText = {
+                    Text(
+                        if (s.hasPrivateKey) "A private key is stored on this device."
+                        else "-----BEGIN PRIVATE KEY----- / BEGIN RSA PRIVATE KEY-----"
+                    )
+                }
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = viewModel::saveCredentials) {
+                    Text(if (s.hasPrivateKey) "Update key" else "Save key")
+                }
+                OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
+            }
+            if (state.keyIdDraft.isNotBlank() && !s.hasPrivateKey && state.pemDraft.isBlank()) {
+                Text(
+                    com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_KEY_ONLY,
+                    color = colors.accentOrange,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Text(
+                "Test connection calls GET /trade-api/v2/portfolio/balance with the stored key " +
+                    "(https://docs.kalshi.com/api-reference/portfolio/get-balance). Shows the cash " +
+                    "or the exact Kalshi error (401 INCORRECT_API_KEY_SIGNATURE, missing PEM, clock skew).",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Button(
+                onClick = viewModel::testConnection,
+                enabled = !state.connectionTestBusy,
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Text(if (state.connectionTestBusy) "Testing…" else "Test connection")
+            }
+            state.connectionTestMessage?.let {
+                Text(
+                    it,
+                    color = if (it.contains(" ok ", ignoreCase = true) || it.startsWith("GET /portfolio/balance ok")) {
+                        colors.accentGreen
+                    } else {
+                        colors.accentOrange
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Section("Last order error")
+            Text(
+                "Copyable last Live Approve / Test connection failure. Also written to SQLite + results.log on Approve.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            val lastErr = state.lastOrderError
+            Text(
+                lastErr ?: "No order error yet.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (lastErr == null) colors.textSecondary else colors.accentRed,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+                    .padding(12.dp)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedButton(
+                    onClick = { lastErr?.let { clipboard.setText(AnnotatedString(it)) } },
+                    enabled = lastErr != null
+                ) { Text("Copy last error") }
+                OutlinedButton(onClick = viewModel::clearLastOrderError, enabled = lastErr != null) {
+                    Text("Clear")
+                }
+            }
+            Text(
+                "Export writes a passphrase-encrypted file you pick (Downloads or Drive). " +
+                    "Import restores the live key and, if present, the demo key. Never uploaded.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedTextField(
+                value = state.credPassphrase,
+                onValueChange = viewModel::setCredPassphrase,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Keys backup passphrase") },
+                singleLine = true
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = { exportKeys.launch("diphunter-kalshi-key.dhcred") }) {
+                    Text("Export keys backup")
+                }
+                OutlinedButton(onClick = { importKeys.launch(arrayOf("*/*")) }) {
+                    Text("Import keys backup")
+                }
+            }
+            state.credentialMessage?.let {
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
 
             Section("Live signals")
             Text(
@@ -472,7 +609,8 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
                     "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
-                    "card is the ledger — you do not need to dig here to see it.",
+                    "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
+                    "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -549,7 +687,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Section("Legacy win-target (History / paper only)")
             Text(
                 "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
-                    "This leftover \$50 sizer is kept so History restore still reads old snapshots.",
+                    "This leftover \$50 sizer is kept so History restore still reads old snapshots — " +
+                    "it can never resize a LIVE order above \$5 (the final order-build step clips again). " +
+                    "Paper / History may still walk the ask book for a \$50 win target.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -596,101 +736,6 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 valueRange = 0f..200f,
                 steps = 39
             )
-
-            Section("Kalshi API key (WS + approve-gated orders)")
-            if (s.hasPrivateKey) {
-                Text(
-                    "Kalshi key saved (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)})",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.accentGreen,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Text(
-                "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
-                    "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
-                    "Used for the public ticker / trade / orderbook_delta WebSocket and, after Live Approve, " +
-                    "POST /trade-api/v2/portfolio/events/orders (V2 limit only — never /portfolio/orders).",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
-            OutlinedTextField(
-                value = state.keyIdDraft,
-                onValueChange = viewModel::setKeyIdDraft,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("API Key ID") },
-                singleLine = true
-            )
-            OutlinedTextField(
-                value = state.pemDraft,
-                onValueChange = viewModel::setPemDraft,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(if (s.hasPrivateKey) "Replace private key PEM" else "Private key PEM") },
-                minLines = 5,
-                supportingText = {
-                    Text(
-                        if (s.hasPrivateKey) "A private key is stored on this device."
-                        else "-----BEGIN PRIVATE KEY----- / BEGIN RSA PRIVATE KEY-----"
-                    )
-                }
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = viewModel::saveCredentials) {
-                    Text(if (s.hasPrivateKey) "Update key" else "Save key")
-                }
-                OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
-            }
-            OutlinedButton(
-                onClick = viewModel::testConnection,
-                modifier = Modifier.fillMaxWidth().height(48.dp)
-            ) {
-                Text("Test connection (GET /portfolio/balance)")
-            }
-            state.connectionMessage?.let {
-                Text(it, color = if (it.startsWith("GET /portfolio/balance")) colors.accentGreen else colors.accentRed,
-                    style = MaterialTheme.typography.bodyMedium)
-            }
-            Section("Last order error")
-            val lastErr = state.lastOrderError
-            if (lastErr.isNullOrBlank()) {
-                Text(
-                    "No live-order error yet. Failed Live Approve bodies show here verbatim.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary
-                )
-            } else {
-                Text(lastErr, style = MaterialTheme.typography.bodyMedium, color = colors.accentRed)
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(onClick = { clipboard.setText(AnnotatedString(lastErr)) }) {
-                        Text("Copy last error")
-                    }
-                    TextButton(onClick = viewModel::clearLastOrderError) { Text("Clear") }
-                }
-            }
-            Text(
-                "Export writes a passphrase-encrypted file you pick (Downloads or Drive). " +
-                    "Import restores the live key and, if present, the demo key. Never uploaded.",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
-            OutlinedTextField(
-                value = state.credPassphrase,
-                onValueChange = viewModel::setCredPassphrase,
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Keys backup passphrase") },
-                singleLine = true
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { exportKeys.launch("diphunter-kalshi-key.dhcred") }) {
-                    Text("Export keys backup")
-                }
-                OutlinedButton(onClick = { importKeys.launch(arrayOf("*/*")) }) {
-                    Text("Import keys backup")
-                }
-            }
-            state.credentialMessage?.let {
-                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
-            }
 
             Section("Kalshi demo (play money)")
             Text(

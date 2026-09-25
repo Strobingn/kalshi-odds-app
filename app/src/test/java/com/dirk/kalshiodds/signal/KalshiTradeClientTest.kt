@@ -135,6 +135,32 @@ class KalshiTradeClientTest {
     }
 
     @Test
+    fun http401BodyIsShownVerbatim() = runBlocking {
+        val body = """{"error":{"code":"INCORRECT_API_KEY_SIGNATURE","message":"incorrect signature"}}"""
+        val primary = RecordingTradeApi(create = error(401, body))
+        val client = KalshiTradeClient(primary = primary, credentials = { "key" to "pem" })
+        try {
+            client.createLimit(sampleTicket(), "cid-401")
+            fail("expected failure")
+        } catch (e: IllegalStateException) {
+            val msg = e.message ?: ""
+            assertTrue(msg, msg.contains("INCORRECT_API_KEY_SIGNATURE"))
+            assertTrue(msg, msg.contains("incorrect signature"))
+            assertTrue(msg, msg.contains(body) || msg.contains("INCORRECT_API_KEY_SIGNATURE"))
+        }
+    }
+
+    @Test
+    fun testConnectionMissingPemDoesNotHitNetwork() = runBlocking {
+        val api = RecordingTradeApi()
+        val client = KalshiTradeClient(primary = api, credentials = { "key-only" to "" })
+        val result = client.testConnection()
+        assertTrue(result is com.dirk.kalshiodds.data.api.ConnectionTestResult.Fail)
+        val fail = result as com.dirk.kalshiodds.data.api.ConnectionTestResult.Fail
+        assertTrue(fail.reason, fail.reason.contains("Key ID alone") || fail.reason.contains("PEM"))
+    }
+
+    @Test
     fun missingKeysNeverPosts() = runBlocking {
         val api = RecordingTradeApi()
         val client = KalshiTradeClient(primary = api, credentials = { "" to "" })

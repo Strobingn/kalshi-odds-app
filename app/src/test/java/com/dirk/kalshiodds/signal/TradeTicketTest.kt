@@ -3,7 +3,6 @@ package com.dirk.kalshiodds.signal
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
-import com.dirk.kalshiodds.signal.trade.LastOrderError
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
@@ -192,6 +191,33 @@ class TicketSessionTest {
     }
 
     @Test
+    fun lastOrderErrorRedactsPemAndKeepsKalshiBody() {
+        val raw = """401 {"error":{"code":"INCORRECT_API_KEY_SIGNATURE"}} -----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA
+-----END RSA PRIVATE KEY-----"""
+        val cleaned = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore.redact(raw)
+        assertFalse(cleaned.contains("BEGIN RSA"))
+        assertFalse(cleaned.contains("MIIEowIBAAKCAQEA"))
+        assertTrue(cleaned.contains("INCORRECT_API_KEY_SIGNATURE"))
+        assertTrue(cleaned.contains("[redacted"))
+    }
+
+    @Test
+    fun blockedTicketApproveShowsReasonAndDoesNotPlace() = runBlocking {
+        val placed = AtomicInteger(0)
+        val session = session(placed)
+        val blocked = sampleTicket("t1").copy(
+            contracts = 0,
+            blockedReason = "No sellers on YES right now"
+        )
+        session.replaceProposals(listOf(blocked))
+        session.openApprove("t1")
+        val after = session.approve("t1")
+        assertEquals(0, placed.get())
+        assertEquals("No sellers on YES right now", after.lastError)
+    }
+
+    @Test
     fun onlyMatchingApprovePlacesOnce() = runBlocking {
         val placed = AtomicInteger(0)
         val session = session(placed)
@@ -235,7 +261,7 @@ class TicketSessionTest {
         val after = session.approve("b1")
         assertEquals(0, placed.get())
         assertTrue(after.lastError!!.contains("below"))
-        assertEquals(after.lastError, LastOrderError.message)
+        assertTrue(after.lastError!!.contains("$10") || after.lastError!!.contains("10"))
     }
 
     @Test

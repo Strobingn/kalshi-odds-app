@@ -50,6 +50,30 @@ class LiveOrderSizerTest {
         }
     }
 
+    @Test
+    fun leftoverFiftyDollarWinTargetCannotResizeLiveAboveFive() {
+        val fat = TradeTicket(
+            id = "fat",
+            ticker = "KXETH15M-26SEP251230-30",
+            side = "YES",
+            bookSide = "bid",
+            stakeUsd = 50.0,
+            limitPrice = 0.25,
+            yesLimitPrice = 0.25,
+            contracts = 200,
+            estimatedFillUsd = 50.0,
+            maxPayoutUsd = 200.0,
+            estimatedAvgFill = 0.25,
+            winTargetUsd = 50.0,
+            sizingNote = "leftover $50 win-target"
+        )
+        val clip = LiveOrderSizer.enforce(fat)
+        assertTrue(clip.ok)
+        assertEquals(19, clip.count)
+        assertEquals(5.00, clip.allInUsd, 1e-9)
+        assertTrue(clip.allInUsd <= 5.0 + 1e-9)
+    }
+
     private fun assertClip(
         price: Double,
         count: Int,

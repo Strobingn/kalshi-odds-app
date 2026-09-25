@@ -64,10 +64,18 @@ fun TradeTicketsSection(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Cancel leaves no live order.",
+            text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Paper trading ON does not swallow a keyed Live Approve. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
+        if (paperTradingEnabled && credentialsConfigured) {
+            Text(
+                "Paper trading is ON for AI auto-log / the Paper button. Live Approve still sends a real Kalshi order after you confirm.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
         if (!credentialsConfigured) {
             Text(
                 text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
@@ -402,8 +410,8 @@ private fun ApproveTicketDialog(
             Text(
                 when {
                     paperSell -> "PAPER sell this position?"
-                    ticket.isSell -> "LIVE $ Approve this sell?"
-                    else -> "LIVE $ Approve this ticket?"
+                    ticket.isSell -> "REAL MONEY — live sell"
+                    else -> "REAL MONEY"
                 }
             )
         },
@@ -416,35 +424,53 @@ private fun ApproveTicketDialog(
                                 "Count is capped at the paper fill so this cannot flip."
                         paperBuy ->
                             "Simulated fill on the paper book at the current walked ask, including fees. " +
-                                "No Kalshi key needed. This never places a live order. Win-target size above " +
-                                "paper cash is capped, not blocked."
+                                "No Kalshi key needed. This never places a live order."
                         ticket.isSell ->
-                            "Places a real V2 reduce-only GTC limit (POST /portfolio/events/orders) to sell the held side. " +
+                            "REAL MONEY. Places a reduce-only V2 GTC limit (POST /portfolio/events/orders) to sell the held side. " +
                                 "Count is capped at your position so this cannot flip. Not a paper fill."
                         else ->
-                            "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
+                            "REAL MONEY. Places a GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
                                 "and not a paper fill. This tap is the only way a live order is sent. " +
                                 "Dismiss / Back leaves no hanging order. Not financial advice. High variance."
                     },
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (paperSell) FontWeight.Normal else FontWeight.Bold,
+                    color = if (paperSell) colors.textPrimary else colors.accentOrange
                 )
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    String.format(
-                        Locale.US,
-                        "%s %s\n$%.2f stake · %d contracts @ %s\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
-                        ticket.displaySide,
-                        ticket.ticker,
-                        ticket.stakeUsd,
-                        ticket.contracts,
-                        KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice),
-                        ticket.estimatedFillUsd,
-                        ticket.maxPayoutUsd,
-                        ticket.potentialGainUsd
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                if (!paperSell && !paperBuy) {
+                    TicketMetricRow("Contracts", ticket.contracts.toString())
+                    TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+                    TicketMetricRow(
+                        "Fee",
+                        String.format(Locale.US, "$%.2f", ticket.feeUsd ?: 0.0)
+                    )
+                    TicketMetricRow(
+                        "Total cost",
+                        String.format(Locale.US, "$%.2f", ticket.allInUsd ?: ticket.stakeUsd)
+                    )
+                    TicketMetricRow(
+                        "Profit if win",
+                        String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
+                    )
+                } else {
+                    Text(
+                        String.format(
+                            Locale.US,
+                            "%s %s\n$%.2f stake · %d contracts @ %s\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
+                            ticket.displaySide,
+                            ticket.ticker,
+                            ticket.stakeUsd,
+                            ticket.contracts,
+                            KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice),
+                            ticket.estimatedFillUsd,
+                            ticket.maxPayoutUsd,
+                            ticket.potentialGainUsd
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
                 ticket.closeNote?.let {
                     Text(
                         it,

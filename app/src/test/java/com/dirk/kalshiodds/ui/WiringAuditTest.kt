@@ -91,7 +91,9 @@ class WiringAuditTest {
         Control("Light/dark palette", DipTheme::class.java, "palette"),
         Control("Theme contrast pairs", DipTheme::class.java, "contrastPairs"),
         Control("Screen contrast roles", ThemeRoles::class.java, "forPalette"),
-        Control("WCAG contrast helper", Contrast::class.java, "readable")
+        Control("WCAG contrast helper", Contrast::class.java, "readable"),
+        Control("Settings Test connection", SettingsViewModel::class.java, "testConnection"),
+        Control("Settings last order error", SettingsViewModel::class.java, "refreshLastOrderError")
     )
 
     @Test

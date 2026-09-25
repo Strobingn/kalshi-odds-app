@@ -18,16 +18,23 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.10**
+Package: `com.dirk.kalshiodds` · version **0.3.11**
+
+## 0.3.11
+
+- **Paper never blocks Live.** `ApproveRouter.Intent.Live` + live positions (`GET /portfolio/positions`). A paper fill on ticker X cannot stop a live order on X (`LiveApprovePaperIsolationTest`). Keyed Approve is Live even when the Paper toggle is ON (`ApproveRouterTest.paperOnWithKeyIsLiveNotPaper`); the Paper button is the only paper path.
+- **$5 all-in live size** at the final order-build step (`LiveOrderSizer` + `KalshiTradeClient.enforceLiveCap`). Default **Min profit if win $10**. Tickets below that stay disabled. A leftover $50 win-target cannot resize a LIVE order above $5. Sizing tests at 1¢, 5¢, 10¢, 25¢, 31¢, 50¢, 63¢.
+- **Scorecard:** hits and Brier both use 0–1 probability (`ForecastUnits`). 0/5 with Brier 0.003 was a percent-vs-unit mix.
+- **UI:** BET UP / BET DOWN / NO BET from the same ticket decision. PAPER vs LIVE $ on buttons. Live confirm sheet says **REAL MONEY** with count, price, fee, total cost, profit if win. Kalshi API key section at the top of Settings with a status line. No-key banner on the home screen.
+- Reuses 0.3.10 (PR #20): PEM paste, Test connection, Last order error, consistent quotes, keyed Approve → Live, toolbar insets.
 
 ## 0.3.10
 
-- **Paper never blocks Live.** Live Approve uses `ApproveRouter.Intent.Live` and live positions (`GET /portfolio/positions`). A paper fill on ticker X cannot stop a live order on X.
-- **$5 all-in live size** including fees (`LiveOrderSizer`). Default min profit if win is **$10**. Tickets below that stay disabled. The $100-payout long-shot remains its own path.
-- **Settings:** Test connection → `GET /portfolio/balance`. Copyable last-order-error panel (Kalshi 4xx/5xx bodies verbatim).
-- **Crossed book fix:** `withLiveQuote` uses one consistent snapshot (`yes_bid = 1 − no_ask`). Dirk's 55/63 vs 37/50 case becomes 55/63 / 37/45.
-- **Scorecard:** hits and Brier both use 0–1 probability (`ForecastUnits`), not edge-sign vs percent mix.
-- **UI:** each market card leads with BET UP / BET DOWN / NO BET from the same ticket decision. PAPER vs LIVE $ on Approve.
+- **Live Approve after API key:** Paper trading ON (default) no longer reroutes a keyed Live Approve into the paper book. Paper fills stay on the Paper button. Manual Buy is a fee-inclusive $5 (Settings stake) GTC limit — not resized to the $50 win target.
+- **PEM paste:** PKCS#1 `BEGIN RSA PRIVATE KEY` and PKCS#8 `BEGIN PRIVATE KEY` accept CRLF, whitespace, one-line pastes, and missing newlines. Key ID alone is rejected on-screen (`CredentialWriteGuard.REJECT_KEY_ONLY`).
+- **Settings → Test connection:** signed `GET /trade-api/v2/portfolio/balance` shows cash or the exact Kalshi body (401 `INCORRECT_API_KEY_SIGNATURE`, clock skew, missing PEM). Copyable Last order error panel.
+- **4xx/5xx verbatim:** create-order failures keep the Kalshi JSON on the ticket, snackbar, SQLite ticket attempt, and Settings last-error.
+- **Consistent live book:** WS ticker is YES-only; NO bid/ask are derived from the same update (`yes_bid = 1 − no_ask`). Stops the 0.3.9 mixed book (UP 55/63 + DOWN 37/50).
 
 ## 0.3.9
 

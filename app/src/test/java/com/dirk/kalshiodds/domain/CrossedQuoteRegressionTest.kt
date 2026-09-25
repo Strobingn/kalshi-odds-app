@@ -40,7 +40,7 @@ class CrossedQuoteRegressionTest {
             ticker = "KXETH15M-26SEP251230-30",
             series = "KXETH15M",
             yesBid = 0.55,
-            yesAsk = null,
+            yesAsk = 0.63,
             lastPrice = 0.55,
             volume = null,
             openInterest = null,

@@ -1,73 +1,70 @@
 package com.dirk.kalshiodds.signal.config
 
 /**
- * Normalize a pasted Kalshi private key so PKCS#1 (`BEGIN RSA PRIVATE KEY`)
- * and PKCS#8 (`BEGIN PRIVATE KEY`) both parse after CRLF, one-line paste,
- * or extra whitespace.
+ * Kalshi private-key PEM as users actually paste it.
  *
- * Docs: https://docs.kalshi.com/getting_started/api_keys
- * Kalshi RSA PEMs are PKCS#1; `openssl genpkey` PKCS#8 also starts with
- * `BEGIN PRIVATE KEY`.
+ * Official docs (https://docs.kalshi.com/getting_started/api_keys):
+ * - RSA keys Kalshi generates: `-----BEGIN RSA PRIVATE KEY-----` (PKCS#1)
+ * - Ed25519 / `openssl genpkey`: `-----BEGIN PRIVATE KEY-----` (PKCS#8)
+ *
+ * Phone paste often: CRLF, leading/trailing whitespace, the whole PEM as
+ * one line with spaces instead of newlines, or the base64 body without
+ * header lines.
  */
 object PemNormalizer {
 
-    const val PKCS1_BEGIN = "-----BEGIN RSA PRIVATE KEY-----"
-    const val PKCS1_END = "-----END RSA PRIVATE KEY-----"
-    const val PKCS8_BEGIN = "-----BEGIN PRIVATE KEY-----"
-    const val PKCS8_END = "-----END PRIVATE KEY-----"
-
-    const val MISSING_PEM =
-        "Key ID is saved but the private key PEM is missing — paste a BEGIN RSA PRIVATE KEY or BEGIN PRIVATE KEY block"
+    private val PKCS1_BEGIN = "-----BEGIN RSA PRIVATE KEY-----"
+    private val PKCS1_END = "-----END RSA PRIVATE KEY-----"
+    private val PKCS8_BEGIN = "-----BEGIN PRIVATE KEY-----"
+    private val PKCS8_END = "-----END PRIVATE KEY-----"
+    private val PKCS8_ENC_BEGIN = "-----BEGIN ENCRYPTED PRIVATE KEY-----"
+    private val PKCS8_ENC_END = "-----END ENCRYPTED PRIVATE KEY-----"
 
     fun normalize(raw: String): String {
-        var t = raw.replace("\r\n", "\n").replace('\r', '\n').trim()
-        if (t.isEmpty()) return ""
-        t = t.replace(Regex("[ \t]+"), " ")
-        val header = when {
-            t.contains("BEGIN RSA PRIVATE KEY", ignoreCase = true) -> PKCS1_BEGIN
-            t.contains("BEGIN PRIVATE KEY", ignoreCase = true) -> PKCS8_BEGIN
-            else -> null
+        val trimmed = raw.replace("\uFEFF", "").trim()
+        if (trimmed.isEmpty()) return ""
+        val unified = trimmed.replace("\r\n", "\n").replace("\r", "\n")
+        extract(unified, "RSA PRIVATE KEY")?.let { return wrap("RSA PRIVATE KEY", it) }
+        extract(unified, "ENCRYPTED PRIVATE KEY")?.let { return wrap("ENCRYPTED PRIVATE KEY", it) }
+        extract(unified, "PRIVATE KEY")?.let { return wrap("PRIVATE KEY", it) }
+        val body = unwrapBase64(unified)
+        if (body.length >= 64 && body.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }) {
+            return wrap("RSA PRIVATE KEY", body)
         }
-        val footer = when (header) {
-            PKCS1_BEGIN -> PKCS1_END
-            PKCS8_BEGIN -> PKCS8_END
-            else -> null
-        }
-        if (header == null || footer == null) {
-            val compact = t.replace(Regex("\\s+"), "")
-            if (compact.length >= 80 && compact.all { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }) {
-                return wrap(PKCS8_BEGIN, PKCS8_END, compact)
-            }
-            return t
-        }
-        val body = t
-            .replace(Regex("(?i)-----BEGIN [A-Z ]*PRIVATE[A-Z ]*KEY-----"), "")
-            .replace(Regex("(?i)-----END [A-Z ]*PRIVATE[A-Z ]*KEY-----"), "")
-            .replace(Regex("\\s+"), "")
-        if (body.isEmpty()) return "$header\n$footer\n"
-        return wrap(header, footer, body)
+        return unified.trim()
     }
 
     fun looksLikePem(raw: String): Boolean {
         val n = normalize(raw)
-        val hasBegin = n.contains(PKCS1_BEGIN) || n.contains(PKCS8_BEGIN)
-        val hasEnd = n.contains(PKCS1_END) || n.contains(PKCS8_END)
-        val body = n.lineSequence()
-            .filter { !it.startsWith("-----") }
-            .joinToString("")
-            .trim()
-        return hasBegin && hasEnd && body.length >= 80
+        if (n.length < 80) return false
+        val hasBegin = n.contains(PKCS1_BEGIN) || n.contains(PKCS8_BEGIN) || n.contains(PKCS8_ENC_BEGIN)
+        val hasEnd = n.contains(PKCS1_END) || n.contains(PKCS8_END) || n.contains(PKCS8_ENC_END)
+        return hasBegin && hasEnd && n.contains("PRIVATE")
     }
 
     fun onlyKeyIdSaved(keyId: String, pem: String): Boolean =
         keyId.isNotBlank() && !looksLikePem(pem)
 
-    private fun wrap(begin: String, end: String, body: String): String {
+    private fun extract(text: String, type: String): String? {
+        val begin = "-----BEGIN $type-----"
+        val end = "-----END $type-----"
+        val start = text.indexOf(begin, ignoreCase = true)
+        val stop = text.indexOf(end, ignoreCase = true)
+        if (start < 0 || stop < 0 || stop <= start) return null
+        val inner = text.substring(start + begin.length, stop)
+        val body = unwrapBase64(inner)
+        return body.takeIf { it.length >= 64 }
+    }
+
+    private fun unwrapBase64(raw: String): String =
+        raw.filter { !it.isWhitespace() }
+
+    private fun wrap(type: String, body: String): String {
         val lines = body.chunked(64)
         return buildString {
-            append(begin).append('\n')
+            append("-----BEGIN ").append(type).append("-----\n")
             lines.forEach { append(it).append('\n') }
-            append(end).append('\n')
+            append("-----END ").append(type).append("-----")
         }
     }
 }

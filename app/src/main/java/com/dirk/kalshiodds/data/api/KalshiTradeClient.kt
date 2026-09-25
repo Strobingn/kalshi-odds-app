@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.KalshiErrorEnvelope
 import com.dirk.kalshiodds.data.dto.MarketPositionDto
+import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import java.util.Locale
@@ -25,6 +26,10 @@ import retrofit2.Response
  *
  * Limit orders only — never market. Fail-soft with a clear message.
  * PEM / secrets are never written to logs.
+ *
+ * Live buys are clipped at the $5 all-in cap ([LiveOrderSizer.enforce])
+ * immediately before the V2 body is built, so a leftover $50 win-target
+ * cannot resize a live order above $5.
  */
 class KalshiTradeClient(
     private val primary: KalshiTradeApi,
@@ -99,40 +104,88 @@ class KalshiTradeClient(
      * Available cash for Live Approve sizing. Never logs the body.
      * Returns null if the key cannot read `portfolio/balance`.
      */
-    suspend fun getCashUsd(): Double? = getBalanceResult().cashUsd
+    suspend fun getCashUsd(): Double? {
+        return when (val r = testConnection()) {
+            is ConnectionTestResult.Ok -> r.cashUsd
+            is ConnectionTestResult.Fail -> null
+        }
+    }
 
     /**
-     * Settings "Test connection" — GET /portfolio/balance.
-     * Returns the Kalshi body verbatim on 4xx/5xx.
+     * Settings → Test connection. GET /portfolio/balance with the stored key.
+     * https://docs.kalshi.com/api-reference/portfolio/get-balance
+     * https://docs.kalshi.com/getting_started/quick_start_authenticated_requests
      */
-    suspend fun getBalanceResult(): BalanceProbe {
+    suspend fun testConnection(): ConnectionTestResult {
         val (id, pem) = credentials()
         if (id.isBlank() && pem.isBlank()) {
-            return BalanceProbe(false, null, "Add Kalshi API Key ID + PEM in Settings")
+            return ConnectionTestResult.Fail("No Key ID or PEM stored — paste both in Settings")
         }
-        if (com.dirk.kalshiodds.signal.config.PemNormalizer.onlyKeyIdSaved(id, pem)) {
-            return BalanceProbe(false, null, com.dirk.kalshiodds.signal.trade.LiveOrderGates.PEM_ONLY_KEY_ID)
+        if (id.isBlank()) {
+            return ConnectionTestResult.Fail(com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_PEM_ONLY)
+        }
+        if (pem.isBlank() || !com.dirk.kalshiodds.signal.config.PemNormalizer.looksLikePem(pem)) {
+            return ConnectionTestResult.Fail(com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_KEY_ONLY)
+        }
+        val parseErr = runCatching {
+            com.dirk.kalshiodds.signal.ws.KalshiWsAuth.parsePrivateKey(pem)
+        }.exceptionOrNull()
+        if (parseErr != null) {
+            return ConnectionTestResult.Fail(
+                "PEM parse failed — ${parseErr.message ?: "unsupported key"}. " +
+                    "Kalshi RSA keys use BEGIN RSA PRIVATE KEY; openssl/Ed25519 use BEGIN PRIVATE KEY."
+            )
+        }
+        val host = if (useDemo()) {
+            KalshiApi.DEMO_TRADE_BASE_URL
+        } else {
+            KalshiApi.TRADE_BASE_URL
         }
         return try {
             val first = activePrimary().getBalance()
             val chosen = chooseHost(first) { activeFallback()?.getBalance() }
             if (!chosen.isSuccessful) {
-                val raw = chosen.errorBody()?.string().orEmpty()
-                return BalanceProbe(false, null, verbatimHttp(chosen.code(), raw))
+                val raw = chosen.errorBody()?.string()
+                return ConnectionTestResult.Fail(
+                    reason = balanceFailure(chosen.code(), raw),
+                    httpCode = chosen.code(),
+                    rawBody = raw
+                )
             }
             val cash = chosen.body()?.cashUsd()
-            BalanceProbe(
-                ok = cash != null,
+                ?: return ConnectionTestResult.Fail("Balance response had no cash field")
+            ConnectionTestResult.Ok(
                 cashUsd = cash,
-                detail = if (cash != null) {
-                    String.format(java.util.Locale.US, "GET /portfolio/balance · cash $%.2f", cash)
-                } else {
-                    "GET /portfolio/balance succeeded but cash was missing"
-                }
+                host = host,
+                rawSummary = String.format(
+                    java.util.Locale.US,
+                    "GET /portfolio/balance ok · $%.2f available · %s",
+                    cash,
+                    host.trimEnd('/')
+                )
             )
         } catch (e: Exception) {
-            BalanceProbe(false, null, e.message ?: "Balance request failed")
+            ConnectionTestResult.Fail(
+                e.message?.takeIf { !it.contains("PRIVATE", ignoreCase = true) }
+                    ?: "Trade request failed — check network and Settings keys"
+            )
         }
+    }
+
+    private fun balanceFailure(code: Int, rawBody: String?): String {
+        val parsed = parseError(rawBody)
+        val codeName = parsed?.code.orEmpty()
+        val hint = when {
+            code == 401 && codeName.equals("INCORRECT_API_KEY_SIGNATURE", ignoreCase = true) ->
+                "401 INCORRECT_API_KEY_SIGNATURE — Key ID / PEM mismatch, or phone clock skew (timestamp must be Unix ms). See https://docs.kalshi.com/getting_started/api_keys"
+            code == 401 ->
+                "401 Unauthorized — check Key ID + PEM, signing path /trade-api/v2/portfolio/balance, and that the phone clock is correct"
+            else -> "HTTP $code"
+        }
+        val detail = listOfNotNull(parsed?.code, parsed?.message, parsed?.details)
+            .joinToString(" · ")
+            .ifBlank { rawBody?.trim().orEmpty() }
+        return if (detail.isNotBlank()) "$hint — $detail" else hint
     }
 
     suspend fun listMarketPositions(): List<MarketPositionDto> {
@@ -178,17 +231,17 @@ class KalshiTradeClient(
 
     private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
         if (ticket.isSell) return ticket
-        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.enforce(ticket)
+        val clip = LiveOrderSizer.enforce(ticket)
         if (!clip.ok) {
             throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
         }
-        if (clip.allInUsd > com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
+        if (clip.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
             throw IllegalStateException(
                 String.format(
-                    java.util.Locale.US,
+                    Locale.US,
                     "Live order all-in $%.2f exceeds the $%.2f cap",
                     clip.allInUsd,
-                    com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+                    LiveOrderSizer.LIVE_ALL_IN_CAP_USD
                 )
             )
         }
@@ -213,43 +266,30 @@ class KalshiTradeClient(
 
     private fun ensureKeys() {
         val (id, pem) = credentials()
-        if (com.dirk.kalshiodds.signal.config.PemNormalizer.onlyKeyIdSaved(id, pem)) {
-            throw IllegalStateException(com.dirk.kalshiodds.signal.trade.LiveOrderGates.PEM_ONLY_KEY_ID)
-        }
         if (id.isBlank() || pem.isBlank()) {
             throw IllegalStateException("Kalshi API key missing — add Key ID + PEM in Settings")
-        }
-        if (!com.dirk.kalshiodds.signal.config.PemNormalizer.looksLikePem(pem)) {
-            throw IllegalStateException(com.dirk.kalshiodds.signal.trade.LiveOrderGates.PEM_ONLY_KEY_ID)
         }
     }
 
     private fun httpFailure(code: Int, rawBody: String?): IllegalStateException {
-        warn("trade API $code")
-        return IllegalStateException(verbatimHttp(code, rawBody))
-    }
-
-    companion object {
-        private const val TAG = "DipHunterTrade"
-        private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
-
-        /** Documented V2 write path — never POST `/portfolio/orders`. */
-        const val V2_CREATE_PATH = "/trade-api/v2/portfolio/events/orders"
-        const val LEGACY_CREATE_PATH = "/trade-api/v2/portfolio/orders"
-
-        fun verbatimHttp(code: Int, rawBody: String?): String {
-            val body = rawBody
-                ?.replace(Regex("(?i)-----BEGIN[\\s\\S]+?-----END[\\s\\S]+?-----"), "[redacted PEM]")
-                ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
-                ?.trim()
-                .orEmpty()
-            val hint = when {
-                code == 404 -> " — not falling back to deprecated v1 /portfolio/orders"
-                code == 410 -> " — this build submits V2 POST /portfolio/events/orders only"
-                else -> ""
-            }
-            return if (body.isBlank()) "HTTP $code$hint" else "HTTP $code\n$body$hint"
+        val parsed = parseError(rawBody)
+        val deprecated = code == 410 ||
+            parsed?.code.equals("deprecated_v1_order_endpoint", ignoreCase = true) ||
+            parsed?.message?.contains("switch to the V2", ignoreCase = true) == true
+        val hint = when {
+            deprecated ->
+                "Kalshi retired the v1 order API (HTTP $code). This build submits V2 POST /portfolio/events/orders only — tap Live Approve again."
+            code == 401 -> "Unauthorized — check Key ID + PEM in Settings"
+            code == 400 -> "Rejected — check price / size / market status"
+            code == 403 -> "Forbidden — this API key may not trade"
+            code == 404 -> "V2 create-order not found on Kalshi hosts — not falling back to deprecated v1 /portfolio/orders"
+            code == 409 -> "Duplicate client_order_id — not re-sent"
+            code == 429 -> "Rate limited — wait and Approve again"
+            code == 503 -> "Kalshi unavailable — try again shortly"
+            else -> "HTTP $code"
         }
+        warn("trade API $code")
+        return IllegalStateException(verbatimHttp(code, rawBody, hint))
     }
 
     private fun parseError(rawBody: String?): com.dirk.kalshiodds.data.dto.KalshiErrorBody? {
@@ -281,10 +321,30 @@ class KalshiTradeClient(
 
     private fun String?.toDoubleOrNullSafe(): Double? =
         this?.trim()?.takeIf { it.isNotEmpty() }?.toDoubleOrNull()
-}
 
-data class BalanceProbe(
-    val ok: Boolean,
-    val cashUsd: Double?,
-    val detail: String
-)
+    companion object {
+        private const val TAG = "DipHunterTrade"
+        private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+        /** Documented V2 write path — never POST `/portfolio/orders`. */
+        const val V2_CREATE_PATH = "/trade-api/v2/portfolio/events/orders"
+        const val LEGACY_CREATE_PATH = "/trade-api/v2/portfolio/orders"
+
+        fun verbatimHttp(code: Int, rawBody: String?, hint: String? = null): String {
+            val body = rawBody
+                ?.replace(Regex("(?is)-----BEGIN[^-]*PRIVATE[^-]*-----.*?-----END[^-]*PRIVATE[^-]*-----"), "[redacted-pem]")
+                ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
+                ?.trim()
+                .orEmpty()
+            val prefix = hint?.takeIf { it.isNotBlank() } ?: "HTTP $code"
+            val extra = when {
+                code == 404 && prefix.contains("not falling back").not() ->
+                    " — not falling back to deprecated v1 /portfolio/orders"
+                code == 410 && prefix.contains("V2").not() ->
+                    " — this build submits V2 POST /portfolio/events/orders only"
+                else -> ""
+            }
+            return if (body.isBlank()) "$prefix$extra" else "$prefix\n$body$extra"
+        }
+    }
+}

@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
@@ -203,6 +204,37 @@ class KalshiFeeAndWinTargetTest {
         assertEquals(TicketKind.MANUAL, manual!!.kind)
         assertEquals(10.0, manual.winTargetUsd!!, 1e-9)
         assertTrue((manual.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
+        assertTrue(manual.stakeUsd <= 5.0 + 1e-9)
+    }
+
+    @Test
+    fun screenshotSixtyThreeCentFiveDollarManualStaysUnderFiveAndIsBelowMinProfit() {
+        val market = sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 55.0).copy(
+            ticker = "KXETH15M-26SEP251230-30",
+            predictedSide = "YES",
+            yesBid = 0.55,
+            noBid = 0.37
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(
+                ticketStakeUsd = 5.0,
+                winTargetEnabled = true,
+                winTargetUsd = 50.0,
+                minProfitIfWinUsd = 10.0
+            ),
+            alertsPaused = false
+        )
+        val ticket = TicketBuilder.proposeManual(market, "YES", ctx)!!
+        assertEquals(TicketKind.MANUAL, ticket.kind)
+        assertEquals(7, ticket.contracts)
+        assertTrue(ticket.stakeUsd <= 5.0 + 1e-9)
+        assertEquals(4.53, ticket.stakeUsd, 1e-9)
+        assertEquals(2.47, ticket.profitIfWinUsd!!, 1e-9)
+        assertTrue(ticket.belowMinProfit)
+        assertFalse(ticket.canApprove)
+        val enforced = LiveOrderSizer.enforce(ticket.copy(blockedReason = null, contracts = 7))
+        assertTrue(enforced.ok)
+        assertTrue(enforced.allInUsd <= 5.0 + 1e-9)
     }
 
     @Test
