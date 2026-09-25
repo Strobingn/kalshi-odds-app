@@ -535,7 +535,7 @@ internal fun ApproveTicketDialog(
                         "Profit if win",
                         String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
                     )
-                } else {
+                } else if (paperSell || paperBuy) {
                     Text(
                         String.format(
                             Locale.US,
@@ -562,7 +562,7 @@ internal fun ApproveTicketDialog(
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
-                if (ticket.isSell) {
+                if (ticket.isSell && ticket.blockedReason == null) {
                     OutlinedTextField(
                         value = countText,
                         onValueChange = { countText = it.filter { ch -> ch.isDigit() }.take(6) },
