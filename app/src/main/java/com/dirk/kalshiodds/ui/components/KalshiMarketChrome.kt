@@ -19,21 +19,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.domain.MarketUiModel
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.AccentRed
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
 fun TargetNowLine(market: MarketUiModel, modifier: Modifier = Modifier) {
+    val colors = DipTheme.colors
     val line = KalshiQuoteDisplay.targetNowLine(market.floorStrike, market.spotUsd) ?: return
     val up = (market.spotVsTargetUsd ?: 0.0) >= 0.0
     Text(
         line,
         style = MaterialTheme.typography.bodyMedium,
-        color = if (up) AccentGreen else AccentRed,
+        color = if (up) colors.accentGreen else colors.accentRed,
         fontWeight = FontWeight.Bold,
         modifier = modifier.fillMaxWidth()
     )
@@ -41,21 +38,23 @@ fun TargetNowLine(market: MarketUiModel, modifier: Modifier = Modifier) {
 
 @Composable
 fun TapeConflictBanner(market: MarketUiModel, modifier: Modifier = Modifier) {
+    val colors = DipTheme.colors
     if (!market.tapeConflict || market.tapeConflictNote.isNullOrBlank()) return
     Text(
         text = market.tapeConflictNote.orEmpty(),
         style = MaterialTheme.typography.bodyMedium,
-        color = AccentOrange,
+        color = colors.accentOrange,
         fontWeight = FontWeight.Bold,
         modifier = modifier
             .fillMaxWidth()
-            .background(AccentOrange.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
+            .background(colors.accentOrange.copy(alpha = 0.16f), RoundedCornerShape(10.dp))
             .padding(10.dp)
     )
 }
 
 @Composable
 fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
+    val colors = DipTheme.colors
     val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
     Row(
         modifier.fillMaxWidth(),
@@ -66,14 +65,14 @@ fun MarketAskHero(market: MarketUiModel, modifier: Modifier = Modifier) {
             title = "UP",
             price = quotes.upHero,
             multiple = quotes.upMultiple,
-            color = AccentGreen,
+            color = colors.accentGreen,
             emphasized = market.primaryHeroSide != "NO"
         )
         AskHeroSide(
             title = "DOWN",
             price = quotes.downHero,
             multiple = quotes.downMultiple,
-            color = AccentRed,
+            color = colors.accentRed,
             emphasized = market.primaryHeroSide == "NO"
         )
     }
@@ -87,11 +86,12 @@ private fun AskHeroSide(
     color: androidx.compose.ui.graphics.Color,
     emphasized: Boolean
 ) {
+    val colors = DipTheme.colors
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         Text(
             title,
             style = MaterialTheme.typography.labelMedium,
-            color = if (emphasized) color else TextSecondary,
+            color = if (emphasized) color else colors.textSecondary,
             fontWeight = FontWeight.Bold
         )
         Text(
@@ -104,7 +104,7 @@ private fun AskHeroSide(
         Text(
             multiple?.let { String.format(Locale.US, "%.2fx", it) } ?: "",
             style = MaterialTheme.typography.labelMedium,
-            color = if (emphasized) color else TextSecondary,
+            color = if (emphasized) color else colors.textSecondary,
             fontWeight = FontWeight.SemiBold
         )
     }
@@ -112,12 +112,13 @@ private fun AskHeroSide(
 
 @Composable
 fun AiFairLabel(market: MarketUiModel, modifier: Modifier = Modifier) {
+    val colors = DipTheme.colors
     val ai = KalshiQuoteDisplay.aiLabel(
         (market.importedModelPp ?: market.aiYesPercent)?.div(100.0)
     ) ?: return
     Text(
         ai + (market.digitalFairPp?.let { String.format(Locale.US, "  ·  Fair %.0f¢", it) } ?: ""),
-        color = AccentBlue,
+        color = colors.accentBlue,
         style = MaterialTheme.typography.bodyMedium,
         fontWeight = FontWeight.SemiBold,
         modifier = modifier
@@ -126,17 +127,18 @@ fun AiFairLabel(market: MarketUiModel, modifier: Modifier = Modifier) {
 
 @Composable
 fun PastSettlementsRow(results: List<Boolean>, modifier: Modifier = Modifier) {
+    val colors = DipTheme.colors
     if (results.isEmpty()) return
     Row(
         modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text("Past", color = TextSecondary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
+        Text("Past", color = colors.textSecondary, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         results.take(8).forEach { yes ->
             Text(
                 if (yes) "▲" else "▼",
-                color = if (yes) AccentGreen else AccentRed,
+                color = if (yes) colors.accentGreen else colors.accentRed,
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp
             )
@@ -151,6 +153,7 @@ fun UpDownBuyButtons(
     onBuyNo: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val colors = DipTheme.colors
     val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
     val tapeUp = market.primaryHeroSide == "YES" ||
         (market.primaryHeroSide == null && (quotes.yesAsk ?: 0.5) >= 0.5)
@@ -162,13 +165,17 @@ fun UpDownBuyButtons(
             onClick = onBuyYes,
             modifier = Modifier.weight(1f).height(52.dp),
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = if (tapeUp) AccentGreen else AccentGreen.copy(alpha = 0.75f)
+                containerColor = if (tapeUp) colors.accentGreen else colors.accentGreen.copy(alpha = 0.75f),
+                contentColor = colors.onAccentGreen
             )
         ) { Text(quotes.upButton) }
         Button(
             onClick = onBuyNo,
             modifier = Modifier.weight(1f).height(52.dp),
-            colors = androidx.compose.material3.ButtonDefaults.buttonColors(containerColor = AccentRed)
+            colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                containerColor = colors.accentRed,
+                contentColor = colors.onAccentRed
+            )
         ) { Text(quotes.downButton) }
     }
 }

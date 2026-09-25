@@ -28,6 +28,7 @@ import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -48,14 +49,10 @@ import com.dirk.kalshiodds.data.local.history.HistoryBet
 import com.dirk.kalshiodds.data.local.history.HistorySession
 import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.domain.MarketUiModel
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentRed
-import com.dirk.kalshiodds.ui.theme.SurfaceAlt
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,10 +61,12 @@ fun HistoryScreen(
     onBack: () -> Unit,
     onOpenMarket: (MarketUiModel) -> Unit
 ) {
+    val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }
     val tabs = listOf("Bets", "Signals", "Sessions", "Settings", "Markets")
     Scaffold(
+        containerColor = colors.bg,
         topBar = {
             TopAppBar(
                 title = { Text("History") },
@@ -75,7 +74,12 @@ fun HistoryScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
-                }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.accentBlue
+                )
             )
         }
     ) { pad ->
@@ -89,7 +93,7 @@ fun HistoryScreen(
                 Text(
                     it,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
                 )
             }
@@ -143,7 +147,7 @@ fun HistoryScreen(
                     item {
                         Text(
                             "Nothing stored yet — Approve, paper fills, and backfill land here.",
-                            color = TextSecondary
+                            color = colors.textSecondary
                         )
                     }
                 }
@@ -201,10 +205,11 @@ private fun ChipRow(content: @Composable RowScope.() -> Unit) {
 
 @Composable
 private fun TotalsCard(t: HistoryAssembler.Totals) {
+    val colors = DipTheme.colors
     Column(
         Modifier
             .fillMaxWidth()
-            .background(SurfaceAlt, RoundedCornerShape(12.dp))
+            .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
             .padding(12.dp)
     ) {
         Text(
@@ -215,16 +220,17 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
             ),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.SemiBold,
-            color = if (t.pnlUsd >= 0) AccentGreen else AccentRed
+            color = if (t.pnlUsd >= 0) colors.accentGreen else colors.accentRed
         )
     }
 }
 
 @Composable
 private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
-    val color = if ((points.lastOrNull()?.second ?: 0.0) >= 0) AccentGreen else AccentRed
+    val colors = DipTheme.colors
+    val color = if ((points.lastOrNull()?.second ?: 0.0) >= 0) colors.accentGreen else colors.accentRed
     Column(Modifier.fillMaxWidth()) {
-        Text("Cumulative P&L", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text("Cumulative P&L", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Canvas(Modifier.fillMaxWidth().height(96.dp).padding(top = 4.dp)) {
             val ys = points.map { it.second }
             val minY = (ys.minOrNull() ?: 0.0) - 1.0
@@ -245,26 +251,27 @@ private fun CumulativePnlChart(points: List<Pair<Long, Double>>) {
 
 @Composable
 private fun BetRow(b: HistoryBet) {
+    val colors = DipTheme.colors
     val resultColor = when (b.result.lowercase()) {
-        "won" -> AccentGreen
-        "lost" -> AccentRed
-        else -> TextSecondary
+        "won" -> colors.accentGreen
+        "lost" -> colors.accentRed
+        else -> colors.textSecondary
     }
     Column(
         Modifier
             .fillMaxWidth()
-            .background(SurfaceAlt, RoundedCornerShape(10.dp))
+            .background(colors.surfaceAlt, RoundedCornerShape(10.dp))
             .padding(10.dp)
     ) {
         Text(
             "${historyTime(b.createdAtMs)}  ${b.ticker}  ${b.side.uppercase()}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = AccentGreen
+            color = colors.accentGreen
         )
         Text(
             buildString {
-                if (b.contracts > 0) append("${b.contracts} ct @ ${String.format(Locale.US, "%.0f¢", b.price * 100)} · ")
+                if (b.contracts > 0) append("${b.contracts} ct @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(b.price)} · ")
                 append(String.format(Locale.US, "stake $%.2f", b.stakeUsd))
                 append(" · ${b.source}")
                 b.winTargetUsd?.let { append(String.format(Locale.US, " · win-target $%.0f", it)) }
@@ -279,6 +286,7 @@ private fun BetRow(b: HistoryBet) {
 
 @Composable
 private fun SignalRow(s: HistoryAssembler.SignalLine) {
+    val colors = DipTheme.colors
     Text(
         String.format(
             Locale.US,
@@ -292,13 +300,14 @@ private fun SignalRow(s: HistoryAssembler.SignalLine) {
             s.settled?.let { "  settled ${it.uppercase()}" } ?: "  unsettled"
         ),
         style = MaterialTheme.typography.bodyMedium,
-        color = AccentBlue,
+        color = colors.accentBlue,
         modifier = Modifier.fillMaxWidth()
     )
 }
 
 @Composable
 private fun SessionRow(s: HistorySession) {
+    val colors = DipTheme.colors
     Text(
         String.format(
             Locale.US,
@@ -311,18 +320,19 @@ private fun SessionRow(s: HistorySession) {
             s.pnlUsd?.let { String.format(Locale.US, "P&L $%.2f", it) } ?: ""
         ),
         style = MaterialTheme.typography.bodyMedium,
-        color = TextSecondary,
+        color = colors.textSecondary,
         modifier = Modifier.fillMaxWidth()
     )
 }
 
 @Composable
 private fun SettingsRow(c: SettingsChange, viewModel: HistoryViewModel) {
+    val colors = DipTheme.colors
     Column(Modifier.fillMaxWidth()) {
         Text(
             "${historyTime(c.createdAtMs)}  ${c.key}: ${c.oldValue} → ${c.newValue}",
             style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary
+            color = colors.textSecondary
         )
         if (c.snapshotJson != null) {
             OutlinedButton(
@@ -335,24 +345,25 @@ private fun SettingsRow(c: SettingsChange, viewModel: HistoryViewModel) {
 
 @Composable
 private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
+    val colors = DipTheme.colors
     Row(
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onOpen)
-            .background(SurfaceAlt, RoundedCornerShape(10.dp))
+            .background(colors.surfaceAlt, RoundedCornerShape(10.dp))
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(Modifier.weight(1f)) {
-            Text(row.ticker, fontWeight = FontWeight.Bold, color = AccentGreen)
+            Text(row.ticker, fontWeight = FontWeight.Bold, color = colors.accentGreen)
             Text(
                 "${row.closeMs?.let { historyTime(it) } ?: "—"}  ${row.result.uppercase()}  " +
                     (row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: ""),
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
         }
-        Text("Chart", color = AccentBlue, fontWeight = FontWeight.Bold)
+        Text("Chart", color = colors.accentBlue, fontWeight = FontWeight.Bold)
     }
 }
 

@@ -9,6 +9,9 @@ import com.dirk.kalshiodds.signal.paper.PaperApprove
 import com.dirk.kalshiodds.signal.trade.ApproveRouter
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.ui.theme.Contrast
+import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.ThemeRoles
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -49,6 +52,12 @@ class WiringAuditTest {
         Control("Supabase restore", DataViewModel::class.java, "restoreSupabase"),
         Control("Credential backup", DataViewModel::class.java, "backupCredentials"),
         Control("Credential restore", DataViewModel::class.java, "restoreCredentials"),
+        Control("Settings export keys", SettingsViewModel::class.java, "backupCredentials"),
+        Control("Settings import keys", SettingsViewModel::class.java, "restoreCredentials"),
+        Control("Settings backup passphrase", SettingsViewModel::class.java, "setCredPassphrase"),
+        Control("Credential write guard", com.dirk.kalshiodds.signal.config.CredentialWriteGuard::class.java, "rejectReason"),
+        Control("Price parse dollars", com.dirk.kalshiodds.domain.KalshiPrice::class.java, "parseDollars"),
+        Control("Price format cents", KalshiQuoteDisplay::class.java, "formatPriceCents"),
         Control("Import model JSON", DataViewModel::class.java, "importModelUri"),
         Control("Get latest model (Data)", DataViewModel::class.java, "getLatestModel"),
         Control("Get latest model (Scorecard)", ScorecardViewModel::class.java, "getLatestModel"),
@@ -69,14 +78,21 @@ class WiringAuditTest {
         Control("Kalshi order-level fee", KalshiFee::class.java, "total"),
         Control("Kalshi payout multiple", KalshiFee::class.java, "payoutMultiple"),
         Control("Kalshi amortized fee", KalshiFee::class.java, "perContract"),
-        Control("Chart seed after restart", OddsViewModel::class.java, "seedChartWindows")
+        Control("Chart seed after restart", OddsViewModel::class.java, "seedChartWindows"),
+        Control("Light/dark palette", DipTheme::class.java, "palette"),
+        Control("Theme contrast pairs", DipTheme::class.java, "contrastPairs"),
+        Control("Screen contrast roles", ThemeRoles::class.java, "forPalette"),
+        Control("WCAG contrast helper", Contrast::class.java, "readable")
     )
 
     @Test
     fun everyAuditedControlResolvesToARealMethod() {
         val missing = catalog.mapNotNull { row ->
-            val found = row.owner.methods.any { it.name == row.method } ||
-                row.owner.declaredMethods.any { it.name == row.method }
+            val found = (row.owner.methods + row.owner.declaredMethods).any {
+                it.name == row.method ||
+                    it.name.startsWith("${row.method}\$") ||
+                    it.name.startsWith("${row.method}-")
+            }
             if (found) null else "${row.name} → ${row.owner.simpleName}.${row.method}"
         }
         assertTrue("Unwired controls: $missing", missing.isEmpty())
@@ -97,5 +113,14 @@ class WiringAuditTest {
         assertNotNull(KalshiFee::payoutMultiple)
         assertNotNull(KalshiFee::perContract)
         assertNotNull(AsyncResultsWriter::enqueueChartTick)
+        assertNotNull(DipTheme::palette)
+        assertNotNull(DipTheme::contrastPairs)
+        assertNotNull(ThemeRoles::forPalette)
+        assertNotNull(Contrast::readable)
+        assertNotNull(com.dirk.kalshiodds.signal.config.CredentialWriteGuard::rejectReason)
+        assertNotNull(com.dirk.kalshiodds.domain.KalshiPrice::parseDollars)
+        assertNotNull(KalshiQuoteDisplay::formatPriceCents)
+        assertNotNull(SettingsViewModel::backupCredentials)
+        assertNotNull(SettingsViewModel::restoreCredentials)
     }
 }

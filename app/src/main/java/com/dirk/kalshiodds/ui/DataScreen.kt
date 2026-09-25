@@ -36,17 +36,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.Bg
-import com.dirk.kalshiodds.ui.theme.Surface
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit) {
+    val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
     val importFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -62,7 +58,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
     ) { uri: Uri? -> uri?.let(viewModel::restoreCredentials) }
 
     Scaffold(
-        containerColor = Bg,
+        containerColor = colors.bg,
         topBar = {
             TopAppBar(
                 title = { Text("Data") },
@@ -72,9 +68,9 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Bg,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = AccentBlue
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.accentBlue
                 )
             )
         }
@@ -90,7 +86,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Import history, backfill settled 15m windows, and load an offline-trained model. Nothing here places a Kalshi order.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
 
             StatsCard(state)
@@ -104,7 +100,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Sideloaded debug APKs used to be signed by a different machine each time, so Android required uninstall — which wiped the Keystore-encrypted key. Future 0.3.7+ debug APKs share one cert so updates keep your data. Still: back up the key with a passphrase and keep the file in Drive/Downloads.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             OutlinedTextField(
                 value = state.credPassphrase,
@@ -126,7 +122,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Pick a DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Button(
                 onClick = { importFile.launch(arrayOf("text/*", "application/json", "text/csv", "*/*")) },
@@ -137,7 +133,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                     "${s.imported} imported · ${s.skipped} skipped · ${s.dateRangeLabel}\n" +
                         "snapshots ${s.snapshots} · alerts ${s.alerts} · fills ${s.fills} · tickets ${s.tickets}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen
+                    color = colors.accentGreen
                 )
             }
 
@@ -145,12 +141,12 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "WorkManager job: settled KXBTC15M / KXETH15M / KXSOL15M + 1-minute candlesticks (live then historical), then matching Coinbase spot candles. Rate-limited, resumable, cancellable.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Text(
                 "Lookback  ${state.days} days",
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -174,7 +170,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             state.backfillMsg?.let {
                 Text(
                     if (state.backfillRunning) "Running · $it · ${state.processed} windows" else it,
-                    color = if (state.backfillRunning) AccentOrange else AccentBlue,
+                    color = if (state.backfillRunning) colors.accentOrange else colors.accentBlue,
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
@@ -183,7 +179,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Optional mirror. Paste the project URL and the publishable/anon key — never a service_role key. Reads diphunter_snapshots / diphunter_results / diphunter_settled.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             OutlinedTextField(
                 value = state.supabaseUrlDraft,
@@ -216,10 +212,10 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Live sync of History / bets / signals / settings (never the Kalshi key).",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             state.syncLine?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = AccentBlue)
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentBlue)
             }
             OutlinedButton(
                 onClick = viewModel::syncNow,
@@ -231,12 +227,12 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             Text(
                 "Load the JSON weights from `python3 ml/train_edge.py`. On-device inference is this file plus the existing light online learner — no extra heavy nets.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Text(
                 "Weekly GitHub Action publishes edge-model-latest. Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Button(
                 onClick = viewModel::getLatestModel,
@@ -263,11 +259,11 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Roll back previous model") }
             state.modelNote?.let {
-                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
             state.message?.let {
-                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -276,21 +272,22 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
 @Composable
 private fun StatsCard(state: DataUiState) {
+    val colors = DipTheme.colors
     val s = state.stats
     Column(
         Modifier
             .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text("DATA STATS", style = MaterialTheme.typography.labelMedium, color = TextSecondary, fontWeight = FontWeight.Bold)
+        Text("DATA STATS", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
         Text(
             "${s.settledCount} settled windows",
             fontSize = 26.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
         )
-        Text(s.dateRangeLabel, style = MaterialTheme.typography.bodyMedium, color = TextSecondary)
+        Text(s.dateRangeLabel, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
         Text(
             String.format(
@@ -299,13 +296,13 @@ private fun StatsCard(state: DataUiState) {
                 s.btc, s.eth, s.sol, s.yesSettled, s.noSettled
             ),
             style = MaterialTheme.typography.bodyMedium,
-            color = AccentGreen,
+            color = colors.accentGreen,
             fontWeight = FontWeight.SemiBold
         )
         Text(
             "Price path ${s.pathPoints} · spot candles ${s.spotCandles} · fills ${s.fills}",
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
+            color = colors.textSecondary,
             modifier = Modifier.padding(top = 4.dp)
         )
     }

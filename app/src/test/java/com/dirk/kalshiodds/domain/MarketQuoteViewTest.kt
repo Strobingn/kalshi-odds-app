@@ -2,6 +2,8 @@ package com.dirk.kalshiodds.domain
 
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -133,5 +135,63 @@ class MarketQuoteViewTest {
         assertEquals("100¢", KalshiQuoteDisplay.formatBid(1.0))
         assertEquals("—", KalshiQuoteDisplay.formatBid(0.0))
         assertEquals("71¢", KalshiQuoteDisplay.formatBid(0.71))
+    }
+
+    @Test
+    fun handComputedMultiplesAtFiveDollarStakeMatchDisplay() {
+        val cases = listOf(
+            Triple(0.001, "0.1¢", 5000.0 / 5.35),
+            Triple(0.01, "1¢", 500.0 / 5.35),
+            Triple(0.015, "1.5¢", 333.0 / 5.34),
+            Triple(0.018, "1.8¢", 277.0 / 5.33),
+            Triple(0.099, "9.9¢", 50.0 / 5.27),
+            Triple(0.10, "10¢", 50.0 / 5.32),
+            Triple(0.105, "10.5¢", 47.0 / 5.25),
+            Triple(0.25, "25¢", 20.0 / 5.27),
+            Triple(0.50, "50¢", 10.0 / 5.18),
+            Triple(0.905, "90.5¢", 5.0 / 4.56),
+            Triple(0.99, "99¢", 5.0 / 4.96)
+        )
+        for ((ask, label, expected) in cases) {
+            val q = MarketQuoteView.of(yesBid = null, yesAsk = ask, noBid = null, noAsk = ask)
+            assertEquals("hero $ask", label, q.upHero)
+            assertEquals("ask label $ask", label, q.yesAskLabel)
+            assertEquals("button $ask", label, q.upButton.substringAfter("Up ").substringBefore(" ·"))
+            assertEquals("multiple $ask", expected, q.upMultiple!!, 1e-9)
+            assertEquals("same source $ask", KalshiQuoteDisplay.multiplier(ask)!!, q.upMultiple!!, 1e-9)
+            assertTrue(q.upButton.contains(q.upHero))
+            assertTrue(q.upHeader.contains("ask $label"))
+            if (ask < 0.10) {
+                assertTrue("sub-10c $ask must not exceed 1/P", q.upMultiple!! <= 1.0 / ask + 1e-9)
+                assertTrue("sub-10c $ask must not be the 0.1c 934x unless it is 0.1c", ask < 0.0015 || q.upMultiple!! < 200.0)
+            } else {
+                assertNotNull("10c+ $ask must show a multiple", q.upMultiple)
+                assertTrue("10c+ $ask multiple", q.upMultiple!! > 1.0)
+            }
+        }
+        assertEquals("Down 1.5¢ · 62.36x", KalshiQuoteDisplay.buttonLabel(false, 0.015))
+        assertEquals("Down 10¢ · 9.40x", KalshiQuoteDisplay.buttonLabel(false, 0.10))
+        assertEquals("Down 25¢ · 3.80x", KalshiQuoteDisplay.buttonLabel(false, 0.25))
+    }
+
+    @Test
+    fun restPayloadSubPennyAndWholeCentShareOneQuote() {
+        val sub = com.dirk.kalshiodds.data.dto.MarketDto(
+            ticker = "KXBTC15M-26SEP251600-00",
+            yesAskDollars = "0.0150",
+            noAskDollars = "0.2500",
+            yesBidDollars = "0.0140",
+            noBidDollars = "0.2480"
+        ).toUiModel(SeriesKind.BTC)
+        assertEquals(0.015, sub.yesAsk!!, 1e-12)
+        assertEquals(0.25, sub.noAsk!!, 1e-12)
+        val q = MarketQuoteView.of(sub)
+        assertEquals("1.5¢", q.upHero)
+        assertEquals("25¢", q.downHero)
+        assertEquals(333.0 / 5.34, q.upMultiple!!, 1e-9)
+        assertEquals(20.0 / 5.27, q.downMultiple!!, 1e-9)
+        assertTrue(q.upButton.contains("1.5¢"))
+        assertTrue(q.downButton.contains("25¢"))
+        assertFalse(q.downButton.contains("934"))
     }
 }

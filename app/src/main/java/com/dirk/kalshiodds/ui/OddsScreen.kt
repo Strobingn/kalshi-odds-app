@@ -57,18 +57,12 @@ import com.dirk.kalshiodds.ui.components.TargetNowLine
 import com.dirk.kalshiodds.ui.components.TimeLeftLabel
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.components.UpDownBuyButtons
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.AccentRed
-import com.dirk.kalshiodds.ui.theme.Bg
-import com.dirk.kalshiodds.ui.theme.SurfaceAlt
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.abs
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -80,10 +74,11 @@ fun OddsScreen(
     onOpenHistory: () -> Unit,
     onOpenChart: (MarketUiModel) -> Unit
 ) {
+    val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
 
     Scaffold(
-        containerColor = Bg,
+        containerColor = colors.bg,
         topBar = {
             TopAppBar(
                 title = { Text("Dip Hunter") },
@@ -105,9 +100,9 @@ fun OddsScreen(
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Bg,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    actionIconContentColor = AccentBlue
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    actionIconContentColor = colors.accentBlue
                 )
             )
         }
@@ -122,7 +117,7 @@ fun OddsScreen(
             val snapshot = state.snapshot
             if (snapshot == null && state.isLoading) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = AccentBlue)
+                    CircularProgressIndicator(color = colors.accentBlue)
                 }
             } else {
                 val allMarkets = snapshot?.allMarkets.orEmpty()
@@ -150,7 +145,7 @@ fun OddsScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Bg),
+                        .background(colors.bg),
                     contentPadding = PaddingValues(16.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
@@ -225,10 +220,10 @@ fun OddsScreen(
                             Text(
                                 text = note,
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = AccentOrange,
+                                color = colors.accentOrange,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(AccentOrange.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                                    .background(colors.accentOrange.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                                     .padding(12.dp)
                             )
                         }
@@ -244,7 +239,7 @@ fun OddsScreen(
                             Text(
                                 "Reloaded from SQLite after a crash or kill. Export a CSV from Settings or Scorecard.",
                                 style = MaterialTheme.typography.labelMedium,
-                                color = TextSecondary
+                                color = colors.textSecondary
                             )
                         }
                         items(state.persistedHistory.take(8), key = { "hist-${it.id}-${it.ticker}" }) { row ->
@@ -272,11 +267,11 @@ fun OddsScreen(
                             Text(
                                 text = "⚡ Edge alert: $alertCount crypto market(s) with |AI−market| ≥ ${threshold.toInt()}pp",
                                 style = MaterialTheme.typography.bodyMedium,
-                                color = AccentGreen,
+                                color = colors.accentGreen,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(AccentGreen.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                                    .background(colors.accentGreen.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
                                     .padding(12.dp)
                             )
                         }
@@ -291,7 +286,7 @@ fun OddsScreen(
                                     "Crypto only · ranked by |fair − mid|. Stance is advisory — no orders."
                                 },
                                 style = MaterialTheme.typography.labelMedium,
-                                color = TextSecondary
+                                color = colors.textSecondary
                             )
                         }
                         items(ranked.take(8), key = { "rank-${it.ticker}" }) { market ->
@@ -340,7 +335,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.marketsOrEmpty(
         item(key = "empty-$section") {
             Text(
                 text = "No open markets",
-                color = TextSecondary,
+                color = DipTheme.colors.textSecondary,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.padding(vertical = 8.dp)
             )
@@ -373,11 +368,12 @@ private fun LiveSignalsCard(
     connection: WsConnectionState,
     onToggle: (Boolean) -> Unit
 ) {
+    val colors = DipTheme.colors
     val accent = when {
-        !enabled -> TextSecondary
-        connection == WsConnectionState.CONNECTED -> AccentGreen
-        connection == WsConnectionState.RECONNECTING || connection == WsConnectionState.CONNECTING -> AccentOrange
-        else -> AccentBlue
+        !enabled -> colors.textSecondary
+        connection == WsConnectionState.CONNECTED -> colors.accentGreen
+        connection == WsConnectionState.RECONNECTING || connection == WsConnectionState.CONNECTING -> colors.accentOrange
+        else -> colors.accentBlue
     }
     Column(
         modifier = Modifier
@@ -404,7 +400,7 @@ private fun LiveSignalsCard(
                         "Off — odds stop shortly after you switch apps or turn the screen off."
                     },
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary
+                    color = colors.textSecondary
                 )
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
@@ -419,10 +415,11 @@ private fun LiveUpDownHero(
     onBuyNo: (MarketUiModel) -> Unit,
     onOpenChart: (MarketUiModel) -> Unit
 ) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(SurfaceAlt, RoundedCornerShape(16.dp))
+            .background(colors.surfaceAlt, RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -434,7 +431,7 @@ private fun LiveUpDownHero(
             Text(
                 text = market?.title?.takeIf { it.isNotBlank() } ?: "Live scan",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary,
+                color = colors.textSecondary,
                 modifier = Modifier.weight(1f)
             )
             TimeLeftLabel(market?.closeTimeEpochMs, pill = true)
@@ -450,13 +447,13 @@ private fun LiveUpDownHero(
             ) {
                 Text(
                     quotes.upHeader,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     quotes.downHeader,
-                    color = AccentRed,
+                    color = colors.accentRed,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -490,7 +487,7 @@ private fun LiveUpDownHero(
         Text(
             text = market?.ticker ?: "Waiting for live quote",
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
+            color = colors.textSecondary,
             modifier = Modifier.padding(top = 8.dp)
         )
         if (market != null) {
@@ -511,7 +508,8 @@ internal fun featuredLiveMarket(
 
 @Composable
 private fun SignalRow(alert: SignalAlert) {
-    val color = if (alert.deltaPp >= 0) AccentGreen else AccentOrange
+    val colors = DipTheme.colors
+    val color = if (alert.deltaPp >= 0) colors.accentGreen else colors.accentOrange
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -527,7 +525,7 @@ private fun SignalRow(alert: SignalAlert) {
                 fontWeight = FontWeight.Bold
             )
         }
-        Text(alert.reason, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(alert.reason, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         val tags = listOfNotNull(alert.regime, alert.tteRegime).joinToString(" · ")
         if (tags.isNotEmpty()) {
             Text(tags, style = MaterialTheme.typography.labelMedium, color = color)
@@ -560,13 +558,14 @@ private fun MetaHeader(
     mutedSummary: String? = null,
     onResumeAlerts: () -> Unit = {}
 ) {
+    val colors = DipTheme.colors
     val chipColor = when (chipState) {
-        WsConnectionState.CONNECTED -> AccentGreen
-        WsConnectionState.RECONNECTING, WsConnectionState.CONNECTING -> AccentOrange
-        WsConnectionState.NEEDS_API_KEY -> AccentOrange
-        WsConnectionState.ERROR -> AccentRed
-        WsConnectionState.REST_FALLBACK -> AccentBlue
-        WsConnectionState.IDLE -> TextSecondary
+        WsConnectionState.CONNECTED -> colors.accentGreen
+        WsConnectionState.RECONNECTING, WsConnectionState.CONNECTING -> colors.accentOrange
+        WsConnectionState.NEEDS_API_KEY -> colors.accentOrange
+        WsConnectionState.ERROR -> colors.accentRed
+        WsConnectionState.REST_FALLBACK -> colors.accentBlue
+        WsConnectionState.IDLE -> colors.textSecondary
     }
     Column(Modifier.fillMaxWidth()) {
         Row(
@@ -581,13 +580,13 @@ private fun MetaHeader(
                     "Not yet updated"
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             if (fromCache) {
                 Text(
                     text = "CACHED",
                     style = MaterialTheme.typography.labelMedium,
-                    color = AccentBlue
+                    color = colors.accentBlue
                 )
             }
         }
@@ -606,13 +605,13 @@ private fun MetaHeader(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp)
-                    .background(AccentOrange.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                    .background(colors.accentOrange.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
                     .padding(12.dp)
             ) {
                 Text(
                     text = banner,
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentOrange,
+                    color = colors.accentOrange,
                     fontWeight = FontWeight.Bold
                 )
                 Button(onClick = onResumeAlerts, modifier = Modifier.padding(top = 6.dp)) {
@@ -624,7 +623,7 @@ private fun MetaHeader(
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentOrange,
+                color = colors.accentOrange,
                 modifier = Modifier.padding(top = 6.dp)
             )
         }
@@ -639,24 +638,24 @@ private fun MetaHeader(
         Text(
             text = pollLabel,
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
+            color = colors.textSecondary,
             modifier = Modifier.padding(top = 4.dp)
         )
         modelScoreLabel?.let {
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentBlue,
+                color = colors.accentBlue,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier
                     .padding(top = 2.dp)
-                    .background(AccentBlue.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
+                    .background(colors.accentBlue.copy(alpha = 0.10f), RoundedCornerShape(8.dp))
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             )
             Text(
                 text = "Open scorecard for hit rate, Brier, edge when right vs wrong",
                 style = MaterialTheme.typography.labelMedium,
-                color = AccentBlue,
+                color = colors.accentBlue,
                 modifier = Modifier
                     .padding(top = 2.dp)
                     .clickable(onClick = onOpenScorecard)
@@ -665,7 +664,7 @@ private fun MetaHeader(
         Text(
             text = "CRYPTO ONLY · BTC/ETH/SOL 15m · Paper vs Live Approve · no auto-fire.",
             style = MaterialTheme.typography.labelMedium,
-            color = TextSecondary,
+            color = colors.textSecondary,
             modifier = Modifier.padding(top = 6.dp)
         )
     }

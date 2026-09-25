@@ -133,4 +133,17 @@ class SqliteMigrationTest {
         assertFalse(ArchiveSchema.isDestructive(ArchiveSchema.CREATE_SESSIONS))
         assertFalse(ChartTickSchema.isDestructive(ChartTickSchema.CREATE))
     }
+
+    @Test
+    fun upgradesNeverTouchCredentialColumns() {
+        val sql = ArchiveSchema.upgradeSql(ArchiveSchema.V036) + ChartTickSchema.upgradeSql(4)
+        assertTrue(sql.isNotEmpty())
+        assertTrue(
+            sql.none {
+                it.contains("api_key", ignoreCase = true) ||
+                    it.contains("private_key", ignoreCase = true) ||
+                    it.contains("kalshi_signal_secrets", ignoreCase = true)
+            }
+        )
+    }
 }

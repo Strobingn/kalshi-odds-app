@@ -1,5 +1,8 @@
 package com.dirk.kalshiodds.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -39,25 +42,28 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.Bg
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit) {
+    val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current
+    val exportKeys = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream")
+    ) { uri: Uri? -> uri?.let(viewModel::backupCredentials) }
+    val importKeys = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let(viewModel::restoreCredentials) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
     }
 
     Scaffold(
-        containerColor = Bg,
+        containerColor = colors.bg,
         topBar = {
             TopAppBar(
                 title = { Text("Signal settings") },
@@ -67,9 +73,9 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Bg,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = AccentBlue
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.accentBlue
                 )
             )
         }
@@ -85,14 +91,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Crypto-only analysis plus optional approve-gated tickets. Nothing is sent to Kalshi without an explicit Approve tap on that ticket. WTI and other non-crypto markets are ignored. Not financial advice.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
 
             Section("Live signals")
             Text(
                 "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Live signals (keep odds alive)", s.liveSignalsEnabled, viewModel::setLiveSignals)
             Text(
@@ -102,13 +108,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "Stopped. The OS will close the live pipeline shortly after the app is backgrounded."
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (s.liveSignalsEnabled) AccentGreen else AccentOrange,
+                color = if (s.liveSignalsEnabled) colors.accentGreen else colors.accentOrange,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
                 "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Dip Hunter battery usage to Unrestricted. This never auto-trades.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Text(
                 if (state.batteryUnrestricted) {
@@ -117,7 +123,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "Battery: restricted — the OS may still stop live odds."
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (state.batteryUnrestricted) AccentGreen else AccentOrange
+                color = if (state.batteryUnrestricted) colors.accentGreen else colors.accentOrange
             )
             OutlinedButton(onClick = { BatteryExemption.openPrompt(context) }) {
                 Text(if (state.batteryUnrestricted) "Open battery settings" else "Allow background")
@@ -137,7 +143,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     Text(
                         state.extraRejected
                             ?: "Comma-separated Kalshi tickers (ETH/SOL/XRP/… 15m ok). Non-crypto dropped.",
-                        color = if (state.extraRejected != null) AccentOrange else TextSecondary
+                        color = if (state.extraRejected != null) colors.accentOrange else colors.textSecondary
                     )
                 },
                 minLines = 2
@@ -148,7 +154,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text(
                     "SIT OUT — auto-tune says the model is not beating the market. ${s.autoTuneNote}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentOrange,
+                    color = colors.accentOrange,
                     fontWeight = FontWeight.Bold
                 )
             } else if (s.autoTuneEnabled && !s.autoTuneManualOverride && s.tunedEdgeThresholdPp != null) {
@@ -160,14 +166,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                         s.autoTuneNote.ifBlank { "from settled history" }
                     ),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.SemiBold
                 )
             }
             Text(
                 String.format(Locale.US, "Manual slider  %.1f pp  — used when override is on", s.edgeThresholdPp),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -186,7 +192,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Opportunity notifications open the ticket. Approve is still required — they never place an order.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Subscribe public trades", s.subscribeTrades, viewModel::setSubscribeTrades)
 
@@ -194,12 +200,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Alerts and ranked opportunities require confidence, liquidity, and a tight enough spread. Weak edges that fail are hidden (not alerted).",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Text(
                 String.format(Locale.US, "Min confidence  %.0f%%", s.minConfidence * 100.0),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -211,7 +217,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Min liquidity  %.0f (volume / OI / near-mid depth)", s.minLiquidity),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -223,7 +229,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Max spread  %.0f¢", s.maxSpreadCents),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -238,7 +244,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Suggested contracts only. The app never places orders. Default is quarter-Kelly, capped at 5% of bankroll and by liquidity / spread.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             OutlinedTextField(
                 value = state.bankrollDraft,
@@ -253,7 +259,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text(
                     String.format(Locale.US, "Kelly fraction  %.2f  (0.25 = quarter-Kelly)", s.kellyFraction),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.SemiBold
                 )
                 Slider(
@@ -266,7 +272,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text(
                     String.format(Locale.US, "Fixed fraction  %.1f%% of bankroll", s.fixedFraction * 100.0),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.SemiBold
                 )
                 Slider(
@@ -279,7 +285,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Max clip  %.1f%% of bankroll", s.maxBankrollFraction * 100.0),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -293,12 +299,12 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Official Kalshi taker fee is ceil_6dp(feeRate × C × P × (1−P)), then the whole order is aligned to $0.01 (non-direct). Default coefficient 7%. Crypto 15-minute series (KXBTC15M / KXETH15M / KXSOL15M) are quadratic with multiplier 1 — no special fee. Ranking and alerts add half-spread when net EV is on. Raw edge still shows on cards.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Text(
                 String.format(Locale.US, "Fee rate  %.0f%%  (Kalshi default 7%%)", s.feeRate * 100.0),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -313,13 +319,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "When a series or regime’s rolling 7-day hit rate falls below the floor (and has enough samples), it is muted: no alerts, downranked, “Muted” chip. Cold start never mutes.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Auto-mute weak series / regimes", s.autoMute, viewModel::setAutoMute)
             Text(
                 String.format(Locale.US, "Hit-rate floor  %.0f%%", s.muteHitRateFloor * 100.0),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -333,13 +339,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Pauses alerts after N consecutive wrong settlements or after a one-contract P&L-proxy drawdown. Scoring continues. Resume here or automatically on the next session.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             if (state.alertsPaused) {
                 Text(
                     state.pauseReason ?: "alerts paused — streak guard",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentOrange,
+                    color = colors.accentOrange,
                     fontWeight = FontWeight.Bold
                 )
                 Button(onClick = viewModel::resumeAlerts) { Text("Resume alerts") }
@@ -347,7 +353,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Pause after ${s.streakPauseN} wrong in a row",
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -359,7 +365,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Drawdown pause  $%.0f (1-contract proxy)", s.drawdownUsd),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -377,7 +383,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "Import, Kalshi backfill, spot candles, Supabase restore, and model weights live on the Data screen. " +
                     "Tickets are still Approve-only — never unsupervised bets.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Button(onClick = onOpenData, modifier = Modifier.fillMaxWidth().height(52.dp)) {
                 Text("Open Data (import / backfill)")
@@ -386,7 +392,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text("Export results")
             }
             state.exportMessage?.let {
-                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
             Section("Heavy ML (0.3.0 / safe light default)")
@@ -397,7 +403,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "Non-OOM failures still trip after 3. Re-enable Heavy ML only if you accept the heap risk. " +
                     "Still analysis + approve-gated tickets only.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow(
                 "Light mode (recommended — 0.2.x scoring, safer on device)",
@@ -405,7 +411,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 viewModel::setLightMode
             )
             state.mlGuardNote?.let {
-                Text(it, color = AccentOrange, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentOrange, style = MaterialTheme.typography.bodyMedium)
             }
             ToggleRow("Heavy ML (sequence + GBM + ensemble)", s.heavyMlEnabled, viewModel::setHeavyMl)
             ToggleRow("Sequence model (Temporal CNN / TinyLSTM)", s.sequenceModelEnabled, viewModel::setSequenceModel)
@@ -415,7 +421,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Max uncertainty  %.2f  (ensemble / MC-dropout std)", s.maxUncertainty),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -427,7 +433,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Policy-eval stake  $%.0f  (scorecard counterfactual)", s.policyEvalStakeUsd),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -444,7 +450,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "RL suggested stake is display-only. Tickets always use the configured \$5 default / caps and still need Approve. " +
                     "News embeddings fail-soft and cache if the network is down.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Extended AI (master)", s.extendedAiEnabled, viewModel::setExtendedAi)
             ToggleRow("Regime classifier (session / weekend / news-shock)", s.regimeClassifierEnabled, viewModel::setRegimeClassifier)
@@ -464,7 +470,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
                     "card is the ledger — you do not need to dig here to see it.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, viewModel::setPaperTrading)
             OutlinedButton(onClick = viewModel::resetPaperBook, modifier = Modifier.height(44.dp)) {
@@ -486,13 +492,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "${SignalConstants.TICKET_RAISE_CONFIRM_PHRASE}. Hard cap \$${SignalConstants.TICKET_STAKE_HARD_CAP_USD.toInt()}. " +
                     "High variance: you can lose the full stake.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Show live trade tickets", s.ticketsEnabled, viewModel::setTicketsEnabled)
             Text(
                 String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -514,13 +520,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     s.winTargetUsd
                 ),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentOrange,
+                color = colors.accentOrange,
                 fontWeight = FontWeight.SemiBold
             )
             Text(
                 "Max ask ¢ — sides cheaper than this can appear as Long-shot cards (default 20¢).",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Slider(
                 value = (s.longShotMaxAsk * 100.0).toFloat().coerceIn(5f, 40f),
@@ -537,13 +543,13 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "When the cap or book depth limits size, the card shows Capped: wins \$X. " +
                     "Still Approve-only — never auto-placed.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Win-target sizing (default on · \$50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
             Text(
                 String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -555,7 +561,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(Locale.US, "Max stake  %.0f%% of bankroll", s.winTargetBankrollPct),
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -571,7 +577,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     String.format(Locale.US, "Optional $ cap  $%.0f", s.winTargetAbsCapUsd)
                 },
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentGreen,
+                color = colors.accentGreen,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
@@ -588,7 +594,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 Text(
                     "Kalshi key saved (${com.dirk.kalshiodds.signal.config.CredentialBackup.maskedKeyId(s.apiKeyId)})",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -598,7 +604,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "Used for the public ticker / trade / orderbook_delta WebSocket and, after Live Approve, " +
                     "POST /trade-api/v2/portfolio/events/orders (V2 limit only — never /portfolio/orders).",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             OutlinedTextField(
                 value = state.keyIdDraft,
@@ -626,8 +632,29 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                 }
                 OutlinedButton(onClick = viewModel::clearCredentials) { Text("Clear") }
             }
+            Text(
+                "Export writes a passphrase-encrypted file you pick (Downloads or Drive). " +
+                    "Import restores the live key and, if present, the demo key. Never uploaded.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedTextField(
+                value = state.credPassphrase,
+                onValueChange = viewModel::setCredPassphrase,
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Keys backup passphrase") },
+                singleLine = true
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = { exportKeys.launch("diphunter-kalshi-key.dhcred") }) {
+                    Text("Export keys backup")
+                }
+                OutlinedButton(onClick = { importKeys.launch(arrayOf("*/*")) }) {
+                    Text("Import keys backup")
+                }
+            }
             state.credentialMessage?.let {
-                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
             Section("Kalshi demo (play money)")
@@ -636,14 +663,14 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                     "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
                     "Paper Buy still works with no key and never hits this host.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             ToggleRow("Kalshi demo environment", s.kalshiDemoEnabled, viewModel::setKalshiDemo)
             if (s.demoCredentialsConfigured) {
                 Text(
                     "Demo key saved",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentGreen,
+                    color = colors.accentGreen,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -672,7 +699,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 "Notification channel: diphunter_signal_alerts (HIGH). Foreground: diphunter_live_signals_ongoing. Live WS: wss://external-api-ws.kalshi.com/trade-api/ws/v2. Demo WS: wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2.",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
         }
     }
@@ -700,7 +727,7 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
                         singleLine = true
                     )
                     state.raiseError?.let {
-                        Text(it, color = AccentOrange, style = MaterialTheme.typography.labelMedium)
+                        Text(it, color = colors.accentOrange, style = MaterialTheme.typography.labelMedium)
                     }
                 }
             },

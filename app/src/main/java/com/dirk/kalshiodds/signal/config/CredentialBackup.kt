@@ -12,11 +12,16 @@ import javax.crypto.spec.SecretKeySpec
  * Passphrase-encrypted credential file for SAF backup / restore.
  * Format: magic | version | salt(16) | iv(12) | ciphertext+tag
  * PBKDF2-HMAC-SHA256 (120_000) + AES-256-GCM.
+ *
+ * Payload is `keyId\\npem` plus an optional demo block
+ * (`\\n\\nDHDEMO1\\ndemoId\\ndemoPem`) so a Settings export can restore
+ * both the live Kalshi key and the demo key after uninstall.
  */
 object CredentialBackup {
     const val MAGIC = "DHCRED1"
     const val VERSION: Byte = 1
     const val ITERATIONS = 120_000
+    const val DEMO_MARK = "\n\nDHDEMO1\n"
     private const val SALT_LEN = 16
     private const val IV_LEN = 12
     private const val KEY_LEN_BITS = 256
@@ -24,9 +29,28 @@ object CredentialBackup {
     class WrongPassphrase : IllegalArgumentException("wrong passphrase")
     class BadFile : IllegalArgumentException("not a DipHunter credential backup")
 
-    fun encrypt(keyId: String, pem: String, passphrase: CharArray): ByteArray {
+    data class Contents(
+        val keyId: String,
+        val pem: String,
+        val demoKeyId: String = "",
+        val demoPem: String = ""
+    )
+
+    fun encrypt(
+        keyId: String,
+        pem: String,
+        passphrase: CharArray,
+        demoKeyId: String = "",
+        demoPem: String = ""
+    ): ByteArray {
         require(passphrase.isNotEmpty()) { "passphrase required" }
-        val payload = "${keyId.trim()}\n${pem.trim()}".toByteArray(Charsets.UTF_8)
+        val live = "${keyId.trim()}\n${pem.trim()}"
+        val payloadText = if (demoKeyId.isNotBlank() && demoPem.isNotBlank()) {
+            live + DEMO_MARK + "${demoKeyId.trim()}\n${demoPem.trim()}"
+        } else {
+            live
+        }
+        val payload = payloadText.toByteArray(Charsets.UTF_8)
         val salt = ByteArray(SALT_LEN).also { SecureRandom().nextBytes(it) }
         val iv = ByteArray(IV_LEN).also { SecureRandom().nextBytes(it) }
         val key = derive(passphrase, salt)
@@ -38,6 +62,11 @@ object CredentialBackup {
     }
 
     fun decrypt(bytes: ByteArray, passphrase: CharArray): Pair<String, String> {
+        val c = decryptAll(bytes, passphrase)
+        return c.keyId to c.pem
+    }
+
+    fun decryptAll(bytes: ByteArray, passphrase: CharArray): Contents {
         val magic = MAGIC.toByteArray(Charsets.US_ASCII)
         if (bytes.size < magic.size + 1 + SALT_LEN + IV_LEN + 16) throw BadFile()
         if (!bytes.copyOfRange(0, magic.size).contentEquals(magic)) throw BadFile()
@@ -51,16 +80,34 @@ object CredentialBackup {
         return try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
-            val raw = cipher.doFinal(ct).toString(Charsets.UTF_8)
-            val nl = raw.indexOf('\n')
-            if (nl <= 0) throw BadFile()
-            raw.substring(0, nl) to raw.substring(nl + 1)
+            parsePayload(cipher.doFinal(ct).toString(Charsets.UTF_8))
         } catch (_: AEADBadTagException) {
             throw WrongPassphrase()
         } catch (e: Exception) {
             if (e is WrongPassphrase || e is BadFile) throw e
             throw WrongPassphrase()
         }
+    }
+
+    fun parsePayload(raw: String): Contents {
+        val parts = raw.split(DEMO_MARK, limit = 2)
+        val live = parts[0]
+        val nl = live.indexOf('\n')
+        if (nl <= 0) throw BadFile()
+        val demo = if (parts.size > 1) {
+            val d = parts[1]
+            val dnl = d.indexOf('\n')
+            if (dnl <= 0) throw BadFile()
+            d.substring(0, dnl) to d.substring(dnl + 1)
+        } else {
+            "" to ""
+        }
+        return Contents(
+            keyId = live.substring(0, nl),
+            pem = live.substring(nl + 1),
+            demoKeyId = demo.first,
+            demoPem = demo.second
+        )
     }
 
     fun maskedKeyId(keyId: String): String {

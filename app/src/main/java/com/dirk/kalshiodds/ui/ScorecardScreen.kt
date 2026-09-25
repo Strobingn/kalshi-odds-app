@@ -32,22 +32,18 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.AccentGreen
-import com.dirk.kalshiodds.ui.theme.AccentOrange
-import com.dirk.kalshiodds.ui.theme.Bg
-import com.dirk.kalshiodds.ui.theme.Surface
-import com.dirk.kalshiodds.ui.theme.TextSecondary
 import java.util.Locale
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
+    val colors = DipTheme.colors
     val ui by viewModel.snapshot.collectAsStateWithLifecycle()
     val snap = ui.metrics
 
     Scaffold(
-        containerColor = Bg,
+        containerColor = colors.bg,
         topBar = {
             TopAppBar(
                 title = { Text("Scorecard") },
@@ -57,9 +53,9 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Bg,
-                    titleContentColor = MaterialTheme.colorScheme.onBackground,
-                    navigationIconContentColor = AccentBlue
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.accentBlue
                 )
             )
         }
@@ -75,7 +71,7 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
             Text(
                 "Post-settlement track record. Analysis only — no orders. Voids are excluded.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Button(onClick = viewModel::exportResults, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
@@ -84,20 +80,20 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
                 Text("Get latest model")
             }
             ui.exportMessage?.let {
-                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
             ui.modelNote?.let {
-                Text(it, color = AccentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
             if (ui.sitOut) {
                 Text(
                     "SIT OUT — ${ui.autoTuneNote.ifBlank { "the model is not beating the market on settled history." }}",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = AccentOrange,
+                    color = colors.accentOrange,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(AccentOrange.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
+                        .background(colors.accentOrange.copy(alpha = 0.14f), RoundedCornerShape(12.dp))
                         .padding(12.dp)
                 )
             }
@@ -125,13 +121,13 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
                 Text(
                     "No settled samples yet. Watch crypto 15-minute contracts and wait for expiry — the first 20 outcomes unlock calibration.",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = TextSecondary
+                    color = colors.textSecondary
                 )
             }
             Text(
                 "Open ${snap.openCount} · void ${snap.voidCount} · settled ${snap.sampleCount}",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
             Spacer(Modifier.height(16.dp))
         }
@@ -140,8 +136,9 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
 
 @Composable
 private fun CalibrationBanner(snap: ScorecardMetrics.Snapshot) {
+    val colors = DipTheme.colors
     val ready = snap.calibrationReady
-    val color = if (ready) AccentGreen else AccentOrange
+    val color = if (ready) colors.accentGreen else colors.accentOrange
     val text = if (ready) {
         String.format(
             Locale.US,
@@ -167,7 +164,8 @@ private fun CalibrationBanner(snap: ScorecardMetrics.Snapshot) {
 
 @Composable
 private fun AdapterBanner(adapter: com.dirk.kalshiodds.signal.feedback.OnlineAdapter.State) {
-    val color = if (adapter.ready) AccentGreen else AccentOrange
+    val colors = DipTheme.colors
+    val color = if (adapter.ready) colors.accentGreen else colors.accentOrange
     val text = if (adapter.ready) {
         String.format(
             Locale.US,
@@ -194,7 +192,8 @@ private fun AdapterBanner(adapter: com.dirk.kalshiodds.signal.feedback.OnlineAda
 
 @Composable
 private fun GuardBanner(g: com.dirk.kalshiodds.signal.feedback.Guardrails.State) {
-    val color = if (g.paused) AccentOrange else TextSecondary
+    val colors = DipTheme.colors
+    val color = if (g.paused) colors.accentOrange else colors.textSecondary
     Text(
         text = if (g.paused) {
             g.banner ?: "alerts paused — streak guard"
@@ -219,6 +218,7 @@ private fun GuardBanner(g: com.dirk.kalshiodds.signal.feedback.Guardrails.State)
 
 @Composable
 private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
+    val colors = DipTheme.colors
     val muted = a.buckets.filter { it.muted }
     val text = if (muted.isEmpty()) {
         "No series/regimes muted. Auto-mute needs ${com.dirk.kalshiodds.signal.config.SignalConstants.MIN_MUTE_SAMPLES}+ rolling samples below the floor."
@@ -228,28 +228,29 @@ private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
     Text(
         text = text,
         style = MaterialTheme.typography.bodyMedium,
-        color = if (muted.isEmpty()) TextSecondary else AccentOrange,
+        color = if (muted.isEmpty()) colors.textSecondary else colors.accentOrange,
         modifier = Modifier
             .fillMaxWidth()
-            .background(AccentOrange.copy(alpha = if (muted.isEmpty()) 0.06f else 0.12f), RoundedCornerShape(12.dp))
+            .background(colors.accentOrange.copy(alpha = if (muted.isEmpty()) 0.06f else 0.12f), RoundedCornerShape(12.dp))
             .padding(12.dp)
     )
 }
 
 @Composable
 private fun HonestCard(h: ScorecardMetrics.Honest) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         if (!h.enoughData) {
             Text(
                 "Not enough data yet — ${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled signals. Numbers below are provisional.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = AccentOrange,
+                color = colors.accentOrange,
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.padding(top = 6.dp)
             )
@@ -279,18 +280,18 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
                 Text(
                     "${row.label}  ${row.stats.label}  Brier ${row.stats.brier?.let { String.format(Locale.US, "%.3f", it) } ?: "—"}",
                     style = MaterialTheme.typography.labelMedium,
-                    color = TextSecondary
+                    color = colors.textSecondary
                 )
             }
         }
         if (h.perCoin.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            Text("Per coin", style = MaterialTheme.typography.labelMedium, color = TextSecondary, fontWeight = FontWeight.Bold)
+            Text("Per coin", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
             h.perCoin.forEach { b -> BreakdownRow(b) }
         }
         if (h.perTimeOfDay.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            Text("Time of day (4-hour ET)", style = MaterialTheme.typography.labelMedium, color = TextSecondary, fontWeight = FontWeight.Bold)
+            Text("Time of day (4-hour ET)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
             h.perTimeOfDay.forEach { b -> BreakdownRow(b) }
         }
     }
@@ -298,6 +299,7 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
 
 @Composable
 private fun BreakdownRow(b: ScorecardMetrics.Breakdown) {
+    val colors = DipTheme.colors
     val line = if (!b.enoughData) {
         "${b.label}  ${b.honestLabel}"
     } else {
@@ -315,31 +317,32 @@ private fun BreakdownRow(b: ScorecardMetrics.Breakdown) {
     Text(
         line,
         style = MaterialTheme.typography.labelMedium,
-        color = if (b.enoughData) TextSecondary else AccentOrange,
+        color = if (b.enoughData) colors.textSecondary else colors.accentOrange,
         modifier = Modifier.padding(top = 2.dp)
     )
 }
 
 @Composable
 private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(
             text = stats.hitRate?.let { String.format(Locale.US, "%.0f%% hit", it * 100.0) } ?: "No samples",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
-            color = if ((stats.hitRate ?: 0.0) >= 0.5) AccentGreen else MaterialTheme.colorScheme.onBackground,
+            color = if ((stats.hitRate ?: 0.0) >= 0.5) colors.accentGreen else MaterialTheme.colorScheme.onBackground,
             lineHeight = 32.sp
         )
         Text(
             "${stats.label} settled",
             style = MaterialTheme.typography.bodyMedium,
-            color = TextSecondary
+            color = colors.textSecondary
         )
         Spacer(Modifier.height(8.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -352,20 +355,21 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
 
 @Composable
 private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecard) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(
             String.format(Locale.US, "If every alert @ $%.0f", policy.stakeUsd),
             fontSize = 20.sp,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onBackground
         )
-        Text(policy.note, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(policy.note, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
         PolicyLine("All alerts", policy.allAlerts)
         Spacer(Modifier.height(6.dp))
@@ -375,13 +379,14 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
 
 @Composable
 private fun ExtendedAiCard(line: String) {
+    val colors = DipTheme.colors
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text("Extended AI (advisory)", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text("Extended AI (advisory)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(
             "Learned from settlements — RL sizer never places an order",
             fontSize = 20.sp,
@@ -406,34 +411,36 @@ private fun PolicyLine(title: String, line: com.dirk.kalshiodds.signal.ml.Policy
 
 @Composable
 private fun SeriesRow(row: ScorecardMetrics.SeriesStats) {
+    val colors = DipTheme.colors
     val s = row.stats
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(Surface, RoundedCornerShape(12.dp))
+            .background(colors.surface, RoundedCornerShape(12.dp))
             .padding(12.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
         Column(Modifier.weight(1f)) {
             Text(row.label, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onBackground)
-            Text(row.series, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Text(row.series, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         }
         Column {
             Text(
                 s.hitRate?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—",
                 style = MaterialTheme.typography.titleMedium,
-                color = AccentBlue,
+                color = colors.accentBlue,
                 fontWeight = FontWeight.Bold
             )
-            Text(s.label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+            Text(s.label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         }
     }
 }
 
 @Composable
 private fun Stat(label: String, value: String) {
+    val colors = DipTheme.colors
     Column {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = TextSecondary)
+        Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onBackground, fontWeight = FontWeight.SemiBold)
     }
 }

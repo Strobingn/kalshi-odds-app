@@ -2,6 +2,8 @@ package com.dirk.kalshiodds.domain
 
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.KalshiFee
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.util.Locale
 
 /**
@@ -14,10 +16,11 @@ import java.util.Locale
  */
 object KalshiQuoteDisplay {
 
+    /** Whole cents only. Sub-cent asks use [formatAsk], never this clamp. */
     fun cents(ask: Double?): Int? {
         val p = KalshiPrice.usable(ask) ?: return null
         val c = kotlin.math.round(p * 100.0).toInt()
-        return c.takeIf { it in 1..99 }
+        return c.takeIf { it in 1..99 && kotlin.math.abs(p * 100.0 - c) < 1e-9 }
     }
 
     /**
@@ -60,12 +63,20 @@ object KalshiQuoteDisplay {
         return formatPriceCents(bid)
     }
 
+    /**
+     * Exact tick string: `0.1¢`, `1.5¢`, `1.8¢`, `12¢`, `99.9¢`.
+     * Never rounds 1.5¢ → `2¢` or 0.1¢ → `0¢` / `1¢`.
+     */
     fun formatPriceCents(price: Double): String {
-        val c = price * 100.0
-        return if (c + 1e-9 < 1.0) {
-            String.format(Locale.US, "%.1f¢", c)
+        if (!price.isFinite()) return "—"
+        val cents = BigDecimal.valueOf(price)
+            .setScale(4, RoundingMode.HALF_UP)
+            .movePointRight(2)
+            .stripTrailingZeros()
+        return if (cents.scale() <= 0) {
+            "${cents.toPlainString()}¢"
         } else {
-            String.format(Locale.US, "%.0f¢", c)
+            String.format(Locale.US, "%.1f¢", cents.toDouble())
         }
     }
 

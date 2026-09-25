@@ -117,13 +117,13 @@ object KalshiWsMessages {
             yesBid = bid,
             yesAsk = ask,
             lastPrice = last,
-            volume = msg.dollarField("volume_fp", "volume"),
-            openInterest = msg.dollarField("open_interest_fp", "open_interest"),
+            volume = msg.rawDouble("volume_fp", "volume"),
+            openInterest = msg.rawDouble("open_interest_fp", "open_interest"),
             closeTimeEpochMs = null,
             source = TickSource.WS_TICKER,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = msg.longField("ts_ms") ?: msg.longField("ts")?.times(1000),
-            tradeSize = msg.dollarField("last_trade_size_fp")
+            tradeSize = msg.rawDouble("last_trade_size_fp")
         )
     }
 
@@ -143,7 +143,7 @@ object KalshiWsMessages {
             source = TickSource.WS_TRADE,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = msg.longField("ts_ms") ?: msg.longField("ts")?.times(1000),
-            tradeSize = msg.dollarField("count_fp", "count"),
+            tradeSize = msg.rawDouble("count_fp", "count"),
             takerSide = msg.stringField("taker_side") ?: msg.stringField("taker_outcome_side")
         )
     }
@@ -187,14 +187,9 @@ object KalshiWsMessages {
                 if (pair.size < 2) continue
                 val pricePrim = pair[0] as? JsonPrimitive ?: continue
                 val sizePrim = pair[1] as? JsonPrimitive ?: continue
-                val priceRaw = pricePrim.doubleOrNull ?: pricePrim.contentOrNull?.toDoubleOrNull() ?: continue
                 val size = sizePrim.doubleOrNull ?: sizePrim.contentOrNull?.toDoubleOrNull() ?: continue
-                val priceText = pricePrim.contentOrNull.orEmpty()
-                val price = if (!priceText.contains('.') && priceRaw > 1.0 && priceRaw <= 100.0) {
-                    priceRaw / 100.0
-                } else {
-                    priceRaw
-                }
+                val priceText = pricePrim.contentOrNull ?: continue
+                val price = com.dirk.kalshiodds.domain.KalshiPrice.parseDollars(priceText) ?: continue
                 if (size > 0.0) out += price to size
             }
             if (out.isNotEmpty() || arr.isEmpty()) return out
@@ -238,20 +233,17 @@ object KalshiWsMessages {
     }
 
     /**
-     * Accepts dollar strings ("0.4500"), integer cents (45), or 0–1 floats.
+     * Prefers FixedPointDollars (`yes_ask_dollars` = `"0.0150"`).
+     * Legacy integer-cent fields (`"15"`) are 15¢. `"1"` is 1¢, not $1.
+     * Unusable placeholders (`"0.0000"`, `"1.0000"`) fall through to the
+     * next name so a dollars miss can still use a legacy integer.
      */
     private fun JsonObject.dollarField(vararg names: String): Double? {
         for (n in names) {
             val v = this[n] ?: continue
             val prim = (v as? JsonPrimitive) ?: continue
-            val asDouble = prim.doubleOrNull ?: prim.contentOrNull?.toDoubleOrNull() ?: continue
-            val raw = prim.contentOrNull.orEmpty()
-            return when {
-                raw.contains('.') -> asDouble
-                asDouble > 1.0 && asDouble <= 100.0 && !n.contains("volume") && !n.contains("interest") && !n.contains("count") && !n.contains("size") ->
-                    asDouble / 100.0
-                else -> asDouble
-            }
+            val raw = prim.contentOrNull ?: continue
+            com.dirk.kalshiodds.domain.KalshiPrice.parseDollars(raw)?.let { return it }
         }
         return null
     }

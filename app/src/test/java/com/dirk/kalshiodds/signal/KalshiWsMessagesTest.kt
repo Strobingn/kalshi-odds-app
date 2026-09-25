@@ -124,4 +124,64 @@ class KalshiWsMessagesTest {
         assertEquals("yes", parsed.side)
         assertEquals(3, parsed.seq)
     }
+
+    @Test
+    fun parseTickerSubPennyAndWholeCent() {
+        val raw = """
+            {
+              "type": "ticker",
+              "sid": 11,
+              "msg": {
+                "market_ticker": "KXETH15M-26SEP251615-15",
+                "yes_bid_dollars": "0.0140",
+                "yes_ask_dollars": "0.0150",
+                "price_dollars": "0.2500",
+                "ts_ms": 1669149841000
+              }
+            }
+        """.trimIndent()
+        val tick = (KalshiWsMessages.parse(raw, 1L) as KalshiWsMessages.Parsed.Ticker).tick
+        assertEquals(0.014, tick.yesBid!!, 1e-12)
+        assertEquals(0.015, tick.yesAsk!!, 1e-12)
+        assertEquals(0.25, tick.lastPrice!!, 1e-12)
+    }
+
+    @Test
+    fun parseOrderbookSubPennyLevel() {
+        val raw = """
+            {
+              "type": "orderbook_snapshot",
+              "sid": 2,
+              "seq": 2,
+              "msg": {
+                "market_ticker": "KXSOL15M-26SEP251600-00",
+                "yes_dollars_fp": [["0.0010", "40.00"], ["0.0990", "12.00"]],
+                "no_dollars_fp": [["0.2500", "8.00"]]
+              }
+            }
+        """.trimIndent()
+        val parsed = KalshiWsMessages.parse(raw, 5L) as KalshiWsMessages.Parsed.OrderbookSnapshot
+        assertEquals(0.001, parsed.yesLevels[0].first, 1e-12)
+        assertEquals(0.099, parsed.yesLevels[1].first, 1e-12)
+        assertEquals(0.25, parsed.noLevels[0].first, 1e-12)
+    }
+
+    @Test
+    fun parseTickerLegacyIntegerOneIsOneCent() {
+        val raw = """
+            {
+              "type": "ticker",
+              "sid": 11,
+              "msg": {
+                "market_ticker": "KXBTC15M-26SEP251600-00",
+                "yes_ask": "1",
+                "yes_bid": "45",
+                "ts_ms": 1669149841000
+              }
+            }
+        """.trimIndent()
+        val tick = (KalshiWsMessages.parse(raw, 1L) as KalshiWsMessages.Parsed.Ticker).tick
+        assertEquals(0.01, tick.yesAsk!!, 1e-12)
+        assertEquals(0.45, tick.yesBid!!, 1e-12)
+    }
 }

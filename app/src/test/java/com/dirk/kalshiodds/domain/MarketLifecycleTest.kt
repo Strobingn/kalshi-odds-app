@@ -41,6 +41,21 @@ class KalshiPriceTest {
     fun integerCentsStillParse() {
         assertEquals(0.45, KalshiPrice.parseDollars("45")!!, 1e-9)
         assertEquals(0.02, KalshiPrice.parseDollars("2")!!, 1e-9)
+        assertEquals(0.01, KalshiPrice.parseDollars("1")!!, 1e-9)
+        assertNull(KalshiPrice.parseDollars("1.0000"))
+        assertNull(KalshiPrice.parseDollars("100"))
+    }
+
+    @Test
+    fun fractionalCentsStayExact() {
+        assertEquals(0.001, KalshiPrice.parseDollars("0.0010")!!, 1e-12)
+        assertEquals(0.015, KalshiPrice.parseDollars("0.0150")!!, 1e-12)
+        assertEquals(0.018, KalshiPrice.parseDollars("0.0180")!!, 1e-12)
+        assertEquals(0.099, KalshiPrice.parseDollars("0.0990")!!, 1e-12)
+        assertEquals(0.105, KalshiPrice.parseDollars("0.1050")!!, 1e-12)
+        assertEquals(0.905, KalshiPrice.parseDollars("0.9050")!!, 1e-12)
+        assertNotNull(KalshiPrice.usable(0.001))
+        assertNotNull(KalshiPrice.usable(0.015))
     }
 
     @Test

@@ -15,8 +15,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
-import com.dirk.kalshiodds.ui.theme.AccentBlue
-import com.dirk.kalshiodds.ui.theme.TextSecondary
+import com.dirk.kalshiodds.ui.theme.DipTheme
 
 /**
  * Lightweight YES-mid sparkline. No charting library — Path/Canvas only.
@@ -26,14 +25,15 @@ import com.dirk.kalshiodds.ui.theme.TextSecondary
 fun OddsSparkline(
     points: List<Float>,
     modifier: Modifier = Modifier,
-    color: Color = AccentBlue
+    color: Color = DipTheme.colors.accentBlue
 ) {
+    val colors = DipTheme.colors
     if (points.size < 2) {
         Box(modifier.height(28.dp), contentAlignment = Alignment.CenterStart) {
             Text(
                 if (points.isEmpty()) "Chart warming up" else "Need 2 prints",
                 style = MaterialTheme.typography.labelMedium,
-                color = TextSecondary
+                color = colors.textSecondary
             )
         }
         return

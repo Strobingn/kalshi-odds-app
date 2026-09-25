@@ -306,6 +306,8 @@ class SignalPreferences(
 
     fun credentialSnapshot(): Pair<String, String> = secrets.snapshot()
 
+    fun demoSnapshot(): Pair<String, String> = extras?.demoSnapshot() ?: ("" to "")
+
     /** True when EncryptedSharedPreferences died and no usable key loaded. */
     fun needsReenterKey(): Boolean = !secrets.hasCredentials && secrets.keystoreInvalidated
 

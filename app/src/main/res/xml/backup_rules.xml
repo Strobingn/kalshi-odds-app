@@ -4,4 +4,6 @@
     <exclude domain="sharedpref" path="kalshi_signal_secrets_fallback.xml" />
     <exclude domain="sharedpref" path="kalshi_signal_secrets_legacy.xml" />
     <exclude domain="sharedpref" path="__androidx_security_crypto_encrypted_file_pref__" />
+    <exclude domain="sharedpref" path="diphunter_extra_secrets.xml" />
+    <exclude domain="sharedpref" path="diphunter_extra_secrets_fallback.xml" />
 </full-backup-content>
