@@ -46,7 +46,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit = {}) {
+fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val importFile = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()

@@ -382,8 +382,8 @@ private fun ApproveTicketDialog(
     paperTradingEnabled: Boolean = false,
     onApprove: () -> Unit,
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
-    onPaper: () -> Unit = {},
-    onPaperSell: (Int, Double) -> Unit = { _, _ -> },
+    onPaper: () -> Unit,
+    onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
     onDismiss: () -> Unit
 ) {
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)

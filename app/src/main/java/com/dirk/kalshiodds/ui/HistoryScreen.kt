@@ -62,7 +62,7 @@ import java.util.Locale
 fun HistoryScreen(
     viewModel: HistoryViewModel,
     onBack: () -> Unit,
-    onOpenMarket: (MarketUiModel) -> Unit = {}
+    onOpenMarket: (MarketUiModel) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     var tab by remember { mutableIntStateOf(0) }

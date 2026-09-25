@@ -19,6 +19,37 @@ import org.junit.Test
 class PaperApprovePathTest {
 
     @Test
+    fun ticketApproveInPaperModeNoCredentialsBooksFillEquityPositionAndHistory() = runBlocking {
+        val ticket = ticket(TicketKind.MANUAL, "KXBTC15M-E2E", 10, 2.0, 0.20)
+        val decision = com.dirk.kalshiodds.signal.trade.ApproveRouter.decide(
+            paperTradingEnabled = true,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = false,
+            canApprove = ticket.canApprove
+        )
+        assertEquals(com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Paper, decision)
+        val (out, book, history) = runApprove(ticket)
+        assertTrue(out.message, out.ok)
+        val snap = book.snapshot()
+        assertEquals(1, snap.fills.size)
+        assertFalse(snap.fills.single().settled)
+        assertEquals(1, snap.openCount)
+        assertTrue(snap.cashUsd < 100.0)
+        assertTrue(100.0 - snap.cashUsd + 1e-9 >= out.stakeUsd)
+        assertEquals(out.contracts, snap.fills.single().contracts)
+        assertEquals(1, history.size)
+        assertTrue(history.single().approved)
+        assertEquals("paper filled", history.single().result)
+        val bets = HistoryAssembler.bets(history, snap, HistoryAssembler.SourceFilter.PAPER)
+        assertEquals(1, bets.size)
+        assertEquals("open", bets.single().result)
+        assertEquals(ticket.ticker, bets.single().ticker)
+        assertFalse(out.message.contains("Kalshi key", ignoreCase = true))
+        assertFalse(out.message.contains("API Key", ignoreCase = true))
+    }
+
+    @Test
     fun approveManualNoCredentialsBooksFillEquityPositionHistory() = runBlocking {
         assertPath(ticket(TicketKind.MANUAL, "KXBTC15M-M", 10, 2.0, 0.20))
     }

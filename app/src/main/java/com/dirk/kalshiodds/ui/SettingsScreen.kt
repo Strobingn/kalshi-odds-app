@@ -48,7 +48,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit = {}) {
+fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData: () -> Unit) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val s = state.settings
     val context = LocalContext.current

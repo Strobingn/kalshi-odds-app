@@ -76,9 +76,9 @@ fun OddsScreen(
     viewModel: OddsViewModel,
     onOpenSettings: () -> Unit,
     onOpenScorecard: () -> Unit,
-    onOpenData: () -> Unit = {},
-    onOpenHistory: () -> Unit = {},
-    onOpenChart: (MarketUiModel) -> Unit = {}
+    onOpenData: () -> Unit,
+    onOpenHistory: () -> Unit,
+    onOpenChart: (MarketUiModel) -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
 
@@ -417,7 +417,7 @@ private fun LiveUpDownHero(
     market: MarketUiModel?,
     onBuyYes: (MarketUiModel) -> Unit,
     onBuyNo: (MarketUiModel) -> Unit,
-    onOpenChart: (MarketUiModel) -> Unit = {}
+    onOpenChart: (MarketUiModel) -> Unit
 ) {
     Column(
         modifier = Modifier
