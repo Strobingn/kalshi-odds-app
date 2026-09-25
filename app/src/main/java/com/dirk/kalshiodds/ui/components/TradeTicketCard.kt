@@ -103,7 +103,7 @@ fun TradeTicketsSection(
         when (val phase = tickets.phase) {
             is TicketPhase.Submitting -> {
                 Text(
-                    "Submitting limit on ${phase.ticket.ticker}…",
+                    "Submitting limit on ${com.dirk.kalshiodds.ui.WindowLabel.of(phase.ticket.ticker)}…",
                     color = colors.accentBlue,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
@@ -111,7 +111,7 @@ fun TradeTicketsSection(
             }
             is TicketPhase.Submitted -> {
                 Text(
-                    "Limit resting · ${phase.order.ticket.ticker} · order ${phase.order.orderId ?: "pending id"}",
+                    "Limit resting · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(phase.order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(phase.order.ticket.ticker)} · order ${phase.order.orderId ?: "pending id"}",
                     color = colors.textPrimary,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
@@ -267,7 +267,7 @@ private fun ProposedTicketCard(
             }
             TicketMetricRow(
                 "Max payout",
-                String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)
+                String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, com.dirk.kalshiodds.ui.SignalCopy.callLabel(ticket.side))
             )
             run {
                 val profit = ticket.profitIfWinUsd ?: ticket.potentialGainUsd
@@ -500,8 +500,8 @@ private fun ApproveTicketDialog(
                         String.format(
                             Locale.US,
                             "%s %s\n$%.2f stake · %d contracts @ %s\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
-                            ticket.displaySide,
-                            ticket.ticker,
+                            com.dirk.kalshiodds.ui.SignalCopy.callLabel(ticket.side),
+                            com.dirk.kalshiodds.ui.WindowLabel.of(ticket.ticker),
                             ticket.stakeUsd,
                             ticket.contracts,
                             KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice),

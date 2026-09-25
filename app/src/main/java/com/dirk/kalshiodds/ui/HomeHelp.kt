@@ -20,6 +20,10 @@ object HomeHelp {
         "Start / reset $100 · win-target sizing · never hits Kalshi. " +
             "The switch enables paper auto-log. Live Approve is the only path that can place a real V2 order."
 
+    const val SIGNALS_TITLE = "Signals"
+    const val SIGNALS_BODY =
+        "Recent live calls for this session. UP / DOWN / NO BET only — the long diagnostic stays behind Details."
+
     const val HOME_TITLE = "Home screen"
     const val HOME_BODY =
         "This window is the single best BetCall across the current BTC / ETH / SOL 15m windows. " +

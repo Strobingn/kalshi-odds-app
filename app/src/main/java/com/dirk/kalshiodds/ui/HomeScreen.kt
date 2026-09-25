@@ -41,6 +41,7 @@ import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.ui.components.CollapsibleHomeSection
 import com.dirk.kalshiodds.ui.components.MarketCard
+import com.dirk.kalshiodds.ui.components.SignalSummaryCard
 import com.dirk.kalshiodds.ui.components.PaperBookCard
 import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
@@ -88,6 +89,7 @@ fun HomeScreen(
         state.snapshot?.modelScoreTotal,
         state.snapshot?.modelMeanBrier
     )
+    val signalCount = state.recentAlerts.size
     val ticketCount = state.tickets.proposals.size + state.tickets.working.count {
         it.orderId != null && it.error?.startsWith("cancelled") != true
     }
@@ -205,6 +207,29 @@ fun HomeScreen(
                                 },
                                 onOpenChart = { onOpenChart(market) }
                             )
+                        }
+                        item {
+                            CollapsibleHomeSection(
+                                title = "Signals",
+                                count = signalCount,
+                                autoExpand = signalCount > 0,
+                                infoTitle = HomeHelp.SIGNALS_TITLE,
+                                infoBody = HomeHelp.SIGNALS_BODY
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    if (state.recentAlerts.isEmpty()) {
+                                        Text(
+                                            "No live signals yet.",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = colors.textSecondary
+                                        )
+                                    } else {
+                                        state.recentAlerts.forEach { alert ->
+                                            SignalSummaryCard(SignalCopy.card(alert))
+                                        }
+                                    }
+                                }
+                            }
                         }
                         item {
                             CollapsibleHomeSection(

@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.ui
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 
@@ -142,6 +143,38 @@ object HomeFixtures {
         settings = settings(hasKey),
         tickets = TicketUiState(),
         paper = PaperBookState(),
-        positions = emptyList()
+        positions = emptyList(),
+        recentAlerts = sampleAlerts()
+    )
+
+    fun sampleAlerts(): List<SignalAlert> = listOf(
+        SignalAlert(
+            id = "a1",
+            ticker = "KXBTC15M-26SEP251400-00",
+            series = "KXBTC15M",
+            deltaPp = -11.4,
+            fairValuePp = 32.6,
+            marketMidPp = 44.0,
+            reason = "QUIET/EARLY · cal · adapt · AI 58% vs mkt 44% · flow YES · Δ -11.4pp (fv 33%)",
+            createdAtMs = NOW_MS,
+            receiveElapsedNanos = 0L,
+            regime = "QUIET",
+            tteRegime = "EARLY",
+            predictedSide = "NO"
+        ),
+        SignalAlert(
+            id = "a2",
+            ticker = "KXBTC15M-26SEP251345-45",
+            series = "KXBTC15M",
+            deltaPp = 9.3,
+            fairValuePp = 73.3,
+            marketMidPp = 64.0,
+            reason = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ +9.3pp (fv 73%)",
+            createdAtMs = NOW_MS,
+            receiveElapsedNanos = 0L,
+            regime = "TREND",
+            tteRegime = "EARLY",
+            predictedSide = "YES"
+        )
     )
 }

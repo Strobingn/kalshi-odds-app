@@ -328,7 +328,11 @@ class HomeScreenScreenshotTest {
             val parent = js.parentFile?.parentFile ?: continue
             val src = File(parent, rel)
             if (src.isFile) {
-                src.copyTo(File(destDir, "$name.png"), overwrite = true)
+                try {
+                    src.copyTo(File(destDir, "$name.png"), overwrite = true)
+                } catch (_: Exception) {
+                    // /opt/cursor/artifacts can flake on close; the PNG is still in paparazzi/images.
+                }
                 return
             }
         }

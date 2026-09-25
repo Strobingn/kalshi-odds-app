@@ -287,18 +287,21 @@ private fun BetRow(b: HistoryBet) {
     }
 }
 
-internal fun signalCard(s: HistoryAssembler.SignalLine): SignalCopy.Card = SignalCopy.card(
-    ticker = s.ticker,
-    side = s.side,
-    modelYes = s.fairPp,
-    marketYes = s.marketPp,
-    settled = s.settled,
-    details = buildString {
-        s.note?.takeIf { it.isNotBlank() }?.let { append(it) }
-        if (isNotEmpty()) append('\n')
-        append(String.format(Locale.US, "Stored Δ %+.1f pp (not the card edge)", s.edgePp))
-    }
-)
+internal fun signalCard(s: HistoryAssembler.SignalLine): SignalCopy.Card {
+    val parsed = SignalCopy.parseAiVsMarket(s.note)
+    return SignalCopy.card(
+        ticker = s.ticker,
+        side = s.side,
+        modelYes = parsed?.first ?: s.fairPp,
+        marketYes = parsed?.second ?: s.marketPp,
+        settled = s.settled,
+        details = buildString {
+            s.note?.takeIf { it.isNotBlank() }?.let { append(it) }
+            if (isNotEmpty()) append('\n')
+            append(String.format(Locale.US, "Stored Δ %+.1f pp (fair − mid, not the card edge)", s.edgePp))
+        }
+    )
+}
 
 @Composable
 private fun SessionRow(s: HistorySession) {

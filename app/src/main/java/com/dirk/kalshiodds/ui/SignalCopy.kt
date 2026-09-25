@@ -1,13 +1,14 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.trade.BetCall
 import java.util.Locale
 
 /**
  * Display-only signal card copy. Edge on the card is always
  * model% − market% for the shown side — same definition as
- * [HomeCopy.modelVsMarket]. Stored `deltaPp` / net-after-fees
- * stay in [Card.details], not the header.
+ * [HomeCopy.modelVsMarket]. Stored `deltaPp` is blended fair − mid
+ * (YES-centric) and stays in [Card.details], not the header.
  */
 object SignalCopy {
     data class Card(
@@ -79,4 +80,35 @@ object SignalCopy {
         outcome = outcomeLabel(settled),
         details = details?.trim()?.takeIf { it.isNotEmpty() }
     )
+
+    /**
+     * Live-alert mapper. Prefers `AI N% vs mkt M%` from [SignalAlert.reason]
+     * so the line matches the home card (AI − market). Falls back to
+     * [SignalAlert.fairValuePp] / [SignalAlert.marketMidPp] when the
+     * diagnostic has no AI pair. Stored [SignalAlert.deltaPp] is fair − mid.
+     */
+    fun card(alert: SignalAlert, settled: String? = null): Card {
+        val parsed = parseAiVsMarket(alert.reason)
+        return card(
+            ticker = alert.ticker,
+            side = alert.predictedSide,
+            modelYes = parsed?.first ?: alert.fairValuePp,
+            marketYes = parsed?.second ?: alert.marketMidPp,
+            settled = settled,
+            details = detailsForAlert(alert)
+        )
+    }
+
+    fun parseAiVsMarket(reason: String?): Pair<Double, Double>? {
+        val m = AI_VS_MKT.find(reason ?: return null) ?: return null
+        return m.groupValues[1].toDouble() to m.groupValues[2].toDouble()
+    }
+
+    fun detailsForAlert(alert: SignalAlert): String = buildString {
+        alert.reason.trim().takeIf { it.isNotEmpty() }?.let { append(it) }
+        if (isNotEmpty()) append('\n')
+        append(String.format(Locale.US, "Stored Δ %+.1f pp (fair − mid, not the card edge)", alert.deltaPp))
+    }
+
+    private val AI_VS_MKT = Regex("""AI\s+(\d+(?:\.\d+)?)%\s+vs\s+mkt\s+(\d+(?:\.\d+)?)%""", RegexOption.IGNORE_CASE)
 }
