@@ -45,6 +45,9 @@ import kotlin.math.floor
  * The fee is paid **on top of** purchase cost at buy time. Settlement is
  * still `C × $1.00`. It is not deducted from the $1 payout.
  *
+ * Money math uses [BigDecimal] so binary `0.07 × C × P × (1−P)` cannot
+ * trip `ceil_6dp` over an exact cent (e.g. 1.12 → 1.120001 → $1.13).
+ *
  * Pure math — never places an order.
  */
 object KalshiFee {
@@ -63,23 +66,19 @@ object KalshiFee {
     }
 
     /** Unrounded model fee `coef × C × P × (1 − P)`. */
-    fun raw(contracts: Int, price: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
-        val n = contracts.coerceAtLeast(0).toDouble()
-        val p = clipPrice(price)
-        val r = feeRate.coerceIn(0.0, 0.25)
-        return (r * n * p * (1.0 - p)).coerceAtLeast(0.0)
-    }
+    fun raw(contracts: Int, price: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double =
+        modelFeeBd(contracts, price, feeRate).toDouble()
 
     /** Fee-model trade fee, rounded up to $0.000001. */
     fun ceil6dp(dollars: Double): Double {
         if (!dollars.isFinite() || dollars <= 0.0) return 0.0
-        return BigDecimal.valueOf(dollars).setScale(6, RoundingMode.CEILING).toDouble()
+        return bd(dollars).setScale(6, RoundingMode.CEILING).toDouble()
     }
 
     /** Round up so the dollar amount sits on a $0.01 grid. */
     fun ceilCent(dollars: Double): Double {
         if (!dollars.isFinite() || dollars <= 0.0) return 0.0
-        return BigDecimal.valueOf(dollars).setScale(2, RoundingMode.CEILING).toDouble()
+        return bd(dollars).setScale(2, RoundingMode.CEILING).toDouble()
     }
 
     /** @deprecated Use [ceilCent]; kept for existing call sites / tests. */
@@ -92,17 +91,14 @@ object KalshiFee {
     fun total(contracts: Int, price: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
         val n = contracts.coerceAtLeast(0)
         if (n <= 0) return 0.0
-        val p = clipPrice(price)
-        val positionCost = n * p
-        val tradeFee = ceil6dp(raw(n, p, feeRate))
-        val debit = ceilCent(positionCost + tradeFee)
-        return (debit - positionCost).coerceAtLeast(0.0)
+        val position = positionBd(n, price)
+        return debitBd(n, price, feeRate).subtract(position).max(BigDecimal.ZERO).toDouble()
     }
 
     fun totalCost(contracts: Int, price: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
         val n = contracts.coerceAtLeast(0)
         if (n <= 0) return 0.0
-        return n * clipPrice(price) + total(n, price, feeRate)
+        return debitBd(n, price, feeRate).toDouble()
     }
 
     fun settlementPayout(contracts: Int): Double =
@@ -154,5 +150,26 @@ object KalshiFee {
         val p = clipPrice(price)
         val c = contractsForStake(stakeUsd, p).coerceAtLeast(1)
         return total(c, p, feeRate) / c.toDouble()
+    }
+
+    private fun bd(dollars: Double): BigDecimal = BigDecimal.valueOf(dollars)
+
+    /** Snap to Kalshi FixedPointDollars (4 decimal places). */
+    private fun priceBd(price: Double): BigDecimal =
+        bd(clipPrice(price)).setScale(4, RoundingMode.HALF_UP)
+
+    private fun modelFeeBd(contracts: Int, price: Double, feeRate: Double): BigDecimal {
+        val n = BigDecimal.valueOf(contracts.coerceAtLeast(0).toLong())
+        val p = priceBd(price)
+        val r = bd(feeRate.coerceIn(0.0, 0.25))
+        return r.multiply(n).multiply(p).multiply(BigDecimal.ONE.subtract(p)).max(BigDecimal.ZERO)
+    }
+
+    private fun positionBd(contracts: Int, price: Double): BigDecimal =
+        priceBd(price).multiply(BigDecimal.valueOf(contracts.coerceAtLeast(0).toLong()))
+
+    private fun debitBd(contracts: Int, price: Double, feeRate: Double): BigDecimal {
+        val trade = modelFeeBd(contracts, price, feeRate).setScale(6, RoundingMode.CEILING)
+        return positionBd(contracts, price).add(trade).setScale(2, RoundingMode.CEILING)
     }
 }
