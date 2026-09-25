@@ -349,7 +349,14 @@ fun OddsScreen(
                         item { Spacer(Modifier.height(8.dp)); SectionHeader("Extra crypto") }
                         marketsOrEmpty("extra", snapshot?.extra.orEmpty(), viewModel, state, onOpenChart)
                     }
-                    item { Spacer(Modifier.height(24.dp)) }
+                    item {
+                        Text(
+                            AppVersion.label,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = colors.textSecondary,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 16.dp)
+                        )
+                    }
                 }
             }
         }

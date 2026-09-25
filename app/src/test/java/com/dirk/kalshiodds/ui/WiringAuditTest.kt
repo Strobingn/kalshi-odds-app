@@ -95,7 +95,8 @@ class WiringAuditTest {
         Control("Settings Test connection", SettingsViewModel::class.java, "testConnection"),
         Control("Settings last order error", SettingsViewModel::class.java, "refreshLastOrderError"),
         Control("API key status line", ApiKeyUi::class.java, "statusLine"),
-        Control("No-key banner visibility", ApiKeyUi::class.java, "showNoKeyBanner")
+        Control("No-key banner visibility", ApiKeyUi::class.java, "showNoKeyBanner"),
+        Control("App version label", AppVersion::class.java, "getLabel")
     )
 
     @Test
