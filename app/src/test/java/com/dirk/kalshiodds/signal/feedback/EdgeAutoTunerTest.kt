@@ -49,10 +49,9 @@ class EdgeAutoTunerTest {
         }
         val r = EdgeAutoTuner.tune(samples, minSamples = 20)
         assertTrue(r.enoughSamples)
-        assertTrue(r.thresholdPp >= 2.0)
-        if (!r.sitOut) {
-            assertTrue((r.evAtThreshold ?: 0.0) > 0.0)
-        }
+        assertFalse(r.sitOut)
+        assertTrue(r.thresholdPp >= 1.5)
+        assertTrue((r.evAtThreshold ?: 0.0) > 5.0)
     }
 
     @Test
