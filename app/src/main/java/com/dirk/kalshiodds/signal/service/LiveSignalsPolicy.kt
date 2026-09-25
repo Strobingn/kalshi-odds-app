@@ -37,6 +37,7 @@ object LiveSignalsPolicy {
     const val FGS_TYPE_DATA_SYNC = 1
 
     const val TICKET_REBUILD_DEBOUNCE_MS = 300L
+    const val LIFECYCLE_CHANNEL = "market_lifecycle_v2"
 
     fun startCommand(explicitStop: Boolean): Int =
         if (explicitStop) START_NOT_STICKY else START_STICKY
@@ -80,6 +81,7 @@ object LiveSignalsPolicy {
             add("ticker")
             if (wanted.isNotEmpty()) add("orderbook_delta")
             if (subscribeTrades) add("trade")
+            add(LIFECYCLE_CHANNEL)
         }
         return SubscriptionPlan(channels, wanted)
     }

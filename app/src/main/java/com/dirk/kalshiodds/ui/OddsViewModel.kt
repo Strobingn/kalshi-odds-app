@@ -19,7 +19,6 @@ import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
-import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.chart.ChartWindowService
 import com.dirk.kalshiodds.chart.hasQuote
@@ -346,9 +345,23 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             currentIntervalMs > BASE_POLL_MS + JITTER_MS -> "Backing off ~${currentIntervalMs / 1000}s"
             else -> "Polling ~${currentIntervalMs}ms (±${JITTER_MS}ms)"
         }
+        val event = container.rollover.applyListed(result.allMarkets)
         hub.ingestRestSnapshot(result)
+        if (event.droppedTickers.isNotEmpty()) {
+            ticketSession.voidTickers(event.droppedTickers)
+            viewModelScope.launch {
+                runCatching { repository.scoreSettlementsNow(container.clock.nowMs()) }
+            }
+        }
+        if (event.addedTickers.isNotEmpty()) {
+            applyRolloverCharts(event)
+        }
+        val series = _state.value.settings.watchedSeries.ifEmpty {
+            com.dirk.kalshiodds.domain.CryptoMarkets.DEFAULT_SERIES
+        }
+        val pruned = result.retainActiveWindows(container.clock.nowMs(), series)
         val overlaid = attachHistory(
-            result.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
+            pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
         )
         _state.update {
             it.copy(
@@ -639,20 +652,26 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun applyRolloverCharts(event: com.dirk.kalshiodds.signal.market.MarketRollover.Event) {
+        val now = container.clock.nowMs()
+        for (ticker in event.addedTickers) {
+            val market = event.active.values.firstOrNull { it.ticker == ticker }
+            val end = market?.closeTimeEpochMs ?: now + ChartWindowService.WINDOW_MS
+            chartWindows.restoreWindow(ticker, end - ChartWindowService.WINDOW_MS, end)
+        }
+        chartWindows.trimActive(event.activeTickers, now - ChartWindowService.WINDOW_MS)
+    }
+
     private fun rebuildTickets() {
         val s = _state.value
-        val now = System.currentTimeMillis()
+        val now = container.clock.nowMs()
         val markets = s.snapshot?.allMarkets.orEmpty()
         val live = MarketLifecycle.tradable(markets, now)
         val liveTickers = live.map { it.ticker }.toSet()
         val ctx = ticketContext(s, now)
-        val remappedManuals = s.tickets.proposals.mapNotNull { existing ->
-            if (existing.kind != TicketKind.MANUAL) return@mapNotNull null
-            if (existing.ticker in liveTickers) return@mapNotNull null
-            val next = MarketLifecycle.liveSuccessor(existing.ticker, live, now) ?: return@mapNotNull null
-            TicketBuilder.proposeManual(next, existing.side, ctx)
-        }
-        val tickets = TicketBuilder.proposeAll(live, ctx) + remappedManuals
+        val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
+        if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
+        val tickets = TicketBuilder.proposeAll(live, ctx)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {
             container.opportunities.consider(
@@ -913,10 +932,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun nextDelayMs(): Long {
         val wsConnected = _state.value.signalStatus.state == WsConnectionState.CONNECTED
-        if (wsConnected) return WS_METADATA_POLL_MS
-        val half = min(JITTER_MS, currentIntervalMs / 3)
-        val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
-        return (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
+        val poll = if (wsConnected) {
+            WS_METADATA_POLL_MS
+        } else {
+            val half = min(JITTER_MS, currentIntervalMs / 3)
+            val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
+            (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
+        }
+        return minOf(poll, container.rollover.nextDelayMs()).coerceAtLeast(50L)
     }
 
     companion object {

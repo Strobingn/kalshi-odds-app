@@ -16,6 +16,7 @@ import java.util.UUID
 object TicketBuilder {
 
     const val MARKET_CLOSED = "Market closed"
+    const val WINDOW_CLOSED = "Window closed"
     const val NO_BUYERS = "No buyers right now; this position can't be sold"
     const val SELL_IOC_NOTE = "Sells at the current bid. Leftover size is canceled."
 
@@ -506,7 +507,7 @@ object TicketBuilder {
             title = market.title,
             sizingNote = reason,
             gateNote = when (reason) {
-                MARKET_CLOSED -> "This window is over — no live order will be sent"
+                MARKET_CLOSED, WINDOW_CLOSED -> "This window is over — no live order will be sent"
                 NO_BUYERS -> NO_BUYERS
                 else -> "Approve stays off until sellers show up"
             },

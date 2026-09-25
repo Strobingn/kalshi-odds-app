@@ -46,6 +46,8 @@ class LiveSignalsService : Service() {
     private var client: KalshiWsClient? = null
     private var pipelineJob: Job? = null
     private var metadataJob: Job? = null
+    private var rolloverJob: Job? = null
+    @Volatile private var rolloverBound = false
     private var wakeLock: PowerManager.WakeLock? = null
     @Volatile private var explicitStop = false
     @Volatile private var lastTickerCount = 0
@@ -61,6 +63,7 @@ class LiveSignalsService : Service() {
         // here is a process-killing RemoteServiceException.
         promoteToForeground()
         runCatching { acquireWakeLock() }
+        runCatching { bindRollover() }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -79,7 +82,29 @@ class LiveSignalsService : Service() {
         if (metadataJob == null || metadataJob?.isActive != true) {
             metadataJob = scope.launch { runMetadataLoop() }
         }
+        if (rolloverJob == null || rolloverJob?.isActive != true) {
+            rolloverJob = scope.launch {
+                runCatching {
+                    KalshiOddsApp.from(this@LiveSignalsService).container.rollover.start(this)
+                }
+            }
+        }
         return START_STICKY
+    }
+
+    private fun bindRollover() {
+        if (rolloverBound) return
+        val container = runCatching { KalshiOddsApp.from(this).container }.getOrNull() ?: return
+        rolloverBound = true
+        container.rollover.addListener { event ->
+            container.hub.setWatchTickers(event.activeTickers)
+            if (event.droppedTickers.isNotEmpty()) {
+                container.tickets.voidTickers(event.droppedTickers)
+                scope.launch {
+                    runCatching { container.repository.scoreSettlementsNow(container.clock.nowMs()) }
+                }
+            }
+        }
     }
 
     private fun handleExplicitStop(): Int {
@@ -194,6 +219,13 @@ class LiveSignalsService : Service() {
             val ws = KalshiWsClient(
                 scope = scope,
                 onTick = { tick -> runCatching { hub.ingestTick(tick) } },
+                onLifecycle = { ticker, eventType ->
+                    scope.launch {
+                        runCatching {
+                            container.rollover.onLifecycleRefresh(ticker, eventType)
+                        }
+                    }
+                },
                 onBookSnapshot = { snap ->
                     runCatching {
                         hub.ingestBookSnapshot(
@@ -371,6 +403,9 @@ class LiveSignalsService : Service() {
         pipelineJob = null
         metadataJob?.cancel()
         metadataJob = null
+        rolloverJob?.cancel()
+        rolloverJob = null
+        runCatching { KalshiOddsApp.from(this).container.rollover.stop() }
     }
 
     private fun acquireWakeLock() {

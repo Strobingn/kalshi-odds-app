@@ -25,8 +25,15 @@ import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import com.dirk.kalshiodds.domain.ActiveMarketResolver
+import com.dirk.kalshiodds.domain.FakeClock
+import com.dirk.kalshiodds.signal.market.MarketRollover
+import com.dirk.kalshiodds.signal.service.LiveSignalsPolicy
+import com.dirk.kalshiodds.signal.ws.WsSubscriptionSwitch
 import com.dirk.kalshiodds.ui.DisagreementLabel
 import com.dirk.kalshiodds.ui.HomeCopy
+import com.dirk.kalshiodds.ui.HomeMarkets
+import com.dirk.kalshiodds.ui.WindowLabel
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
@@ -531,6 +538,214 @@ class KnownIssuesRegressionTest {
             partial.fillSummary()
         )
         assertFalse(partial.isResting)
+    }
+
+    @Test
+    fun fifteenMinuteWindowRollsOverThreeTimesWithoutRestart() = runBlocking {
+        val t0 = 1_700_000_000_000L
+        val clock = FakeClock(t0 + 60_000L)
+        val closes = LongArray(4) { i -> t0 + (i + 1) * 900_000L }
+        val keys = listOf("26SEP251200", "26SEP251215", "26SEP251230", "26SEP251245")
+        val series = listOf("KXBTC15M" to "Bitcoin", "KXETH15M" to "Ethereum", "KXSOL15M" to "Solana")
+        val windows = keys.mapIndexed { i, key ->
+            series.map { (ser, label) ->
+                sample("$ser-$key-45", 0.40, 0.60, 55.0, "YES").copy(
+                    closeTimeEpochMs = closes[i],
+                    status = "active",
+                    seriesLabel = label
+                )
+            }
+        }
+        var listed: List<MarketUiModel> = windows[0]
+        var lateEmpty = false
+        val listCalls = AtomicInteger(0)
+        val scored = mutableListOf<Set<String>>()
+        val ws = RecordingWs()
+        val placed = AtomicInteger(0)
+        val session = TicketSession(
+            placeOrder = { ticket, clientOrderId ->
+                placed.incrementAndGet()
+                Result.success(
+                    PlacedOrder(
+                        ticket = ticket,
+                        clientOrderId = clientOrderId,
+                        orderId = "should-not-place",
+                        fillCount = 0.0,
+                        remainingCount = ticket.contracts.toDouble(),
+                        averageFillPrice = ticket.limitPrice,
+                        placedAtMs = 1L
+                    )
+                )
+            }
+        )
+        val rollover = MarketRollover(
+            clock = clock,
+            listOpen = { seriesTicker ->
+                listCalls.incrementAndGet()
+                if (lateEmpty) emptyList()
+                else listed.filter {
+                    com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) == seriesTicker
+                }
+            }
+        )
+        rollover.addListener { event ->
+            if (event.droppedTickers.isNotEmpty()) scored += event.droppedTickers
+            session.voidTickers(event.droppedTickers)
+            ws.apply(event)
+        }
+
+        var event = rollover.refreshFromRest()
+        assertEquals(windows[0].map { it.ticker }.toSet(), event.activeTickers)
+        assertEquals(closes[0] + ActiveMarketResolver.GRACE_AFTER_CLOSE_MS, event.nextWakeMs)
+        assertEquals(windows[0].map { it.ticker }.toSet(), ws.tickers.toSet())
+        assertTrue(ws.commands.any { it.cmd == "subscribe" })
+        assertTrue(ws.commands.none { it.cmd == "unsubscribe" })
+        assertWindowUi(windows[0], clock.nowMs())
+
+        val firstTicket = TicketBuilder.proposeManual(
+            windows[0].first { it.ticker.startsWith("KXBTC15M") },
+            "YES",
+            TicketBuilder.Context(settings = SignalSettings(ticketsEnabled = true), alertsPaused = false, nowMs = clock.nowMs())
+        )!!
+        session.addManual(firstTicket)
+        assertTrue(firstTicket.canApprove)
+        assertTrue(session.snapshot().phase is com.dirk.kalshiodds.signal.trade.TicketPhase.AwaitingApprove)
+
+        for (step in 1..3) {
+            val openTicket = TicketBuilder.proposeManual(
+                windows[step - 1].first { it.ticker.startsWith("KXETH15M") },
+                "NO",
+                TicketBuilder.Context(
+                    settings = SignalSettings(ticketsEnabled = true),
+                    alertsPaused = false,
+                    nowMs = clock.nowMs()
+                )
+            )!!
+            session.addManual(openTicket)
+            assertTrue(openTicket.canApprove)
+            clock.set(closes[step - 1] + 4_000L)
+            val dropped = windows[step - 1].map { it.ticker }.toSet()
+            val added = windows[step].map { it.ticker }.toSet()
+            if (step == 1) {
+                lateEmpty = true
+                val miss = rollover.refreshFromRest()
+                assertTrue(miss.retrying.containsAll(listOf("KXBTC15M", "KXETH15M", "KXSOL15M")))
+                assertEquals(clock.nowMs() + ActiveMarketResolver.RETRY_MS, miss.nextWakeMs)
+                assertTrue(miss.activeTickers.isEmpty())
+                assertEquals(dropped, miss.droppedTickers)
+                lateEmpty = false
+                clock.advance(ActiveMarketResolver.RETRY_MS)
+            }
+            listed = windows[step]
+            event = rollover.refreshFromRest()
+            assertEquals(added, event.activeTickers)
+            assertEquals(added, event.addedTickers)
+            if (step == 1) {
+                assertTrue(event.droppedTickers.isEmpty())
+            } else {
+                assertEquals(dropped, event.droppedTickers)
+            }
+            assertEquals(added, ws.tickers.toSet())
+            val lastUnsub = ws.commands.last { it.cmd == "unsubscribe" }
+            val lastSub = ws.commands.last { it.cmd == "subscribe" }
+            assertEquals(dropped.toList().sorted(), lastUnsub.droppedTickers.sorted())
+            assertEquals(added.toList().sorted(), lastSub.marketTickers.sorted())
+            assertWindowUi(windows[step], clock.nowMs())
+            assertTrue(scored.any { it == dropped })
+            val voided = session.snapshot().proposals.filter { it.ticker in dropped }
+            assertTrue(voided.isNotEmpty())
+            voided.forEach { ticket ->
+                assertEquals(TicketSession.WINDOW_CLOSED, ticket.blockedReason)
+                assertFalse(ticket.canApprove)
+            }
+            session.approve(firstTicket.id)
+            session.approve(openTicket.id)
+            assertEquals(0, placed.get())
+            assertEquals(TicketSession.WINDOW_CLOSED, session.snapshot().lastError)
+        }
+
+        assertTrue("lifecycle close should re-resolve", rollover.onLifecycle(windows[2][0].ticker, "deactivated"))
+        assertTrue(listCalls.get() >= 4)
+        assertEquals(3, scored.size)
+    }
+
+    @Test
+    fun websocketReconnectMidWindowKeepsCurrentTicker() = runBlocking {
+        val t0 = 1_700_000_000_000L
+        val clock = FakeClock(t0 + 60_000L)
+        val close = t0 + 900_000L
+        val listed = listOf("KXBTC15M", "KXETH15M", "KXSOL15M").map { ser ->
+            sample("$ser-26SEP251200-45", 0.40, 0.60, 55.0, "YES").copy(
+                closeTimeEpochMs = close,
+                status = "active"
+            )
+        }
+        val ws = RecordingWs()
+        val rollover = MarketRollover(
+            clock = clock,
+            listOpen = { series ->
+                listed.filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) == series }
+            }
+        )
+        rollover.addListener { ws.apply(it) }
+        val live = rollover.refreshFromRest()
+        assertEquals(listed.map { it.ticker }.toSet(), live.activeTickers)
+        val before = ws.commands.toList()
+        val replay = rollover.onReconnect()
+        assertTrue(replay.reconnect)
+        assertEquals(live.activeTickers, replay.activeTickers)
+        assertTrue(replay.droppedTickers.isEmpty())
+        assertTrue(replay.addedTickers.isEmpty())
+        val reconnectCmds = ws.commands.drop(before.size)
+        assertEquals(1, reconnectCmds.size)
+        assertEquals("subscribe", reconnectCmds.single().cmd)
+        assertEquals(listed.map { it.ticker }.toSet(), reconnectCmds.single().marketTickers.toSet())
+        assertEquals(listed.map { it.ticker }.toSet(), ws.tickers.toSet())
+        assertTrue(reconnectCmds.none { it.cmd == "unsubscribe" })
+        val switch = WsSubscriptionSwitch.resubscribeOnReconnect(
+            9,
+            LiveSignalsPolicy.subscriptionPlan(true, ws.tickers).channels,
+            ws.tickers
+        )
+        assertEquals("subscribe", switch.cmd)
+        assertEquals(ws.tickers.toSet(), switch.marketTickers.toSet())
+    }
+
+    private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {
+        val cards = HomeMarkets.currentWindowCards(markets, SignalSettings(), nowMs)
+        assertEquals(3, cards.size)
+        cards.forEach { card ->
+            val label = WindowLabel.of(card.ticker, card.closeTimeEpochMs)
+            assertTrue(label.contains("window"))
+            assertEquals(card.closeTimeEpochMs, markets.first { it.ticker == card.ticker }.closeTimeEpochMs)
+        }
+    }
+
+    private class RecordingWs {
+        private var id = 1
+        private val sids = mutableListOf<Int>()
+        var tickers: List<String> = emptyList()
+        val commands = mutableListOf<WsSubscriptionSwitch.Outbound>()
+        private val channels = LiveSignalsPolicy.subscriptionPlan(
+            subscribeTrades = true,
+            watchedTickers = listOf("KXBTC15M-X")
+        ).channels
+
+        fun apply(event: MarketRollover.Event) {
+            if (event.reconnect) {
+                commands += WsSubscriptionSwitch.resubscribeOnReconnect(id++, channels, tickers)
+                return
+            }
+            val next = event.activeTickers.toList().sorted()
+            val out = WsSubscriptionSwitch.replace(id, channels, tickers, next, sids.toList())
+            id += out.size
+            commands += out
+            if (out.any { it.cmd == "unsubscribe" }) sids.clear()
+            if (out.any { it.cmd == "subscribe" }) {
+                tickers = next
+                sids += listOf(11, 12, 13)
+            }
+        }
     }
 
     private fun v2AllIn(body: CreateOrderV2Request): Double {

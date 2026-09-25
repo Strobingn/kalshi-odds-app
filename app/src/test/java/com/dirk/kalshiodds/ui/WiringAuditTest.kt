@@ -117,7 +117,9 @@ class WiringAuditTest {
         Control("Home version label", AppVersion::class.java, "getLabel"),
         Control("Home no-key banner", ApiKeyUi::class.java, "showNoKeyBanner"),
         Control("Home mode chip", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove"),
-        Control("Home disagreement label", DisagreementLabel::class.java, "of")
+        Control("Home disagreement label", DisagreementLabel::class.java, "of"),
+        Control("15m market rollover", com.dirk.kalshiodds.signal.market.MarketRollover::class.java, "refreshFromRest"),
+        Control("Active market resolver", com.dirk.kalshiodds.domain.ActiveMarketResolver::class.java, "forSeries")
     )
 
     @Test

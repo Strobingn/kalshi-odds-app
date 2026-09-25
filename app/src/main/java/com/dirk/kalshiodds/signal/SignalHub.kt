@@ -137,14 +137,24 @@ class SignalHub(
 
     fun ingestRestSnapshot(snapshot: MarketsSnapshot) {
         val recv = elapsedNanos()
+        val now = System.currentTimeMillis()
         val markets = snapshot.allMarkets.filter { CryptoMarkets.isCryptoTicker(it.ticker) }
-        setWatchTickers(markets.map { it.ticker }.toSet())
+        val series = settings.watchedSeries.ifEmpty { CryptoMarkets.DEFAULT_SERIES }
+        val active = com.dirk.kalshiodds.domain.ActiveMarketResolver.tickers(markets, series, now)
+        val extras = settings.extraTickerList().filter { ticker ->
+            markets.any {
+                it.ticker.equals(ticker, ignoreCase = true) &&
+                    com.dirk.kalshiodds.domain.MarketLifecycle.isTradable(it, now)
+            }
+        }
+        setWatchTickers(active + extras)
         for (m in markets) {
             scoring.rememberMeta(m.ticker, m.closeTimeEpochMs, m.volume, m.openInterest, m.floorStrike)
         }
         if (wsLive && _status.value.state == WsConnectionState.CONNECTED) return
         tickScope.launch {
             for (m in markets) {
+                if (m.ticker !in active && m.ticker !in extras) continue
                 if (!settings.isWatchedTicker(m.ticker)) continue
                 runCatching { processTick(MarketTick.fromUi(m, recv, TickSource.REST), notify = true) }
             }

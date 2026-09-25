@@ -57,6 +57,12 @@ object KalshiWsMessages {
             val receiveElapsedNanos: Long
         ) : Parsed()
         data class Subscribed(val sid: Int?, val raw: String) : Parsed()
+        data class Unsubscribed(val sids: List<Int>, val raw: String) : Parsed()
+        data class Lifecycle(
+            val ticker: String,
+            val eventType: String,
+            val result: String? = null
+        ) : Parsed()
         data class Error(val code: Int?, val message: String) : Parsed()
         data class Other(val type: String?, val raw: String) : Parsed()
     }
@@ -78,6 +84,29 @@ object KalshiWsMessages {
         return json.encodeToString(Command(id = id, cmd = "unsubscribe", params = params))
     }
 
+    /**
+     * Official way to change tickers on an existing sid without reconnecting.
+     * https://docs.kalshi.com/websockets/websocket-connection
+     * https://docs.kalshi.com/getting_started/quick_start_websockets
+     * `action`: `add_markets` | `delete_markets` | `get_snapshot`.
+     * `update_subscription` must target exactly one `sid`.
+     */
+    fun updateSubscription(
+        id: Int,
+        sid: Int,
+        action: String,
+        marketTickers: List<String>
+    ): String {
+        val params = mutableMapOf<String, JsonElement>(
+            "sid" to JsonPrimitive(sid),
+            "action" to JsonPrimitive(action)
+        )
+        if (marketTickers.isNotEmpty()) {
+            params["market_tickers"] = json.parseToJsonElement(json.encodeToString(marketTickers))
+        }
+        return json.encodeToString(Command(id = id, cmd = "update_subscription", params = params))
+    }
+
     fun parse(raw: String, receiveElapsedNanos: Long): Parsed {
         val env = runCatching { json.decodeFromString<Envelope>(raw) }.getOrNull()
             ?: return Parsed.Other(null, raw)
@@ -97,6 +126,21 @@ object KalshiWsMessages {
                 parseDelta(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
             }
             "subscribed" -> Parsed.Subscribed(env.sid ?: env.msg?.intField("sid"), raw)
+            "unsubscribed" -> Parsed.Unsubscribed(
+                sids = env.msg?.intList("sids").orEmpty().ifEmpty {
+                    listOfNotNull(env.sid)
+                },
+                raw = raw
+            )
+            "market_lifecycle_v2", "event_lifecycle" -> {
+                val ticker = env.msg?.stringField("market_ticker") ?: return Parsed.Other(env.type, raw)
+                val eventType = env.msg.stringField("event_type", "event", "status") ?: "updated"
+                Parsed.Lifecycle(
+                    ticker = ticker,
+                    eventType = eventType,
+                    result = env.msg.stringField("result")
+                )
+            }
             "error" -> Parsed.Error(
                 code = env.msg?.intField("code"),
                 message = env.msg?.stringField("msg") ?: env.msg?.stringField("message") ?: "WS error"
@@ -226,6 +270,14 @@ object KalshiWsMessages {
     private fun JsonObject.intField(name: String): Int? {
         val v = this[name] as? JsonPrimitive ?: return null
         return v.longOrNull?.toInt() ?: v.contentOrNull?.toIntOrNull()
+    }
+
+    private fun JsonObject.intList(name: String): List<Int>? {
+        val arr = this[name] as? JsonArray ?: return null
+        return arr.mapNotNull { el ->
+            val p = el as? JsonPrimitive ?: return@mapNotNull null
+            p.longOrNull?.toInt() ?: p.contentOrNull?.toIntOrNull()
+        }
     }
 
     private fun JsonObject.rawDouble(vararg names: String): Double? {
