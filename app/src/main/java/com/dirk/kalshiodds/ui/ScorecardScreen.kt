@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import java.util.Locale
+import kotlin.math.roundToInt
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -223,7 +224,7 @@ private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
     val text = if (muted.isEmpty()) {
         "No series/regimes muted. Auto-mute needs ${com.dirk.kalshiodds.signal.config.SignalConstants.MIN_MUTE_SAMPLES}+ rolling samples below the floor."
     } else {
-        "Muted: " + muted.joinToString { "${it.label} ${(it.hitRate * 100).toInt()}% (${it.hits}/${it.total})" }
+        "Muted: " + muted.joinToString { "${it.label} ${(it.hitRate * 100).roundToInt()}% (${it.hits}/${it.total})" }
     }
     Text(
         text = text,

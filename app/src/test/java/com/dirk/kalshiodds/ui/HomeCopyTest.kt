@@ -15,7 +15,7 @@ class HomeCopyTest {
     fun scorecardHidesBrierUntilTwentyResults() {
         assertEquals("Picked side: — · need 20+ results", HomeCopy.scorecardLine(null, null, 0.2))
         assertEquals("Picked side: 0/5 correct (0%) · need 20+ results", HomeCopy.scorecardLine(0, 5, 0.893))
-        assertEquals("Picked side: 12/18 correct (66%) · need 20+ results", HomeCopy.scorecardLine(12, 18, 0.211))
+        assertEquals("Picked side: 12/18 correct (67%) · need 20+ results", HomeCopy.scorecardLine(12, 18, 0.211))
         assertFalse(HomeCopy.scorecardLine(0, 5, 0.893).contains("Brier"))
         assertEquals("need 20+ results", HomeCopy.pickedSideBrierLine(5, 0.893))
         assertEquals("need 20+ results", HomeCopy.pUpBrierLine(5, 0.003))
@@ -25,6 +25,15 @@ class HomeCopyTest {
         )
         assertEquals("Picked-side Brier 0.180", HomeCopy.pickedSideBrierLine(20, 0.180))
         assertEquals("P(UP) Brier 0.003", HomeCopy.pUpBrierLine(20, 0.003))
+    }
+
+    @Test
+    fun pickedSideLineRoundsPercentInsteadOfTruncating() {
+        assertEquals("Picked side: 12/18 correct (67%)", HomeCopy.pickedSideLine(12, 18))
+        assertEquals("Picked side: 1/3 correct (33%)", HomeCopy.pickedSideLine(1, 3))
+        assertEquals("Picked side: 2/3 correct (67%)", HomeCopy.pickedSideLine(2, 3))
+        assertEquals("Picked side: 0/5 correct (0%)", HomeCopy.pickedSideLine(0, 5))
+        assertEquals("Picked side: 5/5 correct (100%)", HomeCopy.pickedSideLine(5, 5))
     }
 
     @Test

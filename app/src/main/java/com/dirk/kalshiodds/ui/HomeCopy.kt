@@ -7,6 +7,7 @@ import com.dirk.kalshiodds.domain.TimeLeft
 import com.dirk.kalshiodds.signal.trade.BetCall
 import java.util.Locale
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /**
  * Home-screen display copy. Formatting only — never changes a [BetCall]
@@ -56,7 +57,7 @@ object HomeCopy {
      */
     fun pickedSideLine(correct: Int?, total: Int?): String {
         if (correct == null || total == null || total <= 0) return "Picked side: —"
-        val pct = ((100.0 * correct) / total).toInt()
+        val pct = ((100.0 * correct) / total).roundToInt()
         return "Picked side: $correct/$total correct ($pct%)"
     }
 
