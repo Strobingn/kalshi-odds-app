@@ -673,7 +673,7 @@ fun SettingsContent(
             Text(
                 "On-device regime / anomaly / survival / conformal / meta / path-sim plus advisory RL sizing. " +
                     "These can raise CPU and battery — turn the master switch off to drop back to Heavy ML + 0.2.x. " +
-                    "RL suggested stake is display-only. Tickets always use the configured \\$5 default / caps and still need Approve. " +
+                    "RL suggested stake is display-only. Tickets always use the configured \$5 default / caps and still need Approve. " +
                     "News embeddings fail-soft and cache if the network is down.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -692,8 +692,8 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \\$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
-                    "signal would trade. Never calls Kalshi. Reset returns cash to \\$100. The home-screen PAPER BOOK " +
+                "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
+                    "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
                     "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
                     "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
@@ -706,11 +706,11 @@ fun SettingsContent(
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Live Approve is \\$5 all-in including Kalshi fees. Count is the largest integer with " +
-                    "count×price + fee ≤ \\$5 (fee = ceil_cent(0.07×count×P×(1−P))). " +
-                    "Tickets below the min-profit-if-win setting (default \\$10) stay disabled. " +
-                    "The \\$100-payout long-shot (ask ≤5¢ / configured stake) is still its own option. " +
-                    "Hunter still surfaces when \\$1 can settle ≥\\$25. Long-shot hunter still needs ask ≤20¢ " +
+                "Live Approve is \$5 all-in including Kalshi fees. Count is the largest integer with " +
+                    "count×price + fee ≤ \$5 (fee = ceil_cent(0.07×count×P×(1−P))). " +
+                    "Tickets below the min-profit-if-win setting (default \$10) stay disabled. " +
+                    "The \$100-payout long-shot (ask ≤5¢ / configured stake) is still its own option. " +
+                    "Hunter still surfaces when \$1 can settle ≥\$25. Long-shot hunter still needs ask ≤20¢ " +
                     "and AI beating implied after fees. Paper fills never block Live. " +
                     "Limit orders only — POST /trade-api/v2/portfolio/events/orders. No auto-fire.",
                 style = MaterialTheme.typography.labelMedium,
@@ -771,14 +771,14 @@ fun SettingsContent(
 
             Section("Legacy win-target (History / paper only)")
             Text(
-                "Off for live. Live Approve always uses the \\$5 all-in cap and the min-profit setting above. " +
-                    "This leftover \\$50 sizer is kept so History restore still reads old snapshots — " +
-                    "it can never resize a LIVE order above \\$5 (the final order-build step clips again). " +
-                    "Paper / History may still walk the ask book for a \\$50 win target.",
+                "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
+                    "This leftover \$50 sizer is kept so History restore still reads old snapshots — " +
+                    "it can never resize a LIVE order above \$5 (the final order-build step clips again). " +
+                    "Paper / History may still walk the ask book for a \$50 win target.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Legacy win-target sizing (default off · \\$50)", s.winTargetEnabled, { viewModel?.setWinTargetEnabled(it) })
+            ToggleRow("Legacy win-target sizing (default off · \$50)", s.winTargetEnabled, { viewModel?.setWinTargetEnabled(it) })
             Text(
                 String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
                 style = MaterialTheme.typography.bodyMedium,
@@ -824,7 +824,7 @@ fun SettingsContent(
 
             Section("Kalshi demo (play money)")
             Text(
-                "Separate from the local \\$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
                     "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
                     "Paper Buy still works with no key and never hits this host.",
                 style = MaterialTheme.typography.labelMedium,
