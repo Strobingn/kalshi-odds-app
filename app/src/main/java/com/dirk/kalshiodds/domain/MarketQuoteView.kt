@@ -26,9 +26,11 @@ data class MarketQuoteView(
     val downChartLabel: String get() = "DOWN bid $noBidLabel"
 
     companion object {
+        @JvmStatic
         fun of(market: MarketUiModel, feeRate: Double = 0.07): MarketQuoteView =
             of(market.yesBid, market.yesAsk, market.noBid, market.noAsk, feeRate)
 
+        @JvmStatic
         fun of(
             yesBid: Double?,
             yesAsk: Double?,

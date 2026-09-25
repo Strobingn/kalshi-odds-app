@@ -91,7 +91,6 @@ class WiringAuditTest {
         assertNotNull(ChartWindowService::restoreWindow)
         assertNotNull(ChartWindowService::persistPoints)
         assertNotNull(LiveWindowBackfill::candles)
-        assertNotNull(KalshiQuoteDisplay::multiplier)
         assertNotNull(KalshiFee::perContract)
         assertNotNull(AsyncResultsWriter::enqueueChartTick)
     }

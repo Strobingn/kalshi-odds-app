@@ -266,7 +266,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    internal fun seedChartWindows() {
+    fun seedChartWindows() {
         runCatching {
             val now = System.currentTimeMillis()
             val markets = _state.value.snapshot?.allMarkets.orEmpty()

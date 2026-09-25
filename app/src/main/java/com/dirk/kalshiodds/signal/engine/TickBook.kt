@@ -157,6 +157,7 @@ class TickBook(private val maxPoints: Int = 80) {
 
     private fun recordBid(tick: MarketTick, nowMs: Long) {
         val (yesBid, yesAsk) = QuoteSanity.usablePair(tick.yesBid, tick.yesAsk)
+        if (QuoteSanity.isCrossed(tick.yesBid, tick.yesAsk)) return
         val noFromAsk = yesAsk?.let { (1.0 - it).coerceIn(0.0, 1.0) }
         val rawNo = tick.noBid
         val no = if (QuoteSanity.isPlaceholder(rawNo)) noFromAsk else rawNo

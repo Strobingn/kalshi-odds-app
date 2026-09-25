@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.chart
 import com.dirk.kalshiodds.data.backfill.HistoryTransport
 import com.dirk.kalshiodds.data.backfill.KalshiBackfillEngine
 import com.dirk.kalshiodds.data.backfill.LiveWindowBackfill
+import com.dirk.kalshiodds.data.backfill.toBidPoint
 import com.dirk.kalshiodds.data.local.archive.ChartTickRow
 import com.dirk.kalshiodds.data.local.results.InMemoryResultsStore
 import com.dirk.kalshiodds.domain.MarketQuoteView
