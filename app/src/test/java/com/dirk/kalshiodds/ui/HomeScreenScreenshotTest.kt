@@ -47,23 +47,28 @@ class HomeScreenScreenshotTest {
 
     @Test
     fun lightS24ScorecardVisibleWithoutScroll() {
-        paparazzi.unsafeUpdateConfig(
-            deviceConfig = DeviceConfig.PIXEL_6.copy(
-                softButtons = false,
-                screenWidth = 1080,
-                screenHeight = 2340
+        val tall = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
+        try {
+            paparazzi.unsafeUpdateConfig(
+                deviceConfig = DeviceConfig.PIXEL_6.copy(
+                    softButtons = false,
+                    screenWidth = 1080,
+                    screenHeight = 2340
+                )
             )
-        )
-        snap(
-            "home_light_s24_scorecard_visible",
-            dark = false,
-            HomeFixtures.state(
-                HomeFixtures.actionableBtc(),
-                HomeFixtures.noBetEth(),
-                HomeFixtures.noBetSol(),
-                hasKey = true
+            snap(
+                "home_light_s24_scorecard_visible",
+                dark = false,
+                HomeFixtures.state(
+                    HomeFixtures.actionableBtc(),
+                    HomeFixtures.noBetEth(),
+                    HomeFixtures.noBetSol(),
+                    hasKey = true
+                )
             )
-        )
+        } finally {
+            paparazzi.unsafeUpdateConfig(deviceConfig = tall)
+        }
     }
 
     @Test
