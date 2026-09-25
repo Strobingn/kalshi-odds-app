@@ -9,7 +9,7 @@ enum class TicketKind {
     HUNTER_VALUE,
     /** User tapped Buy on a market card / hero. */
     MANUAL,
-    /** Sell / reduce a held YES or NO position. Reduce-only V2 limit. */
+    /** Sell / reduce a held YES or NO position. IoC reduce-only at the bid. */
     SELL
 }
 
@@ -48,7 +48,10 @@ data class TradeTicket(
      * ask). Approve stays disabled and [TicketSession.approve] will not place.
      */
     val blockedReason: String? = null,
-    /** Documented V2 `reduce_only` — cap the order at the current position. */
+    /**
+     * Documented V2 `reduce_only` — cap the order at the current position.
+     * Official schema requires `time_in_force=immediate_or_cancel` with this flag.
+     */
     val reduceOnly: Boolean = false,
     val heldContracts: Int? = null,
     /** Shown when a buy would net against an existing position. */
@@ -95,14 +98,43 @@ data class PlacedOrder(
     val averageFillPrice: Double?,
     val placedAtMs: Long,
     val error: String? = null
-)
+) {
+    val filledContracts: Int
+        get() = kotlin.math.floor(fillCount + 1e-9).toInt().coerceAtLeast(0)
+
+    val unfilledContracts: Int
+        get() = (ticket.contracts - filledContracts).coerceAtLeast(0)
+
+    /** IoC reduce-only sells never rest — leftover size is canceled. */
+    val isResting: Boolean
+        get() = !ticket.isSell && remainingCount > 1e-9 && orderId != null
+
+    fun fillSummary(): String {
+        val wanted = ticket.contracts
+        val filled = filledContracts
+        val leftover = unfilledContracts
+        return when {
+            filled <= 0 ->
+                "Sold 0 of $wanted contracts. Nothing filled — no leftover order."
+            leftover <= 0 ->
+                "Sold $filled of $wanted contracts."
+            else ->
+                "Sold $filled of $wanted contracts. $leftover didn't fill — no leftover order."
+        }
+    }
+}
 
 sealed class TicketPhase {
     data object Idle : TicketPhase()
 
     data class Proposed(val tickets: List<TradeTicket>) : TicketPhase()
 
-    data class AwaitingApprove(val ticket: TradeTicket, val others: List<TradeTicket>) : TicketPhase()
+    data class AwaitingApprove(
+        val ticket: TradeTicket,
+        val others: List<TradeTicket> = emptyList(),
+        /** One client_order_id for this confirm sheet — reused on double-tap. */
+        val clientOrderId: String = ""
+    ) : TicketPhase()
 
     data class Submitting(val ticket: TradeTicket, val clientOrderId: String) : TicketPhase()
 

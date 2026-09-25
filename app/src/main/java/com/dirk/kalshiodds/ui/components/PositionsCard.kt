@@ -18,7 +18,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.trade.LivePosition
-import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @Composable
@@ -45,7 +44,7 @@ fun PositionsCard(
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                "Live Kalshi holdings (GET /portfolio/positions). Sell opens an approve-gated V2 reduce-only limit — never the retired v1 path.",
+                "Open Kalshi positions. Sell closes them at the current bid.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -74,13 +73,6 @@ fun PositionsCard(
 @Composable
 private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
     val colors = DipTheme.colors
-    val pnl = pos.unrealizedPnlUsd
-    val pnlColor = when {
-        pnl == null -> colors.textSecondary
-        pnl > 0 -> colors.textPrimary
-        pnl < 0 -> colors.textPrimary
-        else -> colors.accentBlue
-    }
     Column(
         Modifier
             .fillMaxWidth()
@@ -89,7 +81,7 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
-                pos.displaySide,
+                com.dirk.kalshiodds.ui.SignalCopy.callLabel(pos.side),
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.accentBlue,
                 fontWeight = FontWeight.Bold
@@ -97,25 +89,10 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
             TimeLeftLabel(pos.closeTimeEpochMs, compact = true)
         }
         Text(
-            com.dirk.kalshiodds.ui.WindowLabel.of(pos.ticker, pos.closeTimeEpochMs),
+            com.dirk.kalshiodds.ui.PositionCopy.row(pos),
             style = MaterialTheme.typography.titleMedium,
             color = MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Bold
-        )
-        pos.title?.let {
-            Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        }
-        Text(
-            String.format(
-                Locale.US,
-                "%.2f sh · avg %s · bid %s · uP&L %s",
-                pos.contracts,
-                pos.avgCost?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—",
-                pos.bestBid?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—",
-                pnl?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
-            ),
-            style = MaterialTheme.typography.labelMedium,
-            color = pnlColor
         )
         Button(
             onClick = { onSell(pos.ticker, pos.side) },

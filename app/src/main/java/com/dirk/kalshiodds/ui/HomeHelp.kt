@@ -7,13 +7,11 @@ package com.dirk.kalshiodds.ui
 object HomeHelp {
     const val TICKETS_TITLE = "Tickets"
     const val TICKETS_BODY =
-        "LIVE $ = real V2 GTC ($5 all-in including fees). PAPER = simulated $100 book. " +
-            "Paper fills never block Live. Paper trading ON does not swallow a keyed Live Approve. " +
-            "Approve opens the REAL MONEY confirm. Cancel leaves no live order."
+        "Tickets wait for your Approve. Nothing is sent until you confirm."
 
     const val POSITIONS_TITLE = "Positions"
     const val POSITIONS_BODY =
-        "Live Kalshi holdings (GET /portfolio/positions). Sell opens an approve-gated V2 reduce-only limit."
+        "Open Kalshi positions. Sell closes them at the current bid."
 
     const val PAPER_TITLE = "Paper book"
     const val PAPER_BODY =

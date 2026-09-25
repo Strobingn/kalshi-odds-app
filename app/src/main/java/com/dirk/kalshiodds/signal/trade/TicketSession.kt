@@ -62,7 +62,9 @@ class TicketSession(
             if (cur.phase is TicketPhase.Submitting) {
                 return@update cur.copy(proposals = merged, lastError = cleanedError)
             }
-            val awaiting = (cur.phase as? TicketPhase.AwaitingApprove)?.ticket
+            val awaitingPhase = cur.phase as? TicketPhase.AwaitingApprove
+            val awaiting = awaitingPhase?.ticket
+            val confirmId = awaitingPhase?.clientOrderId
             val liveAwaiting = awaiting?.takeIf { ticket ->
                 (liveTickers == null || ticket.ticker in liveTickers) &&
                     merged.any { it.id == ticket.id || ticketKey(it) == ticketKey(ticket) }
@@ -70,12 +72,12 @@ class TicketSession(
             val phase = when {
                 liveAwaiting != null && merged.any { it.id == liveAwaiting.id } -> {
                     val fresh = merged.first { it.id == liveAwaiting.id }
-                    TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
+                    confirmPhase(fresh, merged.filterNot { it.id == fresh.id }, confirmId)
                 }
                 liveAwaiting != null &&
                     (liveAwaiting.kind == TicketKind.MANUAL || liveAwaiting.kind == TicketKind.SELL) -> {
                     val fresh = merged.firstOrNull { ticketKey(it) == ticketKey(liveAwaiting) } ?: liveAwaiting
-                    TicketPhase.AwaitingApprove(fresh, merged.filterNot { it.id == fresh.id })
+                    confirmPhase(fresh, merged.filterNot { it.id == fresh.id }, confirmId)
                 }
                 merged.isEmpty() -> TicketPhase.Idle
                 else -> TicketPhase.Proposed(merged)
@@ -101,7 +103,7 @@ class TicketSession(
             val others = cur.proposals.filterNot { ticketKey(it) == ticketKey(ticket) }
             val next = listOf(ticket) + others
             cur.copy(
-                phase = TicketPhase.AwaitingApprove(ticket, others),
+                phase = confirmPhase(ticket, others),
                 proposals = next,
                 lastError = null
             )
@@ -122,7 +124,7 @@ class TicketSession(
             val phase = when (val p = cur.phase) {
                 is TicketPhase.AwaitingApprove ->
                     if (p.ticket.id == ticketId) {
-                        TicketPhase.AwaitingApprove(nextTicket, next.filterNot { it.id == ticketId })
+                        confirmPhase(nextTicket, next.filterNot { it.id == ticketId }, p.clientOrderId)
                     } else {
                         p
                     }
@@ -146,7 +148,7 @@ class TicketSession(
         val ticket = _state.value.proposals.firstOrNull { it.id == ticketId } ?: return false
         val others = _state.value.proposals.filterNot { it.id == ticketId }
         _state.update {
-            it.copy(phase = TicketPhase.AwaitingApprove(ticket, others), lastError = null)
+            it.copy(phase = confirmPhase(ticket, others), lastError = null)
         }
         return true
     }
@@ -185,7 +187,10 @@ class TicketSession(
         }
         if (cur.phase is TicketPhase.Submitting) return cur
 
-        val clientOrderId = idFactory()
+        val clientOrderId = (cur.phase as? TicketPhase.AwaitingApprove)
+            ?.clientOrderId
+            ?.takeIf { it.isNotBlank() }
+            ?: idFactory()
         _state.update {
             it.copy(
                 phase = TicketPhase.Submitting(ticket, clientOrderId),
@@ -257,6 +262,15 @@ class TicketSession(
             }
         )
         return _state.value
+    }
+
+    private fun confirmPhase(
+        ticket: TradeTicket,
+        others: List<TradeTicket>,
+        existingId: String? = null
+    ): TicketPhase.AwaitingApprove {
+        val id = existingId?.takeIf { it.isNotBlank() } ?: idFactory()
+        return TicketPhase.AwaitingApprove(ticket, others, id)
     }
 
     fun failSoft(message: String) {

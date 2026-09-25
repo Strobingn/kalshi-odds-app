@@ -59,7 +59,7 @@ fun TradeTicketsSection(
     val proposals = tickets.proposals.sortedByDescending {
         if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
-    val working = tickets.working.filter { it.orderId != null && it.error?.startsWith("cancelled") != true }
+    val working = tickets.working.filter { it.isResting && it.error?.startsWith("cancelled") != true }
 
     Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!homeMode) {
@@ -69,21 +69,13 @@ fun TradeTicketsSection(
                 color = MaterialTheme.colorScheme.onBackground
             )
             Text(
-                text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Paper trading ON does not swallow a keyed Live Approve. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
+                text = "Tickets wait for your Approve. Nothing is sent until you confirm.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            if (paperTradingEnabled && credentialsConfigured) {
-                Text(
-                    "Paper trading is ON for AI auto-log / the Paper button. Live Approve still sends a real Kalshi order after you confirm.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.accentOrange,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
             if (!credentialsConfigured) {
                 Text(
-                    text = "Add Kalshi API Key ID + PEM in Settings for Live Approve. Paper fills do not need keys. Keys stay on device and are never logged.",
+                    text = "Add your Kalshi key in Settings to place a live order.",
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.accentOrange
                 )
@@ -111,7 +103,11 @@ fun TradeTicketsSection(
             }
             is TicketPhase.Submitted -> {
                 Text(
-                    "Limit resting · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(phase.order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(phase.order.ticket.ticker)} · order ${phase.order.orderId ?: "pending id"}",
+                    if (phase.order.ticket.isSell) {
+                        phase.order.fillSummary()
+                    } else {
+                        "Limit resting · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(phase.order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(phase.order.ticket.ticker)} · order ${phase.order.orderId ?: "pending id"}"
+                    },
                     color = colors.textPrimary,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold
@@ -205,7 +201,7 @@ private fun ProposedTicketCard(
                         TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
-                        TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
+                        TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
                     } + " · " + TradeModeLabel.forApprove(
                         paperTradingEnabled = paperTradingEnabled,
                         liveCredentialsConfigured = credentialsConfigured,
@@ -248,9 +244,23 @@ private fun ProposedTicketCard(
                         .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 )
-                ticket.gateNote?.let {
-                    Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-                }
+            } else if (ticket.isSell) {
+            Spacer(Modifier.height(8.dp))
+            TicketMetricRow("Contracts", ticket.contracts.toString())
+            TicketMetricRow("Bid", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+            TicketMetricRow(
+                "Expected proceeds",
+                String.format(Locale.US, "$%.2f", ticket.stakeUsd)
+            )
+            ticket.feeUsd?.let {
+                TicketMetricRow("Fee", String.format(Locale.US, "$%.2f", it))
+            }
+            Text(
+                ticket.sizingNote,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary,
+                modifier = Modifier.padding(top = 6.dp)
+            )
             } else {
             Spacer(Modifier.height(8.dp))
             TicketMetricRow("Stake needed", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
@@ -462,25 +472,39 @@ private fun ApproveTicketDialog(
                 Text(
                     when {
                         paperSell ->
-                            "Simulated sell on the $100 paper book — never sent to Kalshi. " +
-                                "Count is capped at the paper fill so this cannot flip."
+                            "Simulated sell on the paper book — never sent to Kalshi."
                         paperBuy ->
-                            "Simulated fill on the paper book at the current walked ask, including fees. " +
-                                "No Kalshi key needed. This never places a live order."
+                            "Simulated fill on the paper book. This never places a live order."
+                        ticket.isSell && ticket.blockedReason != null ->
+                            ticket.blockedReason
                         ticket.isSell ->
-                            "REAL MONEY. Places a reduce-only V2 GTC limit (POST /portfolio/events/orders) to sell the held side. " +
-                                "Count is capped at your position so this cannot flip. Not a paper fill."
+                            "Sells at the current bid. Leftover size is canceled."
                         else ->
-                            "REAL MONEY. Places a GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
-                                "and not a paper fill. This tap is the only way a live order is sent. " +
-                                "Dismiss / Back leaves no hanging order. Not financial advice. High variance."
+                            "This tap sends a real Kalshi order. Cancel leaves nothing resting."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (paperSell) FontWeight.Normal else FontWeight.Bold,
-                    color = if (paperSell) colors.textPrimary else colors.accentOrange
+                    color = if (ticket.isSell && ticket.blockedReason != null) {
+                        colors.accentRed
+                    } else if (paperSell) {
+                        colors.textPrimary
+                    } else {
+                        colors.accentOrange
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
-                if (!paperSell && !paperBuy) {
+                if (ticket.isSell && !paperSell) {
+                    TicketMetricRow("Contracts", ticket.contracts.toString())
+                    TicketMetricRow("Bid", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+                    TicketMetricRow(
+                        "Fee",
+                        String.format(Locale.US, "$%.2f", ticket.feeUsd ?: 0.0)
+                    )
+                    TicketMetricRow(
+                        "Expected proceeds",
+                        String.format(Locale.US, "$%.2f", ticket.stakeUsd)
+                    )
+                } else if (!paperSell && !paperBuy) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())
                     TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
                     TicketMetricRow(
@@ -529,12 +553,14 @@ private fun ApproveTicketDialog(
                         label = { Text("Contracts (max $held)") },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     )
-                    OutlinedTextField(
-                        value = centsText,
-                        onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) },
-                        label = { Text("Limit ¢ (best bid)") },
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                    )
+                    if (paperSell) {
+                        OutlinedTextField(
+                            value = centsText,
+                            onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) },
+                            label = { Text("Limit ¢ (best bid)") },
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                        )
+                    }
                 }
                 if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE) {
                     Text(
@@ -551,7 +577,11 @@ private fun ApproveTicketDialog(
                 onClick = {
                     if (ticket.isSell) {
                         val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
-                        val px = (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
+                        val px = if (paperSell) {
+                            (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
+                        } else {
+                            ticket.limitPrice
+                        }
                         if (paperSell) onPaperSell(qty, px) else onApproveSell(qty, px)
                     } else if (paperBuy) {
                         onPaper()

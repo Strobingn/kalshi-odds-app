@@ -114,4 +114,19 @@ class HomeCopyTest {
         assertEquals("ETH", HomeCopy.coinShort(HomeFixtures.market("KXETH15M-A", "Ethereum", 0.4, 50.0, "YES", nowMs)))
         assertEquals("SOL", HomeCopy.coinShort(HomeFixtures.market("KXSOL15M-A", "Solana", 0.4, 50.0, "YES", nowMs)))
     }
+
+    @Test
+    fun positionsAndTicketsHelpHasNoDeveloperJargon() {
+        val copy = listOf(HomeHelp.TICKETS_BODY, HomeHelp.POSITIONS_BODY)
+        for (line in copy) {
+            assertFalse(line, line.contains("GET /portfolio"))
+            assertFalse(line, line.contains("reduce-only"))
+            assertFalse(line, line.contains("retired v1"))
+            assertFalse(line, line.contains("Paper fills never block"))
+            assertFalse(line, line.contains("Hunter cards still appear"))
+            assertFalse(line, line.contains("approve-gated"))
+        }
+        assertEquals("Tickets wait for your Approve. Nothing is sent until you confirm.", HomeHelp.TICKETS_BODY)
+        assertEquals("Open Kalshi positions. Sell closes them at the current bid.", HomeHelp.POSITIONS_BODY)
+    }
 }

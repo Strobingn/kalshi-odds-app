@@ -448,6 +448,91 @@ class KnownIssuesRegressionTest {
         assertNull(DisagreementLabel.of(tapeConflict = true))
     }
 
+    @Test
+    fun liveSellUsesIocReduceOnlyAtBestBid() = runBlocking {
+        val ticker = "KXBTC15M-26SEP251530-30"
+        val market = sample(ticker, yesAsk = 0.40, noAsk = 0.60, aiYes = 50.0, predicted = "YES")
+            .copy(yesBid = 0.002, noBid = 0.598)
+        val bookCtx = TicketBuilder.Context(
+            settings = SignalSettings(ticketsEnabled = true),
+            alertsPaused = false,
+            books = mapOf(
+                ticker to com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+                    yes = listOf(0.001 to 50.0)
+                )
+            ),
+            nowMs = nowMs
+        )
+        val yes = TicketBuilder.proposeSell(market, "YES", heldContracts = 50, ctx = bookCtx)!!
+        assertEquals(0.001, yes.limitPrice, 1e-12)
+        assertEquals("ask", yes.bookSide)
+        assertTrue(yes.reduceOnly)
+        assertEquals(TicketBuilder.SELL_IOC_NOTE, yes.gateNote)
+
+        val yesApi = RecordingTradeApi()
+        KalshiTradeClient(primary = yesApi, credentials = { "key" to fakePem })
+            .createLimit(yes, "cid-yes-8")
+        val yesBody = yesApi.creates.single()
+        assertEquals("ask", yesBody.side)
+        assertEquals("50.00", yesBody.count)
+        assertEquals("0.0010", yesBody.price)
+        assertEquals(CreateOrderV2Request.TIME_IN_FORCE_IOC, yesBody.timeInForce)
+        assertTrue(yesBody.reduceOnly)
+        assertFalse(yesBody.timeInForce == CreateOrderV2Request.TIME_IN_FORCE_GTC)
+
+        val no = TicketBuilder.proposeSell(
+            sample(ticker, yesAsk = 0.80, noAsk = 0.20, aiYes = 20.0, predicted = "NO")
+                .copy(yesBid = 0.78, noBid = 0.001),
+            "NO",
+            heldContracts = 10,
+            ctx = TicketBuilder.Context(
+                settings = SignalSettings(ticketsEnabled = true),
+                alertsPaused = false,
+                nowMs = nowMs
+            )
+        )!!
+        assertEquals("bid", no.bookSide)
+        assertEquals(0.001, no.limitPrice, 1e-12)
+        assertEquals(0.999, no.yesLimitPrice, 1e-12)
+        val noApi = RecordingTradeApi()
+        KalshiTradeClient(primary = noApi, credentials = { "key" to fakePem })
+            .createLimit(no, "cid-no-8")
+        val noBody = noApi.creates.single()
+        assertEquals("bid", noBody.side)
+        assertEquals("0.9990", noBody.price)
+        assertEquals(CreateOrderV2Request.TIME_IN_FORCE_IOC, noBody.timeInForce)
+        assertTrue(noBody.reduceOnly)
+
+        val empty = TicketBuilder.proposeSell(
+            sample(ticker, yesAsk = 0.40, noAsk = 0.60, aiYes = 50.0, predicted = "YES")
+                .copy(yesBid = null, yesAsk = null, noBid = null, noAsk = null, lastPrice = null),
+            "YES",
+            heldContracts = 50,
+            ctx = TicketBuilder.Context(
+                settings = SignalSettings(ticketsEnabled = true),
+                alertsPaused = false,
+                nowMs = nowMs
+            )
+        )!!
+        assertEquals(TicketBuilder.NO_BUYERS, empty.blockedReason)
+        assertFalse(empty.canApprove)
+
+        val partial = PlacedOrder(
+            ticket = yes,
+            clientOrderId = "cid-partial-8",
+            orderId = "ord-8",
+            fillCount = 20.0,
+            remainingCount = 0.0,
+            averageFillPrice = 0.001,
+            placedAtMs = 1L
+        )
+        assertEquals(
+            "Sold 20 of 50 contracts. 30 didn't fill — no leftover order.",
+            partial.fillSummary()
+        )
+        assertFalse(partial.isResting)
+    }
+
     private fun v2AllIn(body: CreateOrderV2Request): Double {
         val count = body.count.toDouble()
         val price = body.price.toDouble()
