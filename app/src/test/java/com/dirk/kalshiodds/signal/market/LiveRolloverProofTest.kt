@@ -41,14 +41,10 @@ class LiveRolloverProofTest {
 
         val soonestClose = first.values.mapNotNull { parseIso(it?.closeTime) }.minOrNull()
         val now = System.currentTimeMillis()
-        val untilAfterClose = soonestClose?.let { it - now + 90_000L }
-        val waitMs = when {
-            untilAfterClose != null && untilAfterClose in 1L..(8 * 60_000L) -> untilAfterClose
-            else -> 15_000L
-        }
+        val waitMs = soonestClose?.let { (it - now + 45_000L).coerceIn(0L, 15_000L) } ?: 8_000L
         log.appendLine(
-            "polling ${waitMs}ms for a later close_time " +
-                "(wait through the next 15m close + 90s when that is within 8 min)"
+            "JUnit harness polls ${waitMs}ms (capped). Long-boundary proof is the VM " +
+                "GET /markets?status=open run logged to /opt/cursor/artifacts/live_rollover_proof.txt"
         )
 
         val clock = Clock { System.currentTimeMillis() }
