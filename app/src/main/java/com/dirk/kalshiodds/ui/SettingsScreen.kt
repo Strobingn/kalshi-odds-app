@@ -431,21 +431,22 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \$100, auto-logs a \$5 simulated fill when an AI hunter / LiveCall " +
+                "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
                     "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
                     "card is the ledger — you do not need to dig here to see it.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
-            ToggleRow("Paper trading (AI auto-log \$5 fills)", s.paperTradingEnabled, viewModel::setPaperTrading)
+            ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, viewModel::setPaperTrading)
             OutlinedButton(onClick = viewModel::resetPaperBook, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Three approve-gated live paths: (1) cheap hunter — \$1 stake when max payout is ≥\$5 (ask ≤~20¢); " +
-                    "(2) hunter — \$1 stake when max payout is ≥\$25 (ask ≤~4¢); " +
+                "Three approve-gated live paths, each sized so a win pays the target (default \$50): " +
+                    "(1) Long-shot hunter — sides priced ≤20¢ (editable) when AI/fair beats implied after fees; " +
+                    "(2) hunter — still surfaces when a \$1 stake can settle ≥\$25 (ask ≤~4¢); " +
                     "(3) configured stake (default \$5) when max payout is ≥\$100 (ask ≤5¢). " +
                     "Buy YES / Buy NO on any market opens a manual ticket. Limit orders only — never market. " +
                     "Expired 15m windows drop or move to the live contract; a missing ask shows on that ticket " +
@@ -479,41 +480,37 @@ fun SettingsScreen(viewModel: SettingsViewModel, onBack: () -> Unit, onOpenData:
             Text(
                 String.format(
                     Locale.US,
-                    "$1 → $5 hunter  stake $%.0f · target $%.0f  (needs ask ≤ %.0f¢, market says ~%.0f%% chance)",
-                    s.hunterValueStakeUsd,
-                    s.hunterValuePayoutUsd,
-                    (s.hunterValueStakeUsd / s.hunterValuePayoutUsd) * 100.0,
-                    (s.hunterValueStakeUsd / s.hunterValuePayoutUsd) * 100.0
+                    "Long-shot hunter  max ask ≤ %.0f¢  · sized to win $%.0f when AI beats implied after fees",
+                    s.longShotMaxAsk * 100.0,
+                    s.winTargetUsd
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = AccentOrange,
                 fontWeight = FontWeight.SemiBold
             )
-            Text("Stake $", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
-            Slider(
-                value = s.hunterValueStakeUsd.toFloat().coerceIn(1f, 5f),
-                onValueChange = { viewModel.setHunterValueStake(it.toDouble()) },
-                valueRange = 1f..5f,
-                steps = 3
+            Text(
+                "Max ask ¢ — sides cheaper than this can appear as Long-shot cards (default 20¢).",
+                style = MaterialTheme.typography.labelMedium,
+                color = TextSecondary
             )
-            Text("Target payout $", style = MaterialTheme.typography.labelMedium, color = TextSecondary)
             Slider(
-                value = s.hunterValuePayoutUsd.toFloat().coerceIn(2f, 25f),
-                onValueChange = { viewModel.setHunterValuePayout(it.toDouble()) },
-                valueRange = 2f..25f,
-                steps = 22
+                value = (s.longShotMaxAsk * 100.0).toFloat().coerceIn(5f, 40f),
+                onValueChange = { viewModel.setLongShotMaxAsk(it.toDouble() / 100.0) },
+                valueRange = 5f..40f,
+                steps = 34
             )
 
             Section("Win target sizing")
             Text(
-                "Size hunter and Buy UP/DOWN tickets so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
+                "On by default. Size every Buy UP/DOWN and hunter card (including Long-shot) so profit-if-win ≥ the target, walking the ask book (VWAP, not top-of-book). " +
                     "Live Approve uses GET /portfolio/balance cash; Paper uses paper-book equity. " +
                     "Stake is capped at a % of that bankroll (default 10%) and an optional $ cap. " +
+                    "When the cap or book depth limits size, the card shows Capped: wins $X. " +
                     "Still Approve-only — never auto-placed.",
                 style = MaterialTheme.typography.labelMedium,
                 color = TextSecondary
             )
-            ToggleRow("Win-target sizing", s.winTargetEnabled, viewModel::setWinTargetEnabled)
+            ToggleRow("Win-target sizing (default on · $50)", s.winTargetEnabled, viewModel::setWinTargetEnabled)
             Text(
                 String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
                 style = MaterialTheme.typography.bodyMedium,

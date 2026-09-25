@@ -5,7 +5,7 @@ enum class TicketKind {
     CONFIGURED,
     /** Automatic hunter: $1 stake → ≥$25 max payout. */
     HUNTER,
-    /** Cheap hunter: $1 stake → ≥$5 max payout (ask ≤ ~20¢). */
+    /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */
     HUNTER_VALUE,
     /** User tapped Buy on a market card / hero. */
     MANUAL,

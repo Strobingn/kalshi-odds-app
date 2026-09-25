@@ -12,6 +12,7 @@ object SettingsRestore {
         val o = JSONObject()
         o.put("hunterValueStakeUsd", s.hunterValueStakeUsd)
         o.put("hunterValuePayoutUsd", s.hunterValuePayoutUsd)
+        o.put("longShotMaxAsk", s.longShotMaxAsk)
         o.put("winTargetEnabled", s.winTargetEnabled)
         o.put("winTargetUsd", s.winTargetUsd)
         o.put("winTargetBankrollPct", s.winTargetBankrollPct)
@@ -30,6 +31,12 @@ object SettingsRestore {
         return RestoredSettings(
             hunterValueStakeUsd = o.optDoubleOrNull("hunterValueStakeUsd"),
             hunterValuePayoutUsd = o.optDoubleOrNull("hunterValuePayoutUsd"),
+            longShotMaxAsk = o.optDoubleOrNull("longShotMaxAsk")
+                ?: run {
+                    val stake = o.optDoubleOrNull("hunterValueStakeUsd")
+                    val payout = o.optDoubleOrNull("hunterValuePayoutUsd")
+                    if (stake != null && payout != null && payout > 0.0) (stake / payout).coerceIn(0.05, 0.40) else null
+                },
             winTargetEnabled = if (o.has("winTargetEnabled")) o.optBoolean("winTargetEnabled") else null,
             winTargetUsd = o.optDoubleOrNull("winTargetUsd"),
             winTargetBankrollPct = o.optDoubleOrNull("winTargetBankrollPct"),
@@ -44,7 +51,7 @@ object SettingsRestore {
     }
 
     fun label(s: SignalSettings): String =
-        "stake $${s.ticketStakeUsd.toInt()} · $1→$${s.hunterValuePayoutUsd.toInt()} · " +
+        "stake $${s.ticketStakeUsd.toInt()} · long-shot ≤${(s.longShotMaxAsk * 100.0).toInt()}¢ · " +
             "win-target ${if (s.winTargetEnabled) "$${s.winTargetUsd.toInt()}" else "off"}"
 
     private fun JSONObject.optDoubleOrNull(key: String): Double? {
@@ -57,6 +64,7 @@ object SettingsRestore {
 data class RestoredSettings(
     val hunterValueStakeUsd: Double? = null,
     val hunterValuePayoutUsd: Double? = null,
+    val longShotMaxAsk: Double? = null,
     val winTargetEnabled: Boolean? = null,
     val winTargetUsd: Double? = null,
     val winTargetBankrollPct: Double? = null,
@@ -70,6 +78,7 @@ data class RestoredSettings(
 ) {
     val isEmpty: Boolean
         get() = hunterValueStakeUsd == null && hunterValuePayoutUsd == null &&
+            longShotMaxAsk == null &&
             winTargetEnabled == null && winTargetUsd == null &&
             ticketStakeUsd == null && bankrollUsd == null
 }

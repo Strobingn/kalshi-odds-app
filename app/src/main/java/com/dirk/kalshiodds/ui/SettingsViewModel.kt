@@ -142,6 +142,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setHunterValuePayout(v: Double) = track("hunter_value_payout", _state.value.settings.hunterValuePayoutUsd, v) {
         prefs.updateHunterValuePayoutUsd(v)
     }
+    fun setLongShotMaxAsk(v: Double) = track("long_shot_max_ask", _state.value.settings.longShotMaxAsk, v) {
+        prefs.updateLongShotMaxAsk(v)
+    }
     fun setWinTargetEnabled(v: Boolean) = track("win_target_enabled", _state.value.settings.winTargetEnabled, v) {
         prefs.updateWinTargetEnabled(v)
     }

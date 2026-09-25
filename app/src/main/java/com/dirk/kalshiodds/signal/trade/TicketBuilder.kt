@@ -80,14 +80,13 @@ object TicketBuilder {
     }
 
     /**
-     * $1 → ≥$5 hunter (ask ≤ ~20¢). Highlight as an edge only when the
-     * model beats implied by fees + margin. Approve still required.
+     * Long-shot hunter: ask ≤ [SignalSettings.longShotMaxAsk] (default 20¢)
+     * **and** AI/fair beats implied by fees + margin. Sized by win-target
+     * (default $50 profit), not a fixed $1 stake. Approve still required.
      */
     fun proposeHunterValue(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val stake = ctx.settings.hunterValueStakeUsd.coerceAtLeast(1.0)
-        val target = ctx.settings.hunterValuePayoutUsd.coerceAtLeast(2.0)
         val preferred = resolveSide(market)
         val sides = listOfNotNull(preferred, "YES", "NO").distinct()
         return sides.firstNotNullOfOrNull { side ->
@@ -95,8 +94,8 @@ object TicketBuilder {
                 market = market,
                 side = side,
                 ctx = ctx,
-                stakeUsd = stake,
-                minPayoutUsd = target,
+                stakeUsd = SignalConstants.HUNTER_STAKE_USD,
+                minPayoutUsd = SignalConstants.DEFAULT_WIN_TARGET_USD,
                 kind = TicketKind.HUNTER_VALUE,
                 requireGates = false
             )
@@ -244,10 +243,27 @@ object TicketBuilder {
             if (ctx.alertsPaused) return null
         }
         val ask = bestAsk(market, side, ctx) ?: return null
+        if (kind == TicketKind.HUNTER) {
+            val hunterMax = PayoutGate.maxLimitForPayout(
+                SignalConstants.HUNTER_STAKE_USD,
+                SignalConstants.HUNTER_MIN_PAYOUT_USD
+            )
+            if (hunterMax != null && ask > hunterMax + 1e-9) return null
+        }
+        if (kind == TicketKind.HUNTER_VALUE) {
+            val maxAsk = ctx.settings.longShotMaxAsk.coerceIn(0.05, 0.40)
+            if (ask > maxAsk + 1e-9) return null
+        }
+        if (kind == TicketKind.CONFIGURED) {
+            val configuredMax = PayoutGate.maxLimitForPayout(stakeUsd, minPayoutUsd)
+            if (configuredMax != null && ask > configuredMax + 1e-9) return null
+        }
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
-        val win = if (ctx.settings.winTargetEnabled && kind != TicketKind.SELL) {
+        val winTargetOn = kind != TicketKind.SELL &&
+            (ctx.settings.winTargetEnabled || kind == TicketKind.HUNTER_VALUE)
+        val win = if (winTargetOn) {
             WinTargetSizer.size(
                 askLevels = levels.ifEmpty { listOf(ask to (quoted ?: 500.0)) },
                 targetProfitUsd = ctx.settings.winTargetUsd,
@@ -285,15 +301,12 @@ object TicketBuilder {
         val model01 = modelProb(market, side)
         val implied = sizing.estimatedAvgFill
         val edge = modelBeatsImplied(model01, implied, ctx.settings.feeRate)
-        if (kind == TicketKind.HUNTER_VALUE && !edge) {
-            // Still surface the ticket — highlight only when it is an edge.
-        }
+        if (kind == TicketKind.HUNTER_VALUE && !edge) return null
 
         val yesLimit = if (side == "YES") sizing.limitPrice else (1.0 - sizing.limitPrice)
         val bookSide = if (side == "YES") "bid" else "ask"
         val netPer = market.netEvDollars
         val stake = if (win != null && win.contracts > 0) win.stakeUsd else stakeUsd
-        val maxAsk = PayoutGate.maxLimitForPayout(stakeUsd, minPayoutUsd)
         return TradeTicket(
             id = ctx.idFactory(),
             ticker = market.ticker,
@@ -312,9 +325,20 @@ object TicketBuilder {
             title = market.title,
             sizingNote = sizing.reason,
             gateNote = when (kind) {
-                TicketKind.HUNTER -> "Hunter $1 → ≥$25 · Approve still required"
-                TicketKind.HUNTER_VALUE -> hunterValueNote(stakeUsd, minPayoutUsd, maxAsk, implied, model01, edge)
-                TicketKind.MANUAL -> "Manual buy · Approve still required"
+                TicketKind.HUNTER -> {
+                    val sized = if (winTargetOn) " · sized to win \$${fmt(ctx.settings.winTargetUsd)}" else ""
+                    "Hunter $1 → ≥$25$sized · Approve still required"
+                }
+                TicketKind.HUNTER_VALUE -> longShotNote(
+                    ctx.settings.longShotMaxAsk,
+                    implied,
+                    model01,
+                    ctx.settings.winTargetUsd
+                )
+                TicketKind.MANUAL -> {
+                    val sized = if (winTargetOn) " · sized to win \$${fmt(ctx.settings.winTargetUsd)}" else ""
+                    "Manual buy$sized · Approve still required"
+                }
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> "Sell GTC limit · Approve still required · reduce-only"
             },
@@ -325,7 +349,7 @@ object TicketBuilder {
             fairChance = market.digitalFairPp?.div(100.0),
             modelEdge = edge,
             profitIfWinUsd = win?.profitIfWin ?: KalshiFee.netProfit(sizing.contracts, sizing.estimatedAvgFill, ctx.settings.feeRate),
-            winTargetUsd = if (ctx.settings.winTargetEnabled) ctx.settings.winTargetUsd else null,
+            winTargetUsd = if (winTargetOn) ctx.settings.winTargetUsd else null,
             winTargetCapped = win?.capped == true,
             winTargetNote = win?.note,
             bankrollSource = ctx.bankrollSource,
@@ -348,19 +372,16 @@ object TicketBuilder {
         return m > p + fee + margin
     }
 
-    fun hunterValueNote(
-        stake: Double,
-        target: Double,
-        maxAsk: Double?,
+    fun longShotNote(
+        maxAsk: Double,
         implied: Double?,
         model: Double?,
-        edge: Boolean
+        targetProfitUsd: Double
     ): String {
-        val cap = maxAsk?.let { String.format(java.util.Locale.US, "%.0f¢", it * 100.0) } ?: "—"
+        val cap = String.format(java.util.Locale.US, "%.0f¢", maxAsk.coerceIn(0.05, 0.40) * 100.0)
         val mkt = implied?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         val ai = model?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        val flag = if (edge) "EDGE" else "no edge"
-        return "Hunter \$${fmt(stake)} → ≥\$${fmt(target)} · needs ask ≤ $cap · market $mkt · AI $ai · $flag · Approve still required"
+        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · sized to win \$${fmt(targetProfitUsd)} · Approve still required"
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.0f", v)

@@ -58,7 +58,7 @@ fun PaperBookCard(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Start / reset $100 · $5 per AI fill · never hits Kalshi",
+                    "Start / reset $100 · win-target sizing · never hits Kalshi",
                     style = MaterialTheme.typography.labelMedium,
                     color = TextSecondary
                 )

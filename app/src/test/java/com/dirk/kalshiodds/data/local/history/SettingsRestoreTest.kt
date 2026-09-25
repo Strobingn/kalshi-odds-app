@@ -13,6 +13,7 @@ class SettingsRestoreTest {
         val s = SignalSettings(
             hunterValueStakeUsd = 1.0,
             hunterValuePayoutUsd = 5.0,
+            longShotMaxAsk = 0.20,
             winTargetEnabled = true,
             winTargetUsd = 50.0,
             winTargetBankrollPct = 10.0,
@@ -23,6 +24,7 @@ class SettingsRestoreTest {
         val parsed = SettingsRestore.parse(SettingsRestore.snapshot(s))
         assertEquals(1.0, parsed.hunterValueStakeUsd!!, 1e-9)
         assertEquals(5.0, parsed.hunterValuePayoutUsd!!, 1e-9)
+        assertEquals(0.20, parsed.longShotMaxAsk!!, 1e-9)
         assertEquals(true, parsed.winTargetEnabled)
         assertEquals(50.0, parsed.winTargetUsd!!, 1e-9)
         assertEquals(10.0, parsed.winTargetBankrollPct!!, 1e-9)
@@ -37,14 +39,24 @@ class SettingsRestoreTest {
         val parsed = SettingsRestore.parse("{}")
         assertTrue(parsed.isEmpty)
         assertNull(parsed.winTargetUsd)
+        assertNull(parsed.longShotMaxAsk)
     }
 
     @Test
-    fun labelMentionsHunterAndWinTarget() {
+    fun legacyOneToFiveDerivesLongShotMaxAsk() {
+        val parsed = SettingsRestore.parse("""{"hunterValueStakeUsd":1.0,"hunterValuePayoutUsd":5.0}""")
+        assertEquals(0.20, parsed.longShotMaxAsk!!, 1e-9)
+    }
+
+    @Test
+    fun labelMentionsLongShotAndWinTarget() {
         val label = SettingsRestore.label(
-            SignalSettings(winTargetEnabled = true, winTargetUsd = 50.0, hunterValuePayoutUsd = 5.0)
+            SignalSettings(winTargetEnabled = true, winTargetUsd = 50.0, longShotMaxAsk = 0.20)
         )
-        assertTrue(label.contains("$1→$5"))
+        assertTrue(label.contains("long-shot"))
+        assertTrue(label.contains("20¢") || label.contains("20"))
         assertTrue(label.contains("$50"))
+        assertFalse(label.contains("$1→$5"))
+        assertFalse(label.contains("$1 → $5"))
     }
 }

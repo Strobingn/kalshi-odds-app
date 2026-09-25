@@ -93,18 +93,13 @@ object WinTargetSizer {
         val note = when {
             hitTarget -> String.format(
                 java.util.Locale.US,
-                "%d ct @ %.1f¢ VWAP · stake $%.2f · wins $%.0f",
+                "%d ct @ %.1f¢ VWAP · stake $%.2f · Wins $%.0f",
                 filled, vwap * 100.0, cost, profit
-            )
-            capped -> String.format(
-                java.util.Locale.US,
-                "Capped: wins $%.0f (need $%.0f · stake cap $%.2f)",
-                profit, target, cap
             )
             else -> String.format(
                 java.util.Locale.US,
-                "Book fills %d ct · wins $%.0f (target $%.0f)",
-                filled, profit, target
+                "Capped: wins $%.0f",
+                profit
             )
         }
         return Result(
@@ -115,7 +110,7 @@ object WinTargetSizer {
             profitIfWin = profit,
             impliedChance = vwap,
             fillableContracts = filled,
-            capped = capped && !hitTarget,
+            capped = !hitTarget,
             insufficientDepth = insufficient,
             note = note
         )

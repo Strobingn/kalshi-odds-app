@@ -116,7 +116,7 @@ class PaperBook(
             note = if (ticket.winTargetUsd != null) {
                 "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
             } else {
-                "Paper $5 · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
+                "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
             stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
@@ -148,7 +148,7 @@ class PaperBook(
             note = if (ticket.winTargetUsd != null) {
                 "Paper win-target from ticket · never sent to Kalshi"
             } else {
-                "Paper $5 from ticket · never sent to Kalshi"
+                "Paper fill from ticket · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
             stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },

@@ -66,7 +66,7 @@ fun TradeTicketsSection(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper \$5 (above, or on the card) is a simulated fill on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
+            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. Paper uses the same win-target size as the card (default profit \$50) on the \$100 paper book and never hits Kalshi. Hunter cards still appear when a \$1 stake can settle ≥\$25. Long-shot cards appear at asks ≤20¢ when AI beats implied after fees. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = TextSecondary
         )
@@ -163,13 +163,8 @@ private fun ProposedTicketCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     when (ticket.kind) {
-                        TicketKind.HUNTER -> "PENDING APPROVAL · $1 → ≥$25"
-                        TicketKind.HUNTER_VALUE -> String.format(
-                            Locale.US,
-                            "PENDING APPROVAL · $%.0f → ≥$%.0f",
-                            ticket.stakeUsd.coerceAtLeast(1.0),
-                            ticket.maxPayoutUsd.coerceAtLeast(ticket.stakeUsd)
-                        )
+                        TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
+                        TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
@@ -211,17 +206,23 @@ private fun ProposedTicketCard(
             TicketMetricRow("Stake needed", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
             TicketMetricRow("Contracts", String.format(Locale.US, "%d", ticket.contracts))
             TicketMetricRow(
-                "Avg fill",
+                "Avg price",
                 String.format(Locale.US, "%.1f¢  (never market)", ticket.estimatedAvgFill * 100)
             )
             TicketMetricRow(
                 "Max payout",
                 String.format(Locale.US, "$%.0f if %s wins", ticket.maxPayoutUsd, ticket.displaySide)
             )
-            TicketMetricRow(
-                "Profit if wins",
-                String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
-            )
+            run {
+                val profit = ticket.profitIfWinUsd ?: ticket.potentialGainUsd
+                val target = ticket.winTargetUsd ?: profit
+                val winsLabel = if (ticket.winTargetCapped) {
+                    String.format(Locale.US, "Capped: wins $%.0f", profit)
+                } else {
+                    String.format(Locale.US, "Wins $%.0f", target)
+                }
+                TicketMetricRow(winsLabel, String.format(Locale.US, "$%.2f", profit))
+            }
             ticket.bankrollUsd?.let { roll ->
                 val src = when (ticket.bankrollSource) {
                     "live" -> "Kalshi cash"
@@ -235,7 +236,7 @@ private fun ProposedTicketCard(
             }
             ticket.modelChance?.let {
                 TicketMetricRow(
-                    if (ticket.modelEdge) "AI probability (edge)" else "AI probability",
+                    if (ticket.modelEdge) "AI chance (edge)" else "AI chance",
                     String.format(Locale.US, "%.0f%%", it * 100.0)
                 )
             }
@@ -286,7 +287,10 @@ private fun ProposedTicketCard(
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = AccentGreen),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
-                    Text(if (ticket.isSell) "Paper sell" else "Paper $5")
+                    Text(
+                        if (ticket.isSell) "Paper sell"
+                        else String.format(Locale.US, "Paper $%.2f", ticket.stakeUsd)
+                    )
                 }
                 Button(
                     onClick = { onReview(ticket.id) },

@@ -111,11 +111,19 @@ object SignalConstants {
     const val HUNTER_STAKE_USD = 1.0
     const val HUNTER_MIN_PAYOUT_USD = 25.0
 
-    /** Approve-gated cheap hunter: $1 → ≥$5 (ask ≤ 20¢ before fees). */
+    /**
+     * Long-shot hunter: surface sides priced at or under this ask
+     * (default 20¢) when AI/fair beats implied after fees + margin.
+     * Sized by win-target (default $50 profit), not a fixed $1 stake.
+     */
+    const val DEFAULT_LONG_SHOT_MAX_ASK = 0.20
+
+    /** Legacy $1 → $5 keys — kept so History restore can derive max ask. */
     const val HUNTER_VALUE_STAKE_USD = 1.0
     const val HUNTER_VALUE_PAYOUT_USD = 5.0
 
-    const val DEFAULT_WIN_TARGET_ENABLED = false
+    /** Size every approve-gated buy so profit-if-win ≥ this target. */
+    const val DEFAULT_WIN_TARGET_ENABLED = true
     const val DEFAULT_WIN_TARGET_USD = 50.0
     const val DEFAULT_WIN_TARGET_BANKROLL_PCT = 10.0
 

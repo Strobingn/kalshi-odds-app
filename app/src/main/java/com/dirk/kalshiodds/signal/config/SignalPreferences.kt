@@ -60,6 +60,7 @@ data class SignalSettings(
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
     val hunterValueStakeUsd: Double = SignalConstants.HUNTER_VALUE_STAKE_USD,
     val hunterValuePayoutUsd: Double = SignalConstants.HUNTER_VALUE_PAYOUT_USD,
+    val longShotMaxAsk: Double = SignalConstants.DEFAULT_LONG_SHOT_MAX_ASK,
     val winTargetEnabled: Boolean = SignalConstants.DEFAULT_WIN_TARGET_ENABLED,
     val winTargetUsd: Double = SignalConstants.DEFAULT_WIN_TARGET_USD,
     val winTargetBankrollPct: Double = SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
@@ -202,6 +203,9 @@ class SignalPreferences(
     suspend fun updateHunterValuePayoutUsd(value: Double) = edit {
         it[KEY_HUNTER_VALUE_PAYOUT] = value.coerceIn(2.0, 25.0)
     }
+    suspend fun updateLongShotMaxAsk(value: Double) = edit {
+        it[KEY_LONG_SHOT_MAX_ASK] = value.coerceIn(0.05, 0.40)
+    }
     suspend fun updateWinTargetEnabled(value: Boolean) = edit { it[KEY_WIN_TARGET] = value }
     suspend fun updateWinTargetUsd(value: Double) = edit {
         it[KEY_WIN_TARGET_USD] = value.coerceIn(5.0, 500.0)
@@ -263,6 +267,11 @@ class SignalPreferences(
         if (r.isEmpty) return
         r.hunterValueStakeUsd?.let { updateHunterValueStakeUsd(it) }
         r.hunterValuePayoutUsd?.let { updateHunterValuePayoutUsd(it) }
+        val restoredMaxAsk = r.longShotMaxAsk
+            ?: r.hunterValueStakeUsd?.let { stake ->
+                r.hunterValuePayoutUsd?.takeIf { it > 0.0 }?.let { stake / it }
+            }
+        restoredMaxAsk?.let { updateLongShotMaxAsk(it) }
         r.winTargetEnabled?.let { updateWinTargetEnabled(it) }
         r.winTargetUsd?.let { updateWinTargetUsd(it) }
         r.winTargetBankrollPct?.let { updateWinTargetBankrollPct(it) }
@@ -328,6 +337,8 @@ class SignalPreferences(
             ticketRespectGates = this[KEY_TICKET_GATES] ?: def.ticketRespectGates,
             hunterValueStakeUsd = this[KEY_HUNTER_VALUE_STAKE] ?: SignalConstants.HUNTER_VALUE_STAKE_USD,
             hunterValuePayoutUsd = this[KEY_HUNTER_VALUE_PAYOUT] ?: SignalConstants.HUNTER_VALUE_PAYOUT_USD,
+            longShotMaxAsk = this[KEY_LONG_SHOT_MAX_ASK]
+                ?: derivedLongShotMaxAsk(this[KEY_HUNTER_VALUE_STAKE], this[KEY_HUNTER_VALUE_PAYOUT]),
             winTargetEnabled = this[KEY_WIN_TARGET] ?: SignalConstants.DEFAULT_WIN_TARGET_ENABLED,
             winTargetUsd = this[KEY_WIN_TARGET_USD] ?: SignalConstants.DEFAULT_WIN_TARGET_USD,
             winTargetBankrollPct = this[KEY_WIN_TARGET_PCT] ?: SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
@@ -387,6 +398,16 @@ class SignalPreferences(
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
         private val KEY_HUNTER_VALUE_STAKE = doublePreferencesKey("hunter_value_stake_usd")
         private val KEY_HUNTER_VALUE_PAYOUT = doublePreferencesKey("hunter_value_payout_usd")
+        private val KEY_LONG_SHOT_MAX_ASK = doublePreferencesKey("long_shot_max_ask")
+
+        fun derivedLongShotMaxAsk(stakeUsd: Double?, payoutUsd: Double?): Double {
+            val stake = stakeUsd?.takeIf { it.isFinite() && it > 0.0 }
+            val payout = payoutUsd?.takeIf { it.isFinite() && it > 0.0 }
+            if (stake != null && payout != null) {
+                return (stake / payout).coerceIn(0.05, 0.40)
+            }
+            return SignalConstants.DEFAULT_LONG_SHOT_MAX_ASK
+        }
         private val KEY_WIN_TARGET = booleanPreferencesKey("win_target_enabled")
         private val KEY_WIN_TARGET_USD = doublePreferencesKey("win_target_usd")
         private val KEY_WIN_TARGET_PCT = doublePreferencesKey("win_target_bankroll_pct")
