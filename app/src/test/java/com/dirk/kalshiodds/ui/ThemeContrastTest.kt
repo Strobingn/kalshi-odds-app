@@ -83,7 +83,12 @@ class ThemeContrastTest {
                 Triple("History row", p.textPrimary, p.surfaceAlt),
                 Triple("Data stats", p.textPrimary, p.surface),
                 Triple("Scorecard title", p.textPrimary, p.bg),
-                Triple("Settings hint", p.textSecondary, p.bg)
+                Triple("Settings hint", p.textSecondary, p.bg),
+                Triple("BET UP headline", p.accentGreen, p.surface),
+                Triple("BET DOWN headline", p.accentOrange, p.surface),
+                Triple("NO BET headline", p.textSecondary, p.surface),
+                Triple("LIVE $ button", p.onAccentOrange, p.accentOrange),
+                Triple("PAPER button", p.onAccentGreen, p.accentGreen)
             )
             for ((name, fg, bg) in pairs) {
                 assertAa("${if (dark) "dark" else "light"} $name", fg, bg)

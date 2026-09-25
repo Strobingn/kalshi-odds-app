@@ -181,16 +181,12 @@ class PredictionLogStore(private val context: Context) {
                     if (normalized == "void") {
                         list[i] = e.copy(outcome = "void", score = null, brier = null, settledAtMs = settledAtMs)
                     } else {
-                        val predYes = when (e.predictedSide?.uppercase()) {
-                            "YES" -> true
-                            "NO" -> false
-                            else -> e.predictedYes > 0.5
-                        }
-                        val actualYes = normalized == "yes"
-                        val score = if (predYes == actualYes) 1 else 0
-                        val y = if (actualYes) 1.0 else 0.0
-                        val brier = (e.predictedYes - y) * (e.predictedYes - y)
-                        list[i] = e.copy(outcome = normalized, score = score, brier = brier, settledAtMs = settledAtMs)
+                        val next = e.copy(outcome = normalized, settledAtMs = settledAtMs)
+                        val hit = com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(next)
+                        list[i] = next.copy(
+                            score = if (hit) 1 else 0,
+                            brier = com.dirk.kalshiodds.signal.feedback.ForecastUnits.brier(next)
+                        )
                     }
                     changed = true
                 }
@@ -202,9 +198,9 @@ class PredictionLogStore(private val context: Context) {
     data class ScoreSummary(val correct: Int, val total: Int, val meanBrier: Double?)
 
     suspend fun scoreSummary(): ScoreSummary {
-        val scored = readAll().filter { it.score != null }
-        val correct = scored.count { it.score == 1 }
-        val briers = scored.mapNotNull { it.brier }
+        val scored = readAll().filter { it.outcome != null && !it.outcome.equals("void", true) }
+        val correct = scored.count { com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(it) }
+        val briers = scored.map { com.dirk.kalshiodds.signal.feedback.ForecastUnits.brier(it) }
         val meanBrier = if (briers.isNotEmpty()) briers.average() else null
         return ScoreSummary(correct, scored.size, meanBrier)
     }

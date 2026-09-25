@@ -111,6 +111,32 @@ class ApproveRouterTest {
     }
 
     @Test
+    fun liveIntentNeverRoutesToPaperEvenWhenPaperToggleOn() {
+        val d = ApproveRouter.decide(
+            paperTradingEnabled = true,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = true,
+            canApprove = true,
+            intent = ApproveRouter.Intent.Live
+        )
+        assertEquals(ApproveRouter.Decision.Live, d)
+    }
+
+    @Test
+    fun paperIntentIsPaperEvenWhenKeyed() {
+        val d = ApproveRouter.decide(
+            paperTradingEnabled = true,
+            paperOnly = false,
+            isSell = false,
+            liveCredentialsConfigured = true,
+            canApprove = true,
+            intent = ApproveRouter.Intent.Paper
+        )
+        assertEquals(ApproveRouter.Decision.Paper, d)
+    }
+
+    @Test
     fun blockedTicketSurfacesReason() {
         val d = ApproveRouter.decide(
             paperTradingEnabled = false,

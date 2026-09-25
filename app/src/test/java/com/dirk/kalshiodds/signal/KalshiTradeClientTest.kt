@@ -19,6 +19,8 @@ import retrofit2.Response
 
 class KalshiTradeClientTest {
 
+    private val fakePem = "-----BEGIN PRIVATE KEY-----\n${"A".repeat(120)}\n-----END PRIVATE KEY-----"
+
     @Test
     fun v2CreateUsesBidAskFixedPointAndNeverLegacyPath() = runBlocking {
         val api = RecordingTradeApi(
@@ -33,7 +35,7 @@ class KalshiTradeClientTest {
                 )
             )
         )
-        val client = KalshiTradeClient(primary = api, credentials = { "key" to "pem" })
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
         val placed = client.createLimit(sampleTicket(), "cid-1")
         assertEquals("ord-v2", placed.orderId)
         assertEquals(1, api.creates.size)
@@ -56,7 +58,7 @@ class KalshiTradeClientTest {
     @Test
     fun http404DoesNotFallBackToLegacyPortfolioOrders() = runBlocking {
         val primary = RecordingTradeApi(create = error(404, """{"error":{"code":"not_found","message":"nope"}}"""))
-        val client = KalshiTradeClient(primary = primary, credentials = { "key" to "pem" })
+        val client = KalshiTradeClient(primary = primary, credentials = { "key" to fakePem })
         try {
             client.createLimit(sampleTicket(), "cid-404")
             fail("expected failure")
@@ -71,7 +73,7 @@ class KalshiTradeClientTest {
     fun http410IsReadableAndDoesNotClaimSuccess() = runBlocking {
         val gone = """{"error":{"code":"deprecated_v1_order_endpoint","message":"Please switch to the V2 endpoints","details":"https://docs.kalshi.com/api-reference/orders/create-order"}}"""
         val primary = RecordingTradeApi(create = error(410, gone))
-        val client = KalshiTradeClient(primary = primary, credentials = { "key" to "pem" })
+        val client = KalshiTradeClient(primary = primary, credentials = { "key" to fakePem })
         try {
             client.createLimit(sampleTicket(), "cid-410")
             fail("expected failure")
@@ -95,7 +97,7 @@ class KalshiTradeClientTest {
         val client = KalshiTradeClient(
             primary = primary,
             fallback = secondary,
-            credentials = { "key" to "pem" }
+            credentials = { "key" to fakePem }
         )
         val placed = client.createLimit(sampleTicket(), "cid-fb")
         assertEquals("ord-ext", placed.orderId)
@@ -121,7 +123,7 @@ class KalshiTradeClientTest {
         val client = KalshiTradeClient(
             primary = live,
             demoPrimary = demo,
-            credentials = { "demo-key" to "pem" },
+            credentials = { "demo-key" to fakePem },
             useDemo = { true }
         )
         val placed = client.createLimit(sampleTicket(), "cid-demo")

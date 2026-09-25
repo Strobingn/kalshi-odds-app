@@ -42,6 +42,9 @@ object PemNormalizer {
         return hasBegin && hasEnd && n.contains("PRIVATE")
     }
 
+    fun onlyKeyIdSaved(keyId: String, pem: String): Boolean =
+        keyId.isNotBlank() && !looksLikePem(pem)
+
     private fun extract(text: String, type: String): String? {
         val begin = "-----BEGIN $type-----"
         val end = "-----END $type-----"

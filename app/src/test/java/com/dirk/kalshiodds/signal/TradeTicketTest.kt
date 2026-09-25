@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketPhase
@@ -247,6 +248,23 @@ MIIEowIBAAKCAQEA
     }
 
     @Test
+    fun blockedTicketSetsLastErrorAndDoesNotPlace() = runBlocking {
+        val placed = AtomicInteger(0)
+        val session = session(placed)
+        val blocked = sampleTicket("b1").copy(
+            blockedReason = LiveOrderSizer.belowMinProfitMessage(2.47, 10.0),
+            contracts = 7,
+            profitIfWinUsd = 2.47
+        )
+        session.addManual(blocked)
+        assertFalse(blocked.canApprove)
+        val after = session.approve("b1")
+        assertEquals(0, placed.get())
+        assertTrue(after.lastError!!.contains("below"))
+        assertTrue(after.lastError!!.contains("$10") || after.lastError!!.contains("10"))
+    }
+
+    @Test
     fun replaceProposalsPreservesIdAndDoesNotPlace() {
         val placed = AtomicInteger(0)
         val session = session(placed)
@@ -316,7 +334,7 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertEquals(125, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.04).count, ticket!!.contracts)
         assertEquals("YES", ticket.side)
         assertEquals("bid", ticket.bookSide)
     }
@@ -336,7 +354,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(market(passed = true, muted = false, ask = 0.03, volume = 5_000.0), ctx)
         assertTrue(ticket != null)
-        assertEquals(166, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
         assertTrue(ticket.maxPayoutUsd >= 100.0)
     }
 
@@ -377,7 +395,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(m, ctx)
         assertTrue(ticket != null)
-        assertEquals(125, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.04).count, ticket!!.contracts)
     }
 
     @Test
@@ -397,8 +415,8 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertEquals(1.0, ticket!!.stakeUsd, 1e-9)
-        assertEquals(25, ticket.contracts)
+        assertTrue(ticket!!.stakeUsd in 4.0..5.0 + 1e-6)
+        assertEquals(LiveOrderSizer.size(0.04).count, ticket.contracts)
         assertTrue(ticket.maxPayoutUsd >= 25.0)
         assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)
     }

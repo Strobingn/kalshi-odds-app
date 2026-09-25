@@ -16,12 +16,17 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
+import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -52,6 +57,9 @@ fun MarketCard(
     market: MarketUiModel,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    decision: BetCall.Decision? = null,
+    settings: SignalSettings = SignalSettings(),
+    paperTradingEnabled: Boolean = false,
     onBuyYes: (() -> Unit)? = null,
     onBuyNo: (() -> Unit)? = null,
     onSell: (() -> Unit)? = null,
@@ -62,7 +70,17 @@ fun MarketCard(
     val cardBg = scheme.surface
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
-    val alertBorder = if (market.edgeAlert) colors.accentGreen else scheme.outline
+    val call = decision ?: BetCall.decide(market, settings)
+    val headlineColor = when (call.headline) {
+        BetCall.Headline.BET_UP -> colors.accentGreen
+        BetCall.Headline.BET_DOWN -> colors.accentOrange
+        BetCall.Headline.NO_BET -> colors.textSecondary
+    }
+    val alertBorder = when (call.headline) {
+        BetCall.Headline.BET_UP -> colors.accentGreen
+        BetCall.Headline.BET_DOWN -> colors.accentOrange
+        BetCall.Headline.NO_BET -> scheme.outline
+    }
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -107,6 +125,107 @@ fun MarketCard(
                     )
                 }
             }
+
+            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
+            Text(
+                text = call.label,
+                fontSize = 34.sp,
+                fontWeight = FontWeight.Black,
+                color = headlineColor,
+                lineHeight = 38.sp,
+                modifier = Modifier.padding(top = 10.dp)
+            )
+            val ask = call.ask ?: if (call.side.equals("NO", true)) market.noAsk else market.yesAsk
+            val askLabel = KalshiQuoteDisplay.formatAsk(ask)
+            val profit = call.profitIfWinUsd
+            Text(
+                text = buildString {
+                    append("Ask $askLabel")
+                    if (profit != null) append(String.format(Locale.US, "  ·  win $%.2f at $5 cap", profit))
+                    call.noBetReason?.let { append("  ·  $it") }
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = valueColor,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+            TimeLeftLabel(market.closeTimeEpochMs, compact = true)
+            if (onBuyYes != null || onBuyNo != null) {
+                val primaryYes = call.headline != BetCall.Headline.BET_DOWN
+                val primaryLabel = if (primaryYes) quotes.upButton else quotes.downButton
+                val secondaryLabel = if (primaryYes) quotes.downButton else quotes.upButton
+                val primaryClick = if (primaryYes) onBuyYes else onBuyNo
+                val secondaryClick = if (primaryYes) onBuyNo else onBuyYes
+                val primaryColors = if (primaryYes) {
+                    ButtonDefaults.buttonColors(containerColor = colors.accentGreen, contentColor = colors.onAccentGreen)
+                } else {
+                    ButtonDefaults.buttonColors(containerColor = colors.accentOrange, contentColor = colors.onAccentOrange)
+                }
+                val mode = TradeModeLabel.forApprove(settings, call.ticket)
+                Spacer(Modifier.height(10.dp))
+                if (primaryClick != null) {
+                    Button(
+                        onClick = primaryClick,
+                        enabled = call.isActionable,
+                        colors = primaryColors,
+                        modifier = Modifier.fillMaxWidth().height(56.dp)
+                    ) {
+                        Text(
+                            if (call.isActionable) "$mode  $primaryLabel" else "NO BET",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+                if (secondaryClick != null) {
+                    OutlinedButton(
+                        onClick = secondaryClick,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
+                    ) { Text(secondaryLabel) }
+                }
+                if (onSell != null) {
+                    OutlinedButton(
+                        onClick = onSell,
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
+                    ) { Text("Sell") }
+                }
+            }
+
+            Spacer(Modifier.height(8.dp))
+            BidChart(
+                points = market.bidHistory.ifEmpty {
+                    market.oddsHistory.mapIndexed { i, mid ->
+                        com.dirk.kalshiodds.chart.BidPoint(
+                            tMs = (market.closeTimeEpochMs ?: 0L) - (market.oddsHistory.size - 1 - i) * 2_000L,
+                            upBidCents = mid,
+                            downBidCents = 100f - mid
+                        )
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
+                heightDp = if (compact) 56 else 72,
+                windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
+                windowEndMs = market.closeTimeEpochMs,
+                strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
+                spotUsd = market.spotUsd,
+                strikeUsd = market.floorStrike,
+                spotHeightDp = if (compact) 40 else 48,
+                liveUpLabel = quotes.upChartLabel,
+                liveDownLabel = quotes.downChartLabel
+            )
+
+            var detailsOpen by remember(market.ticker) { mutableStateOf(false) }
+            Text(
+                text = if (detailsOpen) "Hide details" else "Details",
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.accentBlue,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .clickable { detailsOpen = !detailsOpen }
+            )
+            if (detailsOpen) {
 
             val chips = listOfNotNull(
                 market.regimeTag,
@@ -198,7 +317,6 @@ fun MarketCard(
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(6.dp))
-            val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
@@ -232,41 +350,6 @@ fun MarketCard(
                     modifier = Modifier.padding(top = 8.dp)
                 )
             }
-            Spacer(Modifier.height(8.dp))
-            BidChart(
-                points = market.bidHistory.ifEmpty {
-                    market.oddsHistory.mapIndexed { i, mid ->
-                        com.dirk.kalshiodds.chart.BidPoint(
-                            tMs = (market.closeTimeEpochMs ?: 0L) - (market.oddsHistory.size - 1 - i) * 2_000L,
-                            upBidCents = mid,
-                            downBidCents = 100f - mid
-                        )
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
-                heightDp = if (compact) 72 else 110,
-                windowStartMs = market.closeTimeEpochMs?.minus(900_000L),
-                windowEndMs = market.closeTimeEpochMs,
-                strikeLabel = market.floorStrike?.let { String.format(Locale.US, "Strike $%,.0f", it) },
-                spotUsd = market.spotUsd,
-                strikeUsd = market.floorStrike,
-                spotHeightDp = if (compact) 56 else 72,
-                liveUpLabel = quotes.upChartLabel,
-                liveDownLabel = quotes.downChartLabel
-            )
-            if (onOpenChart != null) {
-                Text(
-                    "Tap chart for full-screen scrub",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = labelColor,
-                    modifier = Modifier
-                        .clickable(onClick = onOpenChart)
-                        .padding(top = 2.dp)
-                )
-            }
-
             Spacer(Modifier.height(10.dp))
             Text(
                 text = "DIP HUNTER AI",
@@ -418,39 +501,6 @@ fun MarketCard(
                 }
             }
 
-            if (onBuyYes != null || onBuyNo != null || onSell != null) {
-                Spacer(Modifier.height(12.dp))
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (onBuyYes != null) {
-                        Button(
-                            onClick = onBuyYes,
-                            modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text(quotes.upButton) }
-                    }
-                    if (onBuyNo != null) {
-                        OutlinedButton(
-                            onClick = onBuyNo,
-                            modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text(quotes.downButton) }
-                    }
-                    if (onSell != null) {
-                        OutlinedButton(
-                            onClick = onSell,
-                            modifier = Modifier.weight(1f).height(52.dp)
-                        ) { Text("Sell") }
-                    }
-                }
-                Text(
-                    "Opens an approve-gated limit. Nothing is sent until you tap Approve.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = labelColor,
-                    modifier = Modifier.padding(top = 4.dp)
-                )
-            }
-
             ChecklistBlock(market)
 
             if (!compact) {
@@ -504,6 +554,7 @@ fun MarketCard(
                         Text(it, style = MaterialTheme.typography.labelMedium, color = labelColor)
                     }
                 }
+            }
             }
         }
     }

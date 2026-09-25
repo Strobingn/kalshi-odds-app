@@ -288,7 +288,7 @@ class TicketSession(
             ) {
                 return raw.take(240)
             }
-            return LastOrderErrorStore.redact(raw).take(2_000)
+            return LastOrderErrorStore.redact(raw).take(4_000)
         }
     }
 }

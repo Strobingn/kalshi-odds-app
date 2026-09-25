@@ -29,13 +29,16 @@ class SecureCredentialStore(context: Context) {
         }
 
     var privateKeyPem: String
-        get() = prefs.getString(KEY_PEM, "").orEmpty()
+        get() = PemNormalizer.normalize(prefs.getString(KEY_PEM, "").orEmpty())
         set(value) {
             prefs.edit().putString(KEY_PEM, PemNormalizer.normalize(value)).commit()
         }
 
     val hasCredentials: Boolean
         get() = apiKeyId.isNotBlank() && looksLikePem(privateKeyPem)
+
+    val keyIdWithoutPem: Boolean
+        get() = PemNormalizer.onlyKeyIdSaved(apiKeyId, prefs.getString(KEY_PEM, "").orEmpty())
 
     fun clear() {
         prefs.edit().remove(KEY_ID).remove(KEY_PEM).commit()

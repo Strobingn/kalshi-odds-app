@@ -229,7 +229,7 @@ class MarketRepository(
                     timestampMs = now,
                     closeTimeMs = m.closeTimeEpochMs,
                     snapshot = SignalSnapshot(
-                        predictedSide = if ((m.edgePp ?: 0.0) >= 0) "YES" else "NO",
+                        predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideFromProbability(yesPct / 100.0),
                         edgePp = m.edgePp,
                         confidence = m.aiConfidence,
                         regime = m.regimeTag,

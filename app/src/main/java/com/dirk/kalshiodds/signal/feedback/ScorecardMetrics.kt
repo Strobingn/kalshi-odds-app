@@ -129,16 +129,8 @@ object ScorecardMetrics {
             return Honest(0, null, null, null, null, null, false, emptyList())
         }
         val all = window(rows)
-        val modelBriers = rows.map { e ->
-            val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
-            val p = e.predictedYes
-            (p - y) * (p - y)
-        }
-        val marketBriers = rows.map { e ->
-            val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
-            val p = e.marketMid
-            (p - y) * (p - y)
-        }
+        val modelBriers = rows.map { ForecastUnits.brier(it) }
+        val marketBriers = rows.map { ForecastUnits.marketBrier(it) }
         val per = rows.groupBy { it.series.ifBlank { "unknown" } }
             .toSortedMap()
             .map { (series, group) ->
@@ -212,15 +204,11 @@ object ScorecardMetrics {
         if (rows.isEmpty()) {
             return Breakdown(key, label, 0, null, null, null, null, false)
         }
-        val hits = rows.count { it.score == 1 || (it.score == null && sideHit(it)) }
-        val modelBrier = rows.map { brierOf(it) }.average()
-        val marketBrier = rows.map { e ->
-            val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
-            val d = e.marketMid - y
-            d * d
-        }.average()
+        val hits = rows.count { ForecastUnits.hit(it) }
+        val modelBrier = rows.map { ForecastUnits.brier(it) }.average()
+        val marketBrier = rows.map { ForecastUnits.marketBrier(it) }.average()
         val pnl = rows.sumOf { e ->
-            val won = e.score == 1 || (e.score == null && sideHit(e))
+            val won = ForecastUnits.hit(e)
             val stake = 1.0
             if (won) stake * kotlin.math.abs(e.edgePp ?: 0.0) / 100.0 else -stake * kotlin.math.abs(e.edgePp ?: 0.0) / 100.0
         }
@@ -238,11 +226,11 @@ object ScorecardMetrics {
 
     fun window(rows: List<PredictionLogEntry>): WindowStats {
         if (rows.isEmpty()) return WindowStats()
-        val hits = rows.count { it.score == 1 || (it.score == null && sideHit(it)) }
-        val briers = rows.map { it.brier ?: brierOf(it) }
-        val rightEdges = rows.filter { it.score == 1 || (it.score == null && sideHit(it)) }
+        val hits = rows.count { ForecastUnits.hit(it) }
+        val briers = rows.map { ForecastUnits.brier(it) }
+        val rightEdges = rows.filter { ForecastUnits.hit(it) }
             .mapNotNull { it.edgePp }
-        val wrongEdges = rows.filter { it.score == 0 || (it.score == null && !sideHit(it)) }
+        val wrongEdges = rows.filter { !ForecastUnits.hit(it) }
             .mapNotNull { it.edgePp }
         return WindowStats(
             hits = hits,
@@ -254,20 +242,9 @@ object ScorecardMetrics {
         )
     }
 
-    private fun sideHit(e: PredictionLogEntry): Boolean {
-        val predYes = when (e.predictedSide?.uppercase()) {
-            "YES" -> true
-            "NO" -> false
-            else -> e.predictedYes > 0.5
-        }
-        return predYes == e.outcome.equals("yes", true)
-    }
+    private fun sideHit(e: PredictionLogEntry): Boolean = ForecastUnits.hit(e)
 
-    private fun brierOf(e: PredictionLogEntry): Double {
-        val y = if (e.outcome.equals("yes", true)) 1.0 else 0.0
-        val d = e.predictedYes - y
-        return d * d
-    }
+    private fun brierOf(e: PredictionLogEntry): Double = ForecastUnits.brier(e)
 
     private fun settledAt(e: PredictionLogEntry): Long = e.settledAtMs ?: e.timestampMs
 

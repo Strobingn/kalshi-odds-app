@@ -32,6 +32,7 @@ import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.signal.trade.TradeModeLabel
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import java.util.Locale
@@ -64,7 +65,7 @@ fun TradeTicketsSection(
             color = MaterialTheme.colorScheme.onBackground
         )
         Text(
-            text = "Live Approve sends a Kalshi V2 GTC limit after you confirm — never the retired v1 /portfolio/orders path. The Paper button fills the \$100 paper book and never hits Kalshi. Paper trading ON does not block Live Approve when a key is saved. Manual Buy is a \$5 (Settings stake) order including fees. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
+            text = "LIVE \$ = real V2 GTC (\$5 all-in including fees). PAPER = simulated \$100 book. Paper fills never block Live. Paper trading ON does not swallow a keyed Live Approve. Hunter cards still appear when a \$1 stake can settle ≥\$25. Cancel leaves no live order.",
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
@@ -191,7 +192,14 @@ private fun ProposedTicketCard(
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL · REDUCE-ONLY"
-                    },
+                    } + " · " + TradeModeLabel.forApprove(
+                        paperTradingEnabled = paperTradingEnabled,
+                        liveCredentialsConfigured = credentialsConfigured,
+                        paperOnly = ticket.paperOnly,
+                        isSell = ticket.isSell,
+                        canApprove = ticket.canApprove,
+                        blockedReason = ticket.blockedReason
+                    ),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (highlightEdge || ticket.kind == TicketKind.HUNTER) colors.accentOrange else colors.accentBlue,
                     fontWeight = FontWeight.Bold
@@ -317,36 +325,37 @@ private fun ProposedTicketCard(
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
-                        if (ticket.isSell) "Paper sell"
-                        else String.format(Locale.US, "Paper $%.2f", ticket.stakeUsd)
+                        if (ticket.isSell) "PAPER sell"
+                        else String.format(Locale.US, "PAPER $%.2f", ticket.stakeUsd)
                     )
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = when {
-                        ticket.paperOnly ->
-                            ticket.canPaper || ticket.blockedReason != null
-                        credentialsConfigured ->
-                            ticket.canApprove || ticket.blockedReason != null
-                        paperTradingEnabled ->
-                            ticket.canPaper || ticket.blockedReason != null
-                        else -> ticket.blockedReason != null
-                    },
+                    enabled = credentialsConfigured && ticket.canApprove,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.accentOrange,
+                        contentColor = colors.onAccentOrange
+                    ),
                     modifier = Modifier.weight(1f).height(48.dp)
                 ) {
                     Text(
                         when {
-                            ticket.paperOnly ->
-                                if (ticket.canPaper || ticket.blockedReason != null) "Paper Approve…"
-                                else ticket.blockedReason ?: "Unavailable"
-                            credentialsConfigured && !ticket.canApprove ->
-                                ticket.blockedReason ?: "Unavailable"
-                            credentialsConfigured -> "Live Approve…"
-                            paperTradingEnabled ->
-                                if (ticket.canPaper || ticket.blockedReason != null) "Paper Approve…"
-                                else ticket.blockedReason ?: "Unavailable"
-                            !ticket.canApprove -> ticket.blockedReason ?: "Unavailable"
-                            else -> "Needs API key"
+                            !ticket.canApprove -> ticket.blockedReason ?: "NO BET"
+                            else -> {
+                                val mode = TradeModeLabel.forApprove(
+                                    paperTradingEnabled = paperTradingEnabled,
+                                    liveCredentialsConfigured = credentialsConfigured,
+                                    paperOnly = ticket.paperOnly,
+                                    isSell = ticket.isSell,
+                                    canApprove = true,
+                                    blockedReason = ticket.blockedReason
+                                )
+                                if (mode == TradeModeLabel.LIVE) {
+                                    String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
+                                } else {
+                                    mode
+                                }
+                            }
                         }
                     )
                 }
@@ -411,20 +420,19 @@ private fun ApproveTicketDialog(
     val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
     val paperSell = ticket.paperOnly && ticket.isSell
-    val paperBuy = !ticket.isSell && (ticket.paperOnly || (paperTradingEnabled && !credentialsConfigured))
+    val paperBuy = false
     var countText by remember(ticket.id) { mutableStateOf(ticket.contracts.toString()) }
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
     }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = {
+                title = {
             Text(
                 when {
-                    paperSell -> "Paper sell this position?"
-                    paperBuy -> "Paper buy this ticket?"
-                    ticket.isSell -> "Live Approve this sell?"
-                    else -> "Live Approve this ticket?"
+                    paperSell -> "PAPER sell this position?"
+                    ticket.isSell -> "REAL MONEY — live sell"
+                    else -> "REAL MONEY"
                 }
             )
         },
@@ -437,35 +445,53 @@ private fun ApproveTicketDialog(
                                 "Count is capped at the paper fill so this cannot flip."
                         paperBuy ->
                             "Simulated fill on the paper book at the current walked ask, including fees. " +
-                                "No Kalshi key needed. This never places a live order. Win-target size above " +
-                                "paper cash is capped, not blocked."
+                                "No Kalshi key needed. This never places a live order."
                         ticket.isSell ->
-                            "Places a real V2 reduce-only GTC limit (POST /portfolio/events/orders) to sell the held side. " +
+                            "REAL MONEY. Places a reduce-only V2 GTC limit (POST /portfolio/events/orders) to sell the held side. " +
                                 "Count is capped at your position so this cannot flip. Not a paper fill."
                         else ->
-                            "Places a real GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
+                            "REAL MONEY. Places a GTC limit via Kalshi V2 (POST /portfolio/events/orders) — not a market order, " +
                                 "and not a paper fill. This tap is the only way a live order is sent. " +
                                 "Dismiss / Back leaves no hanging order. Not financial advice. High variance."
                     },
-                    style = MaterialTheme.typography.bodyMedium
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = if (paperSell) FontWeight.Normal else FontWeight.Bold,
+                    color = if (paperSell) colors.textPrimary else colors.accentOrange
                 )
                 Spacer(Modifier.height(8.dp))
-                Text(
-                    String.format(
-                        Locale.US,
-                        "%s %s\n$%.2f stake · %d contracts @ %s\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
-                        ticket.displaySide,
-                        ticket.ticker,
-                        ticket.stakeUsd,
-                        ticket.contracts,
-                        KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice),
-                        ticket.estimatedFillUsd,
-                        ticket.maxPayoutUsd,
-                        ticket.potentialGainUsd
-                    ),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.SemiBold
-                )
+                if (!paperSell && !paperBuy) {
+                    TicketMetricRow("Contracts", ticket.contracts.toString())
+                    TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+                    TicketMetricRow(
+                        "Fee",
+                        String.format(Locale.US, "$%.2f", ticket.feeUsd ?: 0.0)
+                    )
+                    TicketMetricRow(
+                        "Total cost",
+                        String.format(Locale.US, "$%.2f", ticket.allInUsd ?: ticket.stakeUsd)
+                    )
+                    TicketMetricRow(
+                        "Profit if win",
+                        String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
+                    )
+                } else {
+                    Text(
+                        String.format(
+                            Locale.US,
+                            "%s %s\n$%.2f stake · %d contracts @ %s\nEst. fill $%.2f · max payout $%.0f · gain $%.0f",
+                            ticket.displaySide,
+                            ticket.ticker,
+                            ticket.stakeUsd,
+                            ticket.contracts,
+                            KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice),
+                            ticket.estimatedFillUsd,
+                            ticket.maxPayoutUsd,
+                            ticket.potentialGainUsd
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
                 ticket.closeNote?.let {
                     Text(
                         it,
@@ -517,23 +543,39 @@ private fun ApproveTicketDialog(
                     else -> credentialsConfigured && ticket.canApprove
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = colors.accentGreen,
-                    contentColor = colors.onAccentGreen
+                    containerColor = if (paperSell) colors.accentGreen else colors.accentOrange,
+                    contentColor = if (paperSell) colors.onAccentGreen else colors.onAccentOrange
                 ),
                 modifier = Modifier.height(48.dp)
             ) {
+                val mode = TradeModeLabel.forApprove(
+                    paperTradingEnabled = paperTradingEnabled,
+                    liveCredentialsConfigured = credentialsConfigured,
+                    paperOnly = ticket.paperOnly,
+                    isSell = ticket.isSell,
+                    canApprove = ticket.canApprove,
+                    blockedReason = ticket.blockedReason
+                )
                 Text(
                     when {
-                        paperSell -> "Paper sell"
-                        paperBuy -> "Paper Approve"
-                        ticket.isSell -> "Live Approve sell"
-                        else -> "Live Approve"
+                        ticket.isSell && mode == TradeModeLabel.PAPER -> "PAPER sell"
+                        ticket.isSell && mode == TradeModeLabel.LIVE -> "LIVE $ sell"
+                        mode == TradeModeLabel.LIVE -> String.format(Locale.US, "LIVE $%.2f", ticket.stakeUsd)
+                        else -> mode
                     }
                 )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!ticket.isSell) {
+                    TextButton(
+                        onClick = onPaper,
+                        enabled = ticket.canPaper
+                    ) { Text(String.format(Locale.US, "PAPER $%.2f", ticket.stakeUsd)) }
+                }
+                TextButton(onClick = onDismiss) { Text("Cancel") }
+            }
         }
     )
 }

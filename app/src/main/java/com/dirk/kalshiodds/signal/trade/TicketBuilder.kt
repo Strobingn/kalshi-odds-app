@@ -82,8 +82,8 @@ object TicketBuilder {
 
     /**
      * Long-shot hunter: ask ≤ [SignalSettings.longShotMaxAsk] (default 20¢)
-     * **and** AI/fair beats implied by fees + margin. Sized by win-target
-     * (default $50 profit), not a fixed $1 stake. Approve still required.
+     * **and** AI/fair beats implied by fees + margin. Sized at the $5 all-in
+     * live cap. Approve still required.
      */
     fun proposeHunterValue(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
@@ -103,9 +103,9 @@ object TicketBuilder {
         }
     }
 
-    /** Rebuild the same kind of ticket against a different bankroll (paper vs live). */
+    /** Rebuild the same kind of ticket (live $5 cap, not bankroll win-target). */
     fun resizeForBankroll(ticket: TradeTicket, market: MarketUiModel, ctx: Context): TradeTicket {
-        if (ticket.isSell || !ctx.settings.winTargetEnabled) return ticket
+        if (ticket.isSell) return ticket
         return when (ticket.kind) {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
@@ -262,134 +262,101 @@ object TicketBuilder {
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
-        val winTargetOn = kind != TicketKind.SELL &&
-            kind != TicketKind.MANUAL &&
-            (ctx.settings.winTargetEnabled || kind == TicketKind.HUNTER_VALUE)
-        val win = if (winTargetOn) {
-            WinTargetSizer.size(
-                askLevels = levels.ifEmpty { listOf(ask to (quoted ?: 500.0)) },
-                targetProfitUsd = ctx.settings.winTargetUsd,
-                bankrollUsd = bankroll,
-                bankrollPct = ctx.settings.winTargetBankrollPct,
-                absCapUsd = ctx.settings.winTargetAbsCapUsd,
-                feeRate = ctx.settings.feeRate,
-                fallbackAsk = ask
-            )
-        } else {
-            null
+        val live = LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+        if (!live.ok) {
+            return if (kind == TicketKind.MANUAL) {
+                blocked(market, side, ctx, live.refusedReason ?: "Cannot size a $5 live order", stakeUsd)
+            } else {
+                null
+            }
         }
-        val sizing = if (win != null && win.contracts > 0) {
-            PayoutGate.Sizing(
-                ok = true,
-                contracts = win.contracts,
-                limitPrice = win.vwap,
-                estimatedFillUsd = win.stakeUsd,
-                maxPayoutUsd = win.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD,
-                estimatedAvgFill = win.vwap,
-                fillableContracts = win.fillableContracts,
-                reason = win.note
-            )
-        } else {
-            PayoutGate.evaluate(
-                stakeUsd = stakeUsd,
-                bestAsk = ask,
-                askLevels = levels,
-                quotedSize = quoted,
-                minPayoutUsd = minPayoutUsd
-            )
-        }
-        if (!sizing.ok) return null
-        val feeInclusive = if (kind == TicketKind.MANUAL) {
-            capStakeIncludingFees(sizing, stakeUsd, ctx.settings.feeRate)
-        } else {
-            sizing
-        } ?: return null
+        val payoutCheck = PayoutGate.evaluate(
+            stakeUsd = stakeUsd,
+            bestAsk = ask,
+            askLevels = levels,
+            quotedSize = quoted,
+            minPayoutUsd = minPayoutUsd
+        )
+        if (kind == TicketKind.CONFIGURED && !payoutCheck.ok) return null
+        if (kind == TicketKind.HUNTER && !payoutCheck.ok) return null
 
         val model01 = modelProb(market, side)
-        val implied = feeInclusive.estimatedAvgFill
+        val implied = live.price
         val edge = modelBeatsImplied(model01, implied, ctx.settings.feeRate, stakeUsd = ctx.settings.ticketStakeUsd)
         if (kind == TicketKind.HUNTER_VALUE && !edge) return null
 
-        val yesLimit = if (side == "YES") feeInclusive.limitPrice else (1.0 - feeInclusive.limitPrice)
+        val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
         val bookSide = if (side == "YES") "bid" else "ask"
         val netPer = market.netEvDollars
-        val stake = when {
-            kind == TicketKind.MANUAL ->
-                KalshiFee.totalCost(feeInclusive.contracts, feeInclusive.limitPrice, ctx.settings.feeRate)
-            win != null && win.contracts > 0 -> win.stakeUsd
-            else -> stakeUsd
+        val minProfit = ctx.settings.minProfitIfWinUsd
+        val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
+        val blockedReason = if (belowMin) {
+            LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
+        } else {
+            null
         }
         return TradeTicket(
             id = ctx.idFactory(),
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,
-            stakeUsd = stake,
-            limitPrice = feeInclusive.limitPrice,
+            stakeUsd = live.allInUsd,
+            limitPrice = live.price,
             yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
-            contracts = feeInclusive.contracts,
-            estimatedFillUsd = feeInclusive.estimatedFillUsd,
-            maxPayoutUsd = feeInclusive.maxPayoutUsd,
-            estimatedAvgFill = feeInclusive.estimatedAvgFill,
-            netEvUsd = netPer?.let { it * feeInclusive.contracts },
+            contracts = live.count,
+            estimatedFillUsd = live.allInUsd,
+            maxPayoutUsd = live.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = live.price,
+            netEvUsd = netPer?.let { it * live.count },
             netEvPerContract = netPer,
             netEdgePp = market.netEdgePp,
             title = market.title,
-            sizingNote = feeInclusive.reason,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · $5 cap",
+                live.count,
+                live.price * 100.0,
+                live.allInUsd,
+                live.feeUsd,
+                live.profitIfWinUsd
+            ),
             gateNote = when (kind) {
-                TicketKind.HUNTER -> {
-                    val sized = if (winTargetOn) " · sized to win \$${fmt(ctx.settings.winTargetUsd)}" else ""
-                    "Hunter $1 → ≥$25$sized · Approve still required"
-                }
+                TicketKind.HUNTER ->
+                    "Hunter print ($1 can settle ≥$25) · live size is the $5 all-in cap · Approve still required"
                 TicketKind.HUNTER_VALUE -> longShotNote(
                     ctx.settings.longShotMaxAsk,
                     implied,
                     model01,
-                    ctx.settings.winTargetUsd
+                    minProfit
                 )
-                TicketKind.MANUAL -> {
-                    val cap = String.format(java.util.Locale.US, "$%.0f", stake)
-                    "Manual $cap buy including fees · Approve still required"
-                }
+                TicketKind.MANUAL ->
+                    "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> "Sell GTC limit · Approve still required · reduce-only"
             },
             createdAtMs = ctx.nowMs,
             kind = kind,
+            blockedReason = blockedReason,
             impliedChance = implied,
             modelChance = model01,
             fairChance = market.digitalFairPp?.div(100.0),
             modelEdge = edge,
-            profitIfWinUsd = win?.profitIfWin ?: KalshiFee.netProfit(feeInclusive.contracts, feeInclusive.estimatedAvgFill, ctx.settings.feeRate),
-            winTargetUsd = if (winTargetOn) ctx.settings.winTargetUsd else null,
-            winTargetCapped = win?.capped == true,
-            winTargetNote = win?.note,
+            profitIfWinUsd = live.profitIfWinUsd,
+            feeUsd = live.feeUsd,
+            allInUsd = live.allInUsd,
+            belowMinProfit = belowMin,
+            minProfitIfWinUsd = minProfit,
+            winTargetUsd = minProfit,
+            winTargetCapped = true,
+            winTargetNote = String.format(
+                java.util.Locale.US,
+                "$5 all-in · min profit $%.0f · wins $%.2f",
+                minProfit,
+                live.profitIfWinUsd
+            ),
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
-            visibleContracts = feeInclusive.fillableContracts
-        )
-    }
-
-    /** Shrink a $5 (or Settings stake) manual so fill + Kalshi taker fee ≤ stake. */
-    private fun capStakeIncludingFees(
-        sizing: PayoutGate.Sizing,
-        stakeUsd: Double,
-        feeRate: Double
-    ): PayoutGate.Sizing? {
-        var c = sizing.contracts
-        val px = sizing.limitPrice
-        while (c > 0 && KalshiFee.totalCost(c, px, feeRate) > stakeUsd + 1e-9) c--
-        if (c <= 0) return null
-        if (c == sizing.contracts) return sizing
-        val fill = c * px
-        val payout = c * SignalConstants.CONTRACT_SETTLEMENT_USD
-        return sizing.copy(
-            contracts = c,
-            estimatedFillUsd = fill,
-            maxPayoutUsd = payout,
-            fillableContracts = minOf(sizing.fillableContracts, c),
-            reason = "$c ct · limit ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px)} · " +
-                "max \$${String.format(java.util.Locale.US, "%.2f", KalshiFee.totalCost(c, px, feeRate))} incl. fees"
+            visibleContracts = quoted?.toInt()
         )
     }
 
@@ -423,7 +390,7 @@ object TicketBuilder {
         val cap = String.format(java.util.Locale.US, "%.0f¢", maxAsk.coerceIn(0.05, 0.40) * 100.0)
         val mkt = implied?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         val ai = model?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · sized to win \$${fmt(targetProfitUsd)} · Approve still required"
+        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · $5 all-in · min profit \$${fmt(targetProfitUsd)} · Approve still required"
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.0f", v)

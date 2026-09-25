@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.KalshiErrorEnvelope
 import com.dirk.kalshiodds.data.dto.MarketPositionDto
+import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import java.util.Locale
@@ -25,6 +26,10 @@ import retrofit2.Response
  *
  * Limit orders only — never market. Fail-soft with a clear message.
  * PEM / secrets are never written to logs.
+ *
+ * Live buys are clipped at the $5 all-in cap ([LiveOrderSizer.enforce])
+ * immediately before the V2 body is built, so a leftover $50 win-target
+ * cannot resize a live order above $5.
  */
 class KalshiTradeClient(
     private val primary: KalshiTradeApi,
@@ -49,24 +54,13 @@ class KalshiTradeClient(
         if (!ticket.canApprove) {
             throw IllegalStateException(ticket.blockedReason ?: "Market closed")
         }
+        val sized = enforceLiveCap(ticket)
         ensureKeys()
-        if (!ticket.isSell) {
-            val cost = com.dirk.kalshiodds.signal.trade.KalshiFee.totalCost(
-                ticket.contracts,
-                ticket.limitPrice
-            )
-            val hard = com.dirk.kalshiodds.signal.config.SignalConstants.TICKET_STAKE_HARD_CAP_USD
-            if (cost > hard + 0.009) {
-                throw IllegalStateException(
-                    "Order \$${String.format(java.util.Locale.US, "%.2f", cost)} including fees exceeds the \$${hard.toInt()} hard cap"
-                )
-            }
-        }
-        val body = v2Body(ticket, clientOrderId)
+        val body = v2Body(sized, clientOrderId)
         return try {
             val first = activePrimary().createOrderV2(body)
             val chosen = chooseHost(first) { activeFallback()?.createOrderV2(body) }
-            mapV2(ticket, clientOrderId, chosen)
+            mapV2(sized, clientOrderId, chosen)
         } catch (e: Exception) {
             throw softFailure(e)
         }
@@ -235,6 +229,41 @@ class KalshiTradeClient(
         )
     }
 
+    private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
+        if (ticket.isSell) return ticket
+        val clip = LiveOrderSizer.enforce(ticket)
+        if (!clip.ok) {
+            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
+        }
+        if (clip.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
+            throw IllegalStateException(
+                String.format(
+                    Locale.US,
+                    "Live order all-in $%.2f exceeds the $%.2f cap",
+                    clip.allInUsd,
+                    LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+                )
+            )
+        }
+        val yesLimit = if (ticket.side.equals("NO", true)) {
+            com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(1.0 - clip.price)
+        } else {
+            com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(clip.price)
+        }
+        return ticket.copy(
+            contracts = clip.count,
+            limitPrice = clip.price,
+            yesLimitPrice = yesLimit,
+            stakeUsd = clip.allInUsd,
+            estimatedFillUsd = clip.allInUsd,
+            estimatedAvgFill = clip.price,
+            feeUsd = clip.feeUsd,
+            allInUsd = clip.allInUsd,
+            profitIfWinUsd = clip.profitIfWinUsd,
+            maxPayoutUsd = clip.count * com.dirk.kalshiodds.signal.config.SignalConstants.CONTRACT_SETTLEMENT_USD
+        )
+    }
+
     private fun ensureKeys() {
         val (id, pem) = credentials()
         if (id.isBlank() || pem.isBlank()) {
@@ -260,26 +289,7 @@ class KalshiTradeClient(
             else -> "HTTP $code"
         }
         warn("trade API $code")
-        val detail = listOfNotNull(parsed?.code, parsed?.message)
-            .joinToString(" · ")
-            .ifBlank {
-                rawBody
-                    ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
-                    ?.take(160)
-                    ?.trim()
-                    .orEmpty()
-            }
-        val verbatim = rawBody
-            ?.replace(Regex("(?is)-----BEGIN[^-]*PRIVATE[^-]*-----.*?-----END[^-]*PRIVATE[^-]*-----"), "[redacted-pem]")
-            ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
-            ?.trim()
-            .orEmpty()
-        val suffix = when {
-            verbatim.isNotBlank() -> " — $verbatim"
-            detail.isNotBlank() && !hint.contains(detail.take(24)) -> " — $detail"
-            else -> ""
-        }
-        return IllegalStateException("$hint$suffix")
+        return IllegalStateException(verbatimHttp(code, rawBody, hint))
     }
 
     private fun parseError(rawBody: String?): com.dirk.kalshiodds.data.dto.KalshiErrorBody? {
@@ -319,5 +329,22 @@ class KalshiTradeClient(
         /** Documented V2 write path — never POST `/portfolio/orders`. */
         const val V2_CREATE_PATH = "/trade-api/v2/portfolio/events/orders"
         const val LEGACY_CREATE_PATH = "/trade-api/v2/portfolio/orders"
+
+        fun verbatimHttp(code: Int, rawBody: String?, hint: String? = null): String {
+            val body = rawBody
+                ?.replace(Regex("(?is)-----BEGIN[^-]*PRIVATE[^-]*-----.*?-----END[^-]*PRIVATE[^-]*-----"), "[redacted-pem]")
+                ?.replace(Regex("(?i)BEGIN [A-Z ]*PRIVATE[A-Z ]*"), "[redacted]")
+                ?.trim()
+                .orEmpty()
+            val prefix = hint?.takeIf { it.isNotBlank() } ?: "HTTP $code"
+            val extra = when {
+                code == 404 && prefix.contains("not falling back").not() ->
+                    " — not falling back to deprecated v1 /portfolio/orders"
+                code == 410 && prefix.contains("V2").not() ->
+                    " — this build submits V2 POST /portfolio/events/orders only"
+                else -> ""
+            }
+            return if (body.isBlank()) "$prefix$extra" else "$prefix\n$body$extra"
+        }
     }
 }

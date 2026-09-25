@@ -23,6 +23,7 @@ object SettingsRestore {
         o.put("paperTradingEnabled", s.paperTradingEnabled)
         o.put("minConfidence", s.minConfidence)
         o.put("maxSpreadCents", s.maxSpreadCents)
+        o.put("minProfitIfWinUsd", s.minProfitIfWinUsd)
         return o.toString()
     }
 
@@ -46,13 +47,14 @@ object SettingsRestore {
             edgeThresholdPp = o.optDoubleOrNull("edgeThresholdPp"),
             paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
             minConfidence = o.optDoubleOrNull("minConfidence"),
-            maxSpreadCents = o.optDoubleOrNull("maxSpreadCents")
+            maxSpreadCents = o.optDoubleOrNull("maxSpreadCents"),
+            minProfitIfWinUsd = o.optDoubleOrNull("minProfitIfWinUsd")
         )
     }
 
     fun label(s: SignalSettings): String =
         "stake $${s.ticketStakeUsd.toInt()} · long-shot ≤${(s.longShotMaxAsk * 100.0).toInt()}¢ · " +
-            "win-target ${if (s.winTargetEnabled) "$${s.winTargetUsd.toInt()}" else "off"}"
+            "$5 all-in · min profit $${s.minProfitIfWinUsd.toInt()}"
 
     private fun JSONObject.optDoubleOrNull(key: String): Double? {
         if (!has(key) || isNull(key)) return null
@@ -74,7 +76,8 @@ data class RestoredSettings(
     val edgeThresholdPp: Double? = null,
     val paperTradingEnabled: Boolean? = null,
     val minConfidence: Double? = null,
-    val maxSpreadCents: Double? = null
+    val maxSpreadCents: Double? = null,
+    val minProfitIfWinUsd: Double? = null
 ) {
     val isEmpty: Boolean
         get() = hunterValueStakeUsd == null && hunterValuePayoutUsd == null &&

@@ -75,6 +75,7 @@ class MainActivity : ComponentActivity() {
             KalshiOddsTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     var screen by rememberSaveable { mutableStateOf("odds") }
+                    var settingsFocusApiKey by rememberSaveable { mutableStateOf(false) }
                     var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
@@ -84,8 +85,12 @@ class MainActivity : ComponentActivity() {
                     when {
                         screen == "settings" -> SettingsScreen(
                             viewModel = settingsViewModel,
-                            onBack = { screen = "odds" },
-                            onOpenData = { screen = "data" }
+                            onBack = {
+                                settingsFocusApiKey = false
+                                screen = "odds"
+                            },
+                            onOpenData = { screen = "data" },
+                            scrollToApiKey = settingsFocusApiKey
                         )
                         screen == "scorecard" -> ScorecardScreen(
                             viewModel = scorecardViewModel,
@@ -129,7 +134,14 @@ class MainActivity : ComponentActivity() {
                         )
                         else -> OddsScreen(
                             viewModel = oddsViewModel,
-                            onOpenSettings = { screen = "settings" },
+                            onOpenSettings = {
+                                settingsFocusApiKey = false
+                                screen = "settings"
+                            },
+                            onOpenApiKeySettings = {
+                                settingsFocusApiKey = true
+                                screen = "settings"
+                            },
                             onOpenScorecard = { screen = "scorecard" },
                             onOpenData = { screen = "data" },
                             onOpenHistory = { screen = "history" },
