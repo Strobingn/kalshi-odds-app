@@ -260,7 +260,6 @@ class SignalPreferences(
     }
     suspend fun updateMinProfitIfWinUsd(value: Double) = edit {
         it[KEY_MIN_PROFIT] = value.coerceIn(0.0, 100.0)
-        it[KEY_MIN_PROFIT_USER_SET] = true
     }
     suspend fun updateHeavyMl(value: Boolean) = edit { it[KEY_HEAVY_ML] = value }
     suspend fun updateSequenceModel(value: Boolean) = edit { it[KEY_SEQ_MODEL] = value }
@@ -351,24 +350,6 @@ class SignalPreferences(
         }
     }
 
-    /**
-     * 0.3.15 one-time: a stored $20 min-profit that was never explicitly
-     * set (or that we cannot tell was set) is the old implicit default.
-     * Reset it to $10. The Settings slider still writes whatever the user picks.
-     */
-    suspend fun migrateLegacyMinProfitIfNeeded() {
-        app.signalDataStore.edit { prefs ->
-            if (prefs[KEY_MIN_PROFIT_MIGRATED_V0315] == true) return@edit
-            val stored = prefs[KEY_MIN_PROFIT]
-            val userSet = prefs[KEY_MIN_PROFIT_USER_SET] == true
-            val resolved = MinProfitMigration.resolve(stored, userSet)
-            if (stored == null || kotlin.math.abs(resolved - stored) > 1e-9) {
-                prefs[KEY_MIN_PROFIT] = resolved
-            }
-            prefs[KEY_MIN_PROFIT_MIGRATED_V0315] = true
-        }
-    }
-
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         app.signalDataStore.edit(block)
     }
@@ -421,10 +402,7 @@ class SignalPreferences(
             winTargetUsd = this[KEY_WIN_TARGET_USD] ?: SignalConstants.DEFAULT_WIN_TARGET_USD,
             winTargetBankrollPct = this[KEY_WIN_TARGET_PCT] ?: SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
             winTargetAbsCapUsd = this[KEY_WIN_TARGET_ABS],
-            minProfitIfWinUsd = MinProfitMigration.resolve(
-                this[KEY_MIN_PROFIT],
-                this[KEY_MIN_PROFIT_USER_SET] == true
-            ),
+            minProfitIfWinUsd = this[KEY_MIN_PROFIT] ?: SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD,
             heavyMlEnabled = this[KEY_HEAVY_ML] ?: def.heavyMlEnabled,
             sequenceModelEnabled = this[KEY_SEQ_MODEL] ?: def.sequenceModelEnabled,
             gbmEnabled = this[KEY_GBM] ?: def.gbmEnabled,
@@ -505,8 +483,6 @@ class SignalPreferences(
         private val KEY_WIN_TARGET_PCT = doublePreferencesKey("win_target_bankroll_pct")
         private val KEY_WIN_TARGET_ABS = doublePreferencesKey("win_target_abs_cap_usd")
         private val KEY_MIN_PROFIT = doublePreferencesKey("min_profit_if_win_usd")
-        private val KEY_MIN_PROFIT_USER_SET = booleanPreferencesKey("min_profit_if_win_usd_user_set")
-        private val KEY_MIN_PROFIT_MIGRATED_V0315 = booleanPreferencesKey("min_profit_migrated_v0315")
         private val KEY_HEAVY_ML = booleanPreferencesKey("heavy_ml_enabled")
         private val KEY_SEQ_MODEL = booleanPreferencesKey("sequence_model_enabled")
         private val KEY_GBM = booleanPreferencesKey("gbm_enabled")

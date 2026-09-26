@@ -146,6 +146,8 @@ class HomeScreenScreenshotTest {
             HomeFixtures.noBetEth(),
             HomeFixtures.noBetSol(),
             hasKey = true
+        ).copy(
+            settings = HomeFixtures.settings(true).copy(minProfitIfWinUsd = 20.0)
         )
     )
 

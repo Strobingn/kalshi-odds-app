@@ -79,7 +79,6 @@ class KalshiOddsApp : Application() {
         })
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
-            runCatching { container.preferences.migrateLegacyMinProfitIfNeeded() }
             runCatching { restorePersistedHistory() }
             runCatching { firstLaunchSync() }
         }
