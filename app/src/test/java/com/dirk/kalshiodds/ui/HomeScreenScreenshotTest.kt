@@ -163,6 +163,9 @@ class HomeScreenScreenshotTest {
                 autoTuneEnabled = true,
                 sitOut = true,
                 autoTuneNote = "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
+            ),
+            paper = com.dirk.kalshiodds.signal.paper.PaperBookState(
+                fills = listOf(HomeFixtures.openPaperFill(HomeFixtures.disagreementBtc().ticker))
             )
         )
     )
@@ -287,6 +290,7 @@ class HomeScreenScreenshotTest {
                     onOpenChart = {},
                     onRefresh = {},
                     onBuyMarket = { _, _ -> },
+                    onPaperSide = { _, _ -> },
                     onSellMarket = {},
                     onSetPaperTrading = {},
                     onResetPaper = {},

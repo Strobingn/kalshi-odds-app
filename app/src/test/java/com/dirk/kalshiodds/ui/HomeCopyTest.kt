@@ -145,6 +145,15 @@ class HomeCopyTest {
         val missing = market.copy(yesAsk = null, noAsk = null, yesBid = null, noBid = null)
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tileTenDollarUp(missing))
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tileTenDollarDown(missing))
+        assertEquals(HomeCopy.PAPER_UP, "Paper UP")
+        assertEquals(HomeCopy.PAPER_DOWN, "Paper DOWN")
+        assertTrue(HomeCopy.paperUpEnabled(moved))
+        assertTrue(HomeCopy.paperDownEnabled(moved))
+        assertEquals(HomeCopy.paperDisabledReason(missing, "YES"), "No ask to paper UP")
+        assertEquals(
+            "Paper UP · 30 ct · $9.75 · +$20.25 if it wins",
+            HomeCopy.paperConfirmSnackbar("YES", at31)
+        )
     }
 
     @Test

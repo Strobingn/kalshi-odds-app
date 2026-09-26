@@ -6,6 +6,8 @@ import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketPhase
@@ -210,6 +212,24 @@ object HomeFixtures {
         positions = emptyList(),
         recentAlerts = sampleAlerts(),
         scorecardSummary = scorecard
+    )
+
+    fun openPaperFill(
+        ticker: String,
+        side: String = "YES",
+        contracts: Int = 47,
+        limitPrice: Double = 0.20,
+        stakeUsd: Double = 9.93
+    ): PaperFill = PaperFill(
+        id = "fixture-paper",
+        ticker = ticker,
+        side = side,
+        stakeUsd = stakeUsd,
+        contracts = contracts,
+        limitPrice = limitPrice,
+        source = PaperTileBuy.SOURCE,
+        createdAtMs = NOW_MS,
+        note = "fixture open paper"
     )
 
     fun openPosition(): LivePosition = LivePosition(

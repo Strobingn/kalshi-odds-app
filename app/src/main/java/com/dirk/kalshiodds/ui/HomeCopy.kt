@@ -7,6 +7,9 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.TimeLeft
 import com.dirk.kalshiodds.signal.model.SignalStance
+import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import java.util.Locale
@@ -202,6 +205,24 @@ object HomeCopy {
 
     fun tileTenDollarDown(market: MarketUiModel): String =
         tenDollarWins(MarketQuoteView.of(market).noAsk).line
+
+    const val PAPER_UP = "Paper UP"
+    const val PAPER_DOWN = "Paper DOWN"
+
+    fun paperDisabledReason(market: MarketUiModel, side: String): String? =
+        PaperTileBuy.disabledReason(market, side)
+
+    fun paperUpEnabled(market: MarketUiModel): Boolean = PaperTileBuy.enabled(market, "YES")
+
+    fun paperDownEnabled(market: MarketUiModel): Boolean = PaperTileBuy.enabled(market, "NO")
+
+    fun paperPositionLine(fill: PaperFill?): String? = PaperTileBuy.positionLine(fill)
+
+    fun paperPositionLine(paper: PaperBookState, ticker: String): String? =
+        PaperTileBuy.positionLine(PaperTileBuy.openFill(paper, ticker))
+
+    fun paperConfirmSnackbar(side: String, sized: TenDollarWins): String =
+        PaperTileBuy.confirmMessage(side, sized)
 
     data class TileAiPercents(
         val up: String,

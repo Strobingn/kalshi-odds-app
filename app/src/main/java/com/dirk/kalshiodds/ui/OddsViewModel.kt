@@ -586,6 +586,36 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         applyPaperBuy(ticketId)
     }
 
+    /**
+     * Card-level Paper UP / Paper DOWN. $10 at the live ask using the
+     * same math as the tile profit line. Never calls [ticketSession.approve]
+     * and never hits Kalshi portfolio or the order API.
+     */
+    fun paperBuySide(market: MarketUiModel, side: String) {
+        val outcome = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(paperBook, market, side)
+        if (outcome.ok) {
+            runCatching {
+                container.resultsWriter.enqueueTicket(
+                    com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
+                        ticker = market.ticker,
+                        side = if (side.equals("NO", true) || side.equals("DOWN", true)) "NO" else "YES",
+                        stakeUsd = outcome.stakeUsd,
+                        approved = true,
+                        result = "paper filled",
+                        createdAtMs = System.currentTimeMillis(),
+                        note = outcome.message
+                    )
+                )
+            }
+        }
+        _state.update {
+            it.copy(
+                userMessage = outcome.message,
+                paper = paperBook.snapshot()
+            )
+        }
+    }
+
     private fun applyPaperBuy(ticketId: String) {
         val outcome = com.dirk.kalshiodds.signal.paper.PaperApprove.apply(
             session = ticketSession,

@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.signal.paper.PaperApprove
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.ApproveRouter
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
@@ -126,6 +127,11 @@ class WiringAuditTest {
         Control("Home paper toggle", OddsViewModel::class.java, "setPaperTrading"),
         Control("Home tickets Approve", OddsViewModel::class.java, "approveTicket"),
         Control("Home tickets PAPER", OddsViewModel::class.java, "paperTicket"),
+        Control("Home card Paper UP/DOWN", OddsViewModel::class.java, "paperBuySide"),
+        Control("Home card $10 paper fill", PaperTileBuy::class.java, "place"),
+        Control("Home card paper position", HomeCopy::class.java, "paperPositionLine"),
+        Control("Home card paper disabled reason", HomeCopy::class.java, "paperDisabledReason"),
+        Control("Home card paper snackbar", HomeCopy::class.java, "paperConfirmSnackbar"),
         Control("Home scorecard tap", HomeCopy::class.java, "scorecardSummaryLine"),
         Control("Scorecard settled picks", ScorecardCopy::class.java, "settledPicks"),
         Control("Scorecard view", ScorecardCopy::class.java, "of"),

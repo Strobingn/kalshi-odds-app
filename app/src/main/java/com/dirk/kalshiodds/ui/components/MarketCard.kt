@@ -114,6 +114,9 @@ fun MarketCard(
     nowMs: Long? = null,
     onBuyYes: (() -> Unit)? = null,
     onBuyNo: (() -> Unit)? = null,
+    onPaperUp: (() -> Unit)? = null,
+    onPaperDown: (() -> Unit)? = null,
+    paperPosition: String? = null,
     onSell: (() -> Unit)? = null,
     onOpenChart: (() -> Unit)? = null
 ) {
@@ -267,6 +270,56 @@ fun MarketCard(
                         onClick = anyway,
                         modifier = Modifier.fillMaxWidth().height(40.dp)
                     ) { Text(HomeCopy.BUY_ANYWAY) }
+                }
+            }
+            paperPosition?.let {
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            val paperUpOk = HomeCopy.paperUpEnabled(market)
+            val paperDownOk = HomeCopy.paperDownEnabled(market)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Button(
+                    onClick = { onPaperUp?.invoke() },
+                    enabled = onPaperUp != null && paperUpOk,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.up,
+                        contentColor = colors.onUp,
+                        disabledContainerColor = colors.up.copy(alpha = 0.38f),
+                        disabledContentColor = colors.onUp.copy(alpha = 0.70f)
+                    ),
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) { Text(HomeCopy.PAPER_UP, fontWeight = FontWeight.Bold, maxLines = 1) }
+                Button(
+                    onClick = { onPaperDown?.invoke() },
+                    enabled = onPaperDown != null && paperDownOk,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colors.down,
+                        contentColor = colors.onDown,
+                        disabledContainerColor = colors.down.copy(alpha = 0.38f),
+                        disabledContentColor = colors.onDown.copy(alpha = 0.70f)
+                    ),
+                    modifier = Modifier.weight(1f).height(48.dp)
+                ) { Text(HomeCopy.PAPER_DOWN, fontWeight = FontWeight.Bold, maxLines = 1) }
+            }
+            if (!paperUpOk || !paperDownOk) {
+                val reason = listOfNotNull(
+                    HomeCopy.paperDisabledReason(market, "YES").takeIf { !paperUpOk },
+                    HomeCopy.paperDisabledReason(market, "NO").takeIf { !paperDownOk }
+                ).distinct().joinToString(" · ")
+                if (reason.isNotBlank()) {
+                    Text(
+                        reason,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
                 }
             }
             if (onSell != null) {

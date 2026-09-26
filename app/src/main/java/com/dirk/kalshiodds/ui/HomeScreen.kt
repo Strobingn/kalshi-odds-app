@@ -26,11 +26,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -59,6 +63,7 @@ fun HomeScreen(
     onOpenChart: (MarketUiModel) -> Unit,
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
+    onPaperSide: (MarketUiModel, String) -> Unit,
     onSellMarket: (MarketUiModel) -> Unit,
     onSetPaperTrading: (Boolean) -> Unit,
     onResetPaper: () -> Unit,
@@ -84,9 +89,15 @@ fun HomeScreen(
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
     val best = HomeMarkets.best(ranked, decisions)
+    val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(state.userMessage) {
+        val msg = state.userMessage ?: return@LaunchedEffect
+        snackbar.showSnackbar(msg)
+    }
     Scaffold(
         containerColor = colors.bg,
         contentWindowInsets = WindowInsets.safeDrawing,
+        snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
                 title = {
@@ -169,7 +180,7 @@ fun HomeScreen(
                                 }
                             }
                         }
-                        state.userMessage?.let { msg ->
+                        state.userMessage?.takeIf { !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) }?.let { msg ->
                             item {
                                 Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                             }
@@ -197,6 +208,9 @@ fun HomeScreen(
                                     nowMs = nowMs,
                                     onBuyYes = { onBuyMarket(market, "YES") },
                                     onBuyNo = { onBuyMarket(market, "NO") },
+                                    onPaperUp = { onPaperSide(market, "YES") },
+                                    onPaperDown = { onPaperSide(market, "NO") },
+                                    paperPosition = HomeCopy.paperPositionLine(state.paper, market.ticker),
                                     onSell = state.positions.firstOrNull { it.ticker == market.ticker }?.let {
                                         { onSellMarket(market) }
                                     },

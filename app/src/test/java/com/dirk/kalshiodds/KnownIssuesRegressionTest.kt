@@ -1445,6 +1445,9 @@ class KnownIssuesRegressionTest {
         assertTrue(nav.back())
         assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
 
+        assertTrue(home.contains("onPaperSide"))
+        assertFalse(home.contains("paperBuySide"))
+        assertTrue(home.contains("HomeCopy.paperPositionLine"))
         assertTrue(home.contains("TradeModeChip"))
         val chrome = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/components/HomeChrome.kt"),
@@ -1458,6 +1461,10 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }.readText()
         assertFalse(card.contains("AI: UP"))
         assertFalse(card.contains("AI: NO BET"))
+        assertTrue(card.contains("HomeCopy.PAPER_UP"))
+        assertTrue(card.contains("HomeCopy.PAPER_DOWN"))
+        assertTrue(card.contains("onPaperUp"))
+        assertTrue(card.contains("onPaperDown"))
     }
 
     @Test
@@ -1514,6 +1521,51 @@ class KnownIssuesRegressionTest {
         assertFalse(loading.contains("tileAi"))
         assertFalse(loading.contains("AI "))
         assertFalse(loading.contains("tileTenDollar"))
+        assertFalse(loading.contains("PAPER_UP"))
+    }
+
+    @Test
+    fun paperBuyVisibleOnLiveKeyedCard() {
+        // 0.3.13 root cause: keyed ApproveRouter is LIVE $ and MarketCard only
+        // painted Buy anyway / LIVE $ / Sell. Paper lived on TradeTicketCard.
+        val card = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt")
+        ).first { it.isFile }.readText()
+        val home = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt")
+        ).first { it.isFile }.readText()
+        val odds = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/OddsScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/OddsScreen.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(card.contains("HomeCopy.PAPER_UP"))
+        assertTrue(card.contains("HomeCopy.PAPER_DOWN"))
+        assertFalse(card.contains("if (paperTradingEnabled)"))
+        assertTrue(home.contains("onPaperUp"))
+        assertTrue(home.contains("onPaperDown"))
+        assertTrue(odds.contains("viewModel.paperBuySide"))
+        val keyed = HomeFixtures.settings(true)
+        assertTrue(keyed.tradingCredentialsConfigured())
+        assertEquals(
+            TradeModeLabel.LIVE,
+            TradeModeLabel.forApprove(keyed)
+        )
+        val market = HomeFixtures.actionableBtc()
+        assertEquals("Paper UP", HomeCopy.PAPER_UP)
+        assertEquals("Paper DOWN", HomeCopy.PAPER_DOWN)
+        assertTrue(HomeCopy.paperUpEnabled(market))
+        assertTrue(HomeCopy.paperDownEnabled(market))
+        val book = PaperBook(idFactory = { "live-card" }, nowMs = { 1L })
+        val out = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(book, market, "YES")
+        assertTrue(out.ok)
+        assertEquals(HomeCopy.paperConfirmSnackbar("YES", HomeCopy.tenDollarWins(0.20)), out.message)
+        assertEquals(
+            "Paper: UP ${out.contracts} @ 20c",
+            HomeCopy.paperPositionLine(book.snapshot(), market.ticker)
+        )
+        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
     }
 
     /** Same paint path as [com.dirk.kalshiodds.ui.OddsViewModel.applyResult] / applyRolloverEvent. */
