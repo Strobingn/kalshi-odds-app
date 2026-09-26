@@ -33,7 +33,7 @@ class LiveApprovePaperIsolationTest {
     fun paperFillOnTickerDoesNotBlockLiveApproveHttp() = runBlocking {
         val book = PaperBook()
         book.reset()
-        val ticker = "KXETH15M-26SEP251230-30"
+        val ticker = "KXBTC15M-26SEP251230-30"
         val market = sample(ticker, yesAsk = 0.25, noAsk = 0.75, aiYes = 80.0)
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
         val paperFill = book.explicitFill(

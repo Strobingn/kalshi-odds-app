@@ -563,7 +563,10 @@ class TickBook(private val maxPoints: Int = 80) {
         const val VELOCITY_LOOKBACK = 16
 
         fun leadersFor(targetSeries: String): List<String> {
-            return emptyList()
+            return when (targetSeries) {
+                KalshiApi.SERIES_BTC -> listOf(KalshiApi.SERIES_ETH, KalshiApi.SERIES_SOL)
+                else -> listOf(KalshiApi.SERIES_BTC)
+            }
         }
 
         /**

@@ -101,7 +101,7 @@ class KnownIssuesRegressionTest {
 
     @Test
     fun paperFillOnTickerNeverBlocksLiveApproveAndLivePositionNeverBlocksPaper() = runBlocking {
-        val ticker = "KXETH15M-26SEP251230-30"
+        val ticker = "KXBTC15M-26SEP251230-30"
         val market = sample(ticker, yesAsk = 0.25, noAsk = 0.75, aiYes = 80.0, predicted = "YES")
         val livePos = LivePosition(
             ticker = ticker,
@@ -808,7 +808,7 @@ class KnownIssuesRegressionTest {
         assertBtc(HomeMarkets.coinCards(listed, clock.nowMs()), ticker(1))
 
         clock.set(closes[1] + 6_000L)
-        listed = listOf(futureBtc)
+        listed = listOf(coin(3, 30.0))
         val missing = HomeMarkets.coinCards(listed, clock.nowMs())
         assertBtc(missing, null)
         clock.advance(10_000L)
@@ -1341,7 +1341,7 @@ class KnownIssuesRegressionTest {
     @Test
     fun fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration() {
         val entries = HomeFixtures.sampleSettledEntries()
-        val settled = ScorecardMetrics.settledScoredPicks(entries)
+        val settled = ScorecardCopy.settledPicks(entries)
         assertEquals(18, settled.size)
         val window = ScorecardMetrics.window(settled)
         val snap = ScorecardMetrics.Snapshot(

@@ -128,7 +128,7 @@ class WiringAuditTest {
         Control("Scorecard empty state", ScorecardCopy::class.java, "emptyState"),
         Control("Scorecard empty-state gate", ScorecardCopy::class.java, "showsEmptyState"),
         Control("Scorecard bucket line", ScorecardCopy::class.java, "bucketLine"),
-        Control("Scorecard coin buckets", ScorecardCopy::class.java, "coinBuckets"),
+        Control("Scorecard time-of-day buckets", ScorecardCopy::class.java, "timeBuckets"),
         Control("Scorecard time buckets", ScorecardCopy::class.java, "timeBuckets"),
         Control("Scorecard recent pick", ScorecardCopy::class.java, "recentPick"),
         Control("Scorecard recent pick line", ScorecardCopy::class.java, "recentPickLine"),

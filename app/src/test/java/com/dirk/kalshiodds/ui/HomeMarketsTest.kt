@@ -120,7 +120,7 @@ class HomeMarketsTest {
         assertTrue(HomeMarkets.coinCards(listed, clock.nowMs()).none { it.market?.ticker == futureBtc.ticker })
 
         clock.set(closes[1] + 6_000L)
-        listed = mutableListOf(futureBtc)
+        listed = mutableListOf(coin(3, 30.0, closes[2], closes[3]))
         val missing = HomeMarkets.coinCards(listed, clock.nowMs())
         assertBtc(missing, null)
         assertEquals(HomeMarkets.NEXT_WINDOW_LOADING, HomeMarkets.NEXT_WINDOW_LOADING)

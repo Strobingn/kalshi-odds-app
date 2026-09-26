@@ -187,8 +187,8 @@ class LeadLagAndMicrostructureTest {
         assertTrue(btcMove!! > 0.10)
         val ethFollow = TickBook.deltaBetween(ethHist, now - 400L, now) ?: 0.0
         assertEquals(0.0, ethFollow, 1e-9)
-        assertEquals(emptyList<String>(), TickBook.leadersFor("KXETH15M"))
-        assertEquals(emptyList<String>(), TickBook.leadersFor("KXBTC15M"))
+        assertEquals(listOf("KXBTC15M"), TickBook.leadersFor("KXETH15M"))
+        assertEquals(listOf("KXETH15M", "KXSOL15M"), TickBook.leadersFor("KXBTC15M"))
     }
 
     @Test
@@ -343,8 +343,8 @@ class ScoringPredictabilityTest {
         val engine = ScoringEngine(idFactory = { "r" })
         val now = 2_000_000L
         val tick = MarketTick(
-            ticker = "KXSOL15M-REG",
-            series = "KXSOL15M",
+            ticker = "KXBTC15M-REG",
+            series = "KXBTC15M",
             yesBid = 0.44,
             yesAsk = 0.46,
             lastPrice = 0.45,
