@@ -79,9 +79,16 @@ class PaperTileBuyTest {
             ?: java.io.File("app/src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt")
         val paperFn = vm.readText().substringAfter("fun paperBuySide").substringBefore("fun paperSellTicket")
         assertTrue(paperFn.contains("PaperTileBuy.place"))
+        assertTrue(paperFn.contains("resolveActionWindow"))
+        assertTrue(paperFn.contains("NEXT_WINDOW_LOADING"))
         assertFalse(paperFn.contains("ticketSession.approve"))
         assertFalse(paperFn.contains("tradeClient"))
         assertFalse(paperFn.contains("GET /portfolio"))
+        val buyFn = vm.readText().substringAfter("fun buyMarket").substringBefore("private fun applyScoreOverlay")
+        assertTrue(buyFn.contains("resolveActionWindow"))
+        assertTrue(buyFn.contains("NEXT_WINDOW_LOADING"))
+        assertFalse(buyFn.contains("WINDOW_CLOSED"))
+        assertFalse(buyFn.contains("Market closed"))
     }
 
     @Test

@@ -21,17 +21,29 @@ class TicketSession(
     private val placeOrder: suspend (ticket: TradeTicket, clientOrderId: String) -> Result<PlacedOrder>,
     private val cancelOrder: suspend (order: PlacedOrder) -> Result<PlacedOrder> = { Result.success(it) },
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
-    private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null
+    private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val voidHoldMs: Long = VOID_HOLD_MS
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
     val state: StateFlow<TicketUiState> = _state.asStateFlow()
+
+    private val voidedAtMs = mutableMapOf<String, Long>()
+    private val announcedVoidIds = mutableSetOf<String>()
+
+    /** Times [WINDOW_CLOSED_NOTICE] was raised for a newly voided ticket. */
+    var windowClosedNoticeCount: Int = 0
+        private set
 
     fun snapshot(): TicketUiState = _state.value
 
     /** Process start / ViewModel init. Leaves Idle. Never places. */
     fun onStart() {
         _state.value = TicketUiState(phase = TicketPhase.Idle)
+        voidedAtMs.clear()
+        announcedVoidIds.clear()
+        windowClosedNoticeCount = 0
     }
 
     /**
@@ -40,37 +52,45 @@ class TicketSession(
      *
      * [liveTickers]: when set, hunter cards on a closed window are dropped
      * and manual / sell cards are voided with [WINDOW_CLOSED] — never remapped
-     * onto the next contract and never submitted.
+     * onto the next contract and never submitted. A voided manual / sell is
+     * kept briefly so Approve stays off and a one-time notice can show, then
+     * removed on the next refresh after [voidHoldMs] (default 5s).
      */
     fun replaceProposals(tickets: List<TradeTicket>, liveTickers: Set<String>? = null) {
         _state.update { cur ->
-            val incomingManuals = tickets.filter { it.kind == TicketKind.MANUAL || it.kind == TicketKind.SELL }
-            val incomingAuto = tickets.filterNot { it.kind == TicketKind.MANUAL || it.kind == TicketKind.SELL }
+            val now = nowMs()
+            val submitting = cur.phase as? TicketPhase.Submitting
+            val incomingManuals = tickets.filter { it.isManualOrSell }
+            val incomingAuto = tickets.filterNot { it.isManualOrSell }
             val preservedManuals = cur.proposals.filter { t ->
-                (t.kind == TicketKind.MANUAL || t.kind == TicketKind.SELL) &&
-                    incomingManuals.none { n -> ticketKey(n) == ticketKey(t) }
-            }.map { markClosed(it, liveTickers) }
-            val manuals = incomingManuals.map { markClosed(it, liveTickers) } + preservedManuals
+                t.isManualOrSell &&
+                    incomingManuals.none { n -> ticketKey(n) == ticketKey(t) } &&
+                    submitting?.ticket?.id != t.id
+            }.map { markClosed(it, liveTickers, now) }
+            val manuals = incomingManuals.map { markClosed(it, liveTickers, now) } + preservedManuals
             val remapped = preserveIds(
-                cur.proposals.filterNot { it.kind == TicketKind.MANUAL || it.kind == TicketKind.SELL },
+                cur.proposals.filterNot { it.isManualOrSell },
                 incomingAuto
             )
-                .map { markClosed(it, liveTickers) }
+                .map { markClosed(it, liveTickers, now) }
                 .filter { liveTickers == null || it.ticker in liveTickers }
-            val merged = (manuals + remapped).distinctBy { ticketKey(it) }
-            val cleanedError = cur.lastError?.takeUnless { stalePageError(it) }
-            val voided = merged.any { it.blockedReason == WINDOW_CLOSED }
-            if (cur.phase is TicketPhase.Submitting) {
+            val keptManuals = manuals.filterNot { dropVoided(it, now) }
+            val merged = (keptManuals + remapped)
+                .filterNot { dropVoided(it, now) }
+                .distinctBy { ticketKey(it) }
+            forgetDropped(cur.proposals, merged)
+            val lastError = nextLastError(cur, merged, submitting != null)
+            if (submitting != null) {
                 return@update cur.copy(
-                    proposals = merged,
-                    lastError = if (voided) WINDOW_CLOSED else cleanedError
+                    proposals = keepSubmitting(merged, submitting.ticket),
+                    lastError = cur.lastError
                 )
             }
             val awaitingPhase = cur.phase as? TicketPhase.AwaitingApprove
             val awaiting = awaitingPhase?.ticket
             val confirmId = awaitingPhase?.clientOrderId
             val liveAwaiting = awaiting?.takeIf { ticket ->
-                ticket.blockedReason != WINDOW_CLOSED &&
+                !isWindowClosedReason(ticket.blockedReason) &&
                     (liveTickers == null || ticket.ticker in liveTickers) &&
                     merged.any { it.id == ticket.id || ticketKey(it) == ticketKey(ticket) }
             }
@@ -79,8 +99,7 @@ class TicketSession(
                     val fresh = merged.first { it.id == liveAwaiting.id }
                     confirmPhase(fresh, merged.filterNot { it.id == fresh.id }, confirmId)
                 }
-                liveAwaiting != null &&
-                    (liveAwaiting.kind == TicketKind.MANUAL || liveAwaiting.kind == TicketKind.SELL) -> {
+                liveAwaiting != null && liveAwaiting.isManualOrSell -> {
                     val fresh = merged.firstOrNull { ticketKey(it) == ticketKey(liveAwaiting) } ?: liveAwaiting
                     confirmPhase(fresh, merged.filterNot { it.id == fresh.id }, confirmId)
                 }
@@ -90,39 +109,58 @@ class TicketSession(
             cur.copy(
                 phase = phase,
                 proposals = merged,
-                lastError = if (voided) WINDOW_CLOSED else cleanedError
+                lastError = lastError
             )
         }
     }
 
     /**
-     * Mark open tickets on [tickers] as [WINDOW_CLOSED]. Approve stays off;
-     * [approve] will not place. Already-submitting orders are left alone.
+     * Mark open manual / sell tickets on [tickers] as [WINDOW_CLOSED]. Approve
+     * stays off; [approve] will not place. Already-submitting orders are left
+     * alone. Already-voided tickets are not re-announced; they drop after
+     * [voidHoldMs] on the next [replaceProposals].
      */
     fun voidTickers(tickers: Set<String>, reason: String = WINDOW_CLOSED) {
         if (tickers.isEmpty()) return
         _state.update { cur ->
-            fun mark(t: TradeTicket) = if (t.ticker in tickers) voided(t, reason) else t
-            val proposals = cur.proposals.map(::mark)
+            val now = nowMs()
+            val submitting = cur.phase as? TicketPhase.Submitting
+            val submittingId = submitting?.ticket?.id
+            fun mark(t: TradeTicket): TradeTicket {
+                if (t.id == submittingId) return t
+                if (!t.isManualOrSell) return t
+                if (t.ticker !in tickers) return t
+                return markVoided(t, reason, now)
+            }
+            val proposals = cur.proposals.map(::mark).filterNot { dropVoided(it, now) && it.id != submittingId }
+            forgetDropped(cur.proposals, proposals)
             val phase = when (val p = cur.phase) {
                 is TicketPhase.AwaitingApprove -> {
                     val ticket = mark(p.ticket)
-                    val others = p.others.map(::mark)
-                    if (p.ticket.ticker in tickers) {
-                        TicketPhase.Proposed((listOf(ticket) + others).distinctBy { ticketKey(it) })
+                    val others = p.others.map(::mark).filterNot { dropVoided(it, now) }
+                    if (p.ticket.ticker in tickers && p.ticket.isManualOrSell) {
+                        val next = (listOf(ticket) + others).filterNot { dropVoided(it, now) }
+                            .distinctBy { ticketKey(it) }
+                        if (next.isEmpty()) TicketPhase.Idle else TicketPhase.Proposed(next)
                     } else {
                         confirmPhase(ticket, others, p.clientOrderId)
                     }
                 }
-                is TicketPhase.Proposed -> TicketPhase.Proposed(proposals)
+                is TicketPhase.Proposed -> {
+                    if (proposals.isEmpty()) TicketPhase.Idle else TicketPhase.Proposed(proposals)
+                }
                 is TicketPhase.Submitting -> p
                 else -> p
             }
-            val touched = proposals.any { it.ticker in tickers }
+            val lastError = if (submitting != null) {
+                cur.lastError
+            } else {
+                nextLastError(cur.copy(proposals = proposals), proposals, submitting = false)
+            }
             cur.copy(
                 phase = phase,
-                proposals = proposals,
-                lastError = if (touched) reason else cur.lastError
+                proposals = if (submitting != null) keepSubmitting(proposals, submitting.ticket) else proposals,
+                lastError = lastError
             )
         }
     }
@@ -141,7 +179,9 @@ class TicketSession(
      */
     fun addManual(ticket: TradeTicket) {
         _state.update { cur ->
-            val others = cur.proposals.filterNot { ticketKey(it) == ticketKey(ticket) }
+            val others = cur.proposals.filterNot {
+                ticketKey(it) == ticketKey(ticket) || isWindowClosedReason(it.blockedReason)
+            }
             val next = listOf(ticket) + others
             cur.copy(
                 phase = confirmPhase(ticket, others),
@@ -179,6 +219,8 @@ class TicketSession(
     fun dismiss(ticketId: String) {
         _state.update { cur ->
             val next = cur.proposals.filterNot { it.id == ticketId }
+            voidedAtMs.remove(ticketId)
+            announcedVoidIds.remove(ticketId)
             val phase = if (next.isEmpty()) TicketPhase.Idle else TicketPhase.Proposed(next)
             cur.copy(phase = phase, proposals = next)
         }
@@ -221,8 +263,11 @@ class TicketSession(
             return _state.value
         }
         if (!ticket.canApprove) {
-            val reason = ticket.blockedReason?.takeIf { it.isNotBlank() }
-                ?: "Ticket cannot be approved — Approve stays off (no silent skip)"
+            val reason = when {
+                isWindowClosedReason(ticket.blockedReason) -> WINDOW_CLOSED_NOTICE
+                else -> ticket.blockedReason?.takeIf { it.isNotBlank() }
+                    ?: "Ticket cannot be approved — Approve stays off (no silent skip)"
+            }
             _state.update { it.copy(lastError = reason) }
             return _state.value
         }
@@ -320,24 +365,80 @@ class TicketSession(
 
     val placementCount: Int get() = _state.value.placementCount
 
+    private fun markClosed(ticket: TradeTicket, liveTickers: Set<String>?, now: Long): TradeTicket {
+        if (liveTickers == null || ticket.ticker in liveTickers) return ticket
+        if (!ticket.isManualOrSell) return ticket
+        return markVoided(ticket, WINDOW_CLOSED, now)
+    }
+
+    private fun markVoided(ticket: TradeTicket, reason: String, now: Long): TradeTicket {
+        if (ticket.id !in voidedAtMs) voidedAtMs[ticket.id] = now
+        if (ticket.blockedReason == reason) {
+            return ticket.copy(
+                gateNote = ticket.gateNote ?: WINDOW_CLOSED_NOTICE,
+                sizingNote = if (isWindowClosedReason(ticket.sizingNote)) WINDOW_CLOSED_NOTICE else ticket.sizingNote
+            )
+        }
+        return ticket.copy(
+            blockedReason = reason,
+            gateNote = WINDOW_CLOSED_NOTICE,
+            sizingNote = WINDOW_CLOSED_NOTICE
+        )
+    }
+
+    private fun dropVoided(ticket: TradeTicket, now: Long): Boolean {
+        if (!ticket.isManualOrSell) return false
+        if (!isWindowClosedReason(ticket.blockedReason)) return false
+        val at = voidedAtMs[ticket.id] ?: return false
+        return now - at >= voidHoldMs
+    }
+
+    private fun forgetDropped(before: List<TradeTicket>, after: List<TradeTicket>) {
+        val keep = after.map { it.id }.toSet()
+        before.map { it.id }.filter { it !in keep }.forEach { id ->
+            voidedAtMs.remove(id)
+        }
+    }
+
+    private fun keepSubmitting(merged: List<TradeTicket>, submitting: TradeTicket): List<TradeTicket> {
+        val without = merged.filterNot { it.id == submitting.id }
+        return (listOf(submitting) + without).distinctBy { ticketKey(it) }
+    }
+
+    private fun nextLastError(
+        cur: TicketUiState,
+        merged: List<TradeTicket>,
+        submitting: Boolean
+    ): String? {
+        if (submitting) return cur.lastError
+        val cleaned = cur.lastError?.takeUnless { stalePageError(it) }
+        val newly = merged.filter { ticket ->
+            isWindowClosedReason(ticket.blockedReason) && ticket.id !in announcedVoidIds
+        }
+        if (newly.isNotEmpty()) {
+            announcedVoidIds.addAll(newly.map { it.id })
+            windowClosedNoticeCount += newly.size
+            return WINDOW_CLOSED_NOTICE
+        }
+        val stillHolding = merged.any { isWindowClosedReason(it.blockedReason) }
+        if (stillHolding && isWindowClosedError(cleaned)) return WINDOW_CLOSED_NOTICE
+        return cleaned?.takeUnless { isWindowClosedError(it) }
+    }
+
     companion object {
         const val WINDOW_CLOSED = TicketBuilder.WINDOW_CLOSED
+        const val WINDOW_CLOSED_NOTICE = "That window closed. Nothing was sent."
+        const val VOID_HOLD_MS = 5_000L
 
         fun ticketKey(t: TradeTicket): String =
             "${t.ticker}|${t.side}|${t.kind}|${t.stakeUsd}"
 
-        private fun markClosed(ticket: TradeTicket, liveTickers: Set<String>?): TradeTicket {
-            if (liveTickers == null || ticket.ticker in liveTickers) return ticket
-            return voided(ticket)
-        }
+        fun isWindowClosedReason(reason: String?): Boolean =
+            reason == WINDOW_CLOSED || reason == WINDOW_CLOSED_NOTICE
 
-        private fun voided(ticket: TradeTicket, reason: String = WINDOW_CLOSED): TradeTicket {
-            if (ticket.blockedReason == reason) return ticket
-            return ticket.copy(
-                blockedReason = reason,
-                gateNote = reason,
-                sizingNote = reason
-            )
+        fun isWindowClosedError(message: String?): Boolean {
+            if (message.isNullOrBlank()) return false
+            return isWindowClosedReason(message.trim())
         }
 
         fun stalePageError(message: String): Boolean {
@@ -363,3 +464,6 @@ class TicketSession(
         }
     }
 }
+
+private val TradeTicket.isManualOrSell: Boolean
+    get() = kind == TicketKind.MANUAL || kind == TicketKind.SELL

@@ -68,6 +68,25 @@ object MarketLifecycle {
         return liveSuccessor(market.ticker, markets, nowMs) ?: market
     }
 
+    /**
+     * Market a Buy / Paper tap should act on. Prefers the series'
+     * [currentOpenWindow], then [resolveLive] only if that contract is
+     * actually the current window. Returns null when there is no open
+     * window — callers show "Next window loading", never Window/Market closed.
+     */
+    fun resolveActionWindow(
+        tapped: MarketUiModel,
+        markets: List<MarketUiModel>,
+        nowMs: Long = System.currentTimeMillis()
+    ): MarketUiModel? {
+        val series = CryptoMarkets.inferSeries(tapped.ticker)
+        val pool = markets.filter { CryptoMarkets.inferSeries(it.ticker) == series }
+            .ifEmpty { markets }
+        currentOpenWindow(pool, nowMs)?.let { return it }
+        val resolved = resolveLive(tapped, markets, nowMs)
+        return resolved.takeIf { isCurrentWindow(it, nowMs) }
+    }
+
     fun currentWindow(markets: List<MarketUiModel>): MarketUiModel? {
         if (markets.isEmpty()) return null
         val soonest = markets.minOf { it.closeTimeEpochMs ?: Long.MAX_VALUE }

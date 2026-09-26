@@ -3,7 +3,10 @@ package com.dirk.kalshiodds.domain
 import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
+import com.dirk.kalshiodds.signal.paper.PaperBook
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.ui.HomeMarkets
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
@@ -251,6 +254,56 @@ class ExpiredMarketPruneTest {
             "KXBTC15M-26SEP241700-00",
             MarketLifecycle.featuredLive(listOf(deadAtm, liveFar), now)!!.ticker
         )
+    }
+
+    @Test
+    fun buyAndPaperAfterRolloverActOnLiveWindowNeverClosedError() {
+        val stale = sampleMarket(
+            ticker = "KXBTC15M-26SEP241645-45",
+            status = "closed",
+            closeMs = now - 1_000L,
+            ask = 0.04
+        )
+        val live = sampleMarket(
+            ticker = "KXBTC15M-26SEP241700-00",
+            status = "active",
+            closeMs = now + 600_000L,
+            ask = 0.04,
+            volume = 5_000.0
+        )
+        val all = listOf(stale, live)
+        val target = MarketLifecycle.resolveActionWindow(stale, all, now)
+        assertEquals(live.ticker, target!!.ticker)
+        assertTrue(MarketLifecycle.isCurrentWindow(target, now))
+
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(ticketsEnabled = true, ticketStakeUsd = 5.0),
+            alertsPaused = false,
+            idFactory = { "live-buy" },
+            nowMs = now
+        )
+        val ticket = TicketBuilder.proposeManual(target, "YES", ctx)!!
+        assertTrue(ticket.canApprove)
+        assertTrue(ticket.blockedReason != TicketBuilder.WINDOW_CLOSED)
+        assertTrue(ticket.blockedReason != TicketBuilder.MARKET_CLOSED)
+        assertEquals(live.ticker, ticket.ticker)
+
+        val paper = PaperTileBuy.place(PaperBook(idFactory = { "p" }, nowMs = { now }), target, "YES")
+        assertTrue(paper.message, paper.ok)
+        assertFalse(paper.message.contains(TicketBuilder.WINDOW_CLOSED))
+        assertFalse(paper.message.contains(TicketBuilder.MARKET_CLOSED))
+        assertEquals(live.ticker, paper.fill!!.ticker)
+
+        assertNull(MarketLifecycle.resolveActionWindow(stale, listOf(stale), now))
+        val listedNext = sampleMarket(
+            ticker = "KXBTC15M-26SEP241715-00",
+            status = "active",
+            closeMs = now + 1_200_000L,
+            ask = 0.04
+        )
+        assertFalse(MarketLifecycle.isCurrentWindow(listedNext, now))
+        assertNull(MarketLifecycle.resolveActionWindow(stale, listOf(stale, listedNext), now))
+        assertEquals(HomeMarkets.NEXT_WINDOW_LOADING, HomeMarkets.NEXT_WINDOW_LOADING)
     }
 
     @Test

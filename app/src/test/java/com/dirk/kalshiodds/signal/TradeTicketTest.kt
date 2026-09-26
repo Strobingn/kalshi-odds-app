@@ -9,6 +9,8 @@ import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +18,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 
 class PayoutGateTest {
 
@@ -275,7 +278,169 @@ MIIEowIBAAKCAQEA
         assertEquals(0, placed.get())
     }
 
-    private fun session(placed: AtomicInteger) = TicketSession(
+    @Test
+    fun rolloverVoidsManualOnceThenDropsAndClearsError() = runBlocking {
+        val placed = AtomicInteger(0)
+        val clock = AtomicLong(1_000L)
+        val session = session(placed, nowMs = { clock.get() })
+        val manual = sampleTicket("m1", ticker = "KXBTC15M-OLD").copy(
+            kind = com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL
+        )
+        session.addManual(manual)
+        session.voidTickers(setOf("KXBTC15M-OLD"))
+        val first = session.snapshot()
+        val voided = first.proposals.single { it.id == "m1" }
+        assertEquals(TicketSession.WINDOW_CLOSED, voided.blockedReason)
+        assertFalse(voided.canApprove)
+        assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, first.lastError)
+        assertEquals(1, session.windowClosedNoticeCount)
+        session.approve("m1")
+        assertEquals(0, placed.get())
+
+        val liveHunter = sampleTicket("h1", ticker = "KXBTC15M-NEW").copy(
+            kind = com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER
+        )
+        session.replaceProposals(listOf(liveHunter), liveTickers = setOf("KXBTC15M-NEW"))
+        val held = session.snapshot()
+        assertTrue(held.proposals.any { it.id == "m1" })
+        assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, held.lastError)
+        assertEquals(1, session.windowClosedNoticeCount)
+
+        clock.set(1_000L + TicketSession.VOID_HOLD_MS)
+        session.replaceProposals(
+            listOf(liveHunter.copy(id = "h2")),
+            liveTickers = setOf("KXBTC15M-NEW")
+        )
+        val dropped = session.snapshot()
+        assertTrue(dropped.proposals.none { it.id == "m1" })
+        assertNull(dropped.lastError)
+        assertEquals(1, session.windowClosedNoticeCount)
+
+        clock.addAndGet(2_000L)
+        session.replaceProposals(
+            listOf(liveHunter.copy(id = "h3")),
+            liveTickers = setOf("KXBTC15M-NEW")
+        )
+        assertNull(session.snapshot().lastError)
+        assertEquals(1, session.windowClosedNoticeCount)
+        assertEquals(0, placed.get())
+    }
+
+    @Test
+    fun lastOrderErrorRecordedAtMostOncePerVoidedTicket() {
+        val recorded = mutableListOf<String>()
+        var previous: String? = null
+        val clock = AtomicLong(1_000L)
+        val session = session(AtomicInteger(0), nowMs = { clock.get() })
+        session.addManual(
+            sampleTicket("m1", ticker = "KXBTC15M-OLD").copy(
+                kind = com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL
+            )
+        )
+        repeat(5) { i ->
+            session.voidTickers(setOf("KXBTC15M-OLD"))
+            session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-NEW"))
+            com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce
+                .accept(previous, session.snapshot().lastError)
+                ?.let { err ->
+                    recorded += err
+                    previous = err
+                }
+            if (session.snapshot().lastError.isNullOrBlank()) previous = null
+            if (i == 2) clock.set(1_000L + TicketSession.VOID_HOLD_MS)
+        }
+        assertEquals(listOf(TicketSession.WINDOW_CLOSED_NOTICE), recorded)
+        assertEquals(1, session.windowClosedNoticeCount)
+    }
+
+    @Test
+    fun submittingOrderIsUntouchedByWindowClose() = runBlocking {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val placed = AtomicInteger(0)
+        val clock = AtomicLong(1_000L)
+        val session = TicketSession(
+            placeOrder = { ticket, clientId ->
+                entered.complete(Unit)
+                release.await()
+                placed.incrementAndGet()
+                Result.success(
+                    com.dirk.kalshiodds.signal.trade.PlacedOrder(
+                        ticket = ticket,
+                        clientOrderId = clientId,
+                        orderId = "ord-live",
+                        fillCount = 0.0,
+                        remainingCount = ticket.contracts.toDouble(),
+                        averageFillPrice = null,
+                        placedAtMs = 1L
+                    )
+                )
+            },
+            nowMs = { clock.get() }
+        )
+        session.addManual(sampleTicket("t1", ticker = "KXBTC15M-OLD"))
+        val job = launch { session.approve("t1") }
+        entered.await()
+        assertTrue(session.snapshot().phase is TicketPhase.Submitting)
+        session.voidTickers(setOf("KXBTC15M-OLD"))
+        session.replaceProposals(emptyList(), liveTickers = emptySet())
+        clock.set(1_000L + TicketSession.VOID_HOLD_MS)
+        session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-NEW"))
+        val mid = session.snapshot()
+        assertTrue(mid.phase is TicketPhase.Submitting)
+        val submitting = mid.phase as TicketPhase.Submitting
+        assertEquals("t1", submitting.ticket.id)
+        assertNull(submitting.ticket.blockedReason)
+        assertTrue(mid.proposals.any { it.id == "t1" && it.blockedReason == null })
+        assertNull(mid.lastError)
+        assertEquals(0, session.windowClosedNoticeCount)
+        release.complete(Unit)
+        job.join()
+        assertEquals(1, placed.get())
+        assertTrue(session.snapshot().phase is TicketPhase.Submitted)
+    }
+
+    @Test
+    fun approveOnVoidedTicketNeverPlaces() = runBlocking {
+        val placed = AtomicInteger(0)
+        val session = session(placed, nowMs = { 1_000L })
+        session.addManual(
+            sampleTicket("m1", ticker = "KXBTC15M-OLD").copy(
+                kind = com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL
+            )
+        )
+        session.voidTickers(setOf("KXBTC15M-OLD"))
+        val after = session.approve("m1")
+        assertEquals(0, placed.get())
+        assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, after.lastError)
+        assertFalse(session.snapshot().proposals.single { it.id == "m1" }.canApprove)
+    }
+
+    @Test
+    fun lastOrderErrorOnceSkipsRepeatWindowClosed() {
+        assertEquals(
+            TicketSession.WINDOW_CLOSED_NOTICE,
+            com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
+                null,
+                TicketSession.WINDOW_CLOSED_NOTICE
+            )
+        )
+        assertNull(
+            com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
+                TicketSession.WINDOW_CLOSED_NOTICE,
+                TicketSession.WINDOW_CLOSED_NOTICE
+            )
+        )
+        assertNull(
+            com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
+                TicketSession.WINDOW_CLOSED,
+                TicketSession.WINDOW_CLOSED
+            )
+        )
+        assertNull(com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept("x", "PAPER filled"))
+    }
+
+    private fun session(placed: AtomicInteger, nowMs: () -> Long = { System.currentTimeMillis() }) = TicketSession(
         placeOrder = { ticket, clientId ->
             placed.incrementAndGet()
             Result.success(
@@ -289,7 +454,8 @@ MIIEowIBAAKCAQEA
                     placedAtMs = 1L
                 )
             )
-        }
+        },
+        nowMs = nowMs
     )
 }
 

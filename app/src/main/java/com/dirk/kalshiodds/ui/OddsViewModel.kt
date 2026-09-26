@@ -110,6 +110,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var backfillJob: Job? = null
     private var lastWsState: WsConnectionState? = null
     private var rolloverBound = false
+    private var lastRecordedTicketError: String? = null
 
     init {
         ticketSession.onStart()
@@ -117,10 +118,28 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
-                    tickets.lastError?.takeIf { it.isNotBlank() && !it.startsWith("PAPER ", true) }?.let { err ->
-                        container.lastOrderError.record(err)
+                    val incoming = com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
+                        lastRecordedTicketError,
+                        tickets.lastError
+                    )
+                    if (incoming != null) {
+                        lastRecordedTicketError = incoming
+                        container.lastOrderError.record(incoming)
+                    } else if (tickets.lastError.isNullOrBlank()) {
+                        lastRecordedTicketError = null
                     }
-                    _state.update { it.copy(tickets = tickets) }
+                    _state.update { cur ->
+                        val notice = tickets.lastError
+                            ?.takeIf { com.dirk.kalshiodds.signal.trade.TicketSession.isWindowClosedError(it) }
+                        val userMessage = when {
+                            notice != null && cur.userMessage != notice -> notice
+                            notice == null &&
+                                com.dirk.kalshiodds.signal.trade.TicketSession.isWindowClosedError(cur.userMessage) ->
+                                null
+                            else -> cur.userMessage
+                        }
+                        cur.copy(tickets = tickets, userMessage = userMessage)
+                    }
                 }
             }
         }
@@ -592,12 +611,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * and never hits the live order API.
      */
     fun paperBuySide(market: MarketUiModel, side: String) {
-        val outcome = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(paperBook, market, side)
+        val now = container.clock.nowMs()
+        val all = _state.value.snapshot?.allMarkets.orEmpty()
+        val target = MarketLifecycle.resolveActionWindow(market, all, now)
+        if (target == null) {
+            _state.update { it.copy(userMessage = com.dirk.kalshiodds.ui.HomeMarkets.NEXT_WINDOW_LOADING) }
+            return
+        }
+        val outcome = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(paperBook, target, side)
         if (outcome.ok) {
             runCatching {
                 container.resultsWriter.enqueueTicket(
                     com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
-                        ticker = market.ticker,
+                        ticker = target.ticker,
                         side = if (side.equals("NO", true) || side.equals("DOWN", true)) "NO" else "YES",
                         stakeUsd = outcome.stakeUsd,
                         approved = true,
@@ -699,9 +725,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Open an approve-gated Buy sheet for [side] on [market]. Never places.
-     * Closed 15m windows remap to the current live contract. Missing asks
-     * become a disabled ticket card — never a page-level "No ask to size" error.
+     * Open an approve-gated Buy sheet for [side] on the current live window.
+     * A stale card after rollover resolves via [MarketLifecycle.resolveActionWindow];
+     * a missing open window shows [HomeMarkets.NEXT_WINDOW_LOADING] instead of
+     * Window/Market closed. Missing asks become a disabled ticket card — never
+     * a page-level "No ask to size" error. Never remaps a previous ticket.
      */
     fun buyMarket(market: MarketUiModel, side: String) {
         val s = _state.value
@@ -709,9 +737,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ticketSession.failSoft("Turn on trade tickets in Settings to buy")
             return
         }
-        val now = System.currentTimeMillis()
+        val now = container.clock.nowMs()
         val all = s.snapshot?.allMarkets.orEmpty()
-        val target = MarketLifecycle.resolveLive(market, all, now)
+        val target = MarketLifecycle.resolveActionWindow(market, all, now)
+        if (target == null) {
+            ticketSession.failSoft(com.dirk.kalshiodds.ui.HomeMarkets.NEXT_WINDOW_LOADING)
+            _state.update { it.copy(userMessage = com.dirk.kalshiodds.ui.HomeMarkets.NEXT_WINDOW_LOADING) }
+            return
+        }
         val ticketCtx = ticketContext(s, now)
         val ticket = TicketBuilder.proposeManual(target, side, ticketCtx)
         if (ticket == null) {
