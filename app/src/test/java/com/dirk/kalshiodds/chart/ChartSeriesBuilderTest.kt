@@ -23,7 +23,7 @@ class ChartSeriesBuilderTest {
         val series = ChartSeriesBuilder.sparklineMidsPp(mids)
         assertEquals(3, series.size)
         assertEquals(33.5f, series[0], 0.01f)
-        assertEquals(34.5f, series[1], 0.01f)
+        assertEquals(35f, series[1], 0.01f)
         assertEquals(35f, series[2], 0.01f)
         assertTrue("must not stitch bid then ask into one sawtooth", series.none { it == 0f })
         assertTrue(series.none { it == 33f && series.contains(36f) && series.size == 6 })

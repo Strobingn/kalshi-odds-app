@@ -27,8 +27,8 @@ object ChartSeriesBuilder {
      * usable side. Zeros / placeholders are skipped.
      */
     fun yesMidCents(bidCents: Float?, askCents: Float?): Float? {
-        val bid = QuoteSanity.usableCents(bidCents)
-        val ask = QuoteSanity.usableCents(askCents)
+        val bid = sparklineMidsPp(listOf(bidCents)).singleOrNull()
+        val ask = sparklineMidsPp(listOf(askCents)).singleOrNull()
         return when {
             bid != null && ask != null -> ((bid + ask) / 2f)
             bid != null -> bid
@@ -37,12 +37,22 @@ object ChartSeriesBuilder {
         }
     }
 
-    /** Drop 0/null bids so BidChart can break the line at gaps. */
+    /**
+     * Drop 0/null bids so BidChart can break the line at gaps.
+     * A real 100¢ near-settlement bid is kept.
+     */
+    fun chartableBidCents(cents: Float?): Float? {
+        if (cents == null || !cents.isFinite()) return null
+        if (cents <= 0f) return null
+        if (cents > 100.01f) return null
+        return cents
+    }
+
     fun cleanBidPoints(points: List<BidPoint>): List<BidPoint> =
         points.map { p ->
             p.copy(
-                upBidCents = QuoteSanity.usableCents(p.upBidCents),
-                downBidCents = QuoteSanity.usableCents(p.downBidCents)
+                upBidCents = chartableBidCents(p.upBidCents),
+                downBidCents = chartableBidCents(p.downBidCents)
             )
         }.filter { it.hasQuote() || it.hasSpot() }
 }
