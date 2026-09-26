@@ -304,7 +304,7 @@ class HomeScreenScreenshotTest {
                     onCancelApprove = {},
                     onCancelOrder = {},
                     nowMs = HomeFixtures.NOW_MS,
-                    versionLabel = "DipHunter v0.3.14 (29)"
+                    versionLabel = "DipHunter v0.3.15 (30)"
                 )
             }
         }

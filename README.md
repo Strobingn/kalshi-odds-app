@@ -17,7 +17,12 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.14**
+Package: `com.dirk.kalshiodds` · version **0.3.15**
+
+## 0.3.15
+
+- **Sticky "Window closed" after rollover.** 0.3.14 kept MANUAL / SELL tickets from a closed 15-minute window forever (`preservedManuals` / `voidTickers`) and set `lastError = Window closed` on every refresh. Once a Buy/Sell card was open across a rollover, the error stuck on the fresh window and the dead card never left. A closed window now shows a one-time notice (`That window closed. Nothing was sent.`), voids the ticket so Approve cannot place, then drops it after ~5s / the next refresh and clears `lastError`. `lastOrderError` is recorded once per voided ticket. An in-flight Submitting order is left alone.
+- **Buy / Paper UP / Paper DOWN after rollover.** Taps resolve the current live contract via `MarketLifecycle.resolveActionWindow` (`currentOpenWindow` / `resolveLive`). If there is no open window, the UI shows `Next window loading` — never `Window closed` or `Market closed` on a live window.
 
 ## 0.3.14
 

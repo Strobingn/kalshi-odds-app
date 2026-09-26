@@ -157,7 +157,11 @@ class WiringAuditTest {
         Control("Home mode chip", com.dirk.kalshiodds.signal.trade.TradeModeLabel::class.java, "forApprove"),
         Control("Home disagreement label", DisagreementLabel::class.java, "of"),
         Control("15m market rollover", com.dirk.kalshiodds.signal.market.MarketRollover::class.java, "refreshFromRest"),
-        Control("Active market resolver", com.dirk.kalshiodds.domain.ActiveMarketResolver::class.java, "forSeries")
+        Control("Active market resolver", com.dirk.kalshiodds.domain.ActiveMarketResolver::class.java, "forSeries"),
+        Control("Live tap resolves current window", com.dirk.kalshiodds.domain.MarketLifecycle::class.java, "resolveActionWindow"),
+        Control("Last order error once", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "accept"),
+        Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
+        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals")
     )
 
     @Test

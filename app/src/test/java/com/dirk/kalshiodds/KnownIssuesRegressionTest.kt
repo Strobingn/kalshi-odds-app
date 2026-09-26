@@ -59,8 +59,9 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * One named test per known 0.3.10–0.3.14 issue (#14 = full scorecard empty-state
- * contradiction), on the real production classes. No mocks of the logic under test.
+ * One named test per known 0.3.10–0.3.15 issue (#14 = full scorecard empty-state
+ * contradiction; #15 = sticky Window closed after rollover), on the real
+ * production classes. No mocks of the logic under test.
  */
 class KnownIssuesRegressionTest {
 
@@ -673,12 +674,84 @@ class KnownIssuesRegressionTest {
             session.approve(firstTicket.id)
             session.approve(openTicket.id)
             assertEquals(0, placed.get())
-            assertEquals(TicketSession.WINDOW_CLOSED, session.snapshot().lastError)
+            assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, session.snapshot().lastError)
         }
 
         assertTrue("lifecycle close should re-resolve", rollover.onLifecycle(windows[2][0].ticker, "deactivated"))
         assertTrue(listCalls.get() >= 4)
         assertEquals(3, scored.size)
+    }
+
+    @Test
+    fun windowClosedNoticeIsOneShotThenTicketDrops() = runBlocking {
+        val clock = java.util.concurrent.atomic.AtomicLong(1_000L)
+        val placed = AtomicInteger(0)
+        val session = TicketSession(
+            placeOrder = { ticket, clientOrderId ->
+                placed.incrementAndGet()
+                Result.success(
+                    PlacedOrder(
+                        ticket = ticket,
+                        clientOrderId = clientOrderId,
+                        orderId = "should-not-place",
+                        fillCount = 0.0,
+                        remainingCount = ticket.contracts.toDouble(),
+                        averageFillPrice = ticket.limitPrice,
+                        placedAtMs = 1L
+                    )
+                )
+            },
+            nowMs = { clock.get() }
+        )
+        val recorded = mutableListOf<String>()
+        var previous: String? = null
+        fun recordOnce() {
+            com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce
+                .accept(previous, session.snapshot().lastError)
+                ?.let {
+                    recorded += it
+                    previous = it
+                }
+            if (session.snapshot().lastError.isNullOrBlank()) previous = null
+        }
+
+        val open = TicketBuilder.proposeManual(
+            sample("KXBTC15M-26SEP251200-45", 0.25, 0.75, 80.0, "YES").copy(
+                closeTimeEpochMs = 10_000L,
+                status = "active"
+            ),
+            "YES",
+            TicketBuilder.Context(
+                settings = SignalSettings(ticketsEnabled = true),
+                alertsPaused = false,
+                nowMs = clock.get()
+            )
+        )!!
+        session.addManual(open)
+        session.voidTickers(setOf(open.ticker))
+        recordOnce()
+        assertEquals(TicketSession.WINDOW_CLOSED, session.snapshot().proposals.single { it.id == open.id }.blockedReason)
+        assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, session.snapshot().lastError)
+        session.approve(open.id)
+        assertEquals(0, placed.get())
+
+        session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-26SEP251215-45"))
+        recordOnce()
+        assertTrue(session.snapshot().proposals.any { it.id == open.id })
+        assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, session.snapshot().lastError)
+
+        clock.set(1_000L + TicketSession.VOID_HOLD_MS)
+        session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-26SEP251215-45"))
+        recordOnce()
+        assertTrue(session.snapshot().proposals.none { it.id == open.id })
+        assertNull(session.snapshot().lastError)
+
+        session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-26SEP251215-45"))
+        recordOnce()
+        assertNull(session.snapshot().lastError)
+        assertEquals(listOf(TicketSession.WINDOW_CLOSED_NOTICE), recorded)
+        assertEquals(1, session.windowClosedNoticeCount)
+        assertEquals(0, placed.get())
     }
 
     @Test
