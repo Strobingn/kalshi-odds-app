@@ -315,6 +315,79 @@ class MarketQuoteViewTest {
     }
 
     @Test
+    fun realisticThirtyThreeThirtyFourBookShowsTrueBids() {
+        val raw = """
+            {
+              "ticker": "KXBTC15M-26SEP251600-45",
+              "yes_bid_dollars": "0.3300",
+              "yes_ask_dollars": "0.3400",
+              "no_bid_dollars": "0.6600",
+              "no_ask_dollars": "0.6700",
+              "last_price_dollars": "0.3400"
+            }
+        """.trimIndent()
+        val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; isLenient = true }
+        val dto = json.decodeFromString<com.dirk.kalshiodds.data.dto.MarketDto>(raw)
+        val ui = dto.toUiModel(SeriesKind.BTC)
+        assertEquals(0.33, ui.yesBid!!, 1e-12)
+        assertEquals(0.34, ui.yesAsk!!, 1e-12)
+        assertEquals(0.66, ui.noBid!!, 1e-12)
+        assertEquals(0.67, ui.noAsk!!, 1e-12)
+        assertTrue(ui.yesBid!! + ui.noBid!! <= 1.0 + 1e-12)
+        assertTrue(ui.yesAsk!! >= ui.yesBid!! - 1e-12)
+        assertTrue(ui.noAsk!! >= ui.noBid!! - 1e-12)
+        val q = MarketQuoteView.of(ui)
+        assertEquals("33¢", q.yesBidLabel)
+        assertEquals("34¢", q.yesAskLabel)
+        assertEquals("66¢", q.noBidLabel)
+        assertEquals("67¢", q.noAskLabel)
+        assertEquals(0.33, q.yesBid!!, 1e-12)
+        assertEquals(0.66, q.noBid!!, 1e-12)
+    }
+
+    @Test
+    fun lockedBothSidesShowsEmDashBids() {
+        val q = MarketQuoteView.of(yesBid = 0.34, yesAsk = 0.34, noBid = 0.66, noAsk = 0.66)
+        assertEquals("34¢", q.yesAskLabel)
+        assertEquals("66¢", q.noAskLabel)
+        assertEquals("—", q.yesBidLabel)
+        assertEquals("—", q.noBidLabel)
+        assertNull(q.yesBid)
+        assertNull(q.noBid)
+    }
+
+    @Test
+    fun tradeTickDoesNotCopyAskOntoRestBids() {
+        val rest = MarketDto(
+            ticker = "KXBTC15M-26SEP251600-45",
+            yesBidDollars = "0.3300",
+            yesAskDollars = "0.3400",
+            noBidDollars = "0.6600",
+            noAskDollars = "0.6700"
+        ).toUiModel(SeriesKind.BTC)
+        val trade = com.dirk.kalshiodds.signal.model.MarketTick(
+            ticker = "KXBTC15M-26SEP251600-45",
+            series = "KXBTC15M",
+            yesBid = 0.34,
+            yesAsk = 0.34,
+            lastPrice = 0.34,
+            volume = null,
+            openInterest = null,
+            closeTimeEpochMs = null,
+            source = com.dirk.kalshiodds.signal.model.TickSource.WS_TRADE,
+            receiveElapsedNanos = 1L,
+            noBid = 0.66,
+            noAsk = 0.66
+        )
+        val live = rest.withLiveQuote(trade)
+        val q = MarketQuoteView.of(live)
+        assertEquals("33¢", q.yesBidLabel)
+        assertEquals("34¢", q.yesAskLabel)
+        assertEquals("66¢", q.noBidLabel)
+        assertEquals("67¢", q.noAskLabel)
+    }
+
+    @Test
     fun screenshotKxeth15mMixedYesAndNoIsRejectedAndRepaired() {
         // User phone 0.3.9: LIVE BOOK UP 55/63 + DOWN 37/50. 55+50=105 is impossible.
         // REST NO ask 50¢ left over; WS ticker only sent yes_bid/yes_ask 55/63.

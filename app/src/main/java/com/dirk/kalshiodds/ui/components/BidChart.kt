@@ -139,7 +139,12 @@ fun BidChart(
                     } else Modifier
                 )
         ) {
-            val ys = downsampled.flatMap { listOfNotNull(it.upBidCents, it.downBidCents) }
+            val ys = downsampled.flatMap {
+                listOfNotNull(
+                    com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.upBidCents),
+                    com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(it.downBidCents)
+                )
+            }
             val minY = (ys.minOrNull() ?: 0f) - 1f
             val maxY = (ys.maxOrNull() ?: 100f) + 1f
             val spanY = (maxY - minY).coerceAtLeast(2f)
@@ -157,7 +162,7 @@ fun BidChart(
                 val path = Path()
                 var started = false
                 downsampled.forEach { p ->
-                    val v = sel(p) ?: return@forEach
+                    val v = com.dirk.kalshiodds.signal.engine.QuoteSanity.usableCents(sel(p)) ?: return@forEach
                     val x = xOf(p.tMs)
                     val y = yOf(v)
                     if (!started) {

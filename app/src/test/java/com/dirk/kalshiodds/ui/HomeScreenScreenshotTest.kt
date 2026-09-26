@@ -138,6 +138,18 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun darkPhoneScreenshotAfterFix() = snap(
+        "home_after_fix",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.screenshotPhoneBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        )
+    )
+
+    @Test
     fun lightBtcOnly() = snap(
         "home_light_btc_only",
         dark = false,

@@ -117,7 +117,8 @@ enum class SeriesKind(val ticker: String, val label: String) {
  * Overlay a live ticker / REST tick onto the snapshot quote so the hero,
  * buttons, and [MarketQuoteView] multiple use the same ask the ticket path
  * already reads from [com.dirk.kalshiodds.signal.engine.TickBook.lastTick].
- * Book-implied ticks are not stored as lastTick (see TickBook.applySnapshot).
+ * Order-book ticks (YES ask = 1 − best NO bid) update lastTick; trades
+ * and last-as-book prints do not replace a real spread.
  */
 fun MarketUiModel.withLiveQuote(tick: com.dirk.kalshiodds.signal.model.MarketTick?): MarketUiModel {
     val sameTicker = tick != null && tick.ticker.equals(ticker, ignoreCase = true)

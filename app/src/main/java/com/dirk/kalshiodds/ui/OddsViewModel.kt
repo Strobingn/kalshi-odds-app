@@ -1006,12 +1006,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val tick = runCatching { hub.scoring.book.lastTick(raw.ticker) }.getOrNull()
             val m = raw.withLiveQuote(tick)
             val pts = runCatching { hub.scoring.book.midHistoryPp(m.ticker) }.getOrElse { emptyList() }
-            val last = m.yesProbabilityPercent?.toFloat()
-            val merged = if (last != null && (pts.isEmpty() || kotlin.math.abs(pts.last() - last) > 0.05f)) {
-                (pts + last).takeLast(com.dirk.kalshiodds.signal.config.SignalConstants.SPARKLINE_MAX_POINTS)
-            } else {
-                pts
-            }
+            val last = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(
+                listOf(m.yesProbabilityPercent?.toFloat())
+            ).singleOrNull()
+            val merged = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(
+                if (last != null && (pts.isEmpty() || kotlin.math.abs(pts.last() - last) > 0.05f)) {
+                    (pts + last).takeLast(com.dirk.kalshiodds.signal.config.SignalConstants.SPARKLINE_MAX_POINTS)
+                } else {
+                    pts
+                }
+            )
             val bids = runCatching { chartWindows.seriesForCard(m) }.getOrElse {
                 val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
                 val stored = runCatching {

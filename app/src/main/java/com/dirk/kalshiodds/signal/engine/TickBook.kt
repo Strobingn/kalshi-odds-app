@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.engine
 
 import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.TickSource
@@ -67,7 +68,8 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun push(tick: MarketTick, nowMs: Long = System.currentTimeMillis()): Point? {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return last(tick.ticker)
-        lastTickByTicker[tick.ticker] = com.dirk.kalshiodds.domain.ConsistentQuote.completeTick(tick)
+        val completed = com.dirk.kalshiodds.domain.ConsistentQuote.completeTick(tick)
+        lastTickByTicker[tick.ticker] = mergeLastTick(lastTickByTicker[tick.ticker], completed)
         tick.closeTimeEpochMs?.let { closeByTicker[tick.ticker] = it }
         tick.openInterest?.let { oiByTicker[tick.ticker] = it }
         tick.volume?.let { volumeByTicker[tick.ticker] = it }
@@ -98,10 +100,12 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun series(ticker: String): List<Point> = byTicker[ticker]?.toList().orEmpty()
 
-    /** YES mid in percent, copied under the lock for sparklines. */
+    /** YES mid in percent, copied under the lock for sparklines. Gaps/zeros skipped. */
     @Synchronized
     fun midHistoryPp(ticker: String): List<Float> =
-        byTicker[ticker]?.map { (it.mid01 * 100.0).toFloat() }.orEmpty()
+        com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(
+            byTicker[ticker]?.map { (it.mid01 * 100.0).toFloat() }.orEmpty()
+        )
 
     @Synchronized
     fun bidHistory(ticker: String): List<com.dirk.kalshiodds.chart.BidPoint> {
@@ -131,7 +135,7 @@ class TickBook(private val maxPoints: Int = 80) {
                 downBidCents = b.noBid?.times(100.0)?.toFloat(),
                 spotUsd = spot
             )
-        }
+        }.let { com.dirk.kalshiodds.chart.ChartSeriesBuilder.cleanBidPoints(it) }
     }
 
     /**
@@ -269,6 +273,83 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun lastTick(ticker: String): MarketTick? = lastTickByTicker[ticker]
 
+    /**
+     * Volume / OI / close / strike only. Never copies mid onto bid and ask —
+     * that produced the 0.3.14 tiles where bid equalled ask on both sides.
+     */
+    @Synchronized
+    fun updateMeta(
+        ticker: String,
+        closeTimeEpochMs: Long?,
+        volume: Double?,
+        openInterest: Double?,
+        floorStrike: Double? = null
+    ) {
+        if (!CryptoMarkets.isCryptoTicker(ticker)) return
+        rememberStrike(ticker, floorStrike)
+        closeTimeEpochMs?.let { closeByTicker[ticker] = it }
+        volume?.let { volumeByTicker[ticker] = it }
+        openInterest?.let { oiByTicker[ticker] = it }
+        lastTickByTicker[ticker]?.let { t ->
+            lastTickByTicker[ticker] = t.copy(
+                volume = volume ?: t.volume,
+                openInterest = openInterest ?: t.openInterest,
+                closeTimeEpochMs = closeTimeEpochMs ?: t.closeTimeEpochMs,
+                floorStrike = floorStrike ?: t.floorStrike
+            )
+        }
+    }
+
+    /**
+     * Trades and last-as-book prints must not replace a real spread.
+     * Order-book ticks (YES bid = best YES bid, YES ask = 1 − best NO bid)
+     * win when present.
+     */
+    internal fun mergeLastTick(existing: MarketTick?, incoming: MarketTick): MarketTick {
+        if (existing == null) return incoming
+        val incomingUsable = QuoteSanity.usablePair(incoming.yesBid, incoming.yesAsk)
+        val incomingHasQuote = incomingUsable.first != null || incomingUsable.second != null ||
+            KalshiPrice.usable(incoming.noBid) != null || KalshiPrice.usable(incoming.noAsk) != null
+        if (!incomingHasQuote) {
+            return existing.copy(
+                lastPrice = incoming.lastPrice ?: existing.lastPrice,
+                volume = incoming.volume ?: existing.volume,
+                openInterest = incoming.openInterest ?: existing.openInterest,
+                closeTimeEpochMs = incoming.closeTimeEpochMs ?: existing.closeTimeEpochMs
+            )
+        }
+        if (incoming.source == TickSource.WS_TRADE) {
+            return existing.copy(
+                lastPrice = incoming.lastPrice ?: existing.lastPrice,
+                volume = incoming.volume ?: existing.volume,
+                tradeSize = incoming.tradeSize ?: existing.tradeSize,
+                takerSide = incoming.takerSide ?: existing.takerSide,
+                receiveElapsedNanos = incoming.receiveElapsedNanos,
+                exchangeTsMs = incoming.exchangeTsMs ?: existing.exchangeTsMs
+            )
+        }
+        if (incoming.source == TickSource.WS_ORDERBOOK) {
+            return incoming.copy(
+                lastPrice = incoming.lastPrice ?: existing.lastPrice,
+                volume = incoming.volume ?: existing.volume,
+                openInterest = incoming.openInterest ?: existing.openInterest,
+                closeTimeEpochMs = incoming.closeTimeEpochMs ?: existing.closeTimeEpochMs,
+                floorStrike = incoming.floorStrike ?: existing.floorStrike
+            )
+        }
+        val incomingLocked = com.dirk.kalshiodds.domain.ConsistentQuote.lockedBothSides(incoming)
+        val existingLocked = com.dirk.kalshiodds.domain.ConsistentQuote.lockedBothSides(existing)
+        if (incomingLocked && !existingLocked) {
+            return existing.copy(
+                lastPrice = incoming.lastPrice ?: existing.lastPrice,
+                volume = incoming.volume ?: existing.volume,
+                openInterest = incoming.openInterest ?: existing.openInterest,
+                closeTimeEpochMs = incoming.closeTimeEpochMs ?: existing.closeTimeEpochMs
+            )
+        }
+        return incoming
+    }
+
     @Synchronized
     fun lastMid(series: String): Double? = lastMidBySeries[series]
 
@@ -337,6 +418,9 @@ class TickBook(private val maxPoints: Int = 80) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val book = books.getOrPut(ticker) { LocalOrderBook() }
         book.replaceSnapshot(yesLevels, noLevels, seq)
+        tickFromBook(ticker, 0L)?.let { fromBook ->
+            lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
+        }
         book.mid01()?.let { mid ->
             val series = CryptoMarkets.inferSeries(ticker)
             lastMidBySeries[series] = mid
@@ -362,6 +446,9 @@ class TickBook(private val maxPoints: Int = 80) {
         if (!book.applyDelta(price, delta, side, seq)) {
             book.clear()
             return null
+        }
+        tickFromBook(ticker, 0L)?.let { fromBook ->
+            lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
         }
         book.mid01()?.let { mid ->
             val series = CryptoMarkets.inferSeries(ticker)
@@ -531,6 +618,8 @@ class TickBook(private val maxPoints: Int = 80) {
         val book = books[ticker] ?: return null
         val bid = book.bestYesBid()
         val ask = book.bestYesAsk()
+        val noBid = book.bestNoBid()
+        val noAsk = book.bestNoAsk()
         val mid = book.mid01() ?: return null
         val last = lastTickByTicker[ticker]
         return MarketTick(
@@ -545,8 +634,9 @@ class TickBook(private val maxPoints: Int = 80) {
             source = TickSource.WS_ORDERBOOK,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = nowMs,
-            noBid = ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
-            noAsk = bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+            floorStrike = last?.floorStrike ?: strikeByTicker[ticker],
+            noBid = noBid ?: ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
+            noAsk = noAsk ?: bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
         )
     }
 

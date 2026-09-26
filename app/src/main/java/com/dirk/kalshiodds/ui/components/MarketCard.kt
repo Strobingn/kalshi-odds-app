@@ -207,7 +207,7 @@ fun MarketCard(
             }
 
             OddsSparkline(
-                points = market.oddsHistory,
+                points = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(market.oddsHistory),
                 modifier = Modifier.fillMaxWidth(),
                 color = colors.textSecondary
             )

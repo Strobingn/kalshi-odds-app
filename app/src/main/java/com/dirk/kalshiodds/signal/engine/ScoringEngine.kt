@@ -19,7 +19,6 @@ import com.dirk.kalshiodds.signal.sizing.PositionSizer
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStance
-import com.dirk.kalshiodds.signal.model.TickSource
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.ln
@@ -185,23 +184,7 @@ class ScoringEngine(
         floorStrike: Double? = null
     ) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
-        book.rememberStrike(ticker, floorStrike)
-        val last = book.last(ticker)
-        val mid = last?.mid01 ?: return
-        book.push(
-            MarketTick(
-                ticker = ticker,
-                series = CryptoMarkets.inferSeries(ticker),
-                yesBid = mid,
-                yesAsk = mid,
-                lastPrice = mid,
-                volume = volume,
-                openInterest = openInterest,
-                closeTimeEpochMs = closeTimeEpochMs,
-                source = TickSource.REST,
-                receiveElapsedNanos = 0L
-            )
-        )
+        book.updateMeta(ticker, closeTimeEpochMs, volume, openInterest, floorStrike)
     }
 
     fun applySnapshot(

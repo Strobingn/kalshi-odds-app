@@ -287,6 +287,73 @@ class TickBookMathTest {
         assertEquals(4_200.0, hist.single().spotUsd!!, 1e-6)
     }
 
+    @Test
+    fun lastTickKeepsSpreadWhenTradeAndMetaArrive() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-BOOK"
+        book.push(
+            tick(ticker, 0.33, 0.34).copy(noBid = 0.66, noAsk = 0.67),
+            nowMs = 1_000L
+        )
+        book.push(
+            MarketTick(
+                ticker = ticker,
+                series = "KXBTC15M",
+                yesBid = 0.34,
+                yesAsk = 0.34,
+                lastPrice = 0.34,
+                volume = 2.0,
+                openInterest = 2.0,
+                closeTimeEpochMs = 1_800_000L,
+                source = TickSource.WS_TRADE,
+                receiveElapsedNanos = 2L,
+                noBid = 0.66,
+                noAsk = 0.66
+            ),
+            nowMs = 2_000L
+        )
+        book.updateMeta(ticker, 1_900_000L, 50.0, 10.0, floorStrike = 84_144.0)
+        val last = book.lastTick(ticker)!!
+        assertEquals(0.33, last.yesBid!!, 1e-12)
+        assertEquals(0.34, last.yesAsk!!, 1e-12)
+        assertEquals(0.66, last.noBid!!, 1e-12)
+        assertEquals(0.67, last.noAsk!!, 1e-12)
+        assertEquals(84_144.0, last.floorStrike!!, 1e-6)
+    }
+
+    @Test
+    fun orderbookSnapshotWritesOfficialBidsAndAsks() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-OB"
+        book.applySnapshot(
+            ticker,
+            yesLevels = listOf(0.33 to 12.0, 0.32 to 8.0),
+            noLevels = listOf(0.66 to 15.0, 0.65 to 4.0),
+            seq = 1
+        )
+        assertEquals(0.33, book.orderBook(ticker)!!.bestYesBid()!!, 1e-12)
+        assertEquals(0.34, book.orderBook(ticker)!!.bestYesAsk()!!, 1e-12)
+        assertEquals(0.66, book.orderBook(ticker)!!.bestNoBid()!!, 1e-12)
+        assertEquals(0.67, book.orderBook(ticker)!!.bestNoAsk()!!, 1e-12)
+        val last = book.lastTick(ticker)!!
+        assertEquals(0.33, last.yesBid!!, 1e-12)
+        assertEquals(0.34, last.yesAsk!!, 1e-12)
+        assertEquals(0.66, last.noBid!!, 1e-12)
+        assertEquals(0.67, last.noAsk!!, 1e-12)
+    }
+
+    @Test
+    fun sparklineSkipsZeroMids() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-SPARK"
+        book.push(tick(ticker, 0.33, 0.35), nowMs = 1_000L)
+        book.push(tick(ticker, 0.0, 0.0).copy(lastPrice = 0.0), nowMs = 2_000L)
+        book.push(tick(ticker, 0.34, 0.36), nowMs = 3_000L)
+        val series = book.midHistoryPp(ticker)
+        assertTrue(series.none { it == 0f })
+        assertTrue(series.all { it in 1f..99f })
+    }
+
     private fun tick(ticker: String, bid: Double, ask: Double) = MarketTick(
         ticker = ticker,
         series = MarketTick.inferSeries(ticker),

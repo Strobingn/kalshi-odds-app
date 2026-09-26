@@ -98,6 +98,40 @@ object HomeFixtures {
         spotDelta = -20.0
     )
 
+    /**
+     * Phone screenshot on 0.3.14: BTC 15m, UP 34¢ / DOWN 66¢, AI 39% / 61%.
+     * Realistic book is 33/34 vs 66/67. Model and market both favor DOWN.
+     */
+    fun screenshotPhoneBtc() = market(
+        ticker = "KXBTC15M-26SEP251600-45",
+        seriesLabel = "Bitcoin",
+        yesAsk = 0.34,
+        aiYes = 39.0,
+        predicted = "YES",
+        closeMs = NOW_MS + 707_000L,
+        floorStrike = 84_144.0,
+        spotUsd = 84_140.0,
+        spotDelta = -4.0
+    ).copy(
+        yesBid = 0.33,
+        yesAsk = 0.34,
+        noBid = 0.66,
+        noAsk = 0.67,
+        lastPrice = 0.34,
+        yesProbabilityPercent = 33.5,
+        noProbabilityPercent = 66.5,
+        aiYesPercent = 39.0,
+        aiNoPercent = 61.0,
+        importedModelPp = 39.0,
+        edgePp = 39.0 - 33.5,
+        tapeConflict = true,
+        tapeConflictNote = "AI says UP, market + spot say DOWN",
+        modelLeanSide = "YES",
+        primaryHeroSide = "NO",
+        predictedSide = "YES",
+        oddsHistory = listOf(36f, 35f, 34f, 33f, 34f, 34f)
+    )
+
     fun disagreementBtc() = actionableBtc().copy(
         tapeConflict = true,
         tapeConflictNote = "AI says UP, market + spot say DOWN",
