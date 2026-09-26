@@ -546,22 +546,6 @@ class ScoringEngine(
             predictedSide = dir.side
             delta = fair - midPp
         }
-        val tape = TapeConflict.evaluate(
-            spotReturn1m = spotFeat?.spotReturn1m,
-            spotReturn5m = spotFeat?.spotReturn5m,
-            modelSide = predictedSide,
-            yesAsk = tick.yesAsk,
-            noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
-            spotUsd = spotFeat?.lastPrice,
-            strikeUsd = strikeUsd,
-            fairYes = fair / 100.0,
-            previousPrimary = lastPrimarySide[tick.ticker],
-            priorStreak = tapeStreak[tick.ticker] ?: 0,
-            yesBid = tick.yesBid,
-            noBid = tick.noBid
-        )
-        tapeStreak[tick.ticker] = tape.disagreementStreak
-        lastPrimarySide[tick.ticker] = tape.primarySide
         if (extOut?.fairBlendYes != null || dir.applied) {
             ev = NetExpectedValue.compute(
                 fairYes = fair / 100.0,
@@ -657,6 +641,23 @@ class ScoringEngine(
             delta = fair - midPp
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
+        val tape = TapeConflict.evaluate(
+            spotReturn1m = spotFeat?.spotReturn1m,
+            spotReturn5m = spotFeat?.spotReturn5m,
+            modelSide = predictedSide,
+            yesAsk = tick.yesAsk,
+            noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
+            spotUsd = spotFeat?.lastPrice,
+            strikeUsd = strikeUsd,
+            fairYes = fair / 100.0,
+            previousPrimary = lastPrimarySide[tick.ticker],
+            priorStreak = tapeStreak[tick.ticker] ?: 0,
+            yesBid = tick.yesBid,
+            noBid = tick.noBid,
+            modelYesPercent = importedModelPp ?: aiPp
+        )
+        tapeStreak[tick.ticker] = tape.disagreementStreak
+        lastPrimarySide[tick.ticker] = tape.primarySide
         val reason = buildReason(
             aiPp = aiPp,
             flow = flow,

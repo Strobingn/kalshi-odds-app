@@ -1,7 +1,9 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.TimeLeft
+import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.trade.BetCall
 import java.util.Locale
 import kotlin.math.abs
@@ -66,7 +68,9 @@ object HomeCardDetails {
         RestoredField("Spot move vs target", "v0.3.12-debug", "spotMove"),
         RestoredField("Model vs market % · edge pts", "v0.3.12-debug", "modelVsMarket"),
         RestoredField("Payout multiples", "v0.3.12-debug", "payout"),
-        RestoredField("Feature drivers (blend deviations)", "v0.3.0-debug", "drivers")
+        RestoredField("Feature drivers (blend deviations)", "v0.3.0-debug", "drivers"),
+        RestoredField("Value vs likely side", "v0.3.15", "value"),
+        RestoredField("Likely-side conflict", "v0.3.15", "conflict")
     )
 
     data class Snapshot(
@@ -103,7 +107,9 @@ object HomeCardDetails {
         val openInterest: String,
         val volume24h: String,
         val liquidity: String,
-        val modelLean: String?
+        val modelLean: String?,
+        val value: String?,
+        val conflict: String?
     ) {
         fun lines(): Map<String, String?> = mapOf(
             "section" to section,
@@ -134,7 +140,9 @@ object HomeCardDetails {
             "openInterest" to openInterest,
             "volume24h" to volume24h,
             "liquidity" to liquidity,
-            "modelLean" to modelLean
+            "modelLean" to modelLean,
+            "value" to value,
+            "conflict" to conflict
         )
     }
 
@@ -159,7 +167,7 @@ object HomeCardDetails {
         sizing = sizingLine(market),
         microstructure = microstructureLine(market),
         notes = notesLine(market),
-        stance = market.stance?.takeIf { it.isNotBlank() },
+        stance = stanceLine(market),
         fairValue = fairValueLine(market),
         payout = payoutLine(market),
         targetVsSpot = targetVsSpotLine(market),
@@ -170,7 +178,9 @@ object HomeCardDetails {
         openInterest = formatCompact(market.openInterest),
         volume24h = formatCompact(market.volume24h),
         liquidity = market.liquidityDollars?.let { formatCompact(it) } ?: "—",
-        modelLean = modelLeanLine(market)
+        modelLean = modelLeanLine(market),
+        value = valueLine(market),
+        conflict = conflictLine(market)
     )
 
     fun aiYesLabel(market: MarketUiModel): String =
@@ -183,7 +193,7 @@ object HomeCardDetails {
         pp?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.1f%%", it) } ?: "—"
 
     fun reasonsLine(market: MarketUiModel): String? =
-        market.aiNote?.trim()?.takeIf { it.isNotEmpty() }
+        sanitizePickLanguage(market.aiNote, market) ?: market.aiNote?.trim()?.takeIf { it.isNotEmpty() }
 
     fun confidenceLine(market: MarketUiModel): String? =
         market.aiConfidence?.takeIf { it.isFinite() }?.let {
@@ -205,10 +215,118 @@ object HomeCardDetails {
         return "Signal strength $pct% ($band)"
     }
 
-    fun edgePpLine(market: MarketUiModel): String? =
-        market.edgePp?.takeIf { it.isFinite() }?.let {
-            String.format(Locale.US, "%+.1f pp", it)
+    fun modelYesPercent(market: MarketUiModel): Double? =
+        SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+
+    /** Side with more than 50% model probability. 50% is not a pick. */
+    fun likelySide(market: MarketUiModel): String? =
+        DisagreementLabel.modelFavoredSide(modelYesPercent(market))
+
+    fun likelyPercent(market: MarketUiModel): Int? {
+        val yes = modelYesPercent(market) ?: return null
+        val side = likelySide(market) ?: return null
+        return if (side == "UP") yes.roundToInt() else (100.0 - yes).roundToInt()
+    }
+
+    fun likelySideLabel(market: MarketUiModel): String? {
+        val side = likelySide(market) ?: return null
+        val pct = likelyPercent(market) ?: return side
+        return "$side $pct%"
+    }
+
+    /**
+     * Underpriced side: model probability vs that side's live ask.
+     * Separate from [likelySide] — a 39% UP print can still be cheap at 34¢.
+     */
+    fun valueSide(market: MarketUiModel): String? {
+        val modelYes = modelYesPercent(market) ?: return null
+        val yesAskCents = KalshiPrice.usable(market.yesAsk)?.times(100.0)
+        val noAskCents = KalshiPrice.usable(market.noAsk)?.times(100.0)
+        val upGap = yesAskCents?.let { modelYes - it }
+        val downGap = noAskCents?.let { (100.0 - modelYes) - it }
+        return when {
+            upGap != null && downGap != null -> when {
+                upGap > downGap && upGap > 1e-9 -> "UP"
+                downGap > upGap && downGap > 1e-9 -> "DOWN"
+                else -> null
+            }
+            upGap != null && upGap > 1e-9 -> "UP"
+            downGap != null && downGap > 1e-9 -> "DOWN"
+            else -> null
         }
+    }
+
+    fun valueAskCents(market: MarketUiModel): Double? = when (valueSide(market)) {
+        "UP" -> KalshiPrice.usable(market.yesAsk)?.times(100.0)
+        "DOWN" -> KalshiPrice.usable(market.noAsk)?.times(100.0)
+        else -> null
+    }
+
+    fun valueModelPercent(market: MarketUiModel): Int? {
+        val yes = modelYesPercent(market) ?: return null
+        return when (valueSide(market)) {
+            "UP" -> yes.roundToInt()
+            "DOWN" -> (100.0 - yes).roundToInt()
+            else -> null
+        }
+    }
+
+    /**
+     * Explicit value-vs-likely sentence. Example: phone case
+     * `Value: UP is underpriced (model 39% vs ask 34¢) · More likely: DOWN 61%`.
+     */
+    fun valueLine(market: MarketUiModel): String? {
+        val value = valueSide(market) ?: return null
+        val modelPct = valueModelPercent(market) ?: return null
+        val ask = valueAskCents(market) ?: return null
+        val likely = likelySideLabel(market) ?: return null
+        return String.format(
+            Locale.US,
+            "Value: %s is underpriced (model %d%% vs ask %.0f¢) · More likely: %s",
+            value,
+            modelPct,
+            ask,
+            likely
+        )
+    }
+
+    fun likelyLine(market: MarketUiModel): String? =
+        likelySideLabel(market)?.let { "Likely side: $it" }
+
+    fun valueSideLine(market: MarketUiModel): String? {
+        val value = valueSide(market) ?: return null
+        return "Value side: $value underpriced"
+    }
+
+    /** Never "Slight UP / YES" as an AI pick — those words are value vs likely. */
+    fun stanceLine(market: MarketUiModel): String? {
+        val value = valueSide(market)
+        val likely = likelySideLabel(market)
+        if (value == null && likely == null) return null
+        val valuePart = value?.let { "Value side: $it" }
+        val likelyPart = likely?.let { "Likely side: $it" }
+        return listOfNotNull(valuePart, likelyPart).joinToString(" · ")
+    }
+
+    /**
+     * Yellow-box copy only when the model's *likely* side disagrees with
+     * market + spot. Stored [MarketUiModel.tapeConflictNote] is ignored
+     * when it names the value side as what the AI "says".
+     */
+    fun conflictLine(market: MarketUiModel): String? {
+        val copy = DisagreementLabel.of(market) ?: return null
+        return "${copy.title}. ${copy.detail}"
+    }
+
+    fun edgePpLine(market: MarketUiModel): String? {
+        val edge = market.edgePp?.takeIf { it.isFinite() } ?: return null
+        val value = valueSide(market)
+        return if (value != null) {
+            String.format(Locale.US, "Value edge %+.1f pp %s", edge, value)
+        } else {
+            String.format(Locale.US, "Value edge %+.1f pp", edge)
+        }
+    }
 
     fun netEvLine(market: MarketUiModel): String? {
         val net = market.netEdgePp?.takeIf { it.isFinite() } ?: return null
@@ -247,9 +365,9 @@ object HomeCardDetails {
 
     fun notesLine(market: MarketUiModel): String? {
         val parts = listOfNotNull(
-            market.ensembleNote?.trim()?.takeIf { it.isNotEmpty() },
-            market.extendedNote?.trim()?.takeIf { it.isNotEmpty() },
-            market.rlNote?.trim()?.takeIf { it.isNotEmpty() }
+            sanitizePickLanguage(market.ensembleNote, market),
+            sanitizePickLanguage(market.extendedNote, market),
+            sanitizePickLanguage(market.rlNote, market)
         )
         return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
     }
@@ -283,9 +401,37 @@ object HomeCardDetails {
         } ?: "—"
 
     fun modelLeanLine(market: MarketUiModel): String? {
-        val lean = market.modelLeanSide?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-        val side = if (lean.equals("NO", true)) "DOWN / NO" else "UP / YES"
-        return "Model lean $side · primary follows live tape"
+        if (conflictLine(market) == null) return null
+        val likely = likelySideLabel(market) ?: return null
+        return "Likely side: $likely · primary follows live tape"
+    }
+
+    /**
+     * Rewrite stored stance / tape strings that treat the value side as
+     * what the AI says, leans, or picks.
+     */
+    fun sanitizePickLanguage(raw: String?, market: MarketUiModel): String? {
+        val t = raw?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+        if (!claimsAiPick(t)) return t
+        return stanceLine(market)
+    }
+
+    fun claimsAiPick(text: String): Boolean {
+        val u = text.lowercase(Locale.US)
+        if (u.startsWith("value:") || u.startsWith("value side") || u.startsWith("likely side") ||
+            u.startsWith("value edge") || u.contains("underpriced")
+        ) {
+            return false
+        }
+        return u.contains("ai says") ||
+            u.contains("model lean") ||
+            u.contains("leans ") ||
+            u.contains("lean up") ||
+            u.contains("lean down") ||
+            u.contains("slight up") ||
+            u.contains("slight down") ||
+            u.contains("picks up") ||
+            u.contains("picks down")
     }
 
     /**

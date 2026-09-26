@@ -129,7 +129,8 @@ fun MarketCard(
     val cardBg = scheme.surface
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
-    val call = decision ?: BetCall.decide(market, settings)
+    val clock = nowMs ?: System.currentTimeMillis()
+    val call = decision ?: BetCall.decide(market, settings, clock)
     val headlineColor = SideColor.of(call.headline, colors)
     val alertBorder = if (call.isActionable) headlineColor else scheme.outline
     val quotes = MarketQuoteView.of(market)
@@ -390,8 +391,7 @@ private fun DetailsBlock(
     onOpenChart: (() -> Unit)?
 ) {
     val colors = DipTheme.colors
-    val clock = nowMs ?: System.currentTimeMillis()
-    val details = HomeCardDetails.of(market, call, clock)
+    val details = HomeCardDetails.of(market, call, nowMs ?: System.currentTimeMillis())
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         val chips = listOfNotNull(
             market.regimeTag,
@@ -441,9 +441,9 @@ private fun DetailsBlock(
         } else if (!market.passedFilter && market.skipReason != null) {
             Text("Filtered · ${market.skipReason}", style = MaterialTheme.typography.labelMedium, color = colors.accentOrange)
         }
-        if (market.tapeConflict && market.tapeConflictNote != null) {
+        details.conflict?.let { conflict ->
             Text(
-                text = market.tapeConflictNote.orEmpty(),
+                text = conflict,
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
                 fontWeight = FontWeight.Bold,
@@ -459,6 +459,14 @@ private fun DetailsBlock(
                     color = colors.accentOrange
                 )
             }
+        }
+        details.value?.let {
+            Text(
+                text = it,
+                style = MaterialTheme.typography.bodyMedium,
+                color = valueColor,
+                fontWeight = FontWeight.SemiBold
+            )
         }
 
         Text(

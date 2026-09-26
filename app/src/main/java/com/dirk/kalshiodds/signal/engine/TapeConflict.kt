@@ -123,10 +123,16 @@ object TapeConflict {
         previousPrimary: String? = null,
         priorStreak: Int = 0,
         yesBid: Double? = null,
-        noBid: Double? = null
+        noBid: Double? = null,
+        modelYesPercent: Double? = null
     ): Result {
-        val side = if (modelSide.equals("NO", ignoreCase = true)) DirectionSanity.SIDE_NO
+        val stored = if (modelSide.equals("NO", ignoreCase = true)) DirectionSanity.SIDE_NO
         else DirectionSanity.SIDE_YES
+        val side = when {
+            modelYesPercent != null && modelYesPercent > 50.0 -> DirectionSanity.SIDE_YES
+            modelYesPercent != null && modelYesPercent < 50.0 -> DirectionSanity.SIDE_NO
+            else -> stored
+        }
         val t = trend(spotReturn1m, spotReturn5m)
         val tapeRet = (spotReturn5m ?: spotReturn1m)?.takeIf { it.isFinite() }
         val primary = primaryFromMarket(

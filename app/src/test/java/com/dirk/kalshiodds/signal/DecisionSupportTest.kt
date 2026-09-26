@@ -383,17 +383,19 @@ class ChecklistTest {
         val text = PreTradeChecklist.copyText(market)
         assertTrue(text.contains("advisory", ignoreCase = true))
         assertTrue(text.contains("12 contracts max"))
-        assertTrue(text.contains("YES"))
+        assertTrue(text.contains("Likely side"))
+        assertTrue(text.contains("Value side"))
         assertTrue(text.contains("Net EV"))
         assertTrue(text.contains("cleared"))
         val items = PreTradeChecklist.items(market)
-        assertEquals(14, items.size)
-        assertEquals("Side", items[0].label)
-        assertEquals("YES", items[0].value)
-        assertEquals("Uncertainty", items[4].label)
-        assertEquals("Survival P(YES)", items[10].label)
-        assertEquals("RL stake", items[13].label)
-        assertEquals("—", items[13].value)
+        assertEquals(15, items.size)
+        assertEquals("Likely side", items[0].label)
+        assertEquals("—", items[0].value)
+        assertEquals("Value side", items[1].label)
+        assertEquals("Uncertainty", items[5].label)
+        assertEquals("Survival P(YES)", items[11].label)
+        assertEquals("RL stake", items[14].label)
+        assertEquals("—", items[14].value)
     }
 
     @Test
@@ -420,7 +422,8 @@ class ChecklistTest {
             seriesLabel = "Bitcoin"
         )
         val byLabel = PreTradeChecklist.items(market).associate { it.label to it.value }
-        assertTrue(byLabel["Side"]!!.isNotBlank())
+        assertTrue(byLabel["Likely side"]!!.isNotBlank())
+        assertTrue(byLabel["Value side"]!!.isNotBlank())
         assertEquals("—", byLabel["Size"])
         assertEquals("—", byLabel["Net EV"])
         assertEquals("—", byLabel["Confidence"])

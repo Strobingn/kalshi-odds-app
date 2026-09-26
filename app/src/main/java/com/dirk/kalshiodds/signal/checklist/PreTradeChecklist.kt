@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.signal.checklist
 
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.ui.HomeCardDetails
 import java.util.Locale
 
 /**
@@ -15,7 +16,8 @@ object PreTradeChecklist {
     )
 
     fun items(market: MarketUiModel): List<Item> {
-        val side = orDash(market.predictedSide ?: market.stanceSide())
+        val likely = HomeCardDetails.likelySideLabel(market) ?: "—"
+        val value = HomeCardDetails.valueSideLine(market)?.removePrefix("Value side: ") ?: "—"
         val size = market.suggestedContracts?.let { "$it contracts max" } ?: "—"
         val net = market.netEdgePp?.let { String.format(Locale.US, "%+.1f pp", it) }
             ?: market.edgePp?.let { String.format(Locale.US, "%+.1f pp raw", it) }
@@ -36,7 +38,8 @@ object PreTradeChecklist {
         val path = market.pathSurvive?.let { String.format(Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         val rl = orDash(market.rlNote)
         return listOf(
-            Item("Side", side),
+            Item("Likely side", likely),
+            Item("Value side", value),
             Item("Size", size),
             Item("Net EV", net),
             Item("Confidence", conf),
@@ -54,7 +57,8 @@ object PreTradeChecklist {
     }
 
     fun copyText(market: MarketUiModel): String {
-        val side = market.predictedSide ?: market.stanceSide()
+        val likely = HomeCardDetails.likelySideLabel(market) ?: "—"
+        val value = HomeCardDetails.valueSideLine(market) ?: "—"
         val size = market.suggestedContracts ?: 0
         val netEv = market.netEvDollars?.let { String.format(Locale.US, "%+.3f $/ct", it) } ?: "—"
         val netPp = market.netEdgePp?.let { String.format(Locale.US, "%+.1f pp", it) } ?: "—"
@@ -68,7 +72,8 @@ object PreTradeChecklist {
         return buildString {
             appendLine("Dip Hunter checklist (advisory — no order)")
             appendLine("Ticker: ${market.ticker}")
-            appendLine("Side: $side")
+            appendLine("Likely side: $likely")
+            appendLine("Value side: $value")
             appendLine("Suggested size: $size contracts max")
             appendLine("Net EV: $netEv ($netPp)")
             appendLine("Raw edge: $raw")
@@ -89,7 +94,7 @@ object PreTradeChecklist {
             market.metaNote?.let { appendLine("Meta: $it") }
             market.anomalyNote?.let { appendLine("Anomaly: $it") }
             appendLine("Skip filter: $skip")
-            market.stance?.let { appendLine("Stance: $it") }
+            HomeCardDetails.stanceLine(market)?.let { appendLine("Stance: $it") }
         }.trim()
     }
 
@@ -101,10 +106,4 @@ object PreTradeChecklist {
         return if (t.isEmpty()) "—" else t
     }
 
-    private fun MarketUiModel.stanceSide(): String = when {
-        (edgePp ?: 0.0) < 0 -> "NO"
-        (edgePp ?: 0.0) > 0 -> "YES"
-        stance?.contains("NO", true) == true -> "NO"
-        else -> "YES"
-    }
 }
