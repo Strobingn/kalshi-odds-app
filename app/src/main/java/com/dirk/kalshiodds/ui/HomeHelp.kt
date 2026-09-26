@@ -16,6 +16,7 @@ object HomeHelp {
     const val PAPER_TITLE = "Paper book"
     const val PAPER_BODY =
         "Start / reset $100 · win-target sizing · never hits Kalshi. " +
+            "Paper UP / Paper DOWN on the Bitcoin card log a $10 paper bet at the live ask. " +
             "The switch enables paper auto-log. Live Approve is the only path that can place a real V2 order."
 
     const val SIGNALS_TITLE = "Signals"
@@ -24,11 +25,12 @@ object HomeHelp {
 
     const val HOME_TITLE = "Home screen"
     const val HOME_BODY =
-        "This window is the single best BetCall across the current BTC / SOL / ETH 15m windows. " +
-            "The three cards stay Bitcoin, Solana, Ethereum in that order. " +
+        "This window is the BetCall for the current Bitcoin 15m window. " +
+            "Home shows one Bitcoin card. " +
             "Home has no Signals list — Signal history is a text link. " +
             "A compact scorecard line (W-L, win rate, paper P&L) sits under This window and opens the full scorecard. " +
             "Tap a card for the full-screen chart. The primary button opens an approve-gated ticket — " +
             "nothing is sent until you tap Approve. NO BET cards keep Buy anyway for a manual ticket. " +
+            "Paper UP and Paper DOWN are always on the card in LIVE \$ and paper mode — they never send a real order. " +
             "$10 min profit and $5 all-in are Settings; home only displays them."
 }

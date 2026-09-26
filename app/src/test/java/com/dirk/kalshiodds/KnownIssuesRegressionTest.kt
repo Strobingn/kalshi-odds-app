@@ -36,6 +36,7 @@ import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.HomeFixtures
 import com.dirk.kalshiodds.ui.HomeMarkets
 import com.dirk.kalshiodds.ui.HomeScorecardSummary
+import com.dirk.kalshiodds.ui.ScorecardCopy
 import com.dirk.kalshiodds.ui.HomeSnapshotMerge
 import com.dirk.kalshiodds.ui.SignalCopy
 import com.dirk.kalshiodds.ui.SideColor
@@ -58,8 +59,8 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * One named test per known 0.3.10–0.3.13 issue (#13 = home scorecard summary), on the real production
- * classes. No mocks of the logic under test.
+ * One named test per known 0.3.10–0.3.14 issue (#14 = full scorecard empty-state
+ * contradiction), on the real production classes. No mocks of the logic under test.
  */
 class KnownIssuesRegressionTest {
 
@@ -100,7 +101,7 @@ class KnownIssuesRegressionTest {
 
     @Test
     fun paperFillOnTickerNeverBlocksLiveApproveAndLivePositionNeverBlocksPaper() = runBlocking {
-        val ticker = "KXETH15M-26SEP251230-30"
+        val ticker = "KXBTC15M-26SEP251230-30"
         val market = sample(ticker, yesAsk = 0.25, noAsk = 0.75, aiYes = 80.0, predicted = "YES")
         val livePos = LivePosition(
             ticker = ticker,
@@ -557,7 +558,7 @@ class KnownIssuesRegressionTest {
         val clock = FakeClock(t0 + 60_000L)
         val closes = LongArray(4) { i -> t0 + (i + 1) * 900_000L }
         val keys = listOf("26SEP251200", "26SEP251215", "26SEP251230", "26SEP251245")
-        val series = listOf("KXBTC15M" to "Bitcoin", "KXETH15M" to "Ethereum", "KXSOL15M" to "Solana")
+        val series = listOf("KXBTC15M" to "Bitcoin")
         val windows = keys.mapIndexed { i, key ->
             series.map { (ser, label) ->
                 sample("$ser-$key-45", 0.25, 0.75, 80.0, "YES").copy(
@@ -624,7 +625,7 @@ class KnownIssuesRegressionTest {
 
         for (step in 1..3) {
             val openTicket = TicketBuilder.proposeManual(
-                windows[step - 1].first { it.ticker.startsWith("KXETH15M") },
+                windows[step - 1].first { it.ticker.startsWith("KXBTC15M") },
                 "YES",
                 TicketBuilder.Context(
                     settings = SignalSettings(ticketsEnabled = true),
@@ -640,7 +641,7 @@ class KnownIssuesRegressionTest {
             if (step == 1) {
                 lateEmpty = true
                 val miss = rollover.refreshFromRest()
-                assertTrue(miss.retrying.containsAll(listOf("KXBTC15M", "KXETH15M", "KXSOL15M")))
+                assertTrue(miss.retrying.containsAll(listOf("KXBTC15M")))
                 assertEquals(clock.nowMs() + ActiveMarketResolver.RETRY_MS, miss.nextWakeMs)
                 assertTrue(miss.activeTickers.isEmpty())
                 assertEquals(dropped, miss.droppedTickers)
@@ -685,7 +686,7 @@ class KnownIssuesRegressionTest {
         val t0 = 1_700_000_000_000L
         val clock = FakeClock(t0 + 60_000L)
         val close = t0 + 900_000L
-        val listed = listOf("KXBTC15M", "KXETH15M", "KXSOL15M").map { ser ->
+        val listed = listOf("KXBTC15M").map { ser ->
             sample("$ser-26SEP251200-45", 0.25, 0.75, 80.0, "YES").copy(
                 closeTimeEpochMs = close,
                 status = "active"
@@ -771,107 +772,60 @@ class KnownIssuesRegressionTest {
     }
 
     @Test
-    fun homeShowsFixedBtcSolEthCardsAcrossRollover() {
+    fun homeShowsExactlyOneBtcCardAcrossRollover() {
         val t0 = 1_700_000_000_000L
         val clock = FakeClock(t0 + 60_000L)
         val windowMs = com.dirk.kalshiodds.domain.MarketLifecycle.WINDOW_MS
         val closes = LongArray(6) { i -> t0 + (i + 1) * windowMs }
-        val series = listOf(
-            "KXBTC15M" to "Bitcoin",
-            "KXSOL15M" to "Solana",
-            "KXETH15M" to "Ethereum"
-        )
-        fun ticker(ser: String, step: Int) = "$ser-26SEP25${1200 + step * 15}-45"
-        fun coin(ser: String, label: String, step: Int, edge: Double): MarketUiModel =
-            sample(ticker(ser, step), 0.50, 0.50, 50.0 + edge, "YES").copy(
+        fun ticker(step: Int) = "KXBTC15M-26SEP25${1200 + step * 15}-45"
+        fun coin(step: Int, edge: Double): MarketUiModel =
+            sample(ticker(step), 0.50, 0.50, 50.0 + edge, "YES").copy(
                 closeTimeEpochMs = closes[step],
                 openTimeEpochMs = closes[step] - windowMs,
                 status = "active",
-                seriesLabel = label,
+                seriesLabel = "Bitcoin",
                 edgePp = edge,
                 importedModelPp = 50.0 + edge,
                 aiYesPercent = 50.0 + edge
             )
 
-        fun assertOrder(cards: List<HomeMarkets.CoinCard>, btc: String?, sol: String?, eth: String?) {
-            assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), cards.map { it.series })
-            assertEquals(btc, cards[0].market?.ticker)
-            assertEquals(sol, cards[1].market?.ticker)
-            assertEquals(eth, cards[2].market?.ticker)
+        fun assertBtc(cards: List<HomeMarkets.CoinCard>, expected: String?) {
+            assertEquals(listOf("KXBTC15M"), cards.map { it.series })
+            assertEquals(1, cards.size)
+            assertEquals(expected, cards.single().market?.ticker)
+            if (expected == null) assertTrue(cards.single().loading)
+            assertTrue(cards.none { it.series.contains("SOL") || it.series.contains("ETH") })
         }
 
-        // (a) closed-but-still-active BTC + next BTC window
-        val closedBtc = coin("KXBTC15M", "Bitcoin", 0, 12.0)
-        val nextBtc = coin("KXBTC15M", "Bitcoin", 1, 4.0)
-        val sol0 = coin("KXSOL15M", "Solana", 0, 2.0).copy(
-            closeTimeEpochMs = closes[1],
-            openTimeEpochMs = closes[0]
-        )
-        val eth0 = coin("KXETH15M", "Ethereum", 0, 1.0).copy(
-            closeTimeEpochMs = closes[1],
-            openTimeEpochMs = closes[0]
-        )
+        val closedBtc = coin(0, 12.0)
+        val nextBtc = coin(1, 4.0)
         clock.set(closes[0] + 2_000L)
-        var listed = listOf(closedBtc, nextBtc, sol0, eth0)
-        assertOrder(
-            HomeMarkets.coinCards(listed, clock.nowMs()),
-            ticker("KXBTC15M", 1),
-            ticker("KXSOL15M", 0),
-            ticker("KXETH15M", 0)
-        )
+        var listed = listOf(closedBtc, nextBtc, HomeFixtures.noBetSol(), HomeFixtures.noBetEth())
+        assertBtc(HomeMarkets.coinCards(listed, clock.nowMs()), ticker(1))
 
-        // (b) future ETH window listed early must not replace the current ETH card
-        val futureEth = coin("KXETH15M", "Ethereum", 2, 40.0)
-        listed = listed + futureEth
-        assertOrder(
-            HomeMarkets.coinCards(listed, clock.nowMs()),
-            ticker("KXBTC15M", 1),
-            ticker("KXSOL15M", 0),
-            ticker("KXETH15M", 0)
-        )
+        val futureBtc = coin(2, 40.0)
+        listed = listed + futureBtc
+        assertBtc(HomeMarkets.coinCards(listed, clock.nowMs()), ticker(1))
 
-        // (c) SOL next listing missing for 10 s — slot stays, loading
-        listed = listOf(nextBtc, eth0.copy(closeTimeEpochMs = closes[1], openTimeEpochMs = closes[0]), futureEth)
-        clock.set(closes[0] + 6_000L)
-        val missingSol = HomeMarkets.coinCards(listed, clock.nowMs())
-        assertOrder(missingSol, ticker("KXBTC15M", 1), null, ticker("KXETH15M", 0))
-        assertTrue(missingSol[1].loading)
+        clock.set(closes[1] + 6_000L)
+        listed = listOf(coin(3, 30.0))
+        val missing = HomeMarkets.coinCards(listed, clock.nowMs())
+        assertBtc(missing, null)
         clock.advance(10_000L)
-        listed = listed + coin("KXSOL15M", "Solana", 1, 8.0)
-        assertOrder(
-            HomeMarkets.coinCards(listed, clock.nowMs()),
-            ticker("KXBTC15M", 1),
-            ticker("KXSOL15M", 1),
-            ticker("KXETH15M", 0)
-        )
+        listed = listed + coin(2, 8.0)
+        assertBtc(HomeMarkets.coinCards(listed, clock.nowMs()), ticker(2))
 
-        // (d) edges flip across 3 rollovers; cards never reorder
         val settings = SignalSettings(ticketsEnabled = true)
-        val edges = listOf(Triple(2.0, 25.0, 1.0), Triple(1.0, 2.0, 40.0), Triple(30.0, 3.0, 4.0))
         for (step in 1..3) {
             clock.set(closes[step - 1] + 4_000L)
-            val (btcE, solE, ethE) = edges[step - 1]
-            listed = series.mapIndexed { i, (ser, label) ->
-                coin(ser, label, step, listOf(btcE, solE, ethE)[i])
-            } + series.map { (ser, label) -> coin(ser, label, step - 1, 50.0) } +
-                coin("KXBTC15M", "Bitcoin", step + 1, 99.0)
+            listed = listOf(coin(step, 10.0 + step), coin(step - 1, 50.0), coin(step + 1, 99.0))
             val cards = HomeMarkets.coinCards(listed, clock.nowMs())
-            assertOrder(
-                cards,
-                ticker("KXBTC15M", step),
-                ticker("KXSOL15M", step),
-                ticker("KXETH15M", step)
-            )
+            assertBtc(cards, ticker(step))
             val live = cards.mapNotNull { it.market }
             val ctx = TicketBuilder.Context(settings = settings, alertsPaused = false, nowMs = clock.nowMs())
             val decisions = HomeMarkets.decisions(live, ctx)
             val best = HomeMarkets.best(HomeMarkets.ranked(live, decisions, settings), decisions)!!.first.ticker
-            val expectedBest = when (step) {
-                1 -> ticker("KXSOL15M", step)
-                2 -> ticker("KXETH15M", step)
-                else -> ticker("KXBTC15M", step)
-            }
-            assertEquals(expectedBest, best)
+            assertEquals(ticker(step), best)
         }
     }
 
@@ -918,7 +872,7 @@ class KnownIssuesRegressionTest {
         }
         val losses = (0 until 6).map { i ->
             log(
-                ticker = "KXETH15M-$i",
+                ticker = "KXBTC15M-loss-$i",
                 predictedYes = 0.70,
                 outcome = "no",
                 predictedSide = "YES",
@@ -1090,14 +1044,14 @@ class KnownIssuesRegressionTest {
         val close0 = t0 + 900_000L
         val close1 = close0 + 900_000L
         val clock = FakeClock(t0 + 60_000L)
-        val old = listOf("KXBTC15M", "KXSOL15M", "KXETH15M").map { ser ->
+        val old = listOf("KXBTC15M").map { ser ->
             sample("$ser-26SEP251745-45", 0.25, 0.75, 80.0, "YES").copy(
                 closeTimeEpochMs = close0,
                 openTimeEpochMs = close0 - 900_000L,
                 status = "active"
             )
         }
-        val next = listOf("KXBTC15M", "KXSOL15M", "KXETH15M").map { ser ->
+        val next = listOf("KXBTC15M").map { ser ->
             sample("$ser-26SEP251800-00", 0.25, 0.75, 80.0, "YES").copy(
                 closeTimeEpochMs = close1,
                 openTimeEpochMs = close0,
@@ -1123,8 +1077,8 @@ class KnownIssuesRegressionTest {
         assertEquals(old.map { it.ticker }.toSet(), first.activeTickers)
         val snap0 = com.dirk.kalshiodds.data.repo.MarketsSnapshot(
             btc = listOf(old[0]),
-            sol = listOf(old[1]),
-            eth = listOf(old[2]),
+            sol = emptyList(),
+            eth = emptyList(),
             fetchedAtEpochMs = clock.nowMs(),
             fromCache = false
         )
@@ -1134,13 +1088,14 @@ class KnownIssuesRegressionTest {
         val staleOpen = rollover.refreshFromRest()
         assertTrue(
             "open list still returning the closed ticker is not a rollover",
-            staleOpen.retrying.containsAll(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"))
+            staleOpen.retrying.containsAll(listOf("KXBTC15M"))
         )
         assertTrue(staleOpen.activeTickers.isEmpty())
         assertNull(rollover.successor("KXBTC15M", old, clock.nowMs(), close0, old[0]))
         val loading = paintHome(snap0, staleOpen, clock.nowMs())
         val cards = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
-        assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), cards.map { it.series })
+        assertEquals(listOf("KXBTC15M"), cards.map { it.series })
+        assertEquals(1, cards.size)
         assertTrue(cards.all { it.market == null })
 
         clock.set(close0 + 20_000L)
@@ -1195,9 +1150,8 @@ class KnownIssuesRegressionTest {
         val painted = paintHome(loading, swapped, clock.nowMs())
         val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs())
         assertEquals(next[0].ticker, after[0].market?.ticker)
-        assertEquals(next[1].ticker, after[1].market?.ticker)
-        assertEquals(next[2].ticker, after[2].market?.ticker)
-        assertEquals(listOf("KXBTC15M", "KXSOL15M", "KXETH15M"), after.map { it.series })
+        assertEquals(listOf("KXBTC15M"), after.map { it.series })
+        assertEquals(1, after.size)
 
         val resume = rollover.refreshFromRest()
         assertEquals(swapped.activeTickers, resume.activeTickers)
@@ -1231,7 +1185,210 @@ class KnownIssuesRegressionTest {
             File("src/main/java/com/dirk/kalshiodds/MainActivity.kt")
         ).first { it.isFile }.readText()
         assertTrue(activity.contains("oddsViewModel.onForeground()"))
-        assertTrue(calls.get() >= 9)
+        assertTrue(calls.get() >= 8)
+    }
+
+    /**
+     * Owner S24 0.3.13: SOL sat on "Next window loading" with 8:44 left on BTC.
+     * Root cause: a failed resolve left the series without an active market,
+     * then polling woke only at the next close (or a 429 Retry-After was
+     * capped / abandoned) so mid-window recovery never ran. Bitcoin-only
+     * must keep retrying KXBTC15M — including mid-window and after a 429
+     * with Retry-After longer than [MarketRollover.POLL_CAP_MS] — until an
+     * open market is accepted even when lastCloseMs equals that market's
+     * close (previous == null after the failed fetch).
+     */
+    @Test
+    fun btcCardRecoversFromFailedResolveMidWindow() = runBlocking {
+        val t0 = 1_700_000_000_000L
+        val close0 = t0 + 900_000L
+        val close1 = close0 + 900_000L
+        val clock = FakeClock(t0 + 60_000L)
+        val old = sample("KXBTC15M-26SEP251745-45", 0.25, 0.75, 80.0, "YES").copy(
+            closeTimeEpochMs = close0,
+            openTimeEpochMs = close0 - 900_000L,
+            status = "active",
+            seriesLabel = "Bitcoin"
+        )
+        val next = sample("KXBTC15M-26SEP251800-00", 0.25, 0.75, 80.0, "YES").copy(
+            closeTimeEpochMs = close1,
+            openTimeEpochMs = close0,
+            status = "active",
+            seriesLabel = "Bitcoin"
+        )
+        var listed = listOf(old)
+        var mode = "ok"
+        val rollover = MarketRollover(
+            clock = clock,
+            listOpen = { series ->
+                when (mode) {
+                    "empty" -> emptyList()
+                    "429" -> {
+                        val retryBody = "rate limited".toResponseBody("text/plain".toMediaType())
+                        val raw = okhttp3.Response.Builder()
+                            .request(okhttp3.Request.Builder().url("https://api.elections.kalshi.com/trade-api/v2/markets").build())
+                            .protocol(okhttp3.Protocol.HTTP_1_1)
+                            .code(429)
+                            .message("Too Many Requests")
+                            .header("Retry-After", "12")
+                            .body(retryBody)
+                            .build()
+                        throw retrofit2.HttpException(retrofit2.Response.error<Any>(retryBody, raw))
+                    }
+                    else -> listed.filter {
+                        com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) == series
+                    }
+                }
+            },
+            sleeper = { }
+        )
+
+        val first = rollover.refreshFromRest()
+        assertEquals(setOf(old.ticker), first.activeTickers)
+        val snap0 = com.dirk.kalshiodds.data.repo.MarketsSnapshot(
+            btc = listOf(old),
+            fetchedAtEpochMs = clock.nowMs(),
+            fromCache = false
+        )
+
+        clock.set(close0 + 1_000L)
+        mode = "empty"
+        val miss = rollover.refreshFromRest()
+        assertTrue(miss.retrying.contains("KXBTC15M"))
+        assertTrue(miss.activeTickers.isEmpty())
+        assertTrue(
+            "failed resolve must poll again immediately, not wait for the next close",
+            miss.nextWakeMs!! <= clock.nowMs() + MarketRollover.POLL_MS
+        )
+        assertTrue(miss.nextWakeMs!! < close1)
+        val loading = paintHome(snap0, miss, clock.nowMs())
+        val stuck = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
+        assertEquals(listOf("KXBTC15M"), stuck.map { it.series })
+        assertEquals(1, stuck.size)
+        assertTrue(stuck.single().loading)
+        assertTrue(stuck.none { it.series.contains("SOL") || it.series.contains("ETH") })
+
+        val left844 = close0 + (900_000L - 524_000L)
+        clock.set(left844)
+        mode = "empty"
+        val stillEmpty = rollover.refreshFromRest()
+        assertTrue(stillEmpty.retrying.contains("KXBTC15M"))
+        assertTrue(stillEmpty.activeTickers.isEmpty())
+        assertTrue(stillEmpty.nextWakeMs!! <= clock.nowMs() + MarketRollover.POLL_MS)
+
+        mode = "429"
+        val limited = rollover.refreshFromRest()
+        assertTrue(limited.retrying.contains("KXBTC15M"))
+        assertTrue(limited.rateLimited.contains("KXBTC15M"))
+        assertTrue(limited.activeTickers.isEmpty())
+        val retryBody = "rate limited".toResponseBody("text/plain".toMediaType())
+        val retryRaw = okhttp3.Response.Builder()
+            .request(okhttp3.Request.Builder().url("https://api.elections.kalshi.com/trade-api/v2/markets").build())
+            .protocol(okhttp3.Protocol.HTTP_1_1)
+            .code(429)
+            .message("Too Many Requests")
+            .header("Retry-After", "12")
+            .body(retryBody)
+            .build()
+        val retryEx = retrofit2.HttpException(retrofit2.Response.error<Any>(retryBody, retryRaw))
+        assertEquals(12_000L, MarketRollover.retryAfterMs(retryEx))
+        assertTrue(
+            "Retry-After 12s is longer than POLL_CAP and must be respected, not abandoned",
+            12_000L > MarketRollover.POLL_CAP_MS
+        )
+        val wait = limited.nextWakeMs!! - clock.nowMs()
+        assertTrue("next wake must honor Retry-After 12s, got $wait", wait >= 12_000L)
+
+        clock.set(close0 + MarketRollover.LOADING_MAX_MS + 5_000L)
+        mode = "empty"
+        val afterCap = rollover.refreshFromRest()
+        assertTrue(
+            "close-time polling ending must not give up — still retrying mid-window",
+            afterCap.retrying.contains("KXBTC15M")
+        )
+        assertTrue(afterCap.nextWakeMs!! <= clock.nowMs() + MarketRollover.POLL_MS)
+
+        val openNow = next.copy(
+            openTimeEpochMs = clock.nowMs() - 60_000L,
+            closeTimeEpochMs = clock.nowMs() + 524_000L
+        )
+        val sameCloseAsLast = rollover.successor(
+            series = "KXBTC15M",
+            listed = listOf(openNow),
+            nowMs = clock.nowMs(),
+            lastCloseMs = openNow.closeTimeEpochMs,
+            previous = null
+        )
+        assertEquals(
+            "previous==null mid-window must accept the open market even when close == lastCloseMs",
+            openNow.ticker,
+            sameCloseAsLast?.ticker
+        )
+
+        mode = "ok"
+        listed = listOf(next)
+        val recovered = rollover.refreshFromRest()
+        assertEquals(setOf(next.ticker), recovered.activeTickers)
+        assertTrue(recovered.retrying.isEmpty())
+        val painted = paintHome(loading, recovered, clock.nowMs())
+        val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs())
+        assertEquals(1, after.size)
+        assertEquals("KXBTC15M", after.single().series)
+        assertEquals(next.ticker, after.single().market?.ticker)
+        assertFalse(after.single().loading)
+    }
+
+    @Test
+    fun fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration() {
+        val entries = HomeFixtures.sampleSettledEntries()
+        val settled = ScorecardCopy.settledPicks(entries)
+        assertEquals(18, settled.size)
+        val window = ScorecardMetrics.window(settled)
+        val snap = ScorecardMetrics.Snapshot(
+            daily = window,
+            rolling = window,
+            allTime = window,
+            perSeries = emptyList(),
+            sampleCount = window.total,
+            openCount = 0,
+            voidCount = 0,
+            calibrationReady = false,
+            temperature = null,
+            calibrationSamples = 0,
+            honest = ScorecardMetrics.honest(settled)
+        )
+        assertTrue(snap.perSeries.isEmpty())
+        assertEquals(18, snap.sampleCount)
+        assertEquals(18, snap.honest.n)
+
+        val present = ScorecardCopy.of(entries, 12.40)
+        assertEquals(18, present.settledCount)
+        assertEquals(12, present.summary.wins)
+        assertEquals(6, present.summary.losses)
+        assertFalse(present.showsEmptyState)
+        assertNull(present.emptyState())
+        assertFalse(present.allLines().any { it.contains("No settled samples") })
+        assertFalse(present.allLines().contains(HomeScorecardSummary.NO_SETTLED))
+
+        val empty = ScorecardCopy.of(emptyList(), 0.0)
+        assertEquals(0, empty.settledCount)
+        assertTrue(empty.showsEmptyState)
+        assertEquals(HomeScorecardSummary.NO_SETTLED, empty.emptyState())
+        assertTrue(empty.allLines().contains(HomeScorecardSummary.NO_SETTLED))
+        assertTrue(empty.timeOfDay.all { it.line.contains(ScorecardCopy.EM_DASH) })
+        assertFalse(empty.allLines().any { it.contains("0%") })
+        assertFalse(empty.allLines().any { it.contains("By coin") })
+
+        val src = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(src.contains("view.showsEmptyState"))
+        assertTrue(src.contains("ScorecardCopy.NO_SETTLED"))
+        assertFalse(src.contains("perSeries"))
+        assertFalse(src.contains("No settled samples yet"))
+        assertFalse(src.contains("calibrationSamples"))
+        assertFalse(src.contains("MIN_CALIBRATION_SAMPLES"))
     }
 
     @Test
@@ -1259,10 +1416,26 @@ class KnownIssuesRegressionTest {
         assertTrue(home.contains("scorecard = state.scorecardSummary"))
         val thisWindow = home.indexOf("ThisWindowCard")
         val coins = home.indexOf("items(coinCards")
-        assertTrue("scorecard line is above the three cards, visible without scroll on 1080x2340", thisWindow in 0 until coins)
+        assertTrue("scorecard line is above the Bitcoin card, visible without scroll on 1080x2340", thisWindow in 0 until coins)
         assertTrue(home.contains("SIGNAL_HISTORY"))
         assertTrue(home.contains("onOpenSignalHistory"))
         assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
+        assertEquals(listOf("KXBTC15M"), HomeMarkets.CARD_SERIES)
+        assertEquals(listOf("KXBTC15M"), com.dirk.kalshiodds.domain.CryptoMarkets.DEFAULT_SERIES)
+        val onlyBtc = HomeMarkets.coinCards(
+            listOf(HomeFixtures.actionableBtc(), HomeFixtures.noBetSol(), HomeFixtures.noBetEth()),
+            HomeFixtures.NOW_MS
+        )
+        assertEquals(1, onlyBtc.size)
+        assertEquals("KXBTC15M", onlyBtc.single().series)
+        assertTrue(onlyBtc.none { it.series.contains("SOL") || it.series.contains("ETH") })
+        assertFalse(home.contains("KXSOL15M"))
+        assertFalse(home.contains("KXETH15M"))
+        assertFalse(home.contains("Solana"))
+        assertFalse(home.contains("Ethereum"))
+        assertEquals(HomeCopy.SIT_OUT_HOME, HomeCopy.noBetHeadline("Sit out — model loses to market on Brier/log-loss and EV is -1.20"))
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("Brier"))
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("log-loss"))
 
         val nav = com.dirk.kalshiodds.ui.AppNavigator()
         nav.open(com.dirk.kalshiodds.ui.AppRoutes.SCORECARD)
@@ -1272,6 +1445,9 @@ class KnownIssuesRegressionTest {
         assertTrue(nav.back())
         assertEquals(com.dirk.kalshiodds.ui.AppRoutes.HOME, nav.current)
 
+        assertTrue(home.contains("onPaperSide"))
+        assertFalse(home.contains("paperBuySide"))
+        assertTrue(home.contains("HomeCopy.paperPositionLine"))
         assertTrue(home.contains("TradeModeChip"))
         val chrome = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/components/HomeChrome.kt"),
@@ -1285,6 +1461,11 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }.readText()
         assertFalse(card.contains("AI: UP"))
         assertFalse(card.contains("AI: NO BET"))
+        assertTrue(card.contains("HomeCopy.PAPER_UP"))
+        assertTrue(card.contains("HomeCopy.PAPER_DOWN"))
+        assertTrue(card.contains("onPaperUp"))
+        assertTrue(card.contains("onPaperDown"))
+        assertTrue(card.contains("maxLines = 2"))
     }
 
     @Test
@@ -1323,10 +1504,69 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }.readText()
         assertTrue(card.contains("HomeCopy.tileAiUp(market)"))
         assertTrue(card.contains("HomeCopy.tileAiDown(market)"))
-        assertTrue(card.contains("titleSmall"))
+        assertTrue(card.contains("HomeCopy.tileTenDollarUp(market)"))
+        assertTrue(card.contains("HomeCopy.tileTenDollarDown(market)"))
+        assertTrue(card.contains("headlineMedium"))
+        assertFalse(card.contains("titleSmall"))
+        val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(up)
+        assertEquals(HomeCopy.tenDollarWins(quotes.yesAsk).line, HomeCopy.tileTenDollarUp(up))
+        assertEquals(HomeCopy.tenDollarWins(quotes.noAsk).line, HomeCopy.tileTenDollarDown(up))
+        val at31 = up.copy(yesAsk = 0.31, yesBid = 0.30, noAsk = 0.70, noBid = 0.69)
+        assertEquals(30, HomeCopy.tenDollarWins(0.31).contracts)
+        assertEquals(0.45, HomeCopy.tenDollarWins(0.31).feeUsd, 1e-9)
+        assertEquals(20.25, HomeCopy.tenDollarWins(0.31).profitUsd!!, 1e-9)
+        assertEquals("\$10 wins +\$20.25", HomeCopy.tileTenDollarUp(at31))
+        assertEquals("\$10 wins +\$3.70", HomeCopy.tileTenDollarDown(at31))
+        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
         val loading = card.substringAfter("fun NextWindowLoadingCard").substringBefore("fun MarketCard")
         assertFalse(loading.contains("tileAi"))
         assertFalse(loading.contains("AI "))
+        assertFalse(loading.contains("tileTenDollar"))
+        assertFalse(loading.contains("PAPER_UP"))
+    }
+
+    @Test
+    fun paperBuyVisibleOnLiveKeyedCard() {
+        // 0.3.13 root cause: keyed ApproveRouter is LIVE $ and MarketCard only
+        // painted Buy anyway / LIVE $ / Sell. Paper lived on TradeTicketCard.
+        val card = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/components/MarketCard.kt")
+        ).first { it.isFile }.readText()
+        val home = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt")
+        ).first { it.isFile }.readText()
+        val odds = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/OddsScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/OddsScreen.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(card.contains("HomeCopy.PAPER_UP"))
+        assertTrue(card.contains("HomeCopy.PAPER_DOWN"))
+        assertFalse(card.contains("if (paperTradingEnabled)"))
+        assertTrue(home.contains("onPaperUp"))
+        assertTrue(home.contains("onPaperDown"))
+        assertTrue(odds.contains("viewModel.paperBuySide"))
+        val keyed = HomeFixtures.settings(true)
+        assertTrue(keyed.tradingCredentialsConfigured())
+        assertEquals(
+            TradeModeLabel.LIVE,
+            TradeModeLabel.forApprove(keyed)
+        )
+        val market = HomeFixtures.actionableBtc()
+        assertEquals("Paper UP", HomeCopy.PAPER_UP)
+        assertEquals("Paper DOWN", HomeCopy.PAPER_DOWN)
+        assertTrue(HomeCopy.paperUpEnabled(market))
+        assertTrue(HomeCopy.paperDownEnabled(market))
+        val book = PaperBook(idFactory = { "live-card" }, nowMs = { 1L })
+        val out = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(book, market, "YES")
+        assertTrue(out.ok)
+        assertEquals(HomeCopy.paperConfirmSnackbar("YES", HomeCopy.tenDollarWins(0.20)), out.message)
+        assertEquals(
+            "Paper: UP ${out.contracts} @ 20c",
+            HomeCopy.paperPositionLine(book.snapshot(), market.ticker)
+        )
+        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
     }
 
     /** Same paint path as [com.dirk.kalshiodds.ui.OddsViewModel.applyResult] / applyRolloverEvent. */
@@ -1338,7 +1578,7 @@ class KnownIssuesRegressionTest {
 
     private fun assertWindowUi(markets: List<MarketUiModel>, nowMs: Long) {
         val cards = HomeMarkets.currentWindowCards(markets, SignalSettings(), nowMs)
-        assertEquals(3, cards.size)
+        assertEquals(1, cards.size)
         cards.forEach { card ->
             val label = WindowLabel.of(card.ticker, card.closeTimeEpochMs)
             assertTrue(label.contains("window"))

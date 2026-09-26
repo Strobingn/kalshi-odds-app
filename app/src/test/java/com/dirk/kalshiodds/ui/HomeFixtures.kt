@@ -2,14 +2,19 @@ package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import java.time.ZoneId
+import java.time.ZonedDateTime
 
 object HomeFixtures {
     const val NOW_MS = 1_700_000_000_000L
@@ -132,6 +137,54 @@ object HomeFixtures {
         settledCount = 18
     )
 
+    fun sampleSettledEntries(): List<PredictionLogEntry> {
+        val zone = ZoneId.of("America/New_York")
+        fun et(hour: Int, i: Int): Long =
+            ZonedDateTime.of(2026, 9, 25, hour, i, 0, 0, zone).toInstant().toEpochMilli()
+        fun pick(
+            ticker: String,
+            series: String,
+            at: Long,
+            won: Boolean,
+            side: String = "YES"
+        ): PredictionLogEntry {
+            val yesOutcome = if (side == "YES") won else !won
+            return PredictionLogEntry(
+                ticker = ticker,
+                series = series,
+                predictedYes = if (side == "YES") 0.70 else 0.30,
+                predictedNo = if (side == "YES") 0.30 else 0.70,
+                marketMid = 0.55,
+                timestampMs = at,
+                closeTimeMs = at,
+                outcome = if (yesOutcome) "yes" else "no",
+                score = if (won) 1 else 0,
+                predictedSide = side,
+                edgePp = 5.0,
+                settledAtMs = at
+            )
+        }
+        val btcMorning = (0 until 8).map { i ->
+            pick("KXBTC15M-26SEP25${1000 + i}-50", "KXBTC15M", et(10, i), won = i < 6, side = if (i % 3 == 0) "NO" else "YES")
+        }
+        val btcAfternoon = (0 until 6).map { i ->
+            pick("KXBTC15M-26SEP25${1400 + i}-20", "KXBTC15M", et(14, i), won = i < 4)
+        }
+        val btcEvening = (0 until 4).map { i ->
+            pick("KXBTC15M-26SEP25${1800 + i}-40", "KXBTC15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
+        }
+        val storedSol = (0 until 6).map { i ->
+            pick("KXSOL15M-26SEP25${1400 + i}-20", "KXSOL15M", et(14, i), won = i < 4)
+        }
+        val storedEth = (0 until 4).map { i ->
+            pick("KXETH15M-26SEP25${1800 + i}-40", "KXETH15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
+        }
+        return btcMorning + btcAfternoon + btcEvening + storedSol + storedEth
+    }
+
+    fun sampleScorecardUi(): ScorecardUi =
+        ScorecardUi(view = ScorecardCopy.of(sampleSettledEntries(), SAMPLE_SCORECARD.paperPnlUsd))
+
     fun state(
         btc: MarketUiModel,
         eth: MarketUiModel,
@@ -159,6 +212,24 @@ object HomeFixtures {
         positions = emptyList(),
         recentAlerts = sampleAlerts(),
         scorecardSummary = scorecard
+    )
+
+    fun openPaperFill(
+        ticker: String,
+        side: String = "YES",
+        contracts: Int = 47,
+        limitPrice: Double = 0.20,
+        stakeUsd: Double = 9.93
+    ): PaperFill = PaperFill(
+        id = "fixture-paper",
+        ticker = ticker,
+        side = side,
+        stakeUsd = stakeUsd,
+        contracts = contracts,
+        limitPrice = limitPrice,
+        source = PaperTileBuy.SOURCE,
+        createdAtMs = NOW_MS,
+        note = "fixture open paper"
     )
 
     fun openPosition(): LivePosition = LivePosition(

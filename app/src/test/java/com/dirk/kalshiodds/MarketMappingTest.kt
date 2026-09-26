@@ -44,6 +44,19 @@ class MarketMappingTest {
 
 class CryptoMarketsTest {
     @Test
+    fun liveUniverseIsBitcoinOnly() {
+        assertEquals(listOf("KXBTC15M"), CryptoMarkets.DEFAULT_SERIES)
+        assertTrue(CryptoMarkets.isLiveSeries("KXBTC15M"))
+        assertTrue(CryptoMarkets.isLiveTicker("KXBTC15M-26SEP231600-00"))
+        assertFalse(CryptoMarkets.isLiveTicker("KXETH15M-26SEP231645-45"))
+        assertFalse(CryptoMarkets.isLiveTicker("KXSOL15M-26SEP231645-45"))
+        assertTrue(CryptoMarkets.isRetiredTicker("KXETH15M-X"))
+        assertTrue(CryptoMarkets.isRetiredTicker("KXSOL15M-X"))
+        assertFalse(CryptoMarkets.isRetiredTicker("KXBTC15M-X"))
+        assertEquals(listOf("KXBTC15M-A"), CryptoMarkets.liveTickers(listOf("KXBTC15M-A", "KXETH15M-B", "KXSOL15M-C")))
+    }
+
+    @Test
     fun acceptsDefaultCryptoSeries() {
         assertTrue(CryptoMarkets.isCryptoTicker("KXBTC15M-26SEP231600-00"))
         assertTrue(CryptoMarkets.isCryptoTicker("KXETH15M-26SEP231645-45"))

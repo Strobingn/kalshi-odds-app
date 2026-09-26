@@ -134,7 +134,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
-                    HomeScorecardSummary.of(entries, paper.realizedPnlUsd)
+                    HomeScorecardSummary.of(entries, paper.liveRealizedPnlUsd)
                 }.collect { summary ->
                     _state.update { it.copy(scorecardSummary = summary) }
                 }
@@ -386,10 +386,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value.settings
         refreshExternal()
         return repository.refresh(
-            watchBtc = s.watchBtc,
-            watchEth = s.watchEth,
-            watchSol = s.watchSol,
-            extraTickers = s.extraTickerList(),
+            watchBtc = true,
+            watchEth = false,
+            watchSol = false,
+            extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(s.extraTickerList()),
             edgeThresholdPp = s.edgeThresholdPp
         )
     }
@@ -584,6 +584,36 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      */
     fun paperTicket(ticketId: String) {
         applyPaperBuy(ticketId)
+    }
+
+    /**
+     * Card-level Paper UP / Paper DOWN. $10 at the live ask using the
+     * same math as the tile profit line. Never calls [ticketSession.approve]
+     * and never hits the live order API.
+     */
+    fun paperBuySide(market: MarketUiModel, side: String) {
+        val outcome = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(paperBook, market, side)
+        if (outcome.ok) {
+            runCatching {
+                container.resultsWriter.enqueueTicket(
+                    com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
+                        ticker = market.ticker,
+                        side = if (side.equals("NO", true) || side.equals("DOWN", true)) "NO" else "YES",
+                        stakeUsd = outcome.stakeUsd,
+                        approved = true,
+                        result = "paper filled",
+                        createdAtMs = System.currentTimeMillis(),
+                        note = outcome.message
+                    )
+                )
+            }
+        }
+        _state.update {
+            it.copy(
+                userMessage = outcome.message,
+                paper = paperBook.snapshot()
+            )
+        }
     }
 
     private fun applyPaperBuy(ticketId: String) {
@@ -896,6 +926,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
         val now = System.currentTimeMillis()
         alerts.forEach { alert ->
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
             val market = markets[alert.ticker]
             if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
             val ask = market?.let {

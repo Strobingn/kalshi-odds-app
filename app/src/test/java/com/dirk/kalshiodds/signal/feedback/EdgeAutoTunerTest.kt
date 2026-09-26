@@ -34,7 +34,10 @@ class EdgeAutoTunerTest {
         assertTrue(r.enoughSamples)
         assertTrue(r.sitOut)
         assertTrue(r.modelBrier!! > r.marketBrier!!)
-        assertTrue(r.reason.contains("Sit out"))
+        assertTrue(r.reason.contains("hasn't beaten Kalshi's prices"))
+        assertFalse(r.reason.contains("Brier"))
+        assertFalse(r.reason.contains("log-loss"))
+        assertFalse(r.reason.contains("Sit out"))
     }
 
     @Test

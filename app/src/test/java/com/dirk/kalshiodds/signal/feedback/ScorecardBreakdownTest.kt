@@ -26,6 +26,7 @@ class ScorecardBreakdownTest {
         assertEquals(5, eth.n)
         assertEquals(0, sol.n)
         assertFalse(sol.enoughData)
+        assertEquals(listOf("BTC", "SOL", "ETH"), coins.map { it.key })
     }
 
     @Test

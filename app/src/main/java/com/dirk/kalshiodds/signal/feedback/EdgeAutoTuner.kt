@@ -110,14 +110,13 @@ object EdgeAutoTuner {
         val sitOut = !beats || negativeEv || bestEv == Double.NEGATIVE_INFINITY
         val reason = when {
             !beats && negativeEv ->
-                "Sit out — model loses to market on Brier/log-loss and EV is ${fmt(bestEv)}."
+                "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
             !beats ->
-                "Sit out — model Brier ${fmt3(modelBrier)} / log-loss ${fmt3(modelLl)} " +
-                    "does not beat market ${fmt3(marketBrier)} / ${fmt3(marketLl)}."
+                "The model hasn't beaten Kalshi's prices in testing."
             negativeEv ->
-                "Sit out — best threshold ${fmt(bestThreshold)} pp has EV ${fmt(bestEv)} on $bestN signals."
+                "This bet's expected value is negative."
             bestEv == Double.NEGATIVE_INFINITY ->
-                "Sit out — no threshold has $minSamples+ signals after fees."
+                "Not enough similar bets after fees to size a threshold."
             else ->
                 "Auto-tune ${fmt(bestThreshold)} pp · EV ${fmt(bestEv)} on $bestN / ${samples.size} signals."
         }

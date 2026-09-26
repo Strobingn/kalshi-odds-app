@@ -3,19 +3,30 @@ package com.dirk.kalshiodds.domain
 import com.dirk.kalshiodds.data.api.KalshiApi
 
 /**
- * Crypto-only universe for Dip Hunter.
- *
- * Watched by default: BTC / ETH / SOL 15-minute series.
- * Extra tickers are accepted only when they look crypto-denominated.
- * WTI, oil, and other non-crypto contracts are rejected everywhere
- * (REST, WebSocket subscribe, scoring, alerts, settings).
+ * Live universe for Dip Hunter. 0.3.14 is **Bitcoin-only** ([KalshiApi.SERIES_BTC]).
+ * ETH / SOL / extras are recognized so stored rows can be filtered out, but
+ * they are never subscribed, polled, scored, alerted, or paper-traded.
+ * WTI and other non-crypto contracts stay rejected.
  */
 object CryptoMarkets {
-    val DEFAULT_SERIES: List<String> = listOf(
-        KalshiApi.SERIES_BTC,
-        KalshiApi.SERIES_ETH,
-        KalshiApi.SERIES_SOL
-    )
+    /** Single live watchlist. Home, rollover, WS, scoring, and paper all read this. */
+    val DEFAULT_SERIES: List<String> = listOf(KalshiApi.SERIES_BTC)
+
+    fun isLiveSeries(series: String): Boolean =
+        DEFAULT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
+
+    fun isLiveTicker(ticker: String): Boolean =
+        ticker.isNotBlank() && isLiveSeries(inferSeries(ticker))
+
+    fun liveTickers(tickers: Iterable<String>): List<String> =
+        tickers.map { it.trim() }.filter { it.isNotEmpty() && isLiveTicker(it) }.distinct()
+
+    /** KXETH15M / KXSOL15M — recognized so stored rows can be filtered, never live. */
+    fun isRetiredTicker(ticker: String): Boolean {
+        val series = inferSeries(ticker)
+        return series.equals(KalshiApi.SERIES_ETH, ignoreCase = true) ||
+            series.equals(KalshiApi.SERIES_SOL, ignoreCase = true)
+    }
 
     /** Tokens that identify a crypto-denominated Kalshi series or ticker. */
     private val CRYPTO_TOKENS = listOf(

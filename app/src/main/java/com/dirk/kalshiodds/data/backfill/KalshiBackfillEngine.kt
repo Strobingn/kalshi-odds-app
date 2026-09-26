@@ -34,7 +34,7 @@ data class CandlePrint(
 )
 
 /**
- * Pulls settled KXBTC/ETH/SOL 15m markets + 1-minute candlesticks.
+ * Pulls settled KXBTC15M 15m markets + 1-minute candlesticks.
  *
  * Live: `GET /markets?status=settled` then
  * `GET /series/{series}/markets/{ticker}/candlesticks`.
@@ -257,7 +257,7 @@ class KalshiBackfillEngine(
     }
 
     companion object {
-        val SERIES = listOf(KalshiApi.SERIES_BTC, KalshiApi.SERIES_ETH, KalshiApi.SERIES_SOL)
+        val SERIES = CryptoMarkets.DEFAULT_SERIES
 
         fun parseIso(raw: String?): Long? {
             if (raw.isNullOrBlank()) return null

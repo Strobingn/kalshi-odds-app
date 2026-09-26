@@ -36,7 +36,7 @@ class PaperBuyTest {
         val book = PaperBook()
         val out = PaperBuy.execute(
             book,
-            ticket(TicketKind.HUNTER_VALUE, ticker = "KXETH15M-L", contracts = 40, stake = 8.0, px = 0.20, win = 50.0)
+            ticket(TicketKind.HUNTER_VALUE, ticker = "KXBTC15M-L", contracts = 40, stake = 8.0, px = 0.20, win = 50.0)
         )
         assertTrue(out.ok)
         assertEquals(40, out.contracts)
@@ -48,7 +48,7 @@ class PaperBuyTest {
         val book = PaperBook()
         val out = PaperBuy.execute(
             book,
-            ticket(TicketKind.CONFIGURED, ticker = "KXSOL15M-C", contracts = 20, stake = 4.0, px = 0.20, win = 50.0)
+            ticket(TicketKind.CONFIGURED, ticker = "KXBTC15M-C", contracts = 20, stake = 4.0, px = 0.20, win = 50.0)
         )
         assertTrue(out.ok)
         assertEquals(20, out.contracts)

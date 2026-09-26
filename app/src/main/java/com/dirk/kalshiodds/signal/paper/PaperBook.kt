@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.paper
 
+import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
@@ -55,6 +56,9 @@ data class PaperBookState(
 ) {
     val openStakeUsd: Double get() = fills.filter { !it.settled }.sumOf { it.stakeUsd }
     val realizedPnlUsd: Double get() = fills.mapNotNull { it.pnlUsd }.sum()
+    /** Paper P&L for the live Bitcoin series only — stored ETH/SOL fills stay in the ledger. */
+    val liveRealizedPnlUsd: Double
+        get() = fills.filter { CryptoMarkets.isLiveTicker(it.ticker) }.mapNotNull { it.pnlUsd }.sum()
     val equityUsd: Double get() = cashUsd + openStakeUsd
     val openCount: Int get() = fills.count { !it.settled }
 }
@@ -157,6 +161,10 @@ class PaperBook(
         note: String,
         winTargetUsd: Double? = null
     ): PaperFill? {
+        if (CryptoMarkets.isRetiredTicker(ticker)) {
+            rememberMessage("Paper skip $ticker — Bitcoin-only")
+            return null
+        }
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null.also {
             rememberMessage("Paper skip $ticker — unusable limit")
@@ -249,6 +257,9 @@ class PaperBook(
         note: String,
         winTargetUsd: Double? = null
     ): PaperBuy.Outcome {
+        if (CryptoMarkets.isRetiredTicker(ticker)) {
+            return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
+        }
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice)
             ?: return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — unusable limit")
@@ -320,6 +331,81 @@ class PaperBook(
                 capped = capped,
                 contracts = qty,
                 stakeUsd = stake
+            )
+        }
+    }
+
+    /**
+     * Card-level $10 paper buy. [allInUsd] already includes the same
+     * `ceil_cent(0.07 × C × P × (1−P))` fee [LiveOrderSizer] used for the
+     * tile profit line. Never hits Kalshi.
+     */
+    fun fillTenDollar(
+        ticker: String,
+        side: String,
+        ask: Double,
+        contracts: Int,
+        feeUsd: Double,
+        allInUsd: Double,
+        source: String,
+        message: String
+    ): PaperBuy.Outcome {
+        if (CryptoMarkets.isRetiredTicker(ticker)) {
+            return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
+        }
+        val want = if (side.equals("NO", true)) "NO" else "YES"
+        val px = KalshiPrice.usable(ask)
+            ?: return PaperBuy.Outcome(ok = false, message = "No ask to paper ${if (want == "NO") "DOWN" else "UP"}")
+        val qty = contracts.coerceAtLeast(0)
+        if (qty < 1) {
+            return PaperBuy.Outcome(ok = false, message = "No ask to paper ${if (want == "NO") "DOWN" else "UP"}")
+        }
+        synchronized(lock) {
+            val cur = _state.value
+            val open = cur.fills.firstOrNull {
+                !it.settled && it.ticker.equals(ticker, ignoreCase = true)
+            }
+            if (open != null) {
+                val msg = "Already have an open paper fill on $ticker (${open.displaySide} ${open.contracts} ct)"
+                publish(cur.copy(lastMessage = msg))
+                return PaperBuy.Outcome(ok = false, message = msg)
+            }
+            if (cur.cashUsd + 1e-9 < allInUsd) {
+                val msg = "Paper cash ${fmt(cur.cashUsd)} cannot cover ${fmt(allInUsd)}"
+                publish(cur.copy(lastMessage = msg))
+                return PaperBuy.Outcome(ok = false, message = msg)
+            }
+            val row = PaperFill(
+                id = idFactory(),
+                ticker = ticker,
+                side = want,
+                stakeUsd = allInUsd,
+                contracts = qty,
+                limitPrice = px,
+                source = source,
+                createdAtMs = nowMs(),
+                note = String.format(
+                    java.util.Locale.US,
+                    "Paper tile $10 · %d ct @ %.1f¢ · fee $%.2f · never sent to Kalshi",
+                    qty,
+                    px * 100,
+                    feeUsd
+                )
+            )
+            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            publish(
+                cur.copy(
+                    cashUsd = cur.cashUsd - allInUsd,
+                    fills = fills,
+                    lastMessage = message
+                )
+            )
+            return PaperBuy.Outcome(
+                ok = true,
+                fill = row,
+                message = message,
+                contracts = qty,
+                stakeUsd = allInUsd
             )
         }
     }
@@ -458,6 +544,7 @@ class PaperBook(
         stakeUsd: Double? = null,
         winTargetUsd: Double? = null
     ): PaperFill? {
+        if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null
         synchronized(lock) {

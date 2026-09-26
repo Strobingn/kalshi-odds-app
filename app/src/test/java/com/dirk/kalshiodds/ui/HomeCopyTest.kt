@@ -113,6 +113,50 @@ class HomeCopyTest {
     }
 
     @Test
+    fun tenDollarWinsUsesLiveAskAndKnownCents() {
+        val at31 = HomeCopy.tenDollarWins(0.31)
+        assertEquals(30, at31.contracts)
+        assertEquals(0.45, at31.feeUsd, 1e-9)
+        assertEquals(9.75, at31.costUsd, 1e-9)
+        assertEquals(20.25, at31.profitUsd!!, 1e-9)
+        assertEquals("\$10 wins +\$20.25", at31.line)
+        assertEquals(0.31, at31.ask!!, 1e-9)
+
+        val at70 = HomeCopy.tenDollarWins(0.70)
+        assertEquals(13, at70.contracts)
+        assertEquals(0.20, at70.feeUsd, 1e-9)
+        assertEquals(9.30, at70.costUsd, 1e-9)
+        assertEquals(3.70, at70.profitUsd!!, 1e-9)
+        assertEquals("\$10 wins +\$3.70", at70.line)
+
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(null).line)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.0).line)
+        assertEquals(10.0, HomeCopy.TILE_STAKE_USD, 1e-9)
+        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(5.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)
+
+        val market = HomeFixtures.actionableBtc()
+        val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
+        assertEquals(HomeCopy.tenDollarWins(quotes.yesAsk).line, HomeCopy.tileTenDollarUp(market))
+        assertEquals(HomeCopy.tenDollarWins(quotes.noAsk).line, HomeCopy.tileTenDollarDown(market))
+        val moved = market.copy(yesAsk = 0.31, yesBid = 0.30, noAsk = 0.70, noBid = 0.69)
+        assertEquals("\$10 wins +\$20.25", HomeCopy.tileTenDollarUp(moved))
+        assertEquals("\$10 wins +\$3.70", HomeCopy.tileTenDollarDown(moved))
+        val missing = market.copy(yesAsk = null, noAsk = null, yesBid = null, noBid = null)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tileTenDollarUp(missing))
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tileTenDollarDown(missing))
+        assertEquals(HomeCopy.PAPER_UP, "Paper UP")
+        assertEquals(HomeCopy.PAPER_DOWN, "Paper DOWN")
+        assertTrue(HomeCopy.paperUpEnabled(moved))
+        assertTrue(HomeCopy.paperDownEnabled(moved))
+        assertEquals(HomeCopy.paperDisabledReason(missing, "YES"), "No ask to paper UP")
+        assertEquals(
+            "Paper UP · 30 ct · $9.75 · +$20.25 if it wins",
+            HomeCopy.paperConfirmSnackbar("YES", at31)
+        )
+    }
+
+    @Test
     fun tileAiPercentsMatchModelAndSumTo100() {
         val up = HomeFixtures.actionableBtc()
         assertEquals("AI 80%", HomeCopy.tileAiUp(up))
@@ -145,6 +189,38 @@ class HomeCopyTest {
         }
         assertEquals("Tickets wait for your Approve. Nothing is sent until you confirm.", HomeHelp.TICKETS_BODY)
         assertEquals("Open Kalshi positions. Sell closes them at the current bid.", HomeHelp.POSITIONS_BODY)
+    }
+
+    @Test
+    fun sitOutHomeCopyIsPlainLanguage() {
+        val jargon = "Sit out — model loses to market on Brier/log-loss and EV is -1.20"
+        assertTrue(HomeCopy.isSitOutJargon(jargon))
+        assertEquals(HomeCopy.SIT_OUT_HOME, HomeCopy.noBetHeadline(jargon))
+        assertEquals(
+            "NO BET this window. The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative.",
+            HomeCopy.SIT_OUT_HOME
+        )
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("Brier", ignoreCase = true))
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("log-loss", ignoreCase = true))
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("log loss", ignoreCase = true))
+        val tuner = "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
+        assertTrue(HomeCopy.isSitOutJargon(tuner))
+        assertEquals(HomeCopy.SIT_OUT_HOME, HomeCopy.noBetHeadline(tuner))
+        val dead = HomeFixtures.actionableBtc()
+        val sit = com.dirk.kalshiodds.signal.trade.BetCall.Decision(
+            headline = com.dirk.kalshiodds.signal.trade.BetCall.Headline.NO_BET,
+            side = null,
+            ticket = null,
+            ask = null,
+            profitIfWinUsd = null,
+            allInUsd = null,
+            contracts = 0,
+            noBetReason = jargon
+        )
+        val line = HomeCopy.thisWindowHeadline(sit, dead, nowMs)
+        assertEquals(HomeCopy.SIT_OUT_HOME, line)
+        assertFalse(line.contains("Brier"))
+        assertFalse(line.contains("log-loss"))
     }
 
     @Test

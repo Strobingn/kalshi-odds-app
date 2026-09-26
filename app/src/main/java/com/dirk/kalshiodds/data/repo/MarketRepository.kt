@@ -130,7 +130,13 @@ class MarketRepository(
         extraTickers: List<String> = emptyList(),
         edgeThresholdPp: Double = EDGE_ALERT_THRESHOLD_PP
     ): MarketsSnapshot = refreshMutex.withLock {
-        refreshOnce(watchBtc, watchEth, watchSol, extraTickers, edgeThresholdPp)
+        refreshOnce(
+            watchBtc = true,
+            watchEth = false,
+            watchSol = false,
+            extraTickers = CryptoMarkets.liveTickers(extraTickers),
+            edgeThresholdPp = edgeThresholdPp
+        )
     }
 
     private suspend fun refreshOnce(
@@ -151,7 +157,7 @@ class MarketRepository(
             val solDeferred = async {
                 if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open") else null
             }
-            val extrasDeferred = CryptoMarkets.filterCrypto(extraTickers).map { ticker ->
+            val extrasDeferred = CryptoMarkets.liveTickers(extraTickers).map { ticker ->
                 async { fetchExtra(ticker) }
             }
             val btcMarkets = btcDeferred.await()?.markets.orEmpty().cryptoOnly()

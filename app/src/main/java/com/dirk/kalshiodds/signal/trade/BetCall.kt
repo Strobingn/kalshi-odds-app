@@ -39,7 +39,7 @@ object BetCall {
             return none("Trade tickets are off in Settings")
         }
         if (ctx.settings.isSittingOut()) {
-            return none(ctx.settings.autoTuneNote.ifBlank { "Sitting out — model loses to the market" })
+            return none(ctx.settings.autoTuneNote.ifBlank { "The model hasn't beaten Kalshi's prices in testing." })
         }
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
             return none(TicketBuilder.MARKET_CLOSED)

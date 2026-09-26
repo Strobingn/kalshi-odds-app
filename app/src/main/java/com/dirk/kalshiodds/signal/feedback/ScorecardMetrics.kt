@@ -96,10 +96,7 @@ object ScorecardMetrics {
         requireUncertaintyPass: Boolean = false,
         maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY
     ): Snapshot {
-        val settled = entries.filter {
-            (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
-                ForecastUnits.isScoredPick(it)
-        }
+        val settled = settledScoredPicks(entries)
         val voids = entries.count { it.outcome.equals("void", true) }
         val open = entries.count { it.outcome == null }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
@@ -135,6 +132,20 @@ object ScorecardMetrics {
     const val MIN_BUCKET_SAMPLES = SignalConstants.SCORECARD_BUCKET_MIN_SAMPLES
     const val MIN_BRIER_DISPLAY = 20
 
+    /** Fixed home / scorecard coin order. */
+    val COIN_ORDER: List<String> = listOf("BTC", "SOL", "ETH")
+
+    /**
+     * Settled directional picks that count on the scorecard.
+     * YES/NO outcomes only; voids and NO BET rows are excluded.
+     * Home and the full scorecard both use this list.
+     */
+    fun settledScoredPicks(entries: List<PredictionLogEntry>): List<PredictionLogEntry> =
+        entries.filter {
+            (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
+                ForecastUnits.isScoredPick(it)
+        }
+
     fun honest(
         rows: List<PredictionLogEntry>,
         zoneId: ZoneId = ZoneId.of("America/New_York")
@@ -169,11 +180,10 @@ object ScorecardMetrics {
     }
 
     fun coinBreakdowns(rows: List<PredictionLogEntry>): List<Breakdown> {
-        val order = listOf("BTC", "ETH", "SOL")
         val groups = rows.groupBy { coinOf(it.series.ifBlank { it.ticker }) }
-        return order.map { coin ->
-            breakdown(coin, coinLabel(coin), groups[coin].orEmpty())
-        } + groups.keys.filter { it !in order && it != "OTHER" }.sorted().map { coin ->
+        return COIN_ORDER.map { coin ->
+            breakdown(coin, coin, groups[coin].orEmpty())
+        } + groups.keys.filter { it !in COIN_ORDER && it != "OTHER" }.sorted().map { coin ->
             breakdown(coin, coin, groups[coin].orEmpty())
         }
     }
@@ -209,13 +219,6 @@ object ScorecardMetrics {
             u.contains("SOL") -> "SOL"
             else -> "OTHER"
         }
-    }
-
-    private fun coinLabel(coin: String): String = when (coin) {
-        "BTC" -> "Bitcoin"
-        "ETH" -> "Ethereum"
-        "SOL" -> "Solana"
-        else -> coin
     }
 
     private fun breakdown(key: String, label: String, rows: List<PredictionLogEntry>): Breakdown {

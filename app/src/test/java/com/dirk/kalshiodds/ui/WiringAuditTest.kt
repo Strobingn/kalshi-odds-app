@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
 import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.signal.paper.PaperApprove
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.ApproveRouter
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
@@ -106,6 +107,10 @@ class WiringAuditTest {
         Control("Home tile AI UP percent", HomeCopy::class.java, "tileAiUp"),
         Control("Home tile AI DOWN percent", HomeCopy::class.java, "tileAiDown"),
         Control("Home tile AI percents", HomeCopy::class.java, "tileAiPercents"),
+        Control("Home tile $10 wins", HomeCopy::class.java, "tenDollarWins"),
+        Control("Home tile $10 wins line", HomeCopy::class.java, "tenDollarWinsLine"),
+        Control("Home tile $10 UP", HomeCopy::class.java, "tileTenDollarUp"),
+        Control("Home tile $10 DOWN", HomeCopy::class.java, "tileTenDollarDown"),
         Control("Home $5 all-in line", HomeCopy::class.java, "allInProfit"),
         Control("Home primary Buy label", HomeCopy::class.java, "primaryButtonLabel"),
         Control("Home confirm-sheet Approve label", HomeCopy::class.java, "confirmApproveLabel"),
@@ -122,7 +127,27 @@ class WiringAuditTest {
         Control("Home paper toggle", OddsViewModel::class.java, "setPaperTrading"),
         Control("Home tickets Approve", OddsViewModel::class.java, "approveTicket"),
         Control("Home tickets PAPER", OddsViewModel::class.java, "paperTicket"),
+        Control("Home card Paper UP/DOWN", OddsViewModel::class.java, "paperBuySide"),
+        Control("Home card $10 paper fill", PaperTileBuy::class.java, "place"),
+        Control("Home card paper position", HomeCopy::class.java, "paperPositionLine"),
+        Control("Home card paper disabled reason", HomeCopy::class.java, "paperDisabledReason"),
+        Control("Home card paper snackbar", HomeCopy::class.java, "paperConfirmSnackbar"),
         Control("Home scorecard tap", HomeCopy::class.java, "scorecardSummaryLine"),
+        Control("Scorecard settled picks", ScorecardCopy::class.java, "settledPicks"),
+        Control("Scorecard view", ScorecardCopy::class.java, "of"),
+        Control("Scorecard empty state", ScorecardCopy::class.java, "emptyState"),
+        Control("Scorecard empty-state gate", ScorecardCopy::class.java, "showsEmptyState"),
+        Control("Scorecard bucket line", ScorecardCopy::class.java, "bucketLine"),
+        Control("Scorecard time-of-day buckets", ScorecardCopy::class.java, "timeBuckets"),
+        Control("Scorecard time buckets", ScorecardCopy::class.java, "timeBuckets"),
+        Control("Scorecard recent pick", ScorecardCopy::class.java, "recentPick"),
+        Control("Scorecard recent pick line", ScorecardCopy::class.java, "recentPickLine"),
+        Control("Scorecard summary line", ScorecardCopy::class.java, "summaryLine"),
+        Control("Scorecard record line", ScorecardCopy::class.java, "recordLine"),
+        Control("Scorecard win-rate line", ScorecardCopy::class.java, "winRateLine"),
+        Control("Scorecard paper P&L line", ScorecardCopy::class.java, "paperPnlLine"),
+        Control("Scorecard settled-count line", ScorecardCopy::class.java, "settledCountLine"),
+        Control("Scorecard export", ScorecardViewModel::class.java, "exportResults"),
         Control("Home snapshot merge", HomeSnapshotMerge::class.java, "apply"),
         Control("App back stack", AppNavigator::class.java, "back"),
         Control("Market rollover successor", com.dirk.kalshiodds.signal.market.MarketRollover::class.java, "successor"),

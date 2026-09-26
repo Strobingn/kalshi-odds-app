@@ -61,12 +61,12 @@ class PaperApprovePathTest {
 
     @Test
     fun approveLongShotNoCredentials() = runBlocking {
-        assertPath(ticket(TicketKind.HUNTER_VALUE, "KXETH15M-L", 40, 8.0, 0.20, win = 50.0))
+        assertPath(ticket(TicketKind.HUNTER_VALUE, "KXBTC15M-L", 40, 8.0, 0.20, win = 50.0))
     }
 
     @Test
     fun approveWinTargetConfiguredNoCredentials() = runBlocking {
-        assertPath(ticket(TicketKind.CONFIGURED, "KXSOL15M-C", 20, 4.0, 0.20, win = 50.0))
+        assertPath(ticket(TicketKind.CONFIGURED, "KXBTC15M-C", 20, 4.0, 0.20, win = 50.0))
     }
 
     @Test

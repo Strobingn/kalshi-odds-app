@@ -1,11 +1,17 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.domain.KalshiPrice
+import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.SeriesKind
 import com.dirk.kalshiodds.domain.TimeLeft
 import com.dirk.kalshiodds.signal.model.SignalStance
+import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -75,8 +81,7 @@ object HomeCopy {
     ): String {
         if (decision == null || market == null) return "NO BET this window"
         if (!decision.isActionable) {
-            val reason = decision.noBetReason?.trim().orEmpty()
-            return if (reason.isEmpty()) "NO BET this window" else "NO BET this window · $reason"
+            return noBetHeadline(decision.noBetReason)
         }
         val profit = decision.profitIfWinUsd?.let { String.format(Locale.US, "$%.2f", it) } ?: "—"
         return "${decision.label}  ${coinShort(market)}  · $5 wins $profit profit · ${closesIn(market.closeTimeEpochMs, nowMs)}"
@@ -123,7 +128,101 @@ object HomeCopy {
         }
     }
 
+    const val NO_BET_WINDOW = "NO BET this window"
+    const val SIT_OUT_HOME =
+        "NO BET this window. The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
+
+    fun noBetHeadline(reason: String?): String {
+        val raw = reason?.trim().orEmpty()
+        if (raw.isEmpty()) return NO_BET_WINDOW
+        if (isSitOutJargon(raw)) return SIT_OUT_HOME
+        return "$NO_BET_WINDOW · $raw"
+    }
+
+    fun isSitOutJargon(reason: String): Boolean {
+        val u = reason.lowercase()
+        return u.contains("brier") ||
+            u.contains("log-loss") ||
+            u.contains("log loss") ||
+            u.contains("sit out") ||
+            u.contains("sitting out") ||
+            u.contains("hasn't beaten kalshi") ||
+            u.contains("expected value is negative")
+    }
+
     const val AI_EM_DASH = "AI —"
+
+    /**
+     * Display-only tile stake. Real live Approve stays
+     * [com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD] ($5).
+     */
+    const val TILE_STAKE_USD = 10.0
+    const val TEN_WINS_DASH = "$10 wins —"
+
+    data class TenDollarWins(
+        val ask: Double?,
+        val contracts: Int,
+        val feeUsd: Double,
+        val costUsd: Double,
+        val profitUsd: Double?,
+        val line: String
+    ) {
+        val hasAsk: Boolean get() = ask != null && contracts > 0
+    }
+
+    /**
+     * Net profit if the owner bought this side with $10 at the live ask
+     * and it wins. Uses [LiveOrderSizer.size] so contracts / fee / profit
+     * match `ceil_cent(0.07 × C × P × (1−P))` and
+     * `C×P + fee ≤ $10`. Display only — never sizes a ticket.
+     */
+    fun tenDollarWins(ask: Double?): TenDollarWins {
+        val px = KalshiPrice.usable(ask)
+        if (px == null) {
+            return TenDollarWins(null, 0, 0.0, 0.0, null, TEN_WINS_DASH)
+        }
+        val clip = LiveOrderSizer.size(px, TILE_STAKE_USD)
+        if (!clip.ok) {
+            return TenDollarWins(px, 0, 0.0, 0.0, null, TEN_WINS_DASH)
+        }
+        return TenDollarWins(
+            ask = clip.price,
+            contracts = clip.count,
+            feeUsd = clip.feeUsd,
+            costUsd = clip.allInUsd,
+            profitUsd = clip.profitIfWinUsd,
+            line = tenDollarWinsLine(clip.profitIfWinUsd)
+        )
+    }
+
+    fun tenDollarWinsLine(profitUsd: Double): String {
+        val sign = if (profitUsd >= -1e-9) "+" else "−"
+        return String.format(Locale.US, "$10 wins %s$%.2f", sign, abs(profitUsd))
+    }
+
+    fun tileTenDollarUp(market: MarketUiModel): String =
+        tenDollarWins(MarketQuoteView.of(market).yesAsk).line
+
+    fun tileTenDollarDown(market: MarketUiModel): String =
+        tenDollarWins(MarketQuoteView.of(market).noAsk).line
+
+    const val PAPER_UP = "Paper UP"
+    const val PAPER_DOWN = "Paper DOWN"
+
+    fun paperDisabledReason(market: MarketUiModel, side: String): String? =
+        PaperTileBuy.disabledReason(market, side)
+
+    fun paperUpEnabled(market: MarketUiModel): Boolean = PaperTileBuy.enabled(market, "YES")
+
+    fun paperDownEnabled(market: MarketUiModel): Boolean = PaperTileBuy.enabled(market, "NO")
+
+    fun paperPositionLine(fill: PaperFill?): String? = PaperTileBuy.positionLine(fill)
+
+    fun paperPositionLine(paper: PaperBookState, ticker: String): String? =
+        PaperTileBuy.positionLine(PaperTileBuy.openFill(paper, ticker))
+
+    fun paperConfirmSnackbar(side: String, sized: TenDollarWins): String =
+        PaperTileBuy.confirmMessage(side, sized)
 
     data class TileAiPercents(
         val up: String,

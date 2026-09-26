@@ -1,6 +1,5 @@
 package com.dirk.kalshiodds.ui
 
-import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -10,18 +9,14 @@ import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import kotlin.math.abs
 
 /**
- * Home list = exactly three coin cards in fixed order: BTC, SOL, ETH.
- * Each slot is keyed by series and shows only that coin's current window
- * (`open_time <= now < close_time`). Missing listings keep the slot with
- * [NEXT_WINDOW_LOADING]. Never sorted by edge — [ranked] / [best] feed
- * "This window" only.
+ * Home list = one Bitcoin card from [CryptoMarkets.DEFAULT_SERIES].
+ * The slot is keyed by series and shows only the current window
+ * (`open_time <= now < close_time`). A missing listing keeps the slot
+ * with [NEXT_WINDOW_LOADING]. Never sorted by edge — [ranked] / [best]
+ * feed "This window" only.
  */
 object HomeMarkets {
-    val CARD_SERIES: List<String> = listOf(
-        KalshiApi.SERIES_BTC,
-        KalshiApi.SERIES_SOL,
-        KalshiApi.SERIES_ETH
-    )
+    val CARD_SERIES: List<String> = CryptoMarkets.DEFAULT_SERIES
     const val NEXT_WINDOW_LOADING = "Next window loading"
 
     data class CoinCard(
@@ -50,8 +45,8 @@ object HomeMarkets {
     ): List<MarketUiModel> = coinCards(markets, nowMs).mapNotNull { it.market }
 
     /**
-     * Rank for the "This window" summary only. The three home cards stay
-     * in [CARD_SERIES] order and are never reordered by this key.
+     * Rank for the "This window" summary only. The Bitcoin card stays
+     * in [CARD_SERIES] order and is never reordered by this key.
      */
     fun ranked(
         markets: List<MarketUiModel>,

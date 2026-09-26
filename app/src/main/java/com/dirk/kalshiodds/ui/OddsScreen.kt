@@ -28,6 +28,7 @@ fun OddsScreen(
         onOpenChart = onOpenChart,
         onRefresh = { viewModel.refresh() },
         onBuyMarket = { market, side -> viewModel.buyMarket(market, side) },
+        onPaperSide = { market, side -> viewModel.paperBuySide(market, side) },
         onSellMarket = { market ->
             val pos = state.positions.firstOrNull { it.ticker == market.ticker } ?: return@HomeScreen
             viewModel.sellPosition(pos.ticker, pos.side)

@@ -356,23 +356,10 @@ fun SettingsContent(
             }
 
             Section("Watch series")
-            ToggleRow("Bitcoin · KXBTC15M", s.watchBtc, { viewModel?.setWatchBtc(it) })
-            ToggleRow("Ethereum · KXETH15M", s.watchEth, { viewModel?.setWatchEth(it) })
-            ToggleRow("Solana · KXSOL15M", s.watchSol, { viewModel?.setWatchSol(it) })
-
-            OutlinedTextField(
-                value = s.extraTickersText,
-                onValueChange = { viewModel?.setExtraText(it) },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text("Extra crypto tickers") },
-                supportingText = {
-                    Text(
-                        state.extraRejected
-                            ?: "Comma-separated Kalshi tickers (ETH/SOL/XRP/… 15m ok). Non-crypto dropped.",
-                        color = if (state.extraRejected != null) colors.accentOrange else colors.textSecondary
-                    )
-                },
-                minLines = 2
+            Text(
+                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
             )
 
             Section("Edge threshold")

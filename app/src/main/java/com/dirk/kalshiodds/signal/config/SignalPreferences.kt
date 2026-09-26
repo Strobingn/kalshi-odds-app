@@ -105,23 +105,11 @@ data class SignalSettings(
     fun keyIdWithoutPem(): Boolean = apiKeyId.isNotBlank() && !hasPrivateKey
 
     val watchedSeries: Set<String>
-        get() = buildSet {
-            if (watchBtc) add(KalshiApi.SERIES_BTC)
-            if (watchEth) add(KalshiApi.SERIES_ETH)
-            if (watchSol) add(KalshiApi.SERIES_SOL)
-        }
+        get() = CryptoMarkets.DEFAULT_SERIES.toSet()
 
-    fun isWatchedTicker(ticker: String): Boolean {
-        if (!CryptoMarkets.isCryptoTicker(ticker)) return false
-        val u = ticker.uppercase()
-        if (extraTickers.any { it.equals(ticker, ignoreCase = true) }) return true
-        if (watchBtc && (u.startsWith(KalshiApi.SERIES_BTC) || u.contains("BTC"))) return true
-        if (watchEth && (u.startsWith(KalshiApi.SERIES_ETH) || (u.contains("ETH") && !u.contains("BTC")))) return true
-        if (watchSol && (u.startsWith(KalshiApi.SERIES_SOL) || u.contains("SOL"))) return true
-        return extraTickers.isNotEmpty() && extraTickers.any { u.startsWith(it.uppercase()) }
-    }
+    fun isWatchedTicker(ticker: String): Boolean = CryptoMarkets.isLiveTicker(ticker)
 
-    fun extraTickerList(): List<String> = CryptoMarkets.filterCrypto(extraTickers)
+    fun extraTickerList(): List<String> = CryptoMarkets.liveTickers(extraTickers)
 
     fun isSittingOut(): Boolean =
         autoTuneEnabled && !autoTuneManualOverride && sitOut

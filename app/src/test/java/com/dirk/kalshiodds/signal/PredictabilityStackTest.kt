@@ -343,8 +343,8 @@ class ScoringPredictabilityTest {
         val engine = ScoringEngine(idFactory = { "r" })
         val now = 2_000_000L
         val tick = MarketTick(
-            ticker = "KXSOL15M-REG",
-            series = "KXSOL15M",
+            ticker = "KXBTC15M-REG",
+            series = "KXBTC15M",
             yesBid = 0.44,
             yesAsk = 0.46,
             lastPrice = 0.45,

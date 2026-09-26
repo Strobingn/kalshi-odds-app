@@ -3,7 +3,7 @@ package com.dirk.kalshiodds.domain
 /**
  * Picks the currently open 15m contract per series from a REST listing.
  *
- * Official listing: GET /markets?series_ticker=KXBTC15M|KXETH15M|KXSOL15M&status=open
+ * Official listing: GET /markets?series_ticker=KXBTC15M&status=open
  * https://docs.kalshi.com/api-reference/market/get-markets
  *
  * `status=open` matches response `status=active`. Past [MarketUiModel.closeTimeEpochMs]
