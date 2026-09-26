@@ -47,10 +47,11 @@ data class MarketQuoteView(
         ): MarketQuoteView {
             val snap = ConsistentQuote.fromSameUpdate(yesBid, yesAsk, noBid, noAsk)
                 ?: ConsistentQuote.Snap(yesBid, yesAsk, noBid, noAsk)
-            val yb = displayBid(snap.yesBid)
             val ya = KalshiPrice.usable(snap.yesAsk)
-            val nb = displayBid(snap.noBid)
             val na = KalshiPrice.usable(snap.noAsk)
+            val dropLockedBids = snap.lockedBothSides()
+            val yb = if (dropLockedBids) null else displayBid(snap.yesBid)
+            val nb = if (dropLockedBids) null else displayBid(snap.noBid)
             return MarketQuoteView(
                 yesBid = yb,
                 yesAsk = ya,

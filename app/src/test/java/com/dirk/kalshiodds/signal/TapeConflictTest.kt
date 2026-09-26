@@ -91,6 +91,27 @@ class TapeConflictTest {
     }
 
     @Test
+    fun likelySideFromModelPercentNotValuePredictedSide() {
+        val out = TapeConflict.evaluate(
+            spotReturn1m = -0.001,
+            spotReturn5m = -0.002,
+            modelSide = "YES",
+            yesAsk = 0.34,
+            noAsk = 0.67,
+            yesBid = 0.33,
+            noBid = 0.66,
+            spotUsd = 84_140.0,
+            strikeUsd = 84_144.0,
+            priorStreak = TapeConflict.SUSTAINED_STREAK,
+            modelYesPercent = 39.0
+        )
+        assertEquals("NO", out.modelSide)
+        assertEquals("NO", out.primarySide)
+        assertFalse(out.conflict)
+        assertEquals(null, out.banner)
+    }
+
+    @Test
     fun screenshotMarketIsYesNotSparklineDown() {
         val primary = TapeConflict.primaryFromMarket(
             yesAsk = 0.64,

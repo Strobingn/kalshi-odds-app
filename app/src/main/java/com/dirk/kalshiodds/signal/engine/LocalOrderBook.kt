@@ -109,6 +109,14 @@ class LocalOrderBook {
     @Synchronized
     fun bestYesAsk(): Double? = if (no.isEmpty()) null else (1.0 - no.lastKey()).coerceIn(0.0, 1.0)
 
+    /** Highest NO buy offer. Official orderbook lists bids only. */
+    @Synchronized
+    fun bestNoBid(): Double? = if (no.isEmpty()) null else no.lastKey()
+
+    /** Tightest NO offer implied by the best YES bid: $1 − best YES bid. */
+    @Synchronized
+    fun bestNoAsk(): Double? = if (yes.isEmpty()) null else (1.0 - yes.lastKey()).coerceIn(0.0, 1.0)
+
     @Synchronized
     fun mid01(): Double? {
         val bid = bestYesBid()

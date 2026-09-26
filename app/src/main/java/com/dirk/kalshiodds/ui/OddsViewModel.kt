@@ -118,15 +118,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
-                    val incoming = com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
-                        lastRecordedTicketError,
-                        tickets.lastError
-                    )
-                    if (incoming != null) {
-                        lastRecordedTicketError = incoming
-                        container.lastOrderError.record(incoming)
-                    } else if (tickets.lastError.isNullOrBlank()) {
-                        lastRecordedTicketError = null
+                    val lastError = tickets.lastError
+                    if (!com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.isNotAnOrderError(lastError)) {
+                        val incoming = com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
+                            lastRecordedTicketError,
+                            lastError
+                        )
+                        if (incoming != null) {
+                            lastRecordedTicketError = incoming
+                            container.lastOrderError.record(incoming)
+                        } else if (lastError.isNullOrBlank()) {
+                            lastRecordedTicketError = null
+                        }
                     }
                     _state.update { cur ->
                         val notice = tickets.lastError
@@ -1006,12 +1009,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val tick = runCatching { hub.scoring.book.lastTick(raw.ticker) }.getOrNull()
             val m = raw.withLiveQuote(tick)
             val pts = runCatching { hub.scoring.book.midHistoryPp(m.ticker) }.getOrElse { emptyList() }
-            val last = m.yesProbabilityPercent?.toFloat()
-            val merged = if (last != null && (pts.isEmpty() || kotlin.math.abs(pts.last() - last) > 0.05f)) {
-                (pts + last).takeLast(com.dirk.kalshiodds.signal.config.SignalConstants.SPARKLINE_MAX_POINTS)
-            } else {
-                pts
-            }
+            val last = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(
+                listOf(m.yesProbabilityPercent?.toFloat())
+            ).singleOrNull()
+            val merged = com.dirk.kalshiodds.chart.ChartSeriesBuilder.sparklineMidsPp(
+                if (last != null && (pts.isEmpty() || kotlin.math.abs(pts.last() - last) > 0.05f)) {
+                    (pts + last).takeLast(com.dirk.kalshiodds.signal.config.SignalConstants.SPARKLINE_MAX_POINTS)
+                } else {
+                    pts
+                }
+            )
             val bids = runCatching { chartWindows.seriesForCard(m) }.getOrElse {
                 val liveBids = runCatching { hub.scoring.book.bidHistory(m.ticker) }.getOrElse { emptyList() }
                 val stored = runCatching {

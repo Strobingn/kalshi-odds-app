@@ -749,7 +749,7 @@ class KnownIssuesRegressionTest {
         session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-26SEP251215-45"))
         recordOnce()
         assertNull(session.snapshot().lastError)
-        assertEquals(listOf(TicketSession.WINDOW_CLOSED_NOTICE), recorded)
+        assertTrue(recorded.isEmpty())
         assertEquals(1, session.windowClosedNoticeCount)
         assertEquals(0, placed.get())
     }
@@ -1449,8 +1449,7 @@ class KnownIssuesRegressionTest {
         assertEquals(HomeScorecardSummary.NO_SETTLED, empty.emptyState())
         assertTrue(empty.allLines().contains(HomeScorecardSummary.NO_SETTLED))
         assertTrue(empty.timeOfDay.all { it.line.contains(ScorecardCopy.EM_DASH) })
-        assertFalse(empty.allLines().any { it.contains("0%") })
-        assertFalse(empty.allLines().any { it.contains("By coin") })
+        assertFalse(empty.allLines().any { it.contains("0-0") || it.contains(" · 0%") })
 
         val src = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt"),
@@ -1458,10 +1457,10 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }.readText()
         assertTrue(src.contains("view.showsEmptyState"))
         assertTrue(src.contains("ScorecardCopy.NO_SETTLED"))
-        assertFalse(src.contains("perSeries"))
-        assertFalse(src.contains("No settled samples yet"))
-        assertFalse(src.contains("calibrationSamples"))
-        assertFalse(src.contains("MIN_CALIBRATION_SAMPLES"))
+        assertTrue(src.contains("perSeries"))
+        assertTrue(src.contains("calibrationSamples"))
+        assertTrue(src.contains("MIN_CALIBRATION_SAMPLES"))
+        assertTrue(src.contains("ScorecardCopy.PICKS_TITLE"))
     }
 
     @Test

@@ -98,6 +98,73 @@ object HomeFixtures {
         spotDelta = -20.0
     )
 
+    /**
+     * Phone screenshot on 0.3.14: BTC 15m, UP 34¢ / DOWN 66¢, AI 39% / 61%.
+     * Realistic book is 33/34 vs 66/67. Model and market both favor DOWN.
+     */
+    fun screenshotPhoneBtc() = market(
+        ticker = "KXBTC15M-26SEP251600-45",
+        seriesLabel = "Bitcoin",
+        yesAsk = 0.34,
+        aiYes = 39.0,
+        predicted = "YES",
+        closeMs = NOW_MS + 707_000L,
+        floorStrike = 84_144.0,
+        spotUsd = 84_140.0,
+        spotDelta = -4.0
+    ).copy(
+        yesBid = 0.33,
+        yesAsk = 0.34,
+        noBid = 0.66,
+        noAsk = 0.67,
+        lastPrice = 0.34,
+        yesProbabilityPercent = 33.5,
+        noProbabilityPercent = 66.5,
+        aiYesPercent = 39.0,
+        aiNoPercent = 61.0,
+        importedModelPp = 39.0,
+        edgePp = 39.0 - 33.5,
+        tapeConflict = true,
+        tapeConflictNote = "AI says UP, market + spot say DOWN",
+        modelLeanSide = "YES",
+        primaryHeroSide = "NO",
+        predictedSide = "YES",
+        oddsHistory = listOf(36f, 35f, 34f, 33f, 34f, 34f),
+        spreadDollars = 0.01,
+        aiNote = "QUIET/MID · cal · adapt · AI 39% vs mkt 34% · flow NO · vel −0.6pp/s · book ask −18% · Δ +5.5pp (fv 39%) · net +3.2pp",
+        aiConfidence = 0.62,
+        digitalFairPp = 39.0,
+        netEdgePp = 3.2,
+        netEvDollars = 0.032,
+        feePerContract = 0.014,
+        halfSpread = 0.005,
+        suggestedContracts = 12,
+        sizingNote = "Kelly clip after fee + half-spread",
+        timeToMoveSec = 90.0,
+        midVolPp = 2.4,
+        pFill = 0.71,
+        uncertainty = 0.18,
+        uncertaintyPassed = true,
+        calibrated = true,
+        adapterReady = true,
+        regimeTag = "QUIET",
+        tteRegimeLabel = "MID",
+        stance = "Slight UP / YES",
+        ensembleNote = "blend MLP 41¢ · GBM 38¢",
+        flowNote = "smart-flow",
+        spotLabel = "spot −0.05% / 5m · fund +0.01% (binance)",
+        tapeTrend = "down",
+        mlpPp = 41.0,
+        gbmPp = 38.0,
+        featureDevs = mapOf(
+            "ai" to 5.5,
+            "flow" to -4.2,
+            "spot" to -1.1,
+            "velocity" to -0.8,
+            "imbalance" to -2.4
+        )
+    )
+
     fun disagreementBtc() = actionableBtc().copy(
         tapeConflict = true,
         tapeConflictNote = "AI says UP, market + spot say DOWN",
@@ -146,9 +213,17 @@ object HomeFixtures {
             series: String,
             at: Long,
             won: Boolean,
-            side: String = "YES"
+            side: String = "YES",
+            index: Int,
+            legacyMissingEntry: Boolean = false
         ): PredictionLogEntry {
             val yesOutcome = if (side == "YES") won else !won
+            val ask = if (legacyMissingEntry) null else {
+                if (side == "NO") 0.66 else if (index % 4 == 0) 0.28 else if (index % 3 == 0) 0.72 else 0.34
+            }
+            val contracts = if (legacyMissingEntry || ask == null) null else if (index % 2 == 0) 29 else 8
+            val fee = if (legacyMissingEntry || ask == null) null else 0.18 + index * 0.01
+            val stake = if (ask != null && contracts != null && fee != null) contracts * ask + fee else null
             return PredictionLogEntry(
                 ticker = ticker,
                 series = series,
@@ -161,29 +236,141 @@ object HomeFixtures {
                 score = if (won) 1 else 0,
                 predictedSide = side,
                 edgePp = 5.0,
-                settledAtMs = at
+                settledAtMs = at,
+                entryAsk = ask,
+                contracts = contracts,
+                stakeUsd = stake,
+                feeUsd = fee
             )
         }
         val btcMorning = (0 until 8).map { i ->
-            pick("KXBTC15M-26SEP25${1000 + i}-50", "KXBTC15M", et(10, i), won = i < 6, side = if (i % 3 == 0) "NO" else "YES")
+            pick("KXBTC15M-26SEP25${1000 + i}-50", "KXBTC15M", et(10, i), won = i < 6, side = if (i % 3 == 0) "NO" else "YES", index = i)
         }
         val btcAfternoon = (0 until 6).map { i ->
-            pick("KXBTC15M-26SEP25${1400 + i}-20", "KXBTC15M", et(14, i), won = i < 4)
+            pick("KXBTC15M-26SEP25${1400 + i}-20", "KXBTC15M", et(14, i), won = i < 4, index = 8 + i)
         }
         val btcEvening = (0 until 4).map { i ->
-            pick("KXBTC15M-26SEP25${1800 + i}-40", "KXBTC15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
+            pick(
+                "KXBTC15M-26SEP25${1800 + i}-40",
+                "KXBTC15M",
+                et(18, i),
+                won = i < 2,
+                side = if (i == 1) "NO" else "YES",
+                index = 14 + i,
+                legacyMissingEntry = i == 3
+            )
         }
+        return btcMorning + btcAfternoon + btcEvening
+    }
+
+    /** Legacy stored ETH/SOL rows — scorecard must drop these. */
+    fun sampleStoredNonBtcEntries(): List<PredictionLogEntry> {
+        val zone = ZoneId.of("America/New_York")
+        fun et(hour: Int, i: Int): Long =
+            ZonedDateTime.of(2026, 9, 25, hour, i, 0, 0, zone).toInstant().toEpochMilli()
+        fun pick(ticker: String, series: String, at: Long, won: Boolean, side: String = "YES") = PredictionLogEntry(
+            ticker = ticker,
+            series = series,
+            predictedYes = if (side == "YES") 0.70 else 0.30,
+            predictedNo = if (side == "YES") 0.30 else 0.70,
+            marketMid = 0.55,
+            timestampMs = at,
+            closeTimeMs = at,
+            outcome = if (side == "YES") if (won) "yes" else "no" else if (won) "no" else "yes",
+            score = if (won) 1 else 0,
+            predictedSide = side,
+            edgePp = 5.0,
+            settledAtMs = at,
+            entryAsk = 0.34,
+            contracts = 8,
+            stakeUsd = 2.90,
+            feeUsd = 0.18
+        )
         val storedSol = (0 until 6).map { i ->
             pick("KXSOL15M-26SEP25${1400 + i}-20", "KXSOL15M", et(14, i), won = i < 4)
         }
         val storedEth = (0 until 4).map { i ->
             pick("KXETH15M-26SEP25${1800 + i}-40", "KXETH15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
         }
-        return btcMorning + btcAfternoon + btcEvening + storedSol + storedEth
+        return storedSol + storedEth
     }
 
     fun sampleScorecardUi(): ScorecardUi =
         ScorecardUi(view = ScorecardCopy.of(sampleSettledEntries(), SAMPLE_SCORECARD.paperPnlUsd))
+
+    fun sampleSettledFills(): List<PaperFill> {
+        val entries = sampleSettledEntries().filter { it.entryAsk != null }
+        val matched = entries.mapIndexed { i, e ->
+            val ask = e.entryAsk ?: 0.34
+            val won = e.score == 1
+            val contracts = e.contracts ?: if (i % 2 == 0) 29 else 8
+            val fee = e.feeUsd ?: (0.18 + i * 0.01)
+            val stake = e.stakeUsd ?: (contracts * ask + fee)
+            val pnl = if (won) contracts * 1.0 - stake else -stake
+            PaperFill(
+                id = "fill-$i",
+                ticker = e.ticker,
+                side = e.predictedSide ?: "YES",
+                stakeUsd = stake,
+                contracts = contracts,
+                limitPrice = ask,
+                source = "AI hunter",
+                createdAtMs = e.settledAtMs ?: e.timestampMs,
+                settled = true,
+                outcome = e.outcome,
+                won = won,
+                pnlUsd = pnl,
+                note = String.format(java.util.Locale.US, "settled · fee $%.2f", fee)
+            )
+        }
+        val manuals = (0 until 4).map { i ->
+            val ask = if (i == 3) 0.72 else 0.40
+            val won = i < 3
+            val contracts = 10
+            val fee = 0.20
+            val stake = contracts * ask + fee
+            val pnl = if (won) contracts * 1.0 - stake else -stake
+            PaperFill(
+                id = "manual-$i",
+                ticker = "KXBTC15M-26SEP25${2000 + i}-00",
+                side = if (i == 1) "NO" else "YES",
+                stakeUsd = stake,
+                contracts = contracts,
+                limitPrice = ask,
+                source = PaperTileBuy.SOURCE,
+                createdAtMs = ZonedDateTime.of(2026, 9, 25, 20, i, 0, 0, ZoneId.of("America/New_York"))
+                    .toInstant().toEpochMilli(),
+                settled = true,
+                outcome = if (won) if (i == 1) "no" else "yes" else if (i == 1) "yes" else "no",
+                won = won,
+                pnlUsd = pnl,
+                note = String.format(java.util.Locale.US, "Paper tile $10 · fee $%.2f", fee)
+            )
+        }
+        return matched + manuals
+    }
+
+    fun sampleScorecardDetailUi(): ScorecardUi {
+        val entries = sampleSettledEntries()
+        val fills = sampleSettledFills()
+        val windows = entries.take(6).map {
+            com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+                ticker = it.ticker,
+                series = it.series,
+                result = it.outcome ?: "yes",
+                strikeUsd = 84_144.0
+            )
+        }
+        return ScorecardUi(
+            view = ScorecardCopy.of(entries, fills, paperPnlUsd = 0.0, windows = windows),
+            metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(entries),
+            allowlist = com.dirk.kalshiodds.signal.feedback.Allowlist.State(),
+            adapter = com.dirk.kalshiodds.signal.feedback.OnlineAdapter.identity(),
+            guardrails = com.dirk.kalshiodds.signal.feedback.Guardrails.identity(),
+            extendedLine = "RL n=12 · meta n=8 · conformal n=4 cold",
+            sitOut = false
+        )
+    }
 
     fun state(
         btc: MarketUiModel,

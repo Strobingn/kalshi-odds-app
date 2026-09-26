@@ -55,9 +55,9 @@ fun HomeSpotDelta(
 @Composable
 fun TapeConflictBanner(market: MarketUiModel, modifier: Modifier = Modifier) {
     val colors = DipTheme.colors
-    if (!market.tapeConflict || market.tapeConflictNote.isNullOrBlank()) return
+    val conflict = com.dirk.kalshiodds.ui.HomeCardDetails.conflictLine(market) ?: return
     Text(
-        text = market.tapeConflictNote.orEmpty(),
+        text = conflict,
         style = MaterialTheme.typography.bodyMedium,
         color = colors.accentOrange,
         fontWeight = FontWeight.Bold,

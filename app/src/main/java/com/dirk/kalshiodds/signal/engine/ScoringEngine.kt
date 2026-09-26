@@ -19,7 +19,6 @@ import com.dirk.kalshiodds.signal.sizing.PositionSizer
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStance
-import com.dirk.kalshiodds.signal.model.TickSource
 import java.util.UUID
 import kotlin.math.abs
 import kotlin.math.ln
@@ -185,23 +184,7 @@ class ScoringEngine(
         floorStrike: Double? = null
     ) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
-        book.rememberStrike(ticker, floorStrike)
-        val last = book.last(ticker)
-        val mid = last?.mid01 ?: return
-        book.push(
-            MarketTick(
-                ticker = ticker,
-                series = CryptoMarkets.inferSeries(ticker),
-                yesBid = mid,
-                yesAsk = mid,
-                lastPrice = mid,
-                volume = volume,
-                openInterest = openInterest,
-                closeTimeEpochMs = closeTimeEpochMs,
-                source = TickSource.REST,
-                receiveElapsedNanos = 0L
-            )
-        )
+        book.updateMeta(ticker, closeTimeEpochMs, volume, openInterest, floorStrike)
     }
 
     fun applySnapshot(
@@ -563,22 +546,6 @@ class ScoringEngine(
             predictedSide = dir.side
             delta = fair - midPp
         }
-        val tape = TapeConflict.evaluate(
-            spotReturn1m = spotFeat?.spotReturn1m,
-            spotReturn5m = spotFeat?.spotReturn5m,
-            modelSide = predictedSide,
-            yesAsk = tick.yesAsk,
-            noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
-            spotUsd = spotFeat?.lastPrice,
-            strikeUsd = strikeUsd,
-            fairYes = fair / 100.0,
-            previousPrimary = lastPrimarySide[tick.ticker],
-            priorStreak = tapeStreak[tick.ticker] ?: 0,
-            yesBid = tick.yesBid,
-            noBid = tick.noBid
-        )
-        tapeStreak[tick.ticker] = tape.disagreementStreak
-        lastPrimarySide[tick.ticker] = tape.primarySide
         if (extOut?.fairBlendYes != null || dir.applied) {
             ev = NetExpectedValue.compute(
                 fairYes = fair / 100.0,
@@ -674,6 +641,23 @@ class ScoringEngine(
             delta = fair - midPp
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
+        val tape = TapeConflict.evaluate(
+            spotReturn1m = spotFeat?.spotReturn1m,
+            spotReturn5m = spotFeat?.spotReturn5m,
+            modelSide = predictedSide,
+            yesAsk = tick.yesAsk,
+            noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
+            spotUsd = spotFeat?.lastPrice,
+            strikeUsd = strikeUsd,
+            fairYes = fair / 100.0,
+            previousPrimary = lastPrimarySide[tick.ticker],
+            priorStreak = tapeStreak[tick.ticker] ?: 0,
+            yesBid = tick.yesBid,
+            noBid = tick.noBid,
+            modelYesPercent = importedModelPp ?: aiPp
+        )
+        tapeStreak[tick.ticker] = tape.disagreementStreak
+        lastPrimarySide[tick.ticker] = tape.primarySide
         val reason = buildReason(
             aiPp = aiPp,
             flow = flow,

@@ -42,6 +42,7 @@ class ClosedWindowPathAuditTest {
         val expected = setOf(
             "com/dirk/kalshiodds/signal/trade/TicketBuilder.kt",
             "com/dirk/kalshiodds/signal/trade/TicketSession.kt",
+            "com/dirk/kalshiodds/signal/trade/LastOrderErrorOnce.kt",
             "com/dirk/kalshiodds/signal/trade/BetCall.kt",
             "com/dirk/kalshiodds/signal/trade/LiveOrderGates.kt",
             "com/dirk/kalshiodds/data/api/KalshiTradeClient.kt",
@@ -60,8 +61,16 @@ class ClosedWindowPathAuditTest {
         assertTrue(session.contains("announcedVoidIds"))
         assertTrue(session.contains("TicketPhase.Submitting"))
 
+        val once = read("com/dirk/kalshiodds/signal/trade/LastOrderErrorOnce.kt")
+        assertTrue(once.contains("isNotAnOrderError"))
+        assertTrue(once.contains("shouldClearPersisted"))
+        assertTrue(once.contains("WINDOW_CLOSED_NOTICE"))
+        assertTrue(once.contains("MARKET_CLOSED"))
+        assertTrue(once.contains("NEXT_WINDOW_LOADING"))
+
         val vm = read("com/dirk/kalshiodds/ui/OddsViewModel.kt")
         assertTrue(vm.contains("LastOrderErrorOnce.accept"))
+        assertTrue(vm.contains("LastOrderErrorOnce.isNotAnOrderError"))
         assertTrue(vm.contains("resolveActionWindow"))
         assertTrue(vm.contains("NEXT_WINDOW_LOADING"))
         assertTrue(vm.contains("voidTickers"))
@@ -70,6 +79,13 @@ class ClosedWindowPathAuditTest {
             "sellPosition still uses Market closed only when no market row exists",
             vm.contains("failSoft(\"Market closed\")")
         )
+
+        val app = read("com/dirk/kalshiodds/KalshiOddsApp.kt")
+        assertTrue(app.contains("clearStaleLifecycleNotice"))
+
+        val store = read("com/dirk/kalshiodds/signal/trade/LastOrderErrorStore.kt")
+        assertTrue(store.contains("clearStaleLifecycleNotice"))
+        assertTrue(store.contains("LastOrderErrorOnce.isNotAnOrderError"))
 
         val builder = read("com/dirk/kalshiodds/signal/trade/TicketBuilder.kt")
         assertTrue(builder.contains("const val MARKET_CLOSED"))

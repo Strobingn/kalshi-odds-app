@@ -50,7 +50,12 @@ data class PredictionLogEntry(
     val wouldAlert: Boolean? = null,
     val mlpYes: Double? = null,
     val cnnYes: Double? = null,
-    val gbmYes: Double? = null
+    val gbmYes: Double? = null,
+    /** Entry ask (0–1) for the picked side at signal time. */
+    val entryAsk: Double? = null,
+    val contracts: Int? = null,
+    val stakeUsd: Double? = null,
+    val feeUsd: Double? = null
 )
 
 @Serializable
@@ -70,7 +75,11 @@ data class SignalSnapshot(
     val wouldAlert: Boolean? = null,
     val mlpYes: Double? = null,
     val cnnYes: Double? = null,
-    val gbmYes: Double? = null
+    val gbmYes: Double? = null,
+    val entryAsk: Double? = null,
+    val contracts: Int? = null,
+    val stakeUsd: Double? = null,
+    val feeUsd: Double? = null
 )
 
 class PredictionLogStore(private val context: Context) {
@@ -133,7 +142,11 @@ class PredictionLogStore(private val context: Context) {
                     wouldAlert = snapshot?.wouldAlert ?: prev.wouldAlert,
                     mlpYes = snapshot?.mlpYes ?: prev.mlpYes,
                     cnnYes = snapshot?.cnnYes ?: prev.cnnYes,
-                    gbmYes = snapshot?.gbmYes ?: prev.gbmYes
+                    gbmYes = snapshot?.gbmYes ?: prev.gbmYes,
+                    entryAsk = snapshot?.entryAsk ?: prev.entryAsk,
+                    contracts = snapshot?.contracts ?: prev.contracts,
+                    stakeUsd = snapshot?.stakeUsd ?: prev.stakeUsd,
+                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd
                 )
             } else {
                 list.add(
@@ -160,7 +173,11 @@ class PredictionLogStore(private val context: Context) {
                         wouldAlert = snapshot?.wouldAlert,
                         mlpYes = snapshot?.mlpYes,
                         cnnYes = snapshot?.cnnYes,
-                        gbmYes = snapshot?.gbmYes
+                        gbmYes = snapshot?.gbmYes,
+                        entryAsk = snapshot?.entryAsk,
+                        contracts = snapshot?.contracts,
+                        stakeUsd = snapshot?.stakeUsd,
+                        feeUsd = snapshot?.feeUsd
                     )
                 )
             }

@@ -18,6 +18,7 @@ import kotlin.math.abs
  */
 object ConsistentQuote {
     const val COMPLEMENT_EPS = 0.0015
+    const val LOCKED_EPS = 1e-9
 
     data class Snap(
         val yesBid: Double?,
@@ -30,12 +31,39 @@ object ConsistentQuote {
             if (noBid != null && yesAsk != null && abs(noBid + yesAsk - 1.0) > COMPLEMENT_EPS) return true
             return false
         }
+
+        /** Bid==ask on both sides is last-price copied onto the book, not a real spread. */
+        fun lockedBothSides(): Boolean =
+            lockedBothSides(yesBid, yesAsk, noBid, noAsk)
     }
 
     fun complement(price: Double?): Double? {
         val p = KalshiPrice.usable(price) ?: return null
         return KalshiPrice.usable(1.0 - p)
     }
+
+    /**
+     * A real book almost never has bid==ask on both YES and NO.
+     * That pattern is last-trade / mid copied onto bid and ask, or
+     * bids invented as `1 − opposite ask` when the two asks already
+     * sum to 100. Tiles should not treat those as true best bids.
+     */
+    fun lockedBothSides(
+        yesBid: Double?,
+        yesAsk: Double?,
+        noBid: Double?,
+        noAsk: Double?
+    ): Boolean {
+        val yb = KalshiPrice.usable(yesBid)
+        val ya = KalshiPrice.usable(yesAsk)
+        val nb = KalshiPrice.usable(noBid)
+        val na = KalshiPrice.usable(noAsk)
+        if (yb == null || ya == null || nb == null || na == null) return false
+        return abs(yb - ya) < LOCKED_EPS && abs(nb - na) < LOCKED_EPS
+    }
+
+    fun lockedBothSides(tick: MarketTick): Boolean =
+        lockedBothSides(tick.yesBid, tick.yesAsk, tick.noBid, tick.noAsk)
 
     /**
      * Complete missing sides from fields that arrived together.
@@ -83,8 +111,12 @@ object ConsistentQuote {
         val fromTick = tick?.let {
             fromSameUpdate(it.yesBid, it.yesAsk, it.noBid, it.noAsk)
         }
+        val restFixed = fromSameUpdate(rest.yesBid, rest.yesAsk, rest.noBid, rest.noAsk) ?: rest
+        if (fromTick != null && fromTick.lockedBothSides() && !restFixed.lockedBothSides()) {
+            return restFixed
+        }
         if (fromTick != null) return fromTick
-        return fromSameUpdate(rest.yesBid, rest.yesAsk, rest.noBid, rest.noAsk) ?: rest
+        return restFixed
     }
 
     fun overlay(market: MarketUiModel, tick: MarketTick?): Snap =

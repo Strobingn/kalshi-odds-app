@@ -11,6 +11,7 @@ import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
+import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
@@ -138,6 +139,47 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun darkHomeCardDetailsExpanded() {
+        paparazzi.snapshot(name = "home_card_details") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.screenshotPhoneBtc(),
+                        settings = HomeFixtures.settings(true).copy(minProfitIfWinUsd = 20.0),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = true,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("home_card_details")
+    }
+
+    @Test
+    fun darkPhoneScreenshotAfterFix() = snap(
+        "home_after_fix",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.screenshotPhoneBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        ).copy(
+            settings = HomeFixtures.settings(true).copy(minProfitIfWinUsd = 20.0)
+        )
+    )
+
+    @Test
     fun lightBtcOnly() = snap(
         "home_light_btc_only",
         dark = false,
@@ -231,7 +273,30 @@ class HomeScreenScreenshotTest {
     fun darkScorecard() = snapScorecard("scorecard_dark", dark = true)
 
     @Test
+    fun darkScorecardRestoredBanners() = snapScorecard(
+        "scorecard_restored_banners",
+        dark = true,
+        ui = HomeFixtures.sampleScorecardDetailUi(),
+        height = 3600
+    )
+
+    @Test
     fun darkFullScorecardEmpty() = snapScorecard("scorecard_empty_dark", dark = true, empty = true)
+
+    @Test
+    fun darkScorecardDetail() = snapScorecard(
+        "scorecard_detail",
+        dark = true,
+        empty = false,
+        ui = HomeFixtures.sampleScorecardDetailUi().copy(
+            metrics = null,
+            allowlist = null,
+            adapter = null,
+            guardrails = null,
+            extendedLine = null
+        ),
+        height = 6400
+    )
 
     @Test
     fun lightSignals() = snapSignals("signals_light", dark = false)
@@ -345,19 +410,25 @@ class HomeScreenScreenshotTest {
         copyLatest(name)
     }
 
-    private fun snapScorecard(name: String, dark: Boolean, empty: Boolean = false) {
+    private fun snapScorecard(
+        name: String,
+        dark: Boolean,
+        empty: Boolean = false,
+        ui: ScorecardUi? = null,
+        height: Int? = null
+    ) {
         val tall = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
         try {
             paparazzi.unsafeUpdateConfig(
                 deviceConfig = DeviceConfig.PIXEL_6.copy(
                     softButtons = false,
-                    screenHeight = if (empty) 1400 else 1800
+                    screenHeight = height ?: if (empty) 1400 else 1800
                 )
             )
             paparazzi.snapshot(name = name) {
                 KalshiOddsTheme(darkTheme = dark) {
                     ScorecardScreen(
-                        ui = if (empty) ScorecardUi.EMPTY else HomeFixtures.sampleScorecardUi(),
+                        ui = ui ?: if (empty) ScorecardUi.EMPTY else HomeFixtures.sampleScorecardUi(),
                         onBack = {}
                     )
                 }
