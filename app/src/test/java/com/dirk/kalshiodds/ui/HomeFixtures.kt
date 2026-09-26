@@ -134,7 +134,6 @@ object HomeFixtures {
         aiNote = "QUIET/MID · cal · adapt · AI 39% vs mkt 34% · flow NO · vel −0.6pp/s · book ask −18% · Δ +5.5pp (fv 39%) · net +3.2pp",
         aiConfidence = 0.62,
         digitalFairPp = 39.0,
-        importedModelPp = 39.0,
         netEdgePp = 3.2,
         netEvDollars = 0.032,
         feePerContract = 0.014,

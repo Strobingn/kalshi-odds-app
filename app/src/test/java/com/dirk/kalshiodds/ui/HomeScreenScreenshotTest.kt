@@ -140,40 +140,29 @@ class HomeScreenScreenshotTest {
 
     @Test
     fun darkHomeCardDetailsExpanded() {
-        val restore = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
-        try {
-            paparazzi.unsafeUpdateConfig(
-                deviceConfig = DeviceConfig.PIXEL_6.copy(
-                    softButtons = false,
-                    screenHeight = 4200
-                )
-            )
-            paparazzi.snapshot(name = "home_card_details") {
-                KalshiOddsTheme(darkTheme = true) {
-                    Column(
-                        Modifier
-                            .fillMaxSize()
-                            .background(DipTheme.colors.bg)
-                            .padding(16.dp)
-                    ) {
-                        MarketCard(
-                            market = HomeFixtures.screenshotPhoneBtc(),
-                            settings = HomeFixtures.settings(true).copy(minProfitIfWinUsd = 20.0),
-                            paperTradingEnabled = true,
-                            nowMs = HomeFixtures.NOW_MS,
-                            detailsInitiallyOpen = true,
-                            onBuyYes = {},
-                            onBuyNo = {},
-                            onPaperUp = {},
-                            onPaperDown = {}
-                        )
-                    }
+        paparazzi.snapshot(name = "home_card_details") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.screenshotPhoneBtc(),
+                        settings = HomeFixtures.settings(true).copy(minProfitIfWinUsd = 20.0),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = true,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
                 }
             }
-            copyLatest("home_card_details")
-        } finally {
-            paparazzi.unsafeUpdateConfig(deviceConfig = restore)
         }
+        copyLatest("home_card_details")
     }
 
     @Test
