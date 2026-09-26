@@ -129,7 +129,41 @@ object HomeFixtures {
         modelLeanSide = "YES",
         primaryHeroSide = "NO",
         predictedSide = "YES",
-        oddsHistory = listOf(36f, 35f, 34f, 33f, 34f, 34f)
+        oddsHistory = listOf(36f, 35f, 34f, 33f, 34f, 34f),
+        spreadDollars = 0.01,
+        aiNote = "QUIET/MID · cal · adapt · AI 39% vs mkt 34% · flow NO · vel −0.6pp/s · book ask −18% · Δ +5.5pp (fv 39%) · net +3.2pp",
+        aiConfidence = 0.62,
+        digitalFairPp = 39.0,
+        importedModelPp = 39.0,
+        netEdgePp = 3.2,
+        netEvDollars = 0.032,
+        feePerContract = 0.014,
+        halfSpread = 0.005,
+        suggestedContracts = 12,
+        sizingNote = "Kelly clip after fee + half-spread",
+        timeToMoveSec = 90.0,
+        midVolPp = 2.4,
+        pFill = 0.71,
+        uncertainty = 0.18,
+        uncertaintyPassed = true,
+        calibrated = true,
+        adapterReady = true,
+        regimeTag = "QUIET",
+        tteRegimeLabel = "MID",
+        stance = "Slight UP / YES",
+        ensembleNote = "blend MLP 41¢ · GBM 38¢",
+        flowNote = "smart-flow",
+        spotLabel = "spot −0.05% / 5m · fund +0.01% (binance)",
+        tapeTrend = "down",
+        mlpPp = 41.0,
+        gbmPp = 38.0,
+        featureDevs = mapOf(
+            "ai" to 5.5,
+            "flow" to -4.2,
+            "spot" to -1.1,
+            "velocity" to -0.8,
+            "imbalance" to -2.4
+        )
     )
 
     fun disagreementBtc() = actionableBtc().copy(

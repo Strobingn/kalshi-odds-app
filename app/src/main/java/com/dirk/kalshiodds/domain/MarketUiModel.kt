@@ -102,6 +102,8 @@ data class MarketUiModel(
     val spotUsd: Double? = null,
     val spotVsTargetUsd: Double? = null,
     val pastSettlements: List<Boolean> = emptyList(),
+    /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
+    val featureDevs: Map<String, Double> = emptyMap(),
     /** Kalshi `open_time`. When null, 15m windows infer close − [MarketLifecycle.WINDOW_MS]. */
     val openTimeEpochMs: Long? = null
 )
@@ -274,7 +276,8 @@ fun MarketUiModel.withSignalScore(
         importedModelPp = score.importedModelPp,
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
-        spotVsTargetUsd = score.spotVsTargetUsd
+        spotVsTargetUsd = score.spotVsTargetUsd,
+        featureDevs = score.featureDevs
     )
 }
 

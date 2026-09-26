@@ -11,6 +11,7 @@ import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
+import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
@@ -136,6 +137,44 @@ class HomeScreenScreenshotTest {
     fun darkDisagreement() = snap("home_dark_disagreement", dark = true, HomeFixtures.state(
         HomeFixtures.disagreementBtc(), HomeFixtures.noBetEth(), HomeFixtures.noBetSol(), hasKey = true
     ))
+
+    @Test
+    fun darkHomeCardDetailsExpanded() {
+        val restore = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
+        try {
+            paparazzi.unsafeUpdateConfig(
+                deviceConfig = DeviceConfig.PIXEL_6.copy(
+                    softButtons = false,
+                    screenHeight = 4200
+                )
+            )
+            paparazzi.snapshot(name = "home_card_details") {
+                KalshiOddsTheme(darkTheme = true) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .background(DipTheme.colors.bg)
+                            .padding(16.dp)
+                    ) {
+                        MarketCard(
+                            market = HomeFixtures.screenshotPhoneBtc(),
+                            settings = HomeFixtures.settings(true).copy(minProfitIfWinUsd = 20.0),
+                            paperTradingEnabled = true,
+                            nowMs = HomeFixtures.NOW_MS,
+                            detailsInitiallyOpen = true,
+                            onBuyYes = {},
+                            onBuyNo = {},
+                            onPaperUp = {},
+                            onPaperDown = {}
+                        )
+                    }
+                }
+            }
+            copyLatest("home_card_details")
+        } finally {
+            paparazzi.unsafeUpdateConfig(deviceConfig = restore)
+        }
+    }
 
     @Test
     fun darkPhoneScreenshotAfterFix() = snap(
