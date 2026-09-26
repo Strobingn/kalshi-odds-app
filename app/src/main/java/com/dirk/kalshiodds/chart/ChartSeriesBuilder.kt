@@ -1,7 +1,5 @@
 package com.dirk.kalshiodds.chart
 
-import com.dirk.kalshiodds.signal.engine.QuoteSanity
-
 /**
  * Home-card sparkline and bid-history series. Missing, null, or zero
  * samples are dropped so a gap cannot draw as a 0-price dip (the
