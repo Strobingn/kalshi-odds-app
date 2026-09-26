@@ -1415,7 +1415,7 @@ class KnownIssuesRegressionTest {
     fun fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration() {
         val entries = HomeFixtures.sampleSettledEntries()
         val settled = ScorecardCopy.settledPicks(entries)
-        assertEquals(18, settled.size)
+        assertEquals(28, settled.size)
         val window = ScorecardMetrics.window(settled)
         val snap = ScorecardMetrics.Snapshot(
             daily = window,
@@ -1431,13 +1431,13 @@ class KnownIssuesRegressionTest {
             honest = ScorecardMetrics.honest(settled)
         )
         assertTrue(snap.perSeries.isEmpty())
-        assertEquals(18, snap.sampleCount)
-        assertEquals(18, snap.honest.n)
+        assertEquals(28, snap.sampleCount)
+        assertEquals(28, snap.honest.n)
 
         val present = ScorecardCopy.of(entries, 12.40)
-        assertEquals(18, present.settledCount)
-        assertEquals(12, present.summary.wins)
-        assertEquals(6, present.summary.losses)
+        assertEquals(28, present.settledCount)
+        assertEquals(18, present.summary.wins)
+        assertEquals(10, present.summary.losses)
         assertFalse(present.showsEmptyState)
         assertNull(present.emptyState())
         assertFalse(present.allLines().any { it.contains("No settled samples") })
@@ -1450,7 +1450,6 @@ class KnownIssuesRegressionTest {
         assertTrue(empty.allLines().contains(HomeScorecardSummary.NO_SETTLED))
         assertTrue(empty.timeOfDay.all { it.line.contains(ScorecardCopy.EM_DASH) })
         assertFalse(empty.allLines().any { it.contains("0%") })
-        assertFalse(empty.allLines().any { it.contains("By coin") })
 
         val src = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt"),
@@ -1458,10 +1457,10 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }.readText()
         assertTrue(src.contains("view.showsEmptyState"))
         assertTrue(src.contains("ScorecardCopy.NO_SETTLED"))
-        assertFalse(src.contains("perSeries"))
-        assertFalse(src.contains("No settled samples yet"))
-        assertFalse(src.contains("calibrationSamples"))
-        assertFalse(src.contains("MIN_CALIBRATION_SAMPLES"))
+        assertTrue(src.contains("perSeries"))
+        assertTrue(src.contains("calibrationSamples"))
+        assertTrue(src.contains("MIN_CALIBRATION_SAMPLES"))
+        assertTrue(src.contains("ScorecardCopy.PICKS_TITLE"))
     }
 
     @Test

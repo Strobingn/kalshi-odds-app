@@ -248,6 +248,15 @@ class HomeScreenScreenshotTest {
     fun darkFullScorecardEmpty() = snapScorecard("scorecard_empty_dark", dark = true, empty = true)
 
     @Test
+    fun darkScorecardDetail() = snapScorecard(
+        "scorecard_detail",
+        dark = true,
+        empty = false,
+        ui = HomeFixtures.sampleScorecardDetailUi(),
+        height = 5200
+    )
+
+    @Test
     fun lightSignals() = snapSignals("signals_light", dark = false)
 
     @Test
@@ -359,19 +368,25 @@ class HomeScreenScreenshotTest {
         copyLatest(name)
     }
 
-    private fun snapScorecard(name: String, dark: Boolean, empty: Boolean = false) {
+    private fun snapScorecard(
+        name: String,
+        dark: Boolean,
+        empty: Boolean = false,
+        ui: ScorecardUi? = null,
+        height: Int? = null
+    ) {
         val tall = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
         try {
             paparazzi.unsafeUpdateConfig(
                 deviceConfig = DeviceConfig.PIXEL_6.copy(
                     softButtons = false,
-                    screenHeight = if (empty) 1400 else 1800
+                    screenHeight = height ?: if (empty) 1400 else 1800
                 )
             )
             paparazzi.snapshot(name = name) {
                 KalshiOddsTheme(darkTheme = dark) {
                     ScorecardScreen(
-                        ui = if (empty) ScorecardUi.EMPTY else HomeFixtures.sampleScorecardUi(),
+                        ui = ui ?: if (empty) ScorecardUi.EMPTY else HomeFixtures.sampleScorecardUi(),
                         onBack = {}
                     )
                 }

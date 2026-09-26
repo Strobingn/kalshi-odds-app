@@ -219,6 +219,56 @@ object HomeFixtures {
     fun sampleScorecardUi(): ScorecardUi =
         ScorecardUi(view = ScorecardCopy.of(sampleSettledEntries(), SAMPLE_SCORECARD.paperPnlUsd))
 
+    fun sampleSettledFills(): List<PaperFill> {
+        val entries = sampleSettledEntries().filter { it.ticker.startsWith("KXBTC15M") }
+        return entries.mapIndexed { i, e ->
+            val ask = if (e.predictedSide == "NO") 0.66 else if (i % 4 == 0) 0.28 else if (i % 3 == 0) 0.72 else 0.34
+            val won = e.score == 1
+            val contracts = if (i % 2 == 0) 29 else 8
+            val fee = 0.18 + i * 0.01
+            val stake = contracts * ask
+            val pnl = if (won) contracts * 1.0 - stake - fee else -(stake + fee)
+            val source = if (i < 10) "AI hunter" else PaperTileBuy.SOURCE
+            PaperFill(
+                id = "fill-$i",
+                ticker = e.ticker,
+                side = e.predictedSide ?: "YES",
+                stakeUsd = stake,
+                contracts = contracts,
+                limitPrice = ask,
+                source = source,
+                createdAtMs = e.settledAtMs ?: e.timestampMs,
+                settled = true,
+                outcome = e.outcome,
+                won = won,
+                pnlUsd = pnl,
+                note = String.format(java.util.Locale.US, "settled · fee $%.2f", fee)
+            )
+        }
+    }
+
+    fun sampleScorecardDetailUi(): ScorecardUi {
+        val entries = sampleSettledEntries()
+        val fills = sampleSettledFills()
+        val windows = entries.take(6).map {
+            com.dirk.kalshiodds.data.local.archive.SettledWindowRow(
+                ticker = it.ticker,
+                series = it.series,
+                result = it.outcome ?: "yes",
+                strikeUsd = 84_144.0
+            )
+        }
+        return ScorecardUi(
+            view = ScorecardCopy.of(entries, fills, paperPnlUsd = 0.0, windows = windows),
+            metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(entries),
+            allowlist = com.dirk.kalshiodds.signal.feedback.Allowlist.State(),
+            adapter = com.dirk.kalshiodds.signal.feedback.OnlineAdapter.identity(),
+            guardrails = com.dirk.kalshiodds.signal.feedback.Guardrails.identity(),
+            extendedLine = "RL n=12 · meta n=8 · conformal n=4 cold",
+            sitOut = false
+        )
+    }
+
     fun state(
         btc: MarketUiModel,
         eth: MarketUiModel,

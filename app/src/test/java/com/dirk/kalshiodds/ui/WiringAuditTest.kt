@@ -133,6 +133,7 @@ class WiringAuditTest {
         Control("Home card paper disabled reason", HomeCopy::class.java, "paperDisabledReason"),
         Control("Home card paper snackbar", HomeCopy::class.java, "paperConfirmSnackbar"),
         Control("Home scorecard tap", HomeCopy::class.java, "scorecardSummaryLine"),
+        Control("Scorecard ledger", com.dirk.kalshiodds.signal.feedback.ScorecardLedger::class.java, "of"),
         Control("Scorecard settled picks", ScorecardCopy::class.java, "settledPicks"),
         Control("Scorecard view", ScorecardCopy::class.java, "of"),
         Control("Scorecard empty state", ScorecardCopy::class.java, "emptyState"),
