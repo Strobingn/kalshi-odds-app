@@ -1,11 +1,9 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
-import com.dirk.kalshiodds.signal.feedback.ForecastUnits
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.roundToInt
 
 /**
  * Compact home scorecard: W-L, win rate, paper P&L from the same
@@ -29,10 +27,7 @@ data class HomeScorecardSummary(
             entries: List<PredictionLogEntry>,
             paperPnlUsd: Double
         ): HomeScorecardSummary {
-            val settled = entries.filter {
-                (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
-                    ForecastUnits.isScoredPick(it)
-            }
+            val settled = ScorecardMetrics.settledScoredPicks(entries)
             val all = ScorecardMetrics.window(settled)
             return HomeScorecardSummary(
                 wins = all.hits,

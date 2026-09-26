@@ -18,7 +18,12 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.11**
+Package: `com.dirk.kalshiodds` · version **0.3.14**
+
+## 0.3.14
+
+- **Full scorecard empty-state contradiction.** The 0.3.13 screen showed `Picked side: 12/18 correct` and `settled 18` while the bottom read `No settled samples yet`. The empty-state was gated on `ScorecardMetrics.Snapshot.perSeries.isEmpty()` (and the Paparazzi fixture left `perSeries` empty while stuffing honest / window counts). Calibration-sample copy (`the first 20 outcomes unlock calibration`) was a third, unrelated collection. Every count, empty state, and section now comes from `ScorecardCopy` → `ScorecardMetrics.settledScoredPicks` + the same paper P&L as the home line. `No settled picks yet` appears only when that settled list is empty (`ScorecardCopyTest`, `KnownIssuesRegressionTest.fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration`).
+- **Cleaner layout.** Top summary (W-L, win rate, paper P&L, settled count), compact BTC / SOL / ETH and 4-hour ET breakdowns, then recent settled picks collapsed by default. Removed duplicate Today / 7-day / all-time cards, per-series, Brier / policy / adapter / guardrail / Extended-AI debug banners, and fabricated bucket P&L. Empty buckets render `—`, never `0%`. Green/red stay Kalshi UP/DOWN only; P&L and win rate are neutral `+/−` text.
 
 ## 0.3.11
 

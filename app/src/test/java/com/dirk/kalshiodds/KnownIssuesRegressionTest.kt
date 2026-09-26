@@ -36,6 +36,7 @@ import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.HomeFixtures
 import com.dirk.kalshiodds.ui.HomeMarkets
 import com.dirk.kalshiodds.ui.HomeScorecardSummary
+import com.dirk.kalshiodds.ui.ScorecardCopy
 import com.dirk.kalshiodds.ui.HomeSnapshotMerge
 import com.dirk.kalshiodds.ui.SignalCopy
 import com.dirk.kalshiodds.ui.SideColor
@@ -58,8 +59,8 @@ import org.junit.Test
 import retrofit2.Response
 
 /**
- * One named test per known 0.3.10–0.3.13 issue (#13 = home scorecard summary), on the real production
- * classes. No mocks of the logic under test.
+ * One named test per known 0.3.10–0.3.14 issue (#14 = full scorecard empty-state
+ * contradiction), on the real production classes. No mocks of the logic under test.
  */
 class KnownIssuesRegressionTest {
 
@@ -1232,6 +1233,58 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }.readText()
         assertTrue(activity.contains("oddsViewModel.onForeground()"))
         assertTrue(calls.get() >= 9)
+    }
+
+    @Test
+    fun fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration() {
+        val entries = HomeFixtures.sampleSettledEntries()
+        val settled = ScorecardMetrics.settledScoredPicks(entries)
+        assertEquals(18, settled.size)
+        val window = ScorecardMetrics.window(settled)
+        val snap = ScorecardMetrics.Snapshot(
+            daily = window,
+            rolling = window,
+            allTime = window,
+            perSeries = emptyList(),
+            sampleCount = window.total,
+            openCount = 0,
+            voidCount = 0,
+            calibrationReady = false,
+            temperature = null,
+            calibrationSamples = 0,
+            honest = ScorecardMetrics.honest(settled)
+        )
+        assertTrue(snap.perSeries.isEmpty())
+        assertEquals(18, snap.sampleCount)
+        assertEquals(18, snap.honest.n)
+
+        val present = ScorecardCopy.of(entries, 12.40)
+        assertEquals(18, present.settledCount)
+        assertEquals(12, present.summary.wins)
+        assertEquals(6, present.summary.losses)
+        assertFalse(present.showsEmptyState)
+        assertNull(present.emptyState())
+        assertFalse(present.allLines().any { it.contains("No settled samples") })
+        assertFalse(present.allLines().contains(HomeScorecardSummary.NO_SETTLED))
+
+        val empty = ScorecardCopy.of(emptyList(), 0.0)
+        assertEquals(0, empty.settledCount)
+        assertTrue(empty.showsEmptyState)
+        assertEquals(HomeScorecardSummary.NO_SETTLED, empty.emptyState())
+        assertTrue(empty.allLines().contains(HomeScorecardSummary.NO_SETTLED))
+        assertTrue(empty.coins.all { it.line.contains(ScorecardCopy.EM_DASH) })
+        assertFalse(empty.allLines().any { it.contains("0%") })
+
+        val src = listOf(
+            File("app/src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt"),
+            File("src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(src.contains("view.showsEmptyState"))
+        assertTrue(src.contains("ScorecardCopy.NO_SETTLED"))
+        assertFalse(src.contains("perSeries"))
+        assertFalse(src.contains("No settled samples yet"))
+        assertFalse(src.contains("calibrationSamples"))
+        assertFalse(src.contains("MIN_CALIBRATION_SAMPLES"))
     }
 
     @Test

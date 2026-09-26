@@ -1,7 +1,6 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -14,10 +13,6 @@ import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
 import com.dirk.kalshiodds.ui.components.PositionsCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
-import com.dirk.kalshiodds.signal.feedback.Allowlist
-import com.dirk.kalshiodds.signal.feedback.Guardrails
-import com.dirk.kalshiodds.signal.feedback.OnlineAdapter
-import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
 import org.junit.After
 import org.junit.Rule
@@ -179,6 +174,9 @@ class HomeScreenScreenshotTest {
     fun darkScorecard() = snapScorecard("scorecard_dark", dark = true)
 
     @Test
+    fun darkFullScorecardEmpty() = snapScorecard("scorecard_empty_dark", dark = true, empty = true)
+
+    @Test
     fun lightSignals() = snapSignals("signals_light", dark = false)
 
     @Test
@@ -248,7 +246,7 @@ class HomeScreenScreenshotTest {
                     onCancelApprove = {},
                     onCancelOrder = {},
                     nowMs = HomeFixtures.NOW_MS,
-                    versionLabel = "DipHunter v0.3.13 (28)"
+                    versionLabel = "DipHunter v0.3.14 (29)"
                 )
             }
         }
@@ -271,10 +269,13 @@ class HomeScreenScreenshotTest {
         copyLatest(name)
     }
 
-    private fun snapScorecard(name: String, dark: Boolean) {
+    private fun snapScorecard(name: String, dark: Boolean, empty: Boolean = false) {
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
-                ScorecardScreen(ui = scorecardUi(), onBack = {})
+                ScorecardScreen(
+                    ui = if (empty) ScorecardUi.EMPTY else HomeFixtures.sampleScorecardUi(),
+                    onBack = {}
+                )
             }
         }
         copyLatest(name)
@@ -373,56 +374,6 @@ class HomeScreenScreenshotTest {
         copyLatest(name)
     }
 
-    private fun scorecardUi(): ScorecardUi {
-        val window = ScorecardMetrics.WindowStats(
-            hits = 12,
-            total = 18,
-            hitRate = 12.0 / 18.0,
-            brier = 0.211,
-            pUpBrier = 0.250,
-            avgEdgeWhenRight = 4.0,
-            avgEdgeWhenWrong = -2.0
-        )
-        return ScorecardUi(
-            metrics = ScorecardMetrics.Snapshot(
-                daily = window,
-                rolling = window,
-                allTime = window,
-                perSeries = emptyList(),
-                sampleCount = 18,
-                openCount = 2,
-                voidCount = 0,
-                calibrationReady = false,
-                temperature = null,
-                calibrationSamples = 18,
-                honest = ScorecardMetrics.Honest(
-                    n = 18,
-                    modelBrier = 0.250,
-                    marketBrier = 0.280,
-                    hitRate = 12.0 / 18.0,
-                    avgEdgeWhenRight = 4.0,
-                    avgEdgeWhenWrong = -2.0,
-                    enoughData = false,
-                    perAsset = emptyList(),
-                    perCoin = listOf(
-                        ScorecardMetrics.Breakdown("BTC", "Bitcoin", 24, 0.67, 0.200, 0.220, 8.40, true),
-                        ScorecardMetrics.Breakdown("ETH", "Ethereum", 22, 0.59, 0.230, 0.250, 2.10, true),
-                        ScorecardMetrics.Breakdown("SOL", "Solana", 8, null, null, null, null, false)
-                    ),
-                    perTimeOfDay = listOf(
-                        ScorecardMetrics.Breakdown("08-12", "8–12 ET", 20, 0.70, 0.180, 0.210, 6.00, true),
-                        ScorecardMetrics.Breakdown("12-16", "12–16 ET", 21, 0.62, 0.220, 0.240, 3.50, true),
-                        ScorecardMetrics.Breakdown("16-20", "16–20 ET", 5, null, null, null, null, false)
-                    ),
-                    sideBrier = 0.211,
-                    hits = 12
-                )
-            ),
-            allowlist = Allowlist.State(),
-            adapter = OnlineAdapter.State(),
-            guardrails = Guardrails.State()
-        )
-    }
 
     @After
     fun flushArtifacts() {
