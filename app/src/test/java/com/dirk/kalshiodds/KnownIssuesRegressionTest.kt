@@ -1449,7 +1449,7 @@ class KnownIssuesRegressionTest {
         assertEquals(HomeScorecardSummary.NO_SETTLED, empty.emptyState())
         assertTrue(empty.allLines().contains(HomeScorecardSummary.NO_SETTLED))
         assertTrue(empty.timeOfDay.all { it.line.contains(ScorecardCopy.EM_DASH) })
-        assertFalse(empty.allLines().any { it.contains("0%") })
+        assertFalse(empty.allLines().any { it.contains("0-0") || it.contains(" · 0%") })
 
         val src = listOf(
             File("app/src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt"),

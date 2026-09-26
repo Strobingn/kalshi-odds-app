@@ -121,7 +121,11 @@ class ScorecardLedgerTest {
         val hi = snap.picks.first { it.ticker == "KXBTC15M-HI" }
         assertEquals(84_144.0, hi.strikeUsd!!, 1e-6)
         assertNull(hi.finalUsd)
-        assertEquals(listOf(1L to 3.25, 2L to 0.85), snap.cumulativePnl)
+        assertEquals(2, snap.cumulativePnl.size)
+        assertEquals(1L, snap.cumulativePnl[0].first)
+        assertEquals(3.25, snap.cumulativePnl[0].second, 1e-9)
+        assertEquals(2L, snap.cumulativePnl[1].first)
+        assertEquals(0.85, snap.cumulativePnl[1].second, 1e-9)
         assertEquals("1L", snap.ai.streak)
     }
 

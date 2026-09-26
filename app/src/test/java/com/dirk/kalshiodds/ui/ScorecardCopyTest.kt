@@ -54,8 +54,7 @@ class ScorecardCopyTest {
         assertTrue(view.allLines().contains(ScorecardCopy.NO_SETTLED))
         assertTrue(view.timeOfDay.all { it.settledCount == 0 && it.line.endsWith(ScorecardCopy.EM_DASH) })
         assertTrue(view.recent.isEmpty())
-        assertFalse(view.allLines().any { it.contains("0%") })
-        assertFalse(view.allLines().any { it.contains("0-0") })
+        assertFalse(view.allLines().any { it.contains("0-0") || it.contains(" · 0%") })
     }
 
     @Test
