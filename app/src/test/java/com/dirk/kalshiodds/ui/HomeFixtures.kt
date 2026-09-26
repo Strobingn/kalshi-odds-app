@@ -213,9 +213,17 @@ object HomeFixtures {
             series: String,
             at: Long,
             won: Boolean,
-            side: String = "YES"
+            side: String = "YES",
+            index: Int,
+            legacyMissingEntry: Boolean = false
         ): PredictionLogEntry {
             val yesOutcome = if (side == "YES") won else !won
+            val ask = if (legacyMissingEntry) null else {
+                if (side == "NO") 0.66 else if (index % 4 == 0) 0.28 else if (index % 3 == 0) 0.72 else 0.34
+            }
+            val contracts = if (legacyMissingEntry || ask == null) null else if (index % 2 == 0) 29 else 8
+            val fee = if (legacyMissingEntry || ask == null) null else 0.18 + index * 0.01
+            val stake = if (ask != null && contracts != null && fee != null) contracts * ask + fee else null
             return PredictionLogEntry(
                 ticker = ticker,
                 series = series,
@@ -228,40 +236,77 @@ object HomeFixtures {
                 score = if (won) 1 else 0,
                 predictedSide = side,
                 edgePp = 5.0,
-                settledAtMs = at
+                settledAtMs = at,
+                entryAsk = ask,
+                contracts = contracts,
+                stakeUsd = stake,
+                feeUsd = fee
             )
         }
         val btcMorning = (0 until 8).map { i ->
-            pick("KXBTC15M-26SEP25${1000 + i}-50", "KXBTC15M", et(10, i), won = i < 6, side = if (i % 3 == 0) "NO" else "YES")
+            pick("KXBTC15M-26SEP25${1000 + i}-50", "KXBTC15M", et(10, i), won = i < 6, side = if (i % 3 == 0) "NO" else "YES", index = i)
         }
         val btcAfternoon = (0 until 6).map { i ->
-            pick("KXBTC15M-26SEP25${1400 + i}-20", "KXBTC15M", et(14, i), won = i < 4)
+            pick("KXBTC15M-26SEP25${1400 + i}-20", "KXBTC15M", et(14, i), won = i < 4, index = 8 + i)
         }
         val btcEvening = (0 until 4).map { i ->
-            pick("KXBTC15M-26SEP25${1800 + i}-40", "KXBTC15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
+            pick(
+                "KXBTC15M-26SEP25${1800 + i}-40",
+                "KXBTC15M",
+                et(18, i),
+                won = i < 2,
+                side = if (i == 1) "NO" else "YES",
+                index = 14 + i,
+                legacyMissingEntry = i == 3
+            )
         }
+        return btcMorning + btcAfternoon + btcEvening
+    }
+
+    /** Legacy stored ETH/SOL rows — scorecard must drop these. */
+    fun sampleStoredNonBtcEntries(): List<PredictionLogEntry> {
+        val zone = ZoneId.of("America/New_York")
+        fun et(hour: Int, i: Int): Long =
+            ZonedDateTime.of(2026, 9, 25, hour, i, 0, 0, zone).toInstant().toEpochMilli()
+        fun pick(ticker: String, series: String, at: Long, won: Boolean, side: String = "YES") = PredictionLogEntry(
+            ticker = ticker,
+            series = series,
+            predictedYes = if (side == "YES") 0.70 else 0.30,
+            predictedNo = if (side == "YES") 0.30 else 0.70,
+            marketMid = 0.55,
+            timestampMs = at,
+            closeTimeMs = at,
+            outcome = if (side == "YES") if (won) "yes" else "no" else if (won) "no" else "yes",
+            score = if (won) 1 else 0,
+            predictedSide = side,
+            edgePp = 5.0,
+            settledAtMs = at,
+            entryAsk = 0.34,
+            contracts = 8,
+            stakeUsd = 2.90,
+            feeUsd = 0.18
+        )
         val storedSol = (0 until 6).map { i ->
             pick("KXSOL15M-26SEP25${1400 + i}-20", "KXSOL15M", et(14, i), won = i < 4)
         }
         val storedEth = (0 until 4).map { i ->
             pick("KXETH15M-26SEP25${1800 + i}-40", "KXETH15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
         }
-        return btcMorning + btcAfternoon + btcEvening + storedSol + storedEth
+        return storedSol + storedEth
     }
 
     fun sampleScorecardUi(): ScorecardUi =
         ScorecardUi(view = ScorecardCopy.of(sampleSettledEntries(), SAMPLE_SCORECARD.paperPnlUsd))
 
     fun sampleSettledFills(): List<PaperFill> {
-        val entries = sampleSettledEntries().filter { it.ticker.startsWith("KXBTC15M") }
-        return entries.mapIndexed { i, e ->
-            val ask = if (e.predictedSide == "NO") 0.66 else if (i % 4 == 0) 0.28 else if (i % 3 == 0) 0.72 else 0.34
+        val entries = sampleSettledEntries().filter { it.entryAsk != null }
+        val matched = entries.mapIndexed { i, e ->
+            val ask = e.entryAsk ?: 0.34
             val won = e.score == 1
-            val contracts = if (i % 2 == 0) 29 else 8
-            val fee = 0.18 + i * 0.01
-            val stake = contracts * ask
-            val pnl = if (won) contracts * 1.0 - stake - fee else -(stake + fee)
-            val source = if (i < 10) "AI hunter" else PaperTileBuy.SOURCE
+            val contracts = e.contracts ?: if (i % 2 == 0) 29 else 8
+            val fee = e.feeUsd ?: (0.18 + i * 0.01)
+            val stake = e.stakeUsd ?: (contracts * ask + fee)
+            val pnl = if (won) contracts * 1.0 - stake else -stake
             PaperFill(
                 id = "fill-$i",
                 ticker = e.ticker,
@@ -269,7 +314,7 @@ object HomeFixtures {
                 stakeUsd = stake,
                 contracts = contracts,
                 limitPrice = ask,
-                source = source,
+                source = "AI hunter",
                 createdAtMs = e.settledAtMs ?: e.timestampMs,
                 settled = true,
                 outcome = e.outcome,
@@ -278,6 +323,31 @@ object HomeFixtures {
                 note = String.format(java.util.Locale.US, "settled · fee $%.2f", fee)
             )
         }
+        val manuals = (0 until 4).map { i ->
+            val ask = if (i == 3) 0.72 else 0.40
+            val won = i < 3
+            val contracts = 10
+            val fee = 0.20
+            val stake = contracts * ask + fee
+            val pnl = if (won) contracts * 1.0 - stake else -stake
+            PaperFill(
+                id = "manual-$i",
+                ticker = "KXBTC15M-26SEP25${2000 + i}-00",
+                side = if (i == 1) "NO" else "YES",
+                stakeUsd = stake,
+                contracts = contracts,
+                limitPrice = ask,
+                source = PaperTileBuy.SOURCE,
+                createdAtMs = ZonedDateTime.of(2026, 9, 25, 20, i, 0, 0, ZoneId.of("America/New_York"))
+                    .toInstant().toEpochMilli(),
+                settled = true,
+                outcome = if (won) if (i == 1) "no" else "yes" else if (i == 1) "yes" else "no",
+                won = won,
+                pnlUsd = pnl,
+                note = String.format(java.util.Locale.US, "Paper tile $10 · fee $%.2f", fee)
+            )
+        }
+        return matched + manuals
     }
 
     fun sampleScorecardDetailUi(): ScorecardUi {

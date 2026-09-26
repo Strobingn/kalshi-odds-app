@@ -259,6 +259,13 @@ class MarketRepository(
             val noPct = m.aiNoPercent ?: (100.0 - yesPct)
             val midPct = m.yesProbabilityPercent ?: continue
             runCatching {
+                val predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideFromProbability(yesPct / 100.0)
+                val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
+                    sideYes = predictedSide == "YES",
+                    yesAsk = m.yesAsk,
+                    noAsk = m.noAsk,
+                    yesBid = m.yesBid
+                )
                 logStore.upsertOpenPrediction(
                     ticker = m.ticker,
                     series = series.ticker.ifBlank { CryptoMarkets.inferSeries(m.ticker) },
@@ -268,7 +275,7 @@ class MarketRepository(
                     timestampMs = now,
                     closeTimeMs = m.closeTimeEpochMs,
                     snapshot = SignalSnapshot(
-                        predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideFromProbability(yesPct / 100.0),
+                        predictedSide = predictedSide,
                         edgePp = m.edgePp,
                         confidence = m.aiConfidence,
                         regime = m.regimeTag,
@@ -282,7 +289,11 @@ class MarketRepository(
                         pFill = m.pFill,
                         mlpYes = m.mlpPp?.div(100.0),
                         cnnYes = m.cnnPp?.div(100.0),
-                        gbmYes = m.gbmPp?.div(100.0)
+                        gbmYes = m.gbmPp?.div(100.0),
+                        entryAsk = sized.entryAsk,
+                        contracts = sized.contracts,
+                        stakeUsd = sized.stakeUsd,
+                        feeUsd = sized.feeUsd
                     )
                 )
             }

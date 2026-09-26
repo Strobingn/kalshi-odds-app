@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
+import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -29,12 +30,12 @@ class ScorecardCopyTest {
             calibrationSamples = 0,
             honest = ScorecardMetrics.honest(ScorecardCopy.settledPicks(entries))
         )
-        assertTrue("stored ETH/SOL rows exist alongside BTC", contradiction.perSeries.isEmpty())
-        assertEquals(28, contradiction.sampleCount)
-        assertEquals(28, contradiction.honest.n)
-        assertEquals(28, view.settledCount)
-        assertEquals(18, view.summary.wins)
-        assertEquals(10, view.summary.losses)
+        assertTrue("per-series empty does not hide the BTC scorecard", contradiction.perSeries.isEmpty())
+        assertEquals(18, contradiction.sampleCount)
+        assertEquals(18, contradiction.honest.n)
+        assertEquals(18, view.settledCount)
+        assertEquals(12, view.summary.wins)
+        assertEquals(6, view.summary.losses)
         assertFalse(view.showsEmptyState)
         assertNull(view.emptyState())
         assertFalse(view.allLines().any { it.contains("No settled samples") })
@@ -58,26 +59,31 @@ class ScorecardCopyTest {
     }
 
     @Test
-    fun keepsStoredEthSolOnTheFullScorecard() {
-        val entries = HomeFixtures.sampleSettledEntries()
+    fun dropsStoredEthSolFromTheFullScorecard() {
+        val entries = HomeFixtures.sampleSettledEntries() + HomeFixtures.sampleStoredNonBtcEntries()
         assertTrue(entries.any { it.ticker.startsWith("KXETH15M") })
         assertTrue(entries.any { it.ticker.startsWith("KXSOL15M") })
         val settled = ScorecardCopy.settledPicks(entries)
-        assertEquals(28, settled.size)
-        assertTrue(settled.any { it.ticker.startsWith("KXBTC15M") })
-        assertTrue(settled.any { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
+        assertEquals(18, settled.size)
+        assertTrue(settled.all { it.ticker.startsWith("KXBTC15M") })
+        assertTrue(settled.none { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
         val view = ScorecardCopy.of(entries, 12.40)
-        assertEquals(28, view.settledCount)
-        assertEquals("18-10", ScorecardCopy.recordLine(view.summary))
-        assertEquals("64%", ScorecardCopy.winRateLine(view.summary))
+        assertEquals(18, view.settledCount)
+        assertEquals("12-6", ScorecardCopy.recordLine(view.summary))
+        assertEquals("67%", ScorecardCopy.winRateLine(view.summary))
         assertEquals("paper +$12.40", ScorecardCopy.paperPnlLine(view.summary))
-        assertEquals("28 settled", ScorecardCopy.settledCountLine(view.summary))
+        assertEquals("18 settled", ScorecardCopy.settledCountLine(view.summary))
+        assertTrue(view.recent.none { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
         assertTrue(view.timeOfDay.any { it.settledCount > 0 })
         assertEquals("SOL  —", ScorecardCopy.bucketLine("SOL", 0, 0, 0, null))
         assertEquals("—", ScorecardCopy.percentOrDash(null))
         assertTrue(view.allLines().contains(ScorecardCopy.SIDE_TITLE))
         assertTrue(view.allLines().contains(ScorecardCopy.PRICE_TITLE))
         assertTrue(view.allLines().contains(ScorecardCopy.CONF_TITLE))
+        val ledger = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/feedback/ScorecardLedger.kt").let { f ->
+            if (f.isFile) f.readText() else java.io.File("src/main/java/com/dirk/kalshiodds/signal/feedback/ScorecardLedger.kt").readText()
+        }
+        assertTrue(ledger.contains("CryptoMarkets.isLiveTicker"))
     }
 
     @Test
@@ -108,7 +114,7 @@ class ScorecardCopyTest {
             predictedSide = "NO_BET"
         )
         val view = ScorecardCopy.of(entries, 12.40)
-        assertEquals(58, view.recent.size)
+        assertEquals(48, view.recent.size)
         assertTrue(view.recent.none { it.ticker.contains("NOBET") })
         val first = view.recent.first()
         assertTrue(first.line.contains(first.coin) || first.line.contains(first.side))
@@ -133,5 +139,20 @@ class ScorecardCopyTest {
         assertTrue(src.contains("SideColor.of"))
         assertTrue(src.contains("LazyColumn"))
         assertTrue(src.contains("clearStaleLifecycleNotice").not())
+        assertTrue(src.contains("ENTRY_NOT_RECORDED") || src.contains("entry not recorded"))
+    }
+
+    @Test
+    fun pickLineShowsEntryNotRecordedAndPopulatedSize() {
+        val legacy = HomeFixtures.sampleSettledEntries().single { it.entryAsk == null }
+        val view = ScorecardCopy.of(HomeFixtures.sampleSettledEntries(), HomeFixtures.sampleSettledFills(), 0.0)
+        val missing = view.recent.single { it.ticker == legacy.ticker }
+        assertTrue(missing.line.contains(ScorecardLedger.ENTRY_NOT_RECORDED))
+        assertTrue(missing.line.contains(ScorecardCopy.LOST) || missing.line.contains(ScorecardCopy.WON))
+        val populated = view.recent.filter { it.ticker != legacy.ticker }
+        assertTrue(populated.isNotEmpty())
+        assertTrue(populated.all { !it.line.contains(ScorecardLedger.ENTRY_NOT_RECORDED) })
+        assertTrue(populated.all { it.line.contains("ct") && it.line.contains("stake") && it.line.contains("fee") })
+        assertTrue(view.recent.none { it.ticker.contains("ETH") || it.ticker.contains("SOL") })
     }
 }

@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import com.dirk.kalshiodds.signal.paper.PaperTileBuy
+import com.dirk.kalshiodds.ui.HomeFixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -142,8 +143,147 @@ class ScorecardLedgerTest {
         )
         assertEquals(1, orphan.ai.wins)
         assertEquals(0.0, orphan.ai.money.pnlUsd, 1e-9)
-        assertNull(orphan.picks.single().pnlUsd)
+        assertEquals(0.0, orphan.picks.single().pnlUsd!!, 1e-9)
         assertNull(orphan.picks.single().feeUsd)
+        assertTrue(orphan.picks.single().entryNotRecorded)
+    }
+
+    @Test
+    fun breakdownsReconcileToCombinedIncludingMissingPriceAndVoids() {
+        val entries = listOf(
+            pick("KXBTC15M-A", "YES", won = true, at = 1_700_000_000_000L, yes = 0.70, mid = 0.40, ask = 0.30, contracts = 10, stake = 3.21, fee = 0.21),
+            pick("KXBTC15M-B", "NO", won = false, at = 1_700_000_003_600_000L, yes = 0.28, mid = 0.60, ask = 0.66, contracts = 5, stake = 3.45, fee = 0.15),
+            pick("KXBTC15M-LEGACY", "YES", won = true, at = 1_700_000_007_200_000L, yes = 0.62, mid = 0.45),
+            pick("KXBTC15M-VOID", "YES", won = true, at = 1_700_000_010_800_000L, yes = 0.80, mid = 0.50, ask = 0.40).copy(outcome = "void", score = null),
+            PredictionLogEntry(
+                ticker = "KXETH15M-SKIP",
+                series = "KXETH15M",
+                predictedYes = 0.70,
+                predictedNo = 0.30,
+                marketMid = 0.55,
+                timestampMs = 1_700_000_000_000L,
+                closeTimeMs = 1_700_000_000_000L,
+                outcome = "yes",
+                score = 1,
+                predictedSide = "YES",
+                settledAtMs = 1_700_000_000_000L,
+                entryAsk = 0.34,
+                contracts = 8,
+                stakeUsd = 2.90,
+                feeUsd = 0.18
+            )
+        )
+        val fills = listOf(
+            fill("ai-a", "KXBTC15M-A", "YES", 0.30, 10, 3.21, 6.79, "AI hunter", 1_700_000_000_000L, "Paper · fee $0.21"),
+            fill("man-1", "KXBTC15M-M1", "YES", 0.34, 29, 10.26, 18.74, PaperTileBuy.SOURCE, 1_700_000_014_400_000L, "Paper tile $10 · fee $0.40"),
+            fill("eth", "KXETH15M-SKIP", "YES", 0.34, 8, 2.90, 5.10, "AI hunter", 1_700_000_000_000L, "fee $0.18")
+        )
+        val snap = ScorecardLedger.of(entries, fills)
+        assertEquals(1, snap.voidCount)
+        assertTrue(snap.picks.none { it.ticker.contains("ETH") })
+        assertTrue(snap.picks.any { it.entryNotRecorded && it.ticker.contains("LEGACY") })
+        assertEquals(0.0, snap.picks.first { it.entryNotRecorded }.pnlUsd!!, 1e-9)
+        assertEquals(snap.combined.wins, snap.picks.filter { !it.noBetWouldHave }.count { it.won })
+        assertReconciles(snap.bySide, snap.combined)
+        assertReconciles(snap.byPrice, snap.combined)
+        assertReconciles(snap.byTime, snap.combined)
+        assertReconciles(snap.byConfidence, snap.combined)
+        val unknownPrice = snap.byPrice.first { it.key == ScorecardLedger.UNKNOWN_KEY }
+        assertEquals("Unknown price", unknownPrice.label)
+        assertEquals(1, unknownPrice.settledCount)
+        assertEquals(0.0, unknownPrice.pnlUsd, 1e-9)
+        assertEquals(snap.combined.money.pnlUsd, snap.bySide.sumOf { it.pnlUsd }, 1e-9)
+    }
+
+    @Test
+    fun dropsNonBtcRowsFromTotalsAndList() {
+        val entries = listOf(
+            pick("KXBTC15M-ONLY", "YES", won = true, at = 1_000L, yes = 0.70, ask = 0.34, contracts = 8, stake = 2.90, fee = 0.18),
+            pick("KXETH15M-NO", "YES", won = true, at = 2_000L, yes = 0.70, ask = 0.34, contracts = 8, stake = 2.90, fee = 0.18).copy(series = "KXETH15M", ticker = "KXETH15M-NO"),
+            pick("KXSOL15M-NO", "NO", won = false, at = 3_000L, yes = 0.30, ask = 0.66, contracts = 5, stake = 3.45, fee = 0.15).copy(series = "KXSOL15M", ticker = "KXSOL15M-NO")
+        )
+        val fills = listOf(
+            fill("btc", "KXBTC15M-ONLY", "YES", 0.34, 8, 2.90, 5.10, "AI hunter", 1_000L, "fee $0.18"),
+            fill("eth", "KXETH15M-NO", "YES", 0.34, 8, 2.90, 5.10, "AI hunter", 2_000L, "fee $0.18")
+        )
+        val snap = ScorecardLedger.of(entries, fills)
+        assertEquals(1, snap.combined.settledCount)
+        assertEquals(1, snap.combined.wins)
+        assertEquals(5.10, snap.combined.money.pnlUsd, 1e-9)
+        assertEquals(listOf("KXBTC15M-ONLY"), snap.picks.map { it.ticker })
+        assertTrue(ScorecardLedger.isScorecardTicker("KXBTC15M-26SEP251200-00"))
+        assertTrue(!ScorecardLedger.isScorecardTicker("KXETH15M-26SEP251200-00"))
+        val src = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/feedback/ScorecardLedger.kt").let { f ->
+            if (f.isFile) f.readText() else java.io.File("src/main/java/com/dirk/kalshiodds/signal/feedback/ScorecardLedger.kt").readText()
+        }
+        assertTrue(src.contains("CryptoMarkets.isLiveTicker"))
+        assertTrue(src.contains("isScorecardTicker"))
+    }
+
+    @Test
+    fun derivesPaperStakeWhenAskStoredButSizeMissing() {
+        val ask = 0.34
+        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(ask, ScorecardLedger.PAPER_STAKE_USD)
+        val entry = pick("KXBTC15M-DERIVE", "YES", won = true, at = 1_000L, yes = 0.70, ask = ask)
+        val snap = ScorecardLedger.of(listOf(entry), emptyList())
+        val row = snap.picks.single()
+        assertFalse(row.entryNotRecorded)
+        assertEquals(clip.count, row.contracts)
+        assertEquals(clip.allInUsd, row.stakeUsd!!, 1e-9)
+        assertEquals(clip.feeUsd, row.feeUsd!!, 1e-9)
+        assertEquals(clip.profitIfWinUsd, row.pnlUsd!!, 1e-9)
+        assertEquals(clip.profitIfWinUsd, snap.combined.money.pnlUsd, 1e-9)
+        assertReconciles(snap.byPrice, snap.combined)
+    }
+
+    @Test
+    fun newAiPicksPersistEntryAskContractsAndFee() {
+        val sized = ScorecardLedger.captureEntryFromBook(
+            sideYes = true,
+            yesAsk = 0.34,
+            noAsk = 0.67,
+            yesBid = 0.33
+        )
+        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(0.34, ScorecardLedger.PAPER_STAKE_USD)
+        assertEquals(0.34, sized.entryAsk!!, 1e-9)
+        assertEquals(clip.count, sized.contracts)
+        assertEquals(clip.allInUsd, sized.stakeUsd!!, 1e-9)
+        assertEquals(clip.feeUsd, sized.feeUsd!!, 1e-9)
+        val hub = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/SignalHub.kt").let { f ->
+            if (f.isFile) f.readText() else java.io.File("src/main/java/com/dirk/kalshiodds/signal/SignalHub.kt").readText()
+        }
+        val repo = java.io.File("app/src/main/java/com/dirk/kalshiodds/data/repo/MarketRepository.kt").let { f ->
+            if (f.isFile) f.readText() else java.io.File("src/main/java/com/dirk/kalshiodds/data/repo/MarketRepository.kt").readText()
+        }
+        assertTrue(hub.contains("captureEntryFromBook"))
+        assertTrue(hub.contains("entryAsk = sized.entryAsk"))
+        assertTrue(repo.contains("captureEntryFromBook"))
+        assertTrue(repo.contains("entryAsk = sized.entryAsk"))
+    }
+
+    @Test
+    fun sampleScorecardDetailIsBtcOnlyReconciledAndMostlyPopulated() {
+        val entries = HomeFixtures.sampleSettledEntries() + HomeFixtures.sampleStoredNonBtcEntries()
+        val fills = HomeFixtures.sampleSettledFills()
+        val snap = ScorecardLedger.of(entries, fills)
+        assertTrue(snap.picks.none { it.ticker.contains("ETH") || it.ticker.contains("SOL") })
+        assertTrue(snap.picks.any { it.entryNotRecorded })
+        assertEquals(1, snap.picks.count { it.entryNotRecorded })
+        val scored = snap.picks.filter { !it.noBetWouldHave }
+        scored.filter { !it.entryNotRecorded }.forEach { row ->
+            assertTrue(row.ticker, row.entryAsk != null && row.contracts != null && row.stakeUsd != null && row.feeUsd != null && row.pnlUsd != null)
+        }
+        assertReconciles(snap.bySide, snap.combined)
+        assertReconciles(snap.byPrice, snap.combined)
+        assertReconciles(snap.byTime, snap.combined)
+        assertReconciles(snap.byConfidence, snap.combined)
+        assertEquals(snap.combined.wins + snap.combined.losses, snap.combined.settledCount)
+    }
+
+    private fun assertReconciles(buckets: List<ScorecardLedger.Bucket>, combined: ScorecardLedger.Record) {
+        assertEquals(combined.wins, buckets.sumOf { it.wins })
+        assertEquals(combined.losses, buckets.sumOf { it.losses })
+        assertEquals(combined.money.pnlUsd, buckets.sumOf { it.pnlUsd }, 1e-9)
     }
 
     private fun pick(
@@ -152,7 +292,11 @@ class ScorecardLedgerTest {
         won: Boolean,
         at: Long,
         yes: Double,
-        mid: Double = 0.50
+        mid: Double = 0.50,
+        ask: Double? = null,
+        contracts: Int? = null,
+        stake: Double? = null,
+        fee: Double? = null
     ): PredictionLogEntry {
         val yesOutcome = when (side) {
             "YES" -> won
@@ -171,7 +315,11 @@ class ScorecardLedgerTest {
             score = if (won) 1 else 0,
             predictedSide = side,
             edgePp = 5.0,
-            settledAtMs = at
+            settledAtMs = at,
+            entryAsk = ask,
+            contracts = contracts,
+            stakeUsd = stake,
+            feeUsd = fee
         )
     }
 

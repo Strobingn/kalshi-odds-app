@@ -19,7 +19,7 @@ import java.util.Locale
  */
 object ScorecardCopy {
     const val TITLE = "Scorecard"
-    const val SUBTITLE = "Post-settlement paper record from stored settled rows. Voids are excluded from W-L."
+    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Missing entry ask counts in W-L at $0 (Unknown price)."
     const val NO_SETTLED = HomeScorecardSummary.NO_SETTLED
     const val TIME_TITLE = "By time of day"
     const val SIDE_TITLE = "By side"
@@ -105,6 +105,7 @@ object ScorecardCopy {
 
     fun settledPicks(entries: List<PredictionLogEntry>): List<PredictionLogEntry> =
         ScorecardMetrics.settledScoredPicks(entries)
+            .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
 
     fun showsEmptyState(settledCount: Int): Boolean = settledCount <= 0
 
@@ -240,15 +241,18 @@ object ScorecardCopy {
 
     fun pickLine(row: ScorecardLedger.PickRow): String {
         val result = if (row.won) WON else LOST
-        val ask = row.entryAsk?.let { String.format(Locale.US, "%.0f¢", it * 100.0) } ?: EM_DASH
         val ai = row.aiPct?.let { String.format(Locale.US, "AI %.0f%%", it) } ?: "AI $EM_DASH"
         val mkt = row.marketPct?.let { String.format(Locale.US, "mkt %.0f%%", it) } ?: "mkt $EM_DASH"
-        val stake = row.stakeUsd?.let { String.format(Locale.US, "stake $%.2f", it) } ?: "stake $EM_DASH"
-        val ct = row.contracts?.let { "$it ct" } ?: EM_DASH
-        val fee = row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee $EM_DASH"
         val pnl = ScorecardLedger.signedUsd(row.pnlUsd)
         val strike = row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: "strike $EM_DASH"
         val fin = row.finalUsd?.let { String.format(Locale.US, "final $%,.0f", it) } ?: "final $EM_DASH"
+        if (row.entryNotRecorded) {
+            return "${row.windowEt}  ${row.displaySide}  ${ScorecardLedger.ENTRY_NOT_RECORDED}  $ai  $mkt  $result  $pnl  $strike  $fin  ${row.ticker}"
+        }
+        val ask = row.entryAsk?.let { String.format(Locale.US, "%.0f¢", it * 100.0) } ?: EM_DASH
+        val stake = row.stakeUsd?.let { String.format(Locale.US, "stake $%.2f", it) } ?: "stake $EM_DASH"
+        val ct = row.contracts?.let { "$it ct" } ?: "$EM_DASH ct"
+        val fee = row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee $EM_DASH"
         return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $result  $pnl  $strike  $fin  ${row.ticker}"
     }
 

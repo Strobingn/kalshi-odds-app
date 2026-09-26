@@ -288,7 +288,7 @@ private fun BucketRow(bucket: ScorecardCopy.Bucket) {
                 ScorecardCopy.EM_DASH
             } else {
                 "${bucket.wins}-${bucket.losses} · ${ScorecardCopy.percentOrDash(bucket.hitRate)} · ${bucket.settledCount}" +
-                    if (bucket.pnlUsd != 0.0) " · ${ScorecardLedger.signedUsd(bucket.pnlUsd)}" else ""
+                    " · ${ScorecardLedger.signedUsd(bucket.pnlUsd)}"
             },
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textPrimary
@@ -334,11 +334,19 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                 fontWeight = FontWeight.SemiBold
             )
             if (row != null) {
-                Text(
-                    row.entryAsk?.let { String.format(Locale.US, "%.0f¢", it * 100.0) } ?: "ask —",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary
-                )
+                if (row.entryNotRecorded) {
+                    Text(
+                        ScorecardLedger.ENTRY_NOT_RECORDED,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                } else {
+                    Text(
+                        row.entryAsk?.let { String.format(Locale.US, "%.0f¢", it * 100.0) } ?: "ask —",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                }
                 Text(
                     row.aiPct?.let { String.format(Locale.US, "AI %.0f%%", it) } ?: "AI —",
                     style = MaterialTheme.typography.labelMedium,
@@ -354,11 +362,15 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
         if (row != null) {
             Text(
                 buildString {
-                    append(row.contracts?.let { "$it ct" } ?: "— ct")
-                    append(" · ")
-                    append(row.stakeUsd?.let { String.format(Locale.US, "stake $%.2f", it) } ?: "stake —")
-                    append(" · ")
-                    append(row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee —")
+                    if (row.entryNotRecorded) {
+                        append(ScorecardLedger.ENTRY_NOT_RECORDED)
+                    } else {
+                        append(row.contracts?.let { "$it ct" } ?: "— ct")
+                        append(" · ")
+                        append(row.stakeUsd?.let { String.format(Locale.US, "stake $%.2f", it) } ?: "stake —")
+                        append(" · ")
+                        append(row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee —")
+                    }
                     append(" · ")
                     append(ScorecardLedger.signedUsd(row.pnlUsd))
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }

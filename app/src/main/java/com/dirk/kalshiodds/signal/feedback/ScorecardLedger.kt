@@ -1,11 +1,15 @@
 package com.dirk.kalshiodds.signal.feedback
 
+import com.dirk.kalshiodds.data.api.KalshiApi
 import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
+import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.KalshiFee
+import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.ui.WindowLabel
 import java.time.ZoneId
 import java.util.Locale
@@ -14,6 +18,27 @@ import kotlin.math.abs
 /**
  * Single source of truth for the full Scorecard: settled prediction-log
  * rows plus settled paper fills. Never invents P&L, fees, or strikes.
+ *
+ * Combined W-L and P&L are the pick-row ledger. Every breakdown (side,
+ * price, time, confidence) is a partition of that same list, so W / L /
+ * P&L always sum to Combined. Combined P&L is **not** a separate sum of
+ * raw [PaperFill.pnlUsd] — that was the $0.71 side-vs-combined gap
+ * (fill bag vs row.pnlUsd, plus dropped unknown-price rows).
+ *
+ * Bitcoin-only: [isScorecardTicker] / [CryptoMarkets.isLiveTicker]
+ * (KXBTC15M). Stored ETH/SOL rows are ignored.
+ *
+ * Entry ask / contracts / stake / fee:
+ *  1. Prefer a matched paper fill.
+ *  2. Else use values stored on the prediction-log row (new AI picks
+ *     persist these at signal time).
+ *  3. Else if the entry ask is known, derive contracts/stake/fee/P&L
+ *     from the same $10 paper-stake clip [paperClipFromAsk] that
+ *     [com.dirk.kalshiodds.ui.HomeCopy.tenDollarWins] uses to score
+ *     tiles (`LiveOrderSizer.size(ask, $10)`).
+ *  4. If the entry ask was never stored, the row cannot have a real $
+ *     outcome: count it in W-L, put P&L $0 in the Unknown-price bucket,
+ *     and show "entry not recorded".
  */
 object ScorecardLedger {
 
@@ -70,7 +95,8 @@ object ScorecardLedger {
         val strikeUsd: Double?,
         val finalUsd: Double?,
         val source: String,
-        val noBetWouldHave: Boolean = false
+        val noBetWouldHave: Boolean = false,
+        val entryNotRecorded: Boolean = false
     )
 
     data class Snapshot(
@@ -88,7 +114,26 @@ object ScorecardLedger {
         val voidCount: Int
     )
 
+    data class StoredEntry(
+        val entryAsk: Double?,
+        val contracts: Int?,
+        val stakeUsd: Double?,
+        val feeUsd: Double?
+    )
+
     const val EM_DASH = "—"
+    const val UNKNOWN_KEY = "unknown"
+    const val UNKNOWN_PRICE_LABEL = "Unknown price"
+    const val UNKNOWN_TIME_LABEL = "Unknown time"
+    const val UNKNOWN_CONF_LABEL = "Unknown confidence"
+    const val UNKNOWN_SIDE_LABEL = "Unknown side"
+    const val ENTRY_NOT_RECORDED = "entry not recorded"
+
+    /**
+     * Same $10 all-in clip as [com.dirk.kalshiodds.ui.HomeCopy.TILE_STAKE_USD]
+     * / `tenDollarWins`. Live Approve stays the $5 cap.
+     */
+    const val PAPER_STAKE_USD = 10.0
 
     val PRICE_BANDS: List<Pair<String, String>> = listOf(
         "le31" to "≤31¢",
@@ -104,21 +149,30 @@ object ScorecardLedger {
         "gt85" to "AI >85%"
     )
 
+    /** KXBTC15M only — same live-universe gate the rest of the app uses. */
+    fun isScorecardTicker(ticker: String): Boolean = CryptoMarkets.isLiveTicker(ticker)
+
+    fun isScorecardSeries(series: String): Boolean =
+        series.trim().equals(KalshiApi.SERIES_BTC, ignoreCase = true)
+
     fun of(
         entries: List<PredictionLogEntry>,
         fills: List<PaperFill> = emptyList(),
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE
     ): Snapshot {
-        val scored = entries.filter {
+        val btcEntries = entries.filter { isScorecardTicker(it.ticker) }
+        val scored = btcEntries.filter {
             (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
                 ForecastUnits.isScoredPick(it)
         }
-        val noBet = entries.filter {
+        val noBet = btcEntries.filter {
             (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
                 SignalStance.isNoBetSide(it.predictedSide)
         }
-        val settledFills = fills.filter { it.settled && it.won != null }
+        val settledFills = fills.filter {
+            isScorecardTicker(it.ticker) && it.settled && it.won != null
+        }
         val aiFills = settledFills.filter { isAiSource(it.source) }
         val manualFills = settledFills.filter { !isAiSource(it.source) }
         val windowByTicker = windows.associateBy { it.ticker.uppercase(Locale.US) }
@@ -131,9 +185,12 @@ object ScorecardLedger {
         val leftoverAiRows = unusedAiFills.map { fill ->
             pickFromFill(fill, scored, windowByTicker[fill.ticker.uppercase(Locale.US)], zoneId, Kind.AI)
         }
-        val manualRows = manualFills.map { fill ->
-            pickFromFill(fill, scored + noBet, windowByTicker[fill.ticker.uppercase(Locale.US)], zoneId, Kind.MANUAL)
-        }
+        val scoredTickers = scored.map { it.ticker.uppercase(Locale.US) }.toSet()
+        val manualRows = manualFills
+            .filter { it.ticker.uppercase(Locale.US) !in scoredTickers }
+            .map { fill ->
+                pickFromFill(fill, scored + noBet, windowByTicker[fill.ticker.uppercase(Locale.US)], zoneId, Kind.MANUAL)
+            }
         val noBetRows = noBet.map { entry ->
             pickFromEntry(
                 entry,
@@ -149,29 +206,29 @@ object ScorecardLedger {
         val allMoneyRows = aiPicks + manualRows
         val displayPicks = (allMoneyRows + noBetRows).sortedByDescending { it.settledAtMs }
 
-        val ai = record(aiPicks, moneyOf(aiFills))
-        val manual = record(manualRows, moneyOf(manualFills))
+        val ai = record(aiPicks)
+        val manual = record(manualRows)
         val combined = Record(
             wins = ai.wins + manual.wins,
             losses = ai.losses + manual.losses,
             settledCount = ai.settledCount + manual.settledCount,
             hitRate = rate(ai.wins + manual.wins, ai.settledCount + manual.settledCount),
             streak = streakOf(allMoneyRows.sortedByDescending { it.settledAtMs }),
-            money = moneyOf(settledFills)
+            money = moneyOfRows(allMoneyRows)
         )
         return Snapshot(
             ai = ai,
             manual = manual,
             combined = combined,
-            noBetWouldHave = record(noBetRows, Money()),
+            noBetWouldHave = record(noBetRows),
             bySide = sideBuckets(allMoneyRows),
             byPrice = priceBuckets(allMoneyRows),
             byTime = timeBuckets(allMoneyRows, zoneId),
             byConfidence = confidenceBuckets(allMoneyRows),
             picks = displayPicks,
             cumulativePnl = cumulative(allMoneyRows),
-            openCount = entries.count { it.outcome == null },
-            voidCount = entries.count { it.outcome.equals("void", true) }
+            openCount = btcEntries.count { it.outcome == null },
+            voidCount = btcEntries.count { it.outcome.equals("void", true) }
         )
     }
 
@@ -204,6 +261,11 @@ object ScorecardLedger {
         }
     }
 
+    fun timeBucketKey(settledAtMs: Long, zoneId: ZoneId = ET_ZONE): String? {
+        if (settledAtMs <= 0L) return null
+        return ScorecardMetrics.etBucketKey(settledAtMs, zoneId)
+    }
+
     fun feeUsd(fill: PaperFill): Double? {
         val fromNote = Regex("""fee\s+\$([0-9]+(?:\.[0-9]+)?)""", RegexOption.IGNORE_CASE)
             .find(fill.note)?.groupValues?.getOrNull(1)?.toDoubleOrNull()
@@ -212,22 +274,46 @@ object ScorecardLedger {
         return KalshiFee.total(fill.contracts, fill.limitPrice)
     }
 
-    fun moneyOf(fills: List<PaperFill>): Money {
-        val pnls = fills.mapNotNull { it.pnlUsd }
-        val wins = pnls.filter { it > 1e-9 }
-        val losses = pnls.filter { it < -1e-9 }
-        return Money(
-            wonUsd = wins.sum(),
-            lostUsd = abs(losses.sum()),
-            pnlUsd = pnls.sum(),
-            biggestWinUsd = wins.maxOrNull(),
-            biggestLossUsd = losses.minOrNull(),
-            avgWinUsd = wins.takeIf { it.isNotEmpty() }?.average(),
-            avgLossUsd = losses.takeIf { it.isNotEmpty() }?.average(),
-            winCount = wins.size,
-            lossCount = losses.size
+    /**
+     * $10 paper-stake clip used to score an AI pick when contracts / stake /
+     * fee were not stored but the entry ask was. Same rule as
+     * [com.dirk.kalshiodds.ui.HomeCopy.tenDollarWins]:
+     * `LiveOrderSizer.size(ask, PAPER_STAKE_USD)`.
+     */
+    fun paperClipFromAsk(ask: Double?): LiveOrderSizer.Clip? {
+        val px = KalshiPrice.usable(ask) ?: return null
+        val clip = LiveOrderSizer.size(px, PAPER_STAKE_USD)
+        return clip.takeIf { it.ok }
+    }
+
+    fun captureEntryFromBook(
+        sideYes: Boolean,
+        yesAsk: Double?,
+        noAsk: Double?,
+        yesBid: Double? = null
+    ): StoredEntry {
+        val ask = if (sideYes) {
+            KalshiPrice.usable(yesAsk)
+        } else {
+            KalshiPrice.usable(noAsk) ?: yesBid?.let { KalshiPrice.usable(1.0 - it) }
+        }
+        val clip = paperClipFromAsk(ask)
+        if (clip == null) return StoredEntry(ask, null, null, null)
+        return StoredEntry(
+            entryAsk = clip.price,
+            contracts = clip.count,
+            stakeUsd = clip.allInUsd,
+            feeUsd = clip.feeUsd
         )
     }
+
+    fun moneyOf(fills: List<PaperFill>): Money {
+        val pnls = fills.mapNotNull { it.pnlUsd }
+        return moneyFromPnls(pnls)
+    }
+
+    fun moneyOfRows(rows: List<PickRow>): Money =
+        moneyFromPnls(rows.map { it.pnlUsd ?: 0.0 })
 
     fun streakOf(newestFirst: List<PickRow>): String {
         val scored = newestFirst.filter { !it.noBetWouldHave }
@@ -264,7 +350,23 @@ object ScorecardLedger {
         return String.format(Locale.US, "%s$%.2f", sign, abs(usd))
     }
 
-    private fun record(rows: List<PickRow>, money: Money): Record {
+    private fun moneyFromPnls(pnls: List<Double>): Money {
+        val wins = pnls.filter { it > 1e-9 }
+        val losses = pnls.filter { it < -1e-9 }
+        return Money(
+            wonUsd = wins.sum(),
+            lostUsd = abs(losses.sum()),
+            pnlUsd = pnls.sum(),
+            biggestWinUsd = wins.maxOrNull(),
+            biggestLossUsd = losses.minOrNull(),
+            avgWinUsd = wins.takeIf { it.isNotEmpty() }?.average(),
+            avgLossUsd = losses.takeIf { it.isNotEmpty() }?.average(),
+            winCount = wins.size,
+            lossCount = losses.size
+        )
+    }
+
+    private fun record(rows: List<PickRow>): Record {
         val wins = rows.count { it.won }
         val losses = rows.count { !it.won }
         val n = rows.size
@@ -274,7 +376,7 @@ object ScorecardLedger {
             settledCount = n,
             hitRate = rate(wins, n),
             streak = streakOf(rows.sortedByDescending { it.settledAtMs }),
-            money = money
+            money = moneyOfRows(rows)
         )
     }
 
@@ -312,6 +414,7 @@ object ScorecardLedger {
             else -> "NO"
         }
         val at = entry.settledAtMs ?: entry.closeTimeMs ?: entry.timestampMs
+        val sized = sizePick(entry, fill, won)
         return PickRow(
             kind = kind,
             ticker = entry.ticker,
@@ -319,18 +422,19 @@ object ScorecardLedger {
             displaySide = displaySide(side),
             windowEt = WindowLabel.of(entry.ticker, entry.closeTimeMs ?: at),
             settledAtMs = at,
-            entryAsk = fill?.limitPrice,
+            entryAsk = sized.entryAsk,
             aiPct = ForecastUnits.sideProbability01(entry) * 100.0,
             marketPct = ForecastUnits.probability01(entry.marketMid) * 100.0,
-            stakeUsd = fill?.stakeUsd,
-            contracts = fill?.contracts?.takeIf { it > 0 },
-            feeUsd = fill?.let { feeUsd(it) },
+            stakeUsd = sized.stakeUsd,
+            contracts = sized.contracts,
+            feeUsd = sized.feeUsd,
             won = won,
-            pnlUsd = fill?.pnlUsd,
+            pnlUsd = sized.pnlUsd,
             strikeUsd = window?.strikeUsd,
             finalUsd = null,
             source = fill?.source ?: if (noBetWouldHave) "NO BET would-have" else "AI pick",
-            noBetWouldHave = noBetWouldHave
+            noBetWouldHave = noBetWouldHave,
+            entryNotRecorded = sized.entryNotRecorded
         )
     }
 
@@ -343,6 +447,7 @@ object ScorecardLedger {
     ): PickRow {
         val entry = entries.firstOrNull { it.ticker.equals(fill.ticker, true) }
         val won = fill.won == true
+        val ask = fill.limitPrice.takeIf { it > 0.0 }
         return PickRow(
             kind = kind,
             ticker = fill.ticker,
@@ -350,34 +455,110 @@ object ScorecardLedger {
             displaySide = displaySide(fill.side),
             windowEt = WindowLabel.of(fill.ticker, fill.createdAtMs),
             settledAtMs = fill.createdAtMs,
-            entryAsk = fill.limitPrice.takeIf { it > 0.0 },
+            entryAsk = ask,
             aiPct = entry?.let { ForecastUnits.sideProbability01(it) * 100.0 },
             marketPct = entry?.let { ForecastUnits.probability01(it.marketMid) * 100.0 },
             stakeUsd = fill.stakeUsd,
             contracts = fill.contracts.takeIf { it > 0 },
             feeUsd = feeUsd(fill),
             won = won,
-            pnlUsd = fill.pnlUsd,
+            pnlUsd = fill.pnlUsd ?: 0.0,
             strikeUsd = window?.strikeUsd,
             finalUsd = null,
-            source = fill.source
+            source = fill.source,
+            entryNotRecorded = ask == null
         )
     }
 
+    private data class SizedPick(
+        val entryAsk: Double?,
+        val contracts: Int?,
+        val stakeUsd: Double?,
+        val feeUsd: Double?,
+        val pnlUsd: Double,
+        val entryNotRecorded: Boolean
+    )
+
+    /**
+     * Resolve entry / size / P&L for one AI log row. Fill wins if present.
+     * Otherwise stored log fields. Otherwise the $10 paper-stake rule when
+     * the ask is known. Missing ask → W-L still counts, P&L is $0.
+     */
+    private fun sizePick(entry: PredictionLogEntry, fill: PaperFill?, won: Boolean): SizedPick {
+        val fillAsk = fill?.limitPrice?.takeIf { it > 0.0 }
+        val storedAsk = KalshiPrice.usable(entry.entryAsk)
+        val ask = fillAsk ?: storedAsk
+        if (ask == null && fill == null) {
+            return SizedPick(
+                entryAsk = null,
+                contracts = null,
+                stakeUsd = null,
+                feeUsd = null,
+                pnlUsd = 0.0,
+                entryNotRecorded = true
+            )
+        }
+        val clip = if (fill == null) paperClipFromAsk(ask) else null
+        val contracts = fill?.contracts?.takeIf { it > 0 }
+            ?: entry.contracts?.takeIf { it > 0 }
+            ?: clip?.count
+        val stake = fill?.stakeUsd
+            ?: entry.stakeUsd
+            ?: clip?.allInUsd
+        val fee = fill?.let { feeUsd(it) }
+            ?: entry.feeUsd
+            ?: clip?.feeUsd
+        val pnl = when {
+            fill?.pnlUsd != null -> fill.pnlUsd
+            contracts != null && stake != null && ask != null ->
+                pnlFromPosition(won, contracts, stake, fee, ask)
+            clip != null -> if (won) clip.profitIfWinUsd else -clip.allInUsd
+            else -> 0.0
+        }
+        return SizedPick(
+            entryAsk = ask,
+            contracts = contracts,
+            stakeUsd = stake,
+            feeUsd = fee,
+            pnlUsd = pnl,
+            entryNotRecorded = false
+        )
+    }
+
+    private fun pnlFromPosition(
+        won: Boolean,
+        contracts: Int,
+        stake: Double,
+        fee: Double?,
+        ask: Double
+    ): Double {
+        val pos = contracts * ask
+        val allIn = when {
+            fee != null && abs(stake - (pos + fee)) <= 0.02 -> stake
+            fee != null && abs(stake - pos) <= 0.02 -> stake + fee
+            else -> stake
+        }
+        return if (won) contracts * 1.0 - allIn else -allIn
+    }
+
     private fun sideBuckets(rows: List<PickRow>): List<Bucket> {
-        return listOf("UP" to "UP picks", "DOWN" to "DOWN picks").map { (key, label) ->
+        val known = listOf("UP" to "UP picks", "DOWN" to "DOWN picks").map { (key, label) ->
             bucket(key, label, rows.filter { it.displaySide == key })
         }
+        val unknown = rows.filter { it.displaySide != "UP" && it.displaySide != "DOWN" }
+        return known + bucket(UNKNOWN_KEY, UNKNOWN_SIDE_LABEL, unknown)
     }
 
     private fun priceBuckets(rows: List<PickRow>): List<Bucket> {
         val groups = rows.groupBy { priceBandKey(it.entryAsk) }
-        return PRICE_BANDS.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) }
+        return PRICE_BANDS.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) } +
+            bucket(UNKNOWN_KEY, UNKNOWN_PRICE_LABEL, groups[null].orEmpty())
     }
 
     private fun confidenceBuckets(rows: List<PickRow>): List<Bucket> {
         val groups = rows.groupBy { confidenceBandKey(it.aiPct) }
-        return CONFIDENCE_BANDS.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) }
+        return CONFIDENCE_BANDS.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) } +
+            bucket(UNKNOWN_KEY, UNKNOWN_CONF_LABEL, groups[null].orEmpty())
     }
 
     private fun timeBuckets(rows: List<PickRow>, zoneId: ZoneId): List<Bucket> {
@@ -387,8 +568,9 @@ object ScorecardLedger {
             val label = "%d–%d ET".format(start, start + 4)
             key to label
         }
-        val groups = rows.groupBy { ScorecardMetrics.etBucketKey(it.settledAtMs, zoneId) }
-        return defs.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) }
+        val groups = rows.groupBy { timeBucketKey(it.settledAtMs, zoneId) }
+        return defs.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) } +
+            bucket(UNKNOWN_KEY, UNKNOWN_TIME_LABEL, groups[null].orEmpty())
     }
 
     private fun bucket(key: String, label: String, rows: List<PickRow>): Bucket {
@@ -401,7 +583,7 @@ object ScorecardLedger {
             losses = (n - wins).coerceAtLeast(0),
             settledCount = n,
             hitRate = rate(wins, n),
-            pnlUsd = rows.mapNotNull { it.pnlUsd }.sum()
+            pnlUsd = rows.sumOf { it.pnlUsd ?: 0.0 }
         )
     }
 

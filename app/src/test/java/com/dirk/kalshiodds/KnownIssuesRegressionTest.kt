@@ -1415,7 +1415,7 @@ class KnownIssuesRegressionTest {
     fun fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration() {
         val entries = HomeFixtures.sampleSettledEntries()
         val settled = ScorecardCopy.settledPicks(entries)
-        assertEquals(28, settled.size)
+        assertEquals(18, settled.size)
         val window = ScorecardMetrics.window(settled)
         val snap = ScorecardMetrics.Snapshot(
             daily = window,
@@ -1431,13 +1431,13 @@ class KnownIssuesRegressionTest {
             honest = ScorecardMetrics.honest(settled)
         )
         assertTrue(snap.perSeries.isEmpty())
-        assertEquals(28, snap.sampleCount)
-        assertEquals(28, snap.honest.n)
+        assertEquals(18, snap.sampleCount)
+        assertEquals(18, snap.honest.n)
 
         val present = ScorecardCopy.of(entries, 12.40)
-        assertEquals(28, present.settledCount)
-        assertEquals(18, present.summary.wins)
-        assertEquals(10, present.summary.losses)
+        assertEquals(18, present.settledCount)
+        assertEquals(12, present.summary.wins)
+        assertEquals(6, present.summary.losses)
         assertFalse(present.showsEmptyState)
         assertNull(present.emptyState())
         assertFalse(present.allLines().any { it.contains("No settled samples") })

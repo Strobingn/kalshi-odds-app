@@ -359,6 +359,23 @@ class SignalHub(
         persistScope.launch {
             try {
                 runCatching {
+                    val predictedSide = SignalStance.resolve(
+                        storedSide = scored.predictedSide,
+                        modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                        marketYes = scored.marketMidPp,
+                        fairYes = scored.fairValuePp
+                    ).storedSide
+                    val sideYes = when (predictedSide?.trim()?.uppercase()) {
+                        "YES" -> true
+                        "NO" -> false
+                        else -> (scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp) > 50.0
+                    }
+                    val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
+                        sideYes = sideYes,
+                        yesAsk = tick.yesAsk,
+                        noAsk = tick.noAsk,
+                        yesBid = tick.yesBid
+                    )
                     store.upsertOpenPrediction(
                         ticker = tick.ticker,
                         series = tick.series,
@@ -368,12 +385,7 @@ class SignalHub(
                         timestampMs = System.currentTimeMillis(),
                         closeTimeMs = tick.closeTimeEpochMs ?: scoring.book.closeTime(tick.ticker),
                         snapshot = SignalSnapshot(
-                            predictedSide = SignalStance.resolve(
-                                storedSide = scored.predictedSide,
-                                modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
-                                marketYes = scored.marketMidPp,
-                                fairYes = scored.fairValuePp
-                            ).storedSide,
+                            predictedSide = predictedSide,
                             edgePp = scored.deltaPp,
                             confidence = scored.confidence,
                             regime = scored.regime.name,
@@ -389,7 +401,11 @@ class SignalHub(
                                 kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp(),
                             mlpYes = scored.mlpPp?.div(100.0),
                             cnnYes = scored.cnnPp?.div(100.0),
-                            gbmYes = scored.gbmPp?.div(100.0)
+                            gbmYes = scored.gbmPp?.div(100.0),
+                            entryAsk = sized.entryAsk,
+                            contracts = sized.contracts,
+                            stakeUsd = sized.stakeUsd,
+                            feeUsd = sized.feeUsd
                         )
                     )
                 }
