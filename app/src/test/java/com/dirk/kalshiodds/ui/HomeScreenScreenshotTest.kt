@@ -245,6 +245,14 @@ class HomeScreenScreenshotTest {
     fun darkScorecard() = snapScorecard("scorecard_dark", dark = true)
 
     @Test
+    fun darkScorecardRestoredBanners() = snapScorecard(
+        "scorecard_restored_banners",
+        dark = true,
+        ui = HomeFixtures.sampleScorecardDetailUi(),
+        height = 3600
+    )
+
+    @Test
     fun darkFullScorecardEmpty() = snapScorecard("scorecard_empty_dark", dark = true, empty = true)
 
     @Test
@@ -252,8 +260,14 @@ class HomeScreenScreenshotTest {
         "scorecard_detail",
         dark = true,
         empty = false,
-        ui = HomeFixtures.sampleScorecardDetailUi(),
-        height = 5200
+        ui = HomeFixtures.sampleScorecardDetailUi().copy(
+            metrics = null,
+            allowlist = null,
+            adapter = null,
+            guardrails = null,
+            extendedLine = null
+        ),
+        height = 6400
     )
 
     @Test
