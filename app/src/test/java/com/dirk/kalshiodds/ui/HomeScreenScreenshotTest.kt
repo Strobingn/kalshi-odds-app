@@ -138,6 +138,18 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun lightBtcOnly() = snap(
+        "home_light_btc_only",
+        dark = false,
+        HomeFixtures.state(
+            HomeFixtures.disagreementBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        )
+    )
+
+    @Test
     fun darkBtcOnly() = snap(
         "home_dark_btc_only",
         dark = true,
@@ -152,6 +164,30 @@ class HomeScreenScreenshotTest {
                 sitOut = true,
                 autoTuneNote = "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
             )
+        )
+    )
+
+    @Test
+    fun lightBtcOnly360Font13() = snapNarrowFont13(
+        "home_light_btc_only_360_font13",
+        dark = false,
+        HomeFixtures.state(
+            HomeFixtures.actionableBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        )
+    )
+
+    @Test
+    fun darkBtcOnly360Font13() = snapNarrowFont13(
+        "home_dark_btc_only_360_font13",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.actionableBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
         )
     )
 
@@ -269,6 +305,24 @@ class HomeScreenScreenshotTest {
             }
         }
         copyLatest(name)
+    }
+
+    /** 360dp-wide phone at fontScale 1.3 — tiles must not overflow. */
+    private fun snapNarrowFont13(name: String, dark: Boolean, state: OddsUiState) {
+        val restore = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
+        try {
+            paparazzi.unsafeUpdateConfig(
+                deviceConfig = DeviceConfig.PIXEL_6.copy(
+                    softButtons = false,
+                    screenWidth = 945,
+                    screenHeight = 2400,
+                    fontScale = 1.3f
+                )
+            )
+            snap(name, dark, state)
+        } finally {
+            paparazzi.unsafeUpdateConfig(deviceConfig = restore)
+        }
     }
 
     private fun snapBefore(name: String, dark: Boolean, keyed: Boolean) {

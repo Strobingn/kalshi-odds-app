@@ -26,6 +26,7 @@ Package: `com.dirk.kalshiodds` · version **0.3.14**
 - **Bitcoin-only (KXBTC15M).** Home shows the BTC card plus This window. SOL / ETH cards, watch toggles, extra tickers, WS subscriptions, scoring, alerts, and new paper fills are off. Scorecard and signal history filter stored ETH/SOL rows (DB rows are not deleted). `homeKeeps0312Layout` asserts exactly one BTC card.
 - **Rollover cannot leave BTC stuck.** A failed resolve (empty listing or 429) stays in `retrying` and keeps polling — including mid-window and after close-time polling would have ended. `Retry-After` is respected even when longer than the 10s backoff cap. `successor` accepts a re-found open market when `previous == null` even if `close == lastCloseMs`. `btcCardRecoversFromFailedResolveMidWindow` reproduces the 0.3.13 S24 “Next window loading” stuck state and proves recovery.
 - **This window sit-out copy.** Home never shows Brier / log-loss. Sit-out reads `NO BET this window. The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative.`
+- **Home tiles: $10 profit + larger AI %.** Each UP / DOWN tile shows net profit if the owner bought that side with $10 at the live best ask (`contracts×ask + ceil_cent(0.07×C×P×(1−P)) ≤ $10`, profit = `C×$1 − cost`). Missing ask → `$10 wins —`. Display only — live Approve stays $5 all-in. AI % is headline-sized, still green/red and summing to 100. Paparazzi covers 360dp + fontScale 1.3.
 
 ## 0.3.11
 

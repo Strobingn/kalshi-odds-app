@@ -183,6 +183,7 @@ fun MarketCard(
                     askLabel = quotes.yesAskLabel,
                     bidLabel = quotes.yesBidLabel,
                     aiLabel = HomeCopy.tileAiUp(market),
+                    profitLabel = HomeCopy.tileTenDollarUp(market),
                     accent = colors.up,
                     container = colors.upContainer,
                     highlighted = call.headline == BetCall.Headline.BET_UP,
@@ -193,6 +194,7 @@ fun MarketCard(
                     askLabel = quotes.noAskLabel,
                     bidLabel = quotes.noBidLabel,
                     aiLabel = HomeCopy.tileAiDown(market),
+                    profitLabel = HomeCopy.tileTenDollarDown(market),
                     accent = colors.down,
                     container = colors.downContainer,
                     highlighted = call.headline == BetCall.Headline.BET_DOWN,
@@ -535,6 +537,7 @@ private fun PriceTile(
     askLabel: String,
     bidLabel: String,
     aiLabel: String,
+    profitLabel: String,
     accent: Color,
     container: Color,
     highlighted: Boolean,
@@ -553,25 +556,47 @@ private fun PriceTile(
                 else Modifier.border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
             )
             .background(container, RoundedCornerShape(12.dp))
-            .padding(12.dp)
+            .padding(horizontal = 10.dp, vertical = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = labelColor, fontWeight = FontWeight.Bold)
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = labelColor,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
         Text(
             askLabel,
-            style = MaterialTheme.typography.headlineLarge,
+            style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = valueColor
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Text(
             "bid $bidLabel",
-            style = MaterialTheme.typography.labelMedium,
-            color = labelColor
+            style = MaterialTheme.typography.labelSmall,
+            color = labelColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
         Text(
             aiLabel,
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            color = valueColor,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            profitLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = labelColor,
             fontWeight = FontWeight.SemiBold,
-            color = valueColor
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

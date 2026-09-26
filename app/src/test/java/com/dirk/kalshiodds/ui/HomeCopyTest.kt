@@ -113,6 +113,41 @@ class HomeCopyTest {
     }
 
     @Test
+    fun tenDollarWinsUsesLiveAskAndKnownCents() {
+        val at31 = HomeCopy.tenDollarWins(0.31)
+        assertEquals(30, at31.contracts)
+        assertEquals(0.45, at31.feeUsd, 1e-9)
+        assertEquals(9.75, at31.costUsd, 1e-9)
+        assertEquals(20.25, at31.profitUsd!!, 1e-9)
+        assertEquals("\$10 wins +\$20.25", at31.line)
+        assertEquals(0.31, at31.ask!!, 1e-9)
+
+        val at70 = HomeCopy.tenDollarWins(0.70)
+        assertEquals(13, at70.contracts)
+        assertEquals(0.20, at70.feeUsd, 1e-9)
+        assertEquals(9.30, at70.costUsd, 1e-9)
+        assertEquals(3.70, at70.profitUsd!!, 1e-9)
+        assertEquals("\$10 wins +\$3.70", at70.line)
+
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(null).line)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.0).line)
+        assertEquals(10.0, HomeCopy.TILE_STAKE_USD, 1e-9)
+        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(5.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)
+
+        val market = HomeFixtures.actionableBtc()
+        val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
+        assertEquals(HomeCopy.tenDollarWins(quotes.yesAsk).line, HomeCopy.tileTenDollarUp(market))
+        assertEquals(HomeCopy.tenDollarWins(quotes.noAsk).line, HomeCopy.tileTenDollarDown(market))
+        val moved = market.copy(yesAsk = 0.31, yesBid = 0.30, noAsk = 0.70, noBid = 0.69)
+        assertEquals("\$10 wins +\$20.25", HomeCopy.tileTenDollarUp(moved))
+        assertEquals("\$10 wins +\$3.70", HomeCopy.tileTenDollarDown(moved))
+        val missing = market.copy(yesAsk = null, noAsk = null, yesBid = null, noBid = null)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tileTenDollarUp(missing))
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tileTenDollarDown(missing))
+    }
+
+    @Test
     fun tileAiPercentsMatchModelAndSumTo100() {
         val up = HomeFixtures.actionableBtc()
         assertEquals("AI 80%", HomeCopy.tileAiUp(up))
