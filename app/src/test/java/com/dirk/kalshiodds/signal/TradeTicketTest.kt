@@ -349,7 +349,7 @@ MIIEowIBAAKCAQEA
             if (session.snapshot().lastError.isNullOrBlank()) previous = null
             if (i == 2) clock.set(1_000L + TicketSession.VOID_HOLD_MS)
         }
-        assertEquals(listOf(TicketSession.WINDOW_CLOSED_NOTICE), recorded)
+        assertTrue(recorded.isEmpty())
         assertEquals(1, session.windowClosedNoticeCount)
     }
 
@@ -418,8 +418,7 @@ MIIEowIBAAKCAQEA
 
     @Test
     fun lastOrderErrorOnceSkipsRepeatWindowClosed() {
-        assertEquals(
-            TicketSession.WINDOW_CLOSED_NOTICE,
+        assertNull(
             com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
                 null,
                 TicketSession.WINDOW_CLOSED_NOTICE

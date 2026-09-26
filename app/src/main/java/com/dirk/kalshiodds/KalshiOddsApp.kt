@@ -36,6 +36,7 @@ class KalshiOddsApp : Application() {
         super.onCreate()
         runCatching { CrashBreadcrumb.install(this) }
         container = AppContainer(this)
+        runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->
             // SharedPreferences.apply() only — do not launch a coroutine
             // here. The confirmed 0.3.0 death was CancellableContinuationImpl

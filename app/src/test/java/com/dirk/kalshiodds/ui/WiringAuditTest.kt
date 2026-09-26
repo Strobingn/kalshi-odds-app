@@ -160,6 +160,8 @@ class WiringAuditTest {
         Control("Active market resolver", com.dirk.kalshiodds.domain.ActiveMarketResolver::class.java, "forSeries"),
         Control("Live tap resolves current window", com.dirk.kalshiodds.domain.MarketLifecycle::class.java, "resolveActionWindow"),
         Control("Last order error once", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "accept"),
+        Control("Last order error skip lifecycle", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "isNotAnOrderError"),
+        Control("Last order error clear stale", com.dirk.kalshiodds.signal.trade.LastOrderErrorStore::class.java, "clearStaleLifecycleNotice"),
         Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
         Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals")
     )

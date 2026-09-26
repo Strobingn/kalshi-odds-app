@@ -749,7 +749,7 @@ class KnownIssuesRegressionTest {
         session.replaceProposals(emptyList(), liveTickers = setOf("KXBTC15M-26SEP251215-45"))
         recordOnce()
         assertNull(session.snapshot().lastError)
-        assertEquals(listOf(TicketSession.WINDOW_CLOSED_NOTICE), recorded)
+        assertTrue(recorded.isEmpty())
         assertEquals(1, session.windowClosedNoticeCount)
         assertEquals(0, placed.get())
     }

@@ -118,15 +118,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
-                    val incoming = com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
-                        lastRecordedTicketError,
-                        tickets.lastError
-                    )
-                    if (incoming != null) {
-                        lastRecordedTicketError = incoming
-                        container.lastOrderError.record(incoming)
-                    } else if (tickets.lastError.isNullOrBlank()) {
-                        lastRecordedTicketError = null
+                    val lastError = tickets.lastError
+                    if (!com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.isNotAnOrderError(lastError)) {
+                        val incoming = com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce.accept(
+                            lastRecordedTicketError,
+                            lastError
+                        )
+                        if (incoming != null) {
+                            lastRecordedTicketError = incoming
+                            container.lastOrderError.record(incoming)
+                        } else if (lastError.isNullOrBlank()) {
+                            lastRecordedTicketError = null
+                        }
                     }
                     _state.update { cur ->
                         val notice = tickets.lastError

@@ -17,12 +17,23 @@ class LastOrderErrorStore(context: Context) {
     @Volatile
     private var cachedAtMs: Long = prefs.getLong(KEY_AT, 0L)
 
+    init {
+        clearStaleLifecycleNotice()
+    }
+
     fun record(message: String, atMs: Long = System.currentTimeMillis()) {
         val clean = redact(message).trim().take(MAX)
         if (clean.isEmpty()) return
+        if (LastOrderErrorOnce.isNotAnOrderError(clean)) return
         cached = clean
         cachedAtMs = atMs
         prefs.edit().putString(KEY_MSG, clean).putLong(KEY_AT, atMs).apply()
+    }
+
+    /** Wipe a leftover Window-closed notice that an older build persisted. */
+    fun clearStaleLifecycleNotice() {
+        val msg = cached ?: return
+        if (LastOrderErrorOnce.shouldClearPersisted(msg)) clear()
     }
 
     fun snapshot(): Pair<String, Long>? {
