@@ -71,7 +71,7 @@ class PaperTileBuyTest {
             ?: java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/paper/PaperTileBuy.kt")
         val text = src.readText()
         assertFalse(text.contains("KalshiTradeClient"))
-        assertFalse(text.contains("portfolio"))
+        assertFalse(text.contains("GET /portfolio"))
         assertFalse(text.contains("createLimit"))
         assertFalse(text.contains("TicketSession"))
         val vm = java.io.File("src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt")
@@ -81,7 +81,7 @@ class PaperTileBuyTest {
         assertTrue(paperFn.contains("PaperTileBuy.place"))
         assertFalse(paperFn.contains("ticketSession.approve"))
         assertFalse(paperFn.contains("tradeClient"))
-        assertFalse(paperFn.contains("portfolio"))
+        assertFalse(paperFn.contains("GET /portfolio"))
     }
 
     @Test

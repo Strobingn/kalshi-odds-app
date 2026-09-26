@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -295,8 +296,17 @@ fun MarketCard(
                         disabledContainerColor = colors.up.copy(alpha = 0.38f),
                         disabledContentColor = colors.onUp.copy(alpha = 0.70f)
                     ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     modifier = Modifier.weight(1f).height(48.dp)
-                ) { Text(HomeCopy.PAPER_UP, fontWeight = FontWeight.Bold, maxLines = 1) }
+                ) {
+                    Text(
+                        HomeCopy.PAPER_UP,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Clip
+                    )
+                }
                 Button(
                     onClick = { onPaperDown?.invoke() },
                     enabled = onPaperDown != null && paperDownOk,
@@ -306,8 +316,17 @@ fun MarketCard(
                         disabledContainerColor = colors.down.copy(alpha = 0.38f),
                         disabledContentColor = colors.onDown.copy(alpha = 0.70f)
                     ),
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                     modifier = Modifier.weight(1f).height(48.dp)
-                ) { Text(HomeCopy.PAPER_DOWN, fontWeight = FontWeight.Bold, maxLines = 1) }
+                ) {
+                    Text(
+                        HomeCopy.PAPER_DOWN,
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Clip
+                    )
+                }
             }
             if (!paperUpOk || !paperDownOk) {
                 val reason = listOfNotNull(

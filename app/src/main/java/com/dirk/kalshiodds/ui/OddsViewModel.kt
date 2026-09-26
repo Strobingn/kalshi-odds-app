@@ -589,7 +589,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Card-level Paper UP / Paper DOWN. $10 at the live ask using the
      * same math as the tile profit line. Never calls [ticketSession.approve]
-     * and never hits Kalshi portfolio or the order API.
+     * and never hits the live order API.
      */
     fun paperBuySide(market: MarketUiModel, side: String) {
         val outcome = com.dirk.kalshiodds.signal.paper.PaperTileBuy.place(paperBook, market, side)

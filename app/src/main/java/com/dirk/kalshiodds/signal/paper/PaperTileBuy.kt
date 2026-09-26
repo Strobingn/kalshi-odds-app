@@ -8,8 +8,8 @@ import kotlin.math.roundToInt
 
 /**
  * Card-level $10 paper buy. Same contract / fee / profit math as
- * [HomeCopy.tenDollarWins]. Never touches Kalshi portfolio or the
- * live order client.
+ * [HomeCopy.tenDollarWins]. Never places a live order and never
+ * reads Kalshi cash or positions.
  */
 object PaperTileBuy {
     const val SOURCE = "tile $10"
@@ -60,7 +60,7 @@ object PaperTileBuy {
 
     /**
      * Write one $10 paper fill at the live best ask. Isolated from
-     * [com.dirk.kalshiodds.data.api.KalshiTradeClient] and portfolio GETs.
+     * live order placement and cash/position reads.
      */
     fun place(book: PaperBook, market: MarketUiModel, side: String): PaperBuy.Outcome {
         val want = sideKey(side)

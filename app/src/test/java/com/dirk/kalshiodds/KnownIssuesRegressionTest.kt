@@ -1465,6 +1465,7 @@ class KnownIssuesRegressionTest {
         assertTrue(card.contains("HomeCopy.PAPER_DOWN"))
         assertTrue(card.contains("onPaperUp"))
         assertTrue(card.contains("onPaperDown"))
+        assertTrue(card.contains("maxLines = 2"))
     }
 
     @Test
