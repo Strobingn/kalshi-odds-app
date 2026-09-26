@@ -63,7 +63,7 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         container.logStore.entriesFlow,
         container.paper.book.state
     ) { entries, paper ->
-        ScorecardUi(view = ScorecardCopy.of(entries, paper.realizedPnlUsd))
+        ScorecardUi(view = ScorecardCopy.of(entries, paper.liveRealizedPnlUsd))
     }.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),

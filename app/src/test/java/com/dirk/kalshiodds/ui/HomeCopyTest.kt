@@ -148,6 +148,38 @@ class HomeCopyTest {
     }
 
     @Test
+    fun sitOutHomeCopyIsPlainLanguage() {
+        val jargon = "Sit out — model loses to market on Brier/log-loss and EV is -1.20"
+        assertTrue(HomeCopy.isSitOutJargon(jargon))
+        assertEquals(HomeCopy.SIT_OUT_HOME, HomeCopy.noBetHeadline(jargon))
+        assertEquals(
+            "NO BET this window. The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative.",
+            HomeCopy.SIT_OUT_HOME
+        )
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("Brier", ignoreCase = true))
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("log-loss", ignoreCase = true))
+        assertFalse(HomeCopy.SIT_OUT_HOME.contains("log loss", ignoreCase = true))
+        val tuner = "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
+        assertTrue(HomeCopy.isSitOutJargon(tuner))
+        assertEquals(HomeCopy.SIT_OUT_HOME, HomeCopy.noBetHeadline(tuner))
+        val dead = HomeFixtures.actionableBtc()
+        val sit = com.dirk.kalshiodds.signal.trade.BetCall.Decision(
+            headline = com.dirk.kalshiodds.signal.trade.BetCall.Headline.NO_BET,
+            side = null,
+            ticket = null,
+            ask = null,
+            profitIfWinUsd = null,
+            allInUsd = null,
+            contracts = 0,
+            noBetReason = jargon
+        )
+        val line = HomeCopy.thisWindowHeadline(sit, dead, nowMs)
+        assertEquals(HomeCopy.SIT_OUT_HOME, line)
+        assertFalse(line.contains("Brier"))
+        assertFalse(line.contains("log-loss"))
+    }
+
+    @Test
     fun topBarKeeps0312ActionsPlusScorecard() {
         assertEquals(listOf("Scorecard", "Settings", "Refresh"), HomeCopy.TOP_BAR_ACTIONS)
     }

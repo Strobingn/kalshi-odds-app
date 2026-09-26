@@ -187,8 +187,8 @@ class LeadLagAndMicrostructureTest {
         assertTrue(btcMove!! > 0.10)
         val ethFollow = TickBook.deltaBetween(ethHist, now - 400L, now) ?: 0.0
         assertEquals(0.0, ethFollow, 1e-9)
-        assertEquals(listOf("KXBTC15M"), TickBook.leadersFor("KXETH15M"))
-        assertEquals(listOf("KXETH15M", "KXSOL15M"), TickBook.leadersFor("KXBTC15M"))
+        assertEquals(emptyList<String>(), TickBook.leadersFor("KXETH15M"))
+        assertEquals(emptyList<String>(), TickBook.leadersFor("KXBTC15M"))
     }
 
     @Test

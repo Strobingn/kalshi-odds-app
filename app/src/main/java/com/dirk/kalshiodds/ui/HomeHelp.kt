@@ -24,8 +24,8 @@ object HomeHelp {
 
     const val HOME_TITLE = "Home screen"
     const val HOME_BODY =
-        "This window is the single best BetCall across the current BTC / SOL / ETH 15m windows. " +
-            "The three cards stay Bitcoin, Solana, Ethereum in that order. " +
+        "This window is the BetCall for the current Bitcoin 15m window. " +
+            "Home shows one Bitcoin card. " +
             "Home has no Signals list — Signal history is a text link. " +
             "A compact scorecard line (W-L, win rate, paper P&L) sits under This window and opens the full scorecard. " +
             "Tap a card for the full-screen chart. The primary button opens an approve-gated ticket — " +

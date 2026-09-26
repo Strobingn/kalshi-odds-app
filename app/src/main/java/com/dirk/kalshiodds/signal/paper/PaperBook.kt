@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.paper
 
+import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
@@ -55,6 +56,9 @@ data class PaperBookState(
 ) {
     val openStakeUsd: Double get() = fills.filter { !it.settled }.sumOf { it.stakeUsd }
     val realizedPnlUsd: Double get() = fills.mapNotNull { it.pnlUsd }.sum()
+    /** Paper P&L for the live Bitcoin series only — stored ETH/SOL fills stay in the ledger. */
+    val liveRealizedPnlUsd: Double
+        get() = fills.filter { CryptoMarkets.isLiveTicker(it.ticker) }.mapNotNull { it.pnlUsd }.sum()
     val equityUsd: Double get() = cashUsd + openStakeUsd
     val openCount: Int get() = fills.count { !it.settled }
 }
@@ -157,6 +161,10 @@ class PaperBook(
         note: String,
         winTargetUsd: Double? = null
     ): PaperFill? {
+        if (CryptoMarkets.isRetiredTicker(ticker)) {
+            rememberMessage("Paper skip $ticker — Bitcoin-only")
+            return null
+        }
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null.also {
             rememberMessage("Paper skip $ticker — unusable limit")
@@ -249,6 +257,9 @@ class PaperBook(
         note: String,
         winTargetUsd: Double? = null
     ): PaperBuy.Outcome {
+        if (CryptoMarkets.isRetiredTicker(ticker)) {
+            return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
+        }
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice)
             ?: return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — unusable limit")
@@ -458,6 +469,7 @@ class PaperBook(
         stakeUsd: Double? = null,
         winTargetUsd: Double? = null
     ): PaperFill? {
+        if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null
         synchronized(lock) {

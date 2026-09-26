@@ -44,7 +44,7 @@ class PaperBookTest {
     @Test
     fun manualLiveTicketIsNotAutoPapered() {
         val book = PaperBook()
-        val manual = hunterTicket().copy(kind = TicketKind.MANUAL, ticker = "KXETH15M-X")
+        val manual = hunterTicket().copy(kind = TicketKind.MANUAL, ticker = "KXBTC15M-X")
         assertNull(book.considerTicket(manual, enabled = true))
         assertTrue(book.manualFill(manual) != null)
         assertTrue(book.snapshot().fills.single().source.contains("paper", ignoreCase = true))

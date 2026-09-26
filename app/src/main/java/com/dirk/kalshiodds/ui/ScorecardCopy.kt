@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.feedback.ForecastUnits
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
@@ -18,14 +19,12 @@ object ScorecardCopy {
     const val TITLE = "Scorecard"
     const val SUBTITLE = "Post-settlement paper record. Voids and NO BET rows are excluded."
     const val NO_SETTLED = HomeScorecardSummary.NO_SETTLED
-    const val COINS_TITLE = "By coin"
     const val TIME_TITLE = "By time of day"
     const val RECENT_TITLE = "Recent settled picks"
     const val WON = "won"
     const val LOST = "lost"
     const val EM_DASH = "—"
     const val RECENT_LIMIT = 20
-    val COIN_ORDER: List<String> = ScorecardMetrics.COIN_ORDER
     val ET_ZONE: ZoneId = ZoneId.of("America/New_York")
 
     data class Bucket(
@@ -49,7 +48,6 @@ object ScorecardCopy {
 
     data class View(
         val summary: HomeScorecardSummary,
-        val coins: List<Bucket>,
         val timeOfDay: List<Bucket>,
         val recent: List<RecentPick>
     ) {
@@ -66,8 +64,6 @@ object ScorecardCopy {
                 lines += paperPnlLine(summary)
                 lines += settledCountLine(summary)
             }
-            lines += COINS_TITLE
-            lines += coins.map { it.line }
             lines += TIME_TITLE
             lines += timeOfDay.map { it.line }
             if (recent.isNotEmpty()) {
@@ -81,7 +77,7 @@ object ScorecardCopy {
     val EMPTY: View = of(emptyList(), 0.0)
 
     fun settledPicks(entries: List<PredictionLogEntry>): List<PredictionLogEntry> =
-        ScorecardMetrics.settledScoredPicks(entries)
+        ScorecardMetrics.settledScoredPicks(entries).filter { CryptoMarkets.isLiveTicker(it.ticker) }
 
     fun showsEmptyState(settledCount: Int): Boolean = settledCount <= 0
 
@@ -96,15 +92,9 @@ object ScorecardCopy {
         val settled = settledPicks(entries)
         return View(
             summary = HomeScorecardSummary.of(settled, paperPnlUsd),
-            coins = coinBuckets(settled),
             timeOfDay = timeBuckets(settled, zoneId),
             recent = recentPicks(settled)
         )
-    }
-
-    fun coinBuckets(settled: List<PredictionLogEntry>): List<Bucket> {
-        val groups = settled.groupBy { ScorecardMetrics.coinOf(it.series.ifBlank { it.ticker }) }
-        return COIN_ORDER.map { coin -> bucket(coin, coin, groups[coin].orEmpty()) }
     }
 
     fun timeBuckets(

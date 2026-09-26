@@ -75,4 +75,5 @@ fun SignalHistoryScreen(
 }
 
 fun signalHistoryCards(alerts: List<SignalAlert>): List<SignalCopy.Card> =
-    alerts.map { SignalCopy.card(it) }
+    alerts.filter { com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(it.ticker) }
+        .map { SignalCopy.card(it) }

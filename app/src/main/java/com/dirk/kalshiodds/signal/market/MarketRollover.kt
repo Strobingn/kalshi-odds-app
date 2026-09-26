@@ -15,7 +15,7 @@ import kotlinx.coroutines.launch
 import retrofit2.HttpException
 
 /**
- * Clock-driven 15m window swap for BTC / SOL / ETH.
+ * Clock-driven 15m window swap for [CryptoMarkets.DEFAULT_SERIES] (Bitcoin).
  *
  * Production bug this closes: [com.dirk.kalshiodds.ui.OddsViewModel] painted
  * `repository.refresh()` snapshots and never applied [Event] to home, while
@@ -204,9 +204,11 @@ class MarketRollover(
     }
 
     /**
-     * Keep the current window if it is still open. Otherwise require a listing
-     * whose close_time is strictly later than the window we just showed —
-     * Kalshi can keep the closed ticker in `status=open` for tens of seconds.
+     * Keep the current window if it is still open. Otherwise take the open
+     * listing for this series. Closed tickers Kalshi still marks `status=open`
+     * fail [MarketLifecycle.isCurrentWindow] and are not picked. A missing
+     * listing returns null so the series stays in [Event.retrying] — the loop
+     * never gives up, including mid-window, and respects 429 Retry-After.
      */
     fun successor(
         series: String,
@@ -219,12 +221,10 @@ class MarketRollover(
         val pool = listed.filter {
             CryptoMarkets.inferSeries(it.ticker).equals(series, ignoreCase = true)
         }
-        val later = pool.filter { m ->
-            val close = m.closeTimeEpochMs ?: return@filter false
-            val floor = lastCloseMs ?: Long.MIN_VALUE
-            close > floor && MarketLifecycle.isCurrentWindow(m, nowMs)
-        }
-        return MarketLifecycle.currentOpenWindow(later, nowMs)
+        val current = MarketLifecycle.currentOpenWindow(pool, nowMs) ?: return null
+        val floor = lastCloseMs ?: Long.MIN_VALUE
+        val close = current.closeTimeEpochMs ?: return current
+        return if (close > floor || previous == null) current else null
     }
 
     private fun nextWakeMs(
@@ -234,7 +234,8 @@ class MarketRollover(
         rateLimited: Set<String>
     ): Long? {
         val closeWake = active.mapNotNull { it.closeTimeEpochMs }.minOrNull()?.plus(graceAfterCloseMs)
-        val pollWait = if (retrying.isNotEmpty()) {
+        val unresolved = retrying.isNotEmpty()
+        val pollWait = if (unresolved) {
             val limitedWait = rateLimited.mapNotNull { backoffBySeries[it] }.minOrNull()
             nowMs + (limitedWait ?: retryMs)
         } else {
@@ -275,7 +276,7 @@ class MarketRollover(
         fun retryAfterMs(error: HttpException): Long? {
             val raw = error.response()?.headers()?.get("Retry-After") ?: return null
             val seconds = raw.trim().toLongOrNull() ?: return null
-            return (seconds * 1_000L).coerceIn(POLL_MS, POLL_CAP_MS)
+            return (seconds * 1_000L).coerceAtLeast(POLL_MS)
         }
     }
 }

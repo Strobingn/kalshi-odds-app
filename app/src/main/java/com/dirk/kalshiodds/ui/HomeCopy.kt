@@ -75,8 +75,7 @@ object HomeCopy {
     ): String {
         if (decision == null || market == null) return "NO BET this window"
         if (!decision.isActionable) {
-            val reason = decision.noBetReason?.trim().orEmpty()
-            return if (reason.isEmpty()) "NO BET this window" else "NO BET this window · $reason"
+            return noBetHeadline(decision.noBetReason)
         }
         val profit = decision.profitIfWinUsd?.let { String.format(Locale.US, "$%.2f", it) } ?: "—"
         return "${decision.label}  ${coinShort(market)}  · $5 wins $profit profit · ${closesIn(market.closeTimeEpochMs, nowMs)}"
@@ -121,6 +120,28 @@ object HomeCopy {
             val brierPart = pickedSideBrierLine(total, brier)
             if (brierPart == NEED_20 || brierPart == "—") head else "$head · $brierPart"
         }
+    }
+
+    const val NO_BET_WINDOW = "NO BET this window"
+    const val SIT_OUT_HOME =
+        "NO BET this window. The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
+
+    fun noBetHeadline(reason: String?): String {
+        val raw = reason?.trim().orEmpty()
+        if (raw.isEmpty()) return NO_BET_WINDOW
+        if (isSitOutJargon(raw)) return SIT_OUT_HOME
+        return "$NO_BET_WINDOW · $raw"
+    }
+
+    fun isSitOutJargon(reason: String): Boolean {
+        val u = reason.lowercase()
+        return u.contains("brier") ||
+            u.contains("log-loss") ||
+            u.contains("log loss") ||
+            u.contains("sit out") ||
+            u.contains("sitting out") ||
+            u.contains("hasn't beaten kalshi") ||
+            u.contains("expected value is negative")
     }
 
     const val AI_EM_DASH = "AI —"

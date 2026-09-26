@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import java.util.Locale
@@ -28,6 +29,7 @@ data class HomeScorecardSummary(
             paperPnlUsd: Double
         ): HomeScorecardSummary {
             val settled = ScorecardMetrics.settledScoredPicks(entries)
+                .filter { CryptoMarkets.isLiveTicker(it.ticker) }
             val all = ScorecardMetrics.window(settled)
             return HomeScorecardSummary(
                 wins = all.hits,

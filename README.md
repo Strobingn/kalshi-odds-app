@@ -2,14 +2,13 @@
 
 Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-market odds and fires **analysis-only** signal alerts.
 
-**Default watchlist (crypto only):**
+**Default watchlist (Bitcoin-only):**
 
 | Series | Asset | Role |
 |--------|--------|------|
-| `KXBTC15M` | Bitcoin 15-minute | Default on |
-| `KXETH15M` | Ethereum 15-minute | Default on |
-| `KXSOL15M` | Solana 15-minute | Default on |
-| Extra tickers | Other crypto-denominated Kalshi contracts (XRP, DOGE, …) | Optional, Settings |
+| `KXBTC15M` | Bitcoin 15-minute | The only live series |
+
+`KXETH15M`, `KXSOL15M`, and extra tickers are recognized so stored rows can be filtered out of scorecard / signal history / paper P&L. They are never subscribed, polled, scored, alerted, or paper-traded. The live list is `CryptoMarkets.DEFAULT_SERIES`.
 
 **WTI crude (`KXWTI15M`) and all non-crypto markets are excluded** from defaults, UI toggles, REST watchlists, WebSocket subscriptions, scoring, and alerts.
 
@@ -23,7 +22,10 @@ Package: `com.dirk.kalshiodds` · version **0.3.14**
 ## 0.3.14
 
 - **Full scorecard empty-state contradiction.** The 0.3.13 screen showed `Picked side: 12/18 correct` and `settled 18` while the bottom read `No settled samples yet`. The empty-state was gated on `ScorecardMetrics.Snapshot.perSeries.isEmpty()` (and the Paparazzi fixture left `perSeries` empty while stuffing honest / window counts). Calibration-sample copy (`the first 20 outcomes unlock calibration`) was a third, unrelated collection. Every count, empty state, and section now comes from `ScorecardCopy` → `ScorecardMetrics.settledScoredPicks` + the same paper P&L as the home line. `No settled picks yet` appears only when that settled list is empty (`ScorecardCopyTest`, `KnownIssuesRegressionTest.fullScorecardEmptyStateUsesSettledPicksNotPerSeriesOrCalibration`).
-- **Cleaner layout.** Top summary (W-L, win rate, paper P&L, settled count), compact BTC / SOL / ETH and 4-hour ET breakdowns, then recent settled picks collapsed by default. Removed duplicate Today / 7-day / all-time cards, per-series, Brier / policy / adapter / guardrail / Extended-AI debug banners, and fabricated bucket P&L. Empty buckets render `—`, never `0%`. Green/red stay Kalshi UP/DOWN only; P&L and win rate are neutral `+/−` text.
+- **Cleaner layout.** Top summary (W-L, win rate, paper P&L, settled count), 4-hour ET time-of-day buckets, then recent settled picks collapsed by default. Per-coin breakdown is gone (Bitcoin-only). Removed duplicate Today / 7-day / all-time cards, per-series, Brier / policy / adapter / guardrail / Extended-AI debug banners, and fabricated bucket P&L. Empty buckets render `—`, never `0%`. Green/red stay Kalshi UP/DOWN only; P&L and win rate are neutral `+/−` text.
+- **Bitcoin-only (KXBTC15M).** Home shows the BTC card plus This window. SOL / ETH cards, watch toggles, extra tickers, WS subscriptions, scoring, alerts, and new paper fills are off. Scorecard and signal history filter stored ETH/SOL rows (DB rows are not deleted). `homeKeeps0312Layout` asserts exactly one BTC card.
+- **Rollover cannot leave BTC stuck.** A failed resolve (empty listing or 429) stays in `retrying` and keeps polling — including mid-window and after close-time polling would have ended. `Retry-After` is respected even when longer than the 10s backoff cap. `successor` accepts a re-found open market when `previous == null` even if `close == lastCloseMs`. `btcCardRecoversFromFailedResolveMidWindow` reproduces the 0.3.13 S24 “Next window loading” stuck state and proves recovery.
+- **This window sit-out copy.** Home never shows Brier / log-loss. Sit-out reads `NO BET this window. The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative.`
 
 ## 0.3.11
 
@@ -282,7 +284,7 @@ Event-driven fair-value alerts on crypto ticks.
 
 ## What the app does
 
-1. Fetches open **crypto** markets (`KXBTC15M` / `KXETH15M` / `KXSOL15M` + extra crypto tickers).
+1. Fetches the open **Bitcoin** 15m market (`KXBTC15M` only).
 2. Displays each market as a card (AI YES/NO, edge, bid/ask, volume, OI).
 3. Probability rule: mid = `(yes_bid + yes_ask) / 2` else `last_price`.
 4. Scoring engine (dedicated tick dispatcher):
@@ -315,7 +317,7 @@ adb install -r app/build/outputs/apk/debug/DipHunter-debug.apk
 - Public REST base: `https://api.elections.kalshi.com/trade-api/v2`
 - Authenticated trade writes: `https://external-api.kalshi.com/trade-api/v2` (elections as V2-only fallback)
 - WS: `wss://external-api-ws.kalshi.com/trade-api/ws/v2` (elections host as alternate)
-- Public REST (no auth): `GET /markets?series_ticker=KXBTC15M|KXETH15M|KXSOL15M&status=open`
+- Public REST (no auth): `GET /markets?series_ticker=KXBTC15M&status=open`
 - Authenticated create (after Live Approve): `POST /portfolio/events/orders` (V2 bid/ask, GTC limit). Cancel: `DELETE /portfolio/events/orders/{order_id}`. Never `POST /portfolio/orders`.
 - Example tickers: `KXBTC15M-26SEP231600-00`, `KXETH15M-26SEP231645-45`, `KXSOL15M-26SEP231645-45`
 

@@ -52,36 +52,34 @@ class ScorecardCopyTest {
         assertTrue(view.showsEmptyState)
         assertEquals(ScorecardCopy.NO_SETTLED, view.emptyState())
         assertTrue(view.allLines().contains(ScorecardCopy.NO_SETTLED))
-        assertEquals(listOf("BTC", "SOL", "ETH"), view.coins.map { it.key })
-        assertTrue(view.coins.all { it.settledCount == 0 && it.line.endsWith(ScorecardCopy.EM_DASH) })
         assertTrue(view.timeOfDay.all { it.settledCount == 0 && it.line.endsWith(ScorecardCopy.EM_DASH) })
         assertTrue(view.recent.isEmpty())
         assertFalse(view.allLines().any { it.contains("0%") })
         assertFalse(view.allLines().any { it.contains("0-0") })
+        assertFalse(view.allLines().any { it.contains("By coin") })
     }
 
     @Test
-    fun coinOrderIsBtcSolEthAndEmptyBucketsAreDash() {
-        val view = ScorecardCopy.of(HomeFixtures.sampleSettledEntries(), 12.40)
-        assertEquals(listOf("BTC", "SOL", "ETH"), view.coins.map { it.key })
-        assertEquals(listOf("BTC", "SOL", "ETH"), ScorecardMetrics.coinBreakdowns(emptyList()).map { it.key })
-        val btc = view.coins.first { it.key == "BTC" }
-        val sol = view.coins.first { it.key == "SOL" }
-        val eth = view.coins.first { it.key == "ETH" }
-        assertEquals(8, btc.settledCount)
-        assertEquals(6, btc.wins)
-        assertEquals(2, btc.losses)
-        assertEquals(6, sol.settledCount)
-        assertEquals(4, eth.settledCount)
-        assertEquals(18, btc.settledCount + sol.settledCount + eth.settledCount)
-        val emptySol = ScorecardCopy.bucketLine("SOL", 0, 0, 0, null)
-        assertEquals("SOL  —", emptySol)
-        assertFalse(emptySol.contains("0%"))
-        assertEquals("—", ScorecardCopy.percentOrDash(null))
+    fun filtersStoredEthSolAndDropsCoinSection() {
+        val entries = HomeFixtures.sampleSettledEntries()
+        assertTrue(entries.any { it.ticker.startsWith("KXETH15M") })
+        assertTrue(entries.any { it.ticker.startsWith("KXSOL15M") })
+        val settled = ScorecardCopy.settledPicks(entries)
+        assertEquals(18, settled.size)
+        assertTrue(settled.all { it.ticker.startsWith("KXBTC15M") })
+        assertTrue(settled.none { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
+        val view = ScorecardCopy.of(entries, 12.40)
+        assertEquals(18, view.settledCount)
         assertEquals("12-6", ScorecardCopy.recordLine(view.summary))
         assertEquals("67%", ScorecardCopy.winRateLine(view.summary))
         assertEquals("paper +$12.40", ScorecardCopy.paperPnlLine(view.summary))
         assertEquals("18 settled", ScorecardCopy.settledCountLine(view.summary))
+        assertFalse(view.allLines().any { it.contains("By coin") })
+        assertFalse(view.allLines().any { it.contains("SOL ") })
+        assertFalse(view.allLines().any { it.contains("ETH ") })
+        assertTrue(view.timeOfDay.any { it.settledCount > 0 })
+        assertEquals("SOL  —", ScorecardCopy.bucketLine("SOL", 0, 0, 0, null))
+        assertEquals("—", ScorecardCopy.percentOrDash(null))
     }
 
     @Test
@@ -99,7 +97,9 @@ class ScorecardCopyTest {
         )
         val view = ScorecardCopy.of(entries, 12.40)
         assertEquals(18, view.recent.size)
+        assertTrue(view.recent.all { it.ticker.startsWith("KXBTC15M") })
         assertTrue(view.recent.none { it.ticker.contains("NOBET") })
+        assertTrue(view.recent.none { it.ticker.startsWith("KXETH") || it.ticker.startsWith("KXSOL") })
         val first = view.recent.first()
         assertTrue(first.line.contains(first.coin))
         assertTrue(first.line.contains(first.side))
@@ -121,6 +121,8 @@ class ScorecardCopyTest {
         assertFalse(src.contains("Color.Red"))
         assertFalse(src.contains("accentGreen"))
         assertFalse(src.contains("accentRed"))
+        assertFalse(src.contains("COINS_TITLE"))
+        assertFalse(src.contains("By coin"))
         assertTrue(src.contains("NeutralStat(\"Paper P&L\""))
         assertTrue(src.contains("NeutralStat(\"Win rate\""))
         assertTrue(src.contains("SideColor.of"))

@@ -134,7 +134,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
-                    HomeScorecardSummary.of(entries, paper.realizedPnlUsd)
+                    HomeScorecardSummary.of(entries, paper.liveRealizedPnlUsd)
                 }.collect { summary ->
                     _state.update { it.copy(scorecardSummary = summary) }
                 }
@@ -386,10 +386,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value.settings
         refreshExternal()
         return repository.refresh(
-            watchBtc = s.watchBtc,
-            watchEth = s.watchEth,
-            watchSol = s.watchSol,
-            extraTickers = s.extraTickerList(),
+            watchBtc = true,
+            watchEth = false,
+            watchSol = false,
+            extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(s.extraTickerList()),
             edgeThresholdPp = s.edgeThresholdPp
         )
     }
@@ -896,6 +896,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
         val now = System.currentTimeMillis()
         alerts.forEach { alert ->
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
             val market = markets[alert.ticker]
             if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
             val ask = market?.let {

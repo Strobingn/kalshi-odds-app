@@ -139,7 +139,7 @@ class SignalHub(
     fun ingestRestSnapshot(snapshot: MarketsSnapshot) {
         val recv = elapsedNanos()
         val now = System.currentTimeMillis()
-        val markets = snapshot.allMarkets.filter { CryptoMarkets.isCryptoTicker(it.ticker) }
+        val markets = snapshot.allMarkets.filter { CryptoMarkets.isLiveTicker(it.ticker) }
         val series = settings.watchedSeries.ifEmpty { CryptoMarkets.DEFAULT_SERIES }
         val active = com.dirk.kalshiodds.domain.ActiveMarketResolver.tickers(markets, series, now)
         val extras = settings.extraTickerList().filter { ticker ->

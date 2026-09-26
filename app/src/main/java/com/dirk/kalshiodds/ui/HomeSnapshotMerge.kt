@@ -21,8 +21,9 @@ object HomeSnapshotMerge {
         )
         return base.copy(
             btc = slot(base.btc, event, KalshiApi.SERIES_BTC),
-            eth = slot(base.eth, event, KalshiApi.SERIES_ETH),
-            sol = slot(base.sol, event, KalshiApi.SERIES_SOL),
+            eth = emptyList(),
+            sol = emptyList(),
+            extra = emptyList(),
             fetchedAtEpochMs = nowMs
         )
     }

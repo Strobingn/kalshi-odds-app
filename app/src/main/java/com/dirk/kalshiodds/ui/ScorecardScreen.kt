@@ -95,9 +95,6 @@ fun ScorecardScreen(
             } else {
                 SummaryCard(view.summary)
             }
-            SectionCard(ScorecardCopy.COINS_TITLE) {
-                view.coins.forEach { BucketRow(it) }
-            }
             SectionCard(ScorecardCopy.TIME_TITLE) {
                 view.timeOfDay.forEach { BucketRow(it) }
             }

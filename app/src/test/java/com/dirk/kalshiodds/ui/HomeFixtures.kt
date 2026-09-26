@@ -162,16 +162,22 @@ object HomeFixtures {
                 settledAtMs = at
             )
         }
-        val btc = (0 until 8).map { i ->
+        val btcMorning = (0 until 8).map { i ->
             pick("KXBTC15M-26SEP25${1000 + i}-50", "KXBTC15M", et(10, i), won = i < 6, side = if (i % 3 == 0) "NO" else "YES")
         }
-        val sol = (0 until 6).map { i ->
+        val btcAfternoon = (0 until 6).map { i ->
+            pick("KXBTC15M-26SEP25${1400 + i}-20", "KXBTC15M", et(14, i), won = i < 4)
+        }
+        val btcEvening = (0 until 4).map { i ->
+            pick("KXBTC15M-26SEP25${1800 + i}-40", "KXBTC15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
+        }
+        val storedSol = (0 until 6).map { i ->
             pick("KXSOL15M-26SEP25${1400 + i}-20", "KXSOL15M", et(14, i), won = i < 4)
         }
-        val eth = (0 until 4).map { i ->
+        val storedEth = (0 until 4).map { i ->
             pick("KXETH15M-26SEP25${1800 + i}-40", "KXETH15M", et(18, i), won = i < 2, side = if (i == 1) "NO" else "YES")
         }
-        return btc + sol + eth
+        return btcMorning + btcAfternoon + btcEvening + storedSol + storedEth
     }
 
     fun sampleScorecardUi(): ScorecardUi =

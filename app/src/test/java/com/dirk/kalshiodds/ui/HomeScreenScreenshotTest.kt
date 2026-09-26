@@ -138,6 +138,24 @@ class HomeScreenScreenshotTest {
     ))
 
     @Test
+    fun darkBtcOnly() = snap(
+        "home_dark_btc_only",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.disagreementBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        ).copy(
+            settings = HomeFixtures.settings(true).copy(
+                autoTuneEnabled = true,
+                sitOut = true,
+                autoTuneNote = "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
+            )
+        )
+    )
+
+    @Test
     fun lightNextWindow() = snap("home_light_next_window", dark = false, HomeFixtures.state(
         HomeFixtures.actionableBtc().copy(closeTimeEpochMs = HomeFixtures.NOW_MS - 1_000L),
         HomeFixtures.noBetEth(),
@@ -345,7 +363,7 @@ class HomeScreenScreenshotTest {
                 details = "TREND/EARLY · cal · adapt · AI 68% vs mkt 64% · flow NO · Δ +4.0pp"
             ),
             SignalCopy.card(
-                ticker = "KXETH15M-26SEP251400-40",
+                ticker = "KXBTC15M-26SEP251400-40",
                 side = "NO",
                 modelYes = 30.0,
                 marketYes = 48.0,
