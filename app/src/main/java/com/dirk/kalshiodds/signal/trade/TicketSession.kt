@@ -263,8 +263,11 @@ class TicketSession(
             return _state.value
         }
         if (!ticket.canApprove) {
-            val reason = ticket.blockedReason?.takeIf { it.isNotBlank() }
-                ?: "Ticket cannot be approved — Approve stays off (no silent skip)"
+            val reason = when {
+                isWindowClosedReason(ticket.blockedReason) -> WINDOW_CLOSED_NOTICE
+                else -> ticket.blockedReason?.takeIf { it.isNotBlank() }
+                    ?: "Ticket cannot be approved — Approve stays off (no silent skip)"
+            }
             _state.update { it.copy(lastError = reason) }
             return _state.value
         }
@@ -418,7 +421,7 @@ class TicketSession(
             return WINDOW_CLOSED_NOTICE
         }
         val stillHolding = merged.any { isWindowClosedReason(it.blockedReason) }
-        if (stillHolding && isWindowClosedError(cleaned)) return cleaned
+        if (stillHolding && isWindowClosedError(cleaned)) return WINDOW_CLOSED_NOTICE
         return cleaned?.takeUnless { isWindowClosedError(it) }
     }
 

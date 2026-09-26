@@ -412,7 +412,7 @@ MIIEowIBAAKCAQEA
         session.voidTickers(setOf("KXBTC15M-OLD"))
         val after = session.approve("m1")
         assertEquals(0, placed.get())
-        assertEquals(TicketSession.WINDOW_CLOSED, after.lastError)
+        assertEquals(TicketSession.WINDOW_CLOSED_NOTICE, after.lastError)
         assertFalse(session.snapshot().proposals.single { it.id == "m1" }.canApprove)
     }
 
