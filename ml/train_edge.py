@@ -49,6 +49,8 @@ SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
 UA = "DipHunterTrainer/0.3.8"
+# App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
+SPOT_LOOKBACK_BARS = 16
 
 
 def http_get(url: str, retries: int = 5) -> Any:
@@ -171,7 +173,8 @@ def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list
     return hist.get("candlesticks") or []
 
 
-def fetch_spot(product: str, start: int, end: int) -> list[float]:
+def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
+    """1-minute Coinbase closes as (bucket_start_ts, close), oldest first."""
     q = {"granularity": 60, "start": datetime.fromtimestamp(start, tz=timezone.utc).isoformat(), "end": datetime.fromtimestamp(end, tz=timezone.utc).isoformat()}
     try:
         data = http_get(f"{COINBASE}/products/{product}/candles?{urllib.parse.urlencode(q)}")
@@ -180,7 +183,17 @@ def fetch_spot(product: str, start: int, end: int) -> list[float]:
     if not isinstance(data, list):
         return []
     rows = sorted(data, key=lambda r: r[0] if r else 0)
-    return [float(r[4]) for r in rows if r and len(r) >= 5]
+    return [(int(r[0]), float(r[4])) for r in rows if r and len(r) >= 5]
+
+
+def spot_known_at(spot: list[tuple[int, float]], decision_ts: int, keep: int = SPOT_LOOKBACK_BARS) -> list[float]:
+    """Closes whose 1m bar has finished by [decision_ts] — no look-ahead.
+
+    A Coinbase bucket starting at t closes at t + 60. The market's own
+    settlement spot must never leak into a mid-window feature row.
+    """
+    known = [c for ts, c in spot if ts + 60 <= decision_ts]
+    return known[-keep:]
 
 
 def realized_vol_annual(closes: list[float]) -> float | None:
@@ -197,7 +210,14 @@ def realized_vol_annual(closes: list[float]) -> float | None:
     return min(5.0, max(0.01, std * math.sqrt(SECONDS_PER_YEAR / 60.0)))
 
 
-def features_for(market: dict, candles: list[dict], spot: list[float], idx: int) -> list[float] | None:
+def spot_return(closes: list[float], bars: int) -> float:
+    """Simple return over the last [bars] 1m closes (app: spotReturn5m)."""
+    if len(closes) <= bars or closes[-1 - bars] <= 0:
+        return 0.0
+    return (closes[-1] - closes[-1 - bars]) / closes[-1 - bars]
+
+
+def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, float]], idx: int) -> list[float] | None:
     mid = candle_mid(candles[idx])
     if mid is None:
         return None
@@ -213,6 +233,7 @@ def features_for(market: dict, candles: list[dict], spot: list[float], idx: int)
     ask = _f(ya.get("close_dollars") if "close_dollars" in ya else ya.get("close"))
     spread = (ask - bid) if bid is not None and ask is not None else 0.02
     imbalance = 0.0
+    spot = spot_known_at(spot_rows, end_ts)
     sigma = realized_vol_annual(spot) if spot else None
     strike = _f(market.get("floor_strike"))
     spot_px = spot[-1] if spot else None
@@ -231,7 +252,7 @@ def features_for(market: dict, candles: list[dict], spot: list[float], idx: int)
         float(min(1.0, max(0.0, spread))),
         float(max(-1.0, min(1.0, momentum))),
         float(min(1.0, max(0.0, rvol))),
-        0.0,
+        float(max(-0.2, min(0.2, spot_return(spot, 5)))),
         float((hour * 60) / (24 * 60)),
         float(fair if fair is not None else mid),
     ]
