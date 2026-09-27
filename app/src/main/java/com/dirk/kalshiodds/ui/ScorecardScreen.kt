@@ -188,6 +188,7 @@ fun ScorecardScreen(
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.CONF_TITLE) { view.byConfidence.forEach { BucketRow(it) } } }
+                item { SectionCard(ScorecardCopy.SOURCE_TITLE) { view.bySource.forEach { BucketRow(it) } } }
                 item {
                     Text(
                         ScorecardCopy.PICKS_TITLE,
@@ -319,18 +320,27 @@ private fun BucketRow(bucket: ScorecardCopy.Bucket) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            bucket.label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
-                colors.up
-            } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
-                colors.down
-            } else {
-                colors.textPrimary
-            },
-            fontWeight = FontWeight.SemiBold
-        )
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                bucket.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
+                    colors.up
+                } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
+                    colors.down
+                } else {
+                    colors.textPrimary
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+            bucket.note?.let { note ->
+                Text(
+                    note,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
+        }
         Text(
             if (bucket.settledCount <= 0) {
                 ScorecardCopy.EM_DASH
@@ -423,7 +433,7 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                     append(ScorecardLedger.signedUsd(row.pnlUsd))
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }
                     row.finalUsd?.let { append(String.format(Locale.US, " · final $%,.0f", it)) }
-                    append(" · ${row.source}")
+                    append(" · ${row.pickSource ?: row.source}")
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = if (won) colors.up else colors.down

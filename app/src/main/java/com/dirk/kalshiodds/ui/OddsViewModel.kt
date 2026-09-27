@@ -891,6 +891,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 val logged = container.lastMinuteStore.record(fired)
                 if (logged != null) {
                     runCatching { container.lastMinuteNotifier.notifyFired(fired) }
+                    if (_state.value.settings.paperTradingEnabled) {
+                        paperBook.considerLastMinute(fired, enabled = true)
+                    }
                 }
             }
             market.copy(lastMinute = eval)

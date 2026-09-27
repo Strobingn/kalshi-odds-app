@@ -334,6 +334,45 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
     }
 
+    override fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>) {
+        if (rows.isEmpty()) return
+        val table = com.dirk.kalshiodds.data.local.paper.PaperFillSchema.TABLE
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    table,
+                    null,
+                    ContentValues().apply {
+                        put("fill_id", r.id)
+                        put("ticker", r.ticker)
+                        put("side", r.side)
+                        put("stake_usd", r.stakeUsd)
+                        put("contracts", r.contracts)
+                        put("limit_price", r.limitPrice)
+                        put("source", r.source)
+                        put("created_at_ms", r.createdAtMs)
+                        put("settled", if (r.settled) 1 else 0)
+                        put("outcome", r.outcome)
+                        put("won", r.won?.let { if (it) 1 else 0 })
+                        put("pnl_usd", r.pnlUsd)
+                        put("note", r.note)
+                        put("win_target_usd", r.winTargetUsd)
+                        put("ai_pct", r.aiPct)
+                        put("ai_confidence", r.aiConfidence)
+                        put("market_pct", r.marketPct)
+                        put("pick_source", r.pickSource)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE
+                )
+            }
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
     override fun insertChartTicks(rows: List<com.dirk.kalshiodds.data.local.archive.ChartTickRow>) {
@@ -877,6 +916,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createArchiveTables(db)
             createHistoryTables(db)
             createChartTickTable(db)
+            createPaperFillTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -887,6 +927,13 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             }
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
+            if (oldVersion < 6) createPaperFillTable(db)
+        }
+
+        private fun createPaperFillTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createChartTickTable(db: SQLiteDatabase) {
@@ -997,7 +1044,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 5
+        const val DB_VERSION = 6
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

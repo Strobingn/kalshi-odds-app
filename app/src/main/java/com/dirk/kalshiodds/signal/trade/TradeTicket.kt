@@ -62,6 +62,8 @@ data class TradeTicket(
     val paperOnly: Boolean = false,
     val impliedChance: Double? = null,
     val modelChance: Double? = null,
+    /** Model confidence 0–1 from [com.dirk.kalshiodds.domain.MarketUiModel.aiConfidence]. */
+    val modelConfidence: Double? = null,
     val fairChance: Double? = null,
     val modelEdge: Boolean = false,
     val profitIfWinUsd: Double? = null,

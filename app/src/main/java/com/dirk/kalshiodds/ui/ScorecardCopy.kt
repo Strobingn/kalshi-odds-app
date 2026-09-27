@@ -8,6 +8,7 @@ import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperPickSource
 import java.time.ZoneId
 import java.util.Locale
 
@@ -25,6 +26,8 @@ object ScorecardCopy {
     const val SIDE_TITLE = "By side"
     const val PRICE_TITLE = "By entry price"
     const val CONF_TITLE = "By AI confidence"
+    const val SOURCE_TITLE = ScorecardLedger.SOURCE_TITLE
+    const val UNKNOWN_CONF_NOTE = ScorecardLedger.UNKNOWN_CONF_NOTE
     const val AI_TITLE = "AI picks"
     const val MANUAL_TITLE = "Manual Paper UP/DOWN"
     const val LAST_MINUTE_TITLE = "Last-minute strategy"
@@ -79,7 +82,8 @@ object ScorecardCopy {
         val settledCount: Int,
         val hitRate: Double?,
         val pnlUsd: Double = 0.0,
-        val line: String
+        val line: String,
+        val note: String? = null
     )
 
     data class LastMinuteSection(
@@ -112,6 +116,7 @@ object ScorecardCopy {
         val bySide: List<Bucket>,
         val byPrice: List<Bucket>,
         val byConfidence: List<Bucket>,
+        val bySource: List<Bucket> = emptyList(),
         val lastMinute: LastMinuteSection = LastMinuteSection()
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
@@ -147,6 +152,9 @@ object ScorecardCopy {
             lines += timeOfDay.map { it.line }
             lines += CONF_TITLE
             lines += byConfidence.map { it.line }
+            byConfidence.filter { it.note != null }.forEach { lines += it.note!! }
+            lines += SOURCE_TITLE
+            lines += bySource.map { it.line }
             if (recent.isNotEmpty()) {
                 lines += PICKS_TITLE
                 if (recentExpanded) lines += recent.map { it.line }
@@ -202,6 +210,7 @@ object ScorecardCopy {
         lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList()
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
+        val lastMinute = lastMinuteSection(lastMinutePicks)
         val summary = HomeScorecardSummary(
             wins = ledger.combined.wins,
             losses = ledger.combined.losses,
@@ -217,7 +226,8 @@ object ScorecardCopy {
             bySide = ledger.bySide.map { toBucket(it) },
             byPrice = ledger.byPrice.map { toBucket(it) },
             byConfidence = ledger.byConfidence.map { toBucket(it) },
-            lastMinute = lastMinuteSection(lastMinutePicks)
+            bySource = mergeSourceBuckets(ledger.bySource.map { toBucket(it) }, lastMinute),
+            lastMinute = lastMinute
         )
     }
 
@@ -287,6 +297,34 @@ object ScorecardCopy {
         return "$label  $wins-$losses · ${percentOrDash(hitRate)} · $settledCount settled$money"
     }
 
+    fun mergeSourceBuckets(
+        ledger: List<Bucket>,
+        lastMinute: LastMinuteSection
+    ): List<Bucket> {
+        if (lastMinute.settledCount <= 0) return ledger
+        val key = PaperPickSource.LAST_MINUTE.name.lowercase(Locale.US)
+        val existing = ledger.firstOrNull { it.key == key }
+        if (existing != null && existing.settledCount > 0) return ledger
+        val lm = Bucket(
+            key = key,
+            label = PaperPickSource.LAST_MINUTE.label,
+            wins = lastMinute.wins,
+            losses = lastMinute.losses,
+            settledCount = lastMinute.settledCount,
+            hitRate = lastMinute.winRate,
+            pnlUsd = lastMinute.pnlUsd,
+            line = bucketLine(
+                PaperPickSource.LAST_MINUTE.label,
+                lastMinute.wins,
+                lastMinute.losses,
+                lastMinute.settledCount,
+                lastMinute.winRate,
+                lastMinute.pnlUsd
+            )
+        )
+        return ledger.map { if (it.key == key) lm else it }
+    }
+
     fun recentPicks(settled: List<PredictionLogEntry>): List<RecentPick> =
         settled
             .sortedByDescending { settledAt(it) }
@@ -329,14 +367,15 @@ object ScorecardCopy {
         val pnl = ScorecardLedger.signedUsd(row.pnlUsd)
         val strike = row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: "strike $EM_DASH"
         val fin = row.finalUsd?.let { String.format(Locale.US, "final $%,.0f", it) } ?: "final $EM_DASH"
+        val src = row.pickSource ?: row.source
         if (row.entryNotRecorded) {
-            return "${row.windowEt}  ${row.displaySide}  ${ScorecardLedger.ENTRY_NOT_RECORDED}  $ai  $mkt  $result  $pnl  $strike  $fin  ${row.ticker}"
+            return "${row.windowEt}  ${row.displaySide}  ${ScorecardLedger.ENTRY_NOT_RECORDED}  $ai  $mkt  $result  $pnl  $strike  $fin  $src  ${row.ticker}"
         }
         val ask = row.entryAsk?.let { String.format(Locale.US, "%.0f¢", it * 100.0) } ?: EM_DASH
         val stake = row.stakeUsd?.let { String.format(Locale.US, "stake $%.2f", it) } ?: "stake $EM_DASH"
         val ct = row.contracts?.let { "$it ct" } ?: "$EM_DASH ct"
         val fee = row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee $EM_DASH"
-        return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $result  $pnl  $strike  $fin  ${row.ticker}"
+        return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $result  $pnl  $strike  $fin  $src  ${row.ticker}"
     }
 
     fun recordLine(summary: HomeScorecardSummary): String =
@@ -375,7 +414,8 @@ object ScorecardCopy {
         settledCount = b.settledCount,
         hitRate = b.hitRate,
         pnlUsd = b.pnlUsd,
-        line = bucketLine(b.label, b.wins, b.losses, b.settledCount, b.hitRate, b.pnlUsd)
+        line = bucketLine(b.label, b.wins, b.losses, b.settledCount, b.hitRate, b.pnlUsd),
+        note = b.note
     )
 
     private fun settledAt(entry: PredictionLogEntry): Long = entry.settledAtMs ?: entry.timestampMs

@@ -76,7 +76,9 @@ class AppContainer(context: Context) {
         results = resultsWriter
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
-    val paper = PaperBookStore(app)
+    val paper = PaperBookStore(app) { fills ->
+        runCatching { archive.upsertPaperFills(fills) }
+    }
     val lastMinuteStore = com.dirk.kalshiodds.signal.lastminute.LastMinuteStore(app)
     val lastMinuteEngine = com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine(nowMs = { clock.nowMs() })
     val brti = com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient()

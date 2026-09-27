@@ -133,6 +133,8 @@ class ScorecardCopyTest {
         assertTrue(src.contains("view.showsEmptyState"))
         assertTrue(src.contains("ScorecardCopy.PICKS_TITLE"))
         assertTrue(src.contains("ScorecardCopy.SIDE_TITLE"))
+        assertTrue(src.contains("ScorecardCopy.SOURCE_TITLE"))
+        assertTrue(src.contains("bucket.note"))
         assertTrue(src.contains("colors.up"))
         assertTrue(src.contains("colors.down"))
         assertFalse(src.contains("Color.Green"))
