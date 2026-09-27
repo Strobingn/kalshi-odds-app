@@ -11,7 +11,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.dirk.kalshiodds"
+        // Claude's branch build: separate package so it installs next to
+        // the main DipHunter app instead of replacing it.
+        applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
         versionCode = 31
