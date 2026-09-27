@@ -20,6 +20,13 @@ import java.util.concurrent.TimeUnit
  *
  * Timeouts are short; results are cached; failures are swallowed so
  * scoring continues without this feature (weight drops out).
+ *
+ * This REST snapshot is the fallback. While [CoinbaseSpotStream] is fresh,
+ * scoring takes price, returns and σ from the stream instead ([SpotMerge]);
+ * funding always comes from here.
+ *
+ * [AssetSpotFeatures.realizedVol15m] is the std of **1-minute** log returns
+ * (not annualized). Both sources fill it in that unit.
  */
 data class AssetSpotFeatures(
     val asset: String,
@@ -38,13 +45,23 @@ data class ExternalSnapshot(
     val sol: AssetSpotFeatures? = null,
     val fetchedAtMs: Long = 0L
 ) {
-    fun forSeries(series: String): AssetSpotFeatures? {
-        val u = series.uppercase()
-        return when {
-            u.contains("BTC") -> btc
-            u.contains("ETH") && !u.contains("BTC") -> eth
-            u.contains("SOL") -> sol
-            else -> null
+    fun forSeries(series: String): AssetSpotFeatures? = when (assetOf(series)) {
+        "BTC" -> btc
+        "ETH" -> eth
+        "SOL" -> sol
+        else -> null
+    }
+
+    companion object {
+        /** "BTC" / "ETH" / "SOL" for a Kalshi series or ticker (KXBTC15M…), else null. */
+        fun assetOf(series: String): String? {
+            val u = series.uppercase()
+            return when {
+                u.contains("BTC") -> "BTC"
+                u.contains("ETH") -> "ETH"
+                u.contains("SOL") -> "SOL"
+                else -> null
+            }
         }
     }
 }

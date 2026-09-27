@@ -17,6 +17,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.BookScoreGate
 import com.dirk.kalshiodds.signal.engine.LatestWinsMailbox
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
+import com.dirk.kalshiodds.signal.engine.SpotRescoreGate
 import java.util.concurrent.atomic.AtomicBoolean
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.MarketTick
@@ -71,6 +72,8 @@ class SignalHub(
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
     private val bookMailbox = LatestWinsMailbox<Long>()
+    private val spotMailbox = LatestWinsMailbox<Long>()
+    private val lastSpotRescoreMs = ConcurrentHashMap<String, Long>()
     private val logWriteBusy = AtomicBoolean(false)
 
     private val _status = MutableStateFlow(SignalStatus())
@@ -117,6 +120,7 @@ class SignalHub(
         _watchTickers.value = tickers
         if (tickers.isNotEmpty()) {
             runCatching { scoring.book.pruneTo(tickers) }
+            lastSpotRescoreMs.keys.retainAll(tickers)
             _scores.update { cur -> cur.filterKeys { it in tickers } }
         }
     }
@@ -203,6 +207,26 @@ class SignalHub(
         }
     }
 
+    /**
+     * A streamed spot print for [asset] ("BTC" / "ETH" / "SOL") from
+     * [com.dirk.kalshiodds.signal.external.CoinbaseSpotStream]. Spot vs strike
+     * decides these contracts and Kalshi quotes lag it by seconds, so re-score
+     * that coin's watched markets now instead of waiting for a Kalshi tick.
+     * Called on the OkHttp reader thread: gate + mailbox only, no scoring here.
+     */
+    fun ingestSpot(asset: String, price: Double, receiveElapsedNanos: Long) {
+        val now = System.currentTimeMillis()
+        for (ticker in SpotRescoreGate.tickersFor(asset, _watchTickers.value)) {
+            if (!settings.isWatchedTicker(ticker)) continue
+            val due = SpotRescoreGate.shouldRescore(ticker, price, now, lastSpotRescoreMs) {
+                scoring.book.lastSpot(ticker)
+            }
+            if (due && spotMailbox.offer(ticker, receiveElapsedNanos)) {
+                tickScope.launch { drainSpot() }
+            }
+        }
+    }
+
     private suspend fun drainTicks() {
         try {
             while (true) {
@@ -236,6 +260,38 @@ class SignalHub(
                 tickScope.launch { drainBooks() }
             }
         }
+    }
+
+    private suspend fun drainSpot() {
+        try {
+            while (true) {
+                val batch = spotMailbox.drain()
+                if (batch.isEmpty()) break
+                for ((ticker, recv) in batch) {
+                    runCatching { rescoreOnSpot(ticker, recv) }
+                }
+            }
+        } finally {
+            if (spotMailbox.markIdleAndNeedsRerun()) {
+                tickScope.launch { drainSpot() }
+            }
+        }
+    }
+
+    /**
+     * Re-score [ticker] on its current Kalshi quote with the new spot. The
+     * tick is book-sourced ([TickSource.WS_ORDERBOOK]) so it refreshes fair,
+     * the score overlay and alerts without adding a velocity / flow point:
+     * spot moved, the Kalshi mid did not.
+     */
+    private suspend fun rescoreOnSpot(ticker: String, receiveElapsedNanos: Long) {
+        val tick = scoring.book.tickFromBook(ticker, receiveElapsedNanos)
+            ?: scoring.book.lastTick(ticker)?.copy(
+                source = TickSource.WS_ORDERBOOK,
+                receiveElapsedNanos = receiveElapsedNanos
+            )
+            ?: return
+        processTick(tick, notify = true)
     }
 
     private suspend fun processTick(tick: MarketTick, notify: Boolean) {

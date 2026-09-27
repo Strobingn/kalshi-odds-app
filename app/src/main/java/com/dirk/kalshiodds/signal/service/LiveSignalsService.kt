@@ -9,6 +9,7 @@ import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.ServiceCompat
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.signal.external.CoinbaseSpotStream
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.ws.KalshiWsClient
@@ -28,7 +29,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
- * scoring loop while "Live signals" is on. Survives Activity onStop / process
+ * scoring loop while "Live signals" is on, and holds the Coinbase spot stream
+ * ([CoinbaseSpotStream.OWNER_LIVE]). Survives Activity onStop / process
  * reclaim via START_STICKY, onTaskRemoved restart, and a WorkManager watchdog.
  * Analysis / alerts only — no order channels, no auto-fire.
  *
@@ -189,6 +191,7 @@ class LiveSignalsService : Service() {
         lastTickerCount = tickers.size
         if (!settings.liveSignalsEnabled) {
             explicitStop = true
+            runCatching { container.spotStream.release(CoinbaseSpotStream.OWNER_LIVE) }
             client?.stop()
             client = null
             hub.setConnection(WsConnectionState.IDLE, detail = "live signals off")
@@ -196,6 +199,9 @@ class LiveSignalsService : Service() {
             stopSelf()
             return
         }
+        // Spot stream runs with Live signals even on the REST fallback (no
+        // key): spot moves re-score the last Kalshi quote either way.
+        runCatching { container.spotStream.acquire(CoinbaseSpotStream.OWNER_LIVE) }
         if (!LiveSignalsPolicy.shouldConnectWs(true, settings.tradingCredentialsConfigured())) {
             client?.stop()
             client = null
@@ -399,6 +405,9 @@ class LiveSignalsService : Service() {
     private fun tearDownPipeline() {
         runCatching { client?.stop() }
         client = null
+        runCatching {
+            KalshiOddsApp.from(this).container.spotStream.release(CoinbaseSpotStream.OWNER_LIVE)
+        }
         pipelineJob?.cancel()
         pipelineJob = null
         metadataJob?.cancel()
