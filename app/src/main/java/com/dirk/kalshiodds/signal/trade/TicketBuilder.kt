@@ -515,7 +515,7 @@ object TicketBuilder {
             estimatedAvgFill = fired.ask,
             title = market.title,
             sizingNote = com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.buyLine(fired) + depthNote,
-            gateNote = "Last-minute strategy · EV/$ ${String.format(java.util.Locale.US, "%.2f", fired.evPerDollar)} · Approve + REAL MONEY still required",
+            gateNote = "Last-minute strategy · ${com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.modelEvLine(fired.evPerDollar)} · Approve + REAL MONEY still required",
             createdAtMs = ctx.nowMs,
             kind = TicketKind.LAST_MINUTE,
             blockedReason = null,

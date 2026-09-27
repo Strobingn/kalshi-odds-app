@@ -958,6 +958,11 @@ internal fun LastMinutePlayBox(
             fontWeight = FontWeight.Bold,
             color = colors.textSecondary
         )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
         when (snap.phase) {
             com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.WAITING -> {
                 Text(
@@ -987,6 +992,11 @@ internal fun LastMinutePlayBox(
                         style = MaterialTheme.typography.bodyLarge,
                         fontWeight = FontWeight.Bold,
                         color = if (it.side.equals("NO", true)) colors.down else colors.up
+                    )
+                    Text(
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.modelEvLine(it.evPerDollar),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
                     )
                     if (it.depthLimited) {
                         Text(

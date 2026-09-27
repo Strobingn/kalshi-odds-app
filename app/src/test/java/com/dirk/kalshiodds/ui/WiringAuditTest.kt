@@ -53,6 +53,8 @@ class WiringAuditTest {
         Control("Last-minute settle", com.dirk.kalshiodds.signal.lastminute.LastMinuteStore::class.java, "settle"),
         Control("Last-minute copy headline", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "headline"),
         Control("Last-minute buy line", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "buyLine"),
+        Control("Last-minute model EV label", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "modelEvLine"),
+        Control("Last-minute notify title", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "notificationTitle"),
         Control("Last-minute ticket", TicketBuilder::class.java, "proposeLastMinute"),
         Control("Last-minute scorecard section", ScorecardCopy::class.java, "lastMinuteSection"),
         Control("Last-minute BRTI median", com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient::class.java, "median"),

@@ -164,6 +164,7 @@ fun ScorecardScreen(
                     )
                 }
             }
+            item { LastMinuteScorecardCard(view.lastMinute) }
             if (view.showsEmptyState) {
                 item {
                     Text(
@@ -173,12 +174,10 @@ fun ScorecardScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
-                item { LastMinuteScorecardCard(view.lastMinute) }
             } else {
                 item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
                 item { RecordCard(ScorecardCopy.AI_TITLE, ledger.ai) }
                 item { RecordCard(ScorecardCopy.MANUAL_TITLE, ledger.manual) }
-                item { LastMinuteScorecardCard(view.lastMinute) }
                 if (ledger.noBetWouldHave.settledCount > 0) {
                     item { RecordCard(ScorecardCopy.NO_BET_TITLE, ledger.noBetWouldHave, money = false) }
                 }
@@ -218,6 +217,11 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
     ) {
         Text(ScorecardCopy.LAST_MINUTE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(
+            ScorecardCopy.LAST_MINUTE_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
+        Text(
             if (section.settledCount <= 0) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
@@ -225,9 +229,26 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            section.record,
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.wonUsdLine(section.wonUsd),
             style = MaterialTheme.typography.bodyMedium,
             color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.lostUsdLine(section.lostUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.netPnlLine(section.pnlUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
         )
         if (section.picks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))

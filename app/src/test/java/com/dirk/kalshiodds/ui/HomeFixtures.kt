@@ -275,6 +275,19 @@ object HomeFixtures {
         )
     )
 
+    fun lastMinuteTicket(): TradeTicket {
+        val market = lastMinuteFiredBtc()
+        return TicketBuilder.proposeLastMinute(
+            market,
+            TicketBuilder.Context(
+                settings = SignalSettings(),
+                alertsPaused = false,
+                nowMs = NOW_MS,
+                idFactory = { "lm-ticket" }
+            )
+        ) ?: error("last-minute fixture must fire a ticket")
+    }
+
     fun lastMinuteScorecardUi(): ScorecardUi {
         val pick = com.dirk.kalshiodds.signal.lastminute.LastMinutePick(
             id = "lm1",

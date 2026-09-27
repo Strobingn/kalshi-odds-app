@@ -31,6 +31,8 @@ object ScorecardCopy {
     const val AI_TITLE = "AI picks"
     const val MANUAL_TITLE = "Manual Paper UP/DOWN"
     const val LAST_MINUTE_TITLE = "Last-minute strategy"
+    const val LAST_MINUTE_SUBTITLE =
+        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE
     const val COMBINED_TITLE = "Combined"
     const val NO_BET_TITLE = "NO BET would-have-been"
     const val PICKS_TITLE = "Every settled pick"
@@ -126,6 +128,17 @@ object ScorecardCopy {
         fun allLines(recentExpanded: Boolean = true): List<String> {
             val lines = mutableListOf(SUBTITLE)
             emptyState()?.let { lines += it }
+            lines += LAST_MINUTE_TITLE
+            lines += LAST_MINUTE_SUBTITLE
+            lines += lastMinute.record
+            if (lastMinute.settledCount > 0) {
+                lines += com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.wonUsdLine(lastMinute.wonUsd)
+                lines += com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.lostUsdLine(lastMinute.lostUsd)
+                lines += com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.netPnlLine(lastMinute.pnlUsd)
+            }
+            if (lastMinute.picks.isNotEmpty()) {
+                lines += lastMinute.picks.map { com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(it) }
+            }
             if (!showsEmptyState) {
                 lines += recordLine(summary)
                 lines += winRateLine(summary)
@@ -138,11 +151,6 @@ object ScorecardCopy {
                 breakEvenWinRateLine(ledger.ai.money)?.let { lines += it }
                 lines += MANUAL_TITLE
                 lines += recordLine(ledger.manual)
-            }
-            lines += LAST_MINUTE_TITLE
-            lines += lastMinute.record
-            if (lastMinute.picks.isNotEmpty()) {
-                lines += lastMinute.picks.map { com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(it) }
             }
             lines += SIDE_TITLE
             lines += bySide.map { it.line }

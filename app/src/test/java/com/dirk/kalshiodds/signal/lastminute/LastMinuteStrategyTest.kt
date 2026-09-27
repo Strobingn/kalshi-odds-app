@@ -240,6 +240,7 @@ class LastMinuteStrategyTest {
         assertTrue(section.record.contains("1-0"))
         val view = ScorecardCopy.of(emptyList(), 0.0)
         assertTrue(view.allLines().contains(ScorecardCopy.LAST_MINUTE_TITLE))
+        assertTrue(view.allLines().contains(ScorecardCopy.LAST_MINUTE_SUBTITLE))
         assertEquals(0, view.ledger.combined.settledCount)
     }
 
@@ -290,6 +291,9 @@ class LastMinuteStrategyTest {
         )
         assertTrue(LastMinuteCopy.sideLiveLine(live.up).contains("UP"))
         assertTrue(LastMinuteCopy.sideLiveLine(live.up).contains("3¢") || LastMinuteCopy.sideLiveLine(live.up).contains("ask"))
+        assertTrue(LastMinuteCopy.sideLiveLine(live.up).contains(LastMinuteCopy.MODEL_EV_LABEL))
+        assertFalse(LastMinuteCopy.sideLiveLine(live.up).contains("EV/$"))
+        assertFalse(LastMinuteCopy.sideLiveLine(live.up).contains("wins +"))
         assertEquals("Spot — · none", LastMinuteCopy.spotSourceLine(LastMinuteSnapshot(LastMinutePhase.NO_PLAY, 0, null)))
     }
 

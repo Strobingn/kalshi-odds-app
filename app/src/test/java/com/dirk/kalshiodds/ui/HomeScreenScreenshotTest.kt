@@ -416,6 +416,13 @@ class HomeScreenScreenshotTest {
     }
 
     @Test
+    fun lastMinuteConfirmUnproven() = snapSell(
+        "last_minute_confirm_unproven",
+        dark = true,
+        HomeFixtures.lastMinuteTicket()
+    )
+
+    @Test
     fun lastMinuteScorecardSection() = snapScorecard(
         "last_minute_scorecard_section",
         dark = true,

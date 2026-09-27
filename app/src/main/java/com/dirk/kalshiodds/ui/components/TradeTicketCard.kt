@@ -512,6 +512,15 @@ internal fun ApproveTicketDialog(
                         colors.accentOrange
                     }
                 )
+                if (ticket.kind == TicketKind.LAST_MINUTE && !ticket.isSell) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.CONFIRM_UNPROVEN,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentOrange
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 if (ticket.isSell && !paperSell && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())

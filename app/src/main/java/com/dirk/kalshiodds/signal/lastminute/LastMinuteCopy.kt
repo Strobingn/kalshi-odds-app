@@ -5,9 +5,17 @@ import kotlin.math.roundToInt
 
 /**
  * User-facing last-minute strings. Pure formatting — never a stub.
+ * Live-book replay (163 windows, Sep 25–27) went 3-76 / −$664 at $10.
+ * Full-history backtest is still positive, so the UI must not imply a
+ * live edge. The only EV shown is the per-signal model number, labeled
+ * [MODEL_EV_LABEL].
  */
 object LastMinuteCopy {
     const val TITLE = "Last-minute play"
+    const val UNPROVEN_SUBTITLE = "Unproven on live order books - tracking on paper"
+    const val MODEL_EV_LABEL = "Model EV (unproven)"
+    const val CONFIRM_UNPROVEN =
+        "This strategy has not yet made money on live order books."
     const val NO_PLAY = "No play this window"
     const val SECTION = "Last-minute strategy"
     const val DEPTH_LIMITED = "Depth limited size"
@@ -33,13 +41,19 @@ object LastMinuteCopy {
         val cents = formatCents(fired.ask)
         return String.format(
             Locale.US,
-            "BUY %s %s × %d = $%.2f wins +$%.2f",
+            "BUY %s %s × %d = $%.2f",
             fired.displaySide,
             cents,
             fired.contracts,
-            fired.costUsd,
-            fired.profitIfWinUsd
+            fired.costUsd
         )
+    }
+
+    fun modelEvLine(evPerDollar: Double?): String {
+        val ev = evPerDollar?.takeIf { it.isFinite() }?.let {
+            String.format(Locale.US, "%.2f", it)
+        } ?: "—"
+        return "$MODEL_EV_LABEL $ev"
     }
 
     fun formatCents(price: Double): String {
@@ -61,15 +75,14 @@ object LastMinuteCopy {
     fun sideLiveLine(quote: LastMinuteSideQuote?): String {
         val q = quote ?: return "—"
         val ask = q.ask?.let { formatCents(it) } ?: "—"
-        val ev = q.evPerDollar?.let { String.format(Locale.US, "EV/$ %.2f", it) } ?: "EV/$ —"
+        val ev = modelEvLine(q.evPerDollar)
         val size = if (q.contracts > 0) {
             String.format(Locale.US, "%d ct · $%.2f", q.contracts, q.costUsd)
         } else {
             "0 ct"
         }
-        val win = String.format(Locale.US, "wins +$%.2f", q.profitIfWinUsd)
         val depth = if (q.depthLimited) " · $DEPTH_LIMITED" else ""
-        return "${q.displaySide} ${String.format(Locale.US, "%.1f%%", q.winChance * 100.0)} · ask $ask · $ev · $size · $win$depth"
+        return "${q.displaySide} ${String.format(Locale.US, "%.1f%%", q.winChance * 100.0)} · ask $ask · $ev · $size$depth"
     }
 
     fun spotSourceLine(snap: LastMinuteSnapshot?): String {
@@ -115,11 +128,16 @@ object LastMinuteCopy {
         )
     }
 
-    fun notificationTitle(fired: LastMinuteFired): String =
-        "Last-minute · BUY ${fired.displaySide}"
+    fun wonUsdLine(usd: Double): String = String.format(Locale.US, "Won $%.2f", usd)
 
-    fun notificationBody(fired: LastMinuteFired): String =
-        "${buyLine(fired)} · Approve + REAL MONEY still required"
+    fun lostUsdLine(usd: Double): String = String.format(Locale.US, "Lost $%.2f", usd)
+
+    fun netPnlLine(usd: Double): String = String.format(Locale.US, "Net P&L %+.2f", usd)
+
+    fun notificationTitle(fired: LastMinuteFired): String =
+        "Last-minute play (paper): BUY ${fired.displaySide} at ${formatCents(fired.ask)}"
+
+    fun notificationBody(fired: LastMinuteFired): String = notificationTitle(fired)
 
     private fun absAlmostWhole(c: Double): Boolean = kotlin.math.abs(c - c.roundToInt()) < 1e-6
 }

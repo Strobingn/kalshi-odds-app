@@ -147,6 +147,11 @@ class ScorecardCopyTest {
         assertTrue(src.contains("hypotheticalPolicyTitle"))
         assertTrue(src.contains("breakEvenWinRateLine"))
         assertTrue(src.contains("NeutralStat(\"P&L\""))
+        val lastMinute = src.indexOf("LastMinuteScorecardCard")
+        val combined = src.indexOf("ScorecardCopy.COMBINED_TITLE")
+        assertTrue("last-minute section sits above Combined", lastMinute in 0 until combined)
+        assertTrue(src.contains("LAST_MINUTE_SUBTITLE"))
+        assertTrue(src.contains("wonUsdLine"))
         val policyCard = src.substring(src.indexOf("fun PolicyCard"))
         val policyEnd = policyCard.indexOf("fun ExtendedAiCard")
         val policyOnly = if (policyEnd > 0) policyCard.substring(0, policyEnd) else policyCard
