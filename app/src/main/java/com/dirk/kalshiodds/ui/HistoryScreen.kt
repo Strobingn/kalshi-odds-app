@@ -110,12 +110,19 @@ fun HistoryScreen(
                         if (state.pnl.size >= 2) {
                             item { CumulativePnlChart(state.pnl) }
                         }
-                        items(state.bets, key = { it.id }) { BetRow(it) }
+                        val keyedBets = LazyListKeys.keyed(state.bets) { it.id }
+                        items(keyedBets, key = { it.key }) { row -> BetRow(row.value) }
                     }
-                    1 -> items(state.signals, key = { it.id }) { row ->
-                        SignalSummaryCard(signalCard(row))
+                    1 -> {
+                        val keyedSignals = LazyListKeys.keyed(state.signals) { it.id }
+                        items(keyedSignals, key = { it.key }) { row ->
+                            SignalSummaryCard(signalCard(row.value))
+                        }
                     }
-                    2 -> items(state.sessions, key = { it.id }) { SessionRow(it) }
+                    2 -> {
+                        val keyedSessions = LazyListKeys.keyed(state.sessions) { it.id }
+                        items(keyedSessions, key = { it.key }) { row -> SessionRow(row.value) }
+                    }
                     3 -> {
                         state.currentSettingsJson?.let { json ->
                             item {
@@ -125,10 +132,14 @@ fun HistoryScreen(
                                 ) { Text("Restore current snapshot") }
                             }
                         }
-                        items(state.settings, key = { "${it.id}-${it.createdAtMs}-${it.key}" }) { SettingsRow(it, viewModel) }
+                        val keyedSettings = LazyListKeys.keyed(state.settings) { "${it.id}:${it.createdAtMs}:${it.key}" }
+                        items(keyedSettings, key = { it.key }) { row -> SettingsRow(row.value, viewModel) }
                     }
-                    else -> items(state.markets, key = { it.ticker + (it.closeMs ?: 0L) }) { row ->
-                        MarketRow(row) { onOpenMarket(viewModel.marketModel(row)) }
+                    else -> {
+                        val keyedMarkets = LazyListKeys.keyed(state.markets) { "${it.ticker}:${it.closeMs ?: 0L}" }
+                        items(keyedMarkets, key = { it.key }) { row ->
+                            MarketRow(row.value) { onOpenMarket(viewModel.marketModel(row.value)) }
+                        }
                     }
                 }
                 if (state.hasMore) {

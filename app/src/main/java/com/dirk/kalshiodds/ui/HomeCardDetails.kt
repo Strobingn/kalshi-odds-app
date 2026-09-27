@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
  * Details toggle; this object puts the dropped fields back.
  */
 object HomeCardDetails {
-    const val SECTION = "DIP HUNTER AI"
+    const val SECTION = com.dirk.kalshiodds.signal.lastminute.LastMinuteConstants.AI_MODEL_BACKTEST_LABEL
     const val EDGE_TITLE = "Dip Hunter edge"
     const val MARKET_REF = "Kalshi market (reference)"
     const val LIVE_BOOK = "LIVE BOOK · UP / DOWN"

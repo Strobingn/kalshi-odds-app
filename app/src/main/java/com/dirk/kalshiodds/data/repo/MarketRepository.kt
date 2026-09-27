@@ -71,6 +71,9 @@ data class MarketsSnapshot(
         }
         return copy(btc = btc.apply(), eth = eth.apply(), sol = sol.apply(), extra = extra.apply())
     }
+
+    fun mapMarkets(transform: (MarketUiModel) -> MarketUiModel): MarketsSnapshot =
+        copy(btc = btc.map(transform), eth = eth.map(transform), sol = sol.map(transform), extra = extra.map(transform))
 }
 
 class MarketRepository(

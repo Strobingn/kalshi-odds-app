@@ -11,11 +11,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.dirk.kalshiodds"
+        applicationId = "com.dirk.kalshiodds.kashi"
         minSdk = 26
         targetSdk = 35
-        versionCode = 30
-        versionName = "0.3.15"
+        versionCode = 31
+        versionName = "0.3.16"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

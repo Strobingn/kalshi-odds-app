@@ -76,7 +76,13 @@ class AppContainer(context: Context) {
         results = resultsWriter
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
-    val paper = PaperBookStore(app)
+    val paper = PaperBookStore(app) { fills ->
+        runCatching { archive.upsertPaperFills(fills) }
+    }
+    val lastMinuteStore = com.dirk.kalshiodds.signal.lastminute.LastMinuteStore(app)
+    val lastMinuteEngine = com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine(nowMs = { clock.nowMs() })
+    val brti = com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient()
+    val lastMinuteNotifier = com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -119,7 +125,10 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            lastMinuteStore.settle(ticker, result)
+        },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)

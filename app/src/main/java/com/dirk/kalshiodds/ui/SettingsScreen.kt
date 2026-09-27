@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
 import java.util.Locale
@@ -322,7 +323,7 @@ fun SettingsContent(
 
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “${AppIdentity.LABEL}” notification — allow it. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -693,40 +694,28 @@ fun SettingsContent(
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Live Approve is \$5 all-in including Kalshi fees. Count is the largest integer with " +
-                    "count×price + fee ≤ \$5 (fee = ceil_cent(0.07×count×P×(1−P))). " +
-                    "Tickets below the min-profit-if-win setting (default \$10) stay disabled. " +
-                    "The \$100-payout long-shot (ask ≤5¢ / configured stake) is still its own option. " +
+                "The card pick is the last-minute BRTI strategy (final 60 s, EV/\$ ≥ 0.35, first fire per window). " +
+                    "Live Approve is \$10 all-in including Kalshi fees. Count is the largest integer with " +
+                    "count×price + fee ≤ your stake (default and cap \$10; you can pick less). " +
+                    "There is no min-profit-if-win gate — a cheap ticket is not blocked for low profit. " +
                     "Hunter still surfaces when \$1 can settle ≥\$25. Long-shot hunter still needs ask ≤20¢ " +
                     "and AI beating implied after fees. Paper fills never block Live. " +
-                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. No auto-fire.",
+                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. Approve + REAL MONEY still required. No auto-fire.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Text(
-                String.format(Locale.US, "Min profit if win  $%.0f", s.minProfitIfWinUsd),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Slider(
-                value = s.minProfitIfWinUsd.toFloat().coerceIn(0f, 50f),
-                onValueChange = { viewModel?.setMinProfitIfWinUsd(it.toDouble()) },
-                valueRange = 0f..50f,
-                steps = 49
-            )
             ToggleRow("Show live trade tickets", s.ticketsEnabled, { viewModel?.setTicketsEnabled(it) })
             Text(
-                String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),
+                String.format(Locale.US, "Max bet  $%.0f  (default $10 · cap $10)", s.ticketStakeUsd),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
-                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 25f),
+                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 10f),
                 onValueChange = { viewModel?.requestTicketStake(it.toDouble()) },
-                valueRange = 1f..25f,
-                steps = 23
+                valueRange = 1f..10f,
+                steps = 8
             )
             ToggleRow(
                 "Require skip filter / mute / streak-pause for tickets",
@@ -736,9 +725,8 @@ fun SettingsContent(
             Text(
                 String.format(
                     Locale.US,
-                    "Long-shot hunter  max ask ≤ %.0f¢  · $5 all-in · disabled if profit < $%.0f",
-                    s.longShotMaxAsk * 100.0,
-                    s.minProfitIfWinUsd
+                    "Long-shot hunter  max ask ≤ %.0f¢  · $10 all-in · no min-profit gate",
+                    s.longShotMaxAsk * 100.0
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
@@ -758,9 +746,9 @@ fun SettingsContent(
 
             Section("Legacy win-target (History / paper only)")
             Text(
-                "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
+                "Off for live. Live Approve always uses the \$10 all-in cap. Min-profit-if-win is removed. " +
                     "This leftover \$50 sizer is kept so History restore still reads old snapshots — " +
-                    "it can never resize a LIVE order above \$5 (the final order-build step clips again). " +
+                    "it can never resize a LIVE order above \$10 (the final order-build step clips again). " +
                     "Paper / History may still walk the ask book for a \$50 win target.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary

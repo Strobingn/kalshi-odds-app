@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketQuoteView
@@ -21,7 +22,7 @@ import kotlin.math.roundToInt
  * or a ticket. Wired from [WiringAuditTest] so every line stays a real method.
  */
 object HomeCopy {
-    const val TITLE = "DipHunter"
+    const val TITLE = AppIdentity.LABEL
     const val THIS_WINDOW = "This window"
     const val BUY_ANYWAY = "Buy anyway"
     const val NEED_20 = "need 20+ results"
@@ -84,7 +85,11 @@ object HomeCopy {
             return noBetHeadline(decision.noBetReason)
         }
         val profit = decision.profitIfWinUsd?.let { String.format(Locale.US, "$%.2f", it) } ?: "—"
-        return "${decision.label}  ${coinShort(market)}  · $5 wins $profit profit · ${closesIn(market.closeTimeEpochMs, nowMs)}"
+        val lm = market.lastMinute?.fired
+        if (lm != null) {
+            return "${decision.label}  ${coinShort(market)}  · ${com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.buyLine(lm)} · ${closesIn(market.closeTimeEpochMs, nowMs)}"
+        }
+        return "${decision.label}  ${coinShort(market)}  · $10 wins $profit profit · ${closesIn(market.closeTimeEpochMs, nowMs)}"
     }
 
     fun closesIn(closeEpochMs: Long?, nowMs: Long): String {
@@ -154,7 +159,7 @@ object HomeCopy {
 
     /**
      * Display-only tile stake. Real live Approve stays
-     * [com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD] ($5).
+     * [com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD] ($10).
      */
     const val TILE_STAKE_USD = 10.0
     const val TEN_WINS_DASH = "$10 wins —"
@@ -262,7 +267,7 @@ object HomeCopy {
     fun allInProfit(decision: BetCall.Decision): String? {
         if (!decision.isActionable) return null
         val profit = decision.profitIfWinUsd ?: return null
-        return String.format(Locale.US, "$5 all-in → profit $%.2f if it wins", profit)
+        return String.format(Locale.US, "$10 all-in → profit $%.2f if it wins", profit)
     }
 
     fun primaryButtonLabel(mode: String, decision: BetCall.Decision): String {

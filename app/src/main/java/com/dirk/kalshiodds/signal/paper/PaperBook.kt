@@ -32,9 +32,68 @@ data class PaperFill(
     val won: Boolean? = null,
     val pnlUsd: Double? = null,
     val note: String,
-    val winTargetUsd: Double? = null
+    val winTargetUsd: Double? = null,
+    /** Picked-side AI probability in percent (0–100). Null on pre-0.3.16 rows. */
+    val aiPct: Double? = null,
+    /** Model confidence 0–1. Null on pre-0.3.16 rows. */
+    val aiConfidence: Double? = null,
+    /** Picked-side market/implied percent (0–100). Null on pre-0.3.16 rows. */
+    val marketPct: Double? = null,
+    /** Canonical [PaperPickSource.label]. Null on pre-0.3.16 rows. */
+    val pickSource: String? = null
 ) {
     val displaySide: String get() = side.uppercase()
+
+    companion object {
+        @JvmStatic
+        fun hasAiPct(aiPct: Double?): Boolean =
+            aiPct != null && aiPct.isFinite() && aiPct > 0.0
+
+        /** Convert a 0–1 or 0–100 probability to scorecard percent. */
+        fun pctFromUnit(raw: Double?): Double? {
+            val v = raw?.takeIf { it.isFinite() } ?: return null
+            val pct = if (v <= 1.0 + 1e-9) v * 100.0 else v
+            return pct.takeIf { it.isFinite() && it > 0.0 }
+        }
+
+        fun metaFromTicket(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket): PaperFillMeta {
+            val sideYes = !ticket.side.equals("NO", true)
+            val implied = ticket.impliedChance
+            val market = when {
+                implied == null -> null
+                sideYes -> pctFromUnit(implied)
+                else -> pctFromUnit(1.0 - implied)
+            }
+            return PaperFillMeta(
+                aiPct = pctFromUnit(ticket.modelChance),
+                aiConfidence = ticket.modelConfidence,
+                marketPct = market ?: pctFromUnit(implied),
+                pickSource = PaperPickSource.fromTicketKind(ticket.kind)
+            )
+        }
+
+        fun metaFromAlert(alert: com.dirk.kalshiodds.signal.model.SignalAlert): PaperFillMeta {
+            val sideYes = !alert.predictedSide.equals("NO", true)
+            val fair = alert.fairValuePp.takeIf { it.isFinite() }
+            val mid = alert.marketMidPp.takeIf { it.isFinite() }
+            val ai = fair?.let { if (sideYes) it else 100.0 - it }
+            val mkt = mid?.let { if (sideYes) it else 100.0 - it }
+            return PaperFillMeta(
+                aiPct = ai,
+                aiConfidence = alert.confidence,
+                marketPct = mkt,
+                pickSource = PaperPickSource.AI_ALERT
+            )
+        }
+
+        /**
+         * Auto paper picks must carry an AI %. Manual paper may omit it.
+         * Returns false when the fill must be skipped.
+         */
+        @JvmStatic
+        fun allowCreate(source: PaperPickSource, aiPct: Double?): Boolean =
+            !source.requiresAiPct || hasAiPct(aiPct)
+    }
 }
 
 @Serializable
@@ -111,8 +170,17 @@ class PaperBook(
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
         if (!ticket.canApprove) return null
-        if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
-        val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
+        if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
+            ticket.kind == TicketKind.LAST_MINUTE
+        ) return null
+        val pick = PaperPickSource.fromTicketKind(ticket.kind)
+        val meta = PaperFill.metaFromTicket(ticket)
+        if (!PaperFill.allowCreate(pick, meta.aiPct)) return null
+        val source = when (ticket.kind) {
+            TicketKind.HUNTER -> "AI hunter"
+            TicketKind.HUNTER_VALUE -> PaperPickSource.LONG_SHOT.label
+            else -> "AI ticket"
+        }
         return fill(
             ticker = ticket.ticker,
             side = ticket.side,
@@ -125,7 +193,8 @@ class PaperBook(
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
             stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
-            winTargetUsd = ticket.winTargetUsd
+            winTargetUsd = ticket.winTargetUsd,
+            meta = meta.copy(pickSource = pick)
         )
     }
 
@@ -133,12 +202,39 @@ class PaperBook(
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        val meta = PaperFill.metaFromAlert(alert)
+        if (!PaperFill.allowCreate(PaperPickSource.AI_ALERT, meta.aiPct)) return null
         return fill(
             ticker = alert.ticker,
             side = alert.predictedSide,
             limitPrice = px,
             source = "AI signal",
-            note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" }
+            note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" },
+            meta = meta
+        )
+    }
+
+    fun considerLastMinute(
+        fired: com.dirk.kalshiodds.signal.lastminute.LastMinuteFired,
+        enabled: Boolean
+    ): PaperFill? {
+        if (!enabled) return null
+        val meta = PaperFillMeta(
+            aiPct = PaperFill.pctFromUnit(fired.winChance),
+            aiConfidence = null,
+            marketPct = PaperFill.pctFromUnit(fired.ask),
+            pickSource = PaperPickSource.LAST_MINUTE
+        )
+        if (!PaperFill.allowCreate(PaperPickSource.LAST_MINUTE, meta.aiPct)) return null
+        return fill(
+            ticker = fired.ticker,
+            side = fired.side,
+            limitPrice = fired.ask,
+            source = PaperPickSource.LAST_MINUTE.label,
+            note = "Last-minute strategy · never sent to Kalshi",
+            contracts = fired.contracts.takeIf { it > 0 },
+            stakeUsd = fired.costUsd.takeIf { it > 0.0 },
+            meta = meta
         )
     }
 
@@ -159,7 +255,8 @@ class PaperBook(
         contracts: Int,
         source: String,
         note: String,
-        winTargetUsd: Double? = null
+        winTargetUsd: Double? = null,
+        meta: PaperFillMeta = PaperFillMeta()
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) {
             rememberMessage("Paper skip $ticker — Bitcoin-only")
@@ -181,17 +278,16 @@ class PaperBook(
                 rememberMessage("Paper skip $ticker — need ${fmt(stake)} (cash ${fmt(cur.cashUsd)})")
                 return null
             }
-            val row = PaperFill(
-                id = idFactory(),
+            val row = newFill(
                 ticker = ticker,
                 side = want,
                 stakeUsd = stake,
                 contracts = qty,
                 limitPrice = px,
                 source = source,
-                createdAtMs = nowMs(),
                 note = note,
-                winTargetUsd = winTargetUsd
+                winTargetUsd = winTargetUsd,
+                meta = meta
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(
@@ -244,7 +340,8 @@ class PaperBook(
                 if (ticket.winTargetUsd != null) append(" · win-target \$${ticket.winTargetUsd.toInt()}")
                 append(" · never sent to Kalshi")
             },
-            winTargetUsd = ticket.winTargetUsd
+            winTargetUsd = ticket.winTargetUsd,
+            meta = PaperFill.metaFromTicket(ticket)
         )
     }
 
@@ -255,7 +352,8 @@ class PaperBook(
         wantContracts: Int,
         source: String,
         note: String,
-        winTargetUsd: Double? = null
+        winTargetUsd: Double? = null,
+        meta: PaperFillMeta = PaperFillMeta()
     ): PaperBuy.Outcome {
         if (CryptoMarkets.isRetiredTicker(ticker)) {
             return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
@@ -289,21 +387,20 @@ class PaperBook(
             val stake = qty * px
             val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(qty, px)
             val debit = stake + fees
-            val row = PaperFill(
-                id = idFactory(),
+            val row = newFill(
                 ticker = ticker,
                 side = want,
                 stakeUsd = stake,
                 contracts = qty,
                 limitPrice = px,
                 source = source,
-                createdAtMs = nowMs(),
                 note = buildString {
                     append(note)
                     if (capped) append(" · capped to paper cash")
                     if (fees > 0.0) append(String.format(java.util.Locale.US, " · fee $%.2f", fees))
                 },
-                winTargetUsd = winTargetUsd
+                winTargetUsd = winTargetUsd,
+                meta = meta
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             val msg = String.format(
@@ -348,7 +445,8 @@ class PaperBook(
         feeUsd: Double,
         allInUsd: Double,
         source: String,
-        message: String
+        message: String,
+        meta: PaperFillMeta = PaperFillMeta(pickSource = PaperPickSource.MANUAL)
     ): PaperBuy.Outcome {
         if (CryptoMarkets.isRetiredTicker(ticker)) {
             return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
@@ -375,22 +473,21 @@ class PaperBook(
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
-            val row = PaperFill(
-                id = idFactory(),
+            val row = newFill(
                 ticker = ticker,
                 side = want,
                 stakeUsd = allInUsd,
                 contracts = qty,
                 limitPrice = px,
                 source = source,
-                createdAtMs = nowMs(),
                 note = String.format(
                     java.util.Locale.US,
                     "Paper tile $10 · %d ct @ %.1f¢ · fee $%.2f · never sent to Kalshi",
                     qty,
                     px * 100,
                     feeUsd
-                )
+                ),
+                meta = meta.copy(pickSource = meta.pickSource ?: PaperPickSource.MANUAL)
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(
@@ -542,7 +639,8 @@ class PaperBook(
         note: String,
         contracts: Int? = null,
         stakeUsd: Double? = null,
-        winTargetUsd: Double? = null
+        winTargetUsd: Double? = null,
+        meta: PaperFillMeta = PaperFillMeta()
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -567,17 +665,16 @@ class PaperBook(
                 return null
             }
             val stake = useQty * px
-            val row = PaperFill(
-                id = idFactory(),
+            val row = newFill(
                 ticker = ticker,
                 side = want,
                 stakeUsd = stake,
                 contracts = useQty,
                 limitPrice = px,
                 source = source,
-                createdAtMs = nowMs(),
                 note = note,
-                winTargetUsd = winTargetUsd
+                winTargetUsd = winTargetUsd,
+                meta = meta
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(
@@ -599,6 +696,33 @@ class PaperBook(
             return row
         }
     }
+
+    private fun newFill(
+        ticker: String,
+        side: String,
+        stakeUsd: Double,
+        contracts: Int,
+        limitPrice: Double,
+        source: String,
+        note: String,
+        winTargetUsd: Double? = null,
+        meta: PaperFillMeta = PaperFillMeta()
+    ): PaperFill = PaperFill(
+        id = idFactory(),
+        ticker = ticker,
+        side = side,
+        stakeUsd = stakeUsd,
+        contracts = contracts,
+        limitPrice = limitPrice,
+        source = source,
+        createdAtMs = nowMs(),
+        note = note,
+        winTargetUsd = winTargetUsd,
+        aiPct = meta.aiPct,
+        aiConfidence = meta.aiConfidence,
+        marketPct = meta.marketPct,
+        pickSource = meta.pickSource?.label
+    )
 
     private fun publish(next: PaperBookState) {
         _state.value = next

@@ -188,6 +188,7 @@ class ScorecardLedgerTest {
         assertReconciles(snap.byPrice, snap.combined)
         assertReconciles(snap.byTime, snap.combined)
         assertReconciles(snap.byConfidence, snap.combined)
+        assertReconciles(snap.bySource, snap.combined)
         val unknownPrice = snap.byPrice.first { it.key == ScorecardLedger.UNKNOWN_KEY }
         assertEquals("Unknown price", unknownPrice.label)
         assertEquals(1, unknownPrice.settledCount)
@@ -277,6 +278,7 @@ class ScorecardLedgerTest {
         assertReconciles(snap.byPrice, snap.combined)
         assertReconciles(snap.byTime, snap.combined)
         assertReconciles(snap.byConfidence, snap.combined)
+        assertReconciles(snap.bySource, snap.combined)
         assertEquals(snap.combined.wins + snap.combined.losses, snap.combined.settledCount)
     }
 

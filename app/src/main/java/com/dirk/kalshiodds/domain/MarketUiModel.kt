@@ -105,7 +105,9 @@ data class MarketUiModel(
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
     val featureDevs: Map<String, Double> = emptyMap(),
     /** Kalshi `open_time`. When null, 15m windows infer close − [MarketLifecycle.WINDOW_MS]. */
-    val openTimeEpochMs: Long? = null
+    val openTimeEpochMs: Long? = null,
+    /** Last-minute strategy view for this window (0.3.16 pick). */
+    val lastMinute: com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {

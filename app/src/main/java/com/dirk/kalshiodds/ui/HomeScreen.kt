@@ -194,7 +194,9 @@ fun HomeScreen(
                                 onOpenScorecard = onOpenScorecard
                             )
                         }
-                        items(coinCards, key = { it.series }) { card ->
+                        val keyedCoins = LazyListKeys.keyed(coinCards) { it.series }
+                        items(keyedCoins, key = { it.key }) { row ->
+                            val card = row.value
                             val market = card.market
                             if (market == null) {
                                 NextWindowLoadingCard(card.series)

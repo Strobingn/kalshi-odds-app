@@ -40,10 +40,27 @@ class WiringAuditTest {
         Control("Live / paper Sell", OddsViewModel::class.java, "sellPosition"),
         Control("Paper sell edit", OddsViewModel::class.java, "paperSellTicket"),
         Control("Hunter / Long-shot / win-target cards", TicketBuilder::class.java, "proposeAll"),
-        Control("Live $5 sizer", com.dirk.kalshiodds.signal.trade.LiveOrderSizer::class.java, "size"),
+        Control("Live $10 sizer", com.dirk.kalshiodds.signal.trade.LiveOrderSizer::class.java, "size"),
         Control("Bet headline", com.dirk.kalshiodds.signal.trade.BetCall::class.java, "decide"),
         Control("Test connection", SettingsViewModel::class.java, "testConnection"),
-        Control("Min profit if win", SettingsViewModel::class.java, "setMinProfitIfWinUsd"),
+        Control("Last-minute fair_p", com.dirk.kalshiodds.signal.lastminute.LastMinuteMath::class.java, "fairP"),
+        Control("Last-minute size_bet", com.dirk.kalshiodds.signal.lastminute.LastMinuteMath::class.java, "sizeBet"),
+        Control("Last-minute all-in cost", com.dirk.kalshiodds.signal.lastminute.LastMinuteMath::class.java, "allInCost"),
+        Control("Last-minute strategy", com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy::class.java, "evaluate"),
+        Control("Last-minute book depth", com.dirk.kalshiodds.signal.lastminute.LastMinuteBook::class.java, "depthAtOrBelow"),
+        Control("Last-minute engine tick", com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine::class.java, "tick"),
+        Control("Last-minute paper store", com.dirk.kalshiodds.signal.lastminute.LastMinuteStore::class.java, "record"),
+        Control("Last-minute settle", com.dirk.kalshiodds.signal.lastminute.LastMinuteStore::class.java, "settle"),
+        Control("Last-minute copy headline", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "headline"),
+        Control("Last-minute buy line", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "buyLine"),
+        Control("Last-minute model EV label", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "modelEvLine"),
+        Control("Last-minute notify title", com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy::class.java, "notificationTitle"),
+        Control("Last-minute ticket", TicketBuilder::class.java, "proposeLastMinute"),
+        Control("Last-minute scorecard section", ScorecardCopy::class.java, "lastMinuteSection"),
+        Control("Last-minute BRTI median", com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient::class.java, "median"),
+        Control("Last-minute heads-up notify", com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier::class.java, "notifyFired"),
+        Control("Last-minute notify while UI up", com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifyPolicy::class.java, "shouldNotify"),
+        Control("Ticket stake $10 cap", SettingsViewModel::class.java, "requestTicketStake"),
         Control("PEM normalizer", com.dirk.kalshiodds.signal.config.PemNormalizer::class.java, "normalize"),
         Control("Paper trading toggle", SettingsViewModel::class.java, "setPaperTrading"),
         Control("Win-target toggle", SettingsViewModel::class.java, "setWinTargetEnabled"),
@@ -149,6 +166,11 @@ class WiringAuditTest {
         Control("Scorecard empty state", ScorecardCopy::class.java, "emptyState"),
         Control("Scorecard empty-state gate", ScorecardCopy::class.java, "showsEmptyState"),
         Control("Scorecard bucket line", ScorecardCopy::class.java, "bucketLine"),
+        Control("Scorecard by-source merge", ScorecardCopy::class.java, "mergeSourceBuckets"),
+        Control("Paper pick source parse", com.dirk.kalshiodds.signal.paper.PaperPickSource::class.java, "parse"),
+        Control("Paper fill AI% gate", com.dirk.kalshiodds.signal.paper.PaperFill::class.java, "allowCreate"),
+        Control("Paper last-minute auto", com.dirk.kalshiodds.signal.paper.PaperBook::class.java, "considerLastMinute"),
+        Control("Paper fill schema upgrade", com.dirk.kalshiodds.data.local.paper.PaperFillSchema::class.java, "upgradeSql"),
         Control("Scorecard time-of-day buckets", ScorecardCopy::class.java, "timeBuckets"),
         Control("Scorecard time buckets", ScorecardCopy::class.java, "timeBuckets"),
         Control("Scorecard recent pick", ScorecardCopy::class.java, "recentPick"),
@@ -158,6 +180,11 @@ class WiringAuditTest {
         Control("Scorecard win-rate line", ScorecardCopy::class.java, "winRateLine"),
         Control("Scorecard paper P&L line", ScorecardCopy::class.java, "paperPnlLine"),
         Control("Scorecard settled-count line", ScorecardCopy::class.java, "settledCountLine"),
+        Control("Scorecard hypothetical policy title", ScorecardCopy::class.java, "hypotheticalPolicyTitle"),
+        Control("Scorecard window real P&L line", ScorecardCopy::class.java, "windowRealPnlLine"),
+        Control("Scorecard break-even win rate", ScorecardCopy::class.java, "breakEvenWinRate"),
+        Control("Scorecard break-even win rate line", ScorecardCopy::class.java, "breakEvenWinRateLine"),
+        Control("Scorecard window real P&L", com.dirk.kalshiodds.signal.feedback.ScorecardMetrics::class.java, "windowPnlUsd"),
         Control("Scorecard export", ScorecardViewModel::class.java, "exportResults"),
         Control("Home snapshot merge", HomeSnapshotMerge::class.java, "apply"),
         Control("App back stack", AppNavigator::class.java, "back"),
@@ -174,7 +201,8 @@ class WiringAuditTest {
         Control("Last order error skip lifecycle", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "isNotAnOrderError"),
         Control("Last order error clear stale", com.dirk.kalshiodds.signal.trade.LastOrderErrorStore::class.java, "clearStaleLifecycleNotice"),
         Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
-        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals")
+        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals"),
+        Control("applicationId side-by-side audit", com.dirk.kalshiodds.AppIdentity::class.java, "wiringAuditItems")
     )
 
     @Test
@@ -211,6 +239,15 @@ class WiringAuditTest {
         assertNotNull(Contrast::readable)
         assertNotNull(com.dirk.kalshiodds.signal.config.CredentialWriteGuard::rejectReason)
         assertNotNull(com.dirk.kalshiodds.domain.KalshiPrice::parseDollars)
+        val idItems = com.dirk.kalshiodds.AppIdentity.wiringAuditItems()
+        assertTrue(idItems.any { it.contains("com.dirk.kalshiodds.kashi") })
+        assertTrue(idItems.any { it.contains("FileProvider") })
+        assertTrue(idItems.any { it.contains("PendingIntent") })
+        assertTrue(idItems.any { it.contains("diphunter_results.db") })
+        assertTrue(idItems.any { it.contains("diphunter_signal_prefs") })
+        assertTrue(idItems.any { it.contains("diphunter_signal_alerts") })
+        assertTrue(idItems.any { it.contains("diphunter_live_signals_watchdog") })
+        assertTrue(idItems.any { it.contains("package:\$packageName") || it.contains("packageName") })
         assertNotNull(KalshiQuoteDisplay::formatPriceCents)
         assertNotNull(KalshiQuoteDisplay::multipleLabel)
         assertNotNull(SettingsViewModel::backupCredentials)

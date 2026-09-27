@@ -1,10 +1,13 @@
 package com.dirk.kalshiodds.signal.feedback
 
+import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.ml.PolicyEval
+import com.dirk.kalshiodds.signal.paper.PaperFill
 import java.time.Instant
 import java.time.ZoneId
+import java.util.Locale
 
 /**
  * Phone-readable post-settlement scorecard numbers.
@@ -20,7 +23,9 @@ object ScorecardMetrics {
         /** Mean P(YES) / P(UP) Brier. Scorecard-only; hidden when N < 20. */
         val pUpBrier: Double? = null,
         val avgEdgeWhenRight: Double? = null,
-        val avgEdgeWhenWrong: Double? = null
+        val avgEdgeWhenWrong: Double? = null,
+        /** Real paper $ P&L for the same window picks, when a $ outcome is recorded. */
+        val pnlUsd: Double? = null
     ) {
         val label: String
             get() = if (total <= 0) "—" else "$hits/$total"
@@ -94,21 +99,24 @@ object ScorecardMetrics {
         edgeThresholdPp: Double = 5.0,
         minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
         requireUncertaintyPass: Boolean = false,
-        maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY
+        maxUncertainty: Double = SignalConstants.DEFAULT_MAX_UNCERTAINTY,
+        fills: List<PaperFill> = emptyList(),
+        settledWindows: List<SettledWindowRow> = emptyList()
     ): Snapshot {
         val settled = settledScoredPicks(entries)
         val voids = entries.count { it.outcome.equals("void", true) }
         val open = entries.count { it.outcome == null }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
         val rollingStart = nowMs - SignalConstants.SCORECARD_ROLLING_DAYS * 86_400_000L
+        val ledger = ScorecardLedger.of(entries, fills, settledWindows, zoneId)
         return Snapshot(
-            daily = window(settled.filter { settledAt(it) >= dayStart }),
-            rolling = window(settled.filter { settledAt(it) >= rollingStart }),
-            allTime = window(settled),
+            daily = window(settled.filter { settledAt(it) >= dayStart }, ledger),
+            rolling = window(settled.filter { settledAt(it) >= rollingStart }, ledger),
+            allTime = window(settled, ledger),
             perSeries = settled.groupBy { it.series.ifBlank { "unknown" } }
                 .toSortedMap()
                 .map { (series, rows) ->
-                    SeriesStats(series = series, label = seriesLabel(series), stats = window(rows))
+                    SeriesStats(series = series, label = seriesLabel(series), stats = window(rows, ledger))
                 },
             sampleCount = settled.size,
             openCount = open,
@@ -246,7 +254,10 @@ object ScorecardMetrics {
         )
     }
 
-    fun window(rows: List<PredictionLogEntry>): WindowStats {
+    fun window(
+        rows: List<PredictionLogEntry>,
+        ledger: ScorecardLedger.Snapshot? = null
+    ): WindowStats {
         val scored = rows.filter { ForecastUnits.isScoredPick(it) }
         if (scored.isEmpty()) return WindowStats()
         val hits = scored.count { ForecastUnits.hit(it) }
@@ -263,8 +274,28 @@ object ScorecardMetrics {
             brier = if (sideBriers.isNotEmpty()) sideBriers.average() else null,
             pUpBrier = if (yesBriers.isNotEmpty()) yesBriers.average() else null,
             avgEdgeWhenRight = rightEdges.takeIf { it.isNotEmpty() }?.average(),
-            avgEdgeWhenWrong = wrongEdges.takeIf { it.isNotEmpty() }?.average()
+            avgEdgeWhenWrong = wrongEdges.takeIf { it.isNotEmpty() }?.average(),
+            pnlUsd = windowPnlUsd(scored, ledger)
         )
+    }
+
+    /**
+     * Real paper P&L for [entries] when at least one pick has a recorded
+     * $ outcome (fill, stored size, or $10 paper clip from a known ask).
+     * Null when every pick is "entry not recorded".
+     */
+    fun windowPnlUsd(
+        entries: List<PredictionLogEntry>,
+        ledger: ScorecardLedger.Snapshot? = null
+    ): Double? {
+        if (entries.isEmpty()) return null
+        val snap = ledger ?: ScorecardLedger.of(entries)
+        val tickers = entries.map { it.ticker.uppercase(Locale.US) }.toSet()
+        val matched = snap.picks.filter {
+            !it.noBetWouldHave && it.ticker.uppercase(Locale.US) in tickers
+        }
+        if (matched.none { !it.entryNotRecorded }) return null
+        return matched.sumOf { it.pnlUsd ?: 0.0 }
     }
 
     private fun sideHit(e: PredictionLogEntry): Boolean = ForecastUnits.hit(e)

@@ -19,9 +19,13 @@ class KalshiFeeAndWinTargetTest {
         // $5 ticket: C=25, model = 0.28, order fee = $0.28, amortized = 0.0112
         assertEquals(25, KalshiFee.contractsForStake(5.0, 0.20))
         assertEquals(0.28, KalshiFee.total(25, 0.20), 1e-9)
+        assertEquals(0.0112, KalshiFee.perContract(0.20, stakeUsd = 5.0), 1e-9)
+        // $10 @ 20¢: C=50, fee $0.56, amortized still $0.0112
         assertEquals(0.0112, KalshiFee.perContract(0.20), 1e-9)
         // $5 @ 50¢: C=10, fee $0.18, amortized $0.018
-        assertEquals(0.018, KalshiFee.perContract(0.50), 1e-9)
+        assertEquals(0.018, KalshiFee.perContract(0.50, stakeUsd = 5.0), 1e-9)
+        // $10 @ 50¢: C=20, fee $0.35, amortized $0.0175
+        assertEquals(0.0175, KalshiFee.perContract(0.50), 1e-9)
         // Settlement is C × $1 — fee is not taken from the payout.
         assertEquals(5.0, KalshiFee.netPayout(5, 0.20), 1e-9)
         assertEquals(5.0, KalshiFee.settlementPayout(5), 1e-9)
@@ -64,12 +68,12 @@ class KalshiFeeAndWinTargetTest {
     fun winTargetDefaultsToFiftyOn() {
         assertFalse(SignalConstants.DEFAULT_WIN_TARGET_ENABLED)
         assertEquals(50.0, SignalConstants.DEFAULT_WIN_TARGET_USD, 1e-9)
-        assertEquals(5.0, SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
-        assertEquals(10.0, SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD, 1e-9)
+        assertEquals(10.0, SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(0.0, SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD, 1e-9)
         assertEquals(0.20, SignalConstants.DEFAULT_LONG_SHOT_MAX_ASK, 1e-9)
         val defaults = SignalSettings()
         assertFalse(defaults.winTargetEnabled)
-        assertEquals(10.0, defaults.minProfitIfWinUsd, 1e-9)
+        assertEquals(0.0, defaults.minProfitIfWinUsd, 1e-9)
         assertEquals(0.20, defaults.longShotMaxAsk, 1e-9)
     }
 
@@ -117,15 +121,15 @@ class KalshiFeeAndWinTargetTest {
         assertTrue(ticket != null)
         assertEquals(TicketKind.HUNTER_VALUE, ticket!!.kind)
         assertTrue(ticket.modelEdge)
-        assertEquals(10.0, ticket.winTargetUsd!!, 1e-9)
+        assertEquals(0.0, ticket.winTargetUsd!!, 1e-9)
         assertEquals(0.20, ticket.impliedChance!!, 1e-9)
         assertEquals(0.40, ticket.modelChance!!, 1e-9)
         assertTrue(ticket.canApprove)
         assertTrue(ticket.gateNote!!.contains("Long-shot"))
         assertTrue(ticket.gateNote!!.contains("Approve still required"))
         assertFalse(ticket.gateNote!!.contains("$1 → $5") || ticket.gateNote!!.contains("$1→$5"))
-        assertTrue(ticket.contracts in 20..25)
-        assertTrue(ticket.stakeUsd in 4.0..5.0 + 1e-6)
+        assertEquals(LiveOrderSizer.size(0.20).count, ticket.contracts)
+        assertTrue(ticket.stakeUsd in 9.0..10.0 + 1e-6)
         assertTrue((ticket.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
         assertTrue(ticket.winTargetCapped)
     }
@@ -143,9 +147,9 @@ class KalshiFeeAndWinTargetTest {
         )
         assertTrue(ticket != null)
         assertEquals(TicketKind.HUNTER_VALUE, ticket!!.kind)
-        assertTrue(ticket.stakeUsd in 4.0..5.0 + 1e-6)
+        assertTrue(ticket.stakeUsd in 9.0..10.0 + 1e-6)
         assertTrue((ticket.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
-        assertEquals(10.0, ticket.winTargetUsd!!, 1e-9)
+        assertEquals(0.0, ticket.winTargetUsd!!, 1e-9)
     }
 
     @Test
@@ -191,20 +195,20 @@ class KalshiFeeAndWinTargetTest {
         )
         val hunter = TicketBuilder.proposeHunter(cheap, ctx)
         assertEquals(TicketKind.HUNTER, hunter!!.kind)
-        assertEquals(10.0, hunter.winTargetUsd!!, 1e-9)
-        assertTrue(hunter.stakeUsd in 4.0..5.0 + 1e-6)
+        assertEquals(0.0, hunter.winTargetUsd!!, 1e-9)
+        assertTrue(hunter.stakeUsd in 9.0..10.0 + 1e-6)
         assertTrue((hunter.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
 
         val fiveCent = sample(yesAsk = 0.05, noAsk = 0.95, aiYes = 30.0).copy(predictedSide = "YES")
         val configured = TicketBuilder.propose(fiveCent, ctx)
         assertEquals(TicketKind.CONFIGURED, configured!!.kind)
-        assertEquals(10.0, configured.winTargetUsd!!, 1e-9)
+        assertEquals(0.0, configured.winTargetUsd!!, 1e-9)
 
         val manual = TicketBuilder.proposeManual(fiveCent, "YES", ctx)
         assertEquals(TicketKind.MANUAL, manual!!.kind)
-        assertEquals(10.0, manual.winTargetUsd!!, 1e-9)
+        assertEquals(0.0, manual.winTargetUsd!!, 1e-9)
         assertTrue((manual.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
-        assertTrue(manual.stakeUsd <= 5.0 + 1e-9)
+        assertTrue(manual.stakeUsd <= 10.0 + 1e-9)
     }
 
     @Test
@@ -226,15 +230,13 @@ class KalshiFeeAndWinTargetTest {
         )
         val ticket = TicketBuilder.proposeManual(market, "YES", ctx)!!
         assertEquals(TicketKind.MANUAL, ticket.kind)
-        assertEquals(7, ticket.contracts)
-        assertTrue(ticket.stakeUsd <= 5.0 + 1e-9)
-        assertEquals(4.53, ticket.stakeUsd, 1e-9)
-        assertEquals(2.47, ticket.profitIfWinUsd!!, 1e-9)
-        assertTrue(ticket.belowMinProfit)
-        assertFalse(ticket.canApprove)
-        val enforced = LiveOrderSizer.enforce(ticket.copy(blockedReason = null, contracts = 7))
+        assertEquals(LiveOrderSizer.size(0.63).count, ticket.contracts)
+        assertTrue(ticket.stakeUsd <= 10.0 + 1e-9)
+        assertFalse(ticket.belowMinProfit)
+        assertTrue(ticket.canApprove)
+        val enforced = LiveOrderSizer.enforce(ticket.copy(blockedReason = null))
         assertTrue(enforced.ok)
-        assertTrue(enforced.allInUsd <= 5.0 + 1e-9)
+        assertTrue(enforced.allInUsd <= 10.0 + 1e-9)
     }
 
     @Test

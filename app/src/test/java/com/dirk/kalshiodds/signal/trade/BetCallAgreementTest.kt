@@ -2,6 +2,8 @@ package com.dirk.kalshiodds.signal.trade
 
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot
+import com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -12,7 +14,7 @@ class BetCallAgreementTest {
 
     @Test
     fun betUpHeadlineMatchesTicketAndApproveSide() {
-        val market = sample(yesAsk = 0.20, noAsk = 0.80, aiYes = 80.0, predicted = "YES")
+        val market = sample(yesAsk = 0.20, noAsk = 0.80, aiYes = 80.0, predicted = "YES", fire = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.BET_UP, decision.headline)
@@ -20,11 +22,12 @@ class BetCallAgreementTest {
         assertEquals("YES", decision.ticket!!.side)
         assertTrue(decision.ticket!!.canApprove)
         assertEquals(decision.side, decision.ticket!!.side)
+        assertEquals(TicketKind.LAST_MINUTE, decision.ticket!!.kind)
     }
 
     @Test
     fun betDownHeadlineMatchesTicketAndApproveSide() {
-        val market = sample(yesAsk = 0.80, noAsk = 0.20, aiYes = 10.0, predicted = "NO")
+        val market = sample(yesAsk = 0.80, noAsk = 0.20, aiYes = 10.0, predicted = "NO", fire = "NO")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
@@ -32,17 +35,22 @@ class BetCallAgreementTest {
         assertEquals("NO", decision.ticket!!.side)
         assertTrue(decision.ticket!!.canApprove)
         assertEquals(decision.side, decision.ticket!!.side)
+        assertEquals(TicketKind.LAST_MINUTE, decision.ticket!!.kind)
     }
 
     @Test
-    fun noBetWhenSixtyThreeCentsMissesMinProfit() {
+    fun lastMinuteWaitingIsNoBetEvenAtSixtyThreeCents() {
         val market = sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 70.0, predicted = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         assertNull(decision.side)
         assertFalse(decision.isActionable)
-        assertTrue(decision.noBetReason!!.contains("below") || decision.noBetReason!!.contains("No side"))
+        assertTrue(
+            decision.noBetReason!!.contains("waiting") ||
+                decision.noBetReason!!.contains("Last-minute")
+        )
+        assertFalse(LiveOrderSizer.belowMinProfit(0.50, 0.0))
     }
 
     @Test
@@ -69,11 +77,27 @@ class BetCallAgreementTest {
 
     @Test
     fun sortPutsActionableFirst() {
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
+        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES", fire = "YES"), SignalSettings())) == 0)
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 70.0, "YES"), SignalSettings())) == 1)
     }
 
-    private fun sample(yesAsk: Double, noAsk: Double, aiYes: Double, predicted: String) = MarketUiModel(
+    private fun firedSnap(ticker: String, side: String, yesAsk: Double, noAsk: Double): LastMinuteSnapshot {
+        val up = side.equals("YES", true)
+        return LastMinuteStrategy.evaluate(
+            LastMinuteStrategy.Inputs(
+                ticker = ticker,
+                tauSec = if (up) 45 else 30,
+                x = if (up) 0.0006 else -0.0003,
+                obsMean = if (up) 0.0004 else -0.0002,
+                sigS = if (up) 5e-05 else 4e-05,
+                upAsk = yesAsk,
+                downAsk = noAsk,
+                nowMs = System.currentTimeMillis()
+            )
+        )
+    }
+
+    private fun sample(yesAsk: Double, noAsk: Double, aiYes: Double, predicted: String, fire: String? = null) = MarketUiModel(
         ticker = "KXETH15M-TEST",
         title = "ETH",
         subtitle = null,
@@ -97,6 +121,7 @@ class BetCallAgreementTest {
         seriesLabel = "Ethereum",
         passedFilter = true,
         predictedSide = predicted,
-        primaryHeroSide = predicted
+        primaryHeroSide = predicted,
+        lastMinute = fire?.let { firedSnap("KXETH15M-TEST", it, yesAsk, noAsk) }
     )
 }

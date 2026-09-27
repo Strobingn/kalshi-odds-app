@@ -75,7 +75,15 @@ class LiveSignalsService : Service() {
         if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
             return handleExplicitStop()
         }
+        if (intent?.action == LiveSignalsPolicy.ACTION_RESUME) {
+            LiveSignalsKeepAlive.setTimeoutPaused(this, false)
+        }
         explicitStop = false
+        LiveSignalsKeepAlive.setTimeoutPaused(this, false)
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this)
+                .cancel(SignalNotifier.PAUSED_NOTIFICATION_ID)
+        }
         if (pipelineJob == null || pipelineJob?.isActive != true) {
             pipelineJob = scope.launch { runPipeline() }
         }
@@ -347,7 +355,8 @@ class LiveSignalsService : Service() {
         if (LiveSignalsPolicy.shouldRestartAfterKill(
                 LiveSignalsKeepAlive.isEnabled(this),
                 explicitStop,
-                foregroundFailed
+                foregroundFailed,
+                LiveSignalsKeepAlive.isTimeoutPaused(this)
             )
         ) {
             LiveSignalsKeepAlive.startService(this)
@@ -355,35 +364,52 @@ class LiveSignalsService : Service() {
         }
     }
 
+    /**
+     * API 34 `shortService` timeout. We do not use shortService, but must
+     * still [stopSelf] if the system delivers this callback.
+     */
     @Suppress("UNUSED_PARAMETER")
     override fun onTimeout(startId: Int) {
-        handleDataSyncTimeout()
+        handleForegroundTimeout()
     }
 
+    /**
+     * Android 15 `dataSync` / `mediaProcessing` 6h-per-24h timeout.
+     * Official contract: [stopSelf] within a few seconds. Never re-promote.
+     */
     @Suppress("UNUSED_PARAMETER")
     override fun onTimeout(startId: Int, fgsType: Int) {
-        handleDataSyncTimeout()
+        handleForegroundTimeout()
     }
 
-    private fun handleDataSyncTimeout() {
-        // API 35 dataSync time-box. Re-promote as dataSync; never specialUse.
-        if (LiveSignalsPolicy.shouldRestartAfterKill(
-                LiveSignalsKeepAlive.isEnabled(this),
-                explicitStop,
-                foregroundFailed
-            )
-        ) {
-            promoteToForeground()
-        } else {
+    private fun handleForegroundTimeout() {
+        if (!LiveSignalsPolicy.timeoutRequiresStopSelf()) {
             stopSelf()
+            return
         }
+        explicitStop = true
+        runCatching { LiveSignalsKeepAlive.setTimeoutPaused(this, true) }
+        tearDownPipeline()
+        releaseWakeLock()
+        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
+            .getOrElse { SignalNotifier(this) }
+        val paused = runCatching { notifier.pausedNotification() }.getOrNull()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        if (paused != null) {
+            runCatching {
+                androidx.core.app.NotificationManagerCompat.from(this)
+                    .notify(SignalNotifier.PAUSED_NOTIFICATION_ID, paused)
+            }
+        }
+        stopSelf()
     }
 
     override fun onDestroy() {
         val restart = LiveSignalsPolicy.shouldRestartAfterKill(
             LiveSignalsKeepAlive.isEnabled(this),
             explicitStop,
-            foregroundFailed
+            foregroundFailed,
+            LiveSignalsKeepAlive.isTimeoutPaused(this)
         )
         tearDownPipeline()
         releaseWakeLock()
