@@ -1,0 +1,64 @@
+name: Backtest (Claude)
+
+# Full historical replay on settled Kalshi 15m markets + Coinbase spot.
+# Runs on GitHub's runners (public market data, no API key). Report and
+# charts are uploaded as an artifact; nothing is committed or released.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Lookback days of settled markets
+        required: false
+        default: "28"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backtest-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install report deps
+        run: pip install matplotlib
+
+      - name: Parity tests
+        run: python3 tools/backtest/test_parity.py
+
+      # fetch.py only downloads markets/candles it doesn't already have,
+      # so a restored cache makes re-runs much faster.
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: tools/backtest/cache
+          key: backtest-cache-${{ github.run_id }}
+          restore-keys: backtest-cache-
+
+      - name: Fetch, simulate, report
+        run: |
+          mkdir -p backtest-out
+          python3 tools/backtest/run.py \
+            --days ${{ github.event.inputs.days || '28' }} \
+            --cache tools/backtest/cache \
+            --artifacts backtest-out | tee backtest-out/summary.txt
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backtest-${{ github.run_number }}
+          path: |
+            backtest-out
+            docs/backtest
+          if-no-files-found: warn
