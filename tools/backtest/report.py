@@ -28,6 +28,15 @@ EXPLORATORY_STRATS = [
 ]
 STRATS = CORE_STRATS + STRESS_STRATS + EXPLORATORY_STRATS
 CLAIM_STRATS = CORE_STRATS + STRESS_STRATS + EXPLORATORY_STRATS
+# Entry filter (EntryFilter.kt, docs/ml-review-2026-09-27.md #7). Reported in
+# its own section with its own verdict; not part of the headline claim set.
+ENTRY_STRATS = [
+    ("app_entry", "App pick + entry filter (app defaults)"),
+    ("entry_tuned", "App pick + IS-tuned entry filter (reported OOS only)"),
+]
+# OOS days of the 2026-09-25 run, whose breakdown motivated the defaults.
+ENTRY_MOTIVATION_DAYS = ("2026-09-16", "2026-09-25")
+STRATS = STRATS + ENTRY_STRATS
 
 
 def _fmt(s: dict) -> str:
@@ -80,6 +89,7 @@ def write_charts(result: dict, out_dir: Path, artifact_dir: Path) -> tuple[Path,
     styles = {k: "-" for k, _ in CORE_STRATS}
     styles.update({k: ":" for k, _ in STRESS_STRATS})
     styles.update({k: "--" for k, _ in EXPLORATORY_STRATS})
+    styles.update({k: "-." for k, _ in ENTRY_STRATS})
     for key, label in STRATS:
         pack = result["strategies"].get(key) or {}
         eq = _cum(pack.get("oos_equity") or [])
@@ -148,6 +158,105 @@ def _wr_price_table(title: str, rows: list) -> str:
         lines.append(f"| {r.get('bucket')} | {r.get('n')} | {wr} | {avg} | {gap} |")
     lines.append("")
     return "\n".join(lines)
+
+
+def _entry_cell(s: dict) -> str:
+    if not s or not s.get("n"):
+        return "0 | — | — | —"
+    pbet = f"${s['pnl_per_bet']:+.3f}" if s.get("pnl_per_bet") is not None else "—"
+    roi = f"{100 * s['roi']:.1f}%" if s.get("roi") is not None else "—"
+    return f"{s['n']} | ${s['pnl']:+.2f} | {pbet} | {roi}"
+
+
+def _entry_section(result: dict) -> list[str]:
+    """Entry filter (docs/ml-review-2026-09-27.md #7): rows, verdict, IS sweep, breakdowns."""
+    ef = result.get("entry_filter") or {}
+    strategies = result.get("strategies") or {}
+    if not ef or "app_entry" not in strategies:
+        return []
+    d = ef.get("defaults") or {}
+    rule = ef.get("rule") or {}
+    me_default = int(d.get("min_elapsed_min") or 0)
+    oos_days = [x for x in (result.get("oos_days") or []) if x]
+    lo, hi = ENTRY_MOTIVATION_DAYS
+    overlap = [x for x in oos_days if lo <= x <= hi]
+    out = ["## Entry filter (ml-review #7)", ""]
+    out.append(
+        f"`EntryFilter` in the app: no entry while fewer than **{me_default} min** of the 15-minute window "
+        f"have elapsed (exactly {15 - me_default}:00 left passes), and no entry when "
+        f"|spot − strike| / strike < **{d.get('min_bp'):g}bp** unless the picked side's net edge ≥ "
+        f"**{d.get('override_pp'):g}pp**. Missing spot / strike never blocks. The harness applies the same rule "
+        "(`pipeline.entry_filter`) on top of the shipped alert gate. A blocked minute moves the bet to the next "
+        "alert minute the filter allows, as it does live."
+    )
+    out.append("")
+    out.append(
+        f"**Read the default row with care.** The defaults were picked from the OOS breakdown of the 2026-09-25 run "
+        f"(OOS {lo} → {hi}). {len(overlap)} of {len(oos_days)} OOS days here fall in that range, so the "
+        "`app_entry` OOS row is not independent evidence on those days. The IS-tuned row is the clean walk-forward "
+        "test: grid min elapsed ∈ {0,2,3,5} min × min distance ∈ {0,3,5,10}bp "
+        f"(override fixed at {d.get('override_pp'):g}pp), chosen by IS P&L with ≥ 20 IS bets, then applied OOS."
+    )
+    out.append("")
+    out.append("| Strategy | N | Wins | Win% | Avg ask | P&L | $/bet | ROI | Max DD | Bootstrap 95% CI $/bet (excludes 0?) |")
+    out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---|")
+    out.append(f"| App pick as shipped (baseline) {_fmt((strategies.get('app_shipped') or {}).get('oos') or {})}")
+    for key, label in ENTRY_STRATS:
+        out.append(f"| {label} {_fmt((strategies.get(key) or {}).get('oos') or {})}")
+    out.append("")
+    if rule:
+        out.append(
+            f"IS-tuned choice: min elapsed **{rule.get('min_elapsed_min')} min**, min distance **{rule.get('min_bp'):g}bp** "
+            f"(IS n={rule.get('is_n')}, IS P&L ${rule.get('is_pnl') or 0.0:+.2f})."
+        )
+    else:
+        out.append("IS-tuned choice: none (no grid cell had ≥ 20 IS bets).")
+    out.append("")
+
+    base = (strategies.get("app_shipped") or {}).get("oos") or {}
+    verdict = []
+    any_includes_zero = False
+    for key, label in ENTRY_STRATS:
+        s = (strategies.get(key) or {}).get("oos") or {}
+        ci = s.get("ci95") or (None, None, None)
+        if not s.get("n") or ci[1] is None:
+            verdict.append(f"{label}: no OOS bets.")
+            continue
+        excl = "above 0" if ci[1] > 0 else ("below 0" if ci[2] < 0 else "includes 0")
+        any_includes_zero = any_includes_zero or excl == "includes 0"
+        vs = ""
+        if base.get("pnl_per_bet") is not None:
+            vs = f" vs ${base['pnl_per_bet']:+.3f}/bet as shipped"
+        verdict.append(f"{label}: ${s['pnl_per_bet']:+.3f}/bet{vs}, n={s['n']}, CI [{ci[1]:+.3f}, {ci[2]:+.3f}] ({excl}).")
+    if any_includes_zero:
+        verdict.append("A CI that includes 0 means the filter is not shown to help or hurt; keep it as a guard, not an edge.")
+    out.append("**Verdict:** " + " ".join(verdict))
+    out.append("")
+
+    grid = ef.get("grid") or []
+    if grid:
+        out.append("#### Sweep (IS picks; OOS columns are for sensitivity only — do not pick thresholds from them)")
+        out.append("")
+        out.append("| Min elapsed | Min distance | IS N | IS P&L | IS $/bet | IS ROI | OOS N | OOS P&L | OOS $/bet | OOS ROI |")
+        out.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+        for c in grid:
+            me = c.get("min_elapsed_min")
+            bp = c.get("min_bp") or 0.0
+            tags = []
+            if rule and me == rule.get("min_elapsed_min") and bp == rule.get("min_bp"):
+                tags.append("IS pick")
+            if me == d.get("min_elapsed_min") and bp == d.get("min_bp"):
+                tags.append("app default")
+            if me == 0 and bp == 0.0:
+                tags.append("= as shipped")
+            tag = f" ({', '.join(tags)})" if tags else ""
+            out.append(f"| {me} min{tag} | {bp:g}bp | {_entry_cell(c.get('is_') or {})} | {_entry_cell(c.get('oos') or {})} |")
+        out.append("")
+
+    app_entry = strategies.get("app_entry") or {}
+    out.append(_brk_table("App pick + entry filter — OOS by time-left", app_entry.get("oos_by_tte") or {}))
+    out.append(_brk_table("App pick + entry filter — OOS by |spot − strike|", app_entry.get("oos_by_dist") or {}))
+    return out
 
 
 def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict | None) -> None:
@@ -525,6 +634,7 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     parts.append(_brk_table("By time-left", app_shipped.get("oos_by_tte") or {}))
     parts.append(_brk_table("By fill ask", app_shipped.get("oos_by_ask") or {}))
     parts.append(_brk_table("By |spot − strike|", app_shipped.get("oos_by_dist") or {}))
+    parts.extend(_entry_section(result))
     parts.append("## Calibration (all decision minutes, not just bets)")
     parts.append("")
     parts.append("| Forecast | N | Brier | Log-loss |")
@@ -617,6 +727,7 @@ def write_report(result: dict, dest: Path, charts: tuple[Path, Path], meta: dict
     parts.append("# Kotlin parity (no network):")
     parts.append("./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.backtest.PipelineParityTest")
     parts.append("./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.backtest.ScorecardBrierDiagnosisTest")
+    parts.append("./gradlew :app:testDebugUnitTest --tests com.dirk.kalshiodds.signal.engine.EntryFilterTest")
     parts.append("```")
     parts.append("")
     md = "\n".join(parts)
