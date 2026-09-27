@@ -900,7 +900,6 @@ private fun StatusChip(status: String?) {
     )
 }
 
-@Composable
 private fun lastMinuteFallback(
     market: MarketUiModel,
     nowMs: Long
@@ -926,6 +925,7 @@ private fun lastMinuteFallback(
     }
 }
 
+@Composable
 internal fun LastMinutePlayBox(
     market: MarketUiModel,
     call: BetCall.Decision,
