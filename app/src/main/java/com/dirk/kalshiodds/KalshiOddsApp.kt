@@ -93,7 +93,7 @@ class KalshiOddsApp : Application() {
                     .collect { enabled ->
                         LiveSignalsKeepAlive.setEnabled(this@KalshiOddsApp, enabled)
                         if (enabled && LiveSignalsKeepAlive.isUiInForeground()) {
-                            LiveSignalsService.start(this@KalshiOddsApp)
+                            LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
                         }
                         // Off: the running service observes DataStore and stopSelfs.
                     }

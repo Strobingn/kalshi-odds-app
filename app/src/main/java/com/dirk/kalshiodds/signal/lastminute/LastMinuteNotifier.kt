@@ -23,6 +23,14 @@ class LastMinuteNotifier(private val context: Context) {
     private val ids = AtomicInteger(7000)
 
     fun notifyFired(fired: LastMinuteFired): Int {
+        // Posts even when the Activity is visible. Last-minute heads-up is
+        // independent of the live-signals FGS.
+        if (!LastMinuteNotifyPolicy.shouldNotify(
+                com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
+            )
+        ) {
+            return -1
+        }
         SignalNotifier.ensureChannels(context)
         ensureChannel(context)
         val title = LastMinuteCopy.notificationTitle(fired)

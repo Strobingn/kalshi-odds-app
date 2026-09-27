@@ -18,7 +18,9 @@ object SignalCopy {
         val call: String,
         val modelLine: String,
         val outcome: String?,
-        val details: String?
+        val details: String?,
+        /** Ticker + id / timestamp — never display text. Used as a Lazy key. */
+        val stableKey: String = ""
     )
 
     fun callLabel(side: String?): String = when (SignalStance.normalizeSide(side)) {
@@ -97,7 +99,8 @@ object SignalCopy {
             call = resolved.call,
             modelLine = modelVsMarketLine(modelYes, marketYes, resolved.lineSide),
             outcome = outcomeLabel(settled),
-            details = mergeDetails(resolved.detailsExtra, details)
+            details = mergeDetails(resolved.detailsExtra, details),
+            stableKey = "$ticker:${closeEpochMs ?: 0}:${side ?: ""}"
         )
     }
 
@@ -114,7 +117,8 @@ object SignalCopy {
             call = resolved.call,
             modelLine = modelVsMarketLine(resolved.modelYes, resolved.marketYes, resolved.lineSide),
             outcome = outcomeLabel(settled),
-            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert))
+            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert)),
+            stableKey = "${alert.ticker}:${alert.id}:${alert.createdAtMs}"
         )
     }
 

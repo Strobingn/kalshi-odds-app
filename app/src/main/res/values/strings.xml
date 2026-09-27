@@ -17,6 +17,7 @@
     <string name="live_signals_fg_title">DipHunter live signals</string>
     <string name="live_signals_fg_text">Watching crypto ticker + orderbook WebSocket. Alerts never auto-place; Approve is required per ticket.</string>
     <string name="live_signals_stop">Stop</string>
+    <string name="live_signals_paused_text">Live alerts paused, tap to resume</string>
     <string name="live_signals_allow_background">Allow background</string>
     <string name="signal_alert_title">Dip Hunter · %1$s</string>
     <string name="scorecard">Scorecard</string>

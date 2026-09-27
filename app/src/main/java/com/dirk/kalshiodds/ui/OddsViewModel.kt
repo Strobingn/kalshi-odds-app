@@ -890,6 +890,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             eval.fired?.let { fired ->
                 val logged = container.lastMinuteStore.record(fired)
                 if (logged != null) {
+                    // Heads-up even when this Activity is in the foreground.
                     runCatching { container.lastMinuteNotifier.notifyFired(fired) }
                     if (_state.value.settings.paperTradingEnabled) {
                         paperBook.considerLastMinute(fired, enabled = true)

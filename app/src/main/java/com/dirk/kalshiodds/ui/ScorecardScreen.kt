@@ -152,7 +152,8 @@ fun ScorecardScreen(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
-                items(snap.perSeries, key = { "series-${it.series}" }) { SeriesRow(it) }
+                val seriesKeyed = LazyListKeys.keyed(snap.perSeries) { "series-${it.series}" }
+                items(seriesKeyed, key = { it.key }) { row -> SeriesRow(row.value) }
             }
             if (snap != null) {
                 item {
@@ -196,8 +197,9 @@ fun ScorecardScreen(
                         color = colors.textPrimary
                     )
                 }
-                items(view.recent, key = { "${it.ticker}-${it.settledAtMs}-${it.line}" }) { pick ->
-                    SettledPickRow(pick)
+                val recentKeyed = LazyListKeys.keyed(view.recent) { "${it.ticker}:${it.settledAtMs}" }
+                items(recentKeyed, key = { it.key }) { row ->
+                    SettledPickRow(row.value)
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }

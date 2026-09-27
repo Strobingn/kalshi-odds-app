@@ -57,6 +57,7 @@ class WiringAuditTest {
         Control("Last-minute scorecard section", ScorecardCopy::class.java, "lastMinuteSection"),
         Control("Last-minute BRTI median", com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient::class.java, "median"),
         Control("Last-minute heads-up notify", com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier::class.java, "notifyFired"),
+        Control("Last-minute notify while UI up", com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifyPolicy::class.java, "shouldNotify"),
         Control("Ticket stake $10 cap", SettingsViewModel::class.java, "requestTicketStake"),
         Control("PEM normalizer", com.dirk.kalshiodds.signal.config.PemNormalizer::class.java, "normalize"),
         Control("Paper trading toggle", SettingsViewModel::class.java, "setPaperTrading"),

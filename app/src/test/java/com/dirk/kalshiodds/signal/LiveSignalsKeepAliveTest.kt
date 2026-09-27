@@ -102,12 +102,67 @@ class LiveSignalsKeepAliveTest {
     }
 
     @Test
-    fun fgsTypesAreDataSyncOnlyOnApi29Plus() {
+    fun fgsTypesPreferSpecialUseOnApi34Plus() {
         assertTrue(LiveSignalsPolicy.foregroundServiceTypesToTry(28).isEmpty())
         assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(29))
-        assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(34))
-        assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(35))
+        assertEquals(listOf(LiveSignalsPolicy.FGS_TYPE_DATA_SYNC), LiveSignalsPolicy.foregroundServiceTypesToTry(33))
+        assertEquals(
+            listOf(LiveSignalsPolicy.FGS_TYPE_SPECIAL_USE, LiveSignalsPolicy.FGS_TYPE_DATA_SYNC),
+            LiveSignalsPolicy.foregroundServiceTypesToTry(34)
+        )
+        assertEquals(
+            listOf(LiveSignalsPolicy.FGS_TYPE_SPECIAL_USE, LiveSignalsPolicy.FGS_TYPE_DATA_SYNC),
+            LiveSignalsPolicy.foregroundServiceTypesToTry(35)
+        )
         assertEquals(1, LiveSignalsPolicy.FGS_TYPE_DATA_SYNC)
+        assertEquals(0x40000000, LiveSignalsPolicy.FGS_TYPE_SPECIAL_USE)
+        assertEquals(
+            "android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE",
+            LiveSignalsPolicy.PROPERTY_SPECIAL_USE_FGS_SUBTYPE
+        )
+        assertTrue(LiveSignalsPolicy.SPECIAL_USE_SUBTYPE.contains("Kalshi"))
+        assertTrue(LiveSignalsPolicy.SPECIAL_USE_SUBTYPE.contains("orderbook"))
+    }
+
+    @Test
+    fun android15TimeoutStopsSelfAndDoesNotRestartFromBackground() {
+        assertTrue(LiveSignalsPolicy.timeoutRequiresStopSelf())
+        assertEquals("Live alerts paused, tap to resume", LiveSignalsPolicy.PAUSED_NOTIFICATION_TEXT)
+        assertFalse(
+            LiveSignalsPolicy.shouldRestartAfterKill(
+                liveEnabled = true,
+                explicitStop = false,
+                timeoutPaused = true
+            )
+        )
+        assertFalse(LiveSignalsPolicy.shouldStartFromBackground(liveEnabled = true, timeoutPaused = true))
+        assertTrue(LiveSignalsPolicy.shouldStartFromBackground(liveEnabled = true, timeoutPaused = false))
+        assertTrue(LiveSignalsPolicy.shouldPromoteFromUiForeground(liveEnabled = true))
+    }
+
+    @Test
+    fun manifestDeclaresSpecialUsePropertyAndTimeoutStopSelf() {
+        val manifest = java.io.File("src/main/AndroidManifest.xml").takeIf { it.isFile }
+            ?: java.io.File("app/src/main/AndroidManifest.xml")
+        val xml = manifest.readText()
+        assertTrue(xml.contains("FOREGROUND_SERVICE_SPECIAL_USE"))
+        assertTrue(xml.contains("specialUse|dataSync") || xml.contains("specialUse"))
+        assertTrue(xml.contains("android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"))
+
+        val service = java.io.File("src/main/java/com/dirk/kalshiodds/signal/service/LiveSignalsService.kt")
+            .takeIf { it.isFile }
+            ?: java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/service/LiveSignalsService.kt")
+        val src = service.readText()
+        assertTrue(src.contains("override fun onTimeout(startId: Int)"))
+        assertTrue(src.contains("override fun onTimeout(startId: Int, fgsType: Int)"))
+        assertTrue(src.contains("handleForegroundTimeout"))
+        assertTrue(src.contains("stopSelf()"))
+        assertTrue(src.contains("pausedNotification"))
+        assertFalse(src.contains("handleDataSyncTimeout"))
+        val timeoutFn = src.substring(src.indexOf("private fun handleForegroundTimeout"))
+        val body = timeoutFn.substring(0, timeoutFn.indexOf("override fun onDestroy"))
+        assertTrue(body.contains("stopSelf()"))
+        assertFalse(body.contains("promoteToForeground()"))
     }
 
     @Test
@@ -141,7 +196,12 @@ class LiveSignalsKeepAliveTest {
         )
         assertEquals("diphunter_keepalive", LiveSignalsPolicy.PREFS_NAME)
         assertEquals("live_signals_enabled", LiveSignalsPolicy.PREFS_ENABLED_KEY)
+        assertEquals("live_signals_timeout_paused", LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY)
         assertEquals("DipHunter live signals", LiveSignalsPolicy.NOTIFICATION_TITLE)
+        assertEquals(
+            "com.dirk.kalshiodds.signal.service.RESUME_LIVE_SIGNALS",
+            LiveSignalsPolicy.ACTION_RESUME
+        )
         assertEquals("diphunter_live_signals_ongoing", LiveSignalsPolicy.CHANNEL_ONGOING)
         assertEquals(45_000L, LiveSignalsPolicy.METADATA_INTERVAL_MS)
         assertEquals(15L, LiveSignalsPolicy.WATCHDOG_PERIOD_MINUTES)
