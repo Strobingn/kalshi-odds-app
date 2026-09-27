@@ -59,7 +59,8 @@ data class LastMinuteSnapshot(
     val spotSource: String = "none",
     val x: Double? = null,
     val obsMean: Double? = null,
-    val sigS: Double? = null
+    val sigS: Double? = null,
+    val flip: com.dirk.kalshiodds.signal.flip.FlipCheck.Verdict? = null
 )
 
 data class LastMinutePick(

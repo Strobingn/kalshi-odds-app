@@ -71,7 +71,18 @@ object SignalCopy {
         )
     }
 
-    fun shouldNotify(alert: SignalAlert): Boolean = SignalStance.shouldNotify(resolve(alert))
+    fun shouldNotify(alert: SignalAlert): Boolean {
+        if (!SignalStance.shouldNotify(resolve(alert))) return false
+        val sideYes = !alert.predictedSide.equals("NO", true)
+        val model = (if (sideYes) alert.fairValuePp else 100.0 - alert.fairValuePp) / 100.0
+        val implied = (if (sideYes) alert.marketMidPp else 100.0 - alert.marketMidPp) / 100.0
+        if (model.isFinite() && implied.isFinite() &&
+            !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, implied.coerceIn(0.001, 0.999))
+        ) {
+            return false
+        }
+        return true
+    }
 
     fun outcomeLabel(settled: String?): String = when {
         settled.isNullOrBlank() -> "Pending"

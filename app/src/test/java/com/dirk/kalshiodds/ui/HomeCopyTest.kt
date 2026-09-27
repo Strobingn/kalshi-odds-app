@@ -87,6 +87,19 @@ class HomeCopyTest {
     }
 
     @Test
+    fun deadWindowHeadlineIsFlipChanceNoBet() {
+        val dead = HomeFixtures.deadWindowLotteryBtc()
+        val call = BetCall.decide(dead, SignalSettings(), nowMs)
+        assertEquals(BetCall.Headline.NO_BET, call.headline)
+        assertFalse(call.isActionable)
+        val line = HomeCopy.thisWindowHeadline(call, dead, nowMs)
+        assertTrue(line.startsWith("NO BET this window"))
+        assertTrue(line.contains("Flip chance"))
+        assertNull(HomeCopy.allInProfit(call))
+        assertEquals("PAPER  NO BET", HomeCopy.primaryButtonLabel("PAPER", call))
+    }
+
+    @Test
     fun modelVsMarketUsesExistingPercents() {
         val market = HomeFixtures.market(
             ticker = "KXBTC15M-WIN-50",

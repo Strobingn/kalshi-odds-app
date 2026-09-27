@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.lastminute
 
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
+import com.dirk.kalshiodds.signal.flip.FlipCheck
 
 /**
  * Pure last-minute taker rule. One evaluation, no I/O, no orders.
@@ -34,18 +35,20 @@ object LastMinuteStrategy {
 
     fun evaluate(input: Inputs): LastMinuteSnapshot {
         if (input.alreadyFired) {
+            val flip = flipOf(input, rawPUp = null)
             return LastMinuteSnapshot(
                 phase = LastMinutePhase.FIRED,
                 tauSec = input.tauSec.takeIf { it > 0 },
                 startsInMs = null,
-                pUp = null,
+                pUp = flip?.cappedPUp,
                 fired = null,
                 spotUsd = input.spotUsd,
                 strikeUsd = input.strikeUsd,
                 spotSource = input.spotSource,
                 x = input.x,
                 obsMean = input.obsMean,
-                sigS = input.sigS
+                sigS = input.sigS,
+                flip = flip
             )
         }
         if (input.windowClosed || input.tauSec <= 0) {
@@ -72,14 +75,17 @@ object LastMinuteStrategy {
                 sigS = input.sigS
             )
         }
-        val pUp = LastMinuteMath.fairP(input.x, input.tauSec.toDouble(), input.obsMean, input.sigS)
+        val rawPUp = LastMinuteMath.fairP(input.x, input.tauSec.toDouble(), input.obsMean, input.sigS)
+        val flip = flipOf(input, rawPUp)
+        val pUp = flip?.cappedPUp ?: rawPUp
         val up = quoteSide(
             side = "YES",
             winChance = pUp,
             ask = input.upAsk,
             book = input.book,
             quoted = input.upQuotedSize,
-            stakeUsd = input.stakeUsd
+            stakeUsd = input.stakeUsd,
+            flip = flip
         )
         val down = quoteSide(
             side = "NO",
@@ -87,13 +93,14 @@ object LastMinuteStrategy {
             ask = input.downAsk,
             book = input.book,
             quoted = input.downQuotedSize,
-            stakeUsd = input.stakeUsd
+            stakeUsd = input.stakeUsd,
+            flip = flip
         )
         val winner = listOfNotNull(up, down)
             .filter { it.qualifies }
             .maxByOrNull { it.evPerDollar ?: Double.NEGATIVE_INFINITY }
         if (winner != null) {
-            val ask = winner.ask ?: return live(input, pUp, up, down)
+            val ask = winner.ask ?: return live(input, pUp, up, down, flip)
             val fired = LastMinuteFired(
                 ticker = input.ticker,
                 side = winner.side,
@@ -126,10 +133,11 @@ object LastMinuteStrategy {
                 spotSource = input.spotSource,
                 x = input.x,
                 obsMean = input.obsMean,
-                sigS = input.sigS
+                sigS = input.sigS,
+                flip = flip
             )
         }
-        return live(input, pUp, up, down)
+        return live(input, pUp, up, down, flip)
     }
 
     fun quoteSide(
@@ -138,7 +146,8 @@ object LastMinuteStrategy {
         ask: Double?,
         book: BookLevelSnapshot?,
         quoted: Double?,
-        stakeUsd: Double
+        stakeUsd: Double,
+        flip: FlipCheck.Verdict? = null
     ): LastMinuteSideQuote {
         val display = if (side.equals("NO", true)) "DOWN" else "UP"
         val p = KalshiPrice.usable(ask)
@@ -164,7 +173,9 @@ object LastMinuteStrategy {
         val cost = if (c > 0) LastMinuteMath.allInCost(c, p) else 0.0
         val fee = (cost - c * p).coerceAtLeast(0.0)
         val ev = LastMinuteMath.evPerDollar(c, winChance, cost)
-        val qualifies = c > 0 && ev != null && ev >= LastMinuteConstants.MARGIN_EV_PER_DOLLAR - 1e-12
+        val evOk = c > 0 && ev != null && ev >= LastMinuteConstants.MARGIN_EV_PER_DOLLAR - 1e-12
+        val flipOk = flip == null || FlipCheck.allowsSide(flip, side, p, winChance)
+        val qualifies = evOk && flipOk
         return LastMinuteSideQuote(
             side = if (side.equals("NO", true)) "NO" else "YES",
             displaySide = display,
@@ -185,7 +196,8 @@ object LastMinuteStrategy {
         input: Inputs,
         pUp: Double,
         up: LastMinuteSideQuote,
-        down: LastMinuteSideQuote
+        down: LastMinuteSideQuote,
+        flip: FlipCheck.Verdict?
     ) = LastMinuteSnapshot(
         phase = LastMinutePhase.LIVE,
         tauSec = input.tauSec,
@@ -199,6 +211,19 @@ object LastMinuteStrategy {
         spotSource = input.spotSource,
         x = input.x,
         obsMean = input.obsMean,
-        sigS = input.sigS
+        sigS = input.sigS,
+        flip = flip
     )
+
+    fun flipOf(input: Inputs, rawPUp: Double?): FlipCheck.Verdict? {
+        val geo = FlipCheck.geometryFrom(
+            spotUsd = input.spotUsd,
+            targetUsd = input.strikeUsd,
+            secondsLeft = input.tauSec.toDouble(),
+            sigmaPerSecUsd = FlipCheck.sigmaFromLogVol(input.sigS, input.spotUsd),
+            observedAvgUsd = FlipCheck.observedSpotFromLog(input.obsMean, input.strikeUsd),
+            x = input.x
+        ) ?: return null
+        return FlipCheck.evaluate(geo, rawPUp)
+    }
 }

@@ -36,6 +36,12 @@ class OpportunityNotifier(private val context: Context) {
         ensureChannel(context)
         var posted = 0
         for (ticket in tickets) {
+            if (!ticket.canApprove) continue
+            if (!com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(
+                    ticket.modelChance ?: continue,
+                    ticket.limitPrice
+                )
+            ) continue
             if (!OpportunityDedupe.shouldNotify(ticket, nowMs, lastPosted)) continue
             if (notify(ticket, quiet)) {
                 lastPosted[OpportunityDedupe.keyOf(ticket)] = nowMs

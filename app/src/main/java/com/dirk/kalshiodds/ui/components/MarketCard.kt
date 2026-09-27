@@ -219,10 +219,11 @@ fun MarketCard(
             LastMinutePlayBox(market = market, call = call, nowMs = clock)
             Text(
                 text = when {
+                    call.headline == BetCall.Headline.NO_BET && !call.noBetReason.isNullOrBlank() ->
+                        call.noBetReason!!
                     market.lastMinute != null ->
                         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.headline(market.lastMinute)
                     call.headline != BetCall.Headline.NO_BET -> call.label
-                    !call.noBetReason.isNullOrBlank() -> call.noBetReason!!
                     else -> call.label
                 },
                 style = MaterialTheme.typography.titleMedium,
@@ -972,6 +973,14 @@ internal fun LastMinutePlayBox(
                 )
             }
             com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.LIVE -> {
+                snap.flip?.noBetLine?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textSecondary
+                    )
+                }
                 Text(
                     com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.sideLiveLine(snap.up),
                     style = MaterialTheme.typography.bodyMedium,
@@ -986,7 +995,16 @@ internal fun LastMinutePlayBox(
                 )
             }
             com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.FIRED -> {
-                snap.fired?.let {
+                if (call.headline == BetCall.Headline.NO_BET) {
+                    Text(
+                        call.noBetReason
+                            ?: snap.flip?.noBetLine
+                            ?: com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.NO_PLAY,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textSecondary
+                    )
+                } else snap.fired?.let {
                     Text(
                         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.buyLine(it),
                         style = MaterialTheme.typography.bodyLarge,

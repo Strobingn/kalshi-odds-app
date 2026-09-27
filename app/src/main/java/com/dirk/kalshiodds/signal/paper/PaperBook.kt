@@ -173,6 +173,11 @@ class PaperBook(
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
             ticket.kind == TicketKind.LAST_MINUTE
         ) return null
+        val model = ticket.modelChance
+        val ask = KalshiPrice.usable(ticket.limitPrice)
+        if (model != null && ask != null && !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, ask)) {
+            return null
+        }
         val pick = PaperPickSource.fromTicketKind(ticket.kind)
         val meta = PaperFill.metaFromTicket(ticket)
         if (!PaperFill.allowCreate(pick, meta.aiPct)) return null
@@ -202,6 +207,10 @@ class PaperBook(
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        val model = PaperFill.metaFromAlert(alert).aiPct?.div(100.0)
+        if (model != null && !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, px)) {
+            return null
+        }
         val meta = PaperFill.metaFromAlert(alert)
         if (!PaperFill.allowCreate(PaperPickSource.AI_ALERT, meta.aiPct)) return null
         return fill(
@@ -216,9 +225,22 @@ class PaperBook(
 
     fun considerLastMinute(
         fired: com.dirk.kalshiodds.signal.lastminute.LastMinuteFired,
-        enabled: Boolean
+        enabled: Boolean,
+        market: com.dirk.kalshiodds.domain.MarketUiModel? = null
     ): PaperFill? {
         if (!enabled) return null
+        val liveAsk = market?.let {
+            com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(it, fired.side)
+        }
+        if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
+                fired,
+                market?.spotUsd ?: market?.lastMinute?.spotUsd,
+                market?.floorStrike ?: market?.lastMinute?.strikeUsd,
+                liveAsk
+            )
+        ) {
+            return null
+        }
         val meta = PaperFillMeta(
             aiPct = PaperFill.pctFromUnit(fired.winChance),
             aiConfidence = null,

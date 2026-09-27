@@ -24,4 +24,8 @@ object LastMinuteConstants {
 
     const val STRATEGY_SOURCE = "Last-minute strategy"
     const val AI_MODEL_BACKTEST_LABEL = "AI model (backtest: loses after fees)"
+
+    /** Flip-check floors — see [com.dirk.kalshiodds.signal.flip.FlipCheck]. */
+    const val MIN_FLIP_PROB = com.dirk.kalshiodds.signal.flip.FlipCheck.MIN_FLIP_PROB
+    const val CHEAP_ASK = com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK
 }
