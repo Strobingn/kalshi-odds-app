@@ -1,5 +1,11 @@
 name: Train edge model
 
+# Publishes to the rolling `edge-model-claude` release, which the Claude app
+# (SignalConstants.EDGE_MODEL_RELEASE_TAG) downloads. `edge-model-latest`
+# belongs to the main app; nothing in this file may write to it.
+# Scheduled workflows only run from the default branch, and even there this
+# file only ever targets RELEASE_TAG below.
+
 on:
   schedule:
     # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
@@ -14,19 +20,30 @@ on:
 permissions:
   contents: write
 
+env:
+  RELEASE_TAG: edge-model-claude
+
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Every decision minute of every settled market: ~9k candle pulls at
+    # ≤ 10 req/s, then a few minutes of pure-Python Newton fits.
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Trainer tests (no look-ahead)
+      - name: Trainer tests (no look-ahead, offset model)
         run: python3 ml/test_train_edge.py
       - name: Train
-        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+        run: |
+          python3 ml/train_edge.py \
+            --days ${{ github.event.inputs.days || '30' }} \
+            --tag "$RELEASE_TAG" \
+            --require-live \
+            --out ml/edge_model.json \
+            --manifest ml/edge_model_manifest.json
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
@@ -34,31 +51,34 @@ jobs:
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
-            ml/fixtures/parity_sample.json
+            ml/parity_sample.last.json
           if-no-files-found: error
       - name: Publish rolling release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release delete edge-model-latest --yes || true
+          test "$RELEASE_TAG" = "edge-model-claude"
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
           p = pathlib.Path("ml/edge_model_manifest.json")
           m = json.loads(p.read_text()) if p.is_file() else {}
           print(
-              "Weekly edge model\\n\\n"
+              "Weekly edge model (market-anchored offset logistic)\\n\\n"
               f"- version: {m.get('version')}\\n"
               f"- trained_at: {m.get('trained_at')}\\n"
-              f"- n_samples: {m.get('n_samples')}\\n"
+              f"- n_holdout: {m.get('n_samples')}\\n"
               f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
               f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
+              f"- sim EV-at-ask trades: {m.get('sim_trades')}, P&L/contract sum: {m.get('sim_pnl')}\\n"
               f"- beats_market: {m.get('beats_market')}"
           )
           PY
           )
-          gh release create edge-model-latest \
+          gh release create "$RELEASE_TAG" \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
-            --title "Edge model (latest)" \
+            --target "$GITHUB_SHA" \
+            --title "Edge model (Claude app)" \
             --notes "$NOTES"

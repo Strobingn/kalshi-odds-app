@@ -230,7 +230,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 color = colors.textSecondary
             )
             Text(
-                "Weekly GitHub Action publishes edge-model-latest. Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Weekly GitHub Action publishes edge-model-claude. Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

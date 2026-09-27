@@ -15,12 +15,15 @@ data class EdgeModelManifest(
     val modelLogLoss: Double,
     val marketLogLoss: Double,
     val modelAsset: String = "edge_model.json",
-    val tag: String = "edge-model-latest",
+    val tag: String = com.dirk.kalshiodds.signal.config.SignalConstants.EDGE_MODEL_RELEASE_TAG,
     val simPnl: Double? = null,
-    val simHitRate: Double? = null
+    val simHitRate: Double? = null,
+    /** Trained on the fixture / fallback data, never on settled markets. */
+    val synthetic: Boolean = false
 ) {
     val beatsMarket: Boolean
-        get() = nSamples > 0 &&
+        get() = !synthetic &&
+            nSamples > 0 &&
             modelBrier < marketBrier &&
             modelLogLoss < marketLogLoss
 
@@ -37,6 +40,7 @@ data class EdgeModelManifest(
         o.put("tag", tag)
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
+        if (synthetic) o.put("synthetic", true)
         o.put("beats_market", beatsMarket)
         return o.toString()
     }
@@ -67,9 +71,12 @@ data class EdgeModelManifest(
                 modelLogLoss = modelLl,
                 marketLogLoss = marketLl,
                 modelAsset = o.optString("model_asset").ifBlank { "edge_model.json" },
-                tag = o.optString("tag").ifBlank { "edge-model-latest" },
+                tag = o.optString("tag").ifBlank {
+                    com.dirk.kalshiodds.signal.config.SignalConstants.EDGE_MODEL_RELEASE_TAG
+                },
                 simPnl = o.optDoubleOrNull("sim_pnl"),
-                simHitRate = o.optDoubleOrNull("sim_hit_rate")
+                simHitRate = o.optDoubleOrNull("sim_hit_rate"),
+                synthetic = o.optBoolean("synthetic", false)
             )
         }
 
@@ -88,7 +95,8 @@ data class EdgeModelManifest(
                 modelLogLoss = m["model_logloss"] ?: error("model missing model_logloss"),
                 marketLogLoss = m["market_logloss"] ?: error("model missing market_logloss"),
                 simPnl = m["sim_pnl"],
-                simHitRate = m["sim_hit_rate"]
+                simHitRate = m["sim_hit_rate"],
+                synthetic = (m["synthetic"] ?: 0.0) > 0.0
             )
         }
 
@@ -120,6 +128,13 @@ object ModelActivation {
             return ModelActivationDecision(
                 activate = false,
                 reason = "Model JSON failed validation — previous model stays active."
+            )
+        }
+        if (manifest.synthetic) {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Model was trained on synthetic fixture data — not activating."
             )
         }
         if (manifest.nSamples <= 0) {
