@@ -5,6 +5,11 @@ name: Backtest (Claude)
 # charts are uploaded as an artifact; nothing is committed or released.
 
 on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/backtest/**"
+      - ".github/workflows/backtest.yml"
   workflow_dispatch:
     inputs:
       days:
