@@ -211,7 +211,7 @@ object HomeFixtures {
                 x = kotlin.math.ln(84_559.28 / 84_547.0),
                 obsMean = kotlin.math.ln(84_559.28 / 84_547.0),
                 sigS = 1e-5,
-                upAsk = 0.001,
+                upAsk = 0.999,
                 downAsk = 0.001,
                 nowMs = NOW_MS,
                 spotUsd = 84_559.28,

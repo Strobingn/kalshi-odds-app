@@ -257,7 +257,8 @@ object HomeCopy {
     fun tileAiDown(market: MarketUiModel): String = tileAiPercents(market).down
 
     fun modelVsMarket(market: MarketUiModel, decision: BetCall.Decision): String {
-        val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+        val modelYes = HomeCardDetails.modelYesPercent(market)
+            ?: SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
         val marketYes = market.yesProbabilityPercent
         val side = when (decision.headline) {
             BetCall.Headline.BET_DOWN -> "DOWN"
