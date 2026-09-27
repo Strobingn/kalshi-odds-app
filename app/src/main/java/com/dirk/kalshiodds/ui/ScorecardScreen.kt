@@ -131,6 +131,7 @@ fun ScorecardScreen(
                     )
                 }
             }
+            item { LastMinuteScorecardCard(view.lastMinute) }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }
@@ -164,7 +165,6 @@ fun ScorecardScreen(
                     )
                 }
             }
-            item { LastMinuteScorecardCard(view.lastMinute) }
             if (view.showsEmptyState) {
                 item {
                     Text(
