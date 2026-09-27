@@ -60,6 +60,25 @@ class EdgeModelTest {
 
     // --- offset_logistic (market-anchored) ---------------------------------
 
+    @Test
+    fun beatsMarketNeedsBrierAndLogLossOnRealData() {
+        val base = EdgeModel.parse(offsetJson())
+        val good = mapOf(
+            "model_brier" to 0.15847,
+            "market_brier" to 0.15852,
+            "model_logloss" to 0.47333,
+            "market_logloss" to 0.47368
+        )
+        assertTrue(base.copy(metrics = good).beatsMarket)
+        // Brier alone is not enough (the fixture JSON has no log-loss).
+        assertFalse(base.beatsMarket)
+        assertFalse(base.copy(metrics = good + ("model_logloss" to 0.48)).beatsMarket)
+        assertFalse(base.copy(metrics = good + ("model_brier" to 0.16)).beatsMarket)
+        assertFalse(base.copy(metrics = good + ("synthetic" to 1.0)).beatsMarket)
+        // A legacy logistic re-blends with the mid; never trusted to pick a side.
+        assertFalse(base.copy(kind = "logistic", metrics = good).beatsMarket)
+    }
+
     private fun offsetJson(
         weights: String = "[0,0,0,0,0,0,0,0,0,0]",
         bias: Double = 0.0,

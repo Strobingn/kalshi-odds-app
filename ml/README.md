@@ -64,7 +64,7 @@ Python 3.10+ standard library only (no pip packages).
 
 GitHub Actions: **Actions → Train edge model → Run workflow**, or the weekly
 Monday cron. The JSON + `edge_model_manifest.json` are uploaded as an artifact
-and published on the rolling `edge-model-claude` release (this branch's app
+and published on the rolling `claude-edge-model` release (this branch's app
 reads that tag; `edge-model-latest` belongs to the main app). In the app:
 **Data → Get latest model**.
 

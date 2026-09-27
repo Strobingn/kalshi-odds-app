@@ -110,6 +110,12 @@ data class MarketUiModel(
      * can be chosen by EV at the ask ([com.dirk.kalshiodds.signal.trade.EvSide]).
      */
     val fairValuePp: Double? = null,
+    /**
+     * [fairValuePp] came from a loaded model that beats the market. Without
+     * one the fair is the hand-weighted blend, which scores worse than the
+     * Kalshi mid, so no side is picked from it.
+     */
+    val modelBacked: Boolean = false,
     val modelEdgeQualified: Boolean = true,
     val spotUsd: Double? = null,
     val spotVsTargetUsd: Double? = null,
@@ -288,6 +294,7 @@ fun MarketUiModel.withSignalScore(
         digitalFairPp = score.digitalFairPp,
         importedModelPp = score.importedModelPp,
         fairValuePp = score.fairValuePp,
+        modelBacked = score.modelBacked,
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
         spotVsTargetUsd = score.spotVsTargetUsd,

@@ -45,6 +45,22 @@ data class EdgeModel(
     val isMarketAnchored: Boolean get() = kind == KIND_OFFSET_LOGISTIC
 
     /**
+     * Trusted to pick a side: market-anchored, trained on real (not
+     * synthetic) data, and its walk-forward holdout beat the market mid on
+     * both Brier and log-loss (`metrics` from `ml/train_edge.py`).
+     */
+    val beatsMarket: Boolean
+        get() {
+            if (!isMarketAnchored) return false
+            if ((metrics["synthetic"] ?: 0.0) != 0.0) return false
+            val mb = metrics["model_brier"] ?: return false
+            val kb = metrics["market_brier"] ?: return false
+            val ml = metrics["model_logloss"] ?: return false
+            val kl = metrics["market_logloss"] ?: return false
+            return mb < kb && ml < kl
+        }
+
+    /**
      * P(YES). [marketMid] is the Kalshi YES mid (0–1): the fixed offset of a
      * [KIND_OFFSET_LOGISTIC] model. When null, the `market_mid` feature in
      * [raw] is used. A legacy [KIND_LOGISTIC] model ignores it.

@@ -531,6 +531,10 @@ object TicketBuilder {
         )
     }
 
+    /** BET line / ticket reason when no model that beats the market is loaded. */
+    const val NO_TRUSTED_MODEL =
+        "Paper only: no trained model that beats Kalshi's price is loaded (Data → Get latest model)."
+
     /**
      * Side by expected value at the ask ([EvSide]) from the engine's
      * calibrated fair ([MarketUiModel.fairValuePp]) and the quoted asks.
@@ -543,6 +547,19 @@ object TicketBuilder {
         stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
     ): EvSide.Result? {
         val fair = market.fairValuePp?.takeIf { it.isFinite() }?.div(100.0) ?: return null
+        if (!market.modelBacked) {
+            // Scored, but only by the blend (worse than the mid): no side.
+            return EvSide.Result(
+                side = null,
+                evYes = null,
+                evNo = null,
+                yesAsk = null,
+                noAsk = null,
+                pYes = fair,
+                margin = EvSide.DEFAULT_MARGIN,
+                reason = NO_TRUSTED_MODEL
+            )
+        }
         return EvSide.decide(
             pYes = fair,
             yesAsk = market.yesAsk,

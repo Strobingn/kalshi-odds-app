@@ -143,6 +143,8 @@ class ScoringEngine(
         val digitalFairPp: Double? = null,
         val importedModelPp: Double? = null,
         val modelEdgeQualified: Boolean = true,
+        /** A loaded model that beats the market ([com.dirk.kalshiodds.prediction.EdgeModel.beatsMarket]) produced [fairValuePp]. */
+        val modelBacked: Boolean = false,
         val blendWeight: Double? = null
     )
 
@@ -820,6 +822,7 @@ class ScoringEngine(
             digitalFairPp = digitalFairPp,
             importedModelPp = importedModelPp,
             modelEdgeQualified = modelEdgeQualified,
+            modelBacked = loaded?.beatsMarket == true,
             blendWeight = importedBlendW
         )
     }

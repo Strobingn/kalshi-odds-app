@@ -92,7 +92,7 @@ object SignalConstants {
      * (`.github/workflows/train-edge-model.yml`). `edge-model-latest`
      * belongs to the main app.
      */
-    const val EDGE_MODEL_RELEASE_TAG = "edge-model-claude"
+    const val EDGE_MODEL_RELEASE_TAG = "claude-edge-model"
 
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true

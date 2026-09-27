@@ -158,6 +158,21 @@ class EvSideTest {
 
     private fun ctx() = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
 
+    @Test
+    fun blendOnlyFairPicksNoSideAndTheCallIsPaperOnly() {
+        // Scored by the engine, but no model that beats the market: the blend
+        // (worse than the mid) must not choose a side, nor fall back to hero.
+        val m = market(yesAsk = 0.70, noAsk = 0.31, hero = "YES", fairPp = 55.0).copy(modelBacked = false)
+        val r = TicketBuilder.evDecision(m)!!
+        assertNull(r.side)
+        assertEquals(TicketBuilder.NO_TRUSTED_MODEL, r.reason)
+        assertNull(TicketBuilder.resolveSide(m))
+        // Not scored at all (no fair): old fallback order still applies.
+        val unscored = market(yesAsk = 0.70, noAsk = 0.31, hero = "YES", fairPp = null)
+        assertNull(TicketBuilder.evDecision(unscored))
+        assertEquals("YES", TicketBuilder.resolveSide(unscored))
+    }
+
     private fun market(
         yesAsk: Double?,
         noAsk: Double?,
@@ -193,6 +208,7 @@ class EvSideTest {
         passedFilter = true,
         predictedSide = hero,
         primaryHeroSide = hero,
-        fairValuePp = fairPp
+        fairValuePp = fairPp,
+        modelBacked = true
     )
 }

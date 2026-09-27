@@ -92,12 +92,12 @@ class ModelActivationTest {
     @Test
     fun claudeAppReadsItsOwnReleaseTag() {
         // edge-model-latest belongs to the main app; this build must never pull it.
-        assertEquals("edge-model-claude", SignalConstants.EDGE_MODEL_RELEASE_TAG)
+        assertEquals("claude-edge-model", SignalConstants.EDGE_MODEL_RELEASE_TAG)
         val m = EdgeModelManifest.parse(
             """{"version":"2","trained_at":"2026-09-27T08:17:00Z","n_samples":900,
                "model_brier":0.158,"market_brier":0.159,"model_logloss":0.47,"market_logloss":0.48}"""
         )
-        assertEquals("edge-model-claude", m.tag)
+        assertEquals("claude-edge-model", m.tag)
     }
 
     @Test

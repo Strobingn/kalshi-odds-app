@@ -1,6 +1,6 @@
 name: Train edge model
 
-# Publishes to the rolling `edge-model-claude` release, which the Claude app
+# Publishes to the rolling `claude-edge-model` release, which the Claude app
 # (SignalConstants.EDGE_MODEL_RELEASE_TAG) downloads. `edge-model-latest`
 # belongs to the main app; nothing in this file may write to it.
 # Scheduled workflows only run from the default branch, and even there this
@@ -21,7 +21,7 @@ permissions:
   contents: write
 
 env:
-  RELEASE_TAG: edge-model-claude
+  RELEASE_TAG: claude-edge-model
 
 jobs:
   train:
@@ -58,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          test "$RELEASE_TAG" = "edge-model-claude"
+          test "$RELEASE_TAG" = "claude-edge-model"
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
