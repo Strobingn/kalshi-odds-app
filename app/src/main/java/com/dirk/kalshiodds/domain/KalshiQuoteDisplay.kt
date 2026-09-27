@@ -24,8 +24,8 @@ object KalshiQuoteDisplay {
     }
 
     /**
-     * Payout multiple at [stakeUsd] (default $5 ticket).
-     * 1¢ @ $5 → ~93.46x (not 99x). Null for 0¢ / no-ask.
+     * Payout multiple at [stakeUsd] (default $10 ticket).
+     * 1¢ @ $10 → ~93.46x (not 99x). Null for 0¢ / no-ask.
      */
     fun multiplier(
         ask: Double?,
@@ -81,7 +81,7 @@ object KalshiQuoteDisplay {
     }
 
     /**
-     * Always a visible string: `"62.36x"`, `"no ask"`, or `"can't size $5"`.
+     * Always a visible string: `"62.36x"`, `"no ask"`, or `"can't size $10"`.
      * Never a blank — 10¢+ asks must not disappear.
      */
     fun multipleLabel(
