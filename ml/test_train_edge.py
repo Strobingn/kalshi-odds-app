@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""No-look-ahead checks for ml/train_edge.py (stdlib only).
+"""No-look-ahead and offset-model checks for ml/train_edge.py (stdlib only).
 
     python3 ml/test_train_edge.py
 """
 from __future__ import annotations
 
+import json
+import random
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -70,6 +73,170 @@ class NoLookAheadTest(unittest.TestCase):
         closes = [100.0, 101.0, 102.0, 103.0, 104.0, 110.0]
         self.assertAlmostEqual(te.spot_return(closes, 5), 0.10)
         self.assertEqual(te.spot_return(closes[:3], 5), 0.0)
+
+    def test_every_decision_minute_is_sampled_without_look_ahead(self) -> None:
+        # One candle per minute from open (elapsed 0) through close (elapsed 15).
+        market = dict(_market(), result="yes", ticker="KXBTC15M-T", open_time=None)
+        candles = [_candle(self.close_ts - 900 + 60 * i, 0.45) for i in range(16)]
+        shift = self.close_ts - CLOSE
+        up = [(ts + shift, c) for ts, c in _spot_rows(final_px=110.0)]
+        down = [(ts + shift, c) for ts, c in _spot_rows(final_px=90.0)]
+        s_up = te.market_samples(market, candles, up)
+        s_down = te.market_samples(market, candles, down)
+        elapsed = [(s.ts - (self.close_ts - 900)) // 60 for s in s_up]
+        self.assertEqual(elapsed, list(range(1, 14)), "elapsed minutes 1..13, not 2 per market")
+        self.assertEqual([s.x for s in s_up], [s.x for s in s_down])
+        self.assertTrue(all(s.y == 1 and s.close_ts == self.close_ts for s in s_up))
+        # Candle-close fills: YES = yes_ask, NO = 1 − yes_bid.
+        self.assertAlmostEqual(s_up[0].yes_ask, 0.46)
+        self.assertAlmostEqual(s_up[0].no_ask, 0.56)
+
+    def test_spot_known_at_drops_stale_bars_after_a_gap(self) -> None:
+        rows = [(0, 1.0), (60, 2.0)]
+        self.assertEqual(te.spot_known_at(rows, 120), [1.0, 2.0])
+        self.assertEqual(te.spot_known_at(rows, 120 + te.SPOT_MAX_AGE_S), [])
+
+
+def _samples(n_markets: int, seed: int = 3, lag: float = 0.0) -> list[te.Sample]:
+    """Synthetic minutes. lag = 0: the mid is the true probability."""
+    rng = random.Random(seed)
+    out = []
+    for m in range(n_markets):
+        close = OPEN + 900 * (m // 3 + 1)
+        truth = rng.gauss(0.0, 1.5)
+        y = 1 if rng.random() < te.sigmoid(truth) else 0
+        for k in range(1, 14):
+            spot_logit = truth + rng.gauss(0.0, 0.5)
+            mid = te.sigmoid((1.0 - lag) * truth + (rng.gauss(0.0, 0.3) if lag else 0.0))
+            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit)]
+            out.append(
+                te.Sample(
+                    x=x,
+                    y=y,
+                    mid=mid,
+                    ts=close - 900 + 60 * k,
+                    close_ts=close,
+                    ticker=f"M{m}",
+                    yes_ask=te.usable(round(mid + 0.01, 3)),
+                    no_ask=te.usable(round(1.0 - mid + 0.01, 3)),
+                )
+            )
+    return out
+
+
+class OffsetModelTest(unittest.TestCase):
+    def _zero_model(self, mean_mid: float = 0.0, std_mid: float = 1.0) -> dict:
+        mean = [0.0] * 10
+        std = [1.0] * 10
+        mean[te.MID_INDEX] = mean_mid
+        std[te.MID_INDEX] = std_mid
+        return {
+            "kind": te.KIND_OFFSET,
+            "weights": [0.0] * 10,
+            "bias": 0.0,
+            "mean": mean,
+            "std": std,
+            "platt_a": 1.0,
+            "platt_b": 0.0,
+            "mid_clip": te.MID_CLIP,
+        }
+
+    def test_zero_weights_reproduce_the_mid(self) -> None:
+        # A scaler on market_mid must not touch the offset: it is logit(mid), not a feature.
+        for model in (self._zero_model(), self._zero_model(mean_mid=0.5, std_mid=0.2)):
+            for mid in (0.001, 0.03, 0.31, 0.5, 0.77, 0.999):
+                x = [0.0] * 10
+                x[te.MID_INDEX] = mid
+                self.assertAlmostEqual(te.model_predict(model, x, mid), mid, places=9)
+        clipped = te.model_predict(self._zero_model(), [0.0] * 10, 0.0002)
+        self.assertAlmostEqual(clipped, te.MID_CLIP, places=9)
+
+    def test_newton_fit_converges(self) -> None:
+        rng = random.Random(11)
+        X = [[rng.gauss(0, 1), rng.gauss(0, 1)] for _ in range(2000)]
+        off = [rng.gauss(0, 1) for _ in X]
+        y = [1 if rng.random() < te.sigmoid(o + 0.7 * a - 0.4 * b) else 0 for o, (a, b) in zip(off, X)]
+        l2 = 0.01
+        w, b = te.fit_logistic(X, y, offset=off, l2=l2)
+        # Gradient of mean log-loss + ½·l2·‖θ‖² is zero at the optimum.
+        g = [0.0, 0.0, 0.0]
+        for o, x, yi in zip(off, X, y):
+            r = te.sigmoid(o + b + w[0] * x[0] + w[1] * x[1]) - yi
+            g[0] += r
+            g[1] += r * x[0]
+            g[2] += r * x[1]
+        g = [gi / len(X) + l2 * t for gi, t in zip(g, [b, w[0], w[1]])]
+        self.assertLess(max(abs(v) for v in g), 1e-7)
+        self.assertAlmostEqual(w[0], 0.7, delta=0.15)
+        self.assertAlmostEqual(w[1], -0.4, delta=0.15)
+
+    def test_calibrated_market_gets_near_zero_weights(self) -> None:
+        samples = _samples(1200)
+        model = te.fit_model(samples)
+        design = {te.FEATURE_NAMES.index(n) for n in te.OFFSET_FEATURES}
+        for i, w in enumerate(model["weights"]):
+            if i not in design:
+                self.assertEqual(w, 0.0, f"{te.FEATURE_NAMES[i]} is outside the design")
+        self.assertLess(max(abs(w) for w in model["weights"]), 0.2)
+        self.assertLess(abs(model["bias"]), 0.1)
+        metrics = te.walk_forward(samples)
+        self.assertAlmostEqual(metrics["model_brier"], metrics["market_brier"], delta=0.003)
+
+    def test_lagging_market_is_beaten_and_traded_at_the_ask(self) -> None:
+        metrics = te.walk_forward(_samples(2400, seed=7, lag=0.3))
+        self.assertLess(metrics["model_brier"], metrics["market_brier"])
+        self.assertLess(metrics["model_logloss"], metrics["market_logloss"])
+        self.assertGreater(metrics["sim_trades"], 0)
+        # The mid as its own forecast never clears ask + fee.
+        self.assertEqual(metrics["market_sim_trades"], 0)
+
+    def test_folds_train_only_on_settled_markets(self) -> None:
+        splits = te.fold_splits(_samples(120), folds=4)
+        self.assertEqual(len(splits), 3)
+        seen = set()
+        for train, test in splits:
+            self.assertLessEqual(max(s.close_ts for s in train), min(s.ts for s in test))
+            tickers = {s.ticker for s in test}
+            self.assertFalse(tickers & {s.ticker for s in train}, "a market never straddles a fold")
+            self.assertFalse(tickers & seen)
+            seen |= tickers
+
+    def test_ev_side_rule(self) -> None:
+        # Fair == mid: both sides lose the spread + fee → skip.
+        self.assertIsNone(te.ev_side(0.50, 0.51, 0.51)[0])
+        # Clear edge on NO even though YES is the favorite.
+        side, ev_yes, ev_no = te.ev_side(0.55, 0.70, 0.31)
+        self.assertEqual(side, "NO")
+        self.assertAlmostEqual(ev_no, 0.45 - 0.31 - 0.07 * 0.31 * 0.69)
+        self.assertLess(ev_yes, 0)
+        # Clear edge on YES.
+        self.assertEqual(te.ev_side(0.80, 0.70, 0.31)[0], "YES")
+        # Missing / unusable asks: only the quoted side is evaluated.
+        self.assertEqual(te.ev_side(0.80, 0.70, None)[0], "YES")
+        self.assertEqual(te.ev_side(0.80, None, None), (None, None, None))
+        self.assertIsNone(te.ev_side(0.80, 1.0, 0.0)[0])
+        # Margin: 2¢ after fees.
+        self.assertIsNone(te.ev_side(0.56, 0.53, 0.48)[0])
+
+    def test_export_is_offset_logistic_with_ten_features(self) -> None:
+        samples = _samples(90)
+        model = te.fit_model(samples)
+        metrics = te.walk_forward(samples)
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "edge_model.json"
+            man = Path(tmp) / "manifest.json"
+            te.export(model, metrics, out)
+            te.write_manifest(metrics, man, synthetic=True)
+            payload = json.loads(out.read_text())
+            manifest = json.loads(man.read_text())
+        self.assertEqual(payload["kind"], "offset_logistic")
+        self.assertEqual(payload["feature_names"], te.FEATURE_NAMES)
+        self.assertEqual(len(payload["weights"]), 10)
+        self.assertEqual(payload["mid_clip"], te.MID_CLIP)
+        self.assertEqual((payload["platt_a"], payload["platt_b"]), (1.0, 0.0))
+        self.assertTrue(all(isinstance(v, float) for v in payload["metrics"].values()))
+        self.assertEqual(manifest["tag"], "edge-model-claude")
+        self.assertFalse(manifest["beats_market"], "synthetic data never activates")
 
 
 if __name__ == "__main__":
