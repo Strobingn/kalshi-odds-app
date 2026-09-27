@@ -58,6 +58,17 @@ jobs:
             --cache tools/backtest/cache \
             --artifacts backtest-out | tee backtest-out/summary.txt
 
+      # Print the report so it can be read from the job log / run summary
+      # without downloading the artifact.
+      - name: Show report
+        if: always()
+        run: |
+          f=backtest-out/backtest-2026-09-25.md
+          if [ -f "$f" ]; then
+            cat "$f"
+            cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@v4
