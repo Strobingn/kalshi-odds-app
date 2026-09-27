@@ -171,6 +171,14 @@ class ScoringEngine(
     @Volatile
     var external: ExternalSnapshot = ExternalSnapshot()
 
+    /**
+     * Streamed Coinbase spot. While fresh it supplies price, returns and σ
+     * over [external] (see [com.dirk.kalshiodds.signal.external.SpotMerge]);
+     * null or stale → the REST snapshot alone.
+     */
+    @Volatile
+    var spotStream: com.dirk.kalshiodds.signal.external.SpotStreamBook? = null
+
     private val lastAlertMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastBookScoreMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val tapeStreak = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -232,7 +240,7 @@ class ScoringEngine(
                 }
             }
         }
-        val spotFeat = external.forSeries(tick.series)
+        val spotFeat = com.dirk.kalshiodds.signal.external.SpotMerge.forSeries(external, spotStream, tick.series, nowMs)
         spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
