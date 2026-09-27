@@ -66,11 +66,16 @@ class LazyListKeysTest {
     @Test
     fun everyLazyItemsKeyUsesLazyListKeysNotDisplayText() {
         val files = listOf(
-            "app/src/main/java/com/dirk/kalshiodds/ui/SignalHistoryScreen.kt",
-            "app/src/main/java/com/dirk/kalshiodds/ui/ScorecardScreen.kt",
-            "app/src/main/java/com/dirk/kalshiodds/ui/HomeScreen.kt",
-            "app/src/main/java/com/dirk/kalshiodds/ui/HistoryScreen.kt"
-        ).map { File(it) }.filter { it.isFile }
+            "SignalHistoryScreen.kt",
+            "ScorecardScreen.kt",
+            "HomeScreen.kt",
+            "HistoryScreen.kt"
+        ).map { name ->
+            listOf(
+                File("app/src/main/java/com/dirk/kalshiodds/ui/$name"),
+                File("src/main/java/com/dirk/kalshiodds/ui/$name")
+            ).first { it.isFile }
+        }
         assertEquals(4, files.size)
         files.forEach { file ->
             val src = file.readText()

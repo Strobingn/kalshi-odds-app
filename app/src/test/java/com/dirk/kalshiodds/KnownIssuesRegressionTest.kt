@@ -985,7 +985,7 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }
         val home = homeSrc.readText()
         val thisWindow = home.indexOf("ThisWindowCard")
-        val coins = home.indexOf("items(coinCards")
+        val coins = home.indexOf("items(keyedCoins")
         assertTrue(thisWindow >= 0 && coins > thisWindow)
         assertTrue(home.contains("scorecard = state.scorecardSummary"))
         assertTrue(home.contains("onOpenScorecard"))
@@ -1488,7 +1488,7 @@ class KnownIssuesRegressionTest {
         assertFalse(home.contains("Icons.Default.Folder"))
         assertTrue(home.contains("scorecard = state.scorecardSummary"))
         val thisWindow = home.indexOf("ThisWindowCard")
-        val coins = home.indexOf("items(coinCards")
+        val coins = home.indexOf("items(keyedCoins")
         assertTrue("scorecard line is above the Bitcoin card, visible without scroll on 1080x2340", thisWindow in 0 until coins)
         assertTrue(home.contains("SIGNAL_HISTORY"))
         assertTrue(home.contains("onOpenSignalHistory"))
