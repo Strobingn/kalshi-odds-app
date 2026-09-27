@@ -22,7 +22,8 @@ class NetExpectedValueTest {
     @Test
     fun feeMatchesKalshiStyleFormula() {
         // $5 @ 50¢: C=10, model 0.175, order fee $0.18, amortized $0.018
-        assertEquals(0.018, NetExpectedValue.feePerContract(0.50, 0.07), 1e-9)
+        assertEquals(0.018, NetExpectedValue.feePerContract(0.50, 0.07, 5.0), 1e-9)
+        assertEquals(0.0175, NetExpectedValue.feePerContract(0.50, 0.07), 1e-9)
         assertEquals(0.0, NetExpectedValue.feePerContract(0.50, 0.0), 1e-9)
         // One-contract schedule number is still $0.02
         assertEquals(0.02, com.dirk.kalshiodds.signal.trade.KalshiFee.total(1, 0.50), 1e-9)
@@ -35,7 +36,8 @@ class NetExpectedValueTest {
             mid = 0.50,
             spreadDollars = 0.04,
             feeRate = 0.07,
-            preferSide = "YES"
+            preferSide = "YES",
+            stakeUsd = 5.0
         )
         // paid = 0.50 + 0.02 = 0.52; C = floor(5/0.52) = 9
         // model = 0.07×9×0.52×0.48 = 0.157248 → debit ceil_cent(4.837248) = 4.84
