@@ -76,10 +76,16 @@ object SignalCopy {
         val sideYes = !alert.predictedSide.equals("NO", true)
         val model = (if (sideYes) alert.fairValuePp else 100.0 - alert.fairValuePp) / 100.0
         val implied = (if (sideYes) alert.marketMidPp else 100.0 - alert.marketMidPp) / 100.0
-        if (model.isFinite() && implied.isFinite() &&
-            !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, implied.coerceIn(0.001, 0.999))
-        ) {
-            return false
+        if (model.isFinite() && implied.isFinite()) {
+            val px = implied.coerceIn(0.001, 0.999)
+            if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
+                model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT
+            ) {
+                return false
+            }
+            if (!com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, px)) {
+                return false
+            }
         }
         return true
     }

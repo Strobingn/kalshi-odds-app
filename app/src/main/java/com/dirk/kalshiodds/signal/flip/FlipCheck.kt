@@ -352,7 +352,14 @@ object FlipCheck {
         modelProb: Double? = null,
         sigmaPerSecUsd: Double? = null
     ): Boolean {
-        val verdict = evaluateMarket(market, nowMs, sigmaPerSecUsd) ?: return true
+        val verdict = evaluateMarket(market, nowMs, sigmaPerSecUsd)
+        if (verdict == null) {
+            val px = KalshiPrice.usable(ask) ?: return false
+            // No settlement geometry → never take a lottery-ticket print.
+            if (px + 1e-12 < CHEAP_ASK) return false
+            val model = modelProb ?: return true
+            return beatsAllIn(model, px)
+        }
         val model = modelProb ?: verdict.cappedSideProb(side)
         return allowsSide(verdict, side, ask, model)
     }

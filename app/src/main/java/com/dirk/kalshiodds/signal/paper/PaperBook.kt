@@ -175,6 +175,11 @@ class PaperBook(
         ) return null
         val model = ticket.modelChance
         val ask = KalshiPrice.usable(ticket.limitPrice)
+        if (ask != null && ask + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
+            (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
+        ) {
+            return null
+        }
         if (model != null && ask != null && !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, ask)) {
             return null
         }
@@ -208,6 +213,11 @@ class PaperBook(
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
         val model = PaperFill.metaFromAlert(alert).aiPct?.div(100.0)
+        if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
+            (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
+        ) {
+            return null
+        }
         if (model != null && !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, px)) {
             return null
         }
@@ -241,17 +251,18 @@ class PaperBook(
         ) {
             return null
         }
+        val px = liveAsk ?: fired.ask
         val meta = PaperFillMeta(
             aiPct = PaperFill.pctFromUnit(fired.winChance),
             aiConfidence = null,
-            marketPct = PaperFill.pctFromUnit(fired.ask),
+            marketPct = PaperFill.pctFromUnit(px),
             pickSource = PaperPickSource.LAST_MINUTE
         )
         if (!PaperFill.allowCreate(PaperPickSource.LAST_MINUTE, meta.aiPct)) return null
         return fill(
             ticker = fired.ticker,
             side = fired.side,
-            limitPrice = fired.ask,
+            limitPrice = px,
             source = PaperPickSource.LAST_MINUTE.label,
             note = "Last-minute strategy · never sent to Kalshi",
             contracts = fired.contracts.takeIf { it > 0 },

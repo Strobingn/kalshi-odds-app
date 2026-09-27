@@ -210,7 +210,7 @@ object HomeFixtures {
                 tauSec = 12,
                 x = kotlin.math.ln(84_559.28 / 84_547.0),
                 obsMean = kotlin.math.ln(84_559.28 / 84_547.0),
-                sigS = 5e-5,
+                sigS = 1e-5,
                 upAsk = 0.001,
                 downAsk = 0.001,
                 nowMs = NOW_MS,
