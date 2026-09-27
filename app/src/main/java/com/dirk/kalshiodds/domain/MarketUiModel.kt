@@ -51,6 +51,11 @@ data class MarketUiModel(
     val tteRegimeLabel: String? = null,
     val passedFilter: Boolean = true,
     val skipReason: String? = null,
+    /**
+     * [com.dirk.kalshiodds.signal.engine.EntryFilter] block from the last
+     * score (too early in the window / spot on the strike). Null = allowed.
+     */
+    val entryBlockReason: String? = null,
     val calibrated: Boolean = false,
     val predictedSide: String? = null,
     val netEvDollars: Double? = null,
@@ -230,6 +235,7 @@ fun MarketUiModel.withSignalScore(
         tteRegimeLabel = score.tteRegime.label,
         passedFilter = score.passedFilter,
         skipReason = score.skipReason,
+        entryBlockReason = score.entryBlockReason,
         calibrated = score.calibrated,
         predictedSide = score.predictedSide,
         netEvDollars = score.netEvDollars,

@@ -44,6 +44,7 @@ object BetCall {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
             return none(TicketBuilder.MARKET_CLOSED)
         }
+        TicketBuilder.entryBlockReason(market, ctx.settings)?.let { return none(it) }
         val proposed = TicketBuilder.proposeAll(listOf(market), ctx).filter { !it.isSell }
         val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
         val tickets = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }

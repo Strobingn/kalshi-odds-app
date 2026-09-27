@@ -327,6 +327,7 @@ object TicketBuilder {
         requireGates: Boolean
     ): TradeTicket? {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        if (kind != TicketKind.MANUAL && entryBlockReason(market, ctx.settings) != null) return null
         if (requireGates) {
             if (!market.passedFilter) return null
             if (market.muted) return null
@@ -448,6 +449,19 @@ object TicketBuilder {
             visibleContracts = quoted?.toInt()
         )
     }
+
+    /**
+     * Entry-filter block stamped by the last score
+     * ([com.dirk.kalshiodds.signal.engine.EntryFilter]), or null.
+     *
+     * Applies to every auto-proposed buy (configured, hunter, long-shot) and
+     * to the [BetCall] headline whenever the filter is on — independent of
+     * [SignalSettings.ticketRespectGates], because it is about *when* to
+     * enter, not signal quality. Manual Buy / Buy anyway and Sell are never
+     * blocked. Turning the filter off in Settings takes effect immediately.
+     */
+    fun entryBlockReason(market: MarketUiModel, settings: SignalSettings): String? =
+        if (settings.entryFilterEnabled) market.entryBlockReason?.takeIf { it.isNotBlank() } else null
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
         val yes = market.importedModelPp?.div(100.0)
