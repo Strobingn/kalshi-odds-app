@@ -335,6 +335,82 @@ class HomeScreenScreenshotTest {
     fun darkSettings() = snapSettings("settings_dark", dark = true)
 
     @Test
+    fun deadWindowNoBetFlip() {
+        paparazzi.snapshot(name = "dead_window_no_bet_flip") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.deadWindowLotteryBtc(),
+                        decision = com.dirk.kalshiodds.signal.trade.BetCall.decide(
+                            HomeFixtures.deadWindowLotteryBtc(),
+                            HomeFixtures.settings(true),
+                            HomeFixtures.NOW_MS
+                        ),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("dead_window_no_bet_flip")
+    }
+
+    @Test
+    fun closeWindowStillEligible() {
+        paparazzi.snapshot(name = "close_window_eligible") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.closeWindowEligibleBtc(),
+                        decision = com.dirk.kalshiodds.signal.trade.BetCall.decide(
+                            HomeFixtures.closeWindowEligibleBtc(),
+                            HomeFixtures.settings(true),
+                            HomeFixtures.NOW_MS
+                        ),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("close_window_eligible")
+    }
+
+    @Test
+    fun homeDeadWindow() = snap(
+        "home_dead_window_no_bet",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.deadWindowLotteryBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        )
+    )
+
+    @Test
     fun lastMinuteCardWaiting() {
         paparazzi.snapshot(name = "last_minute_card_waiting") {
             KalshiOddsTheme(darkTheme = true) {

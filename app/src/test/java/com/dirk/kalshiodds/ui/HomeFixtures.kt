@@ -198,6 +198,93 @@ object HomeFixtures {
         minProfitIfWinUsd = 0.0
     )
 
+    /**
+     * Phone screenshot on 0.3.16: 12s left, target $84,547, spot $84,559.28
+     * (+$29), UP bid 99.9¢, DOWN ask 0.1¢. Must be NO BET after the flip check.
+     */
+    fun deadWindowLotteryBtc(): MarketUiModel {
+        val close = NOW_MS + 12_000L
+        val snap = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-27SEP161500-00",
+                tauSec = 12,
+                x = kotlin.math.ln(84_559.28 / 84_547.0),
+                obsMean = kotlin.math.ln(84_559.28 / 84_547.0),
+                sigS = 1e-5,
+                upAsk = 0.999,
+                downAsk = 0.001,
+                nowMs = NOW_MS,
+                spotUsd = 84_559.28,
+                strikeUsd = 84_547.0,
+                spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+            )
+        )
+        return market(
+            ticker = "KXBTC15M-27SEP161500-00",
+            seriesLabel = "Bitcoin",
+            yesAsk = 0.999,
+            aiYes = 96.0,
+            predicted = "NO",
+            closeMs = close,
+            floorStrike = 84_547.0,
+            spotUsd = 84_559.28,
+            spotDelta = 29.0
+        ).copy(
+            yesBid = 0.999,
+            yesAsk = 0.999,
+            noBid = 0.0,
+            noAsk = 0.001,
+            lastPrice = 0.999,
+            yesProbabilityPercent = 99.9,
+            noProbabilityPercent = 0.1,
+            aiYesPercent = 96.0,
+            aiNoPercent = 4.0,
+            importedModelPp = snap.flip?.cappedPUp?.times(100.0) ?: snap.pUp?.times(100.0) ?: 96.0,
+            lastMinute = snap
+        )
+    }
+
+    /** Close window that stays BET-eligible: 40s left, $3 from target, 30¢ ask. */
+    fun closeWindowEligibleBtc(): MarketUiModel {
+        val close = NOW_MS + 40_000L
+        val snap = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-27SEP161515-15",
+                tauSec = 40,
+                x = kotlin.math.ln(84_550.0 / 84_547.0),
+                obsMean = kotlin.math.ln(84_549.0 / 84_547.0),
+                sigS = 8e-5,
+                upAsk = 0.30,
+                downAsk = 0.70,
+                nowMs = NOW_MS,
+                spotUsd = 84_550.0,
+                strikeUsd = 84_547.0,
+                spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+            )
+        )
+        return market(
+            ticker = "KXBTC15M-27SEP161515-15",
+            seriesLabel = "Bitcoin",
+            yesAsk = 0.30,
+            aiYes = 62.0,
+            predicted = "YES",
+            closeMs = close,
+            floorStrike = 84_547.0,
+            spotUsd = 84_550.0,
+            spotDelta = 3.0
+        ).copy(
+            yesBid = 0.29,
+            yesAsk = 0.30,
+            noBid = 0.69,
+            noAsk = 0.70,
+            lastPrice = 0.30,
+            yesProbabilityPercent = 30.0,
+            noProbabilityPercent = 70.0,
+            importedModelPp = snap.flip?.cappedPUp?.times(100.0) ?: snap.pUp?.times(100.0) ?: 62.0,
+            lastMinute = snap
+        )
+    }
+
     fun lastMinuteWaitingBtc() = screenshotPhoneBtc().copy(
         lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot(
             phase = com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.WAITING,

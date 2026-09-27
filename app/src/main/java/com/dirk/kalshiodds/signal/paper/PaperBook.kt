@@ -173,6 +173,13 @@ class PaperBook(
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
             ticket.kind == TicketKind.LAST_MINUTE
         ) return null
+        val model = ticket.modelChance
+        val ask = KalshiPrice.usable(ticket.limitPrice)
+        if (ask != null && ask + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
+            (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
+        ) {
+            return null
+        }
         val pick = PaperPickSource.fromTicketKind(ticket.kind)
         val meta = PaperFill.metaFromTicket(ticket)
         if (!PaperFill.allowCreate(pick, meta.aiPct)) return null
@@ -202,6 +209,12 @@ class PaperBook(
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        val model = PaperFill.metaFromAlert(alert).aiPct?.div(100.0)
+        if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
+            (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
+        ) {
+            return null
+        }
         val meta = PaperFill.metaFromAlert(alert)
         if (!PaperFill.allowCreate(PaperPickSource.AI_ALERT, meta.aiPct)) return null
         return fill(
@@ -216,20 +229,34 @@ class PaperBook(
 
     fun considerLastMinute(
         fired: com.dirk.kalshiodds.signal.lastminute.LastMinuteFired,
-        enabled: Boolean
+        enabled: Boolean,
+        market: com.dirk.kalshiodds.domain.MarketUiModel? = null
     ): PaperFill? {
         if (!enabled) return null
+        val liveAsk = market?.let {
+            com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(it, fired.side)
+        }
+        if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
+                fired,
+                market?.spotUsd ?: market?.lastMinute?.spotUsd,
+                market?.floorStrike ?: market?.lastMinute?.strikeUsd,
+                liveAsk
+            )
+        ) {
+            return null
+        }
+        val px = liveAsk ?: fired.ask
         val meta = PaperFillMeta(
             aiPct = PaperFill.pctFromUnit(fired.winChance),
             aiConfidence = null,
-            marketPct = PaperFill.pctFromUnit(fired.ask),
+            marketPct = PaperFill.pctFromUnit(px),
             pickSource = PaperPickSource.LAST_MINUTE
         )
         if (!PaperFill.allowCreate(PaperPickSource.LAST_MINUTE, meta.aiPct)) return null
         return fill(
             ticker = fired.ticker,
             side = fired.side,
-            limitPrice = fired.ask,
+            limitPrice = px,
             source = PaperPickSource.LAST_MINUTE.label,
             note = "Last-minute strategy · never sent to Kalshi",
             contracts = fired.contracts.takeIf { it > 0 },

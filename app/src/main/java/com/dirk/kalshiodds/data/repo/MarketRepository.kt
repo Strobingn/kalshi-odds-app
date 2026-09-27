@@ -184,6 +184,9 @@ class MarketRepository(
             logPredictions(ethUi, SeriesKind.ETH, now)
             logPredictions(solUi, SeriesKind.SOL, now)
             logPredictions(extraUi, SeriesKind.CRYPTO, now)
+            (btcUi + extraUi).forEach { m ->
+                m.closeTimeEpochMs?.let { scorer.noteCloseTime(m.ticker, it) }
+            }
             runCatching { scorer.maybeScore(now) }
             refreshScorecard()
             MarketsSnapshot(

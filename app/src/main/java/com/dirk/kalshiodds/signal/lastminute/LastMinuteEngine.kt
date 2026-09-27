@@ -2,8 +2,10 @@ package com.dirk.kalshiodds.signal.lastminute
 
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
+import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
+import com.dirk.kalshiodds.signal.flip.FlipCheck
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.floor
 
@@ -25,6 +27,7 @@ class LastMinuteEngine(
 
     private val windows = ConcurrentHashMap<String, WindowState>()
     private val minuteLogCloses = ArrayDeque<Double>()
+    private val spotTicks = ArrayDeque<Pair<Long, Double>>()
     @Volatile var lastQuote: BrtiQuote? = null
         private set
 
@@ -49,6 +52,23 @@ class LastMinuteEngine(
 
     fun noteSpot(quote: BrtiQuote) {
         lastQuote = quote
+        val px = quote.price
+        val t = quote.fetchedAtMs.takeIf { it > 0L } ?: nowMs()
+        if (px.isFinite() && px > 0.0) {
+            synchronized(this) {
+                val last = spotTicks.lastOrNull()
+                if (last == null || last.first != t) {
+                    spotTicks.addLast(t to px)
+                } else {
+                    spotTicks.removeLast()
+                    spotTicks.addLast(t to px)
+                }
+                val cutoff = t - FlipCheck.VOL_WINDOW_MAX_MS
+                while (spotTicks.isNotEmpty() && spotTicks.first().first < cutoff) {
+                    spotTicks.removeFirst()
+                }
+            }
+        }
     }
 
     fun snapshotOf(ticker: String): WindowState? = windows[ticker.uppercase()]
@@ -59,6 +79,23 @@ class LastMinuteEngine(
     }
 
     fun sigS(): Double? = LastMinuteMath.perSecondVol(minuteLogCloses.toList())
+
+    fun sigmaUsdPerSec(spotUsd: Double?): Double {
+        val fromTicks = synchronized(this) { FlipCheck.sigmaFromSpotTicks(spotTicks.toList(), nowMs()) }
+        val fromLog = FlipCheck.sigmaFromLogVol(sigS(), spotUsd)
+        return maxOf(fromTicks, fromLog, FlipCheck.SIGMA_FLOOR_USD_PER_SEC)
+    }
+
+    fun liveAsks(market: MarketUiModel): Pair<Double?, Double?> {
+        val tile = MarketQuoteView.of(market)
+        val up = tile.yesAsk
+            ?: KalshiPrice.usable(market.yesAsk)
+            ?: KalshiPrice.impliedAskFromOppositeBid(market.noBid)
+        val down = tile.noAsk
+            ?: KalshiPrice.usable(market.noAsk)
+            ?: KalshiPrice.impliedAskFromOppositeBid(market.yesBid)
+        return up to down
+    }
 
     fun tick(
         market: MarketUiModel,
@@ -86,6 +123,7 @@ class LastMinuteEngine(
         val closed = close != null && (now >= close || !MarketLifecycle.isTradable(market, now))
         val key = ticker
         val prev = windows[key] ?: WindowState(ticker)
+        val (upAsk, downAsk) = liveAsks(market)
         if (prev.fired != null) {
             val snap = LastMinuteStrategy.evaluate(
                 LastMinuteStrategy.Inputs(
@@ -94,8 +132,8 @@ class LastMinuteEngine(
                     x = prev.fired.x,
                     obsMean = prev.fired.obsMean,
                     sigS = prev.fired.sigS,
-                    upAsk = market.yesAsk,
-                    downAsk = market.noAsk,
+                    upAsk = upAsk,
+                    downAsk = downAsk,
                     book = book,
                     upQuotedSize = market.yesAskSize,
                     downQuotedSize = null,
@@ -108,7 +146,11 @@ class LastMinuteEngine(
                     spotSource = source
                 )
             )
-            return snap.copy(fired = prev.fired, pUp = snap.pUp ?: LastMinuteMath.fairP(prev.fired.x, prev.fired.tauSec.toDouble(), prev.fired.obsMean, prev.fired.sigS))
+            val raw = LastMinuteMath.fairP(prev.fired.x, prev.fired.tauSec.toDouble(), prev.fired.obsMean, prev.fired.sigS)
+            return snap.copy(
+                fired = prev.fired,
+                pUp = snap.pUp ?: snap.flip?.cappedPUp ?: raw
+            )
         }
         if (closed || tauSec <= 0) {
             val next = prev.copy(closedNoPlay = true)
@@ -172,8 +214,8 @@ class LastMinuteEngine(
                 x = x,
                 obsMean = obsMean,
                 sigS = sig,
-                upAsk = KalshiPrice.usable(market.yesAsk) ?: KalshiPrice.impliedAskFromOppositeBid(market.noBid),
-                downAsk = KalshiPrice.usable(market.noAsk) ?: KalshiPrice.impliedAskFromOppositeBid(market.yesBid),
+                upAsk = upAsk,
+                downAsk = downAsk,
                 book = book,
                 upQuotedSize = market.yesAskSize,
                 downQuotedSize = null,

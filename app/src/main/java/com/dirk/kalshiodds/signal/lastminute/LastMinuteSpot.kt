@@ -133,7 +133,7 @@ class BrtiCompositeClient(
     }
 
     private fun get(url: String): String? {
-        val req = Request.Builder().url(url).header("User-Agent", "DipHunter/0.3.16").build()
+        val req = Request.Builder().url(url).header("User-Agent", "DipHunter/0.3.17").build()
         return runCatching {
             http.newCall(req).execute().use { resp ->
                 if (!resp.isSuccessful) return@use null

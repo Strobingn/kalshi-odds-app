@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -84,6 +85,19 @@ class HomeCopyTest {
         val noLine = HomeCopy.thisWindowHeadline(no, dead, nowMs)
         assertTrue(noLine.startsWith("NO BET this window"))
         assertTrue(noLine.contains(no.noBetReason!!.take(12)))
+    }
+
+    @Test
+    fun deadWindowHeadlineIsFlipChanceNoBet() {
+        val dead = HomeFixtures.deadWindowLotteryBtc()
+        val call = BetCall.decide(dead, SignalSettings(), nowMs)
+        assertEquals(BetCall.Headline.NO_BET, call.headline)
+        assertFalse(call.isActionable)
+        val line = HomeCopy.thisWindowHeadline(call, dead, nowMs)
+        assertTrue(line.startsWith("NO BET this window"))
+        assertTrue(line.contains("Flip chance"))
+        assertNull(HomeCopy.allInProfit(call))
+        assertEquals("PAPER  NO BET", HomeCopy.primaryButtonLabel("PAPER", call))
     }
 
     @Test

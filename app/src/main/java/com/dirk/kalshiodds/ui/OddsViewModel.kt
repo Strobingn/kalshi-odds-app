@@ -888,12 +888,22 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 fallbackSource = market.spotLabel
             )
             eval.fired?.let { fired ->
+                val liveAsk = com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(market, fired.side)
+                if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
+                        fired,
+                        eval.spotUsd ?: market.spotUsd,
+                        eval.strikeUsd ?: market.floorStrike,
+                        liveAsk
+                    )
+                ) {
+                    return@mapMarkets market.copy(lastMinute = eval)
+                }
                 val logged = container.lastMinuteStore.record(fired)
                 if (logged != null) {
                     // Heads-up even when this Activity is in the foreground.
                     runCatching { container.lastMinuteNotifier.notifyFired(fired) }
                     if (_state.value.settings.paperTradingEnabled) {
-                        paperBook.considerLastMinute(fired, enabled = true)
+                        paperBook.considerLastMinute(fired, enabled = true, market = market)
                     }
                 }
             }

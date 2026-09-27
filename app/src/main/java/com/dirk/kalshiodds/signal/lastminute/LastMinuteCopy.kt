@@ -29,13 +29,27 @@ object LastMinuteCopy {
         return String.format(Locale.US, "Last-minute play: waiting (starts in %d:%02d)", m, s)
     }
 
-    fun headline(snap: LastMinuteSnapshot?): String = when (snap?.phase) {
-        LastMinutePhase.WAITING -> waiting(snap.startsInMs)
-        LastMinutePhase.LIVE -> TITLE
-        LastMinutePhase.FIRED -> snap.fired?.let { buyLine(it) } ?: TITLE
-        LastMinutePhase.NO_PLAY -> NO_PLAY
-        null -> waiting(null)
+    fun headline(snap: LastMinuteSnapshot?): String {
+        if (snap?.phase == LastMinutePhase.FIRED && snap.fired != null) {
+            val ok = com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
+                snap.fired,
+                snap.spotUsd,
+                snap.strikeUsd,
+                snap.fired.ask
+            )
+            if (!ok) return snap.flip?.noBetLine ?: TITLE
+            return buyLine(snap.fired)
+        }
+        return when (snap?.phase) {
+            LastMinutePhase.WAITING -> waiting(snap.startsInMs)
+            LastMinutePhase.LIVE -> snap.flip?.noBetLine ?: TITLE
+            LastMinutePhase.FIRED -> TITLE
+            LastMinutePhase.NO_PLAY -> NO_PLAY
+            null -> waiting(null)
+        }
     }
+
+    fun flipLine(snap: LastMinuteSnapshot?): String? = snap?.flip?.noBetLine
 
     fun buyLine(fired: LastMinuteFired): String {
         val cents = formatCents(fired.ask)

@@ -23,6 +23,7 @@ class LastMinuteNotifier(private val context: Context) {
     private val ids = AtomicInteger(7000)
 
     fun notifyFired(fired: LastMinuteFired): Int {
+        if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(fired)) return -1
         // Posts even when the Activity is visible. Last-minute heads-up is
         // independent of the live-signals FGS.
         if (!LastMinuteNotifyPolicy.shouldNotify(

@@ -3,73 +3,110 @@ package com.dirk.kalshiodds.prediction
 import com.dirk.kalshiodds.data.api.KalshiApi
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import retrofit2.HttpException
+import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Periodically resolves open prediction-log entries (and extra paper tickers)
- * against settled Kalshi markets.
+ * Resolves open prediction-log / paper tickers against settled Kalshi
+ * markets. Restricted to KXBTC15M the app tracked, only after close_time,
+ * with 5s/15s/30s/60s backoff, in-flight dedupe, and 429 Retry-After.
  */
 class SettlementScorer(
     private val resolveApi: () -> KalshiApi,
     private val logStore: PredictionLogStore,
     private val extraOpenTickers: () -> Set<String> = { emptySet() },
-    private val onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> }
+    private val onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
+    private val closeTimeOf: (String) -> Long? = { null },
+    private val nowMs: () -> Long = { System.currentTimeMillis() }
 ) {
     constructor(
         api: KalshiApi,
         logStore: PredictionLogStore,
         extraOpenTickers: () -> Set<String> = { emptySet() },
-        onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> }
-    ) : this({ api }, logStore, extraOpenTickers, onMarketSettled)
-    private val mutex = Mutex()
-    @Volatile private var lastRunMs: Long = 0L
+        onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
+        closeTimeOf: (String) -> Long? = { null },
+        nowMs: () -> Long = { System.currentTimeMillis() }
+    ) : this({ api }, logStore, extraOpenTickers, onMarketSettled, closeTimeOf, nowMs)
 
-    suspend fun maybeScore(nowMs: Long = System.currentTimeMillis(), minIntervalMs: Long = 15_000L) {
-        if (nowMs - lastRunMs < minIntervalMs) return
+    private val mutex = Mutex()
+    private val schedules = ConcurrentHashMap<String, SettlementPollPolicy.Schedule>()
+    private val inFlight = ConcurrentHashMap.newKeySet<String>()
+    private val closeTimes = ConcurrentHashMap<String, Long>()
+    @Volatile private var lastRunMs: Long = 0L
+    @Volatile private var globalHoldUntilMs: Long = 0L
+
+    fun noteCloseTime(ticker: String, closeTimeMs: Long) {
+        if (!SettlementPollPolicy.isPollableTicker(ticker)) return
+        if (closeTimeMs <= 0L) return
+        closeTimes[ticker.uppercase()] = closeTimeMs
+    }
+
+    fun closeTime(ticker: String): Long? =
+        closeTimes[ticker.uppercase()] ?: closeTimeOf(ticker.uppercase()) ?: closeTimeOf(ticker)
+
+    suspend fun maybeScore(nowMs: Long = this.nowMs(), minIntervalMs: Long = 15_000L) {
+        val hold = globalHoldUntilMs
+        if (nowMs < hold) return
+        if (minIntervalMs > 0L && nowMs - lastRunMs < minIntervalMs) return
         mutex.withLock {
-            if (nowMs - lastRunMs < minIntervalMs) return
+            if (nowMs < globalHoldUntilMs) return
+            if (minIntervalMs > 0L && nowMs - lastRunMs < minIntervalMs) return
             lastRunMs = nowMs
-            scoreOnce()
+            scoreOnce(nowMs)
         }
     }
 
-    private suspend fun scoreOnce() {
+    private suspend fun scoreOnce(nowMs: Long) {
         val open = logStore.readAll().filter { it.outcome == null }
         val extra = extraOpenTickers()
-        if (open.isEmpty() && extra.isEmpty()) return
-        val bySeries = LinkedHashMap<String, MutableSet<String>>()
-        for (e in open) {
-            val series = e.series.ifBlank { inferSeries(e.ticker) }
-            if (series.isBlank()) continue
-            bySeries.getOrPut(series) { mutableSetOf() }.add(e.ticker)
+        val tracked = SettlementPollPolicy.mergeTracked(open, extra) { ticker ->
+            closeTime(ticker)
         }
-        for (t in extra) {
-            val series = inferSeries(t)
-            if (series.isBlank()) continue
-            bySeries.getOrPut(series) { mutableSetOf() }.add(t)
-        }
-        for ((series, tickers) in bySeries) {
+        val due = SettlementPollPolicy.candidates(
+            tracked = tracked,
+            nowMs = nowMs,
+            schedules = schedules,
+            inFlight = inFlight,
+            globalHoldUntilMs = globalHoldUntilMs
+        )
+        for (ticker in due) {
+            if (!inFlight.add(ticker)) continue
             try {
-                val settled = resolveApi().getMarkets(seriesTicker = series, status = "settled", limit = 100)
-                for (m in settled.markets) {
-                    if (m.ticker in tickers) {
-                        applyResult(m.ticker, m.result)
-                    }
-                }
-                for (t in tickers) {
-                    val stillOpen = logStore.readAll().any { it.ticker == t && it.outcome == null } ||
-                        extra.any { it.equals(t, ignoreCase = true) }
-                    if (!stillOpen) continue
-                    try {
-                        val resp = resolveApi().getMarkets(seriesTicker = series, status = "settled", ticker = t, limit = 5)
-                        val hit = resp.markets.firstOrNull { it.ticker == t }
-                        applyResult(t, hit?.result)
-                    } catch (_: Exception) {
-                        // ignore per-ticker misses
-                    }
-                }
-            } catch (_: Exception) {
-                // scoring is best-effort; never break polling
+                pollTicker(ticker, nowMs)
+            } finally {
+                inFlight.remove(ticker)
             }
+        }
+    }
+
+    private suspend fun pollTicker(ticker: String, nowMs: Long) {
+        val prev = schedules[ticker] ?: SettlementPollPolicy.Schedule()
+        try {
+            val resp = resolveApi().getMarkets(
+                seriesTicker = SettlementPollPolicy.SERIES,
+                status = "settled",
+                ticker = ticker,
+                limit = 5
+            )
+            val hit = resp.markets.firstOrNull { it.ticker.equals(ticker, ignoreCase = true) }
+            val result = normalizeResult(hit?.result)
+            if (result != null) {
+                applyResult(ticker, result)
+                schedules.remove(ticker)
+            } else {
+                schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+            }
+        } catch (e: HttpException) {
+            if (SettlementPollPolicy.isRateLimited(e)) {
+                val retry = SettlementPollPolicy.retryAfterMs(e)
+                val next = SettlementPollPolicy.after429(prev, nowMs, retry)
+                schedules[ticker] = next
+                globalHoldUntilMs = maxOf(globalHoldUntilMs, next.nextAttemptMs)
+            } else {
+                schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+            }
+        } catch (_: Exception) {
+            schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
         }
     }
 
@@ -78,9 +115,6 @@ class SettlementScorer(
         logStore.applySettlement(ticker, result)
         runCatching { onMarketSettled(ticker, result) }
     }
-
-    private fun inferSeries(ticker: String): String =
-        com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
 
     companion object {
         fun normalizeResult(raw: String?): String? {

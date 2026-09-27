@@ -35,8 +35,8 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(31, BuildConfig.VERSION_CODE)
-        assertEquals("0.3.16", BuildConfig.VERSION_NAME)
+        assertEquals(32, BuildConfig.VERSION_CODE)
+        assertEquals("0.3.17", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertTrue(AppVersion.label.startsWith("${AppIdentity.LABEL} v"))
@@ -51,8 +51,8 @@ class AppIdentityTest {
         assertTrue(gradle.contains("namespace = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("versionCode = 31"))
-        assertTrue(gradle.contains("versionName = \"0.3.16\""))
+        assertTrue(gradle.contains("versionCode = 32"))
+        assertTrue(gradle.contains("versionName = \"0.3.17\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
@@ -145,18 +145,67 @@ class AppIdentityStorageAuditTest {
     }
 
     @Test
-    fun launcherIconKeepsDipAndAddsKBadge() {
-        val files = listOf(
-            "app/src/main/res/drawable/ic_launcher_foreground.xml",
-            "src/main/res/drawable/ic_launcher_foreground.xml"
-        ).map(::File).filter { it.isFile }
-        assertTrue(files.isNotEmpty())
-        files.forEach { file ->
-            val text = file.readText()
-            assertTrue("${file.name} keeps the dip path", text.contains("M22,40 L38,40"))
-            assertTrue("${file.name} has the gold K badge", text.contains("#E3B341"))
-            assertTrue("${file.name} comments the Kashi badge", text.contains("Kashi badge"))
-        }
+    fun launcherIconIsGoldKOnNavy() {
+        val fg = listOf(
+            File("app/src/main/res/drawable/ic_launcher_foreground.xml"),
+            File("src/main/res/drawable/ic_launcher_foreground.xml")
+        ).first { it.isFile }.readText()
+        val bg = listOf(
+            File("app/src/main/res/drawable/ic_launcher_background.xml"),
+            File("src/main/res/drawable/ic_launcher_background.xml")
+        ).first { it.isFile }.readText()
+        val mono = listOf(
+            File("app/src/main/res/drawable/ic_launcher_monochrome.xml"),
+            File("src/main/res/drawable/ic_launcher_monochrome.xml")
+        ).first { it.isFile }.readText()
+        val adaptive = listOf(
+            File("app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml"),
+            File("src/main/res/mipmap-anydpi-v26/ic_launcher.xml")
+        ).first { it.isFile }.readText()
+        val adaptiveRound = listOf(
+            File("app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml"),
+            File("src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml")
+        ).first { it.isFile }.readText()
+        val manifest = listOf(
+            File("app/src/main/AndroidManifest.xml"),
+            File("src/main/AndroidManifest.xml")
+        ).first { it.isFile }.readText()
+        val colors = listOf(
+            File("app/src/main/res/values/colors.xml"),
+            File("src/main/res/values/colors.xml")
+        ).first { it.isFile }.readText()
+
+        assertTrue(fg.contains("#E8B84A"))
+        assertTrue(fg.contains("M28,26 h14 v18"))
+        assertTrue(fg.contains("M78,44 h9 v20"))
+        assertFalse(fg.contains("#3FB950"))
+        assertFalse(fg.contains("#E3B341"))
+        assertFalse(fg.contains("Kashi badge"))
+        assertFalse(fg.contains("M22,40 L38,40"))
+
+        assertTrue(bg.contains("#070B16"))
+        assertFalse(bg.contains("#3FB950"))
+        assertTrue(colors.contains("ic_launcher_background\">#070B16"))
+
+        assertTrue(mono.contains("#FFFFFF"))
+        assertTrue(mono.contains("M28,26 h14 v18"))
+        assertFalse(mono.contains("#3FB950"))
+
+        assertTrue(adaptive.contains("@drawable/ic_launcher_background"))
+        assertTrue(adaptive.contains("@drawable/ic_launcher_foreground"))
+        assertTrue(adaptive.contains("@drawable/ic_launcher_monochrome"))
+        assertTrue(adaptiveRound.contains("@drawable/ic_launcher_background"))
+        assertTrue(adaptiveRound.contains("@drawable/ic_launcher_foreground"))
+        assertTrue(adaptiveRound.contains("@drawable/ic_launcher_monochrome"))
+
+        assertTrue(manifest.contains("android:icon=\"@mipmap/ic_launcher\""))
+        assertTrue(manifest.contains("android:roundIcon=\"@mipmap/ic_launcher_round\""))
+
+        val xx = listOf(
+            File("app/src/main/res/mipmap-xxhdpi/ic_launcher.png"),
+            File("src/main/res/mipmap-xxhdpi/ic_launcher.png")
+        ).firstOrNull { it.isFile }
+        assertTrue("legacy xxhdpi mipmap missing", xx != null && xx.length() > 0L)
     }
 
     @Test

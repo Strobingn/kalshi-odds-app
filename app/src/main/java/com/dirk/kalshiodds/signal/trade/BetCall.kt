@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.flip.FlipCheck
 import com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy
 import com.dirk.kalshiodds.signal.lastminute.LastMinutePhase
 
@@ -45,16 +46,24 @@ object BetCall {
             return when (lm?.phase) {
                 LastMinutePhase.FIRED -> fired(market, ctx, lm)
                 LastMinutePhase.NO_PLAY -> none(LastMinuteCopy.NO_PLAY)
-                LastMinutePhase.WAITING, LastMinutePhase.LIVE -> none(LastMinuteCopy.NO_PLAY)
+                LastMinutePhase.WAITING, LastMinutePhase.LIVE -> none(flipReason(market, ctx) ?: LastMinuteCopy.NO_PLAY)
                 null -> none(TicketBuilder.MARKET_CLOSED)
             }
         }
         return when (lm?.phase) {
             LastMinutePhase.FIRED -> fired(market, ctx, lm)
-            LastMinutePhase.LIVE -> none(LastMinuteCopy.TITLE)
+            LastMinutePhase.LIVE -> none(flipReason(market, ctx) ?: LastMinuteCopy.TITLE)
             LastMinutePhase.NO_PLAY -> none(LastMinuteCopy.NO_PLAY)
             LastMinutePhase.WAITING -> none(LastMinuteCopy.waiting(lm.startsInMs))
-            null -> none(LastMinuteCopy.waiting(waitingMs(market, ctx.nowMs)))
+            null -> {
+                val tau = FlipCheck.secondsLeft(market.closeTimeEpochMs, ctx.nowMs)
+                val inFinalMinute = tau != null && tau <= com.dirk.kalshiodds.signal.lastminute.LastMinuteConstants.FINAL_MINUTE_SEC
+                if (inFinalMinute) {
+                    none(flipReason(market, ctx) ?: LastMinuteCopy.TITLE)
+                } else {
+                    none(LastMinuteCopy.waiting(waitingMs(market, ctx.nowMs)))
+                }
+            }
         }
     }
 
@@ -84,8 +93,12 @@ object BetCall {
         lm: com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot
     ): Decision {
         val fired = lm.fired
+        val liveAsk = fired?.let { TicketBuilder.liveAsk(market, it.side, ctx) ?: it.ask }
+        if (fired != null && !FlipCheck.allowsFired(fired, lm.spotUsd ?: market.spotUsd, lm.strikeUsd ?: market.floorStrike, liveAsk)) {
+            return none(lm.flip?.noBetLine ?: FlipCheck.evaluateMarket(market, ctx.nowMs)?.noBetLine ?: LastMinuteCopy.TITLE)
+        }
         val ticket = TicketBuilder.proposeLastMinute(market, ctx)
-            ?: return none(fired?.let { LastMinuteCopy.buyLine(it) } ?: LastMinuteCopy.TITLE)
+            ?: return none(lm.flip?.noBetLine ?: fired?.let { LastMinuteCopy.buyLine(it) } ?: LastMinuteCopy.TITLE)
         return Decision(
             headline = if (ticket.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,
             side = ticket.side,
@@ -97,6 +110,10 @@ object BetCall {
             noBetReason = null
         )
     }
+
+    private fun flipReason(market: MarketUiModel, ctx: TicketBuilder.Context): String? =
+        market.lastMinute?.flip?.noBetLine
+            ?: FlipCheck.evaluateMarket(market, ctx.nowMs)?.noBetLine
 
     private fun waitingMs(market: MarketUiModel, nowMs: Long): Long? {
         val close = market.closeTimeEpochMs ?: return null
