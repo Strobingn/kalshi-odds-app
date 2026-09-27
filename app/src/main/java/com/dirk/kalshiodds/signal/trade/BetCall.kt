@@ -46,7 +46,7 @@ object BetCall {
                 LastMinutePhase.FIRED -> fired(market, ctx, lm)
                 LastMinutePhase.NO_PLAY -> none(LastMinuteCopy.NO_PLAY)
                 LastMinutePhase.WAITING, LastMinutePhase.LIVE -> none(LastMinuteCopy.NO_PLAY)
-                null -> none("Market closed")
+                null -> none(TicketBuilder.MARKET_CLOSED)
             }
         }
         return when (lm?.phase) {
@@ -83,9 +83,9 @@ object BetCall {
         ctx: TicketBuilder.Context,
         lm: com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot
     ): Decision {
-        val ticket = TicketBuilder.proposeLastMinute(market, ctx)
-            ?: return none(LastMinuteCopy.buyLine(lm.fired!!).takeIf { lm.fired != null } ?: LastMinuteCopy.TITLE)
         val fired = lm.fired
+        val ticket = TicketBuilder.proposeLastMinute(market, ctx)
+            ?: return none(fired?.let { LastMinuteCopy.buyLine(it) } ?: LastMinuteCopy.TITLE)
         return Decision(
             headline = if (ticket.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,
             side = ticket.side,
