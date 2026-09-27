@@ -98,6 +98,20 @@ object SignalConstants {
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
     const val EXTERNAL_READ_TIMEOUT_MS = 4_000L
 
+    // --- Streamed spot (Coinbase WebSocket; docs/ml-review-2026-09-27.md #6) ---
+
+    /** Settings → "Stream spot (Coinbase WebSocket)". REST stays the fallback. */
+    const val DEFAULT_SPOT_STREAM = true
+
+    /** Streamed spot with no print / heartbeat for this long is ignored (REST wins). */
+    const val SPOT_STREAM_STALE_MS = 5_000L
+
+    /** A spot print re-scores a market at most this often… */
+    const val SPOT_RESCORE_MIN_INTERVAL_MS = 500L
+
+    /** …and only when spot moved at least this far since that market's last score. */
+    const val SPOT_RESCORE_MIN_MOVE_BP = 1.0
+
     // --- v0.2.2 approve-gated tickets ---
 
     /**
