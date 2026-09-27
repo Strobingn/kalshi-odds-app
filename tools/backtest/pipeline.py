@@ -402,6 +402,61 @@ def model_beats_implied(model: float | None, implied: float | None, fee_rate: fl
     return model > p + fee + margin
 
 
+# --- EvSide (side by expected value at the ask) -----------------------------
+
+# EvSide.DEFAULT_MARGIN: same 3¢ as model_beats_implied / TicketBuilder.
+EV_MARGIN = 0.03
+
+
+def fee_per_contract(price: float, fee_rate: float = FEE_RATE, stake: float = STAKE_USD) -> float:
+    """KalshiFee.perContract: order fee amortized over a [stake] ticket's contracts."""
+    p = clip_price(price)
+    c = max(1, int(math.floor(stake / p + 1e-9)))
+    return kalshi_fee_total(c, p, fee_rate) / c
+
+
+def implied_ask(opposite_bid: float | None) -> float | None:
+    """KalshiPrice.impliedAskFromOppositeBid: YES ask = 1 − NO bid."""
+    bid = usable(opposite_bid)
+    return usable(1.0 - bid) if bid is not None else None
+
+
+def ev_side(
+    p_yes: float | None,
+    yes_ask: float | None,
+    no_ask: float | None,
+    yes_bid: float | None = None,
+    no_bid: float | None = None,
+    fee_rate: float = FEE_RATE,
+    margin: float = EV_MARGIN,
+    stake: float = STAKE_USD,
+) -> tuple[str | None, float | None, float | None]:
+    """EvSide.decide: (side, ev_yes, ev_no). side None = skip.
+
+    ev_yes = p − yes_ask − fee(yes_ask); ev_no = (1 − p) − no_ask − fee(no_ask).
+    Bet the larger if it is > [margin]. (None, None, None) when there is no
+    finite p or no usable ask on either side (the app then falls back).
+    """
+    if p_yes is None or not math.isfinite(p_yes):
+        return None, None, None
+    p = min(1.0, max(0.0, p_yes))
+    ya = usable(yes_ask)
+    if ya is None:
+        ya = implied_ask(no_bid)
+    na = usable(no_ask)
+    if na is None:
+        na = implied_ask(yes_bid)
+    ev_yes = (p - ya - fee_per_contract(ya, fee_rate, stake)) if ya is not None else None
+    ev_no = ((1.0 - p) - na - fee_per_contract(na, fee_rate, stake)) if na is not None else None
+    best = None
+    if ev_yes is not None and (ev_no is None or ev_yes >= ev_no):
+        best = ("YES", ev_yes)
+    elif ev_no is not None:
+        best = ("NO", ev_no)
+    side = best[0] if best is not None and best[1] > margin else None
+    return side, ev_yes, ev_no
+
+
 # --- Regime / blend ----------------------------------------------------------
 
 def tte_regime(close_ms: int | None, now_ms: int) -> str:

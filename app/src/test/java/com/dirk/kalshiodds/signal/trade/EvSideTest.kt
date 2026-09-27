@@ -33,9 +33,13 @@ class EvSideTest {
 
     @Test
     fun evIsFairMinusAskMinusAmortizedFee() {
+        // Same numbers as check_ev_side in tools/backtest/test_parity.py.
+        // $5 at 45¢: 11 ct, ceil_cent(4.95 + 0.190575) = $5.15 → 20¢ fee / 11.
+        assertEquals(0.20 / 11.0, KalshiFee.perContract(0.45, feeRate, stake), 1e-12)
+        assertEquals(0.0175, KalshiFee.perContract(0.56, feeRate, stake), 1e-12)
         val r = EvSide.decide(0.60, yesAsk = 0.45, noAsk = 0.56)!!
-        assertEquals(0.60 - 0.45 - KalshiFee.perContract(0.45, feeRate, stake), r.evYes!!, 1e-12)
-        assertEquals(0.40 - 0.56 - KalshiFee.perContract(0.56, feeRate, stake), r.evNo!!, 1e-12)
+        assertEquals(0.60 - 0.45 - 0.20 / 11.0, r.evYes!!, 1e-12)
+        assertEquals(0.40 - 0.56 - 0.0175, r.evNo!!, 1e-12)
         assertEquals("YES", r.side)
         assertTrue(r.reason, r.reason.startsWith("UP beats its 45¢ ask + fee by"))
     }
@@ -58,6 +62,7 @@ class EvSideTest {
         val r = TicketBuilder.evDecision(m)!!
         assertEquals("NO", r.side)
         assertTrue(r.evYes!! < 0.0)
+        assertEquals(0.45 - 0.31 - 0.015, r.evNo!!, 1e-12)
         assertTrue(r.reason, r.reason.startsWith("DOWN beats its 31¢ ask"))
     }
 

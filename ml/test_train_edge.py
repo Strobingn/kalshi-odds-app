@@ -215,7 +215,7 @@ class OffsetModelTest(unittest.TestCase):
         self.assertEqual(te.ev_side(0.80, 0.70, None)[0], "YES")
         self.assertEqual(te.ev_side(0.80, None, None), (None, None, None))
         self.assertIsNone(te.ev_side(0.80, 1.0, 0.0)[0])
-        # Margin: 2¢ after fees.
+        # Margin: 3¢ after fees (1.3¢ here).
         self.assertIsNone(te.ev_side(0.56, 0.53, 0.48)[0])
 
     def test_export_is_offset_logistic_with_ten_features(self) -> None:

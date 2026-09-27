@@ -28,7 +28,7 @@ side by **expected value at the ask** — the app's `EvSide` rule:
 ```
 ev_yes = p − yes_ask − fee(yes_ask)
 ev_no  = (1 − p) − no_ask − fee(no_ask)        # no_ask = 1 − yes_bid
-bet the larger if it is > 2¢ (--ev-margin), else skip
+bet the larger if it is > 3¢ (--ev-margin), else skip
 ```
 
 One bet per market (first qualifying minute) at the candle-close ask, fee
@@ -88,4 +88,4 @@ reads that tag; `edge-model-latest` belongs to the main app). In the app:
 The script prints hold-out `model_brier` vs `market_brier` (and log-loss). If
 the model does not beat the market on both, the app does not activate it. The
 app also hides “edge” flags until |model − market| > fee + margin, and the
-ticket side is whichever side has EV > 2¢ at the ask — often neither.
+ticket side is whichever side has EV > 3¢ at the ask — often neither.

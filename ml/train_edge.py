@@ -99,8 +99,9 @@ OFFSET_FEATURES = ["dist_to_strike_vol", "market_mid", "cross_asset", "digital_f
 # the effective sample is the market count. 0.05 keeps a calibrated
 # market close to w = 0 at a few hundred markets (see test_train_edge.py).
 DEFAULT_L2 = 0.05
-# EvSide.DEFAULT_MARGIN in the app: skip unless EV clears 2¢ per contract.
-EV_MARGIN = 0.02
+# EvSide.DEFAULT_MARGIN in the app (and TicketBuilder.modelBeatsImplied):
+# skip unless EV clears 3¢ per contract after the fee.
+EV_MARGIN = 0.03
 # Decision minutes, same as tools/backtest (elapsed minutes since open).
 FIRST_DECISION_MINUTE = 1
 LAST_DECISION_MINUTE = 13

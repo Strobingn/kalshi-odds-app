@@ -17,6 +17,7 @@ CORE_STRATS = [
     ("cheap_side", "Naive: always cheap side ≤ 31¢"),
     ("always_favorite", "Naive: always favorite"),
     ("random_side", "Naive: random side (ticker-hash)"),
+    ("ev_side", "EV side at the ask (fair − ask − fee > 3¢)"),
     ("tuned", "IS-tuned rule (reported OOS only)"),
 ]
 STRESS_STRATS = [
