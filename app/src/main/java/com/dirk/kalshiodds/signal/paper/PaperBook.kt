@@ -180,9 +180,6 @@ class PaperBook(
         ) {
             return null
         }
-        if (model != null && ask != null && !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, ask)) {
-            return null
-        }
         val pick = PaperPickSource.fromTicketKind(ticket.kind)
         val meta = PaperFill.metaFromTicket(ticket)
         if (!PaperFill.allowCreate(pick, meta.aiPct)) return null
@@ -216,9 +213,6 @@ class PaperBook(
         if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
             (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
         ) {
-            return null
-        }
-        if (model != null && !com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, px)) {
             return null
         }
         val meta = PaperFill.metaFromAlert(alert)

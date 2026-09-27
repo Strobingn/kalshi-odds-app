@@ -352,7 +352,11 @@ object TicketBuilder {
             if (ctx.alertsPaused) return null
         }
         val ask = liveAsk(market, side, ctx) ?: return null
-        if (kind != TicketKind.MANUAL && !FlipCheck.allowsMarketSide(
+        // Hunter / long-shot cards stay visible as detections. FlipCheck
+        // gates the Live $ pick (last-minute / configured), paper auto-fills,
+        // and alerts — not the cheap-print hunter card itself.
+        val gateFlip = kind == TicketKind.CONFIGURED
+        if (gateFlip && !FlipCheck.allowsMarketSide(
                 market = market,
                 side = side,
                 ask = ask,

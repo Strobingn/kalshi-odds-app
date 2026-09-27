@@ -55,7 +55,15 @@ object BetCall {
             LastMinutePhase.LIVE -> none(flipReason(market, ctx) ?: LastMinuteCopy.TITLE)
             LastMinutePhase.NO_PLAY -> none(LastMinuteCopy.NO_PLAY)
             LastMinutePhase.WAITING -> none(LastMinuteCopy.waiting(lm.startsInMs))
-            null -> none(flipReason(market, ctx) ?: LastMinuteCopy.waiting(waitingMs(market, ctx.nowMs)))
+            null -> {
+                val tau = FlipCheck.secondsLeft(market.closeTimeEpochMs, ctx.nowMs)
+                val inFinalMinute = tau != null && tau <= com.dirk.kalshiodds.signal.lastminute.LastMinuteConstants.FINAL_MINUTE_SEC
+                if (inFinalMinute) {
+                    none(flipReason(market, ctx) ?: LastMinuteCopy.TITLE)
+                } else {
+                    none(LastMinuteCopy.waiting(waitingMs(market, ctx.nowMs)))
+                }
+            }
         }
     }
 

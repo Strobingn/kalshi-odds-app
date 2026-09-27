@@ -19,10 +19,6 @@ def summarize(bets, label):
     print(f"{label}: n={n} wins={wins} pnl={pnl:.2f} per={pnl/n:.4f}")
 
 def from_pickle():
-    import pandas as pd
-    import numpy as np
-    from common import size_bet, TAKER_RATE
-    from fine_trades import fair_p
     tag = os.environ.get("TAG", "")
     ev_path = ROOT / f"data/fine_events{tag}.pkl"
     if not ev_path.is_file():
@@ -30,6 +26,10 @@ def from_pickle():
     if not ev_path.is_file():
         print("NO_DATA")
         return 2
+    import pandas as pd
+    import numpy as np
+    from common import size_bet, TAKER_RATE
+    from fine_trades import fair_p
     ev = pd.read_pickle(ev_path)
     ev = ev[(ev.price > 0) & (ev.price < 1) & (ev.tau <= 60)].copy()
     pu = fair_p(ev.X, ev.tau, ev.om, ev.sig, 1.1, 0.0001)
