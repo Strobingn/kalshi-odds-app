@@ -22,6 +22,18 @@ object SignalConstants {
     const val DEFAULT_MAX_SPREAD_CENTS = 8.0
     const val DEFAULT_HIDE_WEAK = true
 
+    /**
+     * Entry filter ([com.dirk.kalshiodds.signal.engine.EntryFilter],
+     * docs/ml-review-2026-09-27.md #7). A guard, not a discovered edge:
+     * out of sample the first-minutes entries (14–12m left, −4.5% ROI) and
+     * near-strike picks (<5bp, −7.7% ROI) lost most, but neither CI
+     * excludes zero. Mirrored in tools/backtest/pipeline.py.
+     */
+    const val DEFAULT_ENTRY_FILTER = true
+    const val DEFAULT_ENTRY_MIN_ELAPSED_MINUTES = 3
+    const val DEFAULT_ENTRY_MIN_STRIKE_DISTANCE_BP = 5.0
+    const val DEFAULT_ENTRY_NEAR_STRIKE_OVERRIDE_PP = 10.0
+
     const val SCORECARD_ROLLING_DAYS = 7
 
     /** Size drop (contracts) treated as a cancel spike. */

@@ -541,6 +541,87 @@ def should_show(passed: bool, edge_pp: float | None, net_edge_pp: float | None) 
     return True
 
 
+# --- Entry filter (EntryFilter.kt; docs/ml-review-2026-09-27.md #7) ------------
+# A guard, not a discovered edge. Same defaults and reason strings as the app.
+ENTRY_MIN_ELAPSED_MIN = 3
+ENTRY_MIN_STRIKE_BP = 5.0
+ENTRY_NEAR_STRIKE_OVERRIDE_PP = 10.0
+ENTRY_WINDOW_SEC = 900
+
+
+def _entry_clock(seconds: int) -> str:
+    s = max(0, int(seconds))
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def _entry_num(v: float) -> str:
+    return f"{v:.0f}" if v == round(v) else f"{v:.1f}"
+
+
+def entry_filter(
+    tte_sec: int | None,
+    spot: float | None,
+    strike: float | None,
+    net_edge_pp: float | None,
+    *,
+    min_elapsed_min: int = ENTRY_MIN_ELAPSED_MIN,
+    min_strike_bp: float = ENTRY_MIN_STRIKE_BP,
+    override_pp: float = ENTRY_NEAR_STRIKE_OVERRIDE_PP,
+    window_sec: int = ENTRY_WINDOW_SEC,
+    enabled: bool = True,
+) -> tuple[bool, str | None]:
+    """EntryFilter.evaluate. Returns (passed, reason).
+
+    (a) block while fewer than `min_elapsed_min` minutes of the window have
+        elapsed (tte > window − min_elapsed; exactly 12:00 left passes);
+    (b) block when |spot − strike| / strike < `min_strike_bp` bp unless the
+        chosen side's *signed* net edge ≥ `override_pp`.
+    Missing data never blocks: no tte / tte > window skips (a); no spot or
+    strike skips (b). A skipped check is noted in the reason.
+    """
+    if not enabled:
+        return True, None
+    blocks: list[str] = []
+    notes: list[str] = []
+
+    min_elapsed_sec = max(0, int(min_elapsed_min)) * 60
+    tte = tte_sec if (tte_sec is not None and tte_sec >= 0) else None
+    if min_elapsed_sec <= 0:
+        pass
+    elif tte is None:
+        notes.append("entry-time check skipped: no close time")
+    elif tte > window_sec:
+        notes.append(f"entry-time check skipped: {_entry_clock(tte)} left is longer than the {_entry_clock(window_sec)} window")
+    elif window_sec - tte < min_elapsed_sec:
+        blocks.append(f"too early: {_entry_clock(tte)} left (wait until {_entry_clock(window_sec - min_elapsed_sec)})")
+
+    ok_spot = spot if (spot is not None and math.isfinite(spot) and spot > 0) else None
+    ok_strike = strike if (strike is not None and math.isfinite(strike) and strike > 0) else None
+    dist_bp = abs(ok_spot - ok_strike) / ok_strike * 10_000.0 if (ok_spot is not None and ok_strike is not None) else None
+    if min_strike_bp > 0.0:
+        if dist_bp is None:
+            if ok_spot is None and ok_strike is None:
+                why = "no spot or strike"
+            elif ok_spot is None:
+                why = "no spot"
+            else:
+                why = "no strike"
+            notes.append(f"near-strike check skipped: {why}")
+        elif dist_bp < min_strike_bp:
+            edge = net_edge_pp if (net_edge_pp is not None and math.isfinite(net_edge_pp)) else None
+            if override_pp > 0.0 and edge is not None and edge >= override_pp:
+                notes.append(
+                    f"near strike {dist_bp:.1f}bp < {_entry_num(min_strike_bp)}bp allowed: "
+                    f"net edge {edge:+.1f}pp ≥ {_entry_num(override_pp)}pp"
+                )
+            else:
+                blocks.append(f"near strike: {dist_bp:.1f}bp < {_entry_num(min_strike_bp)}bp")
+
+    if blocks:
+        return False, " · ".join(blocks)
+    return True, (" · ".join(notes) or None)
+
+
 @dataclass
 class Decision:
     ticker: str

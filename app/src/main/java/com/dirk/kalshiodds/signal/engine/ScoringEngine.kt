@@ -88,6 +88,8 @@ class ScoringEngine(
         val tteSeconds: Long? = null,
         val passedFilter: Boolean = true,
         val skipReason: String? = null,
+        /** [EntryFilter] block (too early / near strike); null when entry is allowed. */
+        val entryBlockReason: String? = null,
         val predictedSide: String = "YES",
         val calibrated: Boolean = false,
         val spreadDollars: Double? = null,
@@ -584,8 +586,16 @@ class ScoringEngine(
             heavyOut.usedHeavy &&
             !heavyOut.uncertaintyPassed
         val extBlocked = extOut?.blockReason
-        val passed = filter.passed && !muted && !uncBlocked && extBlocked == null
+        val entry = EntryFilter.evaluate(
+            tteSeconds = tteSec,
+            spotUsd = spotFeat?.lastPrice,
+            strikeUsd = strikeUsd,
+            netEdgePp = ev.netEdgePp,
+            settings = settings
+        )
+        val passed = filter.passed && !muted && !uncBlocked && extBlocked == null && entry.passed
         val skipReason = when {
+            !entry.passed -> entry.reason
             muted -> muteReason
             uncBlocked -> String.format(
                 java.util.Locale.US,
@@ -716,6 +726,7 @@ class ScoringEngine(
             tteSeconds = tteSec,
             passedFilter = passed,
             skipReason = skipReason,
+            entryBlockReason = if (entry.passed) null else entry.reason,
             predictedSide = predictedSide,
             calibrated = calState.ready || adapterState.ready,
             spreadDollars = spread,

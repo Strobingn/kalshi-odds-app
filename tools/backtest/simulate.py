@@ -22,6 +22,12 @@ from pipeline import (
     size_all_in,
     usable,
 )
+from pipeline import (
+    ENTRY_MIN_ELAPSED_MIN,
+    ENTRY_MIN_STRIKE_BP,
+    ENTRY_NEAR_STRIKE_OVERRIDE_PP,
+    entry_filter,
+)
 
 
 @dataclass
@@ -393,6 +399,126 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
                 continue
             return _place(d, strategy, d.app_side, split)
     return None
+
+
+# --- Entry filter (EntryFilter.kt; docs/ml-review-2026-09-27.md #7) ----------
+# app_entry = shipped pick (alert gate) + entry filter at the app defaults.
+# entry_tuned = same, with (min elapsed, min bp) picked on IS days only by IS
+# P&L (like tune_rule), then applied OOS. Override pp stays at the default.
+ENTRY_STRATEGIES = ("app_entry", "entry_tuned")
+ENTRY_SWEEP_ELAPSED = (0, 2, 3, 5)
+ENTRY_SWEEP_BP = (0.0, 3.0, 5.0, 10.0)
+ENTRY_MIN_IS_BETS = 20
+
+
+def entry_ok(d: Decision, min_elapsed_min: int = ENTRY_MIN_ELAPSED_MIN, min_bp: float = ENTRY_MIN_STRIKE_BP, override_pp: float = ENTRY_NEAR_STRIKE_OVERRIDE_PP) -> bool:
+    ok, _ = entry_filter(
+        d.tte_sec,
+        d.spot,
+        d.strike,
+        d.net_edge_pp,
+        min_elapsed_min=min_elapsed_min,
+        min_strike_bp=min_bp,
+        override_pp=override_pp,
+    )
+    return ok
+
+
+def first_bet_entry(
+    decisions: list[Decision],
+    split: str,
+    min_elapsed_min: int = ENTRY_MIN_ELAPSED_MIN,
+    min_bp: float = ENTRY_MIN_STRIKE_BP,
+    override_pp: float = ENTRY_NEAR_STRIKE_OVERRIDE_PP,
+    strategy: str = "app_entry",
+) -> Bet | None:
+    """App pick as shipped (alert gate) + entry filter; first qualifying minute only.
+
+    Blocked minutes are skipped, so the bet moves to the first alert minute the
+    filter allows — the same thing the app's alert gate does live.
+    """
+    for d in decisions:
+        if not d.would_alert:
+            continue
+        if not entry_ok(d, min_elapsed_min, min_bp, override_pp):
+            continue
+        return _place(d, strategy, d.app_side, split)
+    return None
+
+
+def _light_summary(bets: list[Bet]) -> dict:
+    """summarize() without the bootstrap (the sweep has 16 cells × 2 splits)."""
+    if not bets:
+        return dict(n=0, wins=0, win_rate=None, avg_ask=None, pnl=0.0, pnl_per_bet=None, roi=None)
+    pnl = sum(b.pnl for b in bets)
+    staked = sum(b.cost for b in bets)
+    wins = sum(1 for b in bets if b.won)
+    return dict(
+        n=len(bets),
+        wins=wins,
+        win_rate=wins / len(bets),
+        avg_ask=sum(b.ask for b in bets) / len(bets),
+        pnl=pnl,
+        pnl_per_bet=pnl / len(bets),
+        roi=(pnl / staked) if staked else None,
+    )
+
+
+def run_entry_filter(market_decs: list[tuple[str, list[Decision]]]) -> dict:
+    """app_entry at the app defaults, the (min elapsed × min bp) sweep, and entry_tuned.
+
+    `market_decs` is (split, decisions) per market in chronological order — the
+    same split assignment and order as the app_shipped bets, so rows compare 1:1.
+    """
+
+    def bets_for(split: str, me: int, bp: float, strategy: str) -> list[Bet]:
+        out = []
+        for spl, decs in market_decs:
+            if spl != split:
+                continue
+            b = first_bet_entry(decs, spl, me, bp, strategy=strategy)
+            if b:
+                out.append(b)
+        return out
+
+    def both(me: int, bp: float, strategy: str) -> list[Bet]:
+        return bets_for("is", me, bp, strategy) + bets_for("oos", me, bp, strategy)
+
+    app_entry = both(ENTRY_MIN_ELAPSED_MIN, ENTRY_MIN_STRIKE_BP, "app_entry")
+    grid = []
+    best = None
+    for me in ENTRY_SWEEP_ELAPSED:
+        for bp in ENTRY_SWEEP_BP:
+            is_s = _light_summary(bets_for("is", me, bp, "entry_sweep"))
+            oos_s = _light_summary(bets_for("oos", me, bp, "entry_sweep"))
+            cell = dict(min_elapsed_min=me, min_bp=bp, is_=is_s, oos=oos_s)
+            grid.append(cell)
+            if is_s["n"] < ENTRY_MIN_IS_BETS:
+                continue
+            if best is None or is_s["pnl"] > best["is_"]["pnl"]:
+                best = cell
+    rule = {}
+    tuned: list[Bet] = []
+    if best is not None:
+        rule = dict(
+            min_elapsed_min=best["min_elapsed_min"],
+            min_bp=best["min_bp"],
+            override_pp=ENTRY_NEAR_STRIKE_OVERRIDE_PP,
+            is_n=best["is_"]["n"],
+            is_pnl=best["is_"]["pnl"],
+            is_pnl_per_bet=best["is_"]["pnl_per_bet"],
+        )
+        tuned = both(rule["min_elapsed_min"], rule["min_bp"], "entry_tuned")
+    return dict(
+        bets={"app_entry": app_entry, "entry_tuned": tuned},
+        rule=rule,
+        grid=grid,
+        defaults=dict(
+            min_elapsed_min=ENTRY_MIN_ELAPSED_MIN,
+            min_bp=ENTRY_MIN_STRIKE_BP,
+            override_pp=ENTRY_NEAR_STRIKE_OVERRIDE_PP,
+        ),
+    )
 
 
 def split_days(days: list[str]) -> tuple[set[str], set[str]]:
@@ -814,6 +940,10 @@ def run_sim(cache: Path) -> dict:
     tuned_oos = apply_rule(oos_decs, rule, "oos")
     bets["tuned"] = tuned_is + tuned_oos
 
+    # Entry filter (#7): same markets, split and order as app_shipped.
+    entry = run_entry_filter([(split_of(m), decisions_by.get(m["ticker"]) or []) for m in markets_sorted])
+    bets.update(entry["bets"])
+
     # calibration on every decision minute (no selection) — model vs market mid
     def pairs(getp):
         out = []
@@ -895,6 +1025,8 @@ def run_sim(cache: Path) -> dict:
             mean_brier_side=sum(s["brier_side"] for s in scored) / len(scored) if scored else None,
         ),
     )
+    result["strategies"].update({s: pack(s) for s in ENTRY_STRATEGIES})
+    result["entry_filter"] = dict(defaults=entry["defaults"], rule=entry["rule"], grid=entry["grid"])
     (cache / "sim_result.json").write_text(json.dumps(result, default=str))
     return result
 

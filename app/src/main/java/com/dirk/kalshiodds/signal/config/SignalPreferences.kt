@@ -49,6 +49,10 @@ data class SignalSettings(
     val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
     val maxSpreadCents: Double = SignalConstants.DEFAULT_MAX_SPREAD_CENTS,
     val hideWeakOpportunities: Boolean = SignalConstants.DEFAULT_HIDE_WEAK,
+    val entryFilterEnabled: Boolean = SignalConstants.DEFAULT_ENTRY_FILTER,
+    val entryMinElapsedMinutes: Int = SignalConstants.DEFAULT_ENTRY_MIN_ELAPSED_MINUTES,
+    val entryMinStrikeDistanceBp: Double = SignalConstants.DEFAULT_ENTRY_MIN_STRIKE_DISTANCE_BP,
+    val entryNearStrikeOverridePp: Double = SignalConstants.DEFAULT_ENTRY_NEAR_STRIKE_OVERRIDE_PP,
     val bankrollUsd: Double = SignalConstants.DEFAULT_BANKROLL_USD,
     val useKelly: Boolean = true,
     val kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION,
@@ -187,6 +191,16 @@ class SignalPreferences(
         it[KEY_MAX_SPREAD] = value.coerceIn(1.0, 25.0)
     }
     suspend fun updateHideWeak(value: Boolean) = edit { it[KEY_HIDE_WEAK] = value }
+    suspend fun updateEntryFilterEnabled(value: Boolean) = edit { it[KEY_ENTRY_FILTER] = value }
+    suspend fun updateEntryMinElapsedMinutes(value: Int) = edit {
+        it[KEY_ENTRY_MIN_ELAPSED] = value.coerceIn(0, 12)
+    }
+    suspend fun updateEntryMinStrikeDistanceBp(value: Double) = edit {
+        it[KEY_ENTRY_MIN_BP] = value.coerceIn(0.0, 50.0)
+    }
+    suspend fun updateEntryNearStrikeOverridePp(value: Double) = edit {
+        it[KEY_ENTRY_OVERRIDE_PP] = value.coerceIn(1.0, 50.0)
+    }
     suspend fun updateBankrollUsd(value: Double) = edit {
         it[KEY_BANKROLL] = value.coerceIn(10.0, 1_000_000.0)
     }
@@ -334,6 +348,10 @@ class SignalPreferences(
         r.paperTradingEnabled?.let { updatePaperTrading(it) }
         r.minConfidence?.let { updateMinConfidence(it) }
         r.maxSpreadCents?.let { updateMaxSpreadCents(it) }
+        r.entryFilterEnabled?.let { updateEntryFilterEnabled(it) }
+        r.entryMinElapsedMinutes?.let { updateEntryMinElapsedMinutes(it) }
+        r.entryMinStrikeDistanceBp?.let { updateEntryMinStrikeDistanceBp(it) }
+        r.entryNearStrikeOverridePp?.let { updateEntryNearStrikeOverridePp(it) }
     }
 
     /**
@@ -378,6 +396,10 @@ class SignalPreferences(
             minLiquidity = this[KEY_MIN_LIQ] ?: def.minLiquidity,
             maxSpreadCents = this[KEY_MAX_SPREAD] ?: def.maxSpreadCents,
             hideWeakOpportunities = this[KEY_HIDE_WEAK] ?: def.hideWeakOpportunities,
+            entryFilterEnabled = this[KEY_ENTRY_FILTER] ?: def.entryFilterEnabled,
+            entryMinElapsedMinutes = this[KEY_ENTRY_MIN_ELAPSED] ?: def.entryMinElapsedMinutes,
+            entryMinStrikeDistanceBp = this[KEY_ENTRY_MIN_BP] ?: def.entryMinStrikeDistanceBp,
+            entryNearStrikeOverridePp = this[KEY_ENTRY_OVERRIDE_PP] ?: def.entryNearStrikeOverridePp,
             bankrollUsd = this[KEY_BANKROLL] ?: def.bankrollUsd,
             useKelly = this[KEY_USE_KELLY] ?: def.useKelly,
             kellyFraction = this[KEY_KELLY_FRAC] ?: def.kellyFraction,
@@ -449,6 +471,10 @@ class SignalPreferences(
         private val KEY_MIN_LIQ = doublePreferencesKey("min_liquidity")
         private val KEY_MAX_SPREAD = doublePreferencesKey("max_spread_cents")
         private val KEY_HIDE_WEAK = booleanPreferencesKey("hide_weak_opportunities")
+        private val KEY_ENTRY_FILTER = booleanPreferencesKey("entry_filter_enabled")
+        private val KEY_ENTRY_MIN_ELAPSED = intPreferencesKey("entry_min_elapsed_minutes")
+        private val KEY_ENTRY_MIN_BP = doublePreferencesKey("entry_min_strike_distance_bp")
+        private val KEY_ENTRY_OVERRIDE_PP = doublePreferencesKey("entry_near_strike_override_pp")
         private val KEY_BANKROLL = doublePreferencesKey("bankroll_usd")
         private val KEY_USE_KELLY = booleanPreferencesKey("use_kelly")
         private val KEY_KELLY_FRAC = doublePreferencesKey("kelly_fraction")
