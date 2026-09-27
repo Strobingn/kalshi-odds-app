@@ -87,7 +87,12 @@ object SignalConstants {
 
     const val GITHUB_OWNER = "Strobingn"
     const val GITHUB_REPO = "kalshi-odds-app"
-    const val EDGE_MODEL_RELEASE_TAG = "edge-model-latest"
+    /**
+     * Rolling release the Claude app's "Get latest model" reads
+     * (`.github/workflows/train-edge-model.yml`). `edge-model-latest`
+     * belongs to the main app.
+     */
+    const val EDGE_MODEL_RELEASE_TAG = "edge-model-claude"
 
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true

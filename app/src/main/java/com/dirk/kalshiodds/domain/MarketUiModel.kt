@@ -103,6 +103,13 @@ data class MarketUiModel(
     val bidHistory: List<com.dirk.kalshiodds.chart.BidPoint> = emptyList(),
     val digitalFairPp: Double? = null,
     val importedModelPp: Double? = null,
+    /**
+     * The engine's calibrated, blended fair P(YES) in pp
+     * ([com.dirk.kalshiodds.signal.engine.ScoringEngine.Score.fairValuePp]).
+     * Set only by [withSignalScore] — never the raw MLP — so the ticket side
+     * can be chosen by EV at the ask ([com.dirk.kalshiodds.signal.trade.EvSide]).
+     */
+    val fairValuePp: Double? = null,
     val modelEdgeQualified: Boolean = true,
     val spotUsd: Double? = null,
     val spotVsTargetUsd: Double? = null,
@@ -280,6 +287,7 @@ fun MarketUiModel.withSignalScore(
         modelLeanSide = score.modelLeanSide,
         digitalFairPp = score.digitalFairPp,
         importedModelPp = score.importedModelPp,
+        fairValuePp = score.fairValuePp,
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
         spotVsTargetUsd = score.spotVsTargetUsd,

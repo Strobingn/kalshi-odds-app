@@ -45,11 +45,16 @@ object BetCall {
             return none(TicketBuilder.MARKET_CLOSED)
         }
         TicketBuilder.entryBlockReason(market, ctx.settings)?.let { return none(it) }
+        // EV at the ask picks the side (or no side) whenever the engine has a fair.
+        val ev = TicketBuilder.evDecision(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
+        if (ev != null && ev.side == null) return none(ev.reason)
         val proposed = TicketBuilder.proposeAll(listOf(market), ctx).filter { !it.isSell }
         val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
-        val tickets = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
+        val all = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
+        // Only the EV side can be the call — never the other side's ticket.
+        val tickets = if (ev != null) all.filter { it.side.equals(ev.side, true) } else all
         val actionable = tickets.filter { qualifies(it, market, ctx) }
-        val preferred = TicketBuilder.resolveSide(market)
+        val preferred = ev?.side ?: TicketBuilder.resolveSide(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
         val chosen = actionable.firstOrNull { preferred != null && it.side.equals(preferred, true) }
             ?: actionable.maxByOrNull { it.profitIfWinUsd ?: 0.0 }
         if (chosen != null) {
@@ -66,7 +71,7 @@ object BetCall {
         }
         val blocked = tickets.firstOrNull { it.blockedReason != null }
         val reason = blocked?.blockedReason
-            ?: tickets.firstOrNull()?.gateNote
+            ?: tickets.firstOrNull()?.gateNote?.takeIf { ev == null }
             ?: "No side clears edge after fees, the $5 all-in cap, and the min-profit setting"
         return none(reason)
     }

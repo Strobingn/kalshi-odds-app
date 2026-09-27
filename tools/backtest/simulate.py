@@ -18,6 +18,7 @@ from pipeline import (
     Decision,
     DecisionEngine,
     dirk_ok,
+    ev_side,
     net_profit_if_win,
     size_all_in,
     usable,
@@ -67,6 +68,9 @@ STRATEGIES = (
     "cheap_side",
     "always_favorite",
     "random_side",
+    # App ticket side since the EV change: fair vs ask + fee, 3¢ margin
+    # (EvSide / TicketBuilder.resolveSide when the engine has a fair).
+    "ev_side",
 )
 STRESS_STRATEGIES = ("app_shipped_stress",)
 # OOS only; not in the IS tune grid; do not treat as a claimed edge.
@@ -384,6 +388,12 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
             if d.fill_yes is None or d.fill_no is None:
                 continue
             side = _rand_side(d.ticker)
+            return _place(d, strategy, side, split)
+        if strategy == "ev_side":
+            # Blended fair vs the candle-close asks (YES ask, 1 − YES bid).
+            side, _, _ = ev_side(d.fair_yes, d.fill_yes, d.fill_no)
+            if side is None:
+                continue
             return _place(d, strategy, side, split)
         if strategy == "app_32_50":
             if not d.would_alert:

@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.prediction
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -86,5 +87,39 @@ class ModelActivationTest {
         val again = EdgeModelManifest.parse(m.toJson())
         assertEquals(m.nSamples, again.nSamples)
         assertEquals(m.beatsMarket, again.beatsMarket)
+    }
+
+    @Test
+    fun claudeAppReadsItsOwnReleaseTag() {
+        // edge-model-latest belongs to the main app; this build must never pull it.
+        assertEquals("edge-model-claude", SignalConstants.EDGE_MODEL_RELEASE_TAG)
+        val m = EdgeModelManifest.parse(
+            """{"version":"2","trained_at":"2026-09-27T08:17:00Z","n_samples":900,
+               "model_brier":0.158,"market_brier":0.159,"model_logloss":0.47,"market_logloss":0.48}"""
+        )
+        assertEquals("edge-model-claude", m.tag)
+    }
+
+    @Test
+    fun syntheticManifestNeverActivates() {
+        val raw = """
+            {
+              "version": "2",
+              "trained_at": "2026-09-27T00:00:00Z",
+              "n_samples": 180,
+              "model_brier": 0.03,
+              "market_brier": 0.19,
+              "model_logloss": 0.13,
+              "market_logloss": 0.56,
+              "synthetic": true
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        assertTrue(m.synthetic)
+        assertFalse(m.beatsMarket)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("synthetic"))
+        assertTrue(EdgeModelManifest.parse(m.toJson()).synthetic)
     }
 }

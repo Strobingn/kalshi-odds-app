@@ -8,7 +8,8 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Download the rolling `edge-model-latest` release (manifest + model JSON).
+ * Download the rolling [SignalConstants.EDGE_MODEL_RELEASE_TAG] release
+ * (`edge-model-claude`: manifest + model JSON).
  * Public repos work without a token. Private repos need a GitHub token
  * (classic `repo` or fine-grained Contents: Read) — never the Kalshi key.
  */

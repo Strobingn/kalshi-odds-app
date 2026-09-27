@@ -67,7 +67,7 @@ object TicketBuilder {
     fun proposeHunter(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val preferred = resolveSide(market)
+        val preferred = resolveSide(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
         val sides = listOfNotNull(preferred, "YES", "NO").distinct()
         return sides.firstNotNullOfOrNull { side ->
             buildTicket(
@@ -90,7 +90,7 @@ object TicketBuilder {
     fun proposeHunterValue(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val preferred = resolveSide(market)
+        val preferred = resolveSide(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
         val sides = listOfNotNull(preferred, "YES", "NO").distinct()
         return sides.firstNotNullOfOrNull { side ->
             buildTicket(
@@ -121,7 +121,7 @@ object TicketBuilder {
         val settings = ctx.settings
         if (!settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val side = resolveSide(market) ?: return null
+        val side = resolveSide(market, settings.feeRate, settings.ticketStakeUsd) ?: return null
         val stake = PayoutGate.clipStake(settings.ticketStakeUsd)
         return buildTicket(
             market = market,
@@ -531,7 +531,42 @@ object TicketBuilder {
         )
     }
 
-    fun resolveSide(market: MarketUiModel): String? {
+    /**
+     * Side by expected value at the ask ([EvSide]) from the engine's
+     * calibrated fair ([MarketUiModel.fairValuePp]) and the quoted asks.
+     * Null when the market was not scored by the engine or has no usable
+     * ask on either side.
+     */
+    fun evDecision(
+        market: MarketUiModel,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): EvSide.Result? {
+        val fair = market.fairValuePp?.takeIf { it.isFinite() }?.div(100.0) ?: return null
+        return EvSide.decide(
+            pYes = fair,
+            yesAsk = market.yesAsk,
+            noAsk = market.noAsk,
+            yesBid = market.yesBid,
+            noBid = market.noBid,
+            feeRate = feeRate,
+            stakeUsd = stakeUsd
+        )
+    }
+
+    /**
+     * Ticket side. EV at the ask decides first: the side whose fair beats
+     * its ask + fee by [EvSide.DEFAULT_MARGIN], or null (no ticket) when
+     * neither does. Only without a fair or a usable ask does it fall back to
+     * hero → predicted → edge sign, which picks the favorite regardless of
+     * price.
+     */
+    fun resolveSide(
+        market: MarketUiModel,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): String? {
+        evDecision(market, feeRate, stakeUsd)?.let { return it.side }
         val primary = market.primaryHeroSide?.uppercase()
         if (primary == "YES" || primary == "NO") return primary
         val predicted = market.predictedSide?.uppercase()
