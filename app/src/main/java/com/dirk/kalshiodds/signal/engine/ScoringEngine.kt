@@ -632,14 +632,45 @@ class ScoringEngine(
                     digitalFair = digitalFairPp?.div(100.0)
                 )
             )
-            val pYes = loaded.predictYes(feats)
+            val pYes = loaded.predictYes(feats, mid01)
             importedModelPp = pYes * 100.0
-            importedBlendW = loaded.blendWeight.toDouble()
             modelEdgeQualified = loaded.qualifiesEdge(pYes, mid01, settings.feeRate)
-            val blended = loaded.blendWithMarket(pYes, mid01)
-            fair = (0.55 * (fair / 100.0) + 0.45 * blended).times(100.0).coerceIn(2.0, 98.0)
+            if (loaded.isMarketAnchored) {
+                // Offset model: logit(mid) + w·z is already the market-anchored
+                // fair. Re-blending with the mid would double-count the market.
+                importedBlendW = 1.0
+                fair = (pYes * 100.0).coerceIn(2.0, 98.0)
+            } else {
+                importedBlendW = loaded.blendWeight.toDouble()
+                val blended = loaded.blendWithMarket(pYes, mid01)
+                fair = (0.55 * (fair / 100.0) + 0.45 * blended).times(100.0).coerceIn(2.0, 98.0)
+            }
             delta = fair - midPp
             predictedSide = if (delta >= 0) "YES" else "NO"
+            if (loaded.isMarketAnchored) {
+                ev = NetExpectedValue.compute(
+                    fairYes = fair / 100.0,
+                    mid = mid01,
+                    spreadDollars = spread,
+                    feeRate = settings.feeRate,
+                    preferSide = predictedSide,
+                    stakeUsd = settings.ticketStakeUsd
+                )
+                size = PositionSizer.suggest(
+                    fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
+                    contractPrice = ev.contractPrice,
+                    bankrollUsd = settings.bankrollUsd,
+                    mode = PositionSizer.modeOf(settings.useKelly),
+                    kellyFraction = settings.kellyFraction,
+                    fixedFraction = settings.fixedFraction,
+                    maxFraction = settings.maxBankrollFraction,
+                    liquidity = liquidityObs,
+                    depthNearMid = depthNear,
+                    spreadDollars = spread,
+                    maxSpreadCents = settings.maxSpreadCents,
+                    netEvPositive = ev.netEv > 0.0
+                )
+            }
         }
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
