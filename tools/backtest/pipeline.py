@@ -40,9 +40,11 @@ MIN_ABS_GAP_USD = 0.50
 VELOCITY_LOOKBACK = 16
 DIRK_MIN_PROFIT = 10.0
 
+# Mirrors ScoringEngine companion. ai / related are off until refit
+# (docs/ml-review-2026-09-27.md #3, #4).
 W = {
-    "early": dict(ai=0.30, flow=0.12, related=0.08, velocity=0.10, imbalance=0.10, leadLag=0.10, depth=0.10, cancel=0.10, spot=0.08),
-    "late": dict(ai=0.20, flow=0.14, related=0.04, velocity=0.14, imbalance=0.14, leadLag=0.06, depth=0.14, cancel=0.14, spot=0.06),
+    "early": dict(ai=0.0, flow=0.12, related=0.0, velocity=0.10, imbalance=0.10, leadLag=0.10, depth=0.10, cancel=0.10, spot=0.08),
+    "late": dict(ai=0.0, flow=0.14, related=0.0, velocity=0.14, imbalance=0.14, leadLag=0.06, depth=0.14, cancel=0.14, spot=0.06),
 }
 
 

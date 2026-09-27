@@ -33,9 +33,9 @@ import kotlin.math.tanh
  *
  * | Feature                         | Early | Late | Notes |
  * |---------------------------------|------:|-----:|-------|
- * | AI (TFLite / fallback MLP)      |  0.30 | 0.20 | Then temperature + reliability-bin calibration |
+ * | AI (TFLite / fallback MLP)      |  0.00 | 0.00 | Off until refit; shown only |
  * | Volume-flow + aggressor         |  0.12 | 0.14 | Taker side when the trade feed provides it |
- * | Related crypto mid              |  0.08 | 0.04 | BTC ↔ ETH ↔ SOL last mid |
+ * | Related crypto mid              |  0.00 | 0.00 | Off: other coins' strikes differ |
  * | Tick velocity `Δmid/Δt` + accel |  0.10 | 0.14 | Last N ticker/trade/REST ticks |
  * | Order-book imbalance            |  0.10 | 0.14 | Near-mid bid vs ask |
  * | Cross-asset lead–lag            |  0.10 | 0.06 | BTC leads ETH/SOL (~3s); reverse when useful |
@@ -978,18 +978,31 @@ class ScoringEngine(
     }
 
     companion object {
-        const val W_AI = 0.30
+        /**
+         * Off until refit (docs/ml-review-2026-09-27.md #4). The 8-feature
+         * MLP was trained on 1,120 BTC+WTI rows from Kalshi-mid features only
+         * and has the worst out-of-sample Brier of any forecast (0.1645 vs
+         * market 0.1592). Still computed and shown; no longer moves fair.
+         */
+        const val W_AI = 0.0
         const val W_FLOW = 0.12
-        const val W_RELATED = 0.08
+
+        /**
+         * Off (docs/ml-review-2026-09-27.md #3). [TickBook.relatedCryptoMid]
+         * is the *other* coins' YES mid — a different strike, so not an
+         * estimate of this market's P(YES). Cross-coin moves are already in
+         * the lead–lag channel.
+         */
+        const val W_RELATED = 0.0
         const val W_VELOCITY = 0.10
         const val W_IMBALANCE = 0.10
         const val W_LEADLAG = 0.10
         const val W_DEPTH = 0.10
         const val W_CANCEL = 0.10
 
-        const val W_AI_LATE = 0.20
+        const val W_AI_LATE = 0.0
         const val W_FLOW_LATE = 0.14
-        const val W_RELATED_LATE = 0.04
+        const val W_RELATED_LATE = 0.0
         const val W_VELOCITY_LATE = 0.14
         const val W_IMBALANCE_LATE = 0.14
         const val W_LEADLAG_LATE = 0.06

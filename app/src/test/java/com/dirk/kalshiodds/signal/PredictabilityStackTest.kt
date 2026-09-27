@@ -303,10 +303,36 @@ class ScoringPredictabilityTest {
             hasDepth = true,
             hasCancel = true
         )!!
-        assertTrue(late.ai < early.ai)
+        assertTrue(late.ai <= early.ai)
         assertTrue(late.velocity > early.velocity)
         assertTrue(late.imbalance > early.imbalance)
         assertTrue(late.leadLag < early.leadLag)
+    }
+
+    @Test
+    fun aiAndRelatedChannelsDoNotMoveFairUntilRefit() {
+        val engine = ScoringEngine()
+        for (tte in TteRegime.values()) {
+            for (regime in RegimeTag.values()) {
+                val w = engine.blendWeights(
+                    tte = tte,
+                    regime = regime,
+                    hasAi = true,
+                    hasRelated = true,
+                    hasVel = true,
+                    hasImb = true,
+                    hasLeadLag = true,
+                    hasDepth = true,
+                    hasCancel = true,
+                    hasSpot = true
+                )!!
+                assertEquals(0.0, w.ai, 1e-12)
+                assertEquals(0.0, w.related, 1e-12)
+                val sum = w.ai + w.flow + w.related + w.velocity + w.imbalance +
+                    w.leadLag + w.depth + w.cancel + w.spot
+                assertEquals(1.0, sum, 1e-9)
+            }
+        }
     }
 
     @Test
