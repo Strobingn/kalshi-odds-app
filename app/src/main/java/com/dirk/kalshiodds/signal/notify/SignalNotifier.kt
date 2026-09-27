@@ -45,7 +45,7 @@ class SignalNotifier(private val context: Context) {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(title)
             .setContentText(text)
             .setStyle(
@@ -99,7 +99,7 @@ class SignalNotifier(private val context: Context) {
             )
         }
         return NotificationCompat.Builder(context, CHANNEL_FOREGROUND)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
             .setContentTitle(context.getString(R.string.live_signals_fg_title))
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
@@ -110,9 +110,9 @@ class SignalNotifier(private val context: Context) {
             .setContentIntent(open)
             .addAction(0, context.getString(R.string.live_signals_stop), stopPending)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setPriority(NotificationCompat.PRIORITY_MIN)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
             .build()
     }
 
@@ -125,7 +125,9 @@ class SignalNotifier(private val context: Context) {
         fun ensureChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             val nm = context.getSystemService(NotificationManager::class.java) ?: return
-            runCatching { nm.deleteNotificationChannel(LiveSignalsPolicy.CHANNEL_LEGACY) }
+            LiveSignalsPolicy.CHANNELS_RETIRED.forEach { id ->
+                runCatching { nm.deleteNotificationChannel(id) }
+            }
             val alerts = NotificationChannel(
                 CHANNEL_ALERTS,
                 context.getString(R.string.signal_channel_name),
@@ -138,7 +140,7 @@ class SignalNotifier(private val context: Context) {
             val fg = NotificationChannel(
                 CHANNEL_FOREGROUND,
                 context.getString(R.string.live_signals_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
                 description = context.getString(R.string.live_signals_channel_desc)
                 setShowBadge(false)

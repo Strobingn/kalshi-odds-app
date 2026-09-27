@@ -13,7 +13,7 @@
     <string name="signal_channel_name">Dip Hunter signals</string>
     <string name="signal_channel_desc">Instant local alerts when a crypto contract mid diverges from Dip Hunter fair value. Tickets still need an in-app Approve.</string>
     <string name="live_signals_channel_name">DipHunter live signals</string>
-    <string name="live_signals_channel_desc">Ongoing notice that keeps the Kalshi WebSocket and scoring loop alive in the background. Allow this notification or Android will stop live odds.</string>
+    <string name="live_signals_channel_desc">Silent ongoing notice Android requires while Live signals keeps the Kalshi WebSocket and scoring loop alive. Turn off Live signals in the app to remove it.</string>
     <string name="live_signals_fg_title">DipHunter live signals</string>
     <string name="live_signals_fg_text">Watching crypto ticker + orderbook WebSocket. Alerts never auto-place; Approve is required per ticket.</string>
     <string name="live_signals_stop">Stop</string>

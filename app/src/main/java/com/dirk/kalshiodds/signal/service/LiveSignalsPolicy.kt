@@ -16,8 +16,15 @@ object LiveSignalsPolicy {
     const val WAKELOCK_TIMEOUT_MS = 3L * 60L * 60L * 1000L
 
     const val NOTIFICATION_TITLE = "DipHunter live signals"
-    const val CHANNEL_ONGOING = "diphunter_live_signals_ongoing"
+    /**
+     * IMPORTANCE_MIN channel: silent, collapsed, no status-bar icon. A new id
+     * because Android never lowers an existing channel's importance.
+     */
+    const val CHANNEL_ONGOING = "diphunter_live_signals_quiet"
     const val CHANNEL_LEGACY = "diphunter_live_signals"
+
+    /** Earlier ongoing channels, deleted on start so only the quiet one remains. */
+    val CHANNELS_RETIRED = listOf(CHANNEL_LEGACY, "diphunter_live_signals_ongoing")
 
     const val BATTERY_REQUEST_ACTION = "android.settings.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"
     const val BATTERY_SETTINGS_ACTION = "android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS"

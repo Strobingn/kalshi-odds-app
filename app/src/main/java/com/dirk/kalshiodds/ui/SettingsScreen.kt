@@ -320,16 +320,45 @@ fun SettingsContent(
                 modifier = Modifier.padding(top = 8.dp)
             )
 
+            Section("Notifications")
+            ToggleRow("Notifications (all alerts and ticket cards)", s.notificationsEnabled, { viewModel?.setNotifications(it) })
+            ToggleRow(
+                "Long-shot / hunter cards",
+                s.opportunityAlertsEnabled,
+                { viewModel?.setOpportunityAlerts(it) },
+                enabled = s.notificationsEnabled
+            )
+            ToggleRow(
+                "Quiet opportunity alerts (no sound)",
+                s.opportunityQuiet,
+                { viewModel?.setOpportunityQuiet(it) },
+                enabled = s.notificationsEnabled
+            )
+            Text(
+                if (s.notificationsEnabled) {
+                    "Opportunity notifications open the ticket. Approve is still required — they never place an order."
+                } else {
+                    "Off: no signal alerts and no ticket cards. Signals still show inside the app."
+                },
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                "While Live signals runs, Android requires one ongoing notice. It is silent and collapsed at the bottom of the shade. To remove it, turn off Live signals below.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows a silent ongoing “DipHunter live signals” notice while it runs. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             ToggleRow("Live signals (keep odds alive)", s.liveSignalsEnabled, { viewModel?.setLiveSignals(it) })
             Text(
                 if (s.liveSignalsEnabled) {
-                    "Running. Leave the ongoing notification in place. Swiping the app away will not stop it."
+                    "Running. Swiping the app away will not stop it. Turn this off to remove the ongoing notice."
                 } else {
                     "Stopped. The OS will close the live pipeline shortly after the app is backgrounded."
                 },
@@ -398,15 +427,7 @@ fun SettingsContent(
             ToggleRow("Auto-tune edge from settled history", s.autoTuneEnabled, { viewModel?.setAutoTuneEnabled(it) })
             ToggleRow("Manual override (use slider, ignore sit-out)", s.autoTuneManualOverride, { viewModel?.setAutoTuneOverride(it) })
 
-            Section("Alerts")
-            ToggleRow("Notifications", s.notificationsEnabled, { viewModel?.setNotifications(it) })
-            ToggleRow("Long-shot / hunter cards", s.opportunityAlertsEnabled, { viewModel?.setOpportunityAlerts(it) })
-            ToggleRow("Quiet opportunity alerts (no sound)", s.opportunityQuiet, { viewModel?.setOpportunityQuiet(it) })
-            Text(
-                "Opportunity notifications open the ticket. Approve is still required — they never place an order.",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
+            Section("Trade feed")
             ToggleRow("Subscribe public trades", s.subscribeTrades, { viewModel?.setSubscribeTrades(it) })
 
             Section("Skip filter")
@@ -904,13 +925,18 @@ private fun Section(title: String) {
 }
 
 @Composable
-private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    label: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    enabled: Boolean = true
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(label, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
-        Switch(checked = checked, onCheckedChange = onChange)
+        Switch(checked = checked, onCheckedChange = onChange, enabled = enabled)
     }
 }

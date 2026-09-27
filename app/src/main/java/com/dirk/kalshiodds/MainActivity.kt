@@ -61,7 +61,9 @@ class MainActivity : ComponentActivity() {
         handleOpportunityIntent(intent)
         lifecycleScope.launch {
             KalshiOddsApp.from(this@MainActivity).container.preferences.settings
-                .map { it.notificationsEnabled || it.liveSignalsEnabled }
+                // Live signals alone does not prompt: its foreground service
+                // runs without the permission (the notice is just hidden).
+                .map { it.notificationsEnabled }
                 .distinctUntilChanged()
                 .collect { wantsNotify ->
                     if (wantsNotify) requestNotificationPermission()
@@ -69,7 +71,7 @@ class MainActivity : ComponentActivity() {
         }
         lifecycleScope.launch {
             KalshiOddsApp.from(this@MainActivity).container.preferences.settings
-                .map { it.opportunityAlertsEnabled }
+                .map { it.opportunityAlertsEnabled && it.notificationsEnabled }
                 .distinctUntilChanged()
                 .collect { wants ->
                     if (wants) requestNotificationPermission()
