@@ -11,7 +11,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.dirk.kalshiodds"
+        applicationId = "com.dirk.kalshiodds.kashi"
         minSdk = 26
         targetSdk = 35
         versionCode = 31

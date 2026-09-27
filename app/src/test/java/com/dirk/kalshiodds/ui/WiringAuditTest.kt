@@ -201,7 +201,8 @@ class WiringAuditTest {
         Control("Last order error skip lifecycle", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "isNotAnOrderError"),
         Control("Last order error clear stale", com.dirk.kalshiodds.signal.trade.LastOrderErrorStore::class.java, "clearStaleLifecycleNotice"),
         Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
-        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals")
+        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals"),
+        Control("applicationId side-by-side audit", com.dirk.kalshiodds.AppIdentity::class.java, "wiringAuditItems")
     )
 
     @Test
@@ -238,6 +239,15 @@ class WiringAuditTest {
         assertNotNull(Contrast::readable)
         assertNotNull(com.dirk.kalshiodds.signal.config.CredentialWriteGuard::rejectReason)
         assertNotNull(com.dirk.kalshiodds.domain.KalshiPrice::parseDollars)
+        val idItems = com.dirk.kalshiodds.AppIdentity.wiringAuditItems()
+        assertTrue(idItems.any { it.contains("com.dirk.kalshiodds.kashi") })
+        assertTrue(idItems.any { it.contains("FileProvider") })
+        assertTrue(idItems.any { it.contains("PendingIntent") })
+        assertTrue(idItems.any { it.contains("diphunter_results.db") })
+        assertTrue(idItems.any { it.contains("diphunter_signal_prefs") })
+        assertTrue(idItems.any { it.contains("diphunter_signal_alerts") })
+        assertTrue(idItems.any { it.contains("diphunter_live_signals_watchdog") })
+        assertTrue(idItems.any { it.contains("package:\$packageName") || it.contains("packageName") })
         assertNotNull(KalshiQuoteDisplay::formatPriceCents)
         assertNotNull(KalshiQuoteDisplay::multipleLabel)
         assertNotNull(SettingsViewModel::backupCredentials)

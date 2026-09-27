@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketQuoteView
@@ -21,7 +22,7 @@ import kotlin.math.roundToInt
  * or a ticket. Wired from [WiringAuditTest] so every line stays a real method.
  */
 object HomeCopy {
-    const val TITLE = "DipHunter"
+    const val TITLE = AppIdentity.LABEL
     const val THIS_WINDOW = "This window"
     const val BUY_ANYWAY = "Buy anyway"
     const val NEED_20 = "need 20+ results"

@@ -51,6 +51,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
 import java.util.Locale
@@ -322,7 +323,7 @@ fun SettingsContent(
 
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “${AppIdentity.LABEL}” notification — allow it. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
