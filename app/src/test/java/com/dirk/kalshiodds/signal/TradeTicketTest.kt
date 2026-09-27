@@ -137,10 +137,11 @@ class PayoutGateTest {
 
     @Test
     fun stakeClipAndRaiseConfirm() {
-        assertEquals(25.0, PayoutGate.clipStake(99.0), 1e-9)
+        assertEquals(10.0, PayoutGate.clipStake(99.0), 1e-9)
         assertEquals(1.0, PayoutGate.clipStake(0.1), 1e-9)
         assertFalse(PayoutGate.requiresRaiseConfirm(5.0))
-        assertTrue(PayoutGate.requiresRaiseConfirm(6.0))
+        assertFalse(PayoutGate.requiresRaiseConfirm(6.0))
+        assertFalse(PayoutGate.requiresRaiseConfirm(10.0))
         assertTrue(PayoutGate.raiseConfirmMatches("raise"))
         assertTrue(PayoutGate.raiseConfirmMatches("RAISE"))
         assertFalse(PayoutGate.raiseConfirmMatches("ok"))
@@ -580,7 +581,7 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertTrue(ticket!!.stakeUsd in 4.0..5.0 + 1e-6)
+        assertTrue(ticket!!.stakeUsd in 9.0..10.0 + 1e-6)
         assertEquals(LiveOrderSizer.size(0.04).count, ticket.contracts)
         assertTrue(ticket.maxPayoutUsd >= 25.0)
         assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)
