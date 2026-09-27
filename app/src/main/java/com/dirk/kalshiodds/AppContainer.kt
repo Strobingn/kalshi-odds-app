@@ -15,7 +15,9 @@ import com.dirk.kalshiodds.prediction.PredictionLogStore
 import com.dirk.kalshiodds.signal.SignalHub
 import com.dirk.kalshiodds.signal.config.SignalPreferences
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
+import com.dirk.kalshiodds.signal.external.CoinbaseSpotStream
 import com.dirk.kalshiodds.signal.external.ExternalMarketCache
+import com.dirk.kalshiodds.signal.external.SpotStreamBook
 import com.dirk.kalshiodds.signal.feedback.DecisionSupport
 import com.dirk.kalshiodds.signal.feedback.GuardrailStore
 import com.dirk.kalshiodds.signal.feedback.LearnedWeightsStore
@@ -74,6 +76,18 @@ class AppContainer(context: Context) {
         notifier = notifier,
         logStore = logStore,
         results = resultsWriter
+    )
+
+    /**
+     * Streamed Coinbase spot (docs/ml-review-2026-09-27.md #6). Scoring reads
+     * [spotBook] while it is fresh and falls back to [external] (REST); each
+     * print can re-score that coin via [SignalHub.ingestSpot]. Runs while the
+     * app is visible or Live signals is on, and the Settings toggle allows it.
+     */
+    val spotBook = SpotStreamBook().also { scoring.spotStream = it }
+    val spotStream = CoinbaseSpotStream(
+        book = spotBook,
+        onPrint = { asset, price, recvNanos -> hub.ingestSpot(asset, price, recvNanos) }
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
     val paper = PaperBookStore(app)

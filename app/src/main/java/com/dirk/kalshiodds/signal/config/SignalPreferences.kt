@@ -44,6 +44,8 @@ data class SignalSettings(
     val opportunityQuiet: Boolean = SignalConstants.DEFAULT_OPPORTUNITY_QUIET,
     val liveSignalsEnabled: Boolean = false,
     val subscribeTrades: Boolean = true,
+    /** Coinbase spot WebSocket; off → REST spot only (25 s cache). */
+    val spotStreamEnabled: Boolean = SignalConstants.DEFAULT_SPOT_STREAM,
     val debounceMs: Long = 10_000L,
     val minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
     val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
@@ -177,6 +179,7 @@ class SignalPreferences(
         edit { it[KEY_LIVE] = value }
     }
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
+    suspend fun updateSpotStream(value: Boolean) = edit { it[KEY_SPOT_STREAM] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
         it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)
     }
@@ -373,6 +376,7 @@ class SignalPreferences(
             opportunityQuiet = this[KEY_OPP_QUIET] ?: SignalConstants.DEFAULT_OPPORTUNITY_QUIET,
             liveSignalsEnabled = this[KEY_LIVE] ?: def.liveSignalsEnabled,
             subscribeTrades = this[KEY_TRADES] ?: def.subscribeTrades,
+            spotStreamEnabled = this[KEY_SPOT_STREAM] ?: SignalConstants.DEFAULT_SPOT_STREAM,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
             minConfidence = this[KEY_MIN_CONF] ?: def.minConfidence,
             minLiquidity = this[KEY_MIN_LIQ] ?: def.minLiquidity,
@@ -444,6 +448,7 @@ class SignalPreferences(
         private val KEY_OPP_QUIET = booleanPreferencesKey("opportunity_quiet")
         private val KEY_LIVE = booleanPreferencesKey("live_signals_enabled")
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
+        private val KEY_SPOT_STREAM = booleanPreferencesKey("spot_stream_enabled")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
         private val KEY_MIN_CONF = doublePreferencesKey("min_confidence")
         private val KEY_MIN_LIQ = doublePreferencesKey("min_liquidity")

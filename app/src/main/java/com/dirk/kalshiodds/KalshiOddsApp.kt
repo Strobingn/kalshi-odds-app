@@ -7,6 +7,7 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
+import com.dirk.kalshiodds.signal.external.CoinbaseSpotStream
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
@@ -71,10 +72,13 @@ class KalshiOddsApp : Application() {
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
+                // The UI scores on REST polls while visible; stream spot for it too.
+                runCatching { container.spotStream.acquire(CoinbaseSpotStream.OWNER_UI) }
             }
 
             override fun onStop(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.markUiInForeground(false)
+                runCatching { container.spotStream.release(CoinbaseSpotStream.OWNER_UI) }
                 runCatching { container.endSession() }
             }
         })
@@ -95,6 +99,14 @@ class KalshiOddsApp : Application() {
                         }
                         // Off: the running service observes DataStore and stopSelfs.
                     }
+            }
+        }
+        appScope.launch {
+            runCatching {
+                container.preferences.settings
+                    .map { it.spotStreamEnabled }
+                    .distinctUntilChanged()
+                    .collect { enabled -> container.spotStream.setEnabled(enabled) }
             }
         }
     }

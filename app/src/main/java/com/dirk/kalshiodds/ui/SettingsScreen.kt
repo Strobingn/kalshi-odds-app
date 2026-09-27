@@ -429,6 +429,12 @@ fun SettingsContent(
 
             Section("Trade feed")
             ToggleRow("Subscribe public trades", s.subscribeTrades, { viewModel?.setSubscribeTrades(it) })
+            ToggleRow("Stream spot (Coinbase WebSocket)", s.spotStreamEnabled, { viewModel?.setSpotStream(it) })
+            Text(
+                "Live Coinbase spot re-scores a market as soon as spot moves. Off or disconnected: 25-second REST spot.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
 
             Section("Skip filter")
             Text(
