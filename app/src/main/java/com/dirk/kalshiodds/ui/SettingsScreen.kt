@@ -474,6 +474,60 @@ fun SettingsContent(
             )
             ToggleRow("Hide weak / filtered from opportunities", s.hideWeakOpportunities, { viewModel?.setHideWeak(it) })
 
+            Section("Entry filter")
+            Text(
+                "No alerts, auto tickets, or BET call in the first minutes of each 15-minute window, or when spot is " +
+                    "sitting on the strike (a coin flip). Applies even when tickets ignore the skip filter; Buy anyway " +
+                    "still works. Backtest: those entries lost the most out of sample, but not by a statistically sure margin.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            ToggleRow("Entry filter", s.entryFilterEnabled, { viewModel?.setEntryFilterEnabled(it) })
+            Text(
+                String.format(
+                    Locale.US,
+                    "Wait %d min into the window  (no entry before %s left)",
+                    s.entryMinElapsedMinutes,
+                    com.dirk.kalshiodds.signal.engine.EntryFilter.waitUntilLabel(s.entryMinElapsedMinutes)
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.entryMinElapsedMinutes.toFloat().coerceIn(0f, 10f),
+                onValueChange = { viewModel?.setEntryMinElapsedMinutes(Math.round(it)) },
+                valueRange = 0f..10f,
+                steps = 9,
+                enabled = s.entryFilterEnabled
+            )
+            Text(
+                String.format(Locale.US, "Min distance from strike  %.0f bp  (0 = off)", s.entryMinStrikeDistanceBp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.entryMinStrikeDistanceBp.toFloat().coerceIn(0f, 20f),
+                onValueChange = { viewModel?.setEntryMinStrikeDistanceBp(Math.round(it).toDouble()) },
+                valueRange = 0f..20f,
+                steps = 19,
+                enabled = s.entryFilterEnabled
+            )
+            Text(
+                String.format(Locale.US, "…unless net edge ≥ %.0f pp", s.entryNearStrikeOverridePp),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.entryNearStrikeOverridePp.toFloat().coerceIn(2f, 30f),
+                onValueChange = { viewModel?.setEntryNearStrikeOverridePp(Math.round(it).toDouble()) },
+                valueRange = 2f..30f,
+                steps = 27,
+                enabled = s.entryFilterEnabled && s.entryMinStrikeDistanceBp > 0.0
+            )
+
             Section("Bankroll & size (advisory)")
             Text(
                 "Suggested contracts only. The app never places orders. Default is quarter-Kelly, capped at 5% of bankroll and by liquidity / spread.",

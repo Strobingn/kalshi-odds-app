@@ -140,6 +140,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setMinLiquidity(v: Double) = viewModelScope.launch { prefs.updateMinLiquidity(v) }
     fun setMaxSpreadCents(v: Double) = viewModelScope.launch { prefs.updateMaxSpreadCents(v) }
     fun setHideWeak(v: Boolean) = viewModelScope.launch { prefs.updateHideWeak(v) }
+    fun setEntryFilterEnabled(v: Boolean) = viewModelScope.launch { prefs.updateEntryFilterEnabled(v) }
+    fun setEntryMinElapsedMinutes(v: Int) = viewModelScope.launch { prefs.updateEntryMinElapsedMinutes(v) }
+    fun setEntryMinStrikeDistanceBp(v: Double) = viewModelScope.launch { prefs.updateEntryMinStrikeDistanceBp(v) }
+    fun setEntryNearStrikeOverridePp(v: Double) = viewModelScope.launch { prefs.updateEntryNearStrikeOverridePp(v) }
     fun setBankroll(v: Double) = track("bankroll_usd", _state.value.settings.bankrollUsd, v) {
         prefs.updateBankrollUsd(v)
     }

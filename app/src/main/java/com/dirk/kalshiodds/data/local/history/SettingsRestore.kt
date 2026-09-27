@@ -24,6 +24,10 @@ object SettingsRestore {
         o.put("minConfidence", s.minConfidence)
         o.put("maxSpreadCents", s.maxSpreadCents)
         o.put("minProfitIfWinUsd", s.minProfitIfWinUsd)
+        o.put("entryFilterEnabled", s.entryFilterEnabled)
+        o.put("entryMinElapsedMinutes", s.entryMinElapsedMinutes)
+        o.put("entryMinStrikeDistanceBp", s.entryMinStrikeDistanceBp)
+        o.put("entryNearStrikeOverridePp", s.entryNearStrikeOverridePp)
         return o.toString()
     }
 
@@ -48,7 +52,11 @@ object SettingsRestore {
             paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
             minConfidence = o.optDoubleOrNull("minConfidence"),
             maxSpreadCents = o.optDoubleOrNull("maxSpreadCents"),
-            minProfitIfWinUsd = o.optDoubleOrNull("minProfitIfWinUsd")
+            minProfitIfWinUsd = o.optDoubleOrNull("minProfitIfWinUsd"),
+            entryFilterEnabled = if (o.has("entryFilterEnabled")) o.optBoolean("entryFilterEnabled") else null,
+            entryMinElapsedMinutes = o.optDoubleOrNull("entryMinElapsedMinutes")?.toInt(),
+            entryMinStrikeDistanceBp = o.optDoubleOrNull("entryMinStrikeDistanceBp"),
+            entryNearStrikeOverridePp = o.optDoubleOrNull("entryNearStrikeOverridePp")
         )
     }
 
@@ -77,7 +85,11 @@ data class RestoredSettings(
     val paperTradingEnabled: Boolean? = null,
     val minConfidence: Double? = null,
     val maxSpreadCents: Double? = null,
-    val minProfitIfWinUsd: Double? = null
+    val minProfitIfWinUsd: Double? = null,
+    val entryFilterEnabled: Boolean? = null,
+    val entryMinElapsedMinutes: Int? = null,
+    val entryMinStrikeDistanceBp: Double? = null,
+    val entryNearStrikeOverridePp: Double? = null
 ) {
     val isEmpty: Boolean
         get() = hunterValueStakeUsd == null && hunterValuePayoutUsd == null &&
