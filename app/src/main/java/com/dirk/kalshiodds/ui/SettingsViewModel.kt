@@ -250,20 +250,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setPathSim(v: Boolean) = viewModelScope.launch { prefs.updatePathSim(v) }
 
     /**
-     * Lowering stake (or staying ≤ $5) writes immediately. Raising above the
-     * $5 soft cap opens a typed-confirm dialog. Hard cap is $25.
+     * 0.3.16: stake is $1–$10. Soft cap equals hard cap so RAISE is unused.
      */
     fun requestTicketStake(raw: Double) {
         val clipped = PayoutGate.clipStake(raw)
         val current = _state.value.settings.ticketStakeUsd
-        if (clipped <= current + 1e-9 || !PayoutGate.requiresRaiseConfirm(clipped)) {
-            track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
-            _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
-            return
-        }
-        _state.update {
-            it.copy(pendingRaiseStake = clipped, raiseDraft = "", raiseError = null)
-        }
+        track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
+        _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
     }
 
     fun setRaiseDraft(text: String) = _state.update { it.copy(raiseDraft = text, raiseError = null) }

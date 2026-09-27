@@ -64,12 +64,12 @@ class KalshiFeeAndWinTargetTest {
     fun winTargetDefaultsToFiftyOn() {
         assertFalse(SignalConstants.DEFAULT_WIN_TARGET_ENABLED)
         assertEquals(50.0, SignalConstants.DEFAULT_WIN_TARGET_USD, 1e-9)
-        assertEquals(5.0, SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
-        assertEquals(10.0, SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD, 1e-9)
+        assertEquals(10.0, SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(0.0, SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD, 1e-9)
         assertEquals(0.20, SignalConstants.DEFAULT_LONG_SHOT_MAX_ASK, 1e-9)
         val defaults = SignalSettings()
         assertFalse(defaults.winTargetEnabled)
-        assertEquals(10.0, defaults.minProfitIfWinUsd, 1e-9)
+        assertEquals(0.0, defaults.minProfitIfWinUsd, 1e-9)
         assertEquals(0.20, defaults.longShotMaxAsk, 1e-9)
     }
 

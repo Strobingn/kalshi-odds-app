@@ -103,23 +103,27 @@ object SignalConstants {
     /**
      * Hard all-in cap on a live Approve, including Kalshi fees.
      * `count` is the largest integer with count×P + fee ≤ this.
+     * 0.3.16: $10 default and hard cap (user may pick less).
      */
-    const val LIVE_ALL_IN_CAP_USD = 5.0
-
-    /** Hide / disable a ticket when profit-if-win is below this. */
-    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 10.0
-
-    /** Default USD risked on one approved ticket. */
-    const val DEFAULT_TICKET_STAKE_USD = 5.0
+    const val LIVE_ALL_IN_CAP_USD = 10.0
 
     /**
-     * Soft cap: Settings may lower freely. Raising above this requires an
-     * explicit typed confirmation in Settings.
+     * Min-profit-if-win is gone in 0.3.16. Kept at 0 so leftover prefs
+     * and History restore cannot block a ticket.
      */
-    const val TICKET_STAKE_SOFT_CAP_USD = 5.0
+    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 0.0
 
-    /** Hard ceiling so this never becomes a large auto-bot. */
-    const val TICKET_STAKE_HARD_CAP_USD = 25.0
+    /** Default USD risked on one approved ticket. */
+    const val DEFAULT_TICKET_STAKE_USD = 10.0
+
+    /**
+     * Soft cap equals the hard cap — Settings may lower freely; no RAISE
+     * phrase is needed because nothing above $10 is allowed.
+     */
+    const val TICKET_STAKE_SOFT_CAP_USD = 10.0
+
+    /** Hard ceiling: $10 max bet. */
+    const val TICKET_STAKE_HARD_CAP_USD = 10.0
 
     /** Minimum stake the slider / prefs will accept. */
     const val TICKET_STAKE_MIN_USD = 1.0

@@ -335,6 +335,98 @@ class HomeScreenScreenshotTest {
     fun darkSettings() = snapSettings("settings_dark", dark = true)
 
     @Test
+    fun lastMinuteCardWaiting() {
+        paparazzi.snapshot(name = "last_minute_card_waiting") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteWaitingBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_waiting")
+    }
+
+    @Test
+    fun lastMinuteCardLive() {
+        paparazzi.snapshot(name = "last_minute_card_live") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteLiveBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_live")
+    }
+
+    @Test
+    fun lastMinuteCardFired() {
+        paparazzi.snapshot(name = "last_minute_card_fired") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteFiredBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_fired")
+    }
+
+    @Test
+    fun lastMinuteScorecardSection() = snapScorecard(
+        "last_minute_scorecard_section",
+        dark = true,
+        ui = HomeFixtures.lastMinuteScorecardUi(),
+        height = 2200
+    )
+
+    @Test
+    fun lastMinuteSettings() = snapSettings("last_minute_settings", dark = false)
+
+    @Test
     fun beforeLightActionable() = snapBefore("before_0_3_11_light_actionable", dark = false, keyed = true)
 
     @Test

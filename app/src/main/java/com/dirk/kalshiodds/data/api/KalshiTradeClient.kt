@@ -27,9 +27,9 @@ import retrofit2.Response
  * Limit orders only — never market. Fail-soft with a clear message.
  * PEM / secrets are never written to logs.
  *
- * Live buys are clipped at the $5 all-in cap ([LiveOrderSizer.enforce])
+ * Live buys are clipped at the $10 all-in cap ([LiveOrderSizer.enforce])
  * immediately before the V2 body is built, so a leftover $50 win-target
- * cannot resize a live order above $5.
+ * cannot resize a live order above $10.
  */
 class KalshiTradeClient(
     private val primary: KalshiTradeApi,
@@ -243,7 +243,7 @@ class KalshiTradeClient(
         if (ticket.isSell) return ticket
         val clip = LiveOrderSizer.enforce(ticket)
         if (!clip.ok) {
-            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
+            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $10 all-in cap")
         }
         if (clip.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
             throw IllegalStateException(

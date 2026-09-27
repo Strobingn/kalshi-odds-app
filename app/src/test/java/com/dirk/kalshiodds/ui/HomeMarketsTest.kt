@@ -29,9 +29,13 @@ class HomeMarketsTest {
         val decisions = HomeMarkets.decisions(live, ctx)
         val ranked = HomeMarkets.ranked(live, decisions, settings)
         assertEquals("KXBTC15M-25SEP181700-50", ranked.single().ticker)
-        assertTrue(decisions[ranked.first().ticker]!!.isActionable)
+        assertEquals(BetCall.Headline.NO_BET, decisions[ranked.first().ticker]!!.headline)
         val best = HomeMarkets.best(ranked, decisions)!!
-        assertEquals(BetCall.Headline.BET_UP, best.second.headline)
+        assertEquals(BetCall.Headline.NO_BET, best.second.headline)
+        assertTrue(
+            best.second.noBetReason!!.contains("waiting") ||
+                best.second.noBetReason!!.contains("Last-minute")
+        )
     }
 
     @Test

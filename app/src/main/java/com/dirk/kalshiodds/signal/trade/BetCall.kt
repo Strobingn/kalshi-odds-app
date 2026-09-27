@@ -4,10 +4,12 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy
+import com.dirk.kalshiodds.signal.lastminute.LastMinutePhase
 
 /**
  * Single source of truth for the card headline, the ticket side, and
- * the Approve target. Never a separate heuristic.
+ * the Approve target. 0.3.16: the pick is the last-minute strategy.
  */
 object BetCall {
 
@@ -38,36 +40,22 @@ object BetCall {
         if (!ctx.settings.ticketsEnabled) {
             return none("Trade tickets are off in Settings")
         }
-        if (ctx.settings.isSittingOut()) {
-            return none(ctx.settings.autoTuneNote.ifBlank { "The model hasn't beaten Kalshi's prices in testing." })
-        }
+        val lm = market.lastMinute
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
-            return none(TicketBuilder.MARKET_CLOSED)
+            return when (lm?.phase) {
+                LastMinutePhase.FIRED -> fired(market, ctx, lm)
+                LastMinutePhase.NO_PLAY -> none(LastMinuteCopy.NO_PLAY)
+                LastMinutePhase.WAITING, LastMinutePhase.LIVE -> none(LastMinuteCopy.NO_PLAY)
+                null -> none("Market closed")
+            }
         }
-        val proposed = TicketBuilder.proposeAll(listOf(market), ctx).filter { !it.isSell }
-        val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
-        val tickets = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
-        val actionable = tickets.filter { qualifies(it, market, ctx) }
-        val preferred = TicketBuilder.resolveSide(market)
-        val chosen = actionable.firstOrNull { preferred != null && it.side.equals(preferred, true) }
-            ?: actionable.maxByOrNull { it.profitIfWinUsd ?: 0.0 }
-        if (chosen != null) {
-            return Decision(
-                headline = if (chosen.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,
-                side = chosen.side,
-                ticket = chosen,
-                ask = KalshiPrice.usable(chosen.limitPrice) ?: TicketBuilder.bestAsk(market, chosen.side, ctx),
-                profitIfWinUsd = chosen.profitIfWinUsd,
-                allInUsd = chosen.estimatedFillUsd,
-                contracts = chosen.contracts,
-                noBetReason = null
-            )
+        return when (lm?.phase) {
+            LastMinutePhase.FIRED -> fired(market, ctx, lm)
+            LastMinutePhase.LIVE -> none(LastMinuteCopy.TITLE)
+            LastMinutePhase.NO_PLAY -> none(LastMinuteCopy.NO_PLAY)
+            LastMinutePhase.WAITING -> none(LastMinuteCopy.waiting(lm.startsInMs))
+            null -> none(LastMinuteCopy.waiting(waitingMs(market, ctx.nowMs)))
         }
-        val blocked = tickets.firstOrNull { it.blockedReason != null }
-        val reason = blocked?.blockedReason
-            ?: tickets.firstOrNull()?.gateNote
-            ?: "No side clears edge after fees, the $5 all-in cap, and the min-profit setting"
-        return none(reason)
     }
 
     fun decide(market: MarketUiModel, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Decision =
@@ -76,6 +64,7 @@ object BetCall {
     fun sortKey(decision: Decision): Int = if (decision.isActionable) 0 else 1
 
     fun qualifies(ticket: TradeTicket, market: MarketUiModel, ctx: TicketBuilder.Context): Boolean {
+        if (ticket.kind == TicketKind.LAST_MINUTE) return ticket.canApprove
         if (!ticket.canApprove) return false
         val ask = KalshiPrice.usable(ticket.limitPrice) ?: return false
         if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isPlaceholder(ask)) return false
@@ -87,6 +76,32 @@ object BetCall {
             ctx.settings.feeRate,
             stakeUsd = ctx.settings.ticketStakeUsd
         )
+    }
+
+    private fun fired(
+        market: MarketUiModel,
+        ctx: TicketBuilder.Context,
+        lm: com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot
+    ): Decision {
+        val ticket = TicketBuilder.proposeLastMinute(market, ctx)
+            ?: return none(LastMinuteCopy.buyLine(lm.fired!!).takeIf { lm.fired != null } ?: LastMinuteCopy.TITLE)
+        val fired = lm.fired
+        return Decision(
+            headline = if (ticket.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,
+            side = ticket.side,
+            ticket = ticket,
+            ask = fired?.ask ?: KalshiPrice.usable(ticket.limitPrice),
+            profitIfWinUsd = ticket.profitIfWinUsd,
+            allInUsd = ticket.estimatedFillUsd,
+            contracts = ticket.contracts,
+            noBetReason = null
+        )
+    }
+
+    private fun waitingMs(market: MarketUiModel, nowMs: Long): Long? {
+        val close = market.closeTimeEpochMs ?: return null
+        val start = close - 60_000L
+        return (start - nowMs).coerceAtLeast(0L)
     }
 
     private fun none(reason: String) = Decision(

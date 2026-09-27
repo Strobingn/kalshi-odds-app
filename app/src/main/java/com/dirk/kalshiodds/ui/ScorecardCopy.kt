@@ -27,6 +27,7 @@ object ScorecardCopy {
     const val CONF_TITLE = "By AI confidence"
     const val AI_TITLE = "AI picks"
     const val MANUAL_TITLE = "Manual Paper UP/DOWN"
+    const val LAST_MINUTE_TITLE = "Last-minute strategy"
     const val COMBINED_TITLE = "Combined"
     const val NO_BET_TITLE = "NO BET would-have-been"
     const val PICKS_TITLE = "Every settled pick"
@@ -47,6 +48,18 @@ object ScorecardCopy {
         val line: String
     )
 
+    data class LastMinuteSection(
+        val wins: Int = 0,
+        val losses: Int = 0,
+        val winRate: Double? = null,
+        val wonUsd: Double = 0.0,
+        val lostUsd: Double = 0.0,
+        val pnlUsd: Double = 0.0,
+        val settledCount: Int = 0,
+        val picks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList(),
+        val record: String = EM_DASH
+    )
+
     data class RecentPick(
         val ticker: String,
         val coin: String,
@@ -64,7 +77,8 @@ object ScorecardCopy {
         val ledger: ScorecardLedger.Snapshot,
         val bySide: List<Bucket>,
         val byPrice: List<Bucket>,
-        val byConfidence: List<Bucket>
+        val byConfidence: List<Bucket>,
+        val lastMinute: LastMinuteSection = LastMinuteSection()
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
         val showsEmptyState: Boolean get() = showsEmptyState(settledCount)
@@ -84,6 +98,11 @@ object ScorecardCopy {
                 lines += recordLine(ledger.ai)
                 lines += MANUAL_TITLE
                 lines += recordLine(ledger.manual)
+            }
+            lines += LAST_MINUTE_TITLE
+            lines += lastMinute.record
+            if (lastMinute.picks.isNotEmpty()) {
+                lines += lastMinute.picks.map { com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(it) }
             }
             lines += SIDE_TITLE
             lines += bySide.map { it.line }
@@ -128,13 +147,15 @@ object ScorecardCopy {
         entries: List<PredictionLogEntry>,
         paper: PaperBookState,
         windows: List<SettledWindowRow> = emptyList(),
-        zoneId: ZoneId = ET_ZONE
+        zoneId: ZoneId = ET_ZONE,
+        lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList()
     ): View = of(
         entries = entries,
         fills = paper.fills + paper.archived.flatMap { it.fills },
         paperPnlUsd = paper.realizedPnlUsd,
         windows = windows,
-        zoneId = zoneId
+        zoneId = zoneId,
+        lastMinutePicks = lastMinutePicks
     )
 
     fun of(
@@ -142,7 +163,8 @@ object ScorecardCopy {
         fills: List<PaperFill>,
         paperPnlUsd: Double,
         windows: List<SettledWindowRow> = emptyList(),
-        zoneId: ZoneId = ET_ZONE
+        zoneId: ZoneId = ET_ZONE,
+        lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList()
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
         val summary = HomeScorecardSummary(
@@ -159,7 +181,33 @@ object ScorecardCopy {
             ledger = ledger,
             bySide = ledger.bySide.map { toBucket(it) },
             byPrice = ledger.byPrice.map { toBucket(it) },
-            byConfidence = ledger.byConfidence.map { toBucket(it) }
+            byConfidence = ledger.byConfidence.map { toBucket(it) },
+            lastMinute = lastMinuteSection(lastMinutePicks)
+        )
+    }
+
+    fun lastMinuteSection(
+        picks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick>
+    ): LastMinuteSection {
+        val settled = picks.filter { it.settled && it.won != null }
+        val wins = settled.count { it.won == true }
+        val losses = settled.count { it.won == false }
+        val wonUsd = settled.filter { (it.pnlUsd ?: 0.0) > 0.0 }.sumOf { it.pnlUsd ?: 0.0 }
+        val lostUsd = settled.filter { (it.pnlUsd ?: 0.0) <= 0.0 }.sumOf { -(it.pnlUsd ?: 0.0) }
+        val pnl = settled.sumOf { it.pnlUsd ?: 0.0 }
+        val rate = if (settled.isEmpty()) null else wins.toDouble() / settled.size
+        return LastMinuteSection(
+            wins = wins,
+            losses = losses,
+            winRate = rate,
+            wonUsd = wonUsd,
+            lostUsd = lostUsd,
+            pnlUsd = pnl,
+            settledCount = settled.size,
+            picks = picks,
+            record = if (settled.isEmpty()) EM_DASH else com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.recordLine(
+                wins, losses, rate, wonUsd, lostUsd, pnl
+            )
         )
     }
 

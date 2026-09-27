@@ -26,4 +26,7 @@
     <string name="opportunity_hunter_title">Hunter · %1$s</string>
     <string name="opportunity_wintarget_title">Ticket · %1$s</string>
     <string name="opportunity_body">%1$s · %2$d ct · $%3$s stake. Tap to open the ticket. Approve still required.</string>
+    <string name="last_minute_channel_name">Last-minute play</string>
+    <string name="last_minute_channel_desc">Heads-up when the last-minute BRTI rule fires. Approve + REAL MONEY still required — never auto-placed.</string>
+    <string name="last_minute_alert_title">Last-minute · %1$s</string>
 </resources>

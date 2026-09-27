@@ -193,8 +193,113 @@ object HomeFixtures {
         apiKeyId = if (hasKey) "key-id" else "",
         hasPrivateKey = hasKey,
         paperTradingEnabled = true,
-        ticketsEnabled = true
+        ticketsEnabled = true,
+        ticketStakeUsd = 10.0,
+        minProfitIfWinUsd = 0.0
     )
+
+    fun lastMinuteWaitingBtc() = screenshotPhoneBtc().copy(
+        lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot(
+            phase = com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.WAITING,
+            tauSec = 200,
+            startsInMs = 140_000,
+            spotUsd = 84_140.0,
+            strikeUsd = 84_144.0,
+            spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+        )
+    )
+
+    fun lastMinuteLiveBtc() = screenshotPhoneBtc().copy(
+        yesAsk = 0.50,
+        noAsk = 0.50,
+        lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-26SEP251600-45",
+                tauSec = 20,
+                x = 0.0,
+                obsMean = 0.0,
+                sigS = 5e-4,
+                upAsk = 0.50,
+                downAsk = 0.50,
+                spotUsd = 84_140.0,
+                strikeUsd = 84_144.0,
+                spotSource = "BRTI composite (Coinbase, Kraken)"
+            )
+        )
+    )
+
+    fun lastMinuteFiredBtc() = screenshotPhoneBtc().copy(
+        yesAsk = 0.03,
+        noAsk = 0.97,
+        lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-26SEP251600-45",
+                tauSec = 45,
+                x = 0.0006,
+                obsMean = 0.0004,
+                sigS = 5e-05,
+                upAsk = 0.03,
+                downAsk = 0.97,
+                nowMs = NOW_MS,
+                spotUsd = 84_180.0,
+                strikeUsd = 84_144.0,
+                spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+            )
+        )
+    )
+
+    fun lastMinuteFire(
+        ticker: String,
+        side: String,
+        yesAsk: Double,
+        noAsk: Double
+    ) = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+        com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+            ticker = ticker,
+            tauSec = if (side.equals("NO", true)) 30 else 45,
+            x = if (side.equals("NO", true)) -0.0003 else 0.0006,
+            obsMean = if (side.equals("NO", true)) -0.0002 else 0.0004,
+            sigS = if (side.equals("NO", true)) 4e-05 else 5e-05,
+            upAsk = yesAsk,
+            downAsk = noAsk,
+            nowMs = NOW_MS
+        )
+    )
+
+    fun withLastMinuteFire(market: MarketUiModel, side: String): MarketUiModel = market.copy(
+        lastMinute = lastMinuteFire(
+            market.ticker,
+            side,
+            market.yesAsk ?: 0.03,
+            market.noAsk ?: 0.97
+        )
+    )
+
+    fun lastMinuteScorecardUi(): ScorecardUi {
+        val pick = com.dirk.kalshiodds.signal.lastminute.LastMinutePick(
+            id = "lm1",
+            ticker = "KXBTC15M-26SEP251600-45",
+            side = "YES",
+            entryAsk = 0.03,
+            contracts = 312,
+            stakeUsd = 10.0,
+            feeUsd = 0.64,
+            winChance = 0.998,
+            evPerDollar = 30.1,
+            depthLimited = false,
+            createdAtMs = NOW_MS,
+            settled = true,
+            outcome = "yes",
+            won = true,
+            pnlUsd = 302.0
+        )
+        val base = sampleScorecardUi()
+        return base.copy(
+            view = base.view.copy(
+                lastMinute = ScorecardCopy.lastMinuteSection(listOf(pick))
+            )
+        )
+    }
 
     val SAMPLE_SCORECARD = HomeScorecardSummary(
         wins = 12,

@@ -172,10 +172,12 @@ fun ScorecardScreen(
                         fontWeight = FontWeight.SemiBold
                     )
                 }
+                item { LastMinuteScorecardCard(view.lastMinute) }
             } else {
                 item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
                 item { RecordCard(ScorecardCopy.AI_TITLE, ledger.ai) }
                 item { RecordCard(ScorecardCopy.MANUAL_TITLE, ledger.manual) }
+                item { LastMinuteScorecardCard(view.lastMinute) }
                 if (ledger.noBetWouldHave.settledCount > 0) {
                     item { RecordCard(ScorecardCopy.NO_BET_TITLE, ledger.noBetWouldHave, money = false) }
                 }
@@ -198,6 +200,42 @@ fun ScorecardScreen(
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@Composable
+internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
+    val colors = DipTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.LAST_MINUTE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            if (section.settledCount <= 0) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        if (section.picks.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.picks.take(40).forEach { pick ->
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pick.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
         }
     }
 }

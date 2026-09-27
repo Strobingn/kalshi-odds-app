@@ -49,6 +49,7 @@ class OpportunityNotifier(private val context: Context) {
         val title = when (ticket.kind) {
             TicketKind.HUNTER_VALUE -> context.getString(R.string.opportunity_longshot_title, WindowLabel.of(ticket.ticker))
             TicketKind.HUNTER -> context.getString(R.string.opportunity_hunter_title, WindowLabel.of(ticket.ticker))
+            TicketKind.LAST_MINUTE -> context.getString(R.string.last_minute_alert_title, WindowLabel.of(ticket.ticker))
             else -> context.getString(R.string.opportunity_wintarget_title, WindowLabel.of(ticket.ticker))
         }
         val text = context.getString(

@@ -111,7 +111,9 @@ class PaperBook(
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
         if (!ticket.canApprove) return null
-        if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
+        if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
+            ticket.kind == TicketKind.LAST_MINUTE
+        ) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
         return fill(
             ticker = ticket.ticker,

@@ -58,6 +58,7 @@ class KalshiOddsApp : Application() {
         runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
         runCatching { SignalNotifier.ensureChannels(this) }
         runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
+        runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
         runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this) }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
@@ -80,6 +81,7 @@ class KalshiOddsApp : Application() {
         })
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
+            runCatching { container.preferences.applyLastMinuteStakeIfNeeded() }
             runCatching { restorePersistedHistory() }
             runCatching { firstLaunchSync() }
         }

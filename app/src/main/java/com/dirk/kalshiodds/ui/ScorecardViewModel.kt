@@ -81,14 +81,16 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
     val snapshot: StateFlow<ScorecardUi> = combine(
         container.logStore.entriesFlow,
         container.paper.book.state,
-        container.adapterStore.stateFlow,
+        container.lastMinuteStore.state,
         container.guardrailStore.stateFlow,
-        combine(_exportMessage, _modelNote) { export, note -> export to note }
-    ) { entries, paper, adapter, guard, notes ->
+        combine(_exportMessage, _modelNote, container.adapterStore.stateFlow) { export, note, adapter ->
+            Triple(export, note, adapter)
+        }
+    ) { entries, paper, lastMinute, guard, notes ->
         val settings = container.hub.settings
         val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
         ScorecardUi(
-            view = ScorecardCopy.of(entries, paper, windows),
+            view = ScorecardCopy.of(entries, paper, windows, lastMinutePicks = lastMinute.picks),
             metrics = ScorecardMetrics.compute(
                 entries = entries,
                 calibration = container.scoring.calibration,
@@ -99,7 +101,7 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
                 maxUncertainty = settings.maxUncertainty
             ),
             allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor),
-            adapter = adapter,
+            adapter = notes.third,
             guardrails = guard,
             extendedLine = extendedLine(),
             exportMessage = notes.first,

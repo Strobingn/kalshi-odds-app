@@ -1,8 +1,10 @@
 package com.dirk.kalshiodds.signal.trade
 
 enum class TicketKind {
-    /** Settings stake (default $5) → ≥$100 max payout. */
+    /** Settings stake (default $10) → ≥$100 max payout. */
     CONFIGURED,
+    /** Last-minute strategy fire — one per window. */
+    LAST_MINUTE,
     /** Automatic hunter: $1 stake → ≥$25 max payout. */
     HUNTER,
     /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */

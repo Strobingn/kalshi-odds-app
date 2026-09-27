@@ -20,6 +20,7 @@ object OpportunityDedupe {
         TicketKind.HUNTER -> "hunter"
         TicketKind.CONFIGURED -> "wintarget"
         TicketKind.MANUAL -> "manual"
+        TicketKind.LAST_MINUTE -> "last_minute"
         TicketKind.SELL -> "sell"
     }
 
@@ -28,7 +29,8 @@ object OpportunityDedupe {
         if (ticket.contracts <= 0) return false
         return ticket.kind == TicketKind.HUNTER_VALUE ||
             ticket.kind == TicketKind.HUNTER ||
-            (ticket.winTargetUsd != null && ticket.kind != TicketKind.SELL)
+            ticket.kind == TicketKind.LAST_MINUTE ||
+            (ticket.winTargetUsd != null && ticket.kind != TicketKind.SELL && ticket.kind != TicketKind.LAST_MINUTE)
     }
 
     fun shouldNotify(

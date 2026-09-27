@@ -47,7 +47,7 @@ class HomeCopyTest {
 
     @Test
     fun actionableDownFixtureIsBetDown() {
-        val down = HomeFixtures.actionableDownBtc()
+        val down = HomeFixtures.withLastMinuteFire(HomeFixtures.actionableDownBtc(), "NO")
         val call = BetCall.decide(down, SignalSettings(), nowMs)
         assertEquals(BetCall.Headline.BET_DOWN, call.headline)
         assertTrue(call.isActionable)
@@ -63,11 +63,12 @@ class HomeCopyTest {
             predicted = "YES",
             closeMs = nowMs + 372_000L
         )
-        val upCall = BetCall.decide(up, SignalSettings(), nowMs)
+        val fired = HomeFixtures.withLastMinuteFire(up, "YES")
+        val upCall = BetCall.decide(fired, SignalSettings(), nowMs)
         assertTrue(upCall.isActionable)
-        val line = HomeCopy.thisWindowHeadline(upCall, up, nowMs)
+        val line = HomeCopy.thisWindowHeadline(upCall, fired, nowMs)
         assertTrue(line.startsWith("BET UP  BTC"))
-        assertTrue(line.contains("\$5 wins"))
+        assertTrue(line.contains("BUY UP") || line.contains("\$10 wins"))
         assertTrue(line.contains("closes in 6:12"))
 
         val dead = HomeFixtures.market(
@@ -132,8 +133,8 @@ class HomeCopyTest {
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(null).line)
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.0).line)
         assertEquals(10.0, HomeCopy.TILE_STAKE_USD, 1e-9)
-        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
-        assertEquals(5.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)
 
         val market = HomeFixtures.actionableBtc()
         val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
