@@ -98,7 +98,9 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
                 edgeThresholdPp = settings.effectiveEdgeThresholdPp(),
                 minConfidence = settings.minConfidence,
                 requireUncertaintyPass = settings.uncertaintyGateEnabled,
-                maxUncertainty = settings.maxUncertainty
+                maxUncertainty = settings.maxUncertainty,
+                fills = paper.fills + paper.archived.flatMap { it.fills },
+                settledWindows = windows
             ),
             allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor),
             adapter = notes.third,

@@ -280,6 +280,16 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
                 WinStat("Biggest win", m.biggestWinUsd?.let { ScorecardLedger.signedUsd(it) } ?: ScorecardCopy.EM_DASH)
                 LossStat("Biggest loss", m.biggestLossUsd?.let { ScorecardLedger.signedUsd(it) } ?: ScorecardCopy.EM_DASH)
             }
+            if (title == ScorecardCopy.AI_TITLE) {
+                ScorecardCopy.breakEvenWinRateLine(m)?.let { line ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textPrimary
+                    )
+                }
+            }
         }
     }
 }
@@ -681,6 +691,24 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
             color = colors.textPrimary,
             lineHeight = 28.sp
         )
+        if (stats.total > 0) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    ScorecardCopy.PICKED_SIDE_DIRECTION_NOTE,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                if (stats.pnlUsd != null) {
+                    SignedStat("Real paper P&L", ScorecardLedger.signedUsd(stats.pnlUsd), stats.pnlUsd)
+                }
+            }
+        }
         Text(
             "${stats.label} settled",
             style = MaterialTheme.typography.bodyMedium,
@@ -708,7 +736,11 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
             .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.hypotheticalPolicyTitle(policy.stakeUsd),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
         Text(
             String.format(Locale.US, "If every alert @ $%.0f", policy.stakeUsd),
             fontSize = 20.sp,

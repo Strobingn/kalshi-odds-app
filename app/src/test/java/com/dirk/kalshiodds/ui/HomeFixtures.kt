@@ -468,7 +468,11 @@ object HomeFixtures {
         }
         return ScorecardUi(
             view = ScorecardCopy.of(entries, fills, paperPnlUsd = 0.0, windows = windows),
-            metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(entries),
+            metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(
+                entries,
+                fills = fills,
+                settledWindows = windows
+            ),
             allowlist = com.dirk.kalshiodds.signal.feedback.Allowlist.State(),
             adapter = com.dirk.kalshiodds.signal.feedback.OnlineAdapter.identity(),
             guardrails = com.dirk.kalshiodds.signal.feedback.Guardrails.identity(),

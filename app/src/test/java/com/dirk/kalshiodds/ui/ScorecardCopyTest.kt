@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -140,6 +141,124 @@ class ScorecardCopyTest {
         assertTrue(src.contains("LazyColumn"))
         assertTrue(src.contains("clearStaleLifecycleNotice").not())
         assertTrue(src.contains("ENTRY_NOT_RECORDED") || src.contains("entry not recorded"))
+        assertTrue(src.contains("ScorecardCopy.PICKED_SIDE_DIRECTION_NOTE"))
+        assertTrue(src.contains("hypotheticalPolicyTitle"))
+        assertTrue(src.contains("breakEvenWinRateLine"))
+        assertTrue(src.contains("NeutralStat(\"P&L\""))
+        val policyCard = src.substring(src.indexOf("fun PolicyCard"))
+        val policyEnd = policyCard.indexOf("fun ExtendedAiCard")
+        val policyOnly = if (policyEnd > 0) policyCard.substring(0, policyEnd) else policyCard
+        assertFalse(policyOnly.contains("WinStat"))
+        assertFalse(policyOnly.contains("SignedStat"))
+        assertFalse(policyOnly.contains("colors.up"))
+        assertTrue(src.contains("PICKED_SIDE_DIRECTION_NOTE"))
+    }
+
+    @Test
+    fun pickedSideDirectionNoteAndRealPnlForSameWindowPicks() {
+        assertEquals(
+            "Direction only, not money: favorites cost 70-90¢, so a high hit rate can still lose",
+            ScorecardCopy.PICKED_SIDE_DIRECTION_NOTE
+        )
+        val entries = HomeFixtures.sampleSettledEntries()
+        val fills = HomeFixtures.sampleSettledFills()
+        val snap = ScorecardMetrics.compute(entries, fills = fills)
+        val ledger = ScorecardLedger.of(entries, fills)
+        assertEquals(18, snap.allTime.total)
+        assertEquals(12, snap.allTime.hits)
+        assertNotNull(snap.allTime.pnlUsd)
+        assertEquals(ledger.ai.money.pnlUsd, snap.allTime.pnlUsd!!, 1e-6)
+        assertEquals(
+            "Real paper P&L ${ScorecardLedger.signedUsd(snap.allTime.pnlUsd)}",
+            ScorecardCopy.windowRealPnlLine(snap.allTime.pnlUsd)
+        )
+        assertNull(ScorecardCopy.windowRealPnlLine(null))
+        assertNull(ScorecardMetrics.window(emptyList()).pnlUsd)
+    }
+
+    @Test
+    fun highHitRateOnExpensiveFavoritesCanStillLoseMoney() {
+        val entries = (0 until 48).map { i ->
+            val won = i < 40
+            PredictionLogEntry(
+                ticker = "KXBTC15M-FAV$i",
+                series = "KXBTC15M",
+                predictedYes = 0.85,
+                predictedNo = 0.15,
+                marketMid = 0.85,
+                timestampMs = 1_000L + i,
+                closeTimeMs = 1_000L + i,
+                outcome = if (won) "yes" else "no",
+                score = if (won) 1 else 0,
+                predictedSide = "YES",
+                edgePp = 0.0,
+                settledAtMs = 1_000L + i,
+                entryAsk = 0.85,
+                contracts = 1,
+                stakeUsd = 0.85,
+                feeUsd = 0.0
+            )
+        }
+        val stats = ScorecardMetrics.window(entries)
+        assertEquals(40, stats.hits)
+        assertEquals(48, stats.total)
+        assertEquals("Picked side: 40/48 correct (83%)", HomeCopy.pickedSideLine(stats.hits, stats.total))
+        assertEquals(-0.80, stats.pnlUsd!!, 1e-9)
+        assertTrue(stats.pnlUsd!! < 0.0)
+        val view = ScorecardCopy.of(entries, 0.0)
+        assertEquals(
+            "Break-even win rate at your avg win/loss: 85%",
+            ScorecardCopy.breakEvenWinRateLine(view.ledger.ai.money)
+        )
+        assertTrue(view.allLines().contains("Break-even win rate at your avg win/loss: 85%"))
+    }
+
+    @Test
+    fun windowPnlOmittedWhenEntryNeverRecorded() {
+        val entry = PredictionLogEntry(
+            ticker = "KXBTC15M-UNKNOWN",
+            series = "KXBTC15M",
+            predictedYes = 0.70,
+            predictedNo = 0.30,
+            marketMid = 0.55,
+            timestampMs = 2_000L,
+            closeTimeMs = 2_000L,
+            outcome = "yes",
+            score = 1,
+            predictedSide = "YES",
+            settledAtMs = 2_000L
+        )
+        val stats = ScorecardMetrics.window(listOf(entry))
+        assertEquals(1, stats.total)
+        assertEquals(1, stats.hits)
+        assertNull(stats.pnlUsd)
+        assertNull(ScorecardCopy.windowRealPnlLine(stats.pnlUsd))
+    }
+
+    @Test
+    fun hypotheticalPolicyTitleAndBreakEvenFormula() {
+        assertEquals(
+            "Hypothetical: every alert @ $15 at mid price, NO fees, not real money",
+            ScorecardCopy.hypotheticalPolicyTitle(15.0)
+        )
+        assertEquals(
+            "Hypothetical: every alert @ $5 at mid price, NO fees, not real money",
+            ScorecardCopy.hypotheticalPolicyTitle(5.0)
+        )
+        assertEquals(0.75, ScorecardCopy.breakEvenWinRate(1.0, -3.0)!!, 1e-9)
+        assertEquals(0.75, ScorecardCopy.breakEvenWinRate(1.0, 3.0)!!, 1e-9)
+        assertEquals(
+            "Break-even win rate at your avg win/loss: 75%",
+            ScorecardCopy.breakEvenWinRateLine(1.0, -3.0)
+        )
+        assertNull(ScorecardCopy.breakEvenWinRate(1.0, null))
+        assertNull(ScorecardCopy.breakEvenWinRate(null, -3.0))
+        assertNull(ScorecardCopy.breakEvenWinRate(0.0, 0.0))
+        val view = ScorecardCopy.of(HomeFixtures.sampleSettledEntries(), HomeFixtures.sampleSettledFills(), 0.0)
+        val line = ScorecardCopy.breakEvenWinRateLine(view.ledger.ai.money)
+        assertNotNull(line)
+        assertTrue(line!!.startsWith("Break-even win rate at your avg win/loss:"))
+        assertTrue(view.allLines().contains(line))
     }
 
     @Test

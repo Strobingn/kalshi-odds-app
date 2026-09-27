@@ -35,7 +35,41 @@ object ScorecardCopy {
     const val WON = "WIN"
     const val LOST = "LOSS"
     const val EM_DASH = "—"
+    const val PICKED_SIDE_DIRECTION_NOTE =
+        "Direction only, not money: favorites cost 70-90¢, so a high hit rate can still lose"
     val ET_ZONE: ZoneId = ScorecardLedger.ET_ZONE
+
+    fun hypotheticalPolicyTitle(stakeUsd: Double): String =
+        String.format(
+            Locale.US,
+            "Hypothetical: every alert @ $%.0f at mid price, NO fees, not real money",
+            stakeUsd
+        )
+
+    fun windowRealPnlLine(pnlUsd: Double?): String? =
+        pnlUsd?.let { "Real paper P&L ${ScorecardLedger.signedUsd(it)}" }
+
+    /**
+     * Break-even hit rate given average win and average loss.
+     * Uses magnitudes so [ScorecardLedger.Money.avgLossUsd] (signed
+     * negative) and positive loss sizes both work:
+     * `|avgLoss| / (|avgWin| + |avgLoss|)`.
+     */
+    fun breakEvenWinRate(avgWinUsd: Double?, avgLossUsd: Double?): Double? {
+        val win = avgWinUsd?.let { kotlin.math.abs(it) } ?: return null
+        val loss = avgLossUsd?.let { kotlin.math.abs(it) } ?: return null
+        val den = win + loss
+        if (den <= 1e-12) return null
+        return loss / den
+    }
+
+    fun breakEvenWinRateLine(avgWinUsd: Double?, avgLossUsd: Double?): String? {
+        val rate = breakEvenWinRate(avgWinUsd, avgLossUsd) ?: return null
+        return String.format(Locale.US, "Break-even win rate at your avg win/loss: %.0f%%", rate * 100.0)
+    }
+
+    fun breakEvenWinRateLine(money: ScorecardLedger.Money): String? =
+        breakEvenWinRateLine(money.avgWinUsd, money.avgLossUsd)
 
     data class Bucket(
         val key: String,
@@ -96,6 +130,7 @@ object ScorecardCopy {
                 lines += recordLine(ledger.combined)
                 lines += AI_TITLE
                 lines += recordLine(ledger.ai)
+                breakEvenWinRateLine(ledger.ai.money)?.let { lines += it }
                 lines += MANUAL_TITLE
                 lines += recordLine(ledger.manual)
             }
