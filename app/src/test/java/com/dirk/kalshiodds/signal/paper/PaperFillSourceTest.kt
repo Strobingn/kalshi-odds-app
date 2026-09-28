@@ -261,14 +261,14 @@ class PaperFillSourceTest {
         assertNull(book.considerAlert(alert, ask = 0.40, enabled = true))
 
         val ok = ticket(kind = TicketKind.HUNTER, model = 0.66, ticker = "KXBTC15M-OK")
-        val fill = book.considerTicket(ok, enabled = true)
+        val fill = book.considerTicket(ok, enabled = true, depthContracts = 100_000)
         assertNotNull(fill)
         assertEquals(66.0, fill!!.aiPct!!, 1e-6)
         assertEquals(PaperPickSource.TICKET.label, fill.pickSource)
         assertEquals("AI hunter", fill.source)
 
         val ls = ticket(kind = TicketKind.HUNTER_VALUE, model = 0.45, ticker = "KXBTC15M-LS2")
-        val lsFill = book.considerTicket(ls, enabled = true)
+        val lsFill = book.considerTicket(ls, enabled = true, depthContracts = 100_000)
         assertEquals(PaperPickSource.LONG_SHOT.label, lsFill!!.pickSource)
         assertEquals(PaperPickSource.LONG_SHOT.label, lsFill.source)
         assertTrue(lsFill.kellyF!! > 0.0)
@@ -286,7 +286,7 @@ class PaperFillSourceTest {
             feeUsd = 0.10,
             profitIfWinUsd = 18.0,
             depthLimited = false,
-            depthContracts = null,
+            depthContracts = 10_000,
             tauSec = 12,
             x = 0.0,
             obsMean = 0.0,
