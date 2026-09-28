@@ -456,7 +456,7 @@ fun SettingsContent(
 
             Section("Bankroll & size (advisory)")
             Text(
-                "Suggested contracts for live cards only. Live Approve stays $10 all-in. Paper AI fills use half-Kelly on the paper bankroll (no dollar max).",
+                "Suggested contracts for live cards only. Live Approve stays \$10 all-in. Paper AI fills use half-Kelly on the paper bankroll (no dollar max).",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -661,7 +661,7 @@ fun SettingsContent(
             Text(
                 "On-device regime / anomaly / survival / conformal / meta / path-sim plus advisory RL sizing. " +
                     "These can raise CPU and battery — turn the master switch off to drop back to Heavy ML + 0.2.x. " +
-                    "RL suggested stake is display-only. Tickets always use the configured $10 max / caps and still need Approve. " +
+                    "RL suggested stake is display-only. Tickets always use the configured \$10 max / caps and still need Approve. " +
                     "News embeddings fail-soft and cache if the network is down.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -680,11 +680,11 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at $1,000 (editable below). AI paper fills use fractional Kelly " +
+                "Isolated from live money. Starts at \$1,000 (editable below). AI paper fills use fractional Kelly " +
                     "on that bankroll — no dollar max. Flip-chance and “no asks under 3¢” guards still apply. " +
                     "Never calls Kalshi. Reset archives the ledger and returns cash to the start amount. " +
                     "Paper trading ON does not swallow Live Approve after a Kalshi key is saved — " +
-                    "use the Paper button for simulated fills. Live orders stay $10 all-in + REAL MONEY confirm.",
+                    "use the Paper button for simulated fills. Live orders stay \$10 all-in + REAL MONEY confirm.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -692,7 +692,7 @@ fun SettingsContent(
             Text(
                 String.format(
                     Locale.US,
-                    "Paper Kelly fraction  %.2f  (0.50 = half-Kelly · AI paper only · live stays $10)",
+                    "Paper Kelly fraction  %.2f  (0.50 = half-Kelly · AI paper only · live stays \$10)",
                     s.paperKellyFraction
                 ),
                 style = MaterialTheme.typography.bodyMedium,
@@ -719,11 +719,11 @@ fun SettingsContent(
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "The card pick is the last-minute BRTI strategy (final 60 s, EV/$ ≥ 0.35, first fire per window). " +
-                    "Live Approve is $10 all-in including Kalshi fees. Count is the largest integer with " +
-                    "count×price + fee ≤ your stake (default and cap $10; you can pick less). " +
+                "The card pick is the last-minute BRTI strategy (final 60 s, EV/\$ ≥ 0.35, first fire per window). " +
+                    "Live Approve is \$10 all-in including Kalshi fees. Count is the largest integer with " +
+                    "count×price + fee ≤ your stake (default and cap \$10; you can pick less). " +
                     "There is no min-profit-if-win gate — a cheap ticket is not blocked for low profit. " +
-                    "Hunter still surfaces when $1 can settle ≥$25. Long-shot hunter still needs ask ≤20¢ " +
+                    "Hunter still surfaces when \$1 can settle ≥\$25. Long-shot hunter still needs ask ≤20¢ " +
                     "and AI beating implied after fees. Paper fills never block Live. " +
                     "Limit orders only — POST /trade-api/v2/portfolio/events/orders. Approve + REAL MONEY still required. No auto-fire.",
                 style = MaterialTheme.typography.labelMedium,
@@ -771,14 +771,14 @@ fun SettingsContent(
 
             Section("Legacy win-target (History / paper only)")
             Text(
-                "Off for live. Live Approve always uses the $10 all-in cap. Min-profit-if-win is removed. " +
-                    "This leftover $50 sizer is kept so History restore still reads old snapshots — " +
-                    "it can never resize a LIVE order above $10 (the final order-build step clips again). " +
-                    "Paper / History may still walk the ask book for a $50 win target.",
+                "Off for live. Live Approve always uses the \$10 all-in cap. Min-profit-if-win is removed. " +
+                    "This leftover \$50 sizer is kept so History restore still reads old snapshots — " +
+                    "it can never resize a LIVE order above \$10 (the final order-build step clips again). " +
+                    "Paper / History may still walk the ask book for a \$50 win target.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Legacy win-target sizing (default off · $50)", s.winTargetEnabled, { viewModel?.setWinTargetEnabled(it) })
+            ToggleRow("Legacy win-target sizing (default off · \$50)", s.winTargetEnabled, { viewModel?.setWinTargetEnabled(it) })
             Text(
                 String.format(Locale.US, "Target profit  $%.0f", s.winTargetUsd),
                 style = MaterialTheme.typography.bodyMedium,
@@ -824,7 +824,7 @@ fun SettingsContent(
 
             Section("Kalshi demo (play money)")
             Text(
-                "Separate from the local $100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
                     "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
                     "Paper Buy still works with no key and never hits this host.",
                 style = MaterialTheme.typography.labelMedium,
