@@ -661,7 +661,7 @@ fun SettingsContent(
             Text(
                 "On-device regime / anomaly / survival / conformal / meta / path-sim plus advisory RL sizing. " +
                     "These can raise CPU and battery — turn the master switch off to drop back to Heavy ML + 0.2.x. " +
-                    "RL suggested stake is display-only. Tickets always use the configured \$5 default / caps and still need Approve. " +
+                    "RL suggested stake is display-only. Tickets always use the configured \$10 max / caps and still need Approve. " +
                     "News embeddings fail-soft and cache if the network is down.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary

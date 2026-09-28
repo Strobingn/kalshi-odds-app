@@ -31,7 +31,21 @@ class ImportedModelStore(context: Context) {
 
     fun importJson(raw: String): EdgeModel {
         val model = EdgeModel.parse(raw)
-        activate(model, manifest = null)
+        val manifest = runCatching {
+            EdgeModelManifest.fromModelMetrics(
+                model,
+                trainedAt = java.time.Instant.now().toString()
+            )
+        }.getOrNull()
+        val decision = if (manifest != null) {
+            ModelActivation.decide(manifest, modelValid = true)
+        } else {
+            ModelActivation.decideMissingManifest()
+        }
+        if (!decision.activate) {
+            error(decision.reason)
+        }
+        activate(model, manifest)
         return model
     }
 

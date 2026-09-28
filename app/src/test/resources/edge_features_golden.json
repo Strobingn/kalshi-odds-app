@@ -1,0 +1,46 @@
+{
+  "spot": 100200.0,
+  "strike": 100000.0,
+  "tte_seconds": 420.0,
+  "sigma_annual": 0.4,
+  "market_mid": 0.62,
+  "imbalance": 0.1,
+  "spread": 0.02,
+  "coinbase_closes": [
+    100000.0,
+    100020.0,
+    100040.0,
+    100080.0,
+    100100.0,
+    100140.0,
+    100180.0,
+    100200.0
+  ],
+  "cross_asset": 0.002,
+  "end_ts": 1789920000,
+  "note": "UTC hour of end_ts 2026-09-20T16:00:00Z is 16 (16/24). Shared by Python trainer and Kotlin EdgeFeatures.",
+  "expected": [
+    1.3691890261600559,
+    0.4666666666666667,
+    0.62,
+    0.1,
+    0.02,
+    0.002,
+    0.0006903579080416231,
+    0.002,
+    0.6666666666666666,
+    0.9144157780911144
+  ],
+  "feature_names": [
+    "dist_to_strike_vol",
+    "tte_frac",
+    "market_mid",
+    "imbalance",
+    "spread",
+    "momentum",
+    "realized_vol",
+    "cross_asset",
+    "time_of_day",
+    "digital_fair"
+  ]
+}

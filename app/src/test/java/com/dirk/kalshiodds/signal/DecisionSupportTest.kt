@@ -308,9 +308,9 @@ class OnlineAdapterTest {
         }
         val state = OnlineAdapter.update(OnlineAdapter.identity(), rows, nowMs = now + 50)
         assertTrue(state.ready)
+        // Stacked Platt layer is disabled — Calibrator is the only p remap.
         val cal = OnlineAdapter.apply(0.92, state)
-        assertTrue(cal < 0.92)
-        assertTrue(cal > 0.20)
+        assertEquals(0.92, cal, 1e-12)
     }
 
     @Test
@@ -333,7 +333,8 @@ class SpotFeatureMathTest {
             spotReturn5m = 0.006,
             fundingRate = 0.0,
             realizedVol15m = 0.001,
-            source = "test"
+            source = "coinbase",
+            modelUsable = true
         )
         val adj = SpotFeatureMath.adjustPp(50.0, feat)
         assertNotNull(adj)

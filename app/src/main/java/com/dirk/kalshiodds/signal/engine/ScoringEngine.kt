@@ -33,7 +33,7 @@ import kotlin.math.tanh
  *
  * | Feature                         | Early | Late | Notes |
  * |---------------------------------|------:|-----:|-------|
- * | AI (TFLite / fallback MLP)      |  0.30 | 0.20 | Then temperature + reliability-bin calibration |
+ * | AI (TFLite / fallback MLP)      |  0.00 | 0.00 | Weight 0 until a time-ordered grouped split beats market-only |
  * | Volume-flow + aggressor         |  0.12 | 0.14 | Taker side when the trade feed provides it |
  * | Related crypto mid              |  0.08 | 0.04 | BTC ↔ ETH ↔ SOL last mid |
  * | Tick velocity `Δmid/Δt` + accel |  0.10 | 0.14 | Last N ticker/trade/REST ticks |
@@ -233,7 +233,8 @@ class ScoringEngine(
             }
         }
         val spotFeat = external.forSeries(tick.series)
-        spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
+        val modelSpot = spotFeat?.takeIf { it.modelUsable }?.lastPrice
+        modelSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
@@ -415,8 +416,9 @@ class ScoringEngine(
             ).coerceIn(2.0, 98.0)
 
         val calState = calibration
-        val afterTemp = Calibrator.applyPp(rawFair, calState)
-        var fair = OnlineAdapter.applyPp(afterTemp, adapterState).coerceIn(2.0, 98.0)
+        val afterTemp = Calibrator.applyPp(rawFair, calState, tteSec)
+        // OnlineAdapter Platt is disabled — one calibrator only (raw vs outcome).
+        var fair = afterTemp.coerceIn(2.0, 98.0)
         var delta = fair - midPp
         var predictedSide = if (delta >= 0) "YES" else "NO"
 
@@ -534,12 +536,32 @@ class ScoringEngine(
         }
         val strikeUsd = tick.floorStrike ?: book.strike(tick.ticker)
             ?: DirectionSanity.parseStrike(tick.ticker)
+        val sigmaAnnual = modelSpot?.let {
+            spotFeat?.realizedVol15m?.let { barStd ->
+                if (!barStd.isFinite() || barStd <= 0.0) null
+                else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
+                    .coerceIn(0.01, 5.0)
+            } ?: com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.typicalSigma(tick.series)
+        }
+        val digitalFairPp = if (modelSpot != null && strikeUsd != null && sigmaAnnual != null) {
+            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
+                spot = modelSpot,
+                strike = strikeUsd,
+                tteSeconds = (tteSec ?: 900L).toDouble(),
+                sigmaAnnual = sigmaAnnual
+            )?.times(100.0)
+        } else {
+            null
+        }
         val dir = DirectionSanity.apply(
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = modelSpot,
             strikeUsd = strikeUsd,
-            spotReturn = spotRet,
+            spotReturn = if (spotFeat?.modelUsable == true) spotRet else null,
             fairPp = fair,
-            predictedSide = predictedSide
+            predictedSide = predictedSide,
+            digitalFairPp = digitalFairPp,
+            tteSeconds = (tteSec ?: 900L).toDouble(),
+            sigmaAnnual = sigmaAnnual
         )
         if (dir.applied) {
             fair = dir.fairPp
@@ -596,21 +618,6 @@ class ScoringEngine(
             extBlocked != null -> extBlocked
             else -> filter.reason
         }
-        val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
-            if (!barStd.isFinite() || barStd <= 0.0) null
-            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
-                .coerceIn(0.01, 5.0)
-        }
-        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
-            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
-                spot = spotFeat.lastPrice!!,
-                strike = strikeUsd,
-                tteSeconds = (tteSec ?: 900L).toDouble(),
-                sigmaAnnual = sigmaAnnual
-            )?.times(100.0)
-        } else {
-            null
-        }
         var importedModelPp: Double? = null
         var modelEdgeQualified = true
         var importedBlendW: Double? = null
@@ -618,7 +625,7 @@ class ScoringEngine(
         if (loaded != null) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
-                    spot = spotFeat?.lastPrice,
+                    spot = modelSpot,
                     strike = strikeUsd,
                     tteSeconds = (tteSec ?: 900L).toDouble(),
                     sigmaAnnual = sigmaAnnual,
@@ -627,9 +634,10 @@ class ScoringEngine(
                     spread = spread,
                     momentum = momForMl,
                     realizedVol01 = volForMl,
-                    crossAssetRet = spotFeat?.spotReturn5m,
+                    crossAssetRet = if (spotFeat?.modelUsable == true) spotFeat.spotReturn5m else null,
                     nowMs = nowMs,
-                    digitalFair = digitalFairPp?.div(100.0)
+                    digitalFair = digitalFairPp?.div(100.0),
+                    coinbaseCloses = if (spotFeat?.modelUsable == true) spotFeat.minuteCloses else emptyList()
                 )
             )
             val pYes = loaded.predictYes(feats)
@@ -642,12 +650,12 @@ class ScoringEngine(
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
         val tape = TapeConflict.evaluate(
-            spotReturn1m = spotFeat?.spotReturn1m,
-            spotReturn5m = spotFeat?.spotReturn5m,
+            spotReturn1m = if (spotFeat?.modelUsable == true) spotFeat.spotReturn1m else null,
+            spotReturn5m = if (spotFeat?.modelUsable == true) spotFeat.spotReturn5m else null,
             modelSide = predictedSide,
             yesAsk = tick.yesAsk,
             noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = modelSpot,
             strikeUsd = strikeUsd,
             fairYes = fair / 100.0,
             previousPrimary = lastPrimarySide[tick.ticker],
@@ -760,7 +768,7 @@ class ScoringEngine(
             extendedNote = extOut?.note,
             directionalLock = dir.applied,
             spotVsTargetUsd = dir.spotVsTargetUsd,
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = modelSpot,
             tapeTrend = tape.trend.name,
             tapeConflict = tape.conflict,
             tapeConflictNote = tape.banner,
@@ -978,7 +986,7 @@ class ScoringEngine(
     }
 
     companion object {
-        const val W_AI = 0.30
+        const val W_AI = 0.0
         const val W_FLOW = 0.12
         const val W_RELATED = 0.08
         const val W_VELOCITY = 0.10
@@ -987,7 +995,7 @@ class ScoringEngine(
         const val W_DEPTH = 0.10
         const val W_CANCEL = 0.10
 
-        const val W_AI_LATE = 0.20
+        const val W_AI_LATE = 0.0
         const val W_FLOW_LATE = 0.14
         const val W_RELATED_LATE = 0.04
         const val W_VELOCITY_LATE = 0.14

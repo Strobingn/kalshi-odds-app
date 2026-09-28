@@ -195,13 +195,11 @@ object OnlineAdapter {
     }
 
     /**
-     * Apply the learned slope/intercept. Identity when cold.
-     * Compose *after* [Calibrator] temperature if both are ready.
+     * Probability calibration is disabled. [Calibrator] is the only layer
+     * that remaps p. Feature reweighting ([scaleBlend]) still runs.
      */
     fun apply(pYes: Double, state: State): Double {
-        val p = pYes.coerceIn(0.02, 0.98)
-        if (!state.ready) return p
-        return sigmoid(state.slope * logit(p) + state.intercept).coerceIn(0.02, 0.98)
+        return pYes.coerceIn(0.02, 0.98)
     }
 
     fun applyPp(pYesPp: Double, state: State): Double = apply(pYesPp / 100.0, state) * 100.0

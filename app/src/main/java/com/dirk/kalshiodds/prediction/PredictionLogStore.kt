@@ -21,6 +21,13 @@ private val Context.predictionLogStore: DataStore<Preferences> by preferencesDat
 )
 
 @Serializable
+data class CalSample(
+    val rawYes: Double,
+    val tteSeconds: Long,
+    val bucket: String
+)
+
+@Serializable
 data class PredictionLogEntry(
     val ticker: String,
     val series: String,
@@ -55,7 +62,12 @@ data class PredictionLogEntry(
     val entryAsk: Double? = null,
     val contracts: Int? = null,
     val stakeUsd: Double? = null,
-    val feeUsd: Double? = null
+    val feeUsd: Double? = null,
+    /** Raw uncalibrated blend (0–1). Calibrator fits on this, not [predictedYes]. */
+    val rawPredictedYes: Double? = null,
+    val displayedYes: Double? = null,
+    val tteSeconds: Long? = null,
+    val calSamples: List<CalSample> = emptyList()
 )
 
 @Serializable
@@ -79,7 +91,10 @@ data class SignalSnapshot(
     val entryAsk: Double? = null,
     val contracts: Int? = null,
     val stakeUsd: Double? = null,
-    val feeUsd: Double? = null
+    val feeUsd: Double? = null,
+    val rawPredictedYes: Double? = null,
+    val displayedYes: Double? = null,
+    val tteSeconds: Long? = null
 )
 
 class PredictionLogStore(private val context: Context) {
@@ -113,12 +128,22 @@ class PredictionLogStore(private val context: Context) {
         context.predictionLogStore.edit { prefs ->
             val list = decode(prefs[key]).toMutableList()
             val existingIdx = list.indexOfLast { it.ticker == ticker && it.outcome == null }
+            val rawYes = snapshot?.rawPredictedYes
+            val tteSec = snapshot?.tteSeconds
+            val bucket = com.dirk.kalshiodds.signal.feedback.Calibrator.TteBucket.of(tteSec)
             if (existingIdx >= 0) {
                 val prev = list[existingIdx]
-                val frozen = prev.tteBucket.equals("LATE", ignoreCase = true)
                 val age = timestampMs - prev.timestampMs
                 val moved = kotlin.math.abs(prev.marketMid - marketMid) > midMoveThreshold
-                if (frozen || (age < throttleMs && !moved)) {
+                val samples = prev.calSamples.toMutableList()
+                if (rawYes != null && rawYes.isFinite() && tteSec != null) {
+                    if (samples.none { it.bucket == bucket.key }) {
+                        samples.add(CalSample(rawYes, tteSec, bucket.key))
+                    }
+                }
+                // Do not freeze at LATE — keep the first sample per TTE bucket
+                // and still refresh the displayed row so scorecard is current.
+                if (age < throttleMs && !moved && samples.size == prev.calSamples.size) {
                     return@edit
                 }
                 list[existingIdx] = prev.copy(
@@ -146,9 +171,18 @@ class PredictionLogStore(private val context: Context) {
                     entryAsk = snapshot?.entryAsk ?: prev.entryAsk,
                     contracts = snapshot?.contracts ?: prev.contracts,
                     stakeUsd = snapshot?.stakeUsd ?: prev.stakeUsd,
-                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd
+                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd,
+                    rawPredictedYes = rawYes ?: prev.rawPredictedYes,
+                    displayedYes = snapshot?.displayedYes ?: prev.displayedYes,
+                    tteSeconds = tteSec ?: prev.tteSeconds,
+                    calSamples = samples
                 )
             } else {
+                val first = if (rawYes != null && rawYes.isFinite() && tteSec != null) {
+                    listOf(CalSample(rawYes, tteSec, bucket.key))
+                } else {
+                    emptyList()
+                }
                 list.add(
                     PredictionLogEntry(
                         ticker = ticker,
@@ -177,7 +211,11 @@ class PredictionLogStore(private val context: Context) {
                         entryAsk = snapshot?.entryAsk,
                         contracts = snapshot?.contracts,
                         stakeUsd = snapshot?.stakeUsd,
-                        feeUsd = snapshot?.feeUsd
+                        feeUsd = snapshot?.feeUsd,
+                        rawPredictedYes = rawYes,
+                        displayedYes = snapshot?.displayedYes,
+                        tteSeconds = tteSec,
+                        calSamples = first
                     )
                 )
             }
