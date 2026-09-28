@@ -32,6 +32,9 @@ import kotlin.math.sqrt
  */
 object LateFavoriteRule {
 
+    /** Settings toggle default: tracker on. */
+    const val DEFAULT_ENABLED = true
+
     const val MAX_TTE_SECONDS = 300L
     const val MIN_ABS_Z = 1.5
     const val MIN_ASK = 0.80

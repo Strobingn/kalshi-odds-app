@@ -11,6 +11,7 @@ import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.CryptoMarkets
+import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.prediction.PredictionLogStore
 import com.dirk.kalshiodds.prediction.SignalSnapshot
 import com.dirk.kalshiodds.signal.config.SignalSettings
@@ -50,6 +51,8 @@ class SignalHub(
     private val notifier: SignalNotifier,
     private val logStore: PredictionLogStore? = null,
     private val results: AsyncResultsWriter? = null,
+    /** Paper-only late-favorite tracker; logs, never orders. */
+    private val lateFavorite: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     tickDispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
         Thread(r, "diphunter-ticks").apply { priority = Thread.NORM_PRIORITY + 1; isDaemon = true }
     }.asCoroutineDispatcher()
@@ -306,6 +309,7 @@ class SignalHub(
             _scores.update { it + (tick.ticker to scored) }
             persistScore(tick, scored)
             persistOddsMid(tick.ticker, scored.marketMidPp)
+            maybeLateFavorite(tick, scored)
         }
         persistChartTick(tick)
         val alert = if (notify && scored != null) {
@@ -334,6 +338,45 @@ class SignalHub(
         persistScore(tick, scored)
         persistOddsMid(ticker, scored.marketMidPp)
         persistChartTick(tick)
+        maybeLateFavorite(tick, scored)
+    }
+
+    /**
+     * Paper-only late-favorite tracker (tools/research/edge_search.py H2).
+     * Cheap exits first: off, > 5 min left, or already entered this market.
+     * Logs to [lateFavorite]; there is no path from here to an order.
+     */
+    private fun maybeLateFavorite(tick: MarketTick, scored: ScoringEngine.Score) {
+        val ledger = lateFavorite ?: return
+        if (!settings.lateFavoriteEnabled) return
+        val tte = scored.tteSeconds ?: return
+        if (tte <= 0L || tte > com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.MAX_TTE_SECONDS) return
+        if (!CryptoMarkets.isLiveTicker(tick.ticker) || ledger.hasEntry(tick.ticker)) return
+        runCatching {
+            val now = System.currentTimeMillis()
+            val spot = com.dirk.kalshiodds.signal.external.SpotMerge.forSeries(
+                scoring.external,
+                scoring.spotStream,
+                tick.series,
+                now
+            )
+            val decision = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.evaluate(
+                com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.Inputs(
+                    ticker = tick.ticker,
+                    nowMs = now,
+                    tteSeconds = tte,
+                    spotUsd = spot?.lastPrice,
+                    strikeUsd = tick.floorStrike ?: scoring.book.strike(tick.ticker),
+                    sigma1m = spot?.realizedVol15m,
+                    yesAsk = KalshiPrice.usable(tick.yesAsk) ?: KalshiPrice.impliedAskFromOppositeBid(tick.noBid),
+                    noAsk = KalshiPrice.usable(tick.noAsk) ?: KalshiPrice.impliedAskFromOppositeBid(tick.yesBid)
+                ),
+                alreadyEntered = false
+            ) ?: return
+            ledger.record(decision)?.let {
+                Log.d(TAG, "latefav paper ${it.ticker} ${it.side} @ ${it.ask} z=${it.z} tte=${it.tteSeconds}")
+            }
+        }.onFailure { CrashBreadcrumb.record("latefav ${tick.ticker}", it) }
     }
 
     private fun persistOddsMid(ticker: String, marketMidPp: Double) {
