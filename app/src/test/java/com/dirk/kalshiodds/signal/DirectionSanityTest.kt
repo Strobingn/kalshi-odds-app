@@ -113,7 +113,8 @@ class DirectionSanityTest {
                 asset = "BTC",
                 lastPrice = 100_241.0,
                 spotReturn1m = 0.004,
-                source = "test",
+                source = "coinbase",
+                modelUsable = true,
                 fetchedAtMs = 1L
             )
         )
@@ -141,7 +142,8 @@ class DirectionSanityTest {
                 lastPrice = 100_241.0,
                 spotReturn1m = -0.003,
                 spotReturn5m = -0.004,
-                source = "test",
+                source = "coinbase",
+                modelUsable = true,
                 fetchedAtMs = 1L
             )
         )
@@ -168,7 +170,8 @@ class DirectionSanityTest {
                 asset = "BTC",
                 lastPrice = 99_759.0,
                 spotReturn1m = -0.004,
-                source = "test",
+                source = "coinbase",
+                modelUsable = true,
                 fetchedAtMs = 1L
             )
         )

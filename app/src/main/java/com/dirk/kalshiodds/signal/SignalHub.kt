@@ -405,7 +405,10 @@ class SignalHub(
                             entryAsk = sized.entryAsk,
                             contracts = sized.contracts,
                             stakeUsd = sized.stakeUsd,
-                            feeUsd = sized.feeUsd
+                            feeUsd = sized.feeUsd,
+                            rawPredictedYes = scored.rawFairValuePp / 100.0,
+                            displayedYes = scored.fairValuePp / 100.0,
+                            tteSeconds = scored.tteSeconds
                         )
                     )
                 }

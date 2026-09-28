@@ -261,9 +261,38 @@ def sample_market(market: dict, series: str, series_id: float, historical: bool)
     return rows
 
 
-def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict]:
+def grouped_time_split(
+    market_ids: list[str],
+    times: list[int],
+    n: int,
+    val_frac: float = 0.15,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Time-ordered split grouped by market — no market in both train and val."""
+    by_m: dict[str, int] = {}
+    for mid, t in zip(market_ids, times):
+        by_m[mid] = max(by_m.get(mid, 0), t)
+    ordered = sorted(by_m.items(), key=lambda kv: kv[1])
+    if not ordered:
+        idx = np.arange(n)
+        return idx, idx[: max(1, n // 5)]
+    cut = max(1, int(len(ordered) * (1.0 - val_frac)))
+    if cut >= len(ordered):
+        cut = max(1, len(ordered) - 1)
+    val_markets = {m for m, _ in ordered[cut:]}
+    train_idx = [i for i, m in enumerate(market_ids) if m not in val_markets]
+    val_idx = [i for i, m in enumerate(market_ids) if m in val_markets]
+    if not train_idx:
+        train_idx = list(range(max(1, n - len(val_idx))))
+    if not val_idx:
+        val_idx = train_idx[-max(1, len(train_idx) // 10) :]
+    return np.array(train_idx, dtype=np.int32), np.array(val_idx, dtype=np.int32)
+
+
+def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict, list[str], list[int]]:
     X_list: list[np.ndarray] = []
     y_list: list[int] = []
+    market_ids: list[str] = []
+    times: list[int] = []
     stats = {"markets_live": 0, "markets_hist": 0, "samples_by_series": {}, "yes": 0, "no": 0}
 
     for series, series_id in SERIES:
@@ -301,9 +330,14 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict]:
                 stats["markets_hist"] += 1
             else:
                 stats["markets_live"] += 1
+            close_dt = parse_iso(m.get("close_time"))
+            close_ts = int(close_dt.timestamp()) if close_dt else 0
+            ticker = str(m.get("ticker") or f"{series}-{i}")
             for feats, label in rows:
                 X_list.append(feats)
                 y_list.append(label)
+                market_ids.append(ticker)
+                times.append(close_ts)
                 stats["samples_by_series"][series] += 1
                 if label == 1:
                     stats["yes"] += 1
@@ -314,10 +348,16 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict]:
         raise RuntimeError("No training samples collected from Kalshi API")
     X = np.stack(X_list).astype(np.float32)
     y = np.array(y_list, dtype=np.int32)
-    return X, y, stats
+    return X, y, stats, market_ids, times
 
 
-def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
+def train_and_export(
+    X: np.ndarray,
+    y: np.ndarray,
+    data_stats: dict,
+    market_ids: list[str] | None = None,
+    times: list[int] | None = None,
+) -> dict:
     import tensorflow as tf
     from tensorflow import keras
 
@@ -334,15 +374,24 @@ def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
     # y_oh[i, y[i]] = 1 means label 0 → col0 (NO), label 1 → col1 (YES). Correct.
 
     n = len(X)
-    rng = np.random.default_rng(42)
-    idx = rng.permutation(n)
-    split = max(1, int(n * 0.85)) if n >= 20 else max(1, n - max(1, n // 5))
-    if n < 10:
-        train_idx, val_idx = idx, idx[: max(1, n // 5)]
+    if market_ids is not None and times is not None and len(market_ids) == n:
+        train_idx, val_idx = grouped_time_split(market_ids, times, n)
+        data_stats["split"] = "time_ordered_grouped_by_market"
+        train_markets = {market_ids[int(i)] for i in train_idx}
+        val_markets = {market_ids[int(i)] for i in val_idx}
+        data_stats["leaked_markets"] = len(train_markets & val_markets)
     else:
-        train_idx, val_idx = idx[:split], idx[split:]
-        if len(val_idx) == 0:
-            val_idx = idx[-max(1, n // 10) :]
+        rng = np.random.default_rng(42)
+        idx = rng.permutation(n)
+        split = max(1, int(n * 0.85)) if n >= 20 else max(1, n - max(1, n // 5))
+        if n < 10:
+            train_idx, val_idx = idx, idx[: max(1, n // 5)]
+        else:
+            train_idx, val_idx = idx[:split], idx[split:]
+            if len(val_idx) == 0:
+                val_idx = idx[-max(1, n // 10) :]
+        data_stats["split"] = "random_row_FALLBACK"
+        data_stats["leaked_markets"] = None
 
     Xtr, ytr = Xz[train_idx], y_oh[train_idx]
     Xva, yva = Xz[val_idx], y_oh[val_idx]
@@ -373,23 +422,23 @@ def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
         callbacks=callbacks,
     )
 
-    # Metrics on full set + val
+    # Honest metrics on the held-out markets only (not the train set).
     pred = model.predict(Xz, verbose=0)
     pred_yes = pred[:, 1]
     pred_cls = (pred_yes >= 0.5).astype(np.int32)
-    acc = float((pred_cls == y).mean())
+    acc = float((pred_cls[val_idx] == y[val_idx]).mean()) if len(val_idx) else None
     # AUC if both classes present
     auc = None
     try:
         from sklearn.metrics import roc_auc_score
 
-        if len(np.unique(y)) == 2:
-            auc = float(roc_auc_score(y, pred_yes))
+        if len(np.unique(y[val_idx])) == 2:
+            auc = float(roc_auc_score(y[val_idx], pred_yes[val_idx]))
     except Exception:
         # Manual AUC via ranks if sklearn missing
         if len(np.unique(y)) == 2:
-            pos = pred_yes[y == 1]
-            neg = pred_yes[y == 0]
+            pos = pred_yes[val_idx][y[val_idx] == 1]
+            neg = pred_yes[val_idx][y[val_idx] == 0]
             if len(pos) and len(neg):
                 # Mann–Whitney
                 correct = 0.0
@@ -398,9 +447,19 @@ def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
                 auc = float(correct / (len(pos) * len(neg)))
 
     val_acc = None
+    market_val_acc = None
+    market_val_brier = None
+    model_val_brier = None
+    beats_market_honest = False
     if len(val_idx) >= 2:
         pva = model.predict(Xva, verbose=0)
         val_acc = float(((pva[:, 1] >= 0.5).astype(np.int32) == y[val_idx]).mean())
+        mid = X[val_idx, 0]
+        yv = y[val_idx]
+        market_val_acc = float(((mid >= 0.5).astype(np.int32) == yv).mean())
+        market_val_brier = float(np.mean((mid - yv) ** 2))
+        model_val_brier = float(np.mean((pva[:, 1] - yv) ** 2))
+        beats_market_honest = model_val_brier + 1e-9 < market_val_brier
 
     ML_DIR.mkdir(parents=True, exist_ok=True)
     ASSETS.mkdir(parents=True, exist_ok=True)
@@ -447,6 +506,13 @@ def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
         "accuracy": acc,
         "val_accuracy": val_acc,
         "auc": auc,
+        "split": data_stats.get("split"),
+        "leaked_markets": data_stats.get("leaked_markets"),
+        "note": "accuracy/auc are val-only on a time-ordered grouped-by-market split",
+        "market_val_accuracy": market_val_acc,
+        "market_val_brier": market_val_brier,
+        "model_val_brier": model_val_brier,
+        "beats_market_honest": beats_market_honest,
         "yes_count": int(data_stats.get("yes", 0)),
         "no_count": int(data_stats.get("no", 0)),
         "markets_live": int(data_stats.get("markets_live", 0)),
@@ -496,9 +562,9 @@ Standardization: `(x - mean) / std` using `feature_scaler.json`.
 
 def main() -> int:
     print("Collecting Kalshi training data...", flush=True)
-    X, y, stats = collect_dataset()
+    X, y, stats, market_ids, times = collect_dataset()
     print(f"Collected X={X.shape} yes={stats['yes']} no={stats['no']}", flush=True)
-    metrics = train_and_export(X, y, stats)
+    metrics = train_and_export(X, y, stats, market_ids, times)
     print(f"Done. samples={metrics['samples']} accuracy={metrics['accuracy']}", flush=True)
     return 0
 

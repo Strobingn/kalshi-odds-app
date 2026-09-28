@@ -219,7 +219,19 @@ class WiringAuditTest {
         Control("Last order error clear stale", com.dirk.kalshiodds.signal.trade.LastOrderErrorStore::class.java, "clearStaleLifecycleNotice"),
         Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
         Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals"),
-        Control("applicationId side-by-side audit", com.dirk.kalshiodds.AppIdentity::class.java, "wiringAuditItems")
+        Control("applicationId side-by-side audit", com.dirk.kalshiodds.AppIdentity::class.java, "wiringAuditItems"),
+        Control("Model publish gates", com.dirk.kalshiodds.prediction.ModelActivation::class.java, "decide"),
+        Control("Model beats_market gate", com.dirk.kalshiodds.prediction.ModelActivation::class.java, "beatsMarket"),
+        Control("Latest model download gates", com.dirk.kalshiodds.prediction.LatestModelClient::class.java, "download"),
+        Control("Import model JSON gates", com.dirk.kalshiodds.prediction.ImportedModelStore::class.java, "importJson"),
+        Control("Digital side lock", com.dirk.kalshiodds.signal.engine.DirectionSanity::class.java, "directionalFairPp"),
+        Control("Calibrator apply (raw, TTE bucket)", com.dirk.kalshiodds.signal.feedback.Calibrator::class.java, "applyPp"),
+        Control("Calibrator fit raw entries", com.dirk.kalshiodds.signal.feedback.Calibrator::class.java, "fitEntries"),
+        Control("OnlineAdapter p-layer off", com.dirk.kalshiodds.signal.feedback.OnlineAdapter::class.java, "apply"),
+        Control("Edge UTC + 8×1m candles", com.dirk.kalshiodds.prediction.EdgeFeatures::class.java, "candleWindow"),
+        Control("Edge UTC hour", com.dirk.kalshiodds.prediction.EdgeFeatures::class.java, "timeOfDayFrac"),
+        Control("AI-net 8-minute volume", com.dirk.kalshiodds.prediction.FeatureVector::class.java, "volumeLastMinutes"),
+        Control("Coinbase-only model spot", com.dirk.kalshiodds.signal.external.SpotFeatureMath::class.java, "adjustPp")
     )
 
     @Test

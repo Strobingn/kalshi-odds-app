@@ -7,26 +7,48 @@ on:
   workflow_dispatch:
     inputs:
       days:
-        description: Lookback days for settled Kalshi 15m markets
+        description: Lookback days for settled Kalshi 15m markets (0 = full history)
         required: false
-        default: "30"
+        default: "3650"
 
+# A failed step skips later steps (GitHub Actions default). Publish only runs
+# after the trainer exits 0, which requires the publish gates to pass.
+# https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
 permissions:
   contents: write
 
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Trainer tests (no look-ahead)
+      - name: Trainer tests (no look-ahead + publish safety)
         run: python3 ml/test_train_edge.py
       - name: Train
-        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+        id: train
+        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '3650' }} --series KXBTC15M --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+      - name: Refuse publish unless gates pass
+        run: |
+          python3 - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, "ml")
+          import publish_gates as gates
+          p = Path("ml/edge_model_manifest.json")
+          if not p.is_file():
+              print("no manifest — refusing publish")
+              sys.exit(1)
+          m = json.loads(p.read_text())
+          d = gates.publish_decision(m)
+          print(json.dumps(d, indent=2))
+          if not d["publishable"]:
+              print("gates failed — not publishing")
+              sys.exit(1)
+          PY
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
@@ -37,10 +59,20 @@ jobs:
             ml/fixtures/parity_sample.json
           if-no-files-found: error
       - name: Publish rolling release
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib, sys
+          sys.path.insert(0, "ml")
+          import publish_gates as gates
+          m = json.loads(pathlib.Path("ml/edge_model_manifest.json").read_text())
+          d = gates.publish_decision(m)
+          if not d["publishable"]:
+              raise SystemExit("refusing to create edge-model-latest: gates failed")
+          PY
           gh release delete edge-model-latest --yes || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
@@ -50,10 +82,14 @@ jobs:
               "Weekly edge model\\n\\n"
               f"- version: {m.get('version')}\\n"
               f"- trained_at: {m.get('trained_at')}\\n"
-              f"- n_samples: {m.get('n_samples')}\\n"
+              f"- n_markets: {m.get('n_markets')}\\n"
+              f"- n_rows: {m.get('n_rows') or m.get('n_samples')}\\n"
+              f"- n_holdout: {m.get('n_holdout')}\\n"
+              f"- synthetic: {m.get('synthetic')}\\n"
               f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
               f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
-              f"- beats_market: {m.get('beats_market')}"
+              f"- beats_market: {m.get('beats_market')}\\n"
+              f"- publishable: {m.get('publishable')}"
           )
           PY
           )

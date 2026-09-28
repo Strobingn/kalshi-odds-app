@@ -59,7 +59,16 @@ class AppContainer(context: Context) {
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
         extended = ExtendedAiRuntime()
-    ).also { it.edgeModel = importedModel.current() }
+    ).also { engine ->
+        val model = importedModel.current()
+        val manifest = importedModel.currentManifest()
+        engine.edgeModel = when {
+            model == null -> null
+            manifest == null -> null
+            com.dirk.kalshiodds.prediction.ModelActivation.decide(manifest, modelValid = true).activate -> model
+            else -> null
+        }
+    }
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,
