@@ -1,0 +1,51 @@
+name: Train big research model
+
+on:
+  push:
+    branches: [chat-GTP]
+    paths:
+      - 'ml/train_big_edge.py'
+      - '.github/workflows/train-big-model.yml'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Historical calendar days to sample
+        default: "30"
+        required: false
+      max_per_day:
+        description: Settled markets per coin per day
+        default: "16"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  train:
+    if: github.ref == 'refs/heads/chat-GTP'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install trainer dependencies
+        run: pip install 'numpy>=2,<3' 'scikit-learn>=1.7,<2'
+      - name: Unit checks
+        run: python3 ml/test_train_big_edge.py
+      - name: Collect authentic data and train
+        env:
+          TRAIN_DAYS: ${{ inputs.days || '30' }}
+          MAX_PER_DAY: ${{ inputs.max_per_day || '16' }}
+        run: |
+          python3 ml/train_big_edge.py --collect \
+            --days "$TRAIN_DAYS" --max-per-day "$MAX_PER_DAY"
+      - name: Archive research model and holdout
+        uses: actions/upload-artifact@v4
+        with:
+          name: big-edge-research-model
+          path: |
+            ml/big_edge_model.json
+            ml/big_edge_manifest.json
+          if-no-files-found: error

@@ -5,9 +5,43 @@ import org.json.JSONObject
 import kotlin.math.exp
 import kotlin.math.ln
 
+/** Flat binary tree exported from the offline gradient booster. */
+data class EdgeTreeNode(
+    val feature: Int = -1,
+    val threshold: Float = 0f,
+    val left: Int = -1,
+    val right: Int = -1,
+    val value: Float? = null
+)
+
+data class EdgeTree(val nodes: List<EdgeTreeNode>) {
+    fun predict(raw: FloatArray): Float {
+        var index = 0
+        repeat(nodes.size) {
+            val node = nodes[index]
+            node.value?.let { return it }
+            index = if (raw[node.feature] <= node.threshold) node.left else node.right
+        }
+        error("Invalid tree: traversal did not reach a leaf")
+    }
+
+    fun validate(featureCount: Int) {
+        require(nodes.isNotEmpty() && nodes.size <= 64) { "invalid tree size" }
+        nodes.forEachIndexed { i, node ->
+            if (node.value != null) {
+                require(node.value.isFinite()) { "non-finite tree leaf" }
+            } else {
+                require(node.feature in 0 until featureCount && node.threshold.isFinite()) { "invalid tree split" }
+                require(node.left in (i + 1) until nodes.size && node.right in (i + 1) until nodes.size) {
+                    "invalid tree child"
+                }
+            }
+        }
+    }
+}
+
 /**
- * Tiny on-device logistic imported from `ml/train_edge.py`.
- * Weights + scaler + optional Platt — a few dozen floats, no TFLite.
+ * On-device logistic or bounded tree ensemble imported from offline training.
  */
 data class EdgeModel(
     val version: Int,
@@ -22,11 +56,22 @@ data class EdgeModel(
     val blendWeight: Float = 0.35f,
     val feeMargin: Float = 0.07f,
     val confidenceMargin: Float = 0.03f,
-    val metrics: Map<String, Double> = emptyMap()
+    val metrics: Map<String, Double> = emptyMap(),
+    val trees: List<EdgeTree> = emptyList(),
+    val baseScore: Float = 0f,
+    val learningRate: Float = 0.05f
 ) {
     init {
+        require(kind == "logistic" || kind == "gbdt") { "unsupported model kind" }
         require(weights.size == featureNames.size) { "weights ${weights.size} != names ${featureNames.size}" }
         require(mean.size == weights.size && std.size == weights.size)
+        if (kind == "gbdt") {
+            require(featureNames == EdgeFeatures.NAMES) { "GBDT feature order differs from live app" }
+            require(trees.isNotEmpty() && trees.size <= 512) { "invalid tree count" }
+            require(baseScore.isFinite() && learningRate.isFinite() && learningRate > 0f &&
+                plattA.isFinite() && plattB.isFinite()) { "invalid GBDT calibration" }
+            trees.forEach { it.validate(featureNames.size) }
+        }
     }
 
     fun predictYes(raw: FloatArray): Double {
@@ -42,6 +87,12 @@ data class EdgeModel(
     }
 
     fun logit(raw: FloatArray): Float {
+        if (kind == "gbdt") {
+            require(raw.size == featureNames.size && raw.all { it.isFinite() }) { "invalid GBDT features" }
+            var z = baseScore
+            for (tree in trees) z += learningRate * tree.predict(raw)
+            return z
+        }
         val n = weights.size
         var acc = bias
         val lim = minOf(n, raw.size)
@@ -82,6 +133,19 @@ data class EdgeModel(
         o.put("blend_weight", blendWeight.toDouble())
         o.put("fee_margin", feeMargin.toDouble())
         o.put("confidence_margin", confidenceMargin.toDouble())
+        if (kind == "gbdt") {
+            o.put("base_score", baseScore.toDouble())
+            o.put("learning_rate", learningRate.toDouble())
+            o.put("trees", JSONArray().apply {
+                trees.forEach { tree -> put(JSONObject().put("nodes", JSONArray().apply {
+                    tree.nodes.forEach { node ->
+                        put(if (node.value != null) JSONObject().put("value", node.value.toDouble())
+                        else JSONObject().put("feature", node.feature).put("threshold", node.threshold.toDouble())
+                            .put("left", node.left).put("right", node.right))
+                    }
+                })) }
+            })
+        }
         if (metrics.isNotEmpty()) {
             val m = JSONObject()
             metrics.forEach { (k, v) -> m.put(k, v) }
@@ -109,9 +173,26 @@ data class EdgeModel(
                     metrics[k] = m.optDouble(k)
                 }
             }
+            val kind = o.optString("kind", "logistic")
+            val trees = if (kind == "gbdt") {
+                val arr = o.getJSONArray("trees")
+                require(arr.length() in 1..512)
+                (0 until arr.length()).map { i ->
+                    val nodes = arr.getJSONObject(i).getJSONArray("nodes")
+                    EdgeTree((0 until nodes.length()).map { j ->
+                        val node = nodes.getJSONObject(j)
+                        if (node.has("value")) EdgeTreeNode(value = node.getDouble("value").toFloat())
+                        else EdgeTreeNode(
+                            feature = node.getInt("feature"),
+                            threshold = node.getDouble("threshold").toFloat(),
+                            left = node.getInt("left"), right = node.getInt("right")
+                        )
+                    })
+                }
+            } else emptyList()
             return EdgeModel(
                 version = o.optInt("version", 1),
-                kind = o.optString("kind", "logistic"),
+                kind = kind,
                 featureNames = names,
                 weights = weights,
                 bias = o.optDouble("bias", 0.0).toFloat(),
@@ -122,7 +203,10 @@ data class EdgeModel(
                 blendWeight = o.optDouble("blend_weight", 0.35).toFloat(),
                 feeMargin = o.optDouble("fee_margin", 0.07).toFloat(),
                 confidenceMargin = o.optDouble("confidence_margin", 0.03).toFloat(),
-                metrics = metrics
+                metrics = metrics,
+                trees = trees,
+                baseScore = o.optDouble("base_score", 0.0).toFloat(),
+                learningRate = o.optDouble("learning_rate", 0.05).toFloat()
             )
         }
 

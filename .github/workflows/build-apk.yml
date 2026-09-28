@@ -27,7 +27,10 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       - name: Trainer tests (no look-ahead)
-        run: python3 ml/test_train_edge.py
+        run: |
+          pip install 'numpy>=2,<3' 'scikit-learn>=1.7,<2'
+          python3 ml/test_train_edge.py
+          python3 ml/test_train_big_edge.py
 
       - name: Read version
         id: ver
@@ -50,6 +53,7 @@ jobs:
             --tests 'com.dirk.kalshiodds.signal.GuardrailsTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForecastUnitsTest' \
             --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
+            --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
             --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
             --no-daemon --stacktrace
 
