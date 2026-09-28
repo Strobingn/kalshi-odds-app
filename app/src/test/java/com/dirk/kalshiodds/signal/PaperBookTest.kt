@@ -18,6 +18,8 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+private const val DEEP = 100_000
+
 class PaperBookTest {
 
     @Test
@@ -25,13 +27,13 @@ class PaperBookTest {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertEquals(1_000.0, book.snapshot().paperBankrollUsd, 1e-9)
-        val fill = book.considerTicket(hunterTicket(), enabled = true)
+        val fill = book.considerTicket(hunterTicket(), enabled = true, depthContracts = DEEP)
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
         assertEquals("AI hunter", fill.source)
         assertEquals(70.0, fill.aiPct!!, 1e-6)
         assertEquals(com.dirk.kalshiodds.signal.paper.PaperPickSource.TICKET.label, fill.pickSource)
-        val expected = PaperKellySizer.size(0.70, 0.04, 1_000.0)
+        val expected = PaperKellySizer.size(0.70, 0.04, 1_000.0, depthContracts = DEEP)
         assertTrue(expected.ok)
         assertEquals(expected.contracts, fill.contracts)
         assertEquals(expected.allInUsd, fill.stakeUsd, 1e-9)
@@ -46,9 +48,9 @@ class PaperBookTest {
     @Test
     fun disabledAndDuplicateTickerDoNotFill() {
         val book = PaperBook()
-        assertNull(book.considerTicket(hunterTicket(), enabled = false))
-        assertTrue(book.considerTicket(hunterTicket(), enabled = true) != null)
-        assertNull(book.considerTicket(hunterTicket(id = "other"), enabled = true))
+        assertNull(book.considerTicket(hunterTicket(), enabled = false, depthContracts = DEEP))
+        assertTrue(book.considerTicket(hunterTicket(), enabled = true, depthContracts = DEEP) != null)
+        assertNull(book.considerTicket(hunterTicket(id = "other"), enabled = true, depthContracts = DEEP))
         assertEquals(1, book.snapshot().fills.size)
     }
 
@@ -56,7 +58,7 @@ class PaperBookTest {
     fun manualLiveTicketIsNotAutoPapered() {
         val book = PaperBook()
         val manual = hunterTicket().copy(kind = TicketKind.MANUAL, ticker = "KXBTC15M-X")
-        assertNull(book.considerTicket(manual, enabled = true))
+        assertNull(book.considerTicket(manual, enabled = true, depthContracts = DEEP))
         assertTrue(book.manualFill(manual) != null)
         assertTrue(book.snapshot().fills.single().source.contains("paper", ignoreCase = true))
     }
@@ -83,7 +85,7 @@ class PaperBookTest {
             receiveElapsedNanos = 1L,
             predictedSide = "NO"
         )
-        book.considerAlert(alert, ask = 0.20, enabled = true)
+        book.considerAlert(alert, ask = 0.20, enabled = true, depthContracts = DEEP)
         assertEquals(1, book.snapshot().fills.size)
         assertEquals("NO", book.snapshot().fills.single().side)
         assertTrue(book.snapshot().fills.single().kellyF!! > 0.0)
@@ -108,7 +110,7 @@ class PaperBookTest {
             feeUsd = 0.10,
             profitIfWinUsd = 18.0,
             depthLimited = false,
-            depthContracts = null,
+            depthContracts = 10_000,
             tauSec = 12,
             x = 0.0,
             obsMean = 0.0,
@@ -117,7 +119,7 @@ class PaperBookTest {
         )
         val fill = book.considerLastMinute(fired, enabled = true)
         assertTrue(fill != null)
-        val expected = PaperKellySizer.size(0.91, 0.10, 1_000.0)
+        val expected = PaperKellySizer.size(0.91, 0.10, 1_000.0, depthContracts = 10_000)
         assertEquals(expected.contracts, fill!!.contracts)
         assertTrue(fill.contracts > 20)
         assertEquals(expected.allInUsd, fill.stakeUsd, 1e-9)
@@ -125,11 +127,58 @@ class PaperBookTest {
     }
 
     @Test
+    fun lastMinuteSkipsWhenAskDepthUnknown() {
+        val book = PaperBook()
+        val fired = LastMinuteFired(
+            ticker = "KXBTC15M-LM0",
+            side = "YES",
+            displaySide = "UP",
+            winChance = 0.91,
+            ask = 0.10,
+            evPerDollar = 1.5,
+            contracts = 20,
+            costUsd = 2.0,
+            feeUsd = 0.10,
+            profitIfWinUsd = 18.0,
+            depthLimited = false,
+            depthContracts = null,
+            tauSec = 12,
+            x = 0.0,
+            obsMean = 0.0,
+            sigS = 0.0,
+            firedAtMs = 2L
+        )
+        assertNull(book.considerLastMinute(fired, enabled = true))
+        assertTrue(book.snapshot().fills.isEmpty())
+        assertTrue(book.snapshot().lastMessage!!.contains("depth", ignoreCase = true))
+    }
+
+    @Test
+    fun alertSkipsWhenAskDepthUnknown() {
+        val book = PaperBook()
+        val alert = SignalAlert(
+            id = "a1",
+            ticker = "KXBTC15M-SIG",
+            series = "KXBTC15M",
+            deltaPp = 8.0,
+            fairValuePp = 62.0,
+            marketMidPp = 54.0,
+            reason = "edge",
+            createdAtMs = 1L,
+            receiveElapsedNanos = 1L,
+            predictedSide = "NO"
+        )
+        assertNull(book.considerAlert(alert, ask = 0.20, enabled = true))
+        assertTrue(book.snapshot().fills.isEmpty())
+        assertTrue(book.snapshot().lastMessage!!.contains("depth", ignoreCase = true))
+    }
+
+    @Test
     fun settleWinLossVoidAndReset() {
         val book = PaperBook()
-        val winFill = book.considerTicket(hunterTicket(ticker = "WIN-1"), enabled = true)!!
-        val lossFill = book.considerTicket(hunterTicket(ticker = "LOSS-1", side = "NO"), enabled = true)!!
-        val voidFill = book.considerTicket(hunterTicket(ticker = "VOID-1"), enabled = true)!!
+        val winFill = book.considerTicket(hunterTicket(ticker = "WIN-1"), enabled = true, depthContracts = DEEP)!!
+        val lossFill = book.considerTicket(hunterTicket(ticker = "LOSS-1", side = "NO"), enabled = true, depthContracts = DEEP)!!
+        val voidFill = book.considerTicket(hunterTicket(ticker = "VOID-1"), enabled = true, depthContracts = DEEP)!!
         book.settle("WIN-1", "yes")
         book.settle("LOSS-1", "yes") // NO side loses
         book.settle("VOID-1", "void")
@@ -174,7 +223,7 @@ class PaperBookTest {
         val book = PaperBook()
         val ticket = hunterTicket()
         session.replaceProposals(listOf(ticket))
-        book.considerTicket(ticket, enabled = true)
+        book.considerTicket(ticket, enabled = true, depthContracts = DEEP)
         assertEquals(0, placed.get())
         session.approve("nope")
         assertEquals(0, placed.get())
@@ -196,8 +245,8 @@ class PaperBookTest {
             estimatedAvgFill = 0.40,
             ticker = "KXBTC15M-WT"
         )
-        val fill = book.considerTicket(ticket, enabled = true)
-        val expected = PaperKellySizer.size(0.70, 0.40, 1_000.0)
+        val fill = book.considerTicket(ticket, enabled = true, depthContracts = DEEP)
+        val expected = PaperKellySizer.size(0.70, 0.40, 1_000.0, depthContracts = DEEP)
         assertEquals(expected.contracts, fill!!.contracts)
         assertEquals(expected.allInUsd, fill.stakeUsd, 1e-9)
         assertTrue(fill.contracts != 20)
