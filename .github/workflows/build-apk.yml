@@ -86,3 +86,8 @@ jobs:
             --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
             --notes "$notes" \
             --prerelease
+          # GitHub can leave a freshly uploaded prerelease as a draft even
+          # when `release create` exits successfully. The in-app updater needs
+          # the public release-by-tag endpoint, so verify it before success.
+          gh release edit "$tag" --draft=false --prerelease
+          gh release view "$tag" --json isDraft --jq '.isDraft' | grep -qx false
