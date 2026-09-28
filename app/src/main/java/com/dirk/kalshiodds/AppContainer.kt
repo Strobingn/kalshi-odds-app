@@ -85,9 +85,29 @@ class AppContainer(context: Context) {
      * app is visible or Live signals is on, and the Settings toggle allows it.
      */
     val spotBook = SpotStreamBook().also { scoring.spotStream = it }
+
+    /**
+     * Research recorder (spot / top of book / trades / settlements as daily
+     * gzip CSV under filesDir/recordings). Started by LiveSignalsService.
+     */
+    val recorder = com.dirk.kalshiodds.data.local.recording.MarketDataRecorder(
+        files = com.dirk.kalshiodds.data.local.recording.RecordingFiles(
+            File(app.filesDir, com.dirk.kalshiodds.data.local.recording.MarketDataRecorder.DIR_NAME)
+        ),
+        topOf = { ticker -> scoring.book.topOfBook(ticker) },
+        metaOf = { ticker ->
+            val last = scoring.book.lastTick(ticker)
+            (scoring.book.strike(ticker) ?: last?.floorStrike) to
+                (scoring.book.closeTime(ticker) ?: last?.closeTimeEpochMs)
+        },
+        watchedTickers = { hub.watchTickers.value }
+    )
     val spotStream = CoinbaseSpotStream(
         book = spotBook,
-        onPrint = { asset, price, recvNanos -> hub.ingestSpot(asset, price, recvNanos) }
+        onPrint = { asset, price, recvNanos ->
+            recorder.onSpot("$asset-USD", price)
+            hub.ingestSpot(asset, price, recvNanos)
+        }
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
     val paper = PaperBookStore(app)
@@ -132,8 +152,11 @@ class AppContainer(context: Context) {
         },
         model = model,
         logStore = logStore,
-        extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        extraOpenTickers = { paper.book.openTickers() + recorder.pendingSettlementTickers() },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            recorder.onSettled(ticker, result)
+        },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)

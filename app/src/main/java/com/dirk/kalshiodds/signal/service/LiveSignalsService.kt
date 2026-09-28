@@ -192,6 +192,7 @@ class LiveSignalsService : Service() {
         if (!settings.liveSignalsEnabled) {
             explicitStop = true
             runCatching { container.spotStream.release(CoinbaseSpotStream.OWNER_LIVE) }
+            runCatching { container.recorder.setActive(false) }
             client?.stop()
             client = null
             hub.setConnection(WsConnectionState.IDLE, detail = "live signals off")
@@ -202,6 +203,7 @@ class LiveSignalsService : Service() {
         // Spot stream runs with Live signals even on the REST fallback (no
         // key): spot moves re-score the last Kalshi quote either way.
         runCatching { container.spotStream.acquire(CoinbaseSpotStream.OWNER_LIVE) }
+        runCatching { container.recorder.setActive(settings.recordMarketData) }
         if (!LiveSignalsPolicy.shouldConnectWs(true, settings.tradingCredentialsConfigured())) {
             client?.stop()
             client = null
@@ -210,7 +212,8 @@ class LiveSignalsService : Service() {
             updateNotification(needsKey = true)
             return
         }
-        val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades, tickers.filter {
+        // The recorder needs the public trade channel even if the trades toggle is off.
+        val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades || settings.recordMarketData, tickers.filter {
             settings.isWatchedTicker(it)
         })
         val demo = settings.kalshiDemoEnabled
@@ -224,7 +227,10 @@ class LiveSignalsService : Service() {
             updateNotification(reconnecting = true)
             val ws = KalshiWsClient(
                 scope = scope,
-                onTick = { tick -> runCatching { hub.ingestTick(tick) } },
+                onTick = { tick ->
+                    runCatching { container.recorder.onTick(tick) }
+                    runCatching { hub.ingestTick(tick) }
+                },
                 onLifecycle = { ticker, eventType ->
                     scope.launch {
                         runCatching {
@@ -408,6 +414,7 @@ class LiveSignalsService : Service() {
         runCatching {
             KalshiOddsApp.from(this).container.spotStream.release(CoinbaseSpotStream.OWNER_LIVE)
         }
+        runCatching { KalshiOddsApp.from(this).container.recorder.setActive(false) }
         pipelineJob?.cancel()
         pipelineJob = null
         metadataJob?.cancel()

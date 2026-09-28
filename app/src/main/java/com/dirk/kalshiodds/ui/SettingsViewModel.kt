@@ -136,6 +136,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setLiveSignals(v: Boolean) = viewModelScope.launch { prefs.updateLiveSignals(v) }
     fun setSubscribeTrades(v: Boolean) = viewModelScope.launch { prefs.updateSubscribeTrades(v) }
     fun setSpotStream(v: Boolean) = viewModelScope.launch { prefs.updateSpotStream(v) }
+    fun setRecordMarketData(v: Boolean) = viewModelScope.launch { prefs.updateRecordMarketData(v) }
     fun setThreshold(v: Double) = viewModelScope.launch { prefs.updateEdgeThresholdPp(v) }
     fun setMinConfidence(v: Double) = viewModelScope.launch { prefs.updateMinConfidence(v) }
     fun setMinLiquidity(v: Double) = viewModelScope.launch { prefs.updateMinLiquidity(v) }
