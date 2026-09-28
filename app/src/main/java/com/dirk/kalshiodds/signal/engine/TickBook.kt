@@ -398,6 +398,28 @@ class TickBook(private val maxPoints: Int = 80) {
         return if (snap.isEmpty()) null else snap
     }
 
+    /**
+     * Top of book for the market-data recorder: the local order book when it
+     * has levels, else the last streamed / REST quote with the missing side
+     * derived as 1 − the other (quantities unknown → null).
+     */
+    @Synchronized
+    fun topOfBook(ticker: String): TopOfBook? {
+        val fromBook = books[ticker]?.top()
+        if (fromBook != null && !fromBook.isEmpty()) return fromBook
+        val last = lastTickByTicker[ticker] ?: return null
+        if (last.source == TickSource.WS_TRADE) return null
+        val bid = KalshiPrice.usable(last.yesBid)
+        val ask = KalshiPrice.usable(last.yesAsk)
+        val top = TopOfBook(
+            yesBid = bid,
+            yesAsk = ask,
+            noBid = KalshiPrice.usable(last.noBid) ?: ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
+            noAsk = KalshiPrice.usable(last.noAsk) ?: bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }
+        )
+        return if (top.isEmpty()) null else top
+    }
+
     @Synchronized
     fun applySnapshot(
         ticker: String,
