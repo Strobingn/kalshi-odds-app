@@ -162,12 +162,17 @@ class MarketDataRecorderTest {
             File(dir, "book_$day.csv.gz").writeBytes(ByteArray(600))
         }
         File(dir, "settle_2026-09-25.csv").writeText("x\n")
+        // 602 + 600 + 600 = 1,802 > 1,500: dropping the oldest day (602)
+        // leaves 1,200, already under the cap, so only one day goes.
         val deleted = files.enforceCap("2026-09-27")
-        assertEquals(listOf("2026-09-25", "2026-09-26"), deleted)
-        assertEquals(listOf("2026-09-27"), files.days().map { it.day })
+        assertEquals(listOf("2026-09-25"), deleted)
+        assertEquals(listOf("2026-09-26", "2026-09-27"), files.days().map { it.day })
         assertFalse(files.overCap)
+        // Today grows to 1,600 on its own: the older day goes, today stays,
+        // and the recorder is flagged over the cap.
         File(dir, "spot_2026-09-27.csv.gz").writeBytes(ByteArray(1_000))
-        files.enforceCap("2026-09-27")
+        assertEquals(listOf("2026-09-26"), files.enforceCap("2026-09-27"))
+        assertEquals(listOf("2026-09-27"), files.days().map { it.day })
         assertTrue(files.overCap)
     }
 
