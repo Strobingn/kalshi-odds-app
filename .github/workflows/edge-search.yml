@@ -1,0 +1,56 @@
+name: Edge search (Claude)
+
+# Pre-registered strategy search (tools/research/edge_search.py) on the
+# same settled-market cache the backtest uses. Report is printed to the
+# log and the run summary; nothing is committed or released.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/**"
+      - ".github/workflows/edge-search.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Lookback days of settled markets
+        required: false
+        default: "28"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: edge-search-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install deps
+        run: pip install lightgbm numpy
+
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: tools/backtest/cache
+          key: backtest-cache-${{ github.run_id }}
+          restore-keys: backtest-cache-
+
+      - name: Refresh settled markets (incremental)
+        run: |
+          cd tools/backtest
+          python3 -c "from pathlib import Path; from fetch import run_fetch; print(run_fetch(Path('cache'), days=${{ github.event.inputs.days || '28' }}))"
+
+      - name: Search
+        run: |
+          python3 tools/research/edge_search.py --cache tools/backtest/cache --out edge_search.md
+          cat edge_search.md >> "$GITHUB_STEP_SUMMARY"
