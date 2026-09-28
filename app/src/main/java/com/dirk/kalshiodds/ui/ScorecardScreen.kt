@@ -136,7 +136,7 @@ fun ScorecardScreen(
                 ui.adapter?.let { item { AdapterBanner(it) } }
                 ui.guardrails?.let { item { GuardBanner(it) } }
                 ui.allowlist?.let { item { MuteBanner(it) } }
-                item { HonestCard(metrics.honest) }
+                item { HonestCard(metrics) }
                 item { WindowCard("Today", metrics.daily) }
                 item { WindowCard("Rolling 7 days", metrics.rolling) }
                 item { WindowCard("All time", metrics.allTime) }
@@ -529,8 +529,9 @@ private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
 }
 
 @Composable
-private fun HonestCard(h: ScorecardMetrics.Honest) {
+private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
     val colors = DipTheme.colors
+    val h = snapshot.honest
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -540,7 +541,7 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
         Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         if (!h.enoughData) {
             Text(
-                "Not enough data yet — ${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled signals. Numbers below are provisional.",
+                "${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled directional picks. ${snapshot.noBetCount} settled NO BET windows are excluded. Numbers below are provisional.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
                 fontWeight = FontWeight.SemiBold,
@@ -554,6 +555,12 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
                 color = colors.textPrimary
             )
         }
+        Text(
+            "One result per BTC 15-minute window, up to four per hour. The 100-pick check takes at least 25 hours if every window has a pick; abstentions take longer. Each 4-hour time bucket needs results across multiple days. ${snapshot.openCount} logged windows still await settlement.",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary,
+            modifier = Modifier.padding(top = 6.dp)
+        )
         Spacer(Modifier.height(8.dp))
         Text(
             HomeCopy.pickedSideLine(h.hits, h.n.takeIf { it > 0 }),
@@ -591,7 +598,9 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
         if (h.perCoin.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             Text("Per coin", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
-            h.perCoin.forEach { b -> BreakdownRow(b) }
+            h.perCoin.forEach { b ->
+                if (b.key == "BTC" || b.n > 0) BreakdownRow(b)
+            }
         }
         if (h.perTimeOfDay.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))

@@ -199,10 +199,12 @@ class PredictionLogStore(private val context: Context) {
                         list[i] = e.copy(outcome = "void", score = null, brier = null, settledAtMs = settledAtMs)
                     } else {
                         val next = e.copy(outcome = normalized, settledAtMs = settledAtMs)
-                        val hit = com.dirk.kalshiodds.signal.feedback.ForecastUnits.hit(next)
+                        val forecast = com.dirk.kalshiodds.signal.feedback.ForecastUnits
+                        val isPick = forecast.isScoredPick(next)
+                        val hit = isPick && forecast.hit(next)
                         list[i] = next.copy(
-                            score = if (hit) 1 else 0,
-                            brier = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideBrier(next)
+                            score = if (isPick) (if (hit) 1 else 0) else null,
+                            brier = if (isPick) forecast.sideBrier(next) else null
                         )
                     }
                     changed = true

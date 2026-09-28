@@ -49,6 +49,15 @@ established.
    confirmation prompt. Android requires approval for sideloaded updates.
    Its manually dispatched edge-model workflow publishes a separate
    `edge-model-chat-GTP` release so it cannot replace main's model release.
+9. The scorecard now states that the 100-sample threshold applies to
+   *directional picks*: a settled NO BET window does not increase that count.
+   The screenshot with 43 resolved BTC windows and 12 picks exposed a
+   second bug: `Allowlist` counted the other 31 abstentions as losses,
+   showing a false 8/43 (19%) mute instead of 8/12 (67%). The branch now
+   excludes NO BET rows from the mute guard, guardrail streak/P&L, and
+   stored pick score; the persisted proxy guardrail is rebuilt from retained
+   settled history on upgrade. This is an explanation of the screenshot's
+   denominators, not evidence of profitable trades.
 
 ## Highest-priority test of a real edge
 

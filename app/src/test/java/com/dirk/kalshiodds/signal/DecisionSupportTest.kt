@@ -135,6 +135,28 @@ class PositionSizerTest {
 
 class AllowlistTest {
     @Test
+    fun abstentionsDoNotCountAsLossesOrMuteBtc() {
+        val now = 2_000_000_000_000L
+        val picks = (0 until 12).map { i ->
+            settled("KXBTC15M-p$i", "KXBTC15M", hit = i < 8, ts = now + i)
+        }
+        val noBets = (0 until 31).map { i ->
+            settled("KXBTC15M-n$i", "KXBTC15M", hit = false, ts = now + 12 + i)
+                .copy(predictedSide = "NO_BET", score = 0)
+        }
+        val rows = picks + noBets
+        val state = Allowlist.evaluate(rows, nowMs = now + 100, floor = 0.40, minSamples = 8)
+        val btc = state.buckets.single { it.key == "KXBTC15M" }
+        assertEquals(12, btc.total)
+        assertEquals(8, btc.hits)
+        assertFalse(state.isSeriesMuted("KXBTC15M"))
+
+        val card = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(rows)
+        assertEquals(12, card.honest.n)
+        assertEquals(31, card.noBetCount)
+    }
+
+    @Test
     fun coldStartNeverMutes() {
         val state = Allowlist.evaluate(emptyList(), floor = 0.40, minSamples = 8)
         assertFalse(state.ready)
@@ -187,6 +209,29 @@ class AllowlistTest {
 }
 
 class GuardrailsTest {
+    @Test
+    fun noBetRowsDoNotChangeStreakOrProxyAndOldStateIsRebuilt() {
+        val picks = listOf(
+            settled("KXBTC15M-p0", "KXBTC15M", hit = true, ts = 1_000L),
+            settled("KXBTC15M-p1", "KXBTC15M", hit = false, ts = 2_000L)
+        )
+        val abstained = settled("KXBTC15M-no", "KXBTC15M", hit = false, ts = 3_000L)
+            .copy(predictedSide = "NO_BET", score = 0)
+        val thresholds = Guardrails.Thresholds(streakN = 3, drawdownUsd = 1_000.0)
+        val fresh = Guardrails.update(Guardrails.identity(), picks + abstained, thresholds)
+        assertEquals(2, fresh.processed)
+        assertEquals(1, fresh.consecutiveWrong)
+        assertEquals(0.0, Guardrails.oneContractPnl(abstained), 1e-9)
+        val rebuilt = Guardrails.migrateIfNeeded(
+            Guardrails.State(processed = 3, rollingPnl = -2.0),
+            picks + abstained,
+            thresholds
+        )
+        assertEquals(2, rebuilt.accountingVersion)
+        assertEquals(fresh.rollingPnl, rebuilt.rollingPnl, 1e-9)
+        assertEquals(2, rebuilt.processed)
+    }
+
     @Test
     fun pausesAfterNWrongInARow() {
         val now = 1_000L

@@ -42,6 +42,16 @@ jobs:
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
+      - name: Trading and update regressions
+        run: |
+          ./gradlew :app:testDebugUnitTest \
+            --tests 'com.dirk.kalshiodds.signal.AllowlistTest' \
+            --tests 'com.dirk.kalshiodds.signal.GuardrailsTest' \
+            --tests 'com.dirk.kalshiodds.signal.feedback.ForecastUnitsTest' \
+            --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
+            --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
+            --no-daemon --stacktrace
+
       - name: Rename APK
         id: apk
         run: |

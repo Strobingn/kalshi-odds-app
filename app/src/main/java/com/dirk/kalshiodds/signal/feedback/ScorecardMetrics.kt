@@ -78,6 +78,8 @@ object ScorecardMetrics {
         val sampleCount: Int,
         val openCount: Int,
         val voidCount: Int,
+        /** Resolved windows where the app explicitly abstained. Never score as losses. */
+        val noBetCount: Int = 0,
         val calibrationReady: Boolean,
         val temperature: Double?,
         val calibrationSamples: Int,
@@ -99,6 +101,10 @@ object ScorecardMetrics {
         val settled = settledScoredPicks(entries)
         val voids = entries.count { it.outcome.equals("void", true) }
         val open = entries.count { it.outcome == null }
+        val noBets = entries.count {
+            (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
+                !ForecastUnits.isScoredPick(it)
+        }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
         val rollingStart = nowMs - SignalConstants.SCORECARD_ROLLING_DAYS * 86_400_000L
         return Snapshot(
@@ -113,6 +119,7 @@ object ScorecardMetrics {
             sampleCount = settled.size,
             openCount = open,
             voidCount = voids,
+            noBetCount = noBets,
             calibrationReady = calibration.ready,
             temperature = if (calibration.ready) calibration.temperature else null,
             calibrationSamples = calibration.sampleCount,

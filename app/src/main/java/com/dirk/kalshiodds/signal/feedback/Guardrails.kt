@@ -31,7 +31,9 @@ object Guardrails {
         val lastSettledAtMs: Long = 0L,
         val sessionId: Long = 0L,
         val lastResumeMs: Long = 0L,
-        val processed: Int = 0
+        val processed: Int = 0,
+        /** Old stored state included NO BET rows in streak and proxy P&L. */
+        val accountingVersion: Int = 1
     ) {
         val drawdown: Double get() = (peakPnl - rollingPnl).coerceAtLeast(0.0)
 
@@ -49,7 +51,23 @@ object Guardrails {
         val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION
     )
 
-    fun identity(): State = State()
+    fun identity(): State = State(accountingVersion = 2)
+
+    fun migrateIfNeeded(
+        state: State,
+        entries: List<PredictionLogEntry>,
+        thresholds: Thresholds,
+        nowMs: Long = System.currentTimeMillis()
+    ): State {
+        if (state.accountingVersion >= 2) return state
+        // Rebuild from retained settled rows. Historical no-bets were charged
+        // as trades in the persisted running total and cannot be subtracted
+        // accurately from that aggregate alone.
+        return update(identity(), entries, thresholds, nowMs).copy(
+            sessionId = state.sessionId,
+            lastResumeMs = state.lastResumeMs
+        )
+    }
 
     fun onNewSession(state: State, thresholds: Thresholds, sessionId: Long, nowMs: Long): State {
         if (state.sessionId == sessionId) return state
@@ -87,7 +105,8 @@ object Guardrails {
         val fresh = entries
             .filter { e ->
                 val y = e.outcome?.lowercase()
-                (y == "yes" || y == "no") && (e.settledAtMs ?: e.timestampMs) > state.lastSettledAtMs
+                (y == "yes" || y == "no") && ForecastUnits.isScoredPick(e) &&
+                    (e.settledAtMs ?: e.timestampMs) > state.lastSettledAtMs
             }
             .sortedBy { it.settledAtMs ?: eTimestamp(it) }
         if (fresh.isEmpty()) return maybeTrip(state, thresholds)
@@ -130,6 +149,7 @@ object Guardrails {
     }
 
     fun oneContractPnl(e: PredictionLogEntry): Double {
+        if (!ForecastUnits.isScoredPick(e)) return 0.0
         val mid = e.marketMid.coerceIn(0.01, 0.99)
         val predYes = when (e.predictedSide?.uppercase()) {
             "YES" -> true
@@ -145,12 +165,7 @@ object Guardrails {
     }
 
     fun isHit(e: PredictionLogEntry): Boolean {
-        val predYes = when (e.predictedSide?.uppercase()) {
-            "YES" -> true
-            "NO" -> false
-            else -> e.predictedYes > 0.5
-        }
-        return predYes == e.outcome.equals("yes", true)
+        return ForecastUnits.hit(e)
     }
 
     private fun eTimestamp(e: PredictionLogEntry): Long = e.settledAtMs ?: e.timestampMs
