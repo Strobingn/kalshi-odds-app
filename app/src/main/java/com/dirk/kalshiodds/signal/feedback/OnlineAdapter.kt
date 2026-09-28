@@ -31,9 +31,11 @@ import kotlinx.serialization.Serializable
  *        a ← a + η (y − p̂) logit(p)
  *        b ← b + η (y − p̂)
  *
- *    This is *in addition to* [Calibrator]'s temperature. Cold start
- *    (`sampleCount < MIN_ADAPTER_SAMPLES`) leaves weights at 1.0 and
- *    `(a, b) = (1, 0)` so the live blend is unchanged.
+ *    Tracked for the scorecard only: [ScoringEngine] no longer applies it on
+ *    top of [Calibrator] (two calibrators fit on the same outcomes
+ *    over-corrected). Cold start (`sampleCount < MIN_ADAPTER_SAMPLES`, 100)
+ *    leaves channel weights at 1.0, and each update also shrinks them toward
+ *    1.0 ([SignalConstants.ADAPTER_PRIOR_PULL]).
  *
  * Persistence: JSON in DataStore ([LearnedWeightsStore]). No network
  * training, no remote server.
@@ -140,7 +142,10 @@ object OnlineAdapter {
                     val agree = if (featureWantedYes == actualYes) 1.0 else -1.0
                     val prev = weights[key] ?: 1.0
                     val target = 1.0 + 0.5 * agree
-                    weights[key] = ((1.0 - alpha) * prev + alpha * target).coerceIn(0.35, 2.0)
+                    val moved = (1.0 - alpha) * prev + alpha * target
+                    // L2-style shrink toward the prior so streaks cannot pin a weight at the clamp.
+                    val shrunk = 1.0 + (moved - 1.0) * (1.0 - SignalConstants.ADAPTER_PRIOR_PULL)
+                    weights[key] = shrunk.coerceIn(0.35, 2.0)
                 }
             }
             val z = logit(p)

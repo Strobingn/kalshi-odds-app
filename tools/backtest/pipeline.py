@@ -2,10 +2,15 @@
 
 Calls the same formulas as:
   FeatureVector, FallbackWeights, DipHunterModel.predict,
-  DigitalOptionFairValue, SpotFeatureMath, DirectionSanity, TapeConflict,
-  ScoringEngine (light blend: heavy ML / extended AI default OFF),
-  TickBook flow/momentum/velocity, NetExpectedValue, KalshiFee,
+  DigitalOptionFairValue (incl. sigmaFromCloses), SpotFeatureMath,
+  DirectionSanity, TapeConflict, ScoringEngine (light blend: heavy ML /
+  extended AI default OFF; AI and related-crypto weights 0), EdgeFeatures /
+  EdgeModel (schema-2 market offset), TickBook flow/momentum/velocity,
+  NetExpectedValue.bestSide (side by net EV at the ask), KalshiFee,
   TicketBuilder.resolveSide / modelBeatsImplied, SkipFilter.
+
+`DecisionEngine(lock_mode="legacy")` keeps the 0.3.10 side picker (tape hero
+first, |edge| alert gate, tanh lock) for before/after comparisons.
 
 Unavailable historically (set neutral / drop out of the blend):
   order-book imbalance, depth near/far, quote-pull / cancel spikes,
@@ -40,9 +45,12 @@ MIN_ABS_GAP_USD = 0.50
 VELOCITY_LOOKBACK = 16
 DIRK_MIN_PROFIT = 10.0
 
+# ScoringEngine.W_*. AI (8-feature MLP) and related-crypto are 0: the MLP was
+# trained on BTC+WTI with mismatched inputs and scored worst of every forecast;
+# "related" blended another coin's YES mid (different strike) in as this one's.
 W = {
-    "early": dict(ai=0.30, flow=0.12, related=0.08, velocity=0.10, imbalance=0.10, leadLag=0.10, depth=0.10, cancel=0.10, spot=0.08),
-    "late": dict(ai=0.20, flow=0.14, related=0.04, velocity=0.14, imbalance=0.14, leadLag=0.06, depth=0.14, cancel=0.14, spot=0.06),
+    "early": dict(ai=0.0, flow=0.12, related=0.0, velocity=0.10, imbalance=0.10, leadLag=0.10, depth=0.10, cancel=0.10, spot=0.08),
+    "late": dict(ai=0.0, flow=0.14, related=0.0, velocity=0.14, imbalance=0.14, leadLag=0.06, depth=0.14, cancel=0.14, spot=0.06),
 }
 
 
@@ -285,6 +293,117 @@ def sigma_annual_from_bar_std(bar_std: float) -> float:
     return min(5.0, max(0.01, bar_std * math.sqrt(SECONDS_PER_YEAR / 60.0)))
 
 
+# σ for the digital (DigitalOptionFairValue.sigmaFromCloses): EWMA of squared
+# 1m log returns, half-life SIGMA_HALFLIFE_BARS, over the last SIGMA_BARS returns.
+# Backtest 2026-09-27: beat the old 16-bar sample std on IS and OOS log-loss;
+# scaling σ up (×1.25) was worse, so no inflation.
+SIGMA_BARS = 60
+SIGMA_HALFLIFE_BARS = 10.0
+
+
+def sigma_annual_from_closes(closes: list[float]) -> float | None:
+    rets = []
+    prev = None
+    for c in closes[-(SIGMA_BARS + 1):]:
+        if prev is not None and prev > 0 and c > 0:
+            rets.append(math.log(c / prev))
+        prev = c
+    if len(rets) < 4:
+        return None
+    lam = 0.5 ** (1.0 / SIGMA_HALFLIFE_BARS)
+    var = rets[0] * rets[0]
+    for r in rets[1:]:
+        var = lam * var + (1.0 - lam) * r * r
+    if var <= 0.0:
+        return None
+    return sigma_annual_from_bar_std(math.sqrt(var))
+
+
+# --- Edge model schema 2 (market offset) --------------------------------------
+# Android twin: prediction/EdgeFeatures.kt. Order is the JSON contract.
+
+EDGE_SCHEMA = 2
+EDGE_FEATURES = [
+    "digital_gap",
+    "dist_to_strike_vol",
+    "spot_ret_1m",
+    "spot_ret_5m",
+    "tte_frac",
+    "spread",
+    "tod_sin",
+    "tod_cos",
+    "has_spot",
+]
+EDGE_P_MIN = 0.005
+EDGE_P_MAX = 0.995
+
+
+def logit(p: float) -> float:
+    q = min(EDGE_P_MAX, max(EDGE_P_MIN, p))
+    return math.log(q / (1.0 - q))
+
+
+FAIR_MIN_PP = 0.5
+FAIR_MAX_PP = 99.5
+
+
+def tail_scaled_fair_pp(raw_fair_pp: float, mid: float) -> float:
+    """ScoringEngine.tailScaledFairPp: treat the blend's pp nudges as log-odds nudges.
+
+    Each channel adds up to ~8pp at any price. Scaling the net nudge by
+    4·m·(1−m) (dp ≈ p(1−p)·dlogit) keeps it at full size at 50¢ and shrinks it
+    to ~2% of that at 1¢, instead of inventing a 13% win chance at a 5¢ ask.
+    """
+    m = min(0.995, max(0.005, mid))
+    fair = mid * 100.0 + (raw_fair_pp - mid * 100.0) * 4.0 * m * (1.0 - m)
+    return min(FAIR_MAX_PP, max(FAIR_MIN_PP, fair))
+
+
+def edge_features(
+    mid: float,
+    spread: float | None,
+    spot: float | None,
+    strike: float | None,
+    tte_seconds: float,
+    sigma_annual: float | None,
+    ret_1m: float | None,
+    ret_5m: float | None,
+    now_ms: int,
+) -> list[float]:
+    """Raw (unstandardized) schema-2 features. Missing spot → zeros + has_spot 0."""
+    tte = min(1800.0, max(0.0, tte_seconds))
+    digital = None
+    dist = None
+    if spot is not None and strike is not None and sigma_annual is not None:
+        digital = p_finish_above(spot, strike, tte, sigma_annual)
+        dist = distance_vol_units(spot, strike, tte, sigma_annual)
+    gap = 0.0
+    if digital is not None:
+        gap = min(4.0, max(-4.0, logit(digital) - logit(mid)))
+    sec_of_day = (now_ms // 1000) % 86_400
+    ang = 2.0 * math.pi * sec_of_day / 86_400.0
+    return [
+        gap,
+        min(8.0, max(-8.0, dist)) if dist is not None else 0.0,
+        min(0.02, max(-0.02, ret_1m)) if ret_1m is not None else 0.0,
+        min(0.05, max(-0.05, ret_5m)) if ret_5m is not None else 0.0,
+        min(1.0, max(0.0, tte / 900.0)),
+        min(0.2, max(0.0, spread)) if spread is not None else 0.0,
+        math.sin(ang),
+        math.cos(ang),
+        1.0 if digital is not None else 0.0,
+    ]
+
+
+def edge_predict(model: dict, raw: list[float], mid: float) -> float:
+    """sigmoid(logit(mid) + b + Σ w·z). All-zero weights and bias return the mid."""
+    z = logit(mid) + float(model["bias"])
+    for w, x, m, s in zip(model["weights"], raw, model["mean"], model["std"]):
+        z += w * ((x - m) / (s if s > 1e-9 else 1.0))
+    z = max(-30.0, min(30.0, z))
+    return min(EDGE_P_MAX, max(EDGE_P_MIN, 1.0 / (1.0 + math.exp(-z))))
+
+
 def spot_adjust_pp(mid_pp: float, ret: float | None, rvol15: float | None, funding: float | None = None) -> float | None:
     if ret is None and funding is None and rvol15 is None:
         return None
@@ -306,7 +425,41 @@ def directional_fair_pp(signed_usd: float, strike: float) -> float:
     return min(98.0, max(2.0, p * 100.0))
 
 
-def direction_sanity(spot: float | None, strike: float | None, spot_return: float | None, fair_pp: float, predicted_side: str) -> tuple[str, float, bool]:
+def direction_sanity(spot: float | None, strike: float | None, spot_return: float | None, fair_pp: float, predicted_side: str, digital_pp: float | None = None, mode: str = "digital") -> tuple[str, float, bool]:
+    """DirectionSanity.apply. mode: "digital" (shipped), "legacy" (0.3.10 tanh + max), "off"."""
+    if mode == "legacy":
+        return _direction_sanity_legacy(spot, strike, spot_return, fair_pp, predicted_side)
+    if mode == "off":
+        return predicted_side, fair_pp, False
+    if spot is None or strike is None or spot <= 0 or strike <= 0:
+        return predicted_side, fair_pp, False
+    raw = spot - strike
+    gap = gap_usd(strike)
+    if abs(raw) < gap:
+        return predicted_side, fair_pp, False
+    rising = spot_return is not None and spot_return > 0
+    falling = spot_return is not None and spot_return < 0
+    want_yes = raw > 0
+    confirmed = False
+    if want_yes and (rising or spot_return is None or abs(raw) >= 4.0 * gap):
+        confirmed = True
+    if (not want_yes) and (falling or spot_return is None or abs(raw) >= 4.0 * gap):
+        confirmed = True
+    if not confirmed:
+        return predicted_side, fair_pp, False
+    dir_pp = digital_pp if digital_pp is not None else directional_fair_pp(raw, strike)
+    blend = min(FAIR_MAX_PP, max(FAIR_MIN_PP, fair_pp))
+    if mode == "replace":
+        fair = dir_pp
+    elif mode == "max":
+        fair = max(blend, dir_pp) if want_yes else min(blend, dir_pp)
+    else:  # "digital": halfway between the blend and the time/vol-aware digital
+        fair = 0.5 * blend + 0.5 * dir_pp
+    side = "YES" if fair >= 50.0 else "NO"
+    return side, min(FAIR_MAX_PP, max(FAIR_MIN_PP, fair)), True
+
+
+def _direction_sanity_legacy(spot: float | None, strike: float | None, spot_return: float | None, fair_pp: float, predicted_side: str) -> tuple[str, float, bool]:
     if spot is None or strike is None or spot <= 0 or strike <= 0:
         return predicted_side, fair_pp, False
     raw = spot - strike
@@ -378,10 +531,11 @@ def tape_primary(yes_ask: float | None, no_ask: float | None, spot: float | None
 
 
 def resolve_side(primary: str | None, predicted: str | None, net_edge_pp: float | None) -> str | None:
-    if primary in ("YES", "NO"):
-        return primary
+    """TicketBuilder.resolveSide: the EV-at-ask side first, the tape hero only as a fallback."""
     if predicted in ("YES", "NO"):
         return predicted
+    if primary in ("YES", "NO"):
+        return primary
     if net_edge_pp is None:
         return None
     if net_edge_pp > 0:
@@ -516,6 +670,38 @@ def net_ev(fair_yes: float, mid: float, spread: float | None, prefer: str, stake
     return dict(side=side, net_ev=net, net_edge_pp=net * 100.0, raw_edge_pp=raw, fee=fee, paid=paid, half=half)
 
 
+def net_ev_at_ask(fair_yes: float, side: str, ask: float | None, mid: float, spread: float | None, stake: float = STAKE_USD) -> dict:
+    """NetExpectedValue.atAsk: pay the real ask when there is one, else side-mid + half spread."""
+    p_yes = min(0.995, max(0.005, fair_yes))
+    m = min(0.98, max(0.02, mid))
+    half = max(0.0, spread or 0.0) / 2.0
+    p_side = p_yes if side == "YES" else 1.0 - p_yes
+    paid = usable(ask) if ask is not None else None
+    if paid is None:
+        paid = (m if side == "YES" else 1.0 - m) + half
+    paid = min(0.99, max(MIN_TICK, paid))
+    c = max(1, int(math.floor(stake / paid + 1e-9)))
+    fee = kalshi_fee_total(c, paid) / c
+    net = p_side - paid - fee
+    return dict(side=side, net_ev=net, net_edge_pp=net * 100.0, raw_edge_pp=(p_yes - m) * 100.0, fee=fee, paid=paid, half=half)
+
+
+def best_side_ev(fair_yes: float, yes_ask: float | None, no_ask: float | None, mid: float, spread: float | None, stake: float = STAKE_USD) -> dict:
+    """NetExpectedValue.bestSide: the side whose win chance clears its ask + fee by the most."""
+    yes = net_ev_at_ask(fair_yes, "YES", yes_ask, mid, spread, stake)
+    no = net_ev_at_ask(fair_yes, "NO", no_ask, mid, spread, stake)
+    return yes if yes["net_ev"] >= no["net_ev"] else no
+
+
+def pick_side(fair_yes: float, yes_ask: float | None, no_ask: float | None, mid: float, spread: float | None, stake: float = STAKE_USD) -> dict:
+    """NetExpectedValue.pick: best EV side if positive, else the probability lean (negative EV)."""
+    best = best_side_ev(fair_yes, yes_ask, no_ask, mid, spread, stake)
+    if best["net_ev"] > 0.0:
+        return best
+    lean = "YES" if fair_yes >= 0.5 else "NO"
+    return net_ev_at_ask(fair_yes, lean, yes_ask if lean == "YES" else no_ask, mid, spread, stake)
+
+
 def skip_filter(confidence: float, spread: float | None, volume: float | None, oi: float | None) -> tuple[bool, str | None]:
     reasons = []
     if confidence < MIN_CONFIDENCE:
@@ -529,14 +715,10 @@ def skip_filter(confidence: float, spread: float | None, volume: float | None, o
 
 
 def should_show(passed: bool, edge_pp: float | None, net_edge_pp: float | None) -> bool:
-    rank = net_edge_pp if net_edge_pp is not None else edge_pp
-    if rank is None:
+    """ScoringEngine.maybeAlert: net EV at the ask must clear the threshold (never |raw edge|)."""
+    if net_edge_pp is None or not passed:
         return False
-    if not passed:
-        return False
-    if abs(rank) < EDGE_ALERT_PP:
-        return False
-    return True
+    return net_edge_pp >= EDGE_ALERT_PP
 
 
 @dataclass
@@ -610,11 +792,14 @@ def conservative_fill(side: str, yes_ask_close: float | None, yes_ask_high: floa
 class DecisionEngine:
     """Per-market sequential scorer. Push one minute at a time (no look-ahead)."""
 
-    def __init__(self):
+    def __init__(self, lock_mode: str = "digital", edge_model: dict | None = None, tail_scale: bool = True):
         self.mlp = DipHunterMlp()
         self.last_primary: dict[str, str] = {}
+        self.lock_mode = lock_mode
+        self.edge_model = edge_model
+        self.tail_scale = tail_scale
 
-    def score_minute(self, *, ticker: str, series: str, coin: str, result: str, strike: float | None, now_ms: int, close_ms: int, elapsed_min: int, yes_bid: float | None, yes_ask: float | None, yes_ask_high: float | None, yes_bid_low: float | None, mid: float, volume: float, oi: float, mids: list[float], times: list[int], volumes: list[float], spot: float | None, ret_1m: float | None, ret_5m: float | None, rvol15: float | None, related_mid: float | None) -> Decision:
+    def score_minute(self, *, ticker: str, series: str, coin: str, result: str, strike: float | None, now_ms: int, close_ms: int, elapsed_min: int, yes_bid: float | None, yes_ask: float | None, yes_ask_high: float | None, yes_bid_low: float | None, mid: float, volume: float, oi: float, mids: list[float], times: list[int], volumes: list[float], spot: float | None, ret_1m: float | None, ret_5m: float | None, rvol15: float | None, related_mid: float | None = None, sigma_annual: float | None = None) -> Decision:
         spread = None
         if yes_bid is not None and yes_ask is not None:
             spread = max(0.0, yes_ask - yes_bid)
@@ -645,13 +830,13 @@ class DecisionEngine:
         vel_adj = None
         if vel is not None:
             vel_adj = min(98.0, max(2.0, mid_pp + 6.0 * math.tanh(vel * 100.0 / 2.0) + 2.0 * math.tanh(((acc or 0.0) * 100.0) / 2.0)))
-        related_pp = related_mid * 100.0 if related_mid is not None else None
+        related_pp = None  # channel removed (see W)
         spot_adj = spot_adjust_pp(mid_pp, ret_5m if ret_5m is not None else ret_1m, rvol15)
 
         has = dict(
             ai=True,
             flow=True,
-            related=related_pp is not None,
+            related=False,
             velocity=vel_adj is not None,
             imbalance=False,
             leadLag=False,
@@ -667,19 +852,33 @@ class DecisionEngine:
             + (vel_adj or 0) * w.get("velocity", 0)
             + (spot_adj or 0) * w.get("spot", 0)
         )
-        fair = min(98.0, max(2.0, raw_fair))
+        if self.tail_scale:
+            fair = tail_scaled_fair_pp(raw_fair, mid)
+        else:
+            fair = min(98.0, max(2.0, raw_fair))
         predicted = "YES" if (fair - mid_pp) >= 0 else "NO"
-        predicted, fair, _ = direction_sanity(spot, strike, ret_5m if ret_5m is not None else ret_1m, fair, predicted)
-        delta = fair - mid_pp
-        predicted = "YES" if delta >= 0 else "NO"
 
-        sigma = sigma_annual_from_bar_std(rvol15) if rvol15 is not None else None
+        sigma = sigma_annual
+        if sigma is None and rvol15 is not None:
+            sigma = sigma_annual_from_bar_std(rvol15)
         digital = None
         if spot is not None and strike is not None and sigma is not None:
             p = p_finish_above(spot, strike, float(tte_sec or 900), sigma)
             digital = p * 100.0 if p is not None else None
 
-        ev = net_ev(fair / 100.0, mid, spread, predicted)
+        # ScoringEngine: spotRet = spotReturn1m ?: spotReturn5m
+        predicted, fair, _ = direction_sanity(spot, strike, ret_1m if ret_1m is not None else ret_5m, fair, predicted, digital, self.lock_mode)
+        if self.edge_model is not None:
+            feats = edge_features(mid, spread, spot, strike, float(tte_sec), sigma, ret_1m, ret_5m, now_ms)
+            fair = edge_predict(self.edge_model, feats, mid) * 100.0
+        delta = fair - mid_pp
+
+        if self.lock_mode == "legacy":
+            predicted = "YES" if delta >= 0 else "NO"
+            ev = net_ev(fair / 100.0, mid, spread, predicted)
+        else:
+            ev = pick_side(fair / 100.0, fill_yes, fill_no, mid, spread)
+            predicted = ev["side"]
         n_ticks = len(mids)
         conf = mlp.confidence
         conf *= 0.75 + 0.25 * min(n_ticks / 12.0, 1.0)
@@ -690,12 +889,19 @@ class DecisionEngine:
             conf *= 0.90
         conf = min(0.95, max(0.10, conf))
         passed, _ = skip_filter(conf, spread, volume, oi)
-        would = should_show(passed, delta, ev["net_edge_pp"])
+        if self.lock_mode == "legacy":
+            rank = ev["net_edge_pp"]
+            would = passed and abs(rank) >= EDGE_ALERT_PP
+        else:
+            would = should_show(passed, delta, ev["net_edge_pp"])
 
         no_bid = usable(1.0 - yes_ask) if yes_ask is not None else None
         primary = tape_primary(yes_ask, no_ask, spot, strike, fair / 100.0, self.last_primary.get(ticker), yes_bid, no_bid)
         self.last_primary[ticker] = primary
-        app_side = resolve_side(primary, predicted, ev["net_edge_pp"]) or predicted
+        if self.lock_mode == "legacy":
+            app_side = (primary if primary in ("YES", "NO") else predicted)
+        else:
+            app_side = resolve_side(primary, predicted, ev["net_edge_pp"]) or predicted
 
         # Fair-value-only side: digital if present else direction-from-spot else mid fade
         if digital is not None:

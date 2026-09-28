@@ -55,7 +55,11 @@ data class PredictionLogEntry(
     val entryAsk: Double? = null,
     val contracts: Int? = null,
     val stakeUsd: Double? = null,
-    val feeUsd: Double? = null
+    val feeUsd: Double? = null,
+    /** Raw blend P(YES) before calibration, at [timestampMs] — what [Calibrator] fits. */
+    val rawFairYes: Double? = null,
+    /** Last raw blend P(YES) logged while the window was still EARLY. */
+    val rawFairEarly: Double? = null
 )
 
 @Serializable
@@ -79,8 +83,11 @@ data class SignalSnapshot(
     val entryAsk: Double? = null,
     val contracts: Int? = null,
     val stakeUsd: Double? = null,
-    val feeUsd: Double? = null
+    val feeUsd: Double? = null,
+    val rawFairYes: Double? = null
 )
+
+private fun SignalSnapshot?.isEarly(): Boolean = this?.tteBucket.equals("EARLY", ignoreCase = true)
 
 class PredictionLogStore(private val context: Context) {
 
@@ -146,7 +153,9 @@ class PredictionLogStore(private val context: Context) {
                     entryAsk = snapshot?.entryAsk ?: prev.entryAsk,
                     contracts = snapshot?.contracts ?: prev.contracts,
                     stakeUsd = snapshot?.stakeUsd ?: prev.stakeUsd,
-                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd
+                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd,
+                    rawFairYes = snapshot?.rawFairYes ?: prev.rawFairYes,
+                    rawFairEarly = snapshot?.rawFairYes?.takeIf { snapshot.isEarly() } ?: prev.rawFairEarly
                 )
             } else {
                 list.add(
@@ -177,7 +186,9 @@ class PredictionLogStore(private val context: Context) {
                         entryAsk = snapshot?.entryAsk,
                         contracts = snapshot?.contracts,
                         stakeUsd = snapshot?.stakeUsd,
-                        feeUsd = snapshot?.feeUsd
+                        feeUsd = snapshot?.feeUsd,
+                        rawFairYes = snapshot?.rawFairYes,
+                        rawFairEarly = snapshot?.rawFairYes?.takeIf { snapshot.isEarly() }
                     )
                 )
             }

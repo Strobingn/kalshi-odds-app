@@ -1,498 +1,355 @@
 #!/usr/bin/env python3
 """
-Offline edge trainer for DipHunter 0.3.7.
+Offline edge trainer, schema 2: a logistic model of the **market's error**.
 
-Walk-forward logistic on settled Kalshi BTC/ETH/SOL 15m markets + Coinbase
-spot candles. Calibrates (Platt), reports Brier / log-loss vs the market
-price, and a simulated net P&L after Kalshi-style fees.
+    logit P(YES) = logit(mid) + b + Σ w_i · (x_i − mean_i) / std_i
 
-Exports a compact JSON the Android app can import (Data → Import model).
+With b = 0 and every w = 0 it returns the Kalshi mid, so it can only beat the
+market by fitting something real. Rows are every decision minute (1…13) of
+settled KXBTC15M / KXETH15M / KXSOL15M windows in the backtest cache. The
+features come from `tools/backtest/pipeline.edge_features`; the Android twin
+is `prediction/EdgeFeatures.kt`.
 
-    python3 ml/train_edge.py
-    python3 ml/train_edge.py --days 30 --out ml/edge_model.json
-    python3 ml/train_edge.py --fixture   # no network; writes a tiny fixture model
+    python3 ml/train_edge.py --cache tools/backtest/cache
+    python3 ml/train_edge.py --fetch --days 30          # fetch the cache first (CI)
+    python3 ml/train_edge.py --fixture                  # synthetic smoke test only
+
+A real run exits non-zero when there is not enough data. It never falls back
+to synthetic rows. `--fixture` output is marked `"fixture": true`, and the
+app refuses to activate it.
+
+Honest-number rules:
+- Days are split in time order: first ~2/3 fit, last ~1/3 scored (same split
+  as the backtest).
+- `beats_market` needs lower out-of-sample Brier and log-loss than the mid,
+  and a market-clustered bootstrap 95% CI of the log-loss gain above zero.
 """
 from __future__ import annotations
 
 import argparse
 import json
 import math
-import os
+import random
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
 ML_DIR = REPO / "ml"
-KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
-COINBASE = "https://api.exchange.coinbase.com"
-SERIES = ["KXBTC15M", "KXETH15M", "KXSOL15M"]
-PRODUCT = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
-FEATURE_NAMES = [
-    "dist_to_strike_vol",
-    "tte_frac",
-    "market_mid",
-    "imbalance",
-    "spread",
-    "momentum",
-    "realized_vol",
-    "cross_asset",
-    "time_of_day",
-    "digital_fair",
-]
-SECONDS_PER_YEAR = 365.25 * 24 * 3600
-FEE_RATE = 0.07
-CONF_MARGIN = 0.03
-UA = "DipHunterTrainer/0.3.8"
-# App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
-SPOT_LOOKBACK_BARS = 16
+BACKTEST = REPO / "tools" / "backtest"
+sys.path.insert(0, str(BACKTEST))
+
+import pipeline as pl  # noqa: E402
+
+FEATURE_NAMES = list(pl.EDGE_FEATURES)
+SCHEMA = pl.EDGE_SCHEMA
+L2 = 1.0
+NEWTON_ITERS = 12
+MIN_TRAIN_ROWS = 5_000
+MIN_OOS_MARKETS = 300
+BOOTSTRAP_REPS = 2_000
+# EV simulation: bet the first minute whose net EV at the close ask clears this.
+EV_MARGIN = 0.02
 
 
-def http_get(url: str, retries: int = 5) -> Any:
-    last: Exception | None = None
-    for attempt in range(retries):
-        try:
-            req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": UA})
-            with urllib.request.urlopen(req, timeout=45) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            last = e
-            if e.code in (429, 502, 503):
-                time.sleep(min(2 ** attempt, 20))
-                continue
-            if e.code == 404:
-                return {}
-            raise
-        except urllib.error.URLError as e:
-            last = e
-            time.sleep(min(2 ** attempt, 12))
-    raise RuntimeError(f"GET failed {url}: {last}")
+# --- rows ---------------------------------------------------------------------
 
+def rows_from_cache(cache: Path) -> list[dict[str, Any]]:
+    import simulate as sim
 
-def parse_iso(ts: str | None) -> datetime | None:
-    if not ts:
-        return None
-    try:
-        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-    except Exception:
-        return None
-
-
-def erf(x: float) -> float:
-    sign = -1.0 if x < 0 else 1.0
-    ax = abs(x)
-    t = 1.0 / (1.0 + 0.3275911 * ax)
-    y = 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * math.exp(-ax * ax)
-    return sign * y
-
-
-def norm_cdf(x: float) -> float:
-    return 0.5 * (1.0 + erf(x / math.sqrt(2.0)))
-
-
-def digital_fair(spot: float, strike: float, tte_s: float, sigma: float) -> float | None:
-    if spot <= 0 or strike <= 0 or sigma <= 1e-8:
-        return None
-    t = max(tte_s, 1.0) / SECONDS_PER_YEAR
-    vol = sigma * math.sqrt(t)
-    if vol <= 1e-12:
-        return 1.0 if spot > strike else 0.0
-    d2 = (math.log(spot / strike) - 0.5 * sigma * sigma * t) / vol
-    return min(1.0, max(0.0, norm_cdf(d2)))
-
-
-def dist_vol(spot: float, strike: float, tte_s: float, sigma: float) -> float | None:
-    if spot <= 0 or strike <= 0 or sigma <= 1e-8:
-        return None
-    t = max(tte_s, 1.0) / SECONDS_PER_YEAR
-    vol = sigma * math.sqrt(t)
-    if vol <= 1e-12:
-        return None
-    return math.log(spot / strike) / vol
-
-
-def sigmoid(z: float) -> float:
-    z = max(-30.0, min(30.0, z))
-    return 1.0 / (1.0 + math.exp(-z))
-
-
-def candle_mid(c: dict) -> float | None:
-    price = c.get("price") or {}
-    close = _f(price.get("close_dollars") if "close_dollars" in price else price.get("close"))
-    yb = c.get("yes_bid") or {}
-    ya = c.get("yes_ask") or {}
-    bid = _f(yb.get("close_dollars") if "close_dollars" in yb else yb.get("close"))
-    ask = _f(ya.get("close_dollars") if "close_dollars" in ya else ya.get("close"))
-    if bid is not None and ask is not None:
-        return (bid + ask) / 2.0
-    return close
-
-
-def _f(x: Any) -> float | None:
-    try:
-        return float(x) if x is not None else None
-    except (TypeError, ValueError):
-        return None
-
-
-def fetch_settled(series: str, days: int, limit: int = 200) -> list[dict]:
-    out: list[dict] = []
-    cursor = None
-    cutoff = time.time() - days * 86400
-    while len(out) < limit:
-        q = {"series_ticker": series, "status": "settled", "limit": min(200, limit - len(out))}
-        if cursor:
-            q["cursor"] = cursor
-        data = http_get(f"{KALSHI}/markets?{urllib.parse.urlencode(q)}")
-        batch = data.get("markets") or []
-        if not batch:
-            break
-        for m in batch:
-            ct = parse_iso(m.get("close_time"))
-            if ct and ct.timestamp() >= cutoff and (m.get("result") or "").lower() in ("yes", "no"):
-                out.append(m)
-        cursor = data.get("cursor")
-        time.sleep(0.08)
-        if not cursor:
-            break
+    markets, candles, spots = sim.load_cache(cache)
+    markets = [m for m in markets if m.get("result") in ("yes", "no") and m["ticker"] in candles]
+    out: list[dict[str, Any]] = []
+    for m in sorted(markets, key=lambda m: (m["open_ms"], m["ticker"])):
+        idx = spots.get(m.get("coin") or sim.COIN.get(m["series"], "BTC"), {})
+        out.extend(market_rows(m, candles[m["ticker"]], idx))
     return out
 
 
-def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list[dict]:
-    q = {"start_ts": open_ts - 60, "end_ts": close_ts + 60, "period_interval": 1}
-    data = http_get(f"{KALSHI}/series/{series}/markets/{ticker}/candlesticks?{urllib.parse.urlencode(q)}")
-    sticks = data.get("candlesticks") or []
-    if sticks:
-        return sticks
-    hist = http_get(f"{KALSHI}/historical/markets/{ticker}/candlesticks?{urllib.parse.urlencode(q)}")
-    return hist.get("candlesticks") or []
+def market_rows(m: dict, bars: list[dict], spot_idx: dict[int, float]) -> list[dict[str, Any]]:
+    import simulate as sim
+
+    open_ms = int(m["open_ms"])
+    close_ms = int(m["close_ms"])
+    y = 1 if m["result"] == "yes" else 0
+    strike = m.get("floor_strike")
+    rows = []
+    for r in sorted((b for b in bars if b.get("end_ts")), key=lambda b: b["end_ts"]):
+        now_ms = int(r["end_ts"]) * 1000
+        if now_ms > close_ms:
+            break
+        elapsed = int(round((now_ms - open_ms) / 60_000.0))
+        if elapsed < 1 or elapsed > 13:
+            continue
+        yb = pl.usable((r.get("yes_bid") or {}).get("close"))
+        ya = pl.usable((r.get("yes_ask") or {}).get("close"))
+        if yb is None or ya is None or ya < yb:
+            continue
+        mid = 0.5 * (yb + ya)
+        spot, r1, r5, closes = sim.spot_inputs(spot_idx, now_ms // 1000)
+        sigma = pl.sigma_annual_from_closes(closes)
+        tte = max(0.0, (close_ms - now_ms) / 1000.0)
+        x = pl.edge_features(mid, ya - yb, spot, strike, tte, sigma, r1, r5, now_ms)
+        rows.append(
+            dict(
+                x=x,
+                mid=mid,
+                y=y,
+                ticker=m["ticker"],
+                day=sim._day(close_ms),
+                yes_ask=ya,
+                no_ask=pl.usable(1.0 - yb),
+            )
+        )
+    return rows
 
 
-def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
-    """1-minute Coinbase closes as (bucket_start_ts, close), oldest first."""
-    q = {"granularity": 60, "start": datetime.fromtimestamp(start, tz=timezone.utc).isoformat(), "end": datetime.fromtimestamp(end, tz=timezone.utc).isoformat()}
-    try:
-        data = http_get(f"{COINBASE}/products/{product}/candles?{urllib.parse.urlencode(q)}")
-    except Exception:
-        return []
-    if not isinstance(data, list):
-        return []
-    rows = sorted(data, key=lambda r: r[0] if r else 0)
-    return [(int(r[0]), float(r[4])) for r in rows if r and len(r) >= 5]
+def fixture_rows(n_markets: int = 900, seed: int = 11) -> list[dict[str, Any]]:
+    """Synthetic rows with a planted edge. For smoke tests only."""
+    rng = random.Random(seed)
+    rows = []
+    t0 = 1_790_000_000_000
+    for k in range(n_markets):
+        day = datetime.fromtimestamp((t0 + k * 900_000) / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        truth = rng.uniform(0.1, 0.9)
+        y = 1 if rng.random() < truth else 0
+        for minute in range(1, 14):
+            mid = min(0.95, max(0.05, truth + rng.gauss(0, 0.08)))
+            spot_hint = truth - mid
+            x = [4 * spot_hint, 0.0, 0.0, 0.0, 1 - minute / 15, 0.02, 0.0, 1.0, 1.0]
+            rows.append(dict(x=x, mid=mid, y=y, ticker=f"FX-{k}", day=day, yes_ask=min(0.99, mid + 0.01), no_ask=min(0.99, 1 - mid + 0.01)))
+    return rows
 
 
-def spot_known_at(spot: list[tuple[int, float]], decision_ts: int, keep: int = SPOT_LOOKBACK_BARS) -> list[float]:
-    """Closes whose 1m bar has finished by [decision_ts] — no look-ahead.
+# --- fit ----------------------------------------------------------------------
 
-    A Coinbase bucket starting at t closes at t + 60. The market's own
-    settlement spot must never leak into a mid-window feature row.
-    """
-    known = [c for ts, c in spot if ts + 60 <= decision_ts]
-    return known[-keep:]
-
-
-def realized_vol_annual(closes: list[float]) -> float | None:
-    if len(closes) < 5:
-        return None
-    rets = [math.log(b / a) for a, b in zip(closes, closes[1:]) if a > 0 and b > 0]
-    if len(rets) < 4:
-        return None
-    mean = sum(rets) / len(rets)
-    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
-    std = math.sqrt(max(var, 0.0))
-    if std <= 0:
-        return None
-    return min(5.0, max(0.01, std * math.sqrt(SECONDS_PER_YEAR / 60.0)))
-
-
-def spot_return(closes: list[float], bars: int) -> float:
-    """Simple return over the last [bars] 1m closes (app: spotReturn5m)."""
-    if len(closes) <= bars or closes[-1 - bars] <= 0:
-        return 0.0
-    return (closes[-1] - closes[-1 - bars]) / closes[-1 - bars]
-
-
-def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, float]], idx: int) -> list[float] | None:
-    mid = candle_mid(candles[idx])
-    if mid is None:
-        return None
-    close_dt = parse_iso(market.get("close_time"))
-    end_ts = int(candles[idx].get("end_period_ts") or 0)
-    tte = max(0.0, (close_dt.timestamp() if close_dt else end_ts) - end_ts)
-    window = [candle_mid(c) for c in candles[max(0, idx - 7) : idx + 1]]
-    mids = [m for m in window if m is not None]
-    momentum = (mids[-1] - mids[0]) if len(mids) >= 2 else 0.0
-    yb = candles[idx].get("yes_bid") or {}
-    ya = candles[idx].get("yes_ask") or {}
-    bid = _f(yb.get("close_dollars") if "close_dollars" in yb else yb.get("close"))
-    ask = _f(ya.get("close_dollars") if "close_dollars" in ya else ya.get("close"))
-    spread = (ask - bid) if bid is not None and ask is not None else 0.02
-    imbalance = 0.0
-    spot = spot_known_at(spot_rows, end_ts)
-    sigma = realized_vol_annual(spot) if spot else None
-    strike = _f(market.get("floor_strike"))
-    spot_px = spot[-1] if spot else None
-    dist = dist_vol(spot_px, strike, tte, sigma) if spot_px and strike and sigma else 0.0
-    fair = digital_fair(spot_px, strike, tte, sigma) if spot_px and strike and sigma else mid
-    hour = datetime.fromtimestamp(end_ts or time.time(), tz=timezone.utc).hour
-    rvol = 0.0
-    if len(mids) >= 3:
-        mu = sum(mids) / len(mids)
-        rvol = math.sqrt(sum((m - mu) ** 2 for m in mids) / len(mids))
-    return [
-        float(dist or 0.0),
-        float(min(2.0, max(0.0, tte / 900.0))),
-        float(min(1.0, max(0.0, mid))),
-        float(imbalance),
-        float(min(1.0, max(0.0, spread))),
-        float(max(-1.0, min(1.0, momentum))),
-        float(min(1.0, max(0.0, rvol))),
-        float(max(-0.2, min(0.2, spot_return(spot, 5)))),
-        float((hour * 60) / (24 * 60)),
-        float(fair if fair is not None else mid),
-    ]
-
-
-def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[int]]:
-    X: list[list[float]] = []
-    y: list[int] = []
-    mids: list[float] = []
-    times: list[int] = []
-    per = max(8, max_markets // len(SERIES))
-    for series in SERIES:
-        print(f"=== {series}", flush=True)
-        markets = fetch_settled(series, days, per)
-        print(f"  settled {len(markets)}", flush=True)
-        for m in markets:
-            result = (m.get("result") or "").lower()
-            label = 1 if result == "yes" else 0
-            close_dt = parse_iso(m.get("close_time"))
-            open_dt = parse_iso(m.get("open_time"))
-            if not close_dt:
-                continue
-            close_ts = int(close_dt.timestamp())
-            open_ts = int(open_dt.timestamp()) if open_dt else close_ts - 900
-            try:
-                candles = fetch_candles(series, m["ticker"], open_ts, close_ts)
-            except Exception as e:
-                print(f"  skip candles {m.get('ticker')}: {e}", flush=True)
-                continue
-            time.sleep(0.06)
-            if len(candles) < 3:
-                continue
-            spot = fetch_spot(PRODUCT[series], open_ts - 900, close_ts)
-            # two samples: mid-window and late
-            for idx in (max(1, len(candles) // 2), max(1, len(candles) - 2)):
-                feats = features_for(m, candles, spot, idx)
-                if not feats:
-                    continue
-                X.append(feats)
-                y.append(label)
-                mids.append(feats[2])
-                times.append(int(candles[idx].get("end_period_ts") or close_ts))
-    return X, y, mids, times
-
-
-def standardize(X: list[list[float]]) -> tuple[list[list[float]], list[float], list[float]]:
+def standardize_stats(X: list[list[float]]) -> tuple[list[float], list[float]]:
     n = len(X[0])
-    mean = [sum(row[i] for row in X) / len(X) for i in range(n)]
+    mean = [sum(r[i] for r in X) / len(X) for i in range(n)]
     std = []
     for i in range(n):
-        var = sum((row[i] - mean[i]) ** 2 for row in X) / max(1, len(X) - 1)
+        var = sum((r[i] - mean[i]) ** 2 for r in X) / max(1, len(X) - 1)
         std.append(math.sqrt(var) if var > 1e-12 else 1.0)
-    Z = [[(row[i] - mean[i]) / std[i] for i in range(n)] for row in X]
-    return Z, mean, std
+    return mean, std
 
 
-def fit_logistic(X: list[list[float]], y: list[int], iters: int = 80, lr: float = 0.15) -> tuple[list[float], float]:
-    n = len(X[0])
-    w = [0.0] * n
-    b = 0.0
-    for _ in range(iters):
-        gw = [0.0] * n
-        gb = 0.0
-        for row, yi in zip(X, y):
-            z = b + sum(wj * xj for wj, xj in zip(w, row))
-            p = sigmoid(z)
-            err = p - yi
-            for i in range(n):
-                gw[i] += err * row[i]
-            gb += err
-        scale = 1.0 / len(X)
-        for i in range(n):
-            w[i] -= lr * (gw[i] * scale + 1e-4 * w[i])
-        b -= lr * gb * scale
-    return w, b
-
-
-def predict_rows(X: list[list[float]], w: list[float], b: float, a: float = 1.0, pb: float = 0.0) -> list[float]:
-    out = []
-    for row in X:
-        p = sigmoid(b + sum(wj * xj for wj, xj in zip(w, row)))
-        if a != 1.0 or pb != 0.0:
-            q = min(1 - 1e-6, max(1e-6, p))
-            lp = math.log(q / (1 - q))
-            p = sigmoid(a * lp + pb)
-        out.append(min(0.98, max(0.02, p)))
-    return out
-
-
-def fit_platt(p: list[float], y: list[int]) -> tuple[float, float]:
-    # one-feature logistic on logit(p)
-    xs = []
-    for pi in p:
-        q = min(1 - 1e-6, max(1e-6, pi))
-        xs.append([math.log(q / (1 - q))])
-    w, b = fit_logistic(xs, y, iters = 60, lr=0.2)
-    return w[0], b
-
-
-def brier(p: list[float], y: list[int]) -> float:
-    return sum((pi - yi) ** 2 for pi, yi in zip(p, y)) / len(y)
-
-
-def logloss(p: list[float], y: list[int]) -> float:
-    s = 0.0
-    for pi, yi in zip(p, y):
-        q = min(1 - 1e-9, max(1e-9, pi))
-        s += -(yi * math.log(q) + (1 - yi) * math.log(1 - q))
-    return s / len(y)
-
-
-def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, float]:
-    pnl = 0.0
-    n = 0
-    hits = 0
-    for pi, m, yi in zip(p, mids, y):
-        gap = abs(pi - m)
-        fee = FEE_RATE * m * (1 - m)
-        if gap <= fee + CONF_MARGIN:
+def solve(A: list[list[float]], b: list[float]) -> list[float]:
+    n = len(b)
+    M = [row[:] + [b[i]] for i, row in enumerate(A)]
+    for c in range(n):
+        p = max(range(c, n), key=lambda r: abs(M[r][c]))
+        M[c], M[p] = M[p], M[c]
+        if abs(M[c][c]) < 1e-12:
             continue
-        side_yes = pi > m
-        price = m
-        fee_c = FEE_RATE * price * (1 - price)
-        win = (yi == 1) if side_yes else (yi == 0)
-        pnl += (1.0 - price - fee_c) if win else (-price - fee_c)
-        n += 1
-        hits += int(win)
-    return {"n": n, "pnl": pnl, "hit_rate": (hits / n) if n else 0.0}
+        for r in range(n):
+            if r != c:
+                f = M[r][c] / M[c][c]
+                if f:
+                    for k in range(c, n + 1):
+                        M[r][k] -= f * M[c][k]
+    return [M[i][n] / M[i][i] if abs(M[i][i]) > 1e-12 else 0.0 for i in range(n)]
 
 
-def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: list[int], folds: int = 4) -> dict[str, Any]:
-    order = sorted(range(len(X)), key=lambda i: times[i])
-    X = [X[i] for i in order]
-    y = [y[i] for i in order]
-    mids = [mids[i] for i in order]
-    fold = max(1, len(X) // folds)
-    preds = [0.0] * len(X)
-    for k in range(1, folds):
-        tr_end = k * fold
-        te_end = len(X) if k == folds - 1 else (k + 1) * fold
-        if tr_end < 20 or te_end <= tr_end:
+def fit_offset(Z: list[list[float]], off: list[float], y: list[int], l2: float = L2) -> tuple[list[float], float]:
+    """Newton / IRLS for logistic with a fixed offset and an L2 pull to 0 on w."""
+    d = len(Z[0]) + 1  # last slot = bias (unpenalized)
+    beta = [0.0] * d
+    for _ in range(NEWTON_ITERS):
+        g = [0.0] * d
+        H = [[0.0] * d for _ in range(d)]
+        for z, o, yi in zip(Z, off, y):
+            v = z + [1.0]
+            eta = o + sum(bj * vj for bj, vj in zip(beta, v))
+            eta = max(-30.0, min(30.0, eta))
+            p = 1.0 / (1.0 + math.exp(-eta))
+            e = p - yi
+            wgt = p * (1.0 - p)
+            for i in range(d):
+                vi = v[i]
+                g[i] += e * vi
+                wv = wgt * vi
+                Hi = H[i]
+                for j in range(i, d):
+                    Hi[j] += wv * v[j]
+        for i in range(d):
+            for j in range(i):
+                H[i][j] = H[j][i]
+        for i in range(d - 1):
+            g[i] += l2 * beta[i]
+            H[i][i] += l2
+        step = solve(H, g)
+        beta = [bj - sj for bj, sj in zip(beta, step)]
+        if max(abs(s) for s in step) < 1e-7:
+            break
+    return beta[:-1], beta[-1]
+
+
+def fit_model(rows: list[dict[str, Any]], l2: float = L2) -> dict[str, Any]:
+    X = [r["x"] for r in rows]
+    mean, std = standardize_stats(X)
+    Z = [[(x[i] - mean[i]) / std[i] for i in range(len(mean))] for x in X]
+    off = [pl.logit(r["mid"]) for r in rows]
+    w, b = fit_offset(Z, off, [r["y"] for r in rows], l2)
+    return {"weights": w, "bias": b, "mean": mean, "std": std}
+
+
+# --- score --------------------------------------------------------------------
+
+def clip_p(p: float) -> float:
+    return min(pl.EDGE_P_MAX, max(pl.EDGE_P_MIN, p))
+
+
+def loss_terms(p: float, y: int) -> tuple[float, float]:
+    q = clip_p(p)
+    return (q - y) ** 2, -(y * math.log(q) + (1 - y) * math.log(1 - q))
+
+
+def ev_side(p_yes: float, yes_ask: float | None, no_ask: float | None) -> tuple[str | None, float]:
+    """Side with the higher net EV per contract at the ask ($5 ticket fees)."""
+    best, best_ev = None, -1.0
+    for side, p_side, ask in (("YES", p_yes, yes_ask), ("NO", 1.0 - p_yes, no_ask)):
+        if ask is None:
             continue
-        Ztr, mean, std = standardize(X[:tr_end])
-        w, b = fit_logistic(Ztr, y[:tr_end])
-        Zte = [[(X[i][j] - mean[j]) / std[j] for j in range(len(mean))] for i in range(tr_end, te_end)]
-        raw = predict_rows(Zte, w, b)
-        a, pb = fit_platt(predict_rows(Ztr, w, b), y[:tr_end])
-        cal = predict_rows(Zte, w, b, a, pb)
-        for i, p in enumerate(cal):
-            preds[tr_end + i] = p
-    # fill unfilled with market
-    for i, p in enumerate(preds):
-        if p == 0.0:
-            preds[i] = mids[i]
-    hold = [i for i, p in enumerate(preds) if p != mids[i] or True]
-    hold = list(range(fold, len(X)))  # first fold is train-only
-    if not hold:
-        hold = list(range(len(X)))
-    ph = [preds[i] for i in hold]
-    yh = [y[i] for i in hold]
-    mh = [mids[i] for i in hold]
-    pnl = simulated_pnl(ph, mh, yh)
+        c = max(1, int(math.floor(pl.STAKE_USD / ask + 1e-9)))
+        ev = p_side - ask - pl.kalshi_fee_total(c, ask) / c
+        if ev > best_ev:
+            best, best_ev = side, ev
+    return best, best_ev
+
+
+def bootstrap_gain_ci(per_market: dict[str, tuple[float, int]], reps: int = BOOTSTRAP_REPS, seed: int = 7) -> tuple[float, float]:
+    keys = list(per_market)
+    if not keys:
+        return float("nan"), float("nan")
+    rng = random.Random(seed)
+    means = []
+    for _ in range(reps):
+        s = 0.0
+        n = 0
+        for _k in range(len(keys)):
+            g, c = per_market[keys[rng.randrange(len(keys))]]
+            s += g
+            n += c
+        means.append(s / n)
+    means.sort()
+    return means[int(0.025 * (reps - 1))], means[int(0.975 * (reps - 1))]
+
+
+def evaluate(model: dict[str, Any], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    n = len(rows)
+    mb = ml = kb = kl = 0.0
+    per_market: dict[str, list[float]] = {}
+    for r in rows:
+        p = pl.edge_predict(model, r["x"], r["mid"])
+        b1, l1 = loss_terms(p, r["y"])
+        b0, l0 = loss_terms(r["mid"], r["y"])
+        mb += b1
+        ml += l1
+        kb += b0
+        kl += l0
+        acc = per_market.setdefault(r["ticker"], [0.0, 0])
+        acc[0] += l0 - l1
+        acc[1] += 1
+    lo, hi = bootstrap_gain_ci({k: (v[0], v[1]) for k, v in per_market.items()})
+    # EV at the close ask: first qualifying minute per market, $5 all-in.
+    pnls: list[float] = []
+    seen: set[str] = set()
+    for r in rows:
+        if r["ticker"] in seen:
+            continue
+        p = pl.edge_predict(model, r["x"], r["mid"])
+        side, ev = ev_side(p, r["yes_ask"], r["no_ask"])
+        if side is None or ev < EV_MARGIN:
+            continue
+        ask = r["yes_ask"] if side == "YES" else r["no_ask"]
+        c, cost, _ = pl.size_all_in(ask)
+        if c <= 0:
+            continue
+        seen.add(r["ticker"])
+        won = (r["y"] == 1) == (side == "YES")
+        pnls.append((c - cost) if won else -cost)
+    pnl_lo = pnl_hi = float("nan")
+    if pnls:
+        import simulate as sim
+
+        _, pnl_lo, pnl_hi = sim.bootstrap_ci(pnls, n=BOOTSTRAP_REPS)
     return {
-        "n_holdout": len(hold),
-        "model_brier": brier(ph, yh),
-        "market_brier": brier(mh, yh),
-        "model_logloss": logloss(ph, yh),
-        "market_logloss": logloss(mh, yh),
-        "sim_trades": pnl["n"],
-        "sim_pnl": pnl["pnl"],
-        "sim_hit_rate": pnl["hit_rate"],
+        "n_holdout": n,
+        "n_markets_holdout": len(per_market),
+        "model_brier": mb / n,
+        "market_brier": kb / n,
+        "model_logloss": ml / n,
+        "market_logloss": kl / n,
+        "logloss_gain": (kl - ml) / n,
+        "logloss_gain_ci_low": lo,
+        "logloss_gain_ci_high": hi,
+        "sim_trades": len(pnls),
+        "sim_pnl": sum(pnls),
+        "sim_pnl_per_bet_ci_low": pnl_lo,
+        "sim_pnl_per_bet_ci_high": pnl_hi,
+        "sim_hit_rate": (sum(1 for x in pnls if x > 0) / len(pnls)) if pnls else 0.0,
     }
 
 
-def fit_final(X: list[list[float]], y: list[int]) -> dict[str, Any]:
-    Z, mean, std = standardize(X)
-    w, b = fit_logistic(Z, y)
-    raw = predict_rows(Z, w, b)
-    a, pb = fit_platt(raw, y)
-    return {"weights": w, "bias": b, "mean": mean, "std": std, "platt_a": a, "platt_b": pb}
+def beats_market(metrics: dict[str, Any]) -> bool:
+    return (
+        metrics["n_markets_holdout"] >= MIN_OOS_MARKETS
+        and metrics["model_brier"] < metrics["market_brier"]
+        and metrics["model_logloss"] < metrics["market_logloss"]
+        and metrics["logloss_gain_ci_low"] > 0.0
+    )
 
 
-def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[int]]:
-    X, y, mids, times = [], [], [], []
-    t0 = 1_700_000_000
-    for i in range(n):
-        mid = 0.35 + 0.3 * ((i % 40) / 40.0)
-        dist = (mid - 0.5) * 2
-        fair = min(0.95, max(0.05, mid + 0.08 * math.sin(i / 7.0)))
-        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair]
-        label = 1 if fair + 0.02 * math.sin(i) > 0.5 else 0
-        X.append(row)
-        y.append(label)
-        mids.append(mid)
-        times.append(t0 + i * 900)
-    return X, y, mids, times
+def split_rows(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    import simulate as sim
+
+    is_days, _ = sim.split_days(sorted({r["day"] for r in rows}))
+    return [r for r in rows if r["day"] in is_days], [r for r in rows if r["day"] not in is_days]
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None) -> None:
-    n = int(metrics.get("n_holdout") or metrics.get("n_samples") or 0)
-    model_brier = float(metrics.get("model_brier", 1.0))
-    market_brier = float(metrics.get("market_brier", 1.0))
-    model_ll = float(metrics.get("model_logloss", 1.0))
-    market_ll = float(metrics.get("market_logloss", 1.0))
+# --- export -------------------------------------------------------------------
+
+def export(model: dict[str, Any], metrics: dict[str, Any], path: Path, fixture: bool) -> None:
     payload = {
-        "version": "1",
-        "trained_at": trained_at or datetime.now(timezone.utc).isoformat(),
-        "n_samples": n,
-        "n_holdout": n,
-        "model_brier": model_brier,
-        "market_brier": market_brier,
-        "model_logloss": model_ll,
-        "market_logloss": market_ll,
-        "sim_trades": metrics.get("sim_trades"),
-        "sim_pnl": metrics.get("sim_pnl"),
-        "sim_hit_rate": metrics.get("sim_hit_rate"),
-        "model_asset": "edge_model.json",
-        "tag": "edge-model-latest",
-        "beats_market": n > 0 and model_brier < market_brier and model_ll < market_ll,
+        "version": SCHEMA,
+        "schema": SCHEMA,
+        "kind": "market_offset",
+        "fixture": fixture,
+        "feature_names": FEATURE_NAMES,
+        "weights": model["weights"],
+        "bias": model["bias"],
+        "mean": model["mean"],
+        "std": model["std"],
+        "ev_margin": EV_MARGIN,
+        "metrics": {k: v for k, v in metrics.items() if isinstance(v, (int, float))},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"wrote {path}", flush=True)
 
 
-def export(model: dict[str, Any], metrics: dict[str, Any], path: Path) -> None:
+def write_manifest(metrics: dict[str, Any], path: Path, fixture: bool, trained_at: str | None = None) -> None:
     payload = {
-        "version": 1,
-        "kind": "logistic",
-        "feature_names": FEATURE_NAMES,
-        "weights": model["weights"],
-        "bias": model["bias"],
-        "mean": model["mean"],
-        "std": model["std"],
-        "platt_a": model["platt_a"],
-        "platt_b": model["platt_b"],
-        "blend_weight": 0.35,
-        "fee_margin": FEE_RATE,
-        "confidence_margin": CONF_MARGIN,
-        "metrics": metrics,
+        "version": str(SCHEMA),
+        "schema": SCHEMA,
+        "fixture": fixture,
+        "trained_at": trained_at or datetime.now(timezone.utc).isoformat(),
+        "n_samples": int(metrics["n_holdout"]),
+        "n_holdout": int(metrics["n_holdout"]),
+        "n_markets_holdout": int(metrics["n_markets_holdout"]),
+        "model_brier": metrics["model_brier"],
+        "market_brier": metrics["market_brier"],
+        "model_logloss": metrics["model_logloss"],
+        "market_logloss": metrics["market_logloss"],
+        "logloss_gain_ci_low": metrics["logloss_gain_ci_low"],
+        "logloss_gain_ci_high": metrics["logloss_gain_ci_high"],
+        "sim_trades": metrics["sim_trades"],
+        "sim_pnl": metrics["sim_pnl"],
+        "sim_hit_rate": metrics["sim_hit_rate"],
+        "model_asset": "edge_model.json",
+        "tag": "edge-model-latest",
+        "beats_market": (not fixture) and beats_market(metrics),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -501,44 +358,41 @@ def export(model: dict[str, Any], metrics: dict[str, Any], path: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--cache", default=str(BACKTEST / "cache"))
+    ap.add_argument("--fetch", action="store_true", help="refresh the backtest cache first")
     ap.add_argument("--days", type=int, default=30)
-    ap.add_argument("--max-markets", type=int, default=180)
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
-    ap.add_argument("--fixture", action="store_true")
+    ap.add_argument("--fixture", action="store_true", help="synthetic rows; output never activates")
+    ap.add_argument("--l2", type=float, default=L2)
     args = ap.parse_args()
+
     if args.fixture:
-        X, y, mids, times = fixture_dataset()
+        rows = fixture_rows()
     else:
-        try:
-            X, y, mids, times = collect(args.days, args.max_markets)
-        except Exception as e:
-            print(f"live collect failed ({e}); falling back to fixture", flush=True)
-            X, y, mids, times = fixture_dataset()
-    if len(X) < 30:
-        print(f"only {len(X)} rows — using fixture so the export still exists", flush=True)
-        X, y, mids, times = fixture_dataset()
-    print(f"samples {len(X)} yes={sum(y)} no={len(y) - sum(y)}", flush=True)
-    metrics = walk_forward(X, y, mids, times)
+        cache = Path(args.cache)
+        if args.fetch:
+            from fetch import run_fetch
+
+            print(run_fetch(cache, days=args.days), flush=True)
+        rows = rows_from_cache(cache)
+        if len(rows) < MIN_TRAIN_ROWS:
+            print(f"only {len(rows)} decision rows (< {MIN_TRAIN_ROWS}); refusing to train", file=sys.stderr)
+            return 2
+
+    train, hold = split_rows(rows)
+    print(f"rows {len(rows)} train {len(train)} holdout {len(hold)}", flush=True)
+    if not train or not hold:
+        print("need both train and holdout days", file=sys.stderr)
+        return 2
+    metrics = evaluate(fit_model(train, args.l2), hold)
+    metrics["n_train"] = len(train)
     print(json.dumps(metrics, indent=2), flush=True)
-    model = fit_final(X, y)
-    export(model, metrics, Path(args.out))
-    write_manifest(metrics, Path(args.manifest))
-    # Do not overwrite the hand-checked Android/Python parity fixture.
-    # Write a sample next to the exported model for debugging only.
-    if not args.fixture:
-        sample = {
-            "x": X[0],
-            "p": predict_rows(
-                [[(X[0][j] - model["mean"][j]) / model["std"][j] for j in range(len(FEATURE_NAMES))]],
-                model["weights"],
-                model["bias"],
-                model["platt_a"],
-                model["platt_b"],
-            )[0],
-        }
-        out_dir = Path(args.out).resolve().parent
-        (out_dir / "parity_sample.last.json").write_text(json.dumps(sample, indent=2), encoding="utf-8")
+    final = fit_model(rows, args.l2)
+    print("weights", dict(zip(FEATURE_NAMES, (round(w, 4) for w in final["weights"]))), "bias", round(final["bias"], 4), flush=True)
+    export(final, metrics, Path(args.out), fixture=args.fixture)
+    write_manifest(metrics, Path(args.manifest), fixture=args.fixture)
+    print(f"beats_market={(not args.fixture) and beats_market(metrics)}", flush=True)
     return 0
 
 

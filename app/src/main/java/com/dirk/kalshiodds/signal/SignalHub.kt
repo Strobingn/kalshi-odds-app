@@ -361,14 +361,14 @@ class SignalHub(
                 runCatching {
                     val predictedSide = SignalStance.resolve(
                         storedSide = scored.predictedSide,
-                        modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                        modelYes = scored.importedModelPp ?: scored.fairValuePp,
                         marketYes = scored.marketMidPp,
                         fairYes = scored.fairValuePp
                     ).storedSide
                     val sideYes = when (predictedSide?.trim()?.uppercase()) {
                         "YES" -> true
                         "NO" -> false
-                        else -> (scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp) > 50.0
+                        else -> (scored.importedModelPp ?: scored.fairValuePp) > 50.0
                     }
                     val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
                         sideYes = sideYes,
@@ -398,14 +398,15 @@ class SignalHub(
                             midVolPp = scored.midVolPp,
                             pFill = scored.pFill,
                             wouldAlert = scored.passedFilter &&
-                                kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp(),
+                                (scored.netEdgePp ?: Double.NEGATIVE_INFINITY) >= settings.effectiveEdgeThresholdPp(),
                             mlpYes = scored.mlpPp?.div(100.0),
                             cnnYes = scored.cnnPp?.div(100.0),
                             gbmYes = scored.gbmPp?.div(100.0),
                             entryAsk = sized.entryAsk,
                             contracts = sized.contracts,
                             stakeUsd = sized.stakeUsd,
-                            feeUsd = sized.feeUsd
+                            feeUsd = sized.feeUsd,
+                            rawFairYes = scored.rawFairValuePp / 100.0
                         )
                     )
                 }

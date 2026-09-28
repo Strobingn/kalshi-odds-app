@@ -11,9 +11,15 @@ import kotlin.math.tanh
  * already expensive because spot is far above the strike, that fade recommends
  * NO / DOWN — the opposite of the contract semantics (YES = UP, NO = DOWN).
  *
- * This lock forces the displayed UP/DOWN percentages and the recommended
- * bet side to agree with `sign(spot − strike)`. An edge threshold cannot
- * override that direction.
+ * When spot is clearly past the strike (and moving that way, or far past),
+ * the blend is pulled **halfway to the digital fair value** Φ(d2) — which
+ * knows time left and volatility. It no longer forces the fair *up* with
+ * `max(fair, tanh(gap))`: that fixed curve ignored time and σ and put SOL
+ * at 87% with 14 min left where Φ(d2) says ~70%, inventing favorite edges
+ * early in the window. The bet side itself is chosen later by net EV at the
+ * ask ([com.dirk.kalshiodds.signal.sizing.NetExpectedValue.bestSide]).
+ *
+ * Python twin: `tools/backtest/pipeline.direction_sanity` (mode "digital").
  */
 object DirectionSanity {
 
@@ -46,7 +52,9 @@ object DirectionSanity {
         spotReturn: Double?,
         fairPp: Double,
         predictedSide: String,
-        yesMeansUp: Boolean = true
+        yesMeansUp: Boolean = true,
+        /** Φ(d2) in pp for YES = UP; null → the fixed tanh curve (no σ available). */
+        digitalPp: Double? = null
     ): Result {
         val spot = spotUsd?.takeIf { it.isFinite() && it > 0.0 }
         val strike = strikeUsd?.takeIf { it.isFinite() && it > 0.0 }
@@ -72,13 +80,12 @@ object DirectionSanity {
             return Result(predictedSide, fairPp, applied = false, spotVsTargetUsd = rawDelta)
         }
 
-        val side = if (wantYes) SIDE_YES else SIDE_NO
-        val dirPp = directionalFairPp(signed, strike)
-        var fair = fairPp.coerceIn(2.0, 98.0)
-        // Hero UP/DOWN is `fair` / `100−fair`. Keep it on the same side as the bet.
-        fair = if (wantYes) max(fair, max(dirPp, 52.0)) else minOf(fair, minOf(dirPp, 48.0))
-        if (wantYes && fair < 50.5) fair = 52.0
-        if (!wantYes && fair > 49.5) fair = 48.0
+        // P(YES): the digital is P(up), so flip it when YES is the down contract.
+        // The tanh fallback is already in YES terms (it takes the signed gap).
+        val dirPp = digitalPp?.let { if (yesMeansUp) it else 100.0 - it }
+            ?: directionalFairPp(signed, strike)
+        val fair = 0.5 * fairPp.coerceIn(0.5, 99.5) + 0.5 * dirPp
+        val side = if (fair >= 50.0) SIDE_YES else SIDE_NO
 
         val vs = if (rawDelta >= 0) "above" else "below"
         val mom = when {
@@ -96,7 +103,7 @@ object DirectionSanity {
         )
         return Result(
             side = side,
-            fairPp = fair.coerceIn(2.0, 98.0),
+            fairPp = fair.coerceIn(0.5, 99.5),
             applied = true,
             spotVsTargetUsd = rawDelta,
             note = note

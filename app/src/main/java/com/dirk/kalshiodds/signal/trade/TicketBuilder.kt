@@ -609,10 +609,13 @@ object TicketBuilder {
     }
 
     fun resolveSide(market: MarketUiModel): String? {
-        val primary = market.primaryHeroSide?.uppercase()
-        if (primary == "YES" || primary == "NO") return primary
+        // The scored side is the one with the best net EV at its ask. The tape
+        // hero (spot vs strike, else the favorite) only fills in when nothing
+        // was scored — preferring it bought the favorite whatever the price.
         val predicted = market.predictedSide?.uppercase()
         if (predicted == "YES" || predicted == "NO") return predicted
+        val primary = market.primaryHeroSide?.uppercase()
+        if (primary == "YES" || primary == "NO") return primary
         val net = market.netEdgePp ?: market.edgePp ?: return null
         return when {
             net > 0 -> "YES"

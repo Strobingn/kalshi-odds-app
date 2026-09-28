@@ -90,9 +90,15 @@ object SignalConstants {
     const val DEFAULT_DRAWDOWN_USD = 50.0
     const val DEFAULT_RESUME_ON_NEW_SESSION = true
 
-    const val MIN_ADAPTER_SAMPLES = 8
+    /**
+     * At a Brier near 0.16, 8 outcomes cannot tell a useful channel from noise
+     * (the old gate); weights drifted toward whatever won last.
+     */
+    const val MIN_ADAPTER_SAMPLES = 100
     const val ADAPTER_LEARNING_RATE = 0.08
-    const val ADAPTER_WEIGHT_EMA = 0.15
+    const val ADAPTER_WEIGHT_EMA = 0.05
+    /** Per-update pull of each channel weight back toward the prior 1.0. */
+    const val ADAPTER_PRIOR_PULL = 0.01
 
     const val EXTERNAL_CACHE_MS = 25_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L

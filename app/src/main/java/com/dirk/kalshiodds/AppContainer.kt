@@ -55,11 +55,15 @@ class AppContainer(context: Context) {
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
+    val spotStream = com.dirk.kalshiodds.signal.external.SpotStream()
     val scoring = ScoringEngine(
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
         extended = ExtendedAiRuntime()
-    ).also { it.edgeModel = importedModel.current() }
+    ).also {
+        it.edgeModel = importedModel.currentOrBundled()
+        it.spotStream = spotStream
+    }
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,
@@ -68,7 +72,7 @@ class AppContainer(context: Context) {
         heavyStore = heavyStore,
         results = resultsWriter
     )
-    val external = ExternalMarketCache()
+    val external = ExternalMarketCache(stream = spotStream)
     val hub = SignalHub(
         scoring = scoring,
         notifier = notifier,

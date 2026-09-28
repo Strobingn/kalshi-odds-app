@@ -1,53 +1,58 @@
-# DipHunter offline edge trainer
+# DipHunter offline edge trainer (schema 2)
 
-Trains a compact logistic model on settled Kalshi **BTC / ETH / SOL 15-minute**
-markets plus Coinbase public spot candles. Walk-forward (time-ordered)
-validation, Platt calibration, Brier / log-loss versus the Kalshi market
-price, and a simulated net P&L after the documented Kalshi-style
-`feeRate × P × (1−P)` fee (default 7%) plus a 3¢ confidence margin.
+Trains a **market-offset** logistic on every decision minute (1…13) of settled
+Kalshi **BTC / ETH / SOL 15-minute** windows, using the backtest cache
+(Kalshi 1m candles + Coinbase USD 1m spot):
 
-The export is a few dozen floats. The phone only **infers** it — it does not
-train the heavy 0.3.0 stack.
+    logit P(YES) = logit(mid) + b + Σ w_i · z_i
+
+With every weight at zero it *is* the Kalshi mid, so it cannot do worse than
+the market by construction — any weight has to earn its place on held-out days.
+
+The export is a few dozen floats. The phone only **infers** it.
 
 ## One command
 
 ```bash
-python3 ml/train_edge.py
+python3 ml/train_edge.py --cache tools/backtest/cache           # cache already fetched
+python3 ml/train_edge.py --fetch --days 30                     # fetch first (what CI does)
 ```
 
-Writes `ml/edge_model.json`. Import that file in the app: **Data → Import model**.
+Writes `ml/edge_model.json` + `ml/edge_model_manifest.json`. Import in the app:
+**Data → Import model**, or **Data → Get latest model** for the weekly release.
 
-Options:
+`--fixture` trains on synthetic rows for smoke tests. Its output says
+`"fixture": true` and the app refuses to load it. A real run with too little
+data **exits non-zero** — it never falls back to synthetic data (the schema-1
+trainer did, and published a fake Brier 0.024 model the app would activate).
 
-```bash
-python3 ml/train_edge.py --days 30 --out ml/edge_model.json
-python3 ml/train_edge.py --fixture   # no network; synthetic walk-forward
-```
+Python 3.10+ standard library only.
 
-Python 3.10+ standard library only (no pip packages).
-
-GitHub Actions: **Actions → Train edge model → Run workflow**, or the weekly
-Monday cron. The JSON + `edge_model_manifest.json` are uploaded as an artifact
-and published on the rolling `edge-model-latest` release. In the app:
-**Data → Get latest model**.
-
-## Features (order is the Android contract)
+## Features (order is the Android contract — `EdgeFeatures.kt`)
 
 | # | Name | Meaning |
 |---|------|---------|
-| 0 | dist_to_strike_vol | ln(S/K) / (σ √T) |
-| 1 | tte_frac | seconds-to-expiry / 900 |
-| 2 | market_mid | YES mid 0–1 |
-| 3 | imbalance | book imbalance [-1,1] |
-| 4 | spread | ask − bid |
-| 5 | momentum | mid now − mid window start |
-| 6 | realized_vol | recent mid std |
-| 7 | cross_asset | reserved (0 if missing) |
-| 8 | time_of_day | minutes since midnight / 1440 |
-| 9 | digital_fair | vol digital P(S_T > K) |
+| 0 | digital_gap | logit(Φ(d2)) − logit(mid), clipped ±4; 0 without spot |
+| 1 | dist_to_strike_vol | ln(S/K) / (σ √T), clipped ±8 |
+| 2 | spot_ret_1m | spot now / spot 60 s ago − 1 |
+| 3 | spot_ret_5m | spot now / spot 300 s ago − 1 |
+| 4 | tte_frac | seconds-to-expiry / 900 |
+| 5 | spread | yes ask − yes bid |
+| 6 | tod_sin | sin(2π · UTC second-of-day / 86400) |
+| 7 | tod_cos | cos(…) |
+| 8 | has_spot | 1 when spot, strike and σ were available |
+
+σ = EWMA (half-life 10 bars) of completed 1m Coinbase log returns over the last
+60 bars, annualized (`DigitalOptionFairValue.sigmaFromCloses`). Python and
+Kotlin share the formulas and are pinned to each other by
+`ml/fixtures/parity_sample.json` / `EdgeModelTest`.
 
 ## Honest numbers
 
-The script prints hold-out `model_brier` vs `market_brier`. If the model does
-not beat the market after fees, do not trade the edge. The app also hides
-“edge” flags until |model − market| > fee + margin.
+- Days split in time order: first ~2/3 fit, last ~1/3 scored.
+- `beats_market` requires, on the held-out days: lower Brier **and** log-loss
+  than the mid, ≥ 300 markets, and a market-clustered bootstrap 95% CI of the
+  log-loss gain **above zero**. The app re-checks all of this before activating.
+- The sim bets the first minute per market whose net EV at the **close ask**
+  (after Kalshi fees, $5 ticket) clears `ev_margin`. A higher hit rate alone
+  never counts.

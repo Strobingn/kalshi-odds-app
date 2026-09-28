@@ -7,21 +7,48 @@ import org.junit.Test
 
 class ModelActivationTest {
 
+    private fun manifest(
+        modelBrier: Double = 0.158,
+        marketBrier: Double = 0.160,
+        modelLl: Double = 0.470,
+        marketLl: Double = 0.476,
+        ciLow: Double? = 0.001,
+        markets: Int = 2_500,
+        fixture: Boolean = false,
+        schema: Int = 2
+    ) = EdgeModelManifest(
+        version = schema.toString(),
+        trainedAt = "2026-09-27T00:00:00Z",
+        nSamples = markets * 13,
+        modelBrier = modelBrier,
+        marketBrier = marketBrier,
+        modelLogLoss = modelLl,
+        marketLogLoss = marketLl,
+        schema = schema,
+        fixture = fixture,
+        nMarketsHoldout = markets,
+        logLossGainCiLow = ciLow
+    )
+
     @Test
     fun parseManifestAndBeatsMarket() {
         val raw = """
             {
-              "version": "1",
-              "trained_at": "2026-09-25T00:00:00Z",
-              "n_samples": 120,
-              "model_brier": 0.18,
-              "market_brier": 0.22,
-              "model_logloss": 0.50,
-              "market_logloss": 0.58
+              "version": "2",
+              "schema": 2,
+              "fixture": false,
+              "trained_at": "2026-09-27T00:00:00Z",
+              "n_samples": 30000,
+              "n_markets_holdout": 2400,
+              "model_brier": 0.158,
+              "market_brier": 0.160,
+              "model_logloss": 0.470,
+              "market_logloss": 0.476,
+              "logloss_gain_ci_low": 0.002
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
-        assertEquals(120, m.nSamples)
+        assertEquals(2400, m.nMarketsHoldout)
         assertTrue(m.beatsMarket)
         val d = ModelActivation.decide(m, modelValid = true)
         assertTrue(d.activate)
@@ -30,15 +57,7 @@ class ModelActivationTest {
 
     @Test
     fun doesNotActivateWhenWorseThanMarket() {
-        val m = EdgeModelManifest(
-            version = "1",
-            trainedAt = "2026-09-25T00:00:00Z",
-            nSamples = 80,
-            modelBrier = 0.30,
-            marketBrier = 0.22,
-            modelLogLoss = 0.70,
-            marketLogLoss = 0.55
-        )
+        val m = manifest(modelBrier = 0.30, modelLl = 0.70)
         assertFalse(m.beatsMarket)
         val d = ModelActivation.decide(m, modelValid = true)
         assertFalse(d.activate)
@@ -46,24 +65,50 @@ class ModelActivationTest {
     }
 
     @Test
+    fun ciTouchingZeroDoesNotActivate() {
+        // Point estimate better, but the bootstrap CI of the gain includes zero.
+        val d = ModelActivation.decide(manifest(ciLow = -0.0004), modelValid = true)
+        assertFalse(d.activate)
+    }
+
+    @Test
+    fun missingCiDoesNotActivate() {
+        assertFalse(manifest(ciLow = null).beatsMarket)
+    }
+
+    @Test
+    fun syntheticFixtureNeverActivates() {
+        // The old trainer published its synthetic fallback with Brier 0.024 vs 0.186.
+        val m = manifest(modelBrier = 0.024, marketBrier = 0.186, modelLl = 0.10, marketLl = 0.56, ciLow = 0.3, fixture = true)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("fixture"))
+    }
+
+    @Test
+    fun smallHoldoutDoesNotActivate() {
+        val d = ModelActivation.decide(manifest(markets = 120), modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("need ${EdgeModelManifest.MIN_HOLDOUT_MARKETS}"))
+    }
+
+    @Test
+    fun retiredSchemaDoesNotActivate() {
+        val d = ModelActivation.decide(manifest(schema = 1), modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("retired"))
+    }
+
+    @Test
     fun invalidModelKeepsPrevious() {
-        val m = EdgeModelManifest(
-            version = "1",
-            trainedAt = "2026-09-25T00:00:00Z",
-            nSamples = 80,
-            modelBrier = 0.10,
-            marketBrier = 0.22,
-            modelLogLoss = 0.40,
-            marketLogLoss = 0.55
-        )
-        val d = ModelActivation.decide(m, modelValid = false)
+        val d = ModelActivation.decide(manifest(), modelValid = false)
         assertFalse(d.activate)
         assertTrue(d.reason.contains("failed validation"))
     }
 
     @Test
     fun missingTrainedAtRejected() {
-        val raw = """{"version":"1","n_samples":10,"model_brier":0.1,"market_brier":0.2,"model_logloss":0.3,"market_logloss":0.4}"""
+        val raw = """{"version":"2","n_samples":10,"model_brier":0.1,"market_brier":0.2,"model_logloss":0.3,"market_logloss":0.4}"""
         try {
             EdgeModelManifest.parse(raw)
             throw AssertionError("expected missing trained_at")
@@ -74,17 +119,11 @@ class ModelActivationTest {
 
     @Test
     fun jsonRoundTrip() {
-        val m = EdgeModelManifest(
-            version = "2",
-            trainedAt = "2026-09-25T08:17:00Z",
-            nSamples = 40,
-            modelBrier = 0.19,
-            marketBrier = 0.21,
-            modelLogLoss = 0.51,
-            marketLogLoss = 0.53
-        )
+        val m = manifest()
         val again = EdgeModelManifest.parse(m.toJson())
         assertEquals(m.nSamples, again.nSamples)
+        assertEquals(m.nMarketsHoldout, again.nMarketsHoldout)
+        assertEquals(m.logLossGainCiLow!!, again.logLossGainCiLow!!, 1e-12)
         assertEquals(m.beatsMarket, again.beatsMarket)
     }
 }

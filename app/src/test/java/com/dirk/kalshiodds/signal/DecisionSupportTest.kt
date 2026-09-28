@@ -294,7 +294,8 @@ class OnlineAdapterTest {
     @Test
     fun overconfidentSlopeDampsProbability() {
         val now = 20_000L
-        val rows = (1..12).map { i ->
+        // MIN_ADAPTER_SAMPLES is 100: fewer outcomes cannot separate signal from noise.
+        val rows = (1..120).map { i ->
             settled(
                 ticker = "KXETH15M-$i",
                 series = "KXETH15M",
