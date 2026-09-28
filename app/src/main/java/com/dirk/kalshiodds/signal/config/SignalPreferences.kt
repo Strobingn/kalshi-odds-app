@@ -52,6 +52,7 @@ data class SignalSettings(
     val bankrollUsd: Double = SignalConstants.DEFAULT_BANKROLL_USD,
     val useKelly: Boolean = true,
     val kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION,
+    val paperKellyFraction: Double = SignalConstants.DEFAULT_PAPER_KELLY_FRACTION,
     val fixedFraction: Double = SignalConstants.DEFAULT_FIXED_FRACTION,
     val maxBankrollFraction: Double = SignalConstants.DEFAULT_MAX_BANKROLL_FRACTION,
     val feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
@@ -194,6 +195,12 @@ class SignalPreferences(
     suspend fun updateUseKelly(value: Boolean) = edit { it[KEY_USE_KELLY] = value }
     suspend fun updateKellyFraction(value: Double) = edit {
         it[KEY_KELLY_FRAC] = value.coerceIn(
+            SignalConstants.LIVE_KELLY_FRACTION_MIN,
+            SignalConstants.LIVE_KELLY_FRACTION_MAX
+        )
+    }
+    suspend fun updatePaperKellyFraction(value: Double) = edit {
+        it[KEY_PAPER_KELLY_FRAC] = value.coerceIn(
             SignalConstants.PAPER_KELLY_FRACTION_MIN,
             SignalConstants.PAPER_KELLY_FRACTION_MAX
         )
@@ -351,6 +358,7 @@ class SignalPreferences(
         r.paperTradingEnabled?.let { updatePaperTrading(it) }
         r.paperBankrollStartUsd?.let { updatePaperBankrollStartUsd(it) }
         r.kellyFraction?.let { updateKellyFraction(it) }
+        r.paperKellyFraction?.let { updatePaperKellyFraction(it) }
         r.minConfidence?.let { updateMinConfidence(it) }
         r.maxSpreadCents?.let { updateMaxSpreadCents(it) }
     }
@@ -400,6 +408,7 @@ class SignalPreferences(
             bankrollUsd = this[KEY_BANKROLL] ?: def.bankrollUsd,
             useKelly = this[KEY_USE_KELLY] ?: def.useKelly,
             kellyFraction = this[KEY_KELLY_FRAC] ?: def.kellyFraction,
+            paperKellyFraction = this[KEY_PAPER_KELLY_FRAC] ?: def.paperKellyFraction,
             fixedFraction = this[KEY_FIXED_FRAC] ?: def.fixedFraction,
             maxBankrollFraction = this[KEY_MAX_FRAC] ?: def.maxBankrollFraction,
             feeRate = this[KEY_FEE_RATE] ?: def.feeRate,
@@ -475,6 +484,7 @@ class SignalPreferences(
         private val KEY_BANKROLL = doublePreferencesKey("bankroll_usd")
         private val KEY_USE_KELLY = booleanPreferencesKey("use_kelly")
         private val KEY_KELLY_FRAC = doublePreferencesKey("kelly_fraction")
+        private val KEY_PAPER_KELLY_FRAC = doublePreferencesKey("paper_kelly_fraction")
         private val KEY_FIXED_FRAC = doublePreferencesKey("fixed_fraction")
         private val KEY_MAX_FRAC = doublePreferencesKey("max_bankroll_fraction")
         private val KEY_FEE_RATE = doublePreferencesKey("fee_rate")
