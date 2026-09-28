@@ -40,6 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
+import com.dirk.kalshiodds.signal.feedback.ScorecardTargets
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 import kotlin.math.roundToInt
@@ -176,6 +177,16 @@ fun ScorecardScreen(
                 }
             } else {
                 item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
+                view.paperBankrollUsd?.let { roll ->
+                    item {
+                        Text(
+                            ScorecardCopy.paperBankrollLine(roll) ?: "",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 item { RecordCard(ScorecardCopy.AI_TITLE, ledger.ai) }
                 item { RecordCard(ScorecardCopy.MANUAL_TITLE, ledger.manual) }
                 if (ledger.noBetWouldHave.settledCount > 0) {
@@ -452,6 +463,9 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                         append(" · ")
                         append(row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee —")
                     }
+                    row.kellyF?.let { append(String.format(Locale.US, " · Kelly f=%.3f", it)) }
+                    row.kellyFraction?.let { append(String.format(Locale.US, " ×%.2f", it)) }
+                    row.bankrollAfterUsd?.let { append(String.format(Locale.US, " · bankroll $%.2f", it)) }
                     append(" · ")
                     append(ScorecardLedger.signedUsd(row.pnlUsd))
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }
@@ -621,7 +635,7 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
         Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         if (!h.enoughData) {
             Text(
-                "Not enough data yet — ${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled signals. Numbers below are provisional.",
+                "Not enough data yet — ${h.n}/${ScorecardTargets.MIN_SETTLED_BTC_SIGNALS} settled BTC signals. Numbers below are provisional.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
                 fontWeight = FontWeight.SemiBold,

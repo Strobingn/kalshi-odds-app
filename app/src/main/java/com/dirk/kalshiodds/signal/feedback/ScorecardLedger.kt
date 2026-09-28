@@ -101,7 +101,10 @@ object ScorecardLedger {
         val entryNotRecorded: Boolean = false,
         val pickSource: String? = null,
         val aiConfidence: Double? = null,
-        val confidenceLegacy: Boolean = false
+        val confidenceLegacy: Boolean = false,
+        val kellyF: Double? = null,
+        val kellyFraction: Double? = null,
+        val bankrollAfterUsd: Double? = null
     )
 
     data class Snapshot(
@@ -462,7 +465,10 @@ object ScorecardLedger {
             pickSource = fill?.pickSource ?: fill?.let { PaperPickSource.of(it)?.label }
                 ?: if (noBetWouldHave) null else PaperPickSource.TICKET.label,
             aiConfidence = fill?.aiConfidence ?: entry.confidence,
-            confidenceLegacy = false
+            confidenceLegacy = false,
+            kellyF = fill?.kellyF,
+            kellyFraction = fill?.kellyFraction,
+            bankrollAfterUsd = fill?.bankrollAfterUsd
         )
     }
 
@@ -503,7 +509,10 @@ object ScorecardLedger {
             entryNotRecorded = ask == null,
             pickSource = fill.pickSource ?: sourceKind?.label,
             aiConfidence = fill.aiConfidence ?: entry?.confidence,
-            confidenceLegacy = aiPct == null
+            confidenceLegacy = aiPct == null,
+            kellyF = fill.kellyF,
+            kellyFraction = fill.kellyFraction,
+            bankrollAfterUsd = fill.bankrollAfterUsd
         )
     }
 

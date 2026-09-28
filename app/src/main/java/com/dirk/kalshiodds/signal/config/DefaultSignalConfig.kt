@@ -23,6 +23,7 @@ data class DefaultSignalConfig(
     val bankrollUsd: Double = SignalConstants.DEFAULT_BANKROLL_USD,
     val useKelly: Boolean = true,
     val kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION,
+    val paperKellyFraction: Double = SignalConstants.DEFAULT_PAPER_KELLY_FRACTION,
     val fixedFraction: Double = SignalConstants.DEFAULT_FIXED_FRACTION,
     val maxBankrollFraction: Double = SignalConstants.DEFAULT_MAX_BANKROLL_FRACTION,
     val feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,

@@ -37,6 +37,7 @@ data class SettingsUiState(
     val credentialMessage: String? = null,
     val extraRejected: String? = null,
     val bankrollDraft: String = "",
+    val paperBankrollDraft: String = "",
     val alertsPaused: Boolean = false,
     val pauseReason: String? = null,
     val pendingRaiseStake: Double? = null,
@@ -69,6 +70,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         settings = s,
                         keyIdDraft = s.apiKeyId,
                         bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd),
+                        paperBankrollDraft = String.format(java.util.Locale.US, "%.0f", s.paperBankrollStartUsd),
                         credentialMessage = when {
                             prefs.needsReenterKey() ->
                                 "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
@@ -91,6 +93,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                             String.format(java.util.Locale.US, "%.0f", s.bankrollUsd)
                         } else {
                             it.bankrollDraft
+                        },
+                        paperBankrollDraft = if (it.paperBankrollDraft.isBlank()) {
+                            String.format(java.util.Locale.US, "%.0f", s.paperBankrollStartUsd)
+                        } else {
+                            it.paperBankrollDraft
                         }
                     )
                 }
@@ -106,6 +113,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBankrollDraft(text: String) {
         _state.update { it.copy(bankrollDraft = text) }
         text.replace(",", "").toDoubleOrNull()?.let { setBankroll(it) }
+    }
+
+    fun setPaperBankrollDraft(text: String) {
+        _state.update { it.copy(paperBankrollDraft = text) }
+        text.replace(",", "").toDoubleOrNull()?.let { setPaperBankrollStart(it) }
     }
 
     fun refreshBatteryStatus() {
@@ -143,8 +155,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBankroll(v: Double) = track("bankroll_usd", _state.value.settings.bankrollUsd, v) {
         prefs.updateBankrollUsd(v)
     }
+    fun setPaperBankrollStart(v: Double) = track(
+        "paper_bankroll_start",
+        _state.value.settings.paperBankrollStartUsd,
+        v
+    ) {
+        prefs.updatePaperBankrollStartUsd(v)
+    }
     fun setUseKelly(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(v) }
     fun setKellyFraction(v: Double) = viewModelScope.launch { prefs.updateKellyFraction(v) }
+    fun setPaperKellyFraction(v: Double) = viewModelScope.launch { prefs.updatePaperKellyFraction(v) }
     fun setFixedFraction(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(!v) }
     fun setFixedFractionValue(v: Double) = viewModelScope.launch { prefs.updateFixedFraction(v) }
     fun setMaxBankrollFraction(v: Double) = viewModelScope.launch { prefs.updateMaxBankrollFraction(v) }
@@ -186,10 +206,19 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
     fun resetPaperBook() {
+        val start = _state.value.settings.paperBankrollStartUsd
         val before = container.paper.book.snapshot().cashUsd
-        container.paper.book.reset()
-        track("paper_reset", before, 100.0) { }
-        _state.update { it.copy(credentialMessage = "Paper book archived and reset to $100 — no Kalshi orders") }
+        container.paper.book.reset(start)
+        track("paper_reset", before, start) { }
+        _state.update {
+            it.copy(
+                credentialMessage = String.format(
+                    java.util.Locale.US,
+                    "Paper book archived and reset to $%.0f — no Kalshi orders",
+                    start
+                )
+            )
+        }
     }
 
     private fun track(key: String, old: Any?, new: Any?, block: suspend () -> Unit) {

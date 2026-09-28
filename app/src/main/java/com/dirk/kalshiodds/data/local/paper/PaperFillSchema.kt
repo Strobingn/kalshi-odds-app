@@ -29,7 +29,10 @@ object PaperFillSchema {
           ai_pct REAL,
           ai_confidence REAL,
           market_pct REAL,
-          pick_source TEXT
+          pick_source TEXT,
+          kelly_f REAL,
+          kelly_fraction REAL,
+          bankroll_after_usd REAL
         )
     """.trimIndent()
 
@@ -40,6 +43,9 @@ object PaperFillSchema {
     val ADD_AI_CONFIDENCE = "ALTER TABLE $TABLE ADD COLUMN ai_confidence REAL"
     val ADD_MARKET_PCT = "ALTER TABLE $TABLE ADD COLUMN market_pct REAL"
     val ADD_PICK_SOURCE = "ALTER TABLE $TABLE ADD COLUMN pick_source TEXT"
+    val ADD_KELLY_F = "ALTER TABLE $TABLE ADD COLUMN kelly_f REAL"
+    val ADD_KELLY_FRACTION = "ALTER TABLE $TABLE ADD COLUMN kelly_fraction REAL"
+    val ADD_BANKROLL_AFTER = "ALTER TABLE $TABLE ADD COLUMN bankroll_after_usd REAL"
 
     fun upgradeSql(fromVersion: Int): List<String> {
         if (fromVersion >= VERSION) return emptyList()
@@ -47,7 +53,8 @@ object PaperFillSchema {
     }
 
     fun nullableColumnSql(): List<String> = listOf(
-        ADD_AI_PCT, ADD_AI_CONFIDENCE, ADD_MARKET_PCT, ADD_PICK_SOURCE
+        ADD_AI_PCT, ADD_AI_CONFIDENCE, ADD_MARKET_PCT, ADD_PICK_SOURCE,
+        ADD_KELLY_F, ADD_KELLY_FRACTION, ADD_BANKROLL_AFTER
     )
 
     fun isDestructive(sql: String): Boolean {

@@ -456,7 +456,7 @@ fun SettingsContent(
 
             Section("Bankroll & size (advisory)")
             Text(
-                "Suggested contracts only. The app never places orders. Default is quarter-Kelly, capped at 5% of bankroll and by liquidity / spread.",
+                "Suggested contracts for live cards only. Live Approve stays \$10 all-in. Paper AI fills use half-Kelly on the paper bankroll (no dollar max).",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -471,7 +471,7 @@ fun SettingsContent(
             ToggleRow("Kelly sizing (off = fixed fraction)", s.useKelly, { viewModel?.setUseKelly(it) })
             if (s.useKelly) {
                 Text(
-                    String.format(Locale.US, "Kelly fraction  %.2f  (0.25 = quarter-Kelly)", s.kellyFraction),
+                    String.format(Locale.US, "Kelly fraction  %.2f  (0.25 = quarter-Kelly · live cards only)", s.kellyFraction),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textPrimary,
                     fontWeight = FontWeight.SemiBold
@@ -479,8 +479,8 @@ fun SettingsContent(
                 Slider(
                     value = s.kellyFraction.toFloat(),
                     onValueChange = { viewModel?.setKellyFraction(it.toDouble()) },
-                    valueRange = 0.10f..1.0f,
-                    steps = 8
+                    valueRange = SignalConstants.LIVE_KELLY_FRACTION_MIN.toFloat()..SignalConstants.LIVE_KELLY_FRACTION_MAX.toFloat(),
+                    steps = 18
                 )
             } else {
                 Text(
@@ -680,16 +680,41 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
-                    "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
-                    "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
-                    "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
+                "Isolated from live money. Starts at \$1,000 (editable below). AI paper fills use fractional Kelly " +
+                    "on that bankroll — no dollar max. Flip-chance and “no asks under 3¢” guards still apply. " +
+                    "Never calls Kalshi. Reset archives the ledger and returns cash to the start amount. " +
+                    "Paper trading ON does not swallow Live Approve after a Kalshi key is saved — " +
+                    "use the Paper button for simulated fills. Live orders stay \$10 all-in + REAL MONEY confirm.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("Paper trading (AI Kelly auto-fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            Text(
+                String.format(
+                    Locale.US,
+                    "Paper Kelly fraction  %.2f  (0.50 = half-Kelly · AI paper only · live stays \$10)",
+                    s.paperKellyFraction
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.paperKellyFraction.toFloat(),
+                onValueChange = { viewModel?.setPaperKellyFraction(it.toDouble()) },
+                valueRange = SignalConstants.PAPER_KELLY_FRACTION_MIN.toFloat()..SignalConstants.PAPER_KELLY_FRACTION_MAX.toFloat(),
+                steps = 8
+            )
+            OutlinedTextField(
+                value = state.paperBankrollDraft,
+                onValueChange = { viewModel?.setPaperBankrollDraft(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Paper bankroll start (USD)") },
+                supportingText = { Text("Default $1,000. Used on Reset. Settled paper P&L updates the live bankroll.") },
+                singleLine = true
+            )
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper book to $100")
+                Text(String.format(Locale.US, "Reset paper book to $%.0f", s.paperBankrollStartUsd))
             }
 
             Section("Live Approve tickets (Kalshi V2)")

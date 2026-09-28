@@ -145,6 +145,9 @@ class SupabaseSync(
                 .put("settled", f.settled)
                 .put("pnlUsd", f.pnlUsd)
                 .put("note", f.note)
+            f.kellyF?.takeIf { it.isFinite() }?.let { payload.put("kellyF", it) }
+            f.kellyFraction?.takeIf { it.isFinite() }?.let { payload.put("kellyFraction", it) }
+            f.bankrollAfterUsd?.takeIf { it.isFinite() }?.let { payload.put("bankrollAfterUsd", it) }
             out.add(rec("paper:${f.id}", "paper", f.createdAtMs, payload))
         }
         bundle.settingsSnapshot?.takeIf { !SyncMerge.isForbiddenPayload(it) }?.let { snap ->
@@ -229,7 +232,14 @@ class SupabaseSync(
                         aiPct = o.optDouble("aiPct").takeIf { o.has("aiPct") },
                         aiConfidence = o.optDouble("aiConfidence").takeIf { o.has("aiConfidence") },
                         marketPct = o.optDouble("marketPct").takeIf { o.has("marketPct") },
-                        pickSource = o.optString("pickSource").takeIf { it.isNotBlank() }
+                        pickSource = o.optString("pickSource").takeIf { it.isNotBlank() },
+                        kellyF = o.optDouble("kellyF").takeIf { o.has("kellyF") && !o.isNull("kellyF") },
+                        kellyFraction = o.optDouble("kellyFraction").takeIf {
+                            o.has("kellyFraction") && !o.isNull("kellyFraction")
+                        },
+                        bankrollAfterUsd = o.optDouble("bankrollAfterUsd").takeIf {
+                            o.has("bankrollAfterUsd") && !o.isNull("bankrollAfterUsd")
+                        }
                     )
                     onPaper(fill)
                 }

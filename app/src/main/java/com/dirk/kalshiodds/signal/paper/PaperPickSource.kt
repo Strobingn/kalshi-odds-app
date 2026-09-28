@@ -67,5 +67,7 @@ data class PaperFillMeta(
     val aiPct: Double? = null,
     val aiConfidence: Double? = null,
     val marketPct: Double? = null,
-    val pickSource: PaperPickSource? = null
+    val pickSource: PaperPickSource? = null,
+    val kellyF: Double? = null,
+    val kellyFraction: Double? = null
 )

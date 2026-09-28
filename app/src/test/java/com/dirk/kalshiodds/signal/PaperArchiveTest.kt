@@ -30,7 +30,7 @@ class PaperArchiveTest {
         )
         book.reset()
         val snap = book.snapshot()
-        assertEquals(100.0, snap.cashUsd, 1e-9)
+        assertEquals(com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD, snap.cashUsd, 1e-9)
         assertTrue(snap.fills.isEmpty())
         assertEquals(1, snap.archived.size)
         assertEquals(1, snap.archived[0].fills.size)

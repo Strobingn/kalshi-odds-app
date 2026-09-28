@@ -15,6 +15,7 @@ import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
+import com.dirk.kalshiodds.signal.paper.PaperAskDepth
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
@@ -588,7 +589,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun resetPaperBook() {
         val before = paperBook.snapshot().cashUsd
         val snap = _state.value.settings
-        paperBook.reset()
+        val start = snap.paperBankrollStartUsd
+        paperBook.reset(start)
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 container.archive.insertSettingsChange(
@@ -596,7 +598,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         createdAtMs = System.currentTimeMillis(),
                         key = "paper_reset",
                         oldValue = before.toString(),
-                        newValue = "100.0",
+                        newValue = start.toString(),
                         snapshotJson = com.dirk.kalshiodds.data.local.history.SettingsRestore.snapshot(snap)
                     )
                 )
@@ -823,12 +825,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         if (s.settings.paperTradingEnabled) {
+            paperBook.configure(
+                kellyFraction = s.settings.paperKellyFraction,
+                feeRate = s.settings.feeRate,
+                startUsd = s.settings.paperBankrollStartUsd
+            )
             val paperCtx = ctx.copy(
-                bankrollUsd = paperBook.snapshot().equityUsd,
+                bankrollUsd = paperBook.snapshot().paperBankrollUsd,
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            paperTickets.filter { it.canApprove }.forEach { ticket ->
+                val market = live.firstOrNull { m -> m.ticker.equals(ticket.ticker, true) }
+                val depth = paperAskDepth(ticket.side, ticket.limitPrice, ticket.ticker, market)
+                paperBook.considerTicket(ticket, enabled = true, depthContracts = depth)
+            }
         }
         refreshPositionMarks()
     }
@@ -903,7 +914,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     // Heads-up even when this Activity is in the foreground.
                     runCatching { container.lastMinuteNotifier.notifyFired(fired) }
                     if (_state.value.settings.paperTradingEnabled) {
-                        paperBook.considerLastMinute(fired, enabled = true, market = market)
+                        paperBook.configure(
+                            kellyFraction = _state.value.settings.paperKellyFraction,
+                            feeRate = _state.value.settings.feeRate,
+                            startUsd = _state.value.settings.paperBankrollStartUsd
+                        )
+                        paperBook.considerLastMinute(fired, enabled = true, market = market, book = book)
                     }
                 }
             }
@@ -1055,6 +1071,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun paperFromAlerts(alerts: List<SignalAlert>) {
         if (!_state.value.settings.paperTradingEnabled) return
+        paperBook.configure(
+            kellyFraction = _state.value.settings.paperKellyFraction,
+            feeRate = _state.value.settings.feeRate,
+            startUsd = _state.value.settings.paperBankrollStartUsd
+        )
         val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
         val now = System.currentTimeMillis()
         alerts.forEach { alert ->
@@ -1064,8 +1085,24 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val ask = market?.let {
                 TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
             }
-            paperBook.considerAlert(alert, ask, enabled = true)
+            val depth = paperAskDepth(alert.predictedSide, ask, alert.ticker, market)
+            paperBook.considerAlert(alert, ask, enabled = true, depthContracts = depth)
         }
+    }
+
+    /**
+     * Real ask-side size for a Kelly paper fill. Live book at/below the
+     * paid ask, else displayed YES best-ask size, else skip (never unlimited).
+     */
+    private fun paperAskDepth(
+        side: String,
+        ask: Double?,
+        ticker: String,
+        market: MarketUiModel?
+    ): Int? {
+        val px = KalshiPrice.usable(ask) ?: return null
+        val book = hub.scoring.book.snapshotBook(ticker)
+        return PaperAskDepth.contracts(side, px, book, market)
     }
 
     private fun scheduleChartBackfill(snap: MarketsSnapshot) {
