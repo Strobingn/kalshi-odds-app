@@ -1,0 +1,72 @@
+name: Settlement study (Claude)
+
+# Empirical study of how KXBTC15M / KXETH15M / KXSOL15M settle
+# (tools/research/settlement_fetch.py + settlement_study.py). Reuses the
+# backtest data cache; the Markdown report is printed to the job log and the
+# run summary. Nothing is committed or released.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/settlement_*.py"
+      - ".github/workflows/settlement-study.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Lookback days of settled markets
+        required: false
+        default: "28"
+      trades_per_coin:
+        description: Markets per coin to fetch Coinbase trades for (final 150 s + 30 s after close)
+        required: false
+        default: "100"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: settlement-study-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests (synthetic fixtures)
+        run: python3 tools/research/test_settlement.py
+
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: tools/backtest/cache
+          key: backtest-cache-${{ github.run_id }}
+          restore-keys: backtest-cache-
+
+      - name: Refresh settled markets (incremental)
+        run: |
+          cd tools/backtest
+          python3 -c "from pathlib import Path; from fetch import run_fetch; print(run_fetch(Path('cache'), days=${{ github.event.inputs.days || '28' }}))"
+
+      - name: Fetch settlement fields, spot gaps, Coinbase trades
+        run: |
+          python3 tools/research/settlement_fetch.py \
+            --cache tools/backtest/cache \
+            --days ${{ github.event.inputs.days || '28' }} \
+            --trades-per-coin ${{ github.event.inputs.trades_per_coin || '100' }} \
+            --trade-budget-s 2700
+
+      - name: Study
+        run: |
+          python3 tools/research/settlement_study.py --cache tools/backtest/cache --out settlement_study.md > /dev/null
+          echo "===== SETTLEMENT STUDY REPORT ====="
+          cat settlement_study.md
+          echo "===== END REPORT ====="
+          cat settlement_study.md >> "$GITHUB_STEP_SUMMARY"
