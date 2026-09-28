@@ -72,8 +72,11 @@ alongside the original app and has its own local data and API-key settings.
 Each push to `chat-GTP` triggers the APK workflow and publishes the rolling
 `gtp-v1.0-chat-GTP` prerelease. Install future APKs from that same branch
 over this installation to keep its data: the signing certificate and package
-ID are stable and CI increases the version code for each new run. Never
-switch APKs signed with another certificate or a different application ID.
+ID are stable and CI increases the version code for each new run. In **Settings
+→ Check for app update**, the app checks that same branch release and downloads
+the next APK. Android asks for approval to install an update from this app;
+confirm it to update in place without removing local data. Never switch APKs
+signed with another certificate or a different application ID.
 
 The branch-only model workflow publishes `edge-model-chat-GTP` when manually
 dispatched on `chat-GTP`. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)

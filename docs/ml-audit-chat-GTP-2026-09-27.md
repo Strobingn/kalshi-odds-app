@@ -44,21 +44,33 @@ established.
 8. This app has its own ID (`com.dirk.kalshiodds.chatgtp`), launcher icon,
    local data, exports, and rolling branch APK release. The committed debug
    key and increasing CI version codes allow updates over the same install.
+   Settings includes an in-app updater that checks the branch release,
+   downloads a newer APK, verifies its package ID, and opens Android's
+   confirmation prompt. Android requires approval for sideloaded updates.
    Its manually dispatched edge-model workflow publishes a separate
    `edge-model-chat-GTP` release so it cannot replace main's model release.
 
 ## Highest-priority test of a real edge
 
-The [15-minute BTC contract rule](https://kalshi.com/markets/kx/m/kxbtc15m-26jul251430)
-resolves YES when the *simple average* of the final 60 one-second CF
-Benchmarks BRTI observations meets the strike. A Coinbase last trade is
-neither this benchmark nor the average. [CF Benchmarks](https://www.cfbenchmarks.com/data/indices/BRTI)
-describes access and licensing for the live/historical BRTI stream. Check the
-exact market rules for each other coin before extending this design.
+The [Kalshi crypto settlement guide](https://help.kalshi.com/en/articles/13823838-crypto-markets)
+and [15-minute BTC contract rule](https://kalshi.com/markets/kx/m/kxbtc15m-26aug060615)
+resolve on the *simple average* of the final 60 one-second CF Benchmarks BRTI
+observations. A Coinbase last trade is neither this benchmark nor the
+average. Kalshi documents a direct [CF Benchmarks REST passthrough](https://docs.kalshi.com/cfbenchmarks/rest-passthrough)
+with historical ticks and a [WebSocket `cfbenchmarks_value` feed](https://docs.kalshi.com/websockets/cfbenchmarks-value).
+They use existing Kalshi API credentials; the REST passthrough requires an
+appropriate account entitlement, so verify access before building around it.
+The 1 Hz feed includes `last_60s_windowed_average_15min` with its running
+`value`, `window_size`, and exact quarter-hour boundaries. Its documented
+close tick is count 60, and its `index_ids` include `BRTI`, `ETHUSD_RTI`, and
+`SOLUSD_RTI`; verify the available IDs through the feed's `indexlist` action.
+Check each market's precise rules before extending the signal to other coins.
 
 Proposed signal, **not yet implemented or demonstrated profitable**:
 
-1. Record authorized benchmark observations with exchange timestamps,
+1. Subscribe to the 1 Hz CF feed with `index_ids` for the watched coins and
+   confirm actual streaming access. Record benchmark observations with source
+   timestamps and the feed's final-minute running average/count,
    instrument IDs, timestamp/latency quality, Kalshi order-book snapshots and
    deltas, order attempts, acknowledgments, fills, and exact fees. The
    [Kalshi book stream](https://docs.kalshi.com/websockets/orderbook-updates)
@@ -68,9 +80,13 @@ Proposed signal, **not yet implemented or demonstrated profitable**:
    strike `K`, calculate the future-index-average threshold
    `(60 K − S_k) / (60 − k)`. Model the probability that the *remaining BRTI
    average* crosses this threshold using only observations already published
-   and an explicitly measured feed delay. Never insert unpublished future
-   seconds. Before the final minute, build a separate calibrated forecast of
-   that final average from spot, short-run volatility, and liquidity.
+   and an explicitly measured feed delay. Source `k` and the running average
+   from the documented quarter-hour field, taking care with its exclusion of
+   the start-boundary tick and inclusion of the close tick. Never insert
+   unpublished future seconds. Before the final minute, build a separate
+   calibrated forecast of that final average from spot, short-run volatility,
+   and liquidity. Apply the market's specified rounding and equality rule at
+   settlement; the threshold formula is an unrounded decision aid.
 3. For each side calculate conservative expected return per contract:
    `p_side − executable_ask − taker_fee − execution_buffer`. Require positive
    margin for model uncertainty and book movement; skip both sides otherwise.
@@ -78,6 +94,8 @@ Proposed signal, **not yet implemented or demonstrated profitable**:
    schedule](https://kalshi.com/docs/kalshi-fee-schedule.pdf). Compare maker
    orders separately after tracking fill rate and adverse selection; a lower
    maker fee alone does not show better P&L.
+   Since other traders may observe the same feed, measure whether quotes lag
+   the new benchmark information long enough to fill at a favorable price.
 4. Replay chronological markets with no market appearing in both training and
    validation, walk forward by day, and include delays, unfilled orders,
    partial fills, missing feed seconds, and fee rounding. Freeze rules before
@@ -87,7 +105,8 @@ Proposed signal, **not yet implemented or demonstrated profitable**:
    persists. Increase stake only if *realized* net P&L and uncertainty justify
    it. A higher accuracy figure or better Brier score alone cannot do that.
 
-No licensed benchmark history/live feed or full book/real-fill archive was
+Kalshi's REST history endpoint can provide benchmark ticks if this account
+has access. No Kalshi credentials or full book/real-fill archive were
 available in this checkout, so this is a research specification rather than
 a claimed strategy win. Do not enable automatic live orders on this basis.
 

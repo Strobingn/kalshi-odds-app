@@ -37,7 +37,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -53,6 +56,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
+import kotlinx.coroutines.launch
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
@@ -100,6 +104,9 @@ fun SettingsContent(
     val colors = DipTheme.colors
     val s = state.settings
     val context = LocalContext.current
+    val updateScope = rememberCoroutineScope()
+    var updateBusy by remember { mutableStateOf(false) }
+    var updateMessage by remember { mutableStateOf<String?>(null) }
     val scroll = rememberScrollState()
     val apiKeyY = remember { mutableIntStateOf(0) }
     val clipboard = LocalClipboardManager.current
@@ -140,6 +147,26 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
+            OutlinedButton(
+                enabled = !updateBusy,
+                onClick = {
+                    updateScope.launch {
+                        updateBusy = true
+                        updateMessage = "Checking branch release…"
+                        updateMessage = when (val result = AppUpdater.checkAndDownload(context)) {
+                            AppUpdater.Result.Current -> "This app is up to date."
+                            is AppUpdater.Result.Failed -> result.reason
+                            is AppUpdater.Result.Ready -> runCatching {
+                                AppUpdater.showInstaller(context, result.apk)
+                            }.getOrElse { it.message ?: "Could not open Android installer" }
+                        }
+                        updateBusy = false
+                    }
+                }
+            ) { Text(if (updateBusy) "Checking for update…" else "Check for app update") }
+            updateMessage?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+            }
             Column(
                 modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
                 verticalArrangement = Arrangement.spacedBy(12.dp)
