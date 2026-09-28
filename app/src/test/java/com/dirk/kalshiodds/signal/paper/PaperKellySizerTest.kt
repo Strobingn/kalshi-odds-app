@@ -1,12 +1,16 @@
 package com.dirk.kalshiodds.signal.paper
 
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import kotlin.math.abs
+
+private const val DEEP = 100_000
 
 class PaperKellySizerTest {
 
@@ -23,7 +27,7 @@ class PaperKellySizerTest {
         assertTrue("fee-aware Kelly $f must be below fee-free $feeFree", f < feeFree - 1e-6)
         val expectedF = (p * 1.0 - cost1) / (1.0 - cost1)
         assertEquals(expectedF, f, 1e-9)
-        val sized = PaperKellySizer.size(p, ask, bankroll, frac)
+        val sized = PaperKellySizer.size(p, ask, bankroll, frac, depthContracts = DEEP)
         assertTrue(sized.ok)
         assertEquals(expectedF, sized.kellyF, 1e-9)
         val target = bankroll * expectedF * frac
@@ -60,8 +64,10 @@ class PaperKellySizerTest {
         assertEquals(3, deep.contracts)
         val none = PaperKellySizer.size(p, ask, bankrollUsd = 5_000.0, kellyFraction = 1.0, depthContracts = 0)
         assertTrue(none.skip)
-        val unlimited = PaperKellySizer.size(p, ask, bankrollUsd = 5_000.0, kellyFraction = 1.0, depthContracts = null)
-        assertTrue(unlimited.contracts > 3)
+        val unknown = PaperKellySizer.size(p, ask, bankrollUsd = 5_000.0, kellyFraction = 1.0, depthContracts = null)
+        assertTrue(unknown.skip)
+        assertEquals(0, unknown.contracts)
+        assertTrue(unknown.reason!!.contains("depth", ignoreCase = true))
     }
 
     @Test
@@ -84,7 +90,7 @@ class PaperBankrollPersistenceTest {
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertEquals(1_000.0, book.snapshot().paperBankrollUsd, 1e-9)
         val ticket = hunter(p = 0.70, ask = 0.40, ticker = "KXBTC15M-WIN")
-        val fill = book.considerTicket(ticket, enabled = true)
+        val fill = book.considerTicket(ticket, enabled = true, depthContracts = DEEP)
         assertTrue(fill != null)
         assertTrue(fill!!.kellyF != null && fill.kellyF!! > 0.0)
         assertEquals(0.5, fill.kellyFraction!!, 1e-9)
@@ -101,7 +107,7 @@ class PaperBankrollPersistenceTest {
         assertEquals(settled.single().bankrollAfterUsd!!, book.snapshot().paperBankrollUsd, 1e-6)
 
         val lossTicket = hunter(p = 0.70, ask = 0.40, ticker = "KXBTC15M-LOSS")
-        assertTrue(book.considerTicket(lossTicket, enabled = true) != null)
+        assertTrue(book.considerTicket(lossTicket, enabled = true, depthContracts = DEEP) != null)
         val lost = book.settle("KXBTC15M-LOSS", "no")
         assertEquals(false, lost.single().won)
         assertTrue(lost.single().pnlUsd!! < 0.0)
@@ -132,10 +138,16 @@ class PaperBankrollPersistenceTest {
             kellyFraction = 0.5,
             bankrollAfterUsd = 1_038.0
         )
-        val state = PaperBookState(startingUsd = 1_000.0, cashUsd = 1_038.0, fills = listOf(fill))
+        val state = PaperBookState(
+            startingUsd = 1_000.0,
+            cashUsd = 1_038.0,
+            fills = listOf(fill),
+            lifetimeRealizedPnlUsd = 38.0
+        )
         val encoded = json.encodeToString(PaperBookState.serializer(), state)
         val decoded = json.decodeFromString(PaperBookState.serializer(), encoded)
         assertEquals(1_038.0, decoded.paperBankrollUsd, 1e-9)
+        assertEquals(38.0, decoded.lifetimeRealizedPnlUsd!!, 1e-9)
         assertEquals(0.31, decoded.fills.single().kellyF!!, 1e-9)
         assertEquals(0.5, decoded.fills.single().kellyFraction!!, 1e-9)
         assertEquals(1_038.0, decoded.fills.single().bankrollAfterUsd!!, 1e-9)
@@ -153,9 +165,126 @@ class PaperBankrollPersistenceTest {
     }
 
     @Test
+    fun migrateSeedsLifetimePnlFromSettledFills() {
+        val fills = listOf(
+            PaperFill(
+                id = "a",
+                ticker = "KXBTC15M-A",
+                side = "YES",
+                stakeUsd = 10.0,
+                contracts = 20,
+                limitPrice = 0.50,
+                source = "AI hunter",
+                createdAtMs = 1L,
+                settled = true,
+                outcome = "yes",
+                won = true,
+                pnlUsd = 10.0,
+                note = "win"
+            ),
+            PaperFill(
+                id = "b",
+                ticker = "KXBTC15M-B",
+                side = "YES",
+                stakeUsd = 8.0,
+                contracts = 16,
+                limitPrice = 0.50,
+                source = "AI hunter",
+                createdAtMs = 2L,
+                settled = true,
+                outcome = "no",
+                won = false,
+                pnlUsd = -8.0,
+                note = "loss"
+            )
+        )
+        val old = PaperBookState(startingUsd = 1_000.0, cashUsd = 1_002.0, fills = fills)
+        assertEquals(null, old.lifetimeRealizedPnlUsd)
+        val neu = PaperBookState.migrate(old)
+        assertEquals(2.0, neu.lifetimeRealizedPnlUsd!!, 1e-9)
+        assertEquals(1_002.0, neu.paperBankrollUsd, 1e-9)
+        val already = PaperBookState.migrate(neu.copy(lifetimeRealizedPnlUsd = 99.0))
+        assertEquals(99.0, already.lifetimeRealizedPnlUsd!!, 1e-9)
+    }
+
+    @Test
+    fun bankrollSurvivesPruningPastLedgerMax() {
+        val n = SignalConstants.PAPER_LEDGER_MAX + 8
+        val seq = java.util.concurrent.atomic.AtomicInteger()
+        val book = PaperBook(idFactory = { "p${seq.getAndIncrement()}" }, nowMs = { seq.get().toLong() })
+        var totalPnl = 0.0
+        repeat(n) { i ->
+            val ticker = "KXBTC15M-L$i"
+            val fill = book.forceFill(
+                ticker = ticker,
+                side = "YES",
+                limitPrice = 0.10,
+                contracts = 1,
+                source = "test",
+                note = "prune"
+            )
+            assertTrue(fill != null)
+            val settled = book.settle(ticker, "yes")
+            totalPnl += settled.single().pnlUsd!!
+        }
+        val snap = book.snapshot()
+        assertEquals(SignalConstants.PAPER_LEDGER_MAX, snap.fills.size)
+        assertTrue(n > SignalConstants.PAPER_LEDGER_MAX)
+        assertEquals(totalPnl, snap.lifetimeRealizedPnlUsd!!, 1e-6)
+        assertEquals(SignalConstants.PAPER_START_USD + totalPnl, snap.paperBankrollUsd, 1e-6)
+        assertEquals(n * 0.90, totalPnl, 1e-6)
+    }
+
+    @Test
+    fun zeroFeeKellyNotePersistsFeeZero() {
+        val book = PaperBook(idFactory = { "zf" }, nowMs = { 1L })
+        book.configure(feeRate = 0.0)
+        val fill = book.considerTicket(
+            hunter(p = 0.70, ask = 0.40, ticker = "KXBTC15M-ZF"),
+            enabled = true,
+            depthContracts = DEEP
+        )
+        assertTrue(fill != null)
+        assertTrue(fill!!.note.contains("fee $0.00"))
+        assertEquals(0.0, ScorecardLedger.feeUsd(fill)!!, 1e-9)
+        val rebuilt = KalshiFee.total(fill.contracts, fill.limitPrice)
+        assertTrue("default 7% rebuild would be $rebuilt", rebuilt > 0.0)
+        assertNotEquals(rebuilt, ScorecardLedger.feeUsd(fill)!!, 1e-6)
+    }
+
+    @Test
+    fun paperKellyFractionIsSeparateFromLiveAdvisory() {
+        assertEquals(0.25, SignalConstants.DEFAULT_KELLY_FRACTION, 1e-9)
+        assertEquals(0.5, SignalConstants.DEFAULT_PAPER_KELLY_FRACTION, 1e-9)
+        val defaults = SignalSettings()
+        assertEquals(0.25, defaults.kellyFraction, 1e-9)
+        assertEquals(0.5, defaults.paperKellyFraction, 1e-9)
+        val split = SignalSettings(kellyFraction = 0.25, paperKellyFraction = 0.8)
+        assertEquals(0.25, split.kellyFraction, 1e-9)
+        assertEquals(0.8, split.paperKellyFraction, 1e-9)
+        val prefs = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/config/SignalPreferences.kt")
+            .takeIf { it.isFile }
+            ?: java.io.File("src/main/java/com/dirk/kalshiodds/signal/config/SignalPreferences.kt")
+        val text = prefs.readText()
+        assertTrue(text.contains("paper_kelly_fraction"))
+        assertTrue(text.contains("kelly_fraction"))
+        val settingsUi = java.io.File("app/src/main/java/com/dirk/kalshiodds/ui/SettingsScreen.kt")
+            .takeIf { it.isFile }
+            ?: java.io.File("src/main/java/com/dirk/kalshiodds/ui/SettingsScreen.kt")
+        val ui = settingsUi.readText()
+        assertTrue(ui.contains("setPaperKellyFraction"))
+        assertTrue(ui.contains("setKellyFraction"))
+        assertTrue(ui.contains("s.paperKellyFraction"))
+    }
+
+    @Test
     fun skipWhenKellyNonPositiveDoesNotDebit() {
         val book = PaperBook()
-        val fill = book.considerTicket(hunter(p = 0.10, ask = 0.40, ticker = "KXBTC15M-SKIP"), enabled = true)
+        val fill = book.considerTicket(
+            hunter(p = 0.10, ask = 0.40, ticker = "KXBTC15M-SKIP"),
+            enabled = true,
+            depthContracts = DEEP
+        )
         assertTrue(fill == null)
         assertEquals(1_000.0, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())
