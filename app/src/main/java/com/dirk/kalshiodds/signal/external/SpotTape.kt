@@ -139,6 +139,33 @@ class SpotTape(
         return prices[lastI] / base - 1.0
     }
 
+    /**
+     * Time-weighted mean of ln(price) over [fromMs, toMs], holding each
+     * print until the next. Null when no print exists at or before [toMs]
+     * or the tape starts more than [lookbackSlackMs] after [fromMs].
+     */
+    fun meanLogPrice(fromMs: Long, toMs: Long): Double? {
+        if (size == 0 || toMs <= fromMs) return null
+        val first = indexAtOrBefore(fromMs)
+        val startI = if (first >= 0) first else 0
+        if (first < 0 && times[idx(0)] - fromMs > lookbackSlackMs) return null
+        var acc = 0.0
+        var dur = 0L
+        var i = startI
+        while (i < size) {
+            val at = idx(i)
+            val segStart = maxOf(times[at], fromMs)
+            if (segStart >= toMs) break
+            val segEnd = if (i + 1 < size) minOf(times[idx(i + 1)], toMs) else toMs
+            if (segEnd > segStart && prices[at] > 0.0) {
+                acc += ln(prices[at]) * (segEnd - segStart)
+                dur += segEnd - segStart
+            }
+            i += 1
+        }
+        return if (dur > 0L) acc / dur else null
+    }
+
     /** EWMA std of one [binMs] log return; null while warming up. */
     fun binStd(): Double? {
         if (returns < minReturns || ewmaW <= 0.0) return null

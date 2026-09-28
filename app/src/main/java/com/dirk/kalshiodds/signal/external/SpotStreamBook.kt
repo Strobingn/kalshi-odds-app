@@ -89,6 +89,11 @@ class SpotStreamBook(
         )
     }
 
+    /** Mean ln(price) of [asset] over [fromMs, toMs] from the tape, or null. */
+    @Synchronized
+    fun meanLogPrice(asset: String, fromMs: Long, toMs: Long): Double? =
+        tapes[asset.uppercase()]?.meanLogPrice(fromMs, toMs)
+
     private fun touchLocked(key: String, tMs: Long) {
         val prev = aliveMs[key]
         if (prev == null || tMs > prev) aliveMs[key] = tMs

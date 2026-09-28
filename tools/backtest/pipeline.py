@@ -253,6 +253,46 @@ def p_finish_above(spot: float, strike: float, tte_seconds: float, sigma_annual:
     return min(1.0, max(0.0, norm_cdf(d2)))
 
 
+SETTLE_WINDOW_SECONDS = 60.0
+
+
+def index_noise_log(asset: str | None) -> float:
+    """DigitalOptionFairValue.indexNoiseLog (settlement_study.py robust σ)."""
+    return {"BTC": 0.5e-4, "ETH": 0.9e-4, "SOL": 1.1e-4}.get((asset or "").upper(), 1.0e-4)
+
+
+def p_settle_at_least(
+    spot: float,
+    strike: float,
+    tte_seconds: float,
+    sigma_annual: float,
+    observed_mean_log: float | None = None,
+    index_noise: float = 1.0e-4,
+    window_seconds: float = SETTLE_WINDOW_SECONDS,
+) -> float | None:
+    """DigitalOptionFairValue.pSettleAtLeast: P(60 s index average ≥ strike)."""
+    if not (math.isfinite(spot) and math.isfinite(strike) and spot > 0 and strike > 0):
+        return None
+    if not (math.isfinite(tte_seconds) and math.isfinite(sigma_annual) and sigma_annual > 0):
+        return None
+    if not (math.isfinite(window_seconds) and window_seconds > 0):
+        return None
+    ln_s, ln_k = math.log(spot), math.log(strike)
+    obs = observed_mean_log if observed_mean_log is not None and math.isfinite(observed_mean_log) else ln_s
+    w, t = window_seconds, max(0.0, tte_seconds)
+    s2 = sigma_annual * sigma_annual / SECONDS_PER_YEAR
+    if t >= w:
+        mean, path_var = ln_s, s2 * ((t - w) + w / 3.0)
+    else:
+        f = t / w
+        mean, path_var = ((w - t) * obs + t * ln_s) / w, f * f * s2 * t / 3.0
+    noise = index_noise if math.isfinite(index_noise) and index_noise > 0 else 0.0
+    sd = math.sqrt(path_var + noise * noise)
+    if not math.isfinite(sd) or sd <= 1e-15:
+        return 1.0 if mean >= ln_k else 0.0
+    return min(1.0, max(0.0, norm_cdf((mean - ln_k) / sd)))
+
+
 def distance_vol_units(spot: float, strike: float, tte_seconds: float, sigma_annual: float) -> float | None:
     if not (math.isfinite(spot) and math.isfinite(strike) and spot > 0 and strike > 0):
         return None

@@ -39,6 +39,67 @@ object DigitalOptionFairValue {
         return normCdf(d2).coerceIn(0.0, 1.0)
     }
 
+    /** Kalshi 15m crypto settles on the average of the last 60 s of the index. */
+    const val SETTLE_WINDOW_SECONDS = 60.0
+
+    /**
+     * Robust σ of Kalshi's settlement value vs the Coinbase 60 s average, in
+     * log units (tools/research/settlement_study.py, 2026-09-28: BTC 0.47bp,
+     * ETH 0.89bp, SOL 1.13bp). Empirical; unknown assets use 1bp.
+     */
+    fun indexNoiseLog(asset: String?): Double = when (asset?.uppercase()) {
+        "BTC" -> 0.5e-4
+        "ETH" -> 0.9e-4
+        "SOL" -> 1.1e-4
+        else -> 1.0e-4
+    }
+
+    /**
+     * P(YES) under Kalshi's settlement rule for the 15m crypto markets:
+     * YES when the simple average of the index over the last [windowSeconds]
+     * before close is **at least** the strike (ties settle YES). The strike is
+     * itself the previous window's 60 s average.
+     *
+     * Log price is Brownian with σ [sigmaAnnual] and no drift over minutes.
+     * With `s² = σ²/year-seconds`:
+     *  - tte ≥ W: the whole window is ahead: Var = s²·((tte − W) + W/3).
+     *  - tte < W: `W − tte` seconds are already fixed at [observedMeanLog]
+     *    (mean ln price since the window opened; the current spot if null),
+     *    the rest averages the path ahead: mean = ((W−tte)·obs + tte·ln S)/W,
+     *    Var = (tte/W)²·s²·tte/3.
+     * [indexNoise] (log units) is added in quadrature for index ≠ Coinbase.
+     * Returns null on degenerate input so the feature drops out.
+     */
+    fun pSettleAtLeast(
+        spot: Double,
+        strike: Double,
+        tteSeconds: Double,
+        sigmaAnnual: Double,
+        observedMeanLog: Double? = null,
+        indexNoise: Double = 1.0e-4,
+        windowSeconds: Double = SETTLE_WINDOW_SECONDS
+    ): Double? {
+        if (!spot.isFinite() || !strike.isFinite() || spot <= 0.0 || strike <= 0.0) return null
+        if (!tteSeconds.isFinite() || !sigmaAnnual.isFinite() || sigmaAnnual <= 0.0) return null
+        if (!windowSeconds.isFinite() || windowSeconds <= 0.0) return null
+        val lnS = ln(spot)
+        val lnK = ln(strike)
+        val obs = observedMeanLog?.takeIf { it.isFinite() } ?: lnS
+        val w = windowSeconds
+        val t = tteSeconds.coerceAtLeast(0.0)
+        val s2 = sigmaAnnual * sigmaAnnual / SECONDS_PER_YEAR
+        val (mean, pathVar) = if (t >= w) {
+            lnS to s2 * ((t - w) + w / 3.0)
+        } else {
+            val f = t / w
+            ((w - t) * obs + t * lnS) / w to f * f * s2 * t / 3.0
+        }
+        val noise = if (indexNoise.isFinite() && indexNoise > 0.0) indexNoise else 0.0
+        val sd = sqrt(pathVar + noise * noise)
+        if (!sd.isFinite() || sd <= 1e-15) return if (mean >= lnK) 1.0 else 0.0
+        return normCdf((mean - lnK) / sd).coerceIn(0.0, 1.0)
+    }
+
     /** Distance to strike in remaining-vol units: ln(S/K) / (σ √T). */
     fun distanceVolUnits(
         spot: Double,

@@ -26,6 +26,29 @@ from pipeline import (
 from weights import forward, load_fallback_weights
 
 
+def check_settle_at_least() -> None:
+    """Mirror of SettlementFairValueTest (DigitalOptionFairValue.pSettleAtLeast)."""
+    from pipeline import SECONDS_PER_YEAR, index_noise_log, norm_cdf, p_settle_at_least
+
+    sigma, noise = 0.5, index_noise_log("BTC")
+    s2 = sigma * sigma / SECONDS_PER_YEAR
+    spot, strike, tte = 84_000.0, 83_950.0, 600.0
+    sd = math.sqrt(s2 * ((tte - 60.0) + 20.0) + noise * noise)
+    assert abs(p_settle_at_least(spot, strike, tte, sigma, None, noise) - norm_cdf(math.log(spot / strike) / sd)) < 1e-12
+    assert abs(p_settle_at_least(84_000.0, 84_000.0, 300.0, sigma, None, noise) - 0.5) < 1e-9
+    obs, spot, tte = math.log(83_990.0), 84_010.0, 20.0
+    mean = (40.0 * obs + 20.0 * math.log(spot)) / 60.0
+    sd = math.sqrt((tte / 60.0) ** 2 * s2 * tte / 3.0 + noise * noise)
+    p = p_settle_at_least(spot, 84_000.0, tte, sigma, obs, noise)
+    assert abs(p - norm_cdf((mean - math.log(84_000.0)) / sd)) < 1e-12 and p < 0.5
+    assert p_settle_at_least(spot, 84_000.0, tte, sigma, None, noise) > 0.5
+    k = 84_000.0
+    assert p_settle_at_least(k, k, 0.0, sigma, math.log(k), 0.0) == 1.0  # ties settle YES
+    assert p_settle_at_least(k, k, 0.0, sigma, math.log(k - 0.01), 0.0) == 0.0
+    assert p_settle_at_least(0.0, k, 60.0, sigma) is None
+    assert index_noise_log("sol") == 1.1e-4 and index_noise_log(None) == 1.0e-4
+
+
 def entry_filter_cases() -> None:
     """Hand-computed EntryFilter cases; same list as EntryFilterTest.matchesBacktestPortHandCases."""
     from pipeline import entry_filter
@@ -132,6 +155,7 @@ def main() -> None:
     assert abs(conservative_fill("NO", 0.47, 0.75, 0.40, 0.0) - 0.60) < 1e-12
     entry_filter_cases()
     check_ev_side()
+    check_settle_at_least()
     print("parity ok", p, "mlp", pred.yes)
 
 

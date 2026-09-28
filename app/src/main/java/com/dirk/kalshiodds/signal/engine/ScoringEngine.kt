@@ -601,12 +601,25 @@ class ScoringEngine(
             else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
                 .coerceIn(0.01, 5.0)
         }
+        // Kalshi settles on the 60 s average of the index (ties YES). Inside
+        // the last minute, the part of that average already printed comes
+        // from the streamed tape.
+        val settleAsset = com.dirk.kalshiodds.signal.external.ExternalSnapshot.assetOf(tick.series)
+        val observedMeanLog = if (close != null && settleAsset != null &&
+            nowMs > close - SETTLE_WINDOW_MS && nowMs < close
+        ) {
+            runCatching { spotStream?.meanLogPrice(settleAsset, close - SETTLE_WINDOW_MS, nowMs) }.getOrNull()
+        } else {
+            null
+        }
         val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
-            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
+            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
                 spot = spotFeat.lastPrice!!,
                 strike = strikeUsd,
                 tteSeconds = (tteSec ?: 900L).toDouble(),
-                sigmaAnnual = sigmaAnnual
+                sigmaAnnual = sigmaAnnual,
+                observedMeanLog = observedMeanLog,
+                indexNoise = com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.indexNoiseLog(settleAsset)
             )?.times(100.0)
         } else {
             null
@@ -629,7 +642,10 @@ class ScoringEngine(
                     realizedVol01 = volForMl,
                     crossAssetRet = spotFeat?.spotReturn5m,
                     nowMs = nowMs,
-                    digitalFair = digitalFairPp?.div(100.0)
+                    // Null: EdgeFeatures computes the point-spot digital the
+                    // model was trained on (ml/train_edge.py), not the
+                    // settlement-average fair shown in the app.
+                    digitalFair = null
                 )
             )
             val pYes = loaded.predictYes(feats, mid01)
@@ -1067,5 +1083,8 @@ class ScoringEngine(
 
         /** Book deltas update depth immediately; re-score at most this often. */
         const val BOOK_SCORE_MIN_INTERVAL_MS = 250L
+
+        /** Settlement averages the last 60 s of the index before close. */
+        const val SETTLE_WINDOW_MS = 60_000L
     }
 }
