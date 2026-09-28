@@ -242,6 +242,42 @@ def fetch_spot(product: str, start_ms: int, end_ms: int, pause: float = 0.12) ->
     return [by[k] for k in sorted(by)]
 
 
+def refresh_spot(dest: Path, product: str, start_ms: int, end_ms: int) -> list[list]:
+    """Write Coinbase 1m bars covering [start_ms, end_ms] to [dest].
+
+    A cached file is extended (earlier and/or later bars fetched and merged)
+    instead of being reused forever, so markets settled after the first
+    fetch still get spot. Bar `time` is the bar start in seconds.
+    """
+    have: list[list] = []
+    if dest.is_file() and dest.stat().st_size > 100:
+        try:
+            have = json.loads(dest.read_text())
+        except (json.JSONDecodeError, OSError):
+            have = []
+    if not have:
+        print(f"[fetch] spot {product}")
+        bars = fetch_spot(product, start_ms, end_ms)
+    else:
+        first_ms = int(have[0][0]) * 1000
+        last_ms = int(have[-1][0]) * 1000
+        extra: list[list] = []
+        if start_ms < first_ms - 60_000:
+            extra += fetch_spot(product, start_ms, first_ms)
+        if end_ms > last_ms + 120_000:
+            extra += fetch_spot(product, last_ms, end_ms)
+        if not extra:
+            print(f"[fetch] spot {product} cached")
+            return have
+        by = {int(r[0]): r for r in have}
+        by.update({int(r[0]): r for r in extra if isinstance(r, list) and len(r) >= 6})
+        bars = [by[k] for k in sorted(by)]
+        print(f"[fetch] spot {product} extended +{len(bars) - len(have)} bars")
+    dest.write_text(json.dumps(bars, separators=(",", ":")))
+    print(f"[fetch]   {len(bars)} bars")
+    return bars
+
+
 def load_jsonl(path: Path) -> list:
     if not path.is_file():
         return []
@@ -348,14 +384,7 @@ def run_fetch(cache: Path, days: int = 28, pause: float = 0.08) -> dict:
     else:
         start_ms, end_ms = min_ms, now_ms
     for series, product in PRODUCT.items():
-        dest = cache / f"spot_{product}.json"
-        if dest.is_file() and dest.stat().st_size > 100:
-            print(f"[fetch] spot {product} cached")
-            continue
-        print(f"[fetch] spot {product}")
-        bars = fetch_spot(product, start_ms, end_ms)
-        dest.write_text(json.dumps(bars, separators=(",", ":")))
-        print(f"[fetch]   {len(bars)} bars")
+        refresh_spot(cache / f"spot_{product}.json", product, start_ms, end_ms)
 
     return {"markets": len(all_markets), "cutoff": cut, "min_ms": min_ms, "now_ms": now_ms}
 
