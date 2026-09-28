@@ -43,13 +43,22 @@ object SignalConstants {
     const val PAPER_LEDGER_MAX = 40
 
     /**
+     * Live-card advisory Kelly fraction for [com.dirk.kalshiodds.signal.sizing.PositionSizer]
+     * / ScoringEngine. Default 0.25 (quarter-Kelly). Paper AI uses
+     * [DEFAULT_PAPER_KELLY_FRACTION] on a separate preference key.
+     */
+    const val DEFAULT_KELLY_FRACTION = 0.25
+
+    /**
      * Fraction of full Kelly actually risked on **paper**. Default 0.5
      * (half-Kelly). Settings slider is [PAPER_KELLY_FRACTION_MIN]–[PAPER_KELLY_FRACTION_MAX].
      * Live orders ignore this and stay on the $10 all-in cap.
      */
-    const val DEFAULT_KELLY_FRACTION = 0.5
+    const val DEFAULT_PAPER_KELLY_FRACTION = 0.5
     const val PAPER_KELLY_FRACTION_MIN = 0.1
     const val PAPER_KELLY_FRACTION_MAX = 1.0
+    const val LIVE_KELLY_FRACTION_MIN = 0.05
+    const val LIVE_KELLY_FRACTION_MAX = 1.0
 
     /** Hard cap on bankroll committed to one suggested clip. */
     const val DEFAULT_MAX_BANKROLL_FRACTION = 0.05

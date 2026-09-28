@@ -17,7 +17,7 @@ import kotlin.math.min
  * That is the bankroll fraction that maximizes log-growth in the
  * textbook binary case. We then apply:
  *
- *  1. [kellyFraction] (default 0.5 = half-Kelly; paper AI uses [com.dirk.kalshiodds.signal.paper.PaperKellySizer])
+ *  1. [kellyFraction] (default 0.25 = quarter-Kelly; paper AI uses [com.dirk.kalshiodds.signal.paper.PaperKellySizer])
  *  2. [maxFraction] hard cap (default 5% of bankroll)
  *  3. Liquidity / depth clip so we do not suggest walking the book
  *  4. Spread haircut (wider book → smaller clip)

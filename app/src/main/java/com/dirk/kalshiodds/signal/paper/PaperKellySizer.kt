@@ -22,7 +22,7 @@ import kotlin.math.min
 object PaperKellySizer {
 
     const val PAYOUT_USD = SignalConstants.CONTRACT_SETTLEMENT_USD
-    const val DEFAULT_KELLY_FRACTION = SignalConstants.DEFAULT_KELLY_FRACTION
+    const val DEFAULT_KELLY_FRACTION = SignalConstants.DEFAULT_PAPER_KELLY_FRACTION
     const val MIN_KELLY_FRACTION = SignalConstants.PAPER_KELLY_FRACTION_MIN
     const val MAX_KELLY_FRACTION = SignalConstants.PAPER_KELLY_FRACTION_MAX
 
@@ -103,11 +103,21 @@ object PaperKellySizer {
                 costPerContract = cost1
             )
         }
+        if (depthContracts == null) {
+            return Result(
+                skip = true,
+                reason = "Paper skip — unknown ask depth",
+                kellyF = f,
+                kellyFraction = frac,
+                ask = px,
+                costPerContract = cost1
+            )
+        }
         val n = maxContracts(px, cap, feeRate, depthContracts)
         if (n < 1) {
             return Result(
                 skip = true,
-                reason = if (depthContracts != null && depthContracts <= 0) {
+                reason = if (depthContracts <= 0) {
                     "Paper skip — no size at the ask"
                 } else {
                     "Paper skip — cannot fit 1 contract under bankroll"
@@ -134,8 +144,8 @@ object PaperKellySizer {
     }
 
     /**
-     * Largest whole [n] with all-in ≤ [capUsd], optionally ≤ [depth].
-     * No dollar max besides [capUsd] (the bankroll / Kelly stake).
+     * Largest whole [n] with all-in ≤ [capUsd] and n ≤ [depthContracts].
+     * Unknown / missing depth is 0 — never unlimited.
      */
     fun maxContracts(
         ask: Double,
@@ -145,10 +155,10 @@ object PaperKellySizer {
     ): Int {
         val px = KalshiPrice.usable(ask) ?: return 0
         if (!capUsd.isFinite() || capUsd <= 0.0) return 0
-        val depthCap = depthContracts?.takeIf { it >= 0 }
-        if (depthCap != null && depthCap <= 0) return 0
+        val depthCap = depthContracts?.takeIf { it >= 0 } ?: return 0
+        if (depthCap <= 0) return 0
         val hiGuess = (floor(capUsd / px) + 2.0).toInt().coerceAtLeast(0)
-        val hi = if (depthCap != null) min(hiGuess, depthCap) else hiGuess
+        val hi = min(hiGuess, depthCap)
         if (hi < 1) return 0
         if (KalshiFee.totalCost(1, px, feeRate) > capUsd + 1e-9) return 0
         var lo = 1

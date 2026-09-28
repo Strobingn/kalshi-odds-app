@@ -22,7 +22,13 @@ class LiveOrderUnaffectedByPaperKellyTest {
     @Test
     fun liveClipStaysTenDollarsEvenWhenPaperKellyIsHuge() {
         val ask = 0.25
-        val paper = PaperKellySizer.size(0.80, ask, bankrollUsd = 50_000.0, kellyFraction = 1.0)
+        val paper = PaperKellySizer.size(
+            0.80,
+            ask,
+            bankrollUsd = 50_000.0,
+            kellyFraction = 1.0,
+            depthContracts = 100_000
+        )
         assertTrue(paper.ok)
         assertTrue(paper.allInUsd > SignalConstants.LIVE_ALL_IN_CAP_USD)
         val live = LiveOrderSizer.size(ask)
@@ -120,7 +126,7 @@ class LiveOrderUnaffectedByPaperKellyTest {
             modelChance = 0.70,
             impliedChance = 0.04
         )
-        book.considerTicket(ticket, enabled = true)
+        book.considerTicket(ticket, enabled = true, depthContracts = 100_000)
         assertTrue(book.snapshot().fills.isNotEmpty() || book.snapshot().lastMessage != null)
         assertEquals(0, placed.get())
         assertEquals(0, session.placementCount)
