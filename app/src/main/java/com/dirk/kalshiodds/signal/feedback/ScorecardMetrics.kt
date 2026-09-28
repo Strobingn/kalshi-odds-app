@@ -104,8 +104,12 @@ object ScorecardMetrics {
         settledWindows: List<SettledWindowRow> = emptyList()
     ): Snapshot {
         val settled = settledScoredPicks(entries)
-        val voids = entries.count { it.outcome.equals("void", true) }
-        val open = entries.count { it.outcome == null }
+        val voids = entries.count {
+            ScorecardLedger.isScorecardTicker(it.ticker) && it.outcome.equals("void", true)
+        }
+        val open = entries.count {
+            ScorecardLedger.isScorecardTicker(it.ticker) && it.outcome == null
+        }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
         val rollingStart = nowMs - SignalConstants.SCORECARD_ROLLING_DAYS * 86_400_000L
         val ledger = ScorecardLedger.of(entries, fills, settledWindows, zoneId)

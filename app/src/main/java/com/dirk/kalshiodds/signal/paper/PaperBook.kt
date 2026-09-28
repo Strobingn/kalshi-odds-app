@@ -132,6 +132,7 @@ data class PaperBookState(
 
     companion object {
         /** 0.3.19: $100 start → $1,000, preserving realized P&L. */
+        @JvmStatic
         fun migrateStartUsd(state: PaperBookState): PaperBookState {
             val old = 100.0
             val neu = SignalConstants.PAPER_START_USD

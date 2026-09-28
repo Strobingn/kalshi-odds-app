@@ -181,15 +181,15 @@ class ScorecardMetricsTest {
             entry("KXSOL15M-C", "KXSOL15M", 0.80, "void", null, null, 4.0, now)
         )
         val snap = ScorecardMetrics.compute(rows, nowMs = now, zoneId = ZoneOffset.UTC)
-        assertEquals(2, snap.sampleCount)
-        assertEquals(1, snap.voidCount)
-        assertEquals(0.5, snap.allTime.hitRate!!, 1e-9)
-        // Picked-side Brier: YES@0.70 hit → 0.09; NO@0.30 miss vs yes → (0.70−1)² = 0.09
+        assertEquals(1, snap.sampleCount)
+        assertEquals(0, snap.voidCount)
+        assertEquals(1.0, snap.allTime.hitRate!!, 1e-9)
         assertEquals(0.09, snap.allTime.brier!!, 1e-9)
-        assertEquals(0.29, snap.allTime.pUpBrier!!, 1e-9)
+        assertEquals(0.09, snap.allTime.pUpBrier!!, 1e-9)
         assertEquals(8.0, snap.allTime.avgEdgeWhenRight!!, 1e-9)
-        assertEquals(-6.0, snap.allTime.avgEdgeWhenWrong!!, 1e-9)
-        assertEquals(2, snap.perSeries.size)
+        assertEquals(null, snap.allTime.avgEdgeWhenWrong)
+        assertEquals(1, snap.perSeries.size)
+        assertEquals("KXBTC15M", snap.perSeries.single().series)
     }
 
     private fun entry(
