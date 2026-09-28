@@ -39,6 +39,19 @@ class SpotStream(
 
     val connected: Boolean get() = socket != null
 
+    /** Called on every accepted print (asset like "BTC", price). The market-data recorder hooks in here. */
+    @Volatile var onPrint: ((asset: String, price: Double) -> Unit)? = null
+
+    /**
+     * While true (Live signals running) the socket never idles out, so the
+     * recorder gets every print. Reconnects still back off after failures.
+     */
+    @Volatile var pinned: Boolean = false
+        set(value) {
+            field = value
+            if (value) ensureRunning()
+        }
+
     @Synchronized
     fun ensureRunning(nowMs: Long = clock()) {
         lastDemandMs = nowMs
@@ -81,7 +94,8 @@ class SpotStream(
         val asset = PRODUCT_TO_ASSET[o.optString("product_id")] ?: return
         val px = o.optString("price").toDoubleOrNull()?.takeIf { it > 0.0 && it.isFinite() } ?: return
         rings[asset]?.add(nowMs, px)
-        if (nowMs - lastDemandMs > IDLE_MS) stop()
+        runCatching { onPrint?.invoke(asset, px) }
+        if (!pinned && nowMs - lastDemandMs > IDLE_MS) stop()
     }
 
     private fun scheduleRetry(nowMs: Long) {

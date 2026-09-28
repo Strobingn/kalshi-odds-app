@@ -44,6 +44,8 @@ data class SignalSettings(
     val opportunityQuiet: Boolean = SignalConstants.DEFAULT_OPPORTUNITY_QUIET,
     val liveSignalsEnabled: Boolean = false,
     val subscribeTrades: Boolean = true,
+    /** Research recorder (filesDir/recordings) while Live signals runs. */
+    val recordMarketData: Boolean = true,
     val debounceMs: Long = 10_000L,
     val minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
     val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
@@ -177,6 +179,7 @@ class SignalPreferences(
         edit { it[KEY_LIVE] = value }
     }
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
+    suspend fun updateRecordMarketData(value: Boolean) = edit { it[KEY_RECORD_MARKET_DATA] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
         it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)
     }
@@ -383,6 +386,7 @@ class SignalPreferences(
             opportunityQuiet = this[KEY_OPP_QUIET] ?: SignalConstants.DEFAULT_OPPORTUNITY_QUIET,
             liveSignalsEnabled = this[KEY_LIVE] ?: def.liveSignalsEnabled,
             subscribeTrades = this[KEY_TRADES] ?: def.subscribeTrades,
+            recordMarketData = this[KEY_RECORD_MARKET_DATA] ?: true,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
             minConfidence = this[KEY_MIN_CONF] ?: def.minConfidence,
             minLiquidity = this[KEY_MIN_LIQ] ?: def.minLiquidity,
@@ -457,6 +461,7 @@ class SignalPreferences(
         private val KEY_OPP_QUIET = booleanPreferencesKey("opportunity_quiet")
         private val KEY_LIVE = booleanPreferencesKey("live_signals_enabled")
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
+        private val KEY_RECORD_MARKET_DATA = booleanPreferencesKey("record_market_data")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
         private val KEY_MIN_CONF = doublePreferencesKey("min_confidence")
         private val KEY_MIN_LIQ = doublePreferencesKey("min_liquidity")

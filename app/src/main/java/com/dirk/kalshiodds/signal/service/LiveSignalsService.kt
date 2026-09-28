@@ -197,6 +197,8 @@ class LiveSignalsService : Service() {
         lastTickerCount = tickers.size
         if (!settings.liveSignalsEnabled) {
             explicitStop = true
+            runCatching { container.spotStream.pinned = false }
+            runCatching { container.recorder.setActive(false) }
             client?.stop()
             client = null
             hub.setConnection(WsConnectionState.IDLE, detail = "live signals off")
@@ -204,6 +206,10 @@ class LiveSignalsService : Service() {
             stopSelf()
             return
         }
+        // Keep the Coinbase spot stream open for the whole Live session (scoring
+        // and the recorder both read it), not only while ticks demand it.
+        runCatching { container.spotStream.pinned = true }
+        runCatching { container.recorder.setActive(settings.recordMarketData) }
         if (!LiveSignalsPolicy.shouldConnectWs(true, settings.tradingCredentialsConfigured())) {
             client?.stop()
             client = null
@@ -212,7 +218,8 @@ class LiveSignalsService : Service() {
             updateNotification(needsKey = true)
             return
         }
-        val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades, tickers.filter {
+        // The recorder needs the public trade channel even if the trades toggle is off.
+        val plan = LiveSignalsPolicy.subscriptionPlan(settings.subscribeTrades || settings.recordMarketData, tickers.filter {
             settings.isWatchedTicker(it)
         })
         val demo = settings.kalshiDemoEnabled
@@ -226,7 +233,10 @@ class LiveSignalsService : Service() {
             updateNotification(reconnecting = true)
             val ws = KalshiWsClient(
                 scope = scope,
-                onTick = { tick -> runCatching { hub.ingestTick(tick) } },
+                onTick = { tick ->
+                    runCatching { container.recorder.onTick(tick) }
+                    runCatching { hub.ingestTick(tick) }
+                },
                 onLifecycle = { ticker, eventType ->
                     scope.launch {
                         runCatching {
@@ -425,6 +435,8 @@ class LiveSignalsService : Service() {
     private fun tearDownPipeline() {
         runCatching { client?.stop() }
         client = null
+        runCatching { KalshiOddsApp.from(this).container.spotStream.pinned = false }
+        runCatching { KalshiOddsApp.from(this).container.recorder.setActive(false) }
         pipelineJob?.cancel()
         pipelineJob = null
         metadataJob?.cancel()

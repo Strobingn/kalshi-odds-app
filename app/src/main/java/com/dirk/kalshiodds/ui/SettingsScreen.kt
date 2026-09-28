@@ -409,6 +409,13 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             ToggleRow("Subscribe public trades", s.subscribeTrades, { viewModel?.setSubscribeTrades(it) })
+            ToggleRow("Record market data (1s)", s.recordMarketData, { viewModel?.setRecordMarketData(it) })
+            Text(
+                "While Live signals runs: BTC spot, KXBTC15M top of book, trades and settlements to daily files on this phone (capped at 300 MB, oldest days deleted). Export them from Data.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            RecordingStatsLine()
 
             Section("Skip filter")
             Text(
