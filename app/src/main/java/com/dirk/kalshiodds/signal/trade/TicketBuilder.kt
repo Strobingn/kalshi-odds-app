@@ -60,16 +60,11 @@ object TicketBuilder {
             .sortedByDescending { it.maxPayoutUsd }
     }
 
-    /**
-     * $1 → ≥$25 hunter. Quality gates do **not** hide a cheap print —
-     * detection is automatic, execution is still Approve-only.
-     */
+    /** Cheap hunter tickets still require positive modeled value after costs. */
     fun proposeHunter(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val preferred = resolveSide(market)
-        val sides = listOfNotNull(preferred, "YES", "NO").distinct()
-        return sides.firstNotNullOfOrNull { side ->
+        return rankedValueSides(market, ctx).firstNotNullOfOrNull { side ->
             buildTicket(
                 market = market,
                 side = side,
@@ -90,9 +85,7 @@ object TicketBuilder {
     fun proposeHunterValue(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val preferred = resolveSide(market)
-        val sides = listOfNotNull(preferred, "YES", "NO").distinct()
-        return sides.firstNotNullOfOrNull { side ->
+        return rankedValueSides(market, ctx).firstNotNullOfOrNull { side ->
             buildTicket(
                 market = market,
                 side = side,
@@ -121,17 +114,18 @@ object TicketBuilder {
         val settings = ctx.settings
         if (!settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val side = resolveSide(market) ?: return null
         val stake = PayoutGate.clipStake(settings.ticketStakeUsd)
-        return buildTicket(
-            market = market,
-            side = side,
-            ctx = ctx,
-            stakeUsd = stake,
-            minPayoutUsd = SignalConstants.DEFAULT_MIN_PAYOUT_USD,
-            kind = TicketKind.CONFIGURED,
-            requireGates = settings.ticketRespectGates
-        )
+        return rankedValueSides(market, ctx).firstNotNullOfOrNull { side ->
+            buildTicket(
+                market = market,
+                side = side,
+                ctx = ctx,
+                stakeUsd = stake,
+                minPayoutUsd = SignalConstants.DEFAULT_MIN_PAYOUT_USD,
+                kind = TicketKind.CONFIGURED,
+                requireGates = settings.ticketRespectGates
+            )
+        }
     }
 
     /**
@@ -371,12 +365,14 @@ object TicketBuilder {
 
         val model01 = modelProb(market, side)
         val implied = live.price
-        val edge = modelBeatsImplied(model01, implied, ctx.settings.feeRate, stakeUsd = ctx.settings.ticketStakeUsd)
-        if (kind == TicketKind.HUNTER_VALUE && !edge) return null
+        val netPer = model01?.let { it - live.allInUsd / live.count }
+        val edge = netPer != null && netPer > AUTO_VALUE_MARGIN
+        // All automatic tickets need a buffer above the executable ask and
+        // the fee for the actual $5 clip. A cheap payoff is not itself edge.
+        if (kind != TicketKind.MANUAL && !edge) return null
 
         val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
         val bookSide = if (side == "YES") "bid" else "ask"
-        val netPer = market.netEvDollars
         val minProfit = ctx.settings.minProfitIfWinUsd
         val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
         val blockedReason = if (belowMin) {
@@ -398,7 +394,7 @@ object TicketBuilder {
             estimatedAvgFill = live.price,
             netEvUsd = netPer?.let { it * live.count },
             netEvPerContract = netPer,
-            netEdgePp = market.netEdgePp,
+            netEdgePp = netPer?.times(100.0),
             title = market.title,
             sizingNote = String.format(
                 java.util.Locale.US,
@@ -469,6 +465,19 @@ object TicketBuilder {
         val fee = KalshiFee.perContract(p, feeRate, stakeUsd)
         return m > p + fee + margin
     }
+
+    private const val AUTO_VALUE_MARGIN = 0.03
+
+    /** Rank the two actual buys independently; a hero direction is not an order price. */
+    private fun rankedValueSides(market: MarketUiModel, ctx: Context): List<String> =
+        listOf("YES", "NO").mapNotNull { side ->
+            val probability = modelProb(market, side) ?: return@mapNotNull null
+            if (probability !in 0.0..1.0) return@mapNotNull null
+            val ask = bestAsk(market, side, ctx) ?: return@mapNotNull null
+            val clip = LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            if (!clip.ok) return@mapNotNull null
+            side to (probability - clip.allInUsd / clip.count)
+        }.sortedByDescending { it.second }.map { it.first }
 
     fun longShotNote(
         maxAsk: Double,

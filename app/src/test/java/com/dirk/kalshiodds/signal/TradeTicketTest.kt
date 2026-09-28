@@ -461,6 +461,39 @@ MIIEowIBAAKCAQEA
 class TicketBuilderGateTest {
 
     @Test
+    fun cheapAskWithoutValueDoesNotSuggestAnAutomaticTicket() {
+        val m = market(passed = true, muted = false, ask = 0.04).copy(aiYesPercent = 4.0)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        assertNull(TicketBuilder.proposeHunter(m, ctx))
+        assertNull(TicketBuilder.proposeHunterValue(m, ctx))
+        assertNull(TicketBuilder.propose(m, ctx))
+        assertTrue(TicketBuilder.proposeAll(listOf(m), ctx).isEmpty())
+        assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
+    }
+
+    @Test
+    fun automaticTicketChoosesPricedValueOverHeroDirectionAndRecomputesEv() {
+        val m = market(passed = true, muted = false, ask = 0.97).copy(
+            yesBid = 0.96, noBid = 0.03, noAsk = 0.04,
+            aiYesPercent = 15.0, primaryHeroSide = "YES", predictedSide = "YES",
+            netEvDollars = 100.0, netEdgePp = 500.0
+        )
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        val ticket = TicketBuilder.propose(m, ctx)!!
+        assertEquals("NO", ticket.side)
+        assertEquals(0.85 - ticket.allInUsd!! / ticket.contracts, ticket.netEvPerContract!!, 1e-9)
+        assertTrue(ticket.netEdgePp!! < 100.0)
+    }
+
+    @Test
+    fun missingModelDoesNotCreateAutomaticTicket() {
+        val m = market(passed = true, muted = false, ask = 0.04).copy(aiYesPercent = null)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        assertNull(TicketBuilder.proposeHunter(m, ctx))
+        assertNull(TicketBuilder.propose(m, ctx))
+    }
+
+    @Test
     fun qualityGatesBlockWhenEnabled() {
         val cheap = market(passed = false, muted = false, ask = 0.04)
         val ctx = TicketBuilder.Context(
@@ -704,6 +737,7 @@ private fun market(
     passedFilter = passed,
     muted = muted,
     predictedSide = "YES",
+    aiYesPercent = 15.0,
     edgePp = 8.0,
     netEdgePp = 6.0,
     netEvDollars = 0.04

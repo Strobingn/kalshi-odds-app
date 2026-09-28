@@ -46,6 +46,7 @@ jobs:
         run: |
           ./gradlew :app:testDebugUnitTest \
             --tests 'com.dirk.kalshiodds.signal.AllowlistTest' \
+            --tests 'com.dirk.kalshiodds.signal.TicketBuilderGateTest' \
             --tests 'com.dirk.kalshiodds.signal.GuardrailsTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForecastUnitsTest' \
             --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
