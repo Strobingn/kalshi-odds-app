@@ -28,6 +28,7 @@ jobs:
           python3 tools/backtest/test_parity.py
           python3 tools/research/test_maker_sim.py
           python3 tools/research/test_settlement.py
+          python3 tools/research/test_recordings.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue

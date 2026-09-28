@@ -245,6 +245,21 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    /** Zip recorded market data for [days] (all when empty) into the picked document. */
+    fun exportRecordings(uri: Uri, days: List<String>) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val out = getApplication<Application>().contentResolver.openOutputStream(uri)
+                        ?: error("could not open the export file")
+                    val n = container.recorder.export(days, out)
+                    if (n == 0) "No recordings to export" else "Exported $n recording files"
+                }.getOrElse { "Export failed: ${it.message ?: it.javaClass.simpleName}" }
+            }
+            _state.update { it.copy(message = result) }
+        }
+    }
+
     fun backupCredentials(uri: Uri) {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {

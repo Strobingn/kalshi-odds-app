@@ -96,6 +96,9 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 modifier = Modifier.fillMaxWidth().height(52.dp)
             ) { Text("History") }
 
+            Section("Market-data recordings")
+            RecordingsExportSection(onExport = viewModel::exportRecordings)
+
             Section("Back up Kalshi credentials")
             Text(
                 "Sideloaded debug APKs used to be signed by a different machine each time, so Android required uninstall — which wiped the Keystore-encrypted key. Future 0.3.7+ debug APKs share one cert so updates keep your data. Still: back up the key with a passphrase and keep the file in Drive/Downloads.",
