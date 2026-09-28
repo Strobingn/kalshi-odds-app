@@ -44,6 +44,18 @@ class BigEdgeModelTest(unittest.TestCase):
         self.assertTrue(0 <= metrics["test_markets"] < 510)
         self.assertTrue(math.isfinite(metrics["paper_pnl_usd"]))
 
+    def test_tree_export_uses_float32_features_at_split_boundary(self):
+        import numpy as np
+
+        threshold = 0.31415926665067673
+        raw = float(np.float32(0.31415927)) + 1e-10
+        payload = {"base_score": 0.0, "learning_rate": 1.0,
+                   "trees": [{"nodes": [
+                       {"feature": 0, "threshold": threshold, "left": 1, "right": 2},
+                       {"value": -1.0}, {"value": 1.0}]}]}
+        expected = -1.0 if float(np.float32(raw)) <= threshold else 1.0
+        self.assertEqual(big.exported_logit(payload, (raw,)), expected)
+
     def test_rejects_insufficient_distinct_days_even_with_many_rows(self):
         with self.assertRaisesRegex(ValueError, "UTC days"):
             big.train(rows(days=4, markets_per_day=90))

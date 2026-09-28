@@ -24,6 +24,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_CEILING
 from pathlib import Path
+from urllib.parse import urlencode
 
 import numpy as np
 from sklearn.ensemble import GradientBoostingClassifier
@@ -169,6 +170,9 @@ def export_trees(model: GradientBoostingClassifier) -> tuple[float, list[dict]]:
 
 def exported_logit(export: dict, features: tuple[float, ...]) -> float:
     """Pure Python implementation of the Android flat-tree contract."""
+    # sklearn casts prediction inputs to float32 before it follows tree
+    # thresholds. Match the phone's FloatArray, including borderline splits.
+    features = tuple(float(v) for v in np.asarray(features, dtype=np.float32))
     z = float(export["base_score"])
     for tree in export["trees"]:
         nodes, at = tree["nodes"], 0
@@ -222,7 +226,28 @@ def train(rows: list[Row]) -> tuple[dict, dict]:
 def collect(days: int, max_per_day: int) -> list[Row]:
     rows: list[Row] = []
     for series in te.SERIES:
-        markets = te.fetch_settled(series, days, limit=max(3000, days * 110))
+        # Ask the API for the settlement date range. The older generic
+        # collector can otherwise keep paginating old markets indefinitely
+        # when fewer than its target count fall inside the requested days.
+        markets: list[dict] = []
+        cursor: str | None = None
+        for _ in range(100):
+            query = {"series_ticker": series, "status": "settled", "limit": 200,
+                     "min_settled_ts": int(time.time()) - days * 86400}
+            if cursor:
+                query["cursor"] = cursor
+            result = te.http_get(f"{te.KALSHI}/markets?{urlencode(query)}")
+            batch = result.get("markets") or []
+            markets.extend(batch)
+            next_cursor = result.get("cursor")
+            if not batch or not next_cursor:
+                break
+            if next_cursor == cursor:
+                raise ValueError("settled market pagination did not advance")
+            cursor = next_cursor
+            time.sleep(0.06)
+        else:
+            raise ValueError("settled market pagination exceeded 100 pages")
         by_day: dict[str, list[dict]] = defaultdict(list)
         for m in markets:
             close = te.parse_iso(m.get("close_time"))

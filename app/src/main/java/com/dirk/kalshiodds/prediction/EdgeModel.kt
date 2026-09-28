@@ -8,19 +8,19 @@ import kotlin.math.ln
 /** Flat binary tree exported from the offline gradient booster. */
 data class EdgeTreeNode(
     val feature: Int = -1,
-    val threshold: Float = 0f,
+    val threshold: Double = 0.0,
     val left: Int = -1,
     val right: Int = -1,
-    val value: Float? = null
+    val value: Double? = null
 )
 
 data class EdgeTree(val nodes: List<EdgeTreeNode>) {
-    fun predict(raw: FloatArray): Float {
+    fun predict(raw: FloatArray): Double {
         var index = 0
         repeat(nodes.size) {
             val node = nodes[index]
             node.value?.let { return it }
-            index = if (raw[node.feature] <= node.threshold) node.left else node.right
+            index = if (raw[node.feature].toDouble() <= node.threshold) node.left else node.right
         }
         error("Invalid tree: traversal did not reach a leaf")
     }
@@ -58,8 +58,8 @@ data class EdgeModel(
     val confidenceMargin: Float = 0.03f,
     val metrics: Map<String, Double> = emptyMap(),
     val trees: List<EdgeTree> = emptyList(),
-    val baseScore: Float = 0f,
-    val learningRate: Float = 0.05f
+    val baseScore: Double = 0.0,
+    val learningRate: Double = 0.05
 ) {
     init {
         require(kind == "logistic" || kind == "gbdt") { "unsupported model kind" }
@@ -68,7 +68,7 @@ data class EdgeModel(
         if (kind == "gbdt") {
             require(featureNames == EdgeFeatures.NAMES) { "GBDT feature order differs from live app" }
             require(trees.isNotEmpty() && trees.size <= 512) { "invalid tree count" }
-            require(baseScore.isFinite() && learningRate.isFinite() && learningRate > 0f &&
+            require(baseScore.isFinite() && learningRate.isFinite() && learningRate > 0.0 &&
                 plattA.isFinite() && plattB.isFinite()) { "invalid GBDT calibration" }
             trees.forEach { it.validate(featureNames.size) }
         }
@@ -76,7 +76,7 @@ data class EdgeModel(
 
     fun predictYes(raw: FloatArray): Double {
         val z = logit(raw)
-        val p = sigmoid(z.toDouble())
+        val p = sigmoid(z)
         val calibrated = if (plattA == 1f && plattB == 0f) {
             p
         } else {
@@ -86,7 +86,7 @@ data class EdgeModel(
         return calibrated.coerceIn(0.02, 0.98)
     }
 
-    fun logit(raw: FloatArray): Float {
+    fun logit(raw: FloatArray): Double {
         if (kind == "gbdt") {
             require(raw.size == featureNames.size && raw.all { it.isFinite() }) { "invalid GBDT features" }
             var z = baseScore
@@ -100,7 +100,7 @@ data class EdgeModel(
             val s = if (std[i] < 1e-6f) 1f else std[i]
             acc += weights[i] * ((raw[i] - mean[i]) / s)
         }
-        return acc
+        return acc.toDouble()
     }
 
     /**
@@ -134,13 +134,13 @@ data class EdgeModel(
         o.put("fee_margin", feeMargin.toDouble())
         o.put("confidence_margin", confidenceMargin.toDouble())
         if (kind == "gbdt") {
-            o.put("base_score", baseScore.toDouble())
-            o.put("learning_rate", learningRate.toDouble())
+            o.put("base_score", baseScore)
+            o.put("learning_rate", learningRate)
             o.put("trees", JSONArray().apply {
                 trees.forEach { tree -> put(JSONObject().put("nodes", JSONArray().apply {
                     tree.nodes.forEach { node ->
-                        put(if (node.value != null) JSONObject().put("value", node.value.toDouble())
-                        else JSONObject().put("feature", node.feature).put("threshold", node.threshold.toDouble())
+                        put(if (node.value != null) JSONObject().put("value", node.value)
+                        else JSONObject().put("feature", node.feature).put("threshold", node.threshold)
                             .put("left", node.left).put("right", node.right))
                     }
                 })) }
@@ -181,10 +181,10 @@ data class EdgeModel(
                     val nodes = arr.getJSONObject(i).getJSONArray("nodes")
                     EdgeTree((0 until nodes.length()).map { j ->
                         val node = nodes.getJSONObject(j)
-                        if (node.has("value")) EdgeTreeNode(value = node.getDouble("value").toFloat())
+                        if (node.has("value")) EdgeTreeNode(value = node.getDouble("value"))
                         else EdgeTreeNode(
                             feature = node.getInt("feature"),
-                            threshold = node.getDouble("threshold").toFloat(),
+                            threshold = node.getDouble("threshold"),
                             left = node.getInt("left"), right = node.getInt("right")
                         )
                     })
@@ -205,8 +205,8 @@ data class EdgeModel(
                 confidenceMargin = o.optDouble("confidence_margin", 0.03).toFloat(),
                 metrics = metrics,
                 trees = trees,
-                baseScore = o.optDouble("base_score", 0.0).toFloat(),
-                learningRate = o.optDouble("learning_rate", 0.05).toFloat()
+                baseScore = o.optDouble("base_score", 0.0),
+                learningRate = o.optDouble("learning_rate", 0.05)
             )
         }
 
