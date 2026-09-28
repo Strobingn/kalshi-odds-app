@@ -3,8 +3,11 @@
 Trains a compact logistic model on settled Kalshi **BTC / ETH / SOL 15-minute**
 markets plus Coinbase public spot candles. Walk-forward (time-ordered)
 validation, Platt calibration, Brier / log-loss versus the Kalshi market
-price, and a simulated net P&L after the documented Kalshi-style
+price, and a diagnostic midpoint-fill P&L after a simplified
 `feeRate × P × (1−P)` fee (default 7%) plus a 3¢ confidence margin.
+The diagnostic uses the correct side midpoint (`YES=mid`, `NO=1−mid`),
+but actual taker fills cost the ask and order-level fees are rounded.
+Use the separate ask-fill backtest and live paper fills to evaluate trades.
 
 The export is a few dozen floats. The phone only **infers** it — it does not
 train the heavy 0.3.0 stack.
@@ -26,9 +29,9 @@ python3 ml/train_edge.py --fixture   # no network; synthetic walk-forward
 
 Python 3.10+ standard library only (no pip packages).
 
-GitHub Actions: **Actions → Train edge model → Run workflow**, or the weekly
-Monday cron. The JSON + `edge_model_manifest.json` are uploaded as an artifact
-and published on the rolling `edge-model-latest` release. In the app:
+GitHub Actions: **Actions → Train edge model → Run workflow → chat-GTP**.
+The JSON + `edge_model_manifest.json` are uploaded as an artifact
+and published on the branch-only `edge-model-chat-GTP` release. In this app:
 **Data → Get latest model**.
 
 ## Features (order is the Android contract)
@@ -48,6 +51,12 @@ and published on the rolling `edge-model-latest` release. In the app:
 
 ## Honest numbers
 
-The script prints hold-out `model_brier` vs `market_brier`. If the model does
-not beat the market after fees, do not trade the edge. The app also hides
-“edge” flags until |model − market| > fee + margin.
+The script prints hold-out `model_brier` vs `market_brier`. Better Brier and
+log-loss are necessary checks for activation, but do not establish a trading
+edge after spread, ask fills, and fees. The app hides “edge” flags until
+|model − market| > fee + margin.
+
+The live trainer now exits with an error if Kalshi/Coinbase data collection
+fails or fewer than 30 rows are available. `--fixture` is explicitly synthetic;
+its manifest cannot activate automatically in the Android app. Previously
+published manifests without a verified data source are also rejected.

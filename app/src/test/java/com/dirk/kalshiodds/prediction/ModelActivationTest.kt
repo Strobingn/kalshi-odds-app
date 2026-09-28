@@ -17,7 +17,8 @@ class ModelActivationTest {
               "model_brier": 0.18,
               "market_brier": 0.22,
               "model_logloss": 0.50,
-              "market_logloss": 0.58
+              "market_logloss": 0.58,
+              "data_source": "kalshi_settled_coinbase_spot_v1"
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
@@ -37,7 +38,8 @@ class ModelActivationTest {
             modelBrier = 0.30,
             marketBrier = 0.22,
             modelLogLoss = 0.70,
-            marketLogLoss = 0.55
+            marketLogLoss = 0.55,
+            dataSource = "kalshi_settled_coinbase_spot_v1"
         )
         assertFalse(m.beatsMarket)
         val d = ModelActivation.decide(m, modelValid = true)
@@ -59,6 +61,19 @@ class ModelActivationTest {
         val d = ModelActivation.decide(m, modelValid = false)
         assertFalse(d.activate)
         assertTrue(d.reason.contains("failed validation"))
+    }
+
+    @Test
+    fun syntheticOrLegacyManifestCannotActivate() {
+        for (source in listOf("synthetic_fixture", "unknown")) {
+            val m = EdgeModelManifest(
+                version = "1", trainedAt = "2026-09-25T00:00:00Z", nSamples = 180,
+                modelBrier = 0.02, marketBrier = 0.18,
+                modelLogLoss = 0.10, marketLogLoss = 0.50, dataSource = source
+            )
+            assertFalse(m.beatsMarket)
+            assertFalse(ModelActivation.decide(m, modelValid = true).activate)
+        }
     }
 
     @Test

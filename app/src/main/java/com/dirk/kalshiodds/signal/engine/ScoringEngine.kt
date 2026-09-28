@@ -351,8 +351,10 @@ class ScoringEngine(
         val flow = (0.65 * rawFlow + 0.35 * aggressor).coerceIn(-1.0, 1.0)
         val momentumPp = book.momentumPp(tick.ticker)
         val flowAdjPp = (midPp + 8.0 * tanh(flow) + 0.35 * momentumPp).coerceIn(2.0, 98.0)
-        val related01 = book.relatedCryptoMid(tick.series, settings.watchedSeries)
-        val relatedPp = related01?.times(100.0)
+        // Another coin's YES midpoint is a different event probability.
+        // Keep this channel out of the fair-value blend until its predictive
+        // contribution is fitted against same-market settlement outcomes.
+        val relatedPp: Double? = null
 
         val velAdjPp = vel?.let {
             val velPpPerSec = it * 100.0
@@ -978,7 +980,9 @@ class ScoringEngine(
     }
 
     companion object {
-        const val W_AI = 0.30
+        // The shipped MLP trails the market midpoint in the recorded backtest.
+        // It remains visible for diagnostics but cannot tilt trade fair value.
+        const val W_AI = 0.0
         const val W_FLOW = 0.12
         const val W_RELATED = 0.08
         const val W_VELOCITY = 0.10
@@ -987,7 +991,7 @@ class ScoringEngine(
         const val W_DEPTH = 0.10
         const val W_CANCEL = 0.10
 
-        const val W_AI_LATE = 0.20
+        const val W_AI_LATE = 0.0
         const val W_FLOW_LATE = 0.14
         const val W_RELATED_LATE = 0.04
         const val W_VELOCITY_LATE = 0.14

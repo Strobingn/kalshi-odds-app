@@ -600,8 +600,12 @@ object TicketBuilder {
         } else {
             KalshiPrice.impliedAskFromOppositeBid(tick?.yesBid)
         }
-        val fromBook = bookAsk(side, book)
-        return listOfNotNull(fromQuote, fromTick, fromBook).minOrNull()
+        // Prefer the live book to a tick or a REST quote. Taking the minimum
+        // across observations at different times can fabricate a cheap ask.
+        // A book with no sellers on this side must not fall back to an older
+        // quote that suggests a fill is available.
+        if (book != null && !book.isEmpty()) return bookAsk(side, book)
+        return fromTick ?: fromQuote
     }
 
     /**

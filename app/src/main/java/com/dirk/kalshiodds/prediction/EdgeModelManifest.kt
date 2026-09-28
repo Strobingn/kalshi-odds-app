@@ -17,10 +17,11 @@ data class EdgeModelManifest(
     val modelAsset: String = "edge_model.json",
     val tag: String = "edge-model-latest",
     val simPnl: Double? = null,
-    val simHitRate: Double? = null
+    val simHitRate: Double? = null,
+    val dataSource: String = "unknown"
 ) {
     val beatsMarket: Boolean
-        get() = nSamples > 0 &&
+        get() = dataSource == "kalshi_settled_coinbase_spot_v1" && nSamples > 0 &&
             modelBrier < marketBrier &&
             modelLogLoss < marketLogLoss
 
@@ -35,6 +36,7 @@ data class EdgeModelManifest(
         o.put("market_logloss", marketLogLoss)
         o.put("model_asset", modelAsset)
         o.put("tag", tag)
+        o.put("data_source", dataSource)
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
         o.put("beats_market", beatsMarket)
@@ -69,7 +71,8 @@ data class EdgeModelManifest(
                 modelAsset = o.optString("model_asset").ifBlank { "edge_model.json" },
                 tag = o.optString("tag").ifBlank { "edge-model-latest" },
                 simPnl = o.optDoubleOrNull("sim_pnl"),
-                simHitRate = o.optDoubleOrNull("sim_hit_rate")
+                simHitRate = o.optDoubleOrNull("sim_hit_rate"),
+                dataSource = o.optString("data_source", "unknown")
             )
         }
 
@@ -88,7 +91,8 @@ data class EdgeModelManifest(
                 modelLogLoss = m["model_logloss"] ?: error("model missing model_logloss"),
                 marketLogLoss = m["market_logloss"] ?: error("model missing market_logloss"),
                 simPnl = m["sim_pnl"],
-                simHitRate = m["sim_hit_rate"]
+                simHitRate = m["sim_hit_rate"],
+                dataSource = "unknown"
             )
         }
 
@@ -127,6 +131,13 @@ object ModelActivation {
                 activate = false,
                 manifest = manifest,
                 reason = "Manifest has no holdout samples — not activating."
+            )
+        }
+        if (manifest.dataSource != "kalshi_settled_coinbase_spot_v1") {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Model provenance is missing or synthetic — previous model stays active."
             )
         }
         if (!manifest.beatsMarket) {

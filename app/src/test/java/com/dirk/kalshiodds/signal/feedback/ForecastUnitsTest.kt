@@ -8,9 +8,9 @@ import org.junit.Test
 import kotlin.math.abs
 
 /**
- * Scorecard display: hit = picked side vs settlement; side-Brier is not
- * the P(YES) Brier. The 0.3.11 mix scored P(YES)>0.5 as a hit and printed
- * (0.945−1)² ≈ 0.003 next to a fade that actually went 0/5.
+ * Hit rate evaluates the pick; Brier evaluates the probability forecast.
+ * A correctly transformed NO forecast and NO outcome have the same Brier
+ * as their complementary YES forecast and YES outcome.
  */
 class ForecastUnitsTest {
 
@@ -22,7 +22,7 @@ class ForecastUnitsTest {
     }
 
     @Test
-    fun fadeOfHighYesThatLosesIsZeroHitsAndSideBrierAboutPointEightNineThree() {
+    fun fadeOfHighYesCanLoseDespiteGoodProbabilityForecast() {
         val rows = (0 until 5).map { i ->
             row(
                 ticker = "KXETH15M-$i",
@@ -38,10 +38,9 @@ class ForecastUnitsTest {
         val yesBrier = rows.map { ForecastUnits.brier(it) }.average()
         assertEquals(0, hits)
         val pSide = 1.0 - 0.945
-        val expectedSide = (pSide - 1.0) * (pSide - 1.0)
+        val expectedSide = pSide * pSide
         assertEquals(expectedSide, sideBrier, 1e-9)
-        assertTrue("side-Brier must be ~0.893, not the P(YES) 0.003", abs(sideBrier - 0.893) < 0.002)
-        assertFalse(abs(sideBrier - 0.003) < 0.001)
+        assertEquals(yesBrier, sideBrier, 1e-9)
         assertEquals((0.945 - 1.0) * (0.945 - 1.0), yesBrier, 1e-9)
 
         val card = ScorecardMetrics.window(rows)
@@ -71,6 +70,14 @@ class ForecastUnitsTest {
         assertEquals(5, card.hits)
         assertEquals(5, card.total)
         assertEquals(side, card.brier!!, 1e-9)
+    }
+
+    @Test
+    fun winningNoSideHasLowBrier() {
+        val no = row("KXBTC15M-NO", 0.10, "no", "NO")
+        assertTrue(ForecastUnits.hit(no))
+        assertEquals(0.01, ForecastUnits.sideBrier(no), 1e-9)
+        assertEquals(ForecastUnits.brier(no), ForecastUnits.sideBrier(no), 1e-9)
     }
 
     @Test
@@ -116,7 +123,7 @@ class ForecastUnitsTest {
         }
         val card = ScorecardMetrics.window(rows)
         assertEquals(0, card.hits)
-        assertEquals((1.0 - 0.945 - 1.0) * (1.0 - 0.945 - 1.0), card.brier!!, 1e-9)
+        assertEquals((1.0 - 0.945) * (1.0 - 0.945), card.brier!!, 1e-9)
         assertTrue(rows.all { it.score == 1 && it.brier == 0.003 })
     }
 

@@ -71,6 +71,36 @@ class NoLookAheadTest(unittest.TestCase):
         self.assertAlmostEqual(te.spot_return(closes, 5), 0.10)
         self.assertEqual(te.spot_return(closes[:3], 5), 0.0)
 
+    def test_no_profit_uses_no_midpoint(self) -> None:
+        pnl = te.simulated_pnl([0.10], [0.30], [0])
+        self.assertEqual(pnl["n"], 1)
+        self.assertAlmostEqual(pnl["pnl"], 1.0 - 0.70 - 0.07 * 0.70 * 0.30)
+
+    def test_fixture_manifest_cannot_claim_edge(self) -> None:
+        from tempfile import TemporaryDirectory
+
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "manifest.json"
+            te.write_manifest(
+                {"n_holdout": 180, "model_brier": 0.02, "market_brier": 0.18,
+                 "model_logloss": 0.1, "market_logloss": 0.5},
+                path,
+                fixture=True,
+            )
+            import json
+            manifest = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["data_source"], "synthetic_fixture")
+            self.assertFalse(manifest["beats_market"])
+
+    def test_time_of_day_matches_new_york_minutes(self) -> None:
+        market = _market()
+        end_ts = self.close_ts - 420
+        feats = te.features_for(market, [_candle(end_ts, 0.45)], [], 0)
+        self.assertIsNotNone(feats)
+        local = te.datetime.fromtimestamp(end_ts, te.ZoneInfo("America/New_York"))
+        expected = (local.hour * 60 + local.minute) / 1440
+        self.assertAlmostEqual(feats[te.FEATURE_NAMES.index("time_of_day")], expected)
+
 
 if __name__ == "__main__":
     unittest.main()

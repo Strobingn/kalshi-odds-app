@@ -84,10 +84,9 @@ class KnownIssuesRegressionTest {
         val side = fade.map { ForecastUnits.sideBrier(it) }.average()
         val yes = fade.map { ForecastUnits.brier(it) }.average()
         val pSide = 1.0 - 0.945
-        assertEquals((pSide - 1.0) * (pSide - 1.0), side, 1e-9)
-        assertTrue("side-Brier ~0.893, not the P(YES) 0.003", abs(side - 0.893) < 0.002)
-        assertFalse(abs(side - 0.003) < 0.001)
+        assertEquals(pSide * pSide, side, 1e-9)
         assertEquals((0.945 - 1.0) * (0.945 - 1.0), yes, 1e-9)
+        assertEquals(yes, side, 1e-9)
         val card = ScorecardMetrics.window(fade)
         assertEquals(0, card.hits)
         assertEquals(5, card.total)

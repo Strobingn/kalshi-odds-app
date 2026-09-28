@@ -15,7 +15,7 @@ object ScorecardMetrics {
         val hits: Int = 0,
         val total: Int = 0,
         val hitRate: Double? = null,
-        /** Mean picked-side Brier. Hidden in the UI when [total] < [MIN_BRIER_DISPLAY]. */
+        /** Mean probability Brier expressed in picked-side coordinates. Equal to P(YES) Brier. */
         val brier: Double? = null,
         /** Mean P(YES) / P(UP) Brier. Scorecard-only; hidden when N < 20. */
         val pUpBrier: Double? = null,

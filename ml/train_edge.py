@@ -26,6 +26,7 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 REPO = Path(__file__).resolve().parents[1]
 ML_DIR = REPO / "ml"
@@ -231,7 +232,7 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     ya = candles[idx].get("yes_ask") or {}
     bid = _f(yb.get("close_dollars") if "close_dollars" in yb else yb.get("close"))
     ask = _f(ya.get("close_dollars") if "close_dollars" in ya else ya.get("close"))
-    spread = (ask - bid) if bid is not None and ask is not None else 0.02
+    spread = (ask - bid) if bid is not None and ask is not None else 0.0
     imbalance = 0.0
     spot = spot_known_at(spot_rows, end_ts)
     sigma = realized_vol_annual(spot) if spot else None
@@ -239,7 +240,7 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     spot_px = spot[-1] if spot else None
     dist = dist_vol(spot_px, strike, tte, sigma) if spot_px and strike and sigma else 0.0
     fair = digital_fair(spot_px, strike, tte, sigma) if spot_px and strike and sigma else mid
-    hour = datetime.fromtimestamp(end_ts or time.time(), tz=timezone.utc).hour
+    local = datetime.fromtimestamp(end_ts, tz=ZoneInfo("America/New_York"))
     rvol = 0.0
     if len(mids) >= 3:
         mu = sum(mids) / len(mids)
@@ -253,7 +254,7 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
         float(max(-1.0, min(1.0, momentum))),
         float(min(1.0, max(0.0, rvol))),
         float(max(-0.2, min(0.2, spot_return(spot, 5)))),
-        float((hour * 60) / (24 * 60)),
+        float((local.hour * 60 + local.minute) / (24 * 60)),
         float(fair if fair is not None else mid),
     ]
 
@@ -374,7 +375,9 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, 
         if gap <= fee + CONF_MARGIN:
             continue
         side_yes = pi > m
-        price = m
+        # The input is the YES midpoint. A NO contract costs 1 - YES mid,
+        # even before the executable ask and spread are accounted for.
+        price = m if side_yes else 1.0 - m
         fee_c = FEE_RATE * price * (1 - price)
         win = (yi == 1) if side_yes else (yi == 0)
         pnl += (1.0 - price - fee_c) if win else (-price - fee_c)
@@ -451,7 +454,7 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
     return X, y, mids, times
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None) -> None:
+def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, fixture: bool = False) -> None:
     n = int(metrics.get("n_holdout") or metrics.get("n_samples") or 0)
     model_brier = float(metrics.get("model_brier", 1.0))
     market_brier = float(metrics.get("market_brier", 1.0))
@@ -470,8 +473,9 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "sim_pnl": metrics.get("sim_pnl"),
         "sim_hit_rate": metrics.get("sim_hit_rate"),
         "model_asset": "edge_model.json",
-        "tag": "edge-model-latest",
-        "beats_market": n > 0 and model_brier < market_brier and model_ll < market_ll,
+        "tag": "edge-model-chat-GTP",
+        "data_source": "synthetic_fixture" if fixture else "kalshi_settled_coinbase_spot_v1",
+        "beats_market": not fixture and n > 0 and model_brier < market_brier and model_ll < market_ll,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -513,17 +517,17 @@ def main() -> int:
         try:
             X, y, mids, times = collect(args.days, args.max_markets)
         except Exception as e:
-            print(f"live collect failed ({e}); falling back to fixture", flush=True)
-            X, y, mids, times = fixture_dataset()
+            print(f"live collect failed ({e}); refusing to publish a fixture model", file=sys.stderr, flush=True)
+            return 1
     if len(X) < 30:
-        print(f"only {len(X)} rows — using fixture so the export still exists", flush=True)
-        X, y, mids, times = fixture_dataset()
+        print(f"only {len(X)} rows — refusing to publish an unvalidated model", file=sys.stderr, flush=True)
+        return 1
     print(f"samples {len(X)} yes={sum(y)} no={len(y) - sum(y)}", flush=True)
     metrics = walk_forward(X, y, mids, times)
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y)
     export(model, metrics, Path(args.out))
-    write_manifest(metrics, Path(args.manifest))
+    write_manifest(metrics, Path(args.manifest), fixture=args.fixture)
     # Do not overwrite the hand-checked Android/Python parity fixture.
     # Write a sample next to the exported model for debugging only.
     if not args.fixture:

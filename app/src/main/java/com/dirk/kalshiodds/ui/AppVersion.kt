@@ -11,5 +11,5 @@ object AppVersion {
     val versionCode: Int get() = BuildConfig.VERSION_CODE
 
     val label: String
-        get() = "DipHunter v$versionName ($versionCode)"
+        get() = "DipHunter GTP v$versionName ($versionCode)"
 }

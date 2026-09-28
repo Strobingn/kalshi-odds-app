@@ -564,6 +564,29 @@ class TicketBuilderGateTest {
     }
 
     @Test
+    fun buyAskUsesBookInsteadOfStaleCheapQuote() {
+        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+        val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+            yes = listOf(0.30 to 100.0),
+            no = listOf(0.80 to 100.0)
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(),
+            alertsPaused = false,
+            books = mapOf(m.ticker to book)
+        )
+        assertEquals(0.20, TicketBuilder.bestAsk(m, "YES", ctx)!!, 1e-9)
+        assertEquals(0.70, TicketBuilder.bestAsk(m, "NO", ctx)!!, 1e-9)
+
+        val noYesSellers = ctx.copy(books = mapOf(
+            m.ticker to com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+                yes = listOf(0.30 to 100.0)
+            )
+        ))
+        assertNull(TicketBuilder.bestAsk(m, "YES", noYesSellers))
+    }
+
+    @Test
     fun hunterIgnoresQualityGatesAndUsesOneDollar() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(

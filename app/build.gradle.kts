@@ -11,10 +11,14 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.dirk.kalshiodds"
+        // Independent install from the original DipHunter app. Keep this ID
+        // and the committed debug signing key stable for future APK updates.
+        applicationId = "com.dirk.kalshiodds.chatgtp"
         minSdk = 26
         targetSdk = 35
-        versionCode = 31
+        // GitHub Actions run numbers increase with each branch push, so a
+        // new APK updates this separate installation without version downgrades.
+        versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

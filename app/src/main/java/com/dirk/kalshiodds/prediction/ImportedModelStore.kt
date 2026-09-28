@@ -14,6 +14,13 @@ class ImportedModelStore(context: Context) {
     fun current(): EdgeModel? {
         cached?.let { return it }
         if (!file.exists()) return null
+        // Releases published before provenance was recorded may contain
+        // settlement-look-ahead or synthetic training data. Manual imports
+        // have no manifest and remain an explicit user choice.
+        if (manifestFile.exists()) {
+            val manifest = currentManifest() ?: return null
+            if (!manifest.beatsMarket) return null
+        }
         val model = runCatching { EdgeModel.parse(file.readText()) }.getOrNull() ?: return null
         cached = model
         return model
@@ -46,6 +53,8 @@ class ImportedModelStore(context: Context) {
         file.writeText(model.toJson())
         if (manifest != null) {
             runCatching { manifestFile.writeText(manifest.toJson()) }
+        } else if (manifestFile.exists()) {
+            manifestFile.delete()
         }
         cached = model
         return model

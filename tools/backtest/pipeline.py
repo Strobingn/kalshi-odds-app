@@ -41,8 +41,8 @@ VELOCITY_LOOKBACK = 16
 DIRK_MIN_PROFIT = 10.0
 
 W = {
-    "early": dict(ai=0.30, flow=0.12, related=0.08, velocity=0.10, imbalance=0.10, leadLag=0.10, depth=0.10, cancel=0.10, spot=0.08),
-    "late": dict(ai=0.20, flow=0.14, related=0.04, velocity=0.14, imbalance=0.14, leadLag=0.06, depth=0.14, cancel=0.14, spot=0.06),
+    "early": dict(ai=0.0, flow=0.12, related=0.08, velocity=0.10, imbalance=0.10, leadLag=0.10, depth=0.10, cancel=0.10, spot=0.08),
+    "late": dict(ai=0.0, flow=0.14, related=0.04, velocity=0.14, imbalance=0.14, leadLag=0.06, depth=0.14, cancel=0.14, spot=0.06),
 }
 
 
@@ -645,7 +645,8 @@ class DecisionEngine:
         vel_adj = None
         if vel is not None:
             vel_adj = min(98.0, max(2.0, mid_pp + 6.0 * math.tanh(vel * 100.0 / 2.0) + 2.0 * math.tanh(((acc or 0.0) * 100.0) / 2.0)))
-        related_pp = related_mid * 100.0 if related_mid is not None else None
+        # Other contracts' YES probabilities refer to their own strikes.
+        related_pp = None
         spot_adj = spot_adjust_pp(mid_pp, ret_5m if ret_5m is not None else ret_1m, rvol15)
 
         has = dict(
