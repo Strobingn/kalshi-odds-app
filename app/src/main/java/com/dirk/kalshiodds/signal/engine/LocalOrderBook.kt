@@ -21,6 +21,27 @@ data class BookLevelSnapshot(
     fun isEmpty(): Boolean = yes.isEmpty() && no.isEmpty()
 }
 
+/**
+ * Top of book in dollars (0–1) with contract quantities, both sides.
+ * YES ask = 1 − best NO bid (size = that NO bid's size); NO ask = 1 − best
+ * YES bid (size = that YES bid's size) — the same derivation as
+ * [LocalOrderBook.bestYesAsk] / [LocalOrderBook.bestNoAsk]. A side with no
+ * levels leaves its fields null. Quantities are null when the quote came
+ * from a ticker print rather than the local book.
+ */
+data class TopOfBook(
+    val yesBid: Double? = null,
+    val yesBidQty: Double? = null,
+    val yesAsk: Double? = null,
+    val yesAskQty: Double? = null,
+    val noBid: Double? = null,
+    val noBidQty: Double? = null,
+    val noAsk: Double? = null,
+    val noAskQty: Double? = null
+) {
+    fun isEmpty(): Boolean = yesBid == null && yesAsk == null && noBid == null && noAsk == null
+}
+
 class LocalOrderBook {
     data class Pulse(
         /** [-1, 1] — negative = YES-side cancels (bid support withdrawn). */
@@ -116,6 +137,23 @@ class LocalOrderBook {
     /** Tightest NO offer implied by the best YES bid: $1 − best YES bid. */
     @Synchronized
     fun bestNoAsk(): Double? = if (yes.isEmpty()) null else (1.0 - yes.lastKey()).coerceIn(0.0, 1.0)
+
+    /** Best rung on each side in one lock hold (see [TopOfBook]). */
+    @Synchronized
+    fun top(): TopOfBook {
+        val yesTop = if (yes.isEmpty()) null else yes.lastEntry()
+        val noTop = if (no.isEmpty()) null else no.lastEntry()
+        return TopOfBook(
+            yesBid = yesTop?.key,
+            yesBidQty = yesTop?.value,
+            yesAsk = noTop?.let { (1.0 - it.key).coerceIn(0.0, 1.0) },
+            yesAskQty = noTop?.value,
+            noBid = noTop?.key,
+            noBidQty = noTop?.value,
+            noAsk = yesTop?.let { (1.0 - it.key).coerceIn(0.0, 1.0) },
+            noAskQty = yesTop?.value
+        )
+    }
 
     @Synchronized
     fun mid01(): Double? {
