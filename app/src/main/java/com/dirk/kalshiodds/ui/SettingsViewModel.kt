@@ -164,6 +164,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
     fun setUseKelly(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(v) }
     fun setKellyFraction(v: Double) = viewModelScope.launch { prefs.updateKellyFraction(v) }
+    fun setPaperKellyFraction(v: Double) = viewModelScope.launch { prefs.updatePaperKellyFraction(v) }
     fun setFixedFraction(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(!v) }
     fun setFixedFractionValue(v: Double) = viewModelScope.launch { prefs.updateFixedFraction(v) }
     fun setMaxBankrollFraction(v: Double) = viewModelScope.launch { prefs.updateMaxBankrollFraction(v) }
