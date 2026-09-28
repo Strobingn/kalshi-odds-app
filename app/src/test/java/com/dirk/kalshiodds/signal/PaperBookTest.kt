@@ -18,7 +18,7 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtOneHundredAndPapersFiveDollarAiFill() {
+    fun startsAtOneHundredAndPapersKellySizedAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
@@ -27,10 +27,14 @@ class PaperBookTest {
         assertEquals("AI hunter", fill.source)
         assertEquals(70.0, fill.aiPct!!, 1e-6)
         assertEquals(com.dirk.kalshiodds.signal.paper.PaperPickSource.TICKET.label, fill.pickSource)
-        assertEquals(125, fill.contracts) // floor(5 / 0.04)
-        assertEquals(5.0, fill.stakeUsd, 1e-9)
-        assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
-        assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
+        // Paper AI bets what half-Kelly says (70% at a 4¢ ask ≈ 34% of equity), not a $5 clip.
+        val expected = com.dirk.kalshiodds.signal.paper.PaperSizer.size(0.70, 0.04, equityUsd = 100.0, cashUsd = 100.0)!!
+        assertEquals(expected.contracts, fill.contracts)
+        assertEquals(expected.costUsd, fill.stakeUsd, 1e-9)
+        assertTrue(fill.stakeUsd > 30.0)
+        assertEquals(100.0 - fill.stakeUsd, book.snapshot().cashUsd, 1e-9)
+        assertEquals(fill.stakeUsd, book.snapshot().openStakeUsd, 1e-9)
+        assertTrue(fill.note.contains("Kelly"))
         assertFalse(fill.settled)
     }
 
@@ -96,13 +100,15 @@ class PaperBookTest {
         assertEquals(0, snap.openCount)
         val win = snap.fills.first { it.ticker == "WIN-1" }
         assertEquals(true, win.won)
-        assertEquals(120.0, win.pnlUsd!!, 1e-9) // 125 * 1 - 5
+        assertEquals(win.contracts * 1.0 - win.stakeUsd, win.pnlUsd!!, 1e-9)
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
-        assertEquals(-5.0, loss.pnlUsd!!, 1e-9)
-        assertEquals(115.0, snap.realizedPnlUsd, 1e-9)
-        // cash: 100 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 215
-        assertEquals(215.0, snap.cashUsd, 1e-9)
+        assertEquals(-loss.stakeUsd, loss.pnlUsd!!, 1e-9)
+        assertEquals(win.pnlUsd!! + loss.pnlUsd!!, snap.realizedPnlUsd, 1e-9)
+        val void = snap.fills.first { it.ticker == "VOID-1" }
+        // cash: 100 − all three stakes + win payout (contracts × $1) + void refund
+        val stakes = win.stakeUsd + loss.stakeUsd + void.stakeUsd
+        assertEquals(100.0 - stakes + win.contracts + void.stakeUsd, snap.cashUsd, 1e-9)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())
@@ -142,7 +148,7 @@ class PaperBookTest {
     }
 
     @Test
-    fun winTargetPaperFillUsesTicketSizeNotFive() {
+    fun winTargetPaperFillIsKellySizedAndPaysFee() {
         val book = PaperBook(idFactory = { "pw" }, nowMs = { 11L })
         val ticket = hunterTicket().copy(
             winTargetUsd = 50.0,
@@ -153,10 +159,21 @@ class PaperBookTest {
             ticker = "KXBTC15M-WT"
         )
         val fill = book.considerTicket(ticket, enabled = true)
-        assertEquals(20, fill!!.contracts)
-        assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
+        val expected = com.dirk.kalshiodds.signal.paper.PaperSizer.size(0.70, 0.40, equityUsd = 100.0, cashUsd = 100.0)!!
+        assertEquals(expected.contracts, fill!!.contracts)
+        assertEquals(expected.costUsd, fill.stakeUsd, 1e-9)
+        assertEquals(100.0 - fill.stakeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
+    }
+
+    @Test
+    fun noEdgeAfterFeesSkipsThePaperBet() {
+        val book = PaperBook(idFactory = { "pn" }, nowMs = { 12L })
+        // Model 45% on a 50¢ ask: negative edge → the paper AI does not bet.
+        val ticket = hunterTicket().copy(limitPrice = 0.50, estimatedAvgFill = 0.50, modelChance = 0.45, ticker = "KXBTC15M-NE")
+        assertNull(book.considerTicket(ticket, enabled = true))
+        assertTrue(book.snapshot().lastMessage!!.contains("no edge"))
+        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
     }
 
     private fun hunterTicket(

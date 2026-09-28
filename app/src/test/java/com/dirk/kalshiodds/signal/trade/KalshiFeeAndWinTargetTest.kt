@@ -341,8 +341,10 @@ class KalshiFeeAndWinTargetTest {
         val fill = book.manualFill(ticket)
         assertTrue(fill != null)
         assertEquals(ticket.contracts, fill!!.contracts)
-        assertEquals(ticket.contracts * ticket.limitPrice, fill.stakeUsd, 1e-6)
-        val debit = fill.stakeUsd + KalshiFee.total(fill.contracts, fill.limitPrice)
+        // Recorded stake is all-in (contracts × price + taker fee), matching the cash debit,
+        // so settled paper P&L includes the fee.
+        val debit = ticket.contracts * ticket.limitPrice + KalshiFee.total(fill.contracts, fill.limitPrice)
+        assertEquals(debit, fill.stakeUsd, 1e-6)
         assertTrue(abs(100.0 - debit - book.snapshot().cashUsd) < 1e-6)
         assertTrue(fill.note.contains("win-target") || fill.note.contains("Paper"))
     }

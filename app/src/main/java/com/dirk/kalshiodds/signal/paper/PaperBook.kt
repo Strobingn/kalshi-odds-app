@@ -15,7 +15,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
 /**
- * Isolated paper book. Never calls Kalshi. $100 start / $5 per AI fill.
+ * Isolated paper book. Never calls Kalshi. $100 start; AI picks are sized by
+ * [PaperSizer] (half-Kelly on equity, no stake cap beyond paper cash), and
+ * every fill pays the Kalshi taker fee.
  */
 @Serializable
 data class PaperFill(
@@ -199,9 +201,9 @@ class PaperBook(
                 "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
-            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
             winTargetUsd = ticket.winTargetUsd,
-            meta = meta.copy(pickSource = pick)
+            meta = meta.copy(pickSource = pick),
+            winProb = meta.aiPct?.div(100.0)
         )
     }
 
@@ -223,7 +225,8 @@ class PaperBook(
             limitPrice = px,
             source = "AI signal",
             note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" },
-            meta = meta
+            meta = meta,
+            winProb = meta.aiPct?.div(100.0)
         )
     }
 
@@ -260,8 +263,8 @@ class PaperBook(
             source = PaperPickSource.LAST_MINUTE.label,
             note = "Last-minute strategy · never sent to Kalshi",
             contracts = fired.contracts.takeIf { it > 0 },
-            stakeUsd = fired.costUsd.takeIf { it > 0.0 },
-            meta = meta
+            meta = meta,
+            winProb = fired.winChance.takeIf { it.isFinite() }
         )
     }
 
@@ -417,7 +420,8 @@ class PaperBook(
             val row = newFill(
                 ticker = ticker,
                 side = want,
-                stakeUsd = stake,
+                // All-in: settlement P&L = payout − stakeUsd must include the fee cash paid.
+                stakeUsd = debit,
                 contracts = qty,
                 limitPrice = px,
                 source = source,
@@ -665,9 +669,10 @@ class PaperBook(
         source: String,
         note: String,
         contracts: Int? = null,
-        stakeUsd: Double? = null,
         winTargetUsd: Double? = null,
-        meta: PaperFillMeta = PaperFillMeta()
+        meta: PaperFillMeta = PaperFillMeta(),
+        /** Picked-side win chance 0–1. When set, the paper AI sizes by [PaperSizer] (Kelly). */
+        winProb: Double? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -675,23 +680,30 @@ class PaperBook(
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null
-            val qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            var sizedNote = note
+            val qty: Int
+            if (winProb != null) {
+                val kelly = PaperSizer.size(winProb, px, equityUsd = cur.equityUsd, cashUsd = cur.cashUsd)
+                if (kelly == null) {
+                    publish(cur.copy(lastMessage = "Paper skip $ticker — no edge at ${fmt(px)} after fees"))
+                    return null
+                }
+                qty = kelly.contracts
+                sizedNote = "$note · ${kelly.note}"
+            } else {
+                qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            }
             if (qty < 1) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
                 return null
             }
-            val rawStake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)
-            val (cappedQty, _) = PaperBuy.capContracts(
-                want = if (stakeUsd != null && stakeUsd > 0.0) qty else qty,
-                cashUsd = cur.cashUsd,
-                price = px
-            )
-            val useQty = if (rawStake > cur.cashUsd + 1e-9) cappedQty else qty
+            // Paper pays the same taker fee a real fill would (it used to skip it).
+            val (useQty, capped) = PaperBuy.capContracts(want = qty, cashUsd = cur.cashUsd, price = px)
             if (useQty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover ${fmt(rawStake)}"))
+                publish(cur.copy(lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover it"))
                 return null
             }
-            val stake = useQty * px
+            val stake = PaperBuy.costUsd(useQty, px)
             val row = newFill(
                 ticker = ticker,
                 side = want,
@@ -699,7 +711,7 @@ class PaperBook(
                 contracts = useQty,
                 limitPrice = px,
                 source = source,
-                note = note,
+                note = if (capped) "$sizedNote · capped to paper cash" else sizedNote,
                 winTargetUsd = winTargetUsd,
                 meta = meta
             )

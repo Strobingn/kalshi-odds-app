@@ -37,9 +37,11 @@ object SignalConstants {
 
     /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
     const val PAPER_START_USD = 100.0
+    /** Fallback clip when a paper pick carries no win chance; AI picks size by Kelly (PaperSizer). */
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
-    const val PAPER_LEDGER_MAX = 40
+    /** Fills kept in the live ledger (was 40, which starved the Scorecard of history). */
+    const val PAPER_LEDGER_MAX = 2_000
 
     /**
      * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,

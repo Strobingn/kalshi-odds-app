@@ -201,7 +201,55 @@ fun ScorecardScreen(
                     SettledPickRow(row.value)
                 }
             }
+            if (ui.deep.isNotEmpty()) {
+                item {
+                    Text(
+                        "Deep stats",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = colors.textPrimary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+                val deepKeyed = LazyListKeys.keyed(ui.deep) { "deep-${it.title}" }
+                items(deepKeyed, key = { it.key }) { row -> DeepStatsCard(row.value) }
+            }
             item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun DeepStatsCard(section: com.dirk.kalshiodds.signal.feedback.ScorecardDeepStats.Section) {
+    val colors = DipTheme.colors
+    SectionCard(section.title) {
+        section.rows.forEach { row ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    row.label,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    modifier = Modifier.weight(0.45f)
+                )
+                Text(
+                    row.value,
+                    style = MaterialTheme.typography.bodySmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = when (row.tone) {
+                        com.dirk.kalshiodds.signal.feedback.ScorecardDeepStats.Tone.GOOD -> colors.up
+                        com.dirk.kalshiodds.signal.feedback.ScorecardDeepStats.Tone.BAD -> colors.down
+                        com.dirk.kalshiodds.signal.feedback.ScorecardDeepStats.Tone.NEUTRAL -> colors.textPrimary
+                    },
+                    modifier = Modifier
+                        .weight(0.55f)
+                        .padding(start = 8.dp)
+                )
+            }
         }
     }
 }
