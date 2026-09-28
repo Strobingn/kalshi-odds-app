@@ -190,6 +190,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         prefs.updatePaperTrading(v)
     }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
+    fun setLateFavorite(v: Boolean) = track("late_favorite", _state.value.settings.lateFavoriteEnabled, v) {
+        prefs.updateLateFavorite(v)
+    }
+    fun resetLateFavorite() {
+        val before = container.lateFavorite.ledger.snapshot().totals.settledBets
+        container.lateFavorite.ledger.reset()
+        track("late_favorite_reset", before, 0) { }
+        _state.update { it.copy(credentialMessage = "Late-favorite paper tracker reset — no Kalshi orders") }
+    }
     fun resetPaperBook() {
         val before = container.paper.book.snapshot().cashUsd
         container.paper.book.reset()

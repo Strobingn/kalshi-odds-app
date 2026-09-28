@@ -771,6 +771,16 @@ fun SettingsContent(
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
+            ToggleRow("Late-favorite paper tracker", s.lateFavoriteEnabled, { viewModel?.setLateFavorite(it) })
+            Text(
+                "Logs a \$5 paper bet on the side spot is on with ≤5 min left, |z| ≥ 1.5 and ask 80–97¢. " +
+                    "Paper only, never sent to Kalshi. Unproven: needs ~2,000 settled windows.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedButton(onClick = { viewModel?.resetLateFavorite() }, modifier = Modifier.height(44.dp)) {
+                Text("Reset tracker")
+            }
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
