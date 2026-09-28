@@ -44,6 +44,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
+import com.dirk.kalshiodds.ui.components.LateFavoriteCard
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
@@ -216,6 +217,11 @@ fun HomeScreen(
                                     },
                                     onOpenChart = { onOpenChart(market) }
                                 )
+                            }
+                        }
+                        if (state.settings.lateFavoriteEnabled) {
+                            item(key = "late_favorite") {
+                                LateFavoriteCard(state.lateFavorite)
                             }
                         }
                         item {

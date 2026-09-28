@@ -46,6 +46,8 @@ data class SignalSettings(
     val subscribeTrades: Boolean = true,
     /** Coinbase spot WebSocket; off → REST spot only (25 s cache). */
     val spotStreamEnabled: Boolean = SignalConstants.DEFAULT_SPOT_STREAM,
+    /** Settings → "Late-favorite paper tracker". Paper only, never orders. */
+    val lateFavoriteEnabled: Boolean = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
     val debounceMs: Long = 10_000L,
     val minConfidence: Double = SignalConstants.DEFAULT_MIN_CONFIDENCE,
     val minLiquidity: Double = SignalConstants.DEFAULT_MIN_LIQUIDITY,
@@ -184,6 +186,7 @@ class SignalPreferences(
     }
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
     suspend fun updateSpotStream(value: Boolean) = edit { it[KEY_SPOT_STREAM] = value }
+    suspend fun updateLateFavorite(value: Boolean) = edit { it[KEY_LATE_FAVORITE] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
         it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)
     }
@@ -395,6 +398,8 @@ class SignalPreferences(
             liveSignalsEnabled = this[KEY_LIVE] ?: def.liveSignalsEnabled,
             subscribeTrades = this[KEY_TRADES] ?: def.subscribeTrades,
             spotStreamEnabled = this[KEY_SPOT_STREAM] ?: SignalConstants.DEFAULT_SPOT_STREAM,
+            lateFavoriteEnabled = this[KEY_LATE_FAVORITE]
+                ?: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
             minConfidence = this[KEY_MIN_CONF] ?: def.minConfidence,
             minLiquidity = this[KEY_MIN_LIQ] ?: def.minLiquidity,
@@ -471,6 +476,7 @@ class SignalPreferences(
         private val KEY_LIVE = booleanPreferencesKey("live_signals_enabled")
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
         private val KEY_SPOT_STREAM = booleanPreferencesKey("spot_stream_enabled")
+        private val KEY_LATE_FAVORITE = booleanPreferencesKey("late_favorite_enabled")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
         private val KEY_MIN_CONF = doublePreferencesKey("min_confidence")
         private val KEY_MIN_LIQ = doublePreferencesKey("min_liquidity")

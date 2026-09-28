@@ -183,7 +183,14 @@ class WiringAuditTest {
         Control("Last order error skip lifecycle", com.dirk.kalshiodds.signal.trade.LastOrderErrorOnce::class.java, "isNotAnOrderError"),
         Control("Last order error clear stale", com.dirk.kalshiodds.signal.trade.LastOrderErrorStore::class.java, "clearStaleLifecycleNotice"),
         Control("Void stale tickers", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "voidTickers"),
-        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals")
+        Control("Replace proposals", com.dirk.kalshiodds.signal.trade.TicketSession::class.java, "replaceProposals"),
+        Control("Late-favorite tracker toggle", SettingsViewModel::class.java, "setLateFavorite"),
+        Control("Late-favorite tracker reset", SettingsViewModel::class.java, "resetLateFavorite"),
+        Control("Late-favorite rule", com.dirk.kalshiodds.signal.latefav.LateFavoriteRule::class.java, "evaluate"),
+        Control("Late-favorite paper entry", com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger::class.java, "record"),
+        Control("Late-favorite settle", com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger::class.java, "settle"),
+        Control("Late-favorite home card copy", com.dirk.kalshiodds.signal.latefav.LateFavoriteSummary.Companion::class.java, "of"),
+        Control("Late-favorite live hook", com.dirk.kalshiodds.signal.SignalHub::class.java, "maybeLateFavorite")
     )
 
     @Test

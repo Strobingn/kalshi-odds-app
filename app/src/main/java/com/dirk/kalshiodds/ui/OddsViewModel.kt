@@ -70,7 +70,10 @@ data class OddsUiState(
     val liveCashUsd: Double? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
-    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY
+    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
+    /** Paper-only late-favorite tracker ledger (home card). */
+    val lateFavorite: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState()
 )
 
 /**
@@ -150,6 +153,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.lateFavorite.ledger.state.collect { lf ->
+                    _state.update { it.copy(lateFavorite = lf) }
                 }
             }
         }
