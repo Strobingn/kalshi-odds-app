@@ -103,22 +103,18 @@ object ScorecardMetrics {
         fills: List<PaperFill> = emptyList(),
         settledWindows: List<SettledWindowRow> = emptyList()
     ): Snapshot {
-        val settled = settledScoredPicks(entries)
-        val voids = entries.count {
-            ScorecardLedger.isScorecardTicker(it.ticker) && it.outcome.equals("void", true)
-        }
-        val open = entries.count {
-            ScorecardLedger.isScorecardTicker(it.ticker) && it.outcome == null
-        }
+        val btc = entries.filter { ScorecardLedger.isScorecardTicker(it.ticker) }
+        val settled = settledScoredPicks(btc)
+        val voids = btc.count { it.outcome.equals("void", true) }
+        val open = btc.count { it.outcome == null }
         val dayStart = startOfLocalDayMs(nowMs, zoneId)
         val rollingStart = nowMs - SignalConstants.SCORECARD_ROLLING_DAYS * 86_400_000L
-        val ledger = ScorecardLedger.of(entries, fills, settledWindows, zoneId)
+        val ledger = ScorecardLedger.of(btc, fills, settledWindows, zoneId)
         return Snapshot(
             daily = window(settled.filter { settledAt(it) >= dayStart }, ledger),
             rolling = window(settled.filter { settledAt(it) >= rollingStart }, ledger),
             allTime = window(settled, ledger),
             perSeries = settled
-                .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
                 .groupBy { it.series.ifBlank { "unknown" } }
                 .toSortedMap()
                 .map { (series, rows) ->
@@ -132,7 +128,7 @@ object ScorecardMetrics {
             calibrationSamples = calibration.sampleCount,
             honest = honest(settled, zoneId),
             policy = PolicyEval.evaluate(
-                entries = entries,
+                entries = btc,
                 stakeUsd = policyStakeUsd,
                 edgeThresholdPp = edgeThresholdPp,
                 minConfidence = minConfidence,
