@@ -1,17 +1,19 @@
 package com.dirk.kalshiodds
 
 /**
- * Side-by-side install identity for Kashi's 0.3.16 build.
+ * Side-by-side install identity for the `claude/ml-fixes` build (0.3.18+).
  *
- * [APPLICATION_ID] is the Android package name (must differ from the
- * Claude-branch app, which keeps `com.dirk.kalshiodds`). The Kotlin
- * namespace stays [NAMESPACE]. Storage file names are unchanged from
- * 0.3.15 so `adb run-as` can copy the old app's DB/prefs in.
+ * [APPLICATION_ID] is the Android package name. It differs from the
+ * original app (`com.dirk.kalshiodds`) and Kashi's build
+ * (`com.dirk.kalshiodds.kashi`), so all three install at once with
+ * separate data, keys and notifications. The Kotlin namespace stays
+ * [NAMESPACE]. Storage file names are unchanged from 0.3.15 so
+ * `adb run-as` can copy another build's DB/prefs in.
  */
 object AppIdentity {
-    const val APPLICATION_ID = "com.dirk.kalshiodds.kashi"
+    const val APPLICATION_ID = "com.dirk.kalshiodds.claudeml"
     const val NAMESPACE = "com.dirk.kalshiodds"
-    const val LABEL = "DipHunter (Kashi)"
+    const val LABEL = "DipHunter (Claude ML)"
 
     /** No FileProvider is declared. If one is added, use this authority. */
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"
