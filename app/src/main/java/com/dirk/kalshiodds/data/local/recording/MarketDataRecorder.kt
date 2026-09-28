@@ -168,7 +168,7 @@ class MarketDataRecorder(
         )
     }
 
-    /** Zip [days] (all when empty) into [out] after flushing what is queued. */
+    /** Zip [days] (all when empty) into [out]; open members are sync-flushed first (rows still queued are not). */
     fun export(days: Collection<String>, out: java.io.OutputStream): Int {
         return files.zipDays(days, out, clock())
     }
