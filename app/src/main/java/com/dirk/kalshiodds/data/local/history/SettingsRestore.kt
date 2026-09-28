@@ -23,6 +23,7 @@ object SettingsRestore {
         o.put("paperTradingEnabled", s.paperTradingEnabled)
         o.put("paperBankrollStartUsd", s.paperBankrollStartUsd)
         o.put("kellyFraction", s.kellyFraction)
+        o.put("paperKellyFraction", s.paperKellyFraction)
         o.put("minConfidence", s.minConfidence)
         o.put("maxSpreadCents", s.maxSpreadCents)
         o.put("minProfitIfWinUsd", s.minProfitIfWinUsd)
@@ -50,6 +51,7 @@ object SettingsRestore {
             paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
             paperBankrollStartUsd = o.optDoubleOrNull("paperBankrollStartUsd"),
             kellyFraction = o.optDoubleOrNull("kellyFraction"),
+            paperKellyFraction = o.optDoubleOrNull("paperKellyFraction"),
             minConfidence = o.optDoubleOrNull("minConfidence"),
             maxSpreadCents = o.optDoubleOrNull("maxSpreadCents"),
             minProfitIfWinUsd = o.optDoubleOrNull("minProfitIfWinUsd")
@@ -81,6 +83,7 @@ data class RestoredSettings(
     val paperTradingEnabled: Boolean? = null,
     val paperBankrollStartUsd: Double? = null,
     val kellyFraction: Double? = null,
+    val paperKellyFraction: Double? = null,
     val minConfidence: Double? = null,
     val maxSpreadCents: Double? = null,
     val minProfitIfWinUsd: Double? = null
