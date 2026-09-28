@@ -4,17 +4,23 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Themed-icon silhouette: K + rising candlestick, white on transparent. -->
+    <!-- Themed-icon silhouette: rising neural-net line, white on transparent. -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M35,67 L47,55 L59,61 L73,41" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M28,26 h14 v18 L60,26 h14 L50,52 L74,82 h-14 L42,56 v26 h-14 z" />
+        android:pathData="M35,67 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M81,34 h3 v10 h-3 z" />
+        android:pathData="M47,55 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M78,44 h9 v20 h-9 z" />
+        android:pathData="M59,61 m-5.5,0 a5.5,5.5 0 1,0 11,0 a5.5,5.5 0 1,0 -11,0" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M81,64 h3 v10 h-3 z" />
+        android:pathData="M73,41 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
 </vector>

@@ -145,7 +145,7 @@ class AppIdentityStorageAuditTest {
     }
 
     @Test
-    fun launcherIconIsGoldKOnNavy() {
+    fun launcherIconIsCyanNetLineOnViolet() {
         val fg = listOf(
             File("app/src/main/res/drawable/ic_launcher_foreground.xml"),
             File("src/main/res/drawable/ic_launcher_foreground.xml")
@@ -175,20 +175,22 @@ class AppIdentityStorageAuditTest {
             File("src/main/res/values/colors.xml")
         ).first { it.isFile }.readText()
 
-        assertTrue(fg.contains("#E8B84A"))
-        assertTrue(fg.contains("M28,26 h14 v18"))
-        assertTrue(fg.contains("M78,44 h9 v20"))
+        // Claude ML build: cyan rising net line + white nodes on violet, so it is
+        // told apart at a glance from the original / Kashi gold K on navy.
+        assertTrue(fg.contains("#5CE1E6"))
+        assertTrue(fg.contains("M35,67 L47,55 L59,61 L73,41"))
+        assertFalse(fg.contains("#E8B84A"))
+        assertFalse(fg.contains("M28,26 h14 v18"))
         assertFalse(fg.contains("#3FB950"))
         assertFalse(fg.contains("#E3B341"))
-        assertFalse(fg.contains("Kashi badge"))
-        assertFalse(fg.contains("M22,40 L38,40"))
 
-        assertTrue(bg.contains("#070B16"))
+        assertTrue(bg.contains("#1A1033"))
+        assertFalse(bg.contains("#070B16"))
         assertFalse(bg.contains("#3FB950"))
-        assertTrue(colors.contains("ic_launcher_background\">#070B16"))
+        assertTrue(colors.contains("ic_launcher_background\">#1A1033"))
 
         assertTrue(mono.contains("#FFFFFF"))
-        assertTrue(mono.contains("M28,26 h14 v18"))
+        assertTrue(mono.contains("M35,67 L47,55 L59,61 L73,41"))
         assertFalse(mono.contains("#3FB950"))
 
         assertTrue(adaptive.contains("@drawable/ic_launcher_background"))
