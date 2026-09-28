@@ -36,16 +36,20 @@ object SignalConstants {
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
     /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
-    const val PAPER_START_USD = 100.0
+    const val PAPER_START_USD = 1_000.0
+    /** Legacy $5 clip — unused for AI paper (Kelly). Kept so History restore still reads. */
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
     const val PAPER_LEDGER_MAX = 40
 
     /**
-     * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,
-     * a common conservative default for noisy edges.
+     * Fraction of full Kelly actually risked on **paper**. Default 0.5
+     * (half-Kelly). Settings slider is [PAPER_KELLY_FRACTION_MIN]–[PAPER_KELLY_FRACTION_MAX].
+     * Live orders ignore this and stay on the $10 all-in cap.
      */
-    const val DEFAULT_KELLY_FRACTION = 0.25
+    const val DEFAULT_KELLY_FRACTION = 0.5
+    const val PAPER_KELLY_FRACTION_MIN = 0.1
+    const val PAPER_KELLY_FRACTION_MAX = 1.0
 
     /** Hard cap on bankroll committed to one suggested clip. */
     const val DEFAULT_MAX_BANKROLL_FRACTION = 0.05
@@ -71,7 +75,8 @@ object SignalConstants {
 
     const val DEFAULT_CLOUD_SYNC = true
 
-    const val SCORECARD_BUCKET_MIN_SAMPLES = 20
+    /** @see com.dirk.kalshiodds.signal.feedback.ScorecardTargets.MIN_PER_SLOT_SAMPLES */
+    const val SCORECARD_BUCKET_MIN_SAMPLES = 5
 
     const val GITHUB_OWNER = "Strobingn"
     const val GITHUB_REPO = "kalshi-odds-app"

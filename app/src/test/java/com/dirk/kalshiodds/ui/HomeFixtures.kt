@@ -525,7 +525,10 @@ object HomeFixtures {
                 outcome = e.outcome,
                 won = won,
                 pnlUsd = pnl,
-                note = String.format(java.util.Locale.US, "settled · fee $%.2f", fee)
+                note = String.format(java.util.Locale.US, "settled · fee $%.2f", fee),
+                kellyF = 0.31,
+                kellyFraction = 0.5,
+                bankrollAfterUsd = 1_000.0 + pnl
             )
         }
         val manuals = (0 until 4).map { i ->
@@ -567,7 +570,13 @@ object HomeFixtures {
             )
         }
         return ScorecardUi(
-            view = ScorecardCopy.of(entries, fills, paperPnlUsd = 0.0, windows = windows),
+            view = ScorecardCopy.of(
+                entries = entries,
+                fills = fills,
+                paperPnlUsd = 0.0,
+                windows = windows,
+                paperBankrollUsd = 1_000.0 + fills.mapNotNull { it.pnlUsd }.sum()
+            ),
             metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(
                 entries,
                 fills = fills,

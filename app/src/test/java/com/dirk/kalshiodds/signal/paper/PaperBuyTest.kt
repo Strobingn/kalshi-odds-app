@@ -18,7 +18,7 @@ class PaperBuyTest {
         assertEquals(10, out.contracts)
         assertEquals(2.0, out.stakeUsd, 1e-9)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(10, 0.20)
-        assertEquals(100.0 - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(1_000.0 - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
         assertTrue(out.message.contains("PAPER"))
     }
 
@@ -53,33 +53,32 @@ class PaperBuyTest {
         assertTrue(out.ok)
         assertEquals(20, out.contracts)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(20, 0.20)
-        assertEquals(100.0 - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(1_000.0 - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
     fun winTargetAbovePaperEquityCapsInsteadOfBlocking() {
         val book = PaperBook()
-        // $50 target at 40¢ would want 200 ct / $80 — cash is $100 so this is under cash.
-        // Force a stake above cash: 400 ct @ 40¢ = $160.
+        // $50 target at 40¢ would want 200 ct / $80 — cash is $1,000 so force above cash: 4,000 ct @ 40¢ = $1,600.
         val out = PaperBuy.execute(
             book,
             ticket(
                 TicketKind.HUNTER_VALUE,
                 ticker = "KXBTC15M-CAP",
-                contracts = 400,
-                stake = 160.0,
+                contracts = 4_000,
+                stake = 1_600.0,
                 px = 0.40,
                 win = 50.0
             )
         )
         assertTrue(out.message, out.ok)
         assertTrue(out.capped)
-        val (maxQty, _) = PaperBuy.capContracts(400, 100.0, 0.40)
+        val (maxQty, _) = PaperBuy.capContracts(4_000, 1_000.0, 0.40)
         assertEquals(maxQty, out.contracts)
-        assertTrue(out.contracts in 1..249)
+        assertTrue(out.contracts in 1..2_499)
         assertEquals(out.contracts * 0.40, out.stakeUsd, 1e-9)
         assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
-        assertTrue(book.snapshot().cashUsd < 100.0 - out.stakeUsd + 1e-6)
+        assertTrue(book.snapshot().cashUsd < 1_000.0 - out.stakeUsd + 1e-6)
     }
 
     @Test

@@ -1,8 +1,11 @@
 package com.dirk.kalshiodds.signal
 
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.lastminute.LastMinuteFired
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBook
+import com.dirk.kalshiodds.signal.paper.PaperKellySizer
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
@@ -18,19 +21,25 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtOneHundredAndPapersFiveDollarAiFill() {
+    fun startsAtOneThousandAndKellySizesAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
+        assertEquals(1_000.0, book.snapshot().paperBankrollUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
         assertEquals("AI hunter", fill.source)
         assertEquals(70.0, fill.aiPct!!, 1e-6)
         assertEquals(com.dirk.kalshiodds.signal.paper.PaperPickSource.TICKET.label, fill.pickSource)
-        assertEquals(125, fill.contracts) // floor(5 / 0.04)
-        assertEquals(5.0, fill.stakeUsd, 1e-9)
-        assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
-        assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
+        val expected = PaperKellySizer.size(0.70, 0.04, 1_000.0)
+        assertTrue(expected.ok)
+        assertEquals(expected.contracts, fill.contracts)
+        assertEquals(expected.allInUsd, fill.stakeUsd, 1e-9)
+        assertTrue("no \$10 paper cap: ${fill.stakeUsd}", fill.stakeUsd > 10.0)
+        assertTrue(fill.kellyF!! > 0.0)
+        assertEquals(0.5, fill.kellyFraction!!, 1e-9)
+        assertEquals(1_000.0 - fill.stakeUsd, book.snapshot().cashUsd, 1e-9)
+        assertEquals(fill.stakeUsd, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
     }
 
@@ -77,17 +86,50 @@ class PaperBookTest {
         book.considerAlert(alert, ask = 0.20, enabled = true)
         assertEquals(1, book.snapshot().fills.size)
         assertEquals("NO", book.snapshot().fills.single().side)
+        assertTrue(book.snapshot().fills.single().kellyF!! > 0.0)
+        assertTrue(book.snapshot().fills.single().stakeUsd > 10.0)
         assertEquals(0, placed.get())
         assertEquals(0, session.placementCount)
         assertTrue(session.snapshot().phase is TicketPhase.Idle)
     }
 
     @Test
+    fun lastMinuteKellyIgnoresFiredContractCount() {
+        val book = PaperBook(idFactory = { "lm" }, nowMs = { 2L })
+        val fired = LastMinuteFired(
+            ticker = "KXBTC15M-LM",
+            side = "YES",
+            displaySide = "UP",
+            winChance = 0.91,
+            ask = 0.10,
+            evPerDollar = 1.5,
+            contracts = 20,
+            costUsd = 2.0,
+            feeUsd = 0.10,
+            profitIfWinUsd = 18.0,
+            depthLimited = false,
+            depthContracts = null,
+            tauSec = 12,
+            x = 0.0,
+            obsMean = 0.0,
+            sigS = 0.0,
+            firedAtMs = 2L
+        )
+        val fill = book.considerLastMinute(fired, enabled = true)
+        assertTrue(fill != null)
+        val expected = PaperKellySizer.size(0.91, 0.10, 1_000.0)
+        assertEquals(expected.contracts, fill!!.contracts)
+        assertTrue(fill.contracts > 20)
+        assertEquals(expected.allInUsd, fill.stakeUsd, 1e-9)
+        assertTrue(fill.kellyF!! > 0.0)
+    }
+
+    @Test
     fun settleWinLossVoidAndReset() {
         val book = PaperBook()
-        book.considerTicket(hunterTicket(ticker = "WIN-1"), enabled = true)
-        book.considerTicket(hunterTicket(ticker = "LOSS-1", side = "NO"), enabled = true)
-        book.considerTicket(hunterTicket(ticker = "VOID-1"), enabled = true)
+        val winFill = book.considerTicket(hunterTicket(ticker = "WIN-1"), enabled = true)!!
+        val lossFill = book.considerTicket(hunterTicket(ticker = "LOSS-1", side = "NO"), enabled = true)!!
+        val voidFill = book.considerTicket(hunterTicket(ticker = "VOID-1"), enabled = true)!!
         book.settle("WIN-1", "yes")
         book.settle("LOSS-1", "yes") // NO side loses
         book.settle("VOID-1", "void")
@@ -96,13 +138,15 @@ class PaperBookTest {
         assertEquals(0, snap.openCount)
         val win = snap.fills.first { it.ticker == "WIN-1" }
         assertEquals(true, win.won)
-        assertEquals(120.0, win.pnlUsd!!, 1e-9) // 125 * 1 - 5
+        assertEquals(winFill.contracts * 1.0 - winFill.stakeUsd, win.pnlUsd!!, 1e-6)
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
-        assertEquals(-5.0, loss.pnlUsd!!, 1e-9)
-        assertEquals(115.0, snap.realizedPnlUsd, 1e-9)
-        // cash: 100 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 215
-        assertEquals(215.0, snap.cashUsd, 1e-9)
+        assertEquals(-lossFill.stakeUsd, loss.pnlUsd!!, 1e-6)
+        val voided = snap.fills.first { it.ticker == "VOID-1" }
+        assertEquals(0.0, voided.pnlUsd!!, 1e-6)
+        assertEquals(win.pnlUsd!! + loss.pnlUsd!! + voided.pnlUsd!!, snap.realizedPnlUsd, 1e-6)
+        assertEquals(SignalConstants.PAPER_START_USD + snap.realizedPnlUsd, snap.paperBankrollUsd, 1e-6)
+        assertEquals(snap.paperBankrollUsd, snap.cashUsd, 1e-6)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())
@@ -142,7 +186,7 @@ class PaperBookTest {
     }
 
     @Test
-    fun winTargetPaperFillUsesTicketSizeNotFive() {
+    fun winTargetPaperFillUsesKellyNotTicketSize() {
         val book = PaperBook(idFactory = { "pw" }, nowMs = { 11L })
         val ticket = hunterTicket().copy(
             winTargetUsd = 50.0,
@@ -153,10 +197,15 @@ class PaperBookTest {
             ticker = "KXBTC15M-WT"
         )
         val fill = book.considerTicket(ticket, enabled = true)
-        assertEquals(20, fill!!.contracts)
-        assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
-        assertTrue(fill.note.contains("win-target"))
+        val expected = PaperKellySizer.size(0.70, 0.40, 1_000.0)
+        assertEquals(expected.contracts, fill!!.contracts)
+        assertEquals(expected.allInUsd, fill.stakeUsd, 1e-9)
+        assertTrue(fill.contracts != 20)
+        assertTrue(fill.stakeUsd != 8.0)
+        assertEquals(1_000.0 - fill.stakeUsd, book.snapshot().cashUsd, 1e-9)
+        assertFalse(fill.note.contains("win-target"))
+        assertTrue(fill.note.contains("Kelly"))
+        assertEquals(KalshiFee.totalCost(fill.contracts, 0.40), fill.stakeUsd, 1e-9)
     }
 
     private fun hunterTicket(

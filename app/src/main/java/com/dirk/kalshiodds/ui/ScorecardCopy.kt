@@ -119,7 +119,8 @@ object ScorecardCopy {
         val byPrice: List<Bucket>,
         val byConfidence: List<Bucket>,
         val bySource: List<Bucket> = emptyList(),
-        val lastMinute: LastMinuteSection = LastMinuteSection()
+        val lastMinute: LastMinuteSection = LastMinuteSection(),
+        val paperBankrollUsd: Double? = null
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
         val showsEmptyState: Boolean get() = showsEmptyState(settledCount)
@@ -143,6 +144,7 @@ object ScorecardCopy {
                 lines += recordLine(summary)
                 lines += winRateLine(summary)
                 lines += paperPnlLine(summary)
+                paperBankrollLine(paperBankrollUsd)?.let { lines += it }
                 lines += settledCountLine(summary)
                 lines += COMBINED_TITLE
                 lines += recordLine(ledger.combined)
@@ -206,7 +208,8 @@ object ScorecardCopy {
         paperPnlUsd = paper.realizedPnlUsd,
         windows = windows,
         zoneId = zoneId,
-        lastMinutePicks = lastMinutePicks
+        lastMinutePicks = lastMinutePicks,
+        paperBankrollUsd = paper.paperBankrollUsd
     )
 
     fun of(
@@ -215,7 +218,8 @@ object ScorecardCopy {
         paperPnlUsd: Double,
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE,
-        lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList()
+        lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList(),
+        paperBankrollUsd: Double? = null
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
         val lastMinute = lastMinuteSection(lastMinutePicks)
@@ -235,7 +239,8 @@ object ScorecardCopy {
             byPrice = ledger.byPrice.map { toBucket(it) },
             byConfidence = ledger.byConfidence.map { toBucket(it) },
             bySource = mergeSourceBuckets(ledger.bySource.map { toBucket(it) }, lastMinute),
-            lastMinute = lastMinute
+            lastMinute = lastMinute,
+            paperBankrollUsd = paperBankrollUsd
         )
     }
 
@@ -383,7 +388,12 @@ object ScorecardCopy {
         val stake = row.stakeUsd?.let { String.format(Locale.US, "stake $%.2f", it) } ?: "stake $EM_DASH"
         val ct = row.contracts?.let { "$it ct" } ?: "$EM_DASH ct"
         val fee = row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee $EM_DASH"
-        return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $result  $pnl  $strike  $fin  $src  ${row.ticker}"
+        val kelly = row.kellyF?.let { String.format(Locale.US, "Kelly f=%.3f", it) }
+            ?: row.kellyFraction?.let { String.format(Locale.US, "Kelly ×%.2f", it) }
+            ?: "Kelly $EM_DASH"
+        val bank = row.bankrollAfterUsd?.let { String.format(Locale.US, "bankroll $%.2f", it) }
+            ?: "bankroll $EM_DASH"
+        return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $kelly  $bank  $result  $pnl  $strike  $fin  $src  ${row.ticker}"
     }
 
     fun recordLine(summary: HomeScorecardSummary): String =
@@ -396,6 +406,11 @@ object ScorecardCopy {
 
     fun paperPnlLine(summary: HomeScorecardSummary): String =
         if (summary.settledCount <= 0) EM_DASH else HomeScorecardSummary.paperPnlPart(summary.paperPnlUsd)
+
+    fun paperBankrollLine(bankrollUsd: Double?): String? =
+        bankrollUsd?.takeIf { it.isFinite() }?.let {
+            String.format(Locale.US, "Paper bankroll $%.2f", it)
+        }
 
     fun settledCountLine(summary: HomeScorecardSummary): String =
         if (summary.settledCount <= 0) EM_DASH else "${summary.settledCount} settled"

@@ -63,6 +63,7 @@ data class SignalSettings(
     val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
     val ticketsEnabled: Boolean = true,
     val paperTradingEnabled: Boolean = SignalConstants.DEFAULT_PAPER_TRADING,
+    val paperBankrollStartUsd: Double = SignalConstants.PAPER_START_USD,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
     val hunterValueStakeUsd: Double = SignalConstants.HUNTER_VALUE_STAKE_USD,
@@ -192,7 +193,10 @@ class SignalPreferences(
     }
     suspend fun updateUseKelly(value: Boolean) = edit { it[KEY_USE_KELLY] = value }
     suspend fun updateKellyFraction(value: Double) = edit {
-        it[KEY_KELLY_FRAC] = value.coerceIn(0.05, 1.0)
+        it[KEY_KELLY_FRAC] = value.coerceIn(
+            SignalConstants.PAPER_KELLY_FRACTION_MIN,
+            SignalConstants.PAPER_KELLY_FRACTION_MAX
+        )
     }
     suspend fun updateFixedFraction(value: Double) = edit {
         it[KEY_FIXED_FRAC] = value.coerceIn(0.002, 0.25)
@@ -217,6 +221,9 @@ class SignalPreferences(
     suspend fun updateResumeOnNewSession(value: Boolean) = edit { it[KEY_RESUME_SESSION] = value }
     suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
     suspend fun updatePaperTrading(value: Boolean) = edit { it[KEY_PAPER] = value }
+    suspend fun updatePaperBankrollStartUsd(value: Double) = edit {
+        it[KEY_PAPER_START] = value.coerceIn(100.0, 1_000_000.0)
+    }
     suspend fun updateKalshiDemo(value: Boolean) = edit { it[KEY_KALSHI_DEMO] = value }
 
     fun saveDemoCredentials(keyId: String, pem: String) {
@@ -342,6 +349,8 @@ class SignalPreferences(
         r.bankrollUsd?.let { updateBankrollUsd(it) }
         r.edgeThresholdPp?.let { updateEdgeThresholdPp(it) }
         r.paperTradingEnabled?.let { updatePaperTrading(it) }
+        r.paperBankrollStartUsd?.let { updatePaperBankrollStartUsd(it) }
+        r.kellyFraction?.let { updateKellyFraction(it) }
         r.minConfidence?.let { updateMinConfidence(it) }
         r.maxSpreadCents?.let { updateMaxSpreadCents(it) }
     }
@@ -402,6 +411,7 @@ class SignalPreferences(
             resumeOnNewSession = this[KEY_RESUME_SESSION] ?: def.resumeOnNewSession,
             ticketsEnabled = this[KEY_TICKETS] ?: def.ticketsEnabled,
             paperTradingEnabled = this[KEY_PAPER] ?: def.paperTradingEnabled,
+            paperBankrollStartUsd = this[KEY_PAPER_START] ?: SignalConstants.PAPER_START_USD,
             ticketStakeUsd = (this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd).coerceIn(
                 SignalConstants.TICKET_STAKE_MIN_USD,
                 SignalConstants.TICKET_STAKE_HARD_CAP_USD
@@ -476,6 +486,7 @@ class SignalPreferences(
         private val KEY_RESUME_SESSION = booleanPreferencesKey("resume_on_new_session")
         private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
         private val KEY_PAPER = booleanPreferencesKey("paper_trading_enabled")
+        private val KEY_PAPER_START = doublePreferencesKey("paper_bankroll_start_usd")
         private val KEY_KALSHI_DEMO = booleanPreferencesKey("kalshi_demo_enabled")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")

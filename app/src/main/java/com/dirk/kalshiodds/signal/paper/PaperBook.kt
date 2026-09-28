@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStance
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlin.math.floor
@@ -15,7 +16,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
 /**
- * Isolated paper book. Never calls Kalshi. $100 start / $5 per AI fill.
+ * Isolated paper book. Never calls Kalshi. $1,000 start / Kelly-sized AI fills.
  */
 @Serializable
 data class PaperFill(
@@ -40,7 +41,13 @@ data class PaperFill(
     /** Picked-side market/implied percent (0–100). Null on pre-0.3.16 rows. */
     val marketPct: Double? = null,
     /** Canonical [PaperPickSource.label]. Null on pre-0.3.16 rows. */
-    val pickSource: String? = null
+    val pickSource: String? = null,
+    /** Full Kelly f at fill time. Null on pre-0.3.19 rows. */
+    val kellyF: Double? = null,
+    /** Settings Kelly fraction (0.1–1.0) used to size this fill. */
+    val kellyFraction: Double? = null,
+    /** Paper bankroll (start + settled P&L) after this fill settled. */
+    val bankrollAfterUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
@@ -120,6 +127,19 @@ data class PaperBookState(
         get() = fills.filter { CryptoMarkets.isLiveTicker(it.ticker) }.mapNotNull { it.pnlUsd }.sum()
     val equityUsd: Double get() = cashUsd + openStakeUsd
     val openCount: Int get() = fills.count { !it.settled }
+    /** Start + settled P&L — the Kelly bankroll shown on the scorecard. */
+    val paperBankrollUsd: Double get() = startingUsd + realizedPnlUsd
+
+    companion object {
+        /** 0.3.19: $100 start → $1,000, preserving realized P&L. */
+        fun migrateStartUsd(state: PaperBookState): PaperBookState {
+            val old = 100.0
+            val neu = SignalConstants.PAPER_START_USD
+            if (kotlin.math.abs(state.startingUsd - old) > 1e-6) return state
+            val bump = neu - old
+            return state.copy(startingUsd = neu, cashUsd = state.cashUsd + bump)
+        }
+    }
 }
 
 class PaperBook(
@@ -128,6 +148,9 @@ class PaperBook(
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
     private val nowMs: () -> Long = { System.currentTimeMillis() }
 ) {
+    @Volatile var kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION
+    @Volatile var feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    @Volatile var startUsd: Double = SignalConstants.PAPER_START_USD
     private val lock = Any()
     private val _state = MutableStateFlow(initial)
     val state: StateFlow<PaperBookState> = _state.asStateFlow()
@@ -138,9 +161,20 @@ class PaperBook(
         _state.value.fills.filter { !it.settled }.map { it.ticker.uppercase() }.toSet()
     }
 
-    fun reset() {
+    fun configure(
+        kellyFraction: Double = this.kellyFraction,
+        feeRate: Double = this.feeRate,
+        startUsd: Double = this.startUsd
+    ) {
+        this.kellyFraction = kellyFraction
+        this.feeRate = feeRate
+        this.startUsd = startUsd
+    }
+
+    fun reset(toUsd: Double = startUsd) {
         synchronized(lock) {
             val cur = _state.value
+            val start = toUsd.takeIf { it.isFinite() && it > 0.0 } ?: SignalConstants.PAPER_START_USD
             val archive = PaperArchive(
                 archivedAtMs = nowMs(),
                 startingUsd = cur.startingUsd,
@@ -150,7 +184,13 @@ class PaperBook(
             )
             publish(
                 PaperBookState(
-                    lastMessage = "Paper book reset to $100 — prior run archived",
+                    startingUsd = start,
+                    cashUsd = start,
+                    lastMessage = String.format(
+                        java.util.Locale.US,
+                        "Paper book reset to $%.0f — prior run archived",
+                        start
+                    ),
                     archived = cur.archived + archive
                 )
             )
@@ -164,10 +204,14 @@ class PaperBook(
     }
 
     /**
-     * Auto-log a $5 paper fill when an AI hunter / configured ticket would trade.
-     * Manual live tickets are ignored — those need an explicit Paper tap.
+     * Auto-log a Kelly-sized paper fill when an AI hunter / configured ticket
+     * would trade. Manual live tickets are ignored — those need an explicit Paper tap.
      */
-    fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
+    fun considerTicket(
+        ticket: TradeTicket,
+        enabled: Boolean,
+        depthContracts: Int? = ticket.visibleContracts
+    ): PaperFill? {
         if (!enabled) return null
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
@@ -193,14 +237,10 @@ class PaperBook(
             side = ticket.side,
             limitPrice = ticket.limitPrice,
             source = source,
-            note = if (ticket.winTargetUsd != null) {
-                "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
-            } else {
-                "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
-            },
-            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
-            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
-            winTargetUsd = ticket.winTargetUsd,
+            note = "Paper Kelly · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi",
+            winChance = model,
+            depthContracts = depthContracts,
+            winTargetUsd = null,
             meta = meta.copy(pickSource = pick)
         )
     }
@@ -223,6 +263,7 @@ class PaperBook(
             limitPrice = px,
             source = "AI signal",
             note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" },
+            winChance = model,
             meta = meta
         )
     }
@@ -258,9 +299,9 @@ class PaperBook(
             side = fired.side,
             limitPrice = px,
             source = PaperPickSource.LAST_MINUTE.label,
-            note = "Last-minute strategy · never sent to Kalshi",
-            contracts = fired.contracts.takeIf { it > 0 },
-            stakeUsd = fired.costUsd.takeIf { it > 0.0 },
+            note = "Last-minute strategy · Kelly paper · never sent to Kalshi",
+            winChance = fired.winChance,
+            depthContracts = fired.depthContracts,
             meta = meta
         )
     }
@@ -627,7 +668,16 @@ class PaperBook(
                 ).also { changed += it }
             }
             if (changed.isEmpty()) return emptyList()
-            val msg = changed.last().let { f ->
+            val realized = nextFills.mapNotNull { it.pnlUsd }.sum()
+            val bankrollAfter = cur.startingUsd + realized
+            val stamped = nextFills.map { fill ->
+                val match = changed.firstOrNull { it.id == fill.id } ?: return@map fill
+                fill.copy(bankrollAfterUsd = bankrollAfter)
+            }
+            val stampedChanged = changed.map { it.copy(bankrollAfterUsd = bankrollAfter) }
+            changed.clear()
+            changed.addAll(stampedChanged)
+            val msg = stampedChanged.last().let { f ->
                 when {
                     f.outcome == "void" -> "Paper void ${f.ticker} — stake returned"
                     f.won == true -> String.format(
@@ -646,7 +696,7 @@ class PaperBook(
                     )
                 }
             }
-            publish(cur.copy(cashUsd = cash, fills = nextFills, lastMessage = msg))
+            publish(cur.copy(cashUsd = cash, fills = stamped, lastMessage = msg))
         }
         return changed
     }
@@ -664,58 +714,78 @@ class PaperBook(
         limitPrice: Double,
         source: String,
         note: String,
-        contracts: Int? = null,
-        stakeUsd: Double? = null,
+        winChance: Double? = null,
+        depthContracts: Int? = null,
         winTargetUsd: Double? = null,
         meta: PaperFillMeta = PaperFillMeta()
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(limitPrice) ?: return null
+        val p = winChance ?: meta.aiPct?.let { if (it <= 1.0 + 1e-9) it else it / 100.0 }
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null
-            val qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
-            if (qty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
-                return null
-            }
-            val rawStake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)
-            val (cappedQty, _) = PaperBuy.capContracts(
-                want = if (stakeUsd != null && stakeUsd > 0.0) qty else qty,
-                cashUsd = cur.cashUsd,
-                price = px
+            val bankroll = cur.paperBankrollUsd.coerceAtLeast(cur.cashUsd)
+            val sized = PaperKellySizer.size(
+                winProb = p,
+                ask = px,
+                bankrollUsd = bankroll,
+                kellyFraction = kellyFraction,
+                feeRate = feeRate,
+                depthContracts = depthContracts
             )
-            val useQty = if (rawStake > cur.cashUsd + 1e-9) cappedQty else qty
-            if (useQty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover ${fmt(rawStake)}"))
+            if (!sized.ok) {
+                publish(cur.copy(lastMessage = sized.reason ?: "Paper skip $ticker — Kelly ≤ 0"))
                 return null
             }
-            val stake = useQty * px
+            val (useQty, _) = PaperBuy.capContracts(
+                want = sized.contracts,
+                cashUsd = cur.cashUsd,
+                price = px,
+                feeRate = feeRate
+            )
+            if (useQty < 1) {
+                publish(
+                    cur.copy(
+                        lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover Kelly size"
+                    )
+                )
+                return null
+            }
+            val allIn = KalshiFee.totalCost(useQty, px, feeRate)
+            val fee = KalshiFee.total(useQty, px, feeRate)
             val row = newFill(
                 ticker = ticker,
                 side = want,
-                stakeUsd = stake,
+                stakeUsd = allIn,
                 contracts = useQty,
                 limitPrice = px,
                 source = source,
-                note = note,
+                note = buildString {
+                    append(note)
+                    if (fee > 0.0) append(String.format(java.util.Locale.US, " · fee $%.2f", fee))
+                    append(String.format(java.util.Locale.US, " · Kelly f=%.3f × %.2f", sized.kellyF, sized.kellyFraction))
+                },
                 winTargetUsd = winTargetUsd,
-                meta = meta
+                meta = meta,
+                kellyF = sized.kellyF,
+                kellyFraction = sized.kellyFraction
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(
                 cur.copy(
-                    cashUsd = cur.cashUsd - stake,
+                    cashUsd = cur.cashUsd - allIn,
                     fills = fills,
                     lastMessage = String.format(
                         java.util.Locale.US,
-                        "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · %s",
+                        "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · Kelly f=%.3f · %s",
                         row.displaySide,
                         row.ticker,
                         row.stakeUsd,
                         row.contracts,
                         row.limitPrice * 100,
+                        sized.kellyF,
                         source
                     )
                 )
@@ -733,7 +803,10 @@ class PaperBook(
         source: String,
         note: String,
         winTargetUsd: Double? = null,
-        meta: PaperFillMeta = PaperFillMeta()
+        meta: PaperFillMeta = PaperFillMeta(),
+        kellyF: Double? = null,
+        kellyFraction: Double? = null,
+        bankrollAfterUsd: Double? = null
     ): PaperFill = PaperFill(
         id = idFactory(),
         ticker = ticker,
@@ -748,7 +821,10 @@ class PaperBook(
         aiPct = meta.aiPct,
         aiConfidence = meta.aiConfidence,
         marketPct = meta.marketPct,
-        pickSource = meta.pickSource?.label
+        pickSource = meta.pickSource?.label,
+        kellyF = kellyF,
+        kellyFraction = kellyFraction,
+        bankrollAfterUsd = bankrollAfterUsd
     )
 
     private fun publish(next: PaperBookState) {

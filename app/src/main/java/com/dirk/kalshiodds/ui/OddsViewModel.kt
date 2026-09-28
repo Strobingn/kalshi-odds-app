@@ -588,7 +588,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun resetPaperBook() {
         val before = paperBook.snapshot().cashUsd
         val snap = _state.value.settings
-        paperBook.reset()
+        val start = snap.paperBankrollStartUsd
+        paperBook.reset(start)
         viewModelScope.launch(Dispatchers.IO) {
             runCatching {
                 container.archive.insertSettingsChange(
@@ -596,7 +597,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         createdAtMs = System.currentTimeMillis(),
                         key = "paper_reset",
                         oldValue = before.toString(),
-                        newValue = "100.0",
+                        newValue = start.toString(),
                         snapshotJson = com.dirk.kalshiodds.data.local.history.SettingsRestore.snapshot(snap)
                     )
                 )
@@ -823,12 +824,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         if (s.settings.paperTradingEnabled) {
+            paperBook.configure(
+                kellyFraction = s.settings.kellyFraction,
+                feeRate = s.settings.feeRate,
+                startUsd = s.settings.paperBankrollStartUsd
+            )
             val paperCtx = ctx.copy(
-                bankrollUsd = paperBook.snapshot().equityUsd,
+                bankrollUsd = paperBook.snapshot().paperBankrollUsd,
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            paperTickets.filter { it.canApprove }.forEach {
+                paperBook.considerTicket(it, enabled = true, depthContracts = it.visibleContracts)
+            }
         }
         refreshPositionMarks()
     }
@@ -903,6 +911,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     // Heads-up even when this Activity is in the foreground.
                     runCatching { container.lastMinuteNotifier.notifyFired(fired) }
                     if (_state.value.settings.paperTradingEnabled) {
+                        paperBook.configure(
+                            kellyFraction = _state.value.settings.kellyFraction,
+                            feeRate = _state.value.settings.feeRate,
+                            startUsd = _state.value.settings.paperBankrollStartUsd
+                        )
                         paperBook.considerLastMinute(fired, enabled = true, market = market)
                     }
                 }
@@ -1055,6 +1068,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun paperFromAlerts(alerts: List<SignalAlert>) {
         if (!_state.value.settings.paperTradingEnabled) return
+        paperBook.configure(
+            kellyFraction = _state.value.settings.kellyFraction,
+            feeRate = _state.value.settings.feeRate,
+            startUsd = _state.value.settings.paperBankrollStartUsd
+        )
         val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
         val now = System.currentTimeMillis()
         alerts.forEach { alert ->

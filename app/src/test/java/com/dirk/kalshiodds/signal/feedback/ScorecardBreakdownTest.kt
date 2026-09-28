@@ -10,36 +10,36 @@ import java.time.ZoneId
 class ScorecardBreakdownTest {
 
     @Test
-    fun perCoinBucketsAndNotEnoughData() {
+    fun perCoinBucketsAreBitcoinOnly() {
         val rows = (0 until 12).map { i ->
             entry("KXBTC15M-$i", "KXBTC15M", 1_700_000_000_000L + i)
         } + (0 until 5).map { i ->
             entry("KXETH15M-$i", "KXETH15M", 1_700_000_000_000L + i)
+        } + (0 until 8).map { i ->
+            entry("KXSOL15M-$i", "KXSOL15M", 1_700_000_000_000L + i)
         }
         val coins = ScorecardMetrics.coinBreakdowns(rows)
-        val btc = coins.first { it.key == "BTC" }
-        val eth = coins.first { it.key == "ETH" }
-        val sol = coins.first { it.key == "SOL" }
+        assertEquals(listOf("BTC"), coins.map { it.key })
+        val btc = coins.single { it.key == "BTC" }
         assertEquals(12, btc.n)
-        assertFalse(btc.enoughData)
-        assertTrue(btc.honestLabel.contains("Not enough data"))
-        assertEquals(5, eth.n)
-        assertEquals(0, sol.n)
-        assertFalse(sol.enoughData)
-        assertEquals(listOf("BTC", "SOL", "ETH"), coins.map { it.key })
+        assertTrue(btc.enoughData)
+        assertFalse(coins.any { it.key == "ETH" || it.key == "SOL" })
     }
 
     @Test
-    fun enoughDataAtTwenty() {
-        val rows = (0 until 20).map { i ->
-            entry("KXSOL15M-$i", "KXSOL15M", 1_700_000_000_000L + i)
+    fun enoughDataAtFivePerSlot() {
+        val rows = (0 until 5).map { i ->
+            entry("KXBTC15M-$i", "KXBTC15M", 1_700_000_000_000L + i)
         }
-        val sol = ScorecardMetrics.coinBreakdowns(rows).first { it.key == "SOL" }
-        assertTrue(sol.enoughData)
-        assertEquals(20, sol.n)
-        assertTrue(sol.hitRate != null)
-        assertTrue(sol.modelBrier != null)
-        assertTrue(sol.marketBrier != null)
+        val btc = ScorecardMetrics.coinBreakdowns(rows).single { it.key == "BTC" }
+        assertTrue(btc.enoughData)
+        assertEquals(5, btc.n)
+        assertTrue(btc.hitRate != null)
+        assertTrue(btc.modelBrier != null)
+        assertTrue(btc.marketBrier != null)
+        val four = ScorecardMetrics.coinBreakdowns(rows.take(4)).single { it.key == "BTC" }
+        assertFalse(four.enoughData)
+        assertTrue(four.honestLabel.contains("Not enough data (4/5)"))
     }
 
     @Test
@@ -56,7 +56,9 @@ class ScorecardBreakdownTest {
         assertEquals(6, buckets.size)
         val noon = buckets.first { it.key == "12-16" }
         assertEquals(8, noon.n)
-        assertFalse(noon.enoughData)
+        assertTrue(noon.enoughData)
+        val thin = ScorecardMetrics.timeOfDayBreakdowns(rows.take(4), zone).first { it.key == "12-16" }
+        assertFalse(thin.enoughData)
     }
 
     private fun entry(ticker: String, series: String, at: Long) = PredictionLogEntry(

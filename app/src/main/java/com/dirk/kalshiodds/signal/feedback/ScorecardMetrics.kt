@@ -113,7 +113,9 @@ object ScorecardMetrics {
             daily = window(settled.filter { settledAt(it) >= dayStart }, ledger),
             rolling = window(settled.filter { settledAt(it) >= rollingStart }, ledger),
             allTime = window(settled, ledger),
-            perSeries = settled.groupBy { it.series.ifBlank { "unknown" } }
+            perSeries = settled
+                .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
+                .groupBy { it.series.ifBlank { "unknown" } }
                 .toSortedMap()
                 .map { (series, rows) ->
                     SeriesStats(series = series, label = seriesLabel(series), stats = window(rows, ledger))
@@ -136,12 +138,12 @@ object ScorecardMetrics {
         )
     }
 
-    const val MIN_HONEST_SAMPLES = 100
-    const val MIN_BUCKET_SAMPLES = SignalConstants.SCORECARD_BUCKET_MIN_SAMPLES
+    const val MIN_HONEST_SAMPLES = ScorecardTargets.MIN_SETTLED_BTC_SIGNALS
+    const val MIN_BUCKET_SAMPLES = ScorecardTargets.MIN_PER_SLOT_SAMPLES
     const val MIN_BRIER_DISPLAY = 20
 
-    /** Fixed home / scorecard coin order. */
-    val COIN_ORDER: List<String> = listOf("BTC", "SOL", "ETH")
+    /** Bitcoin-only — KXBTC15M is the live universe. */
+    val COIN_ORDER: List<String> = listOf("BTC")
 
     /**
      * Settled directional picks that count on the scorecard.
@@ -150,7 +152,8 @@ object ScorecardMetrics {
      */
     fun settledScoredPicks(entries: List<PredictionLogEntry>): List<PredictionLogEntry> =
         entries.filter {
-            (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
+            ScorecardLedger.isScorecardTicker(it.ticker) &&
+                (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
                 ForecastUnits.isScoredPick(it)
         }
 
@@ -158,7 +161,9 @@ object ScorecardMetrics {
         rows: List<PredictionLogEntry>,
         zoneId: ZoneId = ZoneId.of("America/New_York")
     ): Honest {
-        val scored = rows.filter { ForecastUnits.isScoredPick(it) }
+        val scored = rows.filter {
+            ScorecardLedger.isScorecardTicker(it.ticker) && ForecastUnits.isScoredPick(it)
+        }
         if (scored.isEmpty()) {
             return Honest(0, null, null, null, null, null, false, emptyList())
         }
@@ -166,7 +171,9 @@ object ScorecardMetrics {
         val modelBriers = scored.map { ForecastUnits.brier(it) }
         val marketBriers = scored.map { ForecastUnits.marketBrier(it) }
         val sideBriers = scored.map { ForecastUnits.sideBrier(it) }
-        val per = scored.groupBy { it.series.ifBlank { "unknown" } }
+        val per = scored
+            .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
+            .groupBy { it.series.ifBlank { "unknown" } }
             .toSortedMap()
             .map { (series, group) ->
                 SeriesStats(series = series, label = seriesLabel(series), stats = window(group))
@@ -188,10 +195,9 @@ object ScorecardMetrics {
     }
 
     fun coinBreakdowns(rows: List<PredictionLogEntry>): List<Breakdown> {
-        val groups = rows.groupBy { coinOf(it.series.ifBlank { it.ticker }) }
+        val btc = rows.filter { ScorecardLedger.isScorecardTicker(it.ticker) }
+        val groups = btc.groupBy { coinOf(it.series.ifBlank { it.ticker }) }
         return COIN_ORDER.map { coin ->
-            breakdown(coin, coin, groups[coin].orEmpty())
-        } + groups.keys.filter { it !in COIN_ORDER && it != "OTHER" }.sorted().map { coin ->
             breakdown(coin, coin, groups[coin].orEmpty())
         }
     }

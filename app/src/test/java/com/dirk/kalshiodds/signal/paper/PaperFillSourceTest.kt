@@ -34,6 +34,9 @@ class PaperFillSourceTest {
         assertNull(fill.aiConfidence)
         assertNull(fill.marketPct)
         assertNull(fill.pickSource)
+        assertNull(fill.kellyF)
+        assertNull(fill.kellyFraction)
+        assertNull(fill.bankrollAfterUsd)
         assertEquals("AI hunter", fill.source)
     }
 
@@ -45,6 +48,8 @@ class PaperFillSourceTest {
         assertTrue(sql.any { it.contains(PaperFillSchema.TABLE) })
         assertTrue(sql.any { it.contains("ai_pct REAL") })
         assertTrue(sql.any { it.contains("pick_source TEXT") })
+        assertTrue(sql.any { it.contains("kelly_f REAL") })
+        assertTrue(sql.any { it.contains("bankroll_after_usd REAL") })
         assertTrue(PaperFillSchema.upgradeSql(PaperFillSchema.VERSION).isEmpty())
         PaperFillSchema.nullableColumnSql().forEach { line ->
             assertTrue(line.startsWith("ALTER TABLE"))
@@ -262,10 +267,12 @@ class PaperFillSourceTest {
         assertEquals(PaperPickSource.TICKET.label, fill.pickSource)
         assertEquals("AI hunter", fill.source)
 
-        val ls = ticket(kind = TicketKind.HUNTER_VALUE, model = 0.22, ticker = "KXBTC15M-LS2")
+        val ls = ticket(kind = TicketKind.HUNTER_VALUE, model = 0.45, ticker = "KXBTC15M-LS2")
         val lsFill = book.considerTicket(ls, enabled = true)
         assertEquals(PaperPickSource.LONG_SHOT.label, lsFill!!.pickSource)
         assertEquals(PaperPickSource.LONG_SHOT.label, lsFill.source)
+        assertTrue(lsFill.kellyF!! > 0.0)
+        assertTrue(lsFill.contracts > 5)
 
         val fired = LastMinuteFired(
             ticker = "KXBTC15M-LM2",
@@ -289,6 +296,8 @@ class PaperFillSourceTest {
         val lm = book.considerLastMinute(fired, enabled = true)
         assertEquals(91.0, lm!!.aiPct!!, 1e-6)
         assertEquals(PaperPickSource.LAST_MINUTE.label, lm.pickSource)
+        assertTrue(lm.contracts > fired.contracts)
+        assertTrue(lm.kellyF!! > 0.0)
 
         val manual = ticket(kind = TicketKind.MANUAL, model = null, ticker = "KXBTC15M-MAN")
         val paper = book.manualFill(manual)

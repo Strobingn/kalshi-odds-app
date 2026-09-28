@@ -363,6 +363,9 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                         put("ai_confidence", r.aiConfidence)
                         put("market_pct", r.marketPct)
                         put("pick_source", r.pickSource)
+                        put("kelly_f", r.kellyF)
+                        put("kelly_fraction", r.kellyFraction)
+                        put("bankroll_after_usd", r.bankrollAfterUsd)
                     },
                     SQLiteDatabase.CONFLICT_REPLACE
                 )
@@ -928,11 +931,24 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
             if (oldVersion < 6) createPaperFillTable(db)
+            applyPaperFillColumns(db)
+        }
+
+        override fun onOpen(db: SQLiteDatabase) {
+            super.onOpen(db)
+            applyPaperFillColumns(db)
         }
 
         private fun createPaperFillTable(db: SQLiteDatabase) {
             for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)) {
                 db.execSQL(sql)
+            }
+            applyPaperFillColumns(db)
+        }
+
+        private fun applyPaperFillColumns(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.nullableColumnSql()) {
+                runCatching { db.execSQL(sql) }
             }
         }
 

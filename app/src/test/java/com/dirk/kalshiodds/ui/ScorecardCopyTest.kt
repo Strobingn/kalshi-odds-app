@@ -279,6 +279,7 @@ class ScorecardCopyTest {
         assertTrue(populated.isNotEmpty())
         assertTrue(populated.all { !it.line.contains(ScorecardLedger.ENTRY_NOT_RECORDED) })
         assertTrue(populated.all { it.line.contains("ct") && it.line.contains("stake") && it.line.contains("fee") })
+        assertTrue(populated.all { it.line.contains("Kelly") && it.line.contains("bankroll") })
         assertTrue(view.recent.none { it.ticker.contains("ETH") || it.ticker.contains("SOL") })
     }
 }

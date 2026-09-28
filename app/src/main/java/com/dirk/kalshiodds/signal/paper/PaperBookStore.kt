@@ -24,8 +24,9 @@ class PaperBookStore(
 
     private fun load(): PaperBookState {
         val raw = prefs.getString(KEY, null) ?: return PaperBookState()
-        return runCatching { json.decodeFromString(PaperBookState.serializer(), raw) }
-            .getOrElse { PaperBookState() }
+        val decoded = runCatching { json.decodeFromString(PaperBookState.serializer(), raw) }
+            .getOrElse { return PaperBookState() }
+        return PaperBookState.migrateStartUsd(decoded)
     }
 
     private fun save(state: PaperBookState) {
