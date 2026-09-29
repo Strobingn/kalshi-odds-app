@@ -988,7 +988,11 @@ class ScoringEngine(
     companion object {
         const val W_AI = 0.0
         const val W_FLOW = 0.12
-        const val W_RELATED = 0.08
+        /**
+         * Related-crypto YES mids are other coins / other strikes — not
+         * this market's P(YES). Weight stays 0 (Bitcoin-only).
+         */
+        const val W_RELATED = 0.0
         const val W_VELOCITY = 0.10
         const val W_IMBALANCE = 0.10
         const val W_LEADLAG = 0.10
@@ -997,7 +1001,7 @@ class ScoringEngine(
 
         const val W_AI_LATE = 0.0
         const val W_FLOW_LATE = 0.14
-        const val W_RELATED_LATE = 0.04
+        const val W_RELATED_LATE = 0.0
         const val W_VELOCITY_LATE = 0.14
         const val W_IMBALANCE_LATE = 0.14
         const val W_LEADLAG_LATE = 0.06

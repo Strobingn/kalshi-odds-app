@@ -49,7 +49,9 @@ data class PaperFill(
     /** Settings Kelly fraction (0.1–1.0) used to size this fill. */
     val kellyFraction: Double? = null,
     /** Paper bankroll (start + settled P&L) after this fill settled. */
-    val bankrollAfterUsd: Double? = null
+    val bankrollAfterUsd: Double? = null,
+    /** Expected $ of this clip at fill time (`n × (p − ask − fee)`). */
+    val evUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
@@ -304,8 +306,17 @@ class PaperBook(
         book: BookLevelSnapshot? = null
     ): PaperFill? {
         if (!enabled) return null
+        val ctx = com.dirk.kalshiodds.signal.trade.TicketBuilder.Context(
+            settings = com.dirk.kalshiodds.signal.config.SignalSettings(),
+            alertsPaused = false,
+            books = book?.let { mapOf(fired.ticker to it) } ?: emptyMap()
+        )
         val liveAsk = market?.let {
-            com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(it, fired.side)
+            com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(it, fired.side, ctx)
+        } ?: com.dirk.kalshiodds.signal.trade.TicketBuilder.bookAskOrNull(fired.side, book)
+        if (book != null && !book.isEmpty() && liveAsk == null) {
+            rememberMessage("Paper skip ${fired.ticker} — live book has no sellers")
+            return null
         }
         if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
                 fired,
@@ -335,6 +346,42 @@ class PaperBook(
             winChance = fired.winChance,
             depthContracts = depth,
             meta = meta
+        )
+    }
+
+    /**
+     * Autopilot paper fill. Allows more than one open clip on the same
+     * ticker (re-entry guard lives in [PaperAutopilot]). Never hits Kalshi.
+     */
+    fun considerAutopilot(
+        ticker: String,
+        side: String,
+        ask: Double,
+        winProb: Double,
+        depthContracts: Int?,
+        evPerContract: Double? = null,
+        enabled: Boolean
+    ): PaperFill? {
+        if (!enabled) return null
+        val px = KalshiPrice.usable(ask) ?: return null
+        val p = winProb.takeIf { it.isFinite() } ?: return null
+        val meta = PaperFillMeta(
+            aiPct = PaperFill.pctFromUnit(p),
+            marketPct = PaperFill.pctFromUnit(px),
+            pickSource = PaperPickSource.AUTOPILOT,
+            evUsd = evPerContract
+        )
+        if (!PaperFill.allowCreate(PaperPickSource.AUTOPILOT, meta.aiPct)) return null
+        return fill(
+            ticker = ticker,
+            side = side,
+            limitPrice = px,
+            source = PaperAutopilot.SOURCE,
+            note = "AI paper autopilot · Kelly · never sent to Kalshi",
+            winChance = p,
+            depthContracts = depthContracts,
+            meta = meta,
+            allowMultipleOpen = true
         )
     }
 
@@ -759,7 +806,8 @@ class PaperBook(
         winChance: Double? = null,
         depthContracts: Int? = null,
         winTargetUsd: Double? = null,
-        meta: PaperFillMeta = PaperFillMeta()
+        meta: PaperFillMeta = PaperFillMeta(),
+        allowMultipleOpen: Boolean = false
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -767,7 +815,11 @@ class PaperBook(
         val p = winChance ?: meta.aiPct?.let { if (it <= 1.0 + 1e-9) it else it / 100.0 }
         synchronized(lock) {
             val cur = _state.value
-            if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null
+            if (!allowMultipleOpen &&
+                cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }
+            ) {
+                return null
+            }
             val bankroll = cur.paperBankrollUsd.coerceAtLeast(cur.cashUsd)
             val sized = PaperKellySizer.size(
                 winProb = p,
@@ -812,7 +864,10 @@ class PaperBook(
                 winTargetUsd = winTargetUsd,
                 meta = meta,
                 kellyF = sized.kellyF,
-                kellyFraction = sized.kellyFraction
+                kellyFraction = sized.kellyFraction,
+                evUsd = (meta.evUsd ?: p?.let { win ->
+                    win * SignalConstants.CONTRACT_SETTLEMENT_USD - sized.costPerContract
+                })?.let { it * useQty }
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(
@@ -848,7 +903,8 @@ class PaperBook(
         meta: PaperFillMeta = PaperFillMeta(),
         kellyF: Double? = null,
         kellyFraction: Double? = null,
-        bankrollAfterUsd: Double? = null
+        bankrollAfterUsd: Double? = null,
+        evUsd: Double? = null
     ): PaperFill = PaperFill(
         id = idFactory(),
         ticker = ticker,
@@ -866,7 +922,8 @@ class PaperBook(
         pickSource = meta.pickSource?.label,
         kellyF = kellyF,
         kellyFraction = kellyFraction,
-        bankrollAfterUsd = bankrollAfterUsd
+        bankrollAfterUsd = bankrollAfterUsd,
+        evUsd = evUsd ?: meta.evUsd
     )
 
     private fun nextLifetime(cur: PaperBookState, addedPnl: Double): Double {

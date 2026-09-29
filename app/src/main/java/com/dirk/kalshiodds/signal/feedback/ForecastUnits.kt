@@ -12,9 +12,9 @@ import kotlin.math.abs
  * actually showed / would have bet.
  *
  * P(YES) / P(UP) Brier is `(p − 1_{result=yes})²` and stays a calibration
- * score of the YES probability. Picked-side Brier uses `p_side`
- * (P(NO) when the pick is NO) against the YES settlement bit so a fade of
- * p(YES)=0.945 that loses is ≈0.893, not the misleading P(YES) 0.003.
+ * score of the YES probability. Picked-side Brier uses P(NO) and the NO
+ * outcome for a NO pick. With binary outcomes the two Briers are equal.
+ * Side hit rate and realized P&L measure the decision to trade.
  */
 object ForecastUnits {
 
@@ -65,16 +65,17 @@ object ForecastUnits {
 
     /**
      * Picked-side Brier: `p_side` is P(YES) when the pick is YES and
-     * `1 − P(YES)` when the pick is NO. Compared to the YES settlement
-     * bit so a losing fade does not collapse to the P(YES) Brier.
+     * `1 − P(YES)` when the pick is NO. Compare with whether that same
+     * side settles, so complementing the forecast and outcome leaves the
+     * proper score unchanged. A low Brier does not mean a bet was good.
      *
-     * predictedYes=0.945, predictedSide=NO, result=yes →
-     * p_side=0.055, y=1, (0.055−1)² ≈ 0.893 (not 0.003).
+     * predictedYes=0.20, predictedSide=NO, result=no →
+     * p_side=0.80, y_NO=1, (0.80−1)² = 0.04 (not (0.80−0)² = 0.64).
      */
     fun sideBrier(e: PredictionLogEntry): Double {
         val pSide = sideProbability01(e)
-        val yYes = if (outcomeYes(e.outcome)) 1.0 else 0.0
-        val d = pSide - yYes
+        val ySide = if (pickedSideIsYes(e) == outcomeYes(e.outcome)) 1.0 else 0.0
+        val d = pSide - ySide
         return d * d
     }
 

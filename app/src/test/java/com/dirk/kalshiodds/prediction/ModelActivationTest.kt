@@ -18,7 +18,8 @@ class ModelActivationTest {
         marketBrier = 0.186,
         modelLogLoss = 0.480,
         marketLogLoss = 0.520,
-        countsPresent = true
+        countsPresent = true,
+        dataSource = EdgeModelManifest.PROVENANCE_LIVE
     )
 
     @Test
@@ -35,7 +36,8 @@ class ModelActivationTest {
               "market_brier": 0.186,
               "model_logloss": 0.48,
               "market_logloss": 0.52,
-              "synthetic": false
+              "synthetic": false,
+              "data_source": "kalshi_settled_coinbase_spot_v1"
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
@@ -57,7 +59,8 @@ class ModelActivationTest {
               "model_brier": 0.10,
               "market_brier": 0.22,
               "model_logloss": 0.40,
-              "market_logloss": 0.58
+              "market_logloss": 0.58,
+              "data_source": "kalshi_settled_coinbase_spot_v1"
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
@@ -141,6 +144,43 @@ class ModelActivationTest {
         assertEquals(m.nRows, again.nRows)
         assertEquals(m.beatsMarket, again.beatsMarket)
         assertFalse(again.synthetic)
+    }
+
+    @Test
+    fun refusesMissingProvenanceOnAutoActivate() {
+        val raw = """
+            {
+              "version": "2",
+              "trained_at": "2026-09-25T00:00:00Z",
+              "n_samples": 12000,
+              "n_rows": 12000,
+              "n_markets": 2500,
+              "n_holdout": 800,
+              "model_brier": 0.16,
+              "market_brier": 0.186,
+              "model_logloss": 0.48,
+              "market_logloss": 0.52
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        assertEquals(EdgeModelManifest.PROVENANCE_UNKNOWN, m.dataSource)
+        assertTrue("metrics can still beat the market; auto-activate is a separate gate", m.beatsMarket)
+        val auto = ModelActivation.decide(m, modelValid = true)
+        assertFalse(auto.activate)
+        assertTrue(auto.reason.contains("provenance") || auto.reason.contains("synthetic"))
+        val manual = ModelActivation.decide(m, modelValid = true, requireProvenance = false)
+        assertTrue(manual.activate)
+    }
+
+    @Test
+    fun refusesSyntheticFixtureProvenance() {
+        val m = honestPass().copy(
+            synthetic = false,
+            dataSource = EdgeModelManifest.PROVENANCE_SYNTHETIC
+        )
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("synthetic") || d.reason.contains("provenance"))
     }
 
     @Test

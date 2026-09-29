@@ -40,7 +40,9 @@ object SignalConstants {
     /** Legacy $5 clip — unused for AI paper (Kelly). Kept so History restore still reads. */
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
-    const val PAPER_LEDGER_MAX = 40
+    /** AI paper autopilot — default on. Manual Paper UP/DOWN is separate. */
+    const val DEFAULT_AI_PAPER_AUTOPILOT = true
+    const val PAPER_LEDGER_MAX = 80
 
     /**
      * Live-card advisory Kelly fraction for [com.dirk.kalshiodds.signal.sizing.PositionSizer]
@@ -104,9 +106,12 @@ object SignalConstants {
     const val DEFAULT_DRAWDOWN_USD = 50.0
     const val DEFAULT_RESUME_ON_NEW_SESSION = true
 
-    const val MIN_ADAPTER_SAMPLES = 8
+    /** Reweight blend channels only after this many settlements. Was 8. */
+    const val MIN_ADAPTER_SAMPLES = 100
     const val ADAPTER_LEARNING_RATE = 0.08
     const val ADAPTER_WEIGHT_EMA = 0.15
+    /** L2-style pull of each channel weight toward the prior (1.0). */
+    const val ADAPTER_PRIOR_SHRINK = 0.05
 
     const val EXTERNAL_CACHE_MS = 25_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L

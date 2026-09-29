@@ -186,6 +186,33 @@ class AllowlistTest {
         assertTrue(state.isRegimeMuted("CHOP"))
         assertFalse(state.isRegimeMuted("TREND"))
     }
+
+    @Test
+    fun noBetWindowsAreNotCountedAsMuteLosses() {
+        val now = 2_000_000_000_000L
+        val wins = (0 until 8).map { i ->
+            settled("KXBTC15M-w$i", "KXBTC15M", hit = true, ts = now, regime = "TREND", tte = "EARLY")
+        }
+        val losses = (0 until 4).map { i ->
+            settled("KXBTC15M-l$i", "KXBTC15M", hit = false, ts = now, regime = "TREND", tte = "EARLY")
+        }
+        val abstain = (0 until 31).map { i ->
+            settled(
+                ticker = "KXBTC15M-nb$i",
+                series = "KXBTC15M",
+                hit = false,
+                ts = now,
+                regime = "TREND",
+                tte = "EARLY"
+            ).copy(predictedSide = "NO_BET", score = 0)
+        }
+        val state = Allowlist.evaluate(wins + losses + abstain, nowMs = now, floor = 0.40, minSamples = 8)
+        val btc = state.buckets.first { it.key == "KXBTC15M" }
+        assertEquals(8, btc.hits)
+        assertEquals(12, btc.total)
+        assertEquals(8.0 / 12.0, btc.hitRate, 1e-9)
+        assertFalse(state.isSeriesMuted("KXBTC15M"))
+    }
 }
 
 class GuardrailsTest {
@@ -258,6 +285,50 @@ class GuardrailsTest {
         val loseYes = settled("L", "KXBTC15M", hit = false, ts = 1, mid = 0.40, side = "YES")
         assertEquals(-0.40, Guardrails.oneContractPnl(loseYes), 1e-9)
     }
+
+    @Test
+    fun noBetDoesNotCountAsGuardrailLoss() {
+        val t = Guardrails.Thresholds(streakN = 3, drawdownUsd = 1_000.0)
+        val abstain = (1..5).map { i ->
+            settled("NB$i", "KXBTC15M", hit = false, ts = i.toLong(), mid = 0.50)
+                .copy(predictedSide = "NO_BET", score = 0)
+        }
+        val state = Guardrails.update(Guardrails.identity(), abstain, t, 10)
+        assertFalse(state.paused)
+        assertEquals(0, state.consecutiveWrong)
+        assertEquals(0, state.processed)
+        assertEquals(0.0, Guardrails.oneContractPnl(abstain.first()), 1e-9)
+    }
+
+    @Test
+    fun migrateRebuildsProxyWithoutNoBetLosses() {
+        val t = Guardrails.Thresholds(streakN = 3, drawdownUsd = 1_000.0)
+        val stale = Guardrails.State(
+            consecutiveWrong = 8,
+            rollingPnl = -8.0,
+            peakPnl = 0.0,
+            paused = true,
+            pauseReason = "alerts paused — streak guard (8 wrong in a row)",
+            lastSettledAtMs = 0L,
+            processed = 43,
+            accountingVersion = 1
+        )
+        val wins = (1..8).map { i ->
+            settled("W$i", "KXBTC15M", hit = true, ts = i.toLong(), mid = 0.50)
+        }
+        val losses = (1..4).map { i ->
+            settled("L$i", "KXBTC15M", hit = false, ts = 20L + i, mid = 0.50)
+        }
+        val abstain = (1..31).map { i ->
+            settled("N$i", "KXBTC15M", hit = false, ts = 40L + i, mid = 0.50)
+                .copy(predictedSide = "NO_BET", score = 0)
+        }
+        val next = Guardrails.migrateIfNeeded(stale, wins + losses + abstain, t, 100)
+        assertEquals(2, next.accountingVersion)
+        assertEquals(4, next.consecutiveWrong)
+        assertEquals(12, next.processed)
+        assertTrue(next.paused)
+    }
 }
 
 class OnlineAdapterTest {
@@ -307,7 +378,7 @@ class OnlineAdapterTest {
             )
         }
         val state = OnlineAdapter.update(OnlineAdapter.identity(), rows, nowMs = now + 50)
-        assertTrue(state.ready)
+        assertFalse("12 settlements is below the 100-sample adapter gate", state.ready)
         // Stacked Platt layer is disabled — Calibrator is the only p remap.
         val cal = OnlineAdapter.apply(0.92, state)
         assertEquals(0.92, cal, 1e-12)

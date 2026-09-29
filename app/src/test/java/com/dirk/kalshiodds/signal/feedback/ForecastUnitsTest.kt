@@ -22,7 +22,7 @@ class ForecastUnitsTest {
     }
 
     @Test
-    fun fadeOfHighYesThatLosesIsZeroHitsAndSideBrierAboutPointEightNineThree() {
+    fun fadeOfHighYesThatLosesIsZeroHitsAndComplementedBrier() {
         val rows = (0 until 5).map { i ->
             row(
                 ticker = "KXETH15M-$i",
@@ -37,12 +37,13 @@ class ForecastUnitsTest {
         val sideBrier = rows.map { ForecastUnits.sideBrier(it) }.average()
         val yesBrier = rows.map { ForecastUnits.brier(it) }.average()
         assertEquals(0, hits)
-        val pSide = 1.0 - 0.945
-        val expectedSide = (pSide - 1.0) * (pSide - 1.0)
+        // P(NO)=0.055 vs NO not settling → (0.055−0)² = P(YES) Brier.
+        val pNo = 1.0 - 0.945
+        val expectedSide = (pNo - 0.0) * (pNo - 0.0)
         assertEquals(expectedSide, sideBrier, 1e-9)
-        assertTrue("side-Brier must be ~0.893, not the P(YES) 0.003", abs(sideBrier - 0.893) < 0.002)
-        assertFalse(abs(sideBrier - 0.003) < 0.001)
-        assertEquals((0.945 - 1.0) * (0.945 - 1.0), yesBrier, 1e-9)
+        assertEquals(yesBrier, sideBrier, 1e-9)
+        assertTrue(abs(sideBrier - 0.003) < 0.001)
+        assertFalse("old bug compared P(NO) with YES settling (~0.893)", abs(sideBrier - 0.893) < 0.002)
 
         val card = ScorecardMetrics.window(rows)
         assertEquals(0, card.hits)
@@ -50,6 +51,22 @@ class ForecastUnitsTest {
         assertEquals(sideBrier, card.brier!!, 1e-9)
         assertEquals(yesBrier, card.pUpBrier!!, 1e-9)
         assertFalse(card.showBrier)
+    }
+
+    @Test
+    fun winningNoPickComparesPNoWithNoSettling() {
+        val row = row(
+            ticker = "KXBTC15M-WINNO",
+            predictedYes = 0.20,
+            outcome = "no",
+            predictedSide = "NO"
+        )
+        assertTrue(ForecastUnits.hit(row))
+        val side = ForecastUnits.sideBrier(row)
+        val yes = ForecastUnits.brier(row)
+        assertEquals((0.80 - 1.0) * (0.80 - 1.0), side, 1e-9)
+        assertEquals(yes, side, 1e-9)
+        assertFalse("old bug scored winning NO as (0.80−0)² = 0.64", abs(side - 0.64) < 0.01)
     }
 
     @Test
@@ -116,7 +133,7 @@ class ForecastUnitsTest {
         }
         val card = ScorecardMetrics.window(rows)
         assertEquals(0, card.hits)
-        assertEquals((1.0 - 0.945 - 1.0) * (1.0 - 0.945 - 1.0), card.brier!!, 1e-9)
+        assertEquals((1.0 - 0.945) * (1.0 - 0.945), card.brier!!, 1e-9)
         assertTrue(rows.all { it.score == 1 && it.brier == 0.003 })
     }
 

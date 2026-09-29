@@ -105,6 +105,7 @@ class PublishSafetyTest(unittest.TestCase):
             self.assertEqual(rc, 0)
             payload = json.loads(man.read_text())
             self.assertTrue(payload["synthetic"])
+            self.assertEqual(payload["data_source"], "synthetic_fixture")
             self.assertFalse(payload["beats_market"])
             self.assertFalse(payload["publishable"])
             self.assertGreaterEqual(payload["n_markets"], 1)

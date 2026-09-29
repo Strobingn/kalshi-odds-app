@@ -162,6 +162,34 @@ class MarketAskMappingTest {
         )
         assertEquals(0.03, TicketBuilder.bestAsk(ui, "YES", ctx)!!, 1e-9)
     }
+
+    @Test
+    fun liveBookWithNoSellersDoesNotFallBackToStaleRestAsk() {
+        val ui = MarketDto(
+            ticker = "KXBTC15M-EMPTY-SIDE",
+            yesAskDollars = "0.2200",
+            noAskDollars = "0.8000",
+            yesBidDollars = "0.2000",
+            noBidDollars = "0.7800",
+            status = "active"
+        ).toUiModel(SeriesKind.BTC)
+        // Live book has YES bids (NO sellers) but no NO bids (no YES sellers).
+        val book = BookLevelSnapshot(yes = listOf(0.20 to 50.0), no = emptyList())
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(ticketsEnabled = true),
+            alertsPaused = false,
+            books = mapOf(ui.ticker to book),
+            nowMs = 1_000L
+        )
+        assertNull(TicketBuilder.bestAsk(ui, "YES", ctx))
+        assertNull(TicketBuilder.liveAsk(ui, "YES", ctx))
+        assertEquals(0.80, TicketBuilder.bestAsk(ui, "NO", ctx)!!, 1e-9)
+        assertEquals(0.80, TicketBuilder.liveAsk(ui, "NO", ctx)!!, 1e-9)
+        val noSellersYes = BookLevelSnapshot(yes = emptyList(), no = listOf(0.78 to 40.0))
+        val yesCtx = ctx.copy(books = mapOf(ui.ticker to noSellersYes))
+        assertEquals(0.22, TicketBuilder.liveAsk(ui, "YES", yesCtx)!!, 1e-9)
+        assertNull(TicketBuilder.liveAsk(ui, "NO", yesCtx))
+    }
 }
 
 class ExpiredMarketPruneTest {

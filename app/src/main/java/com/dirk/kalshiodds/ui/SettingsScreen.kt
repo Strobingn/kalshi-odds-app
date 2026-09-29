@@ -689,6 +689,15 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             ToggleRow("Paper trading (AI Kelly auto-fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("AI paper autopilot", s.aiPaperAutopilotEnabled, { viewModel?.setAiPaperAutopilot(it) })
+            Text(
+                "When on (default), the AI places paper bets at any time in the window, on either side, " +
+                    "as often as +EV after fees says. Sized by half-Kelly on the paper bankroll (no dollar cap; " +
+                    "book-depth cap still applies). Flip-chance still blocks lottery prints. Off = no AI paper bets; " +
+                    "manual Paper UP/DOWN still works. Never places a real order.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
             Text(
                 String.format(
                     Locale.US,
@@ -824,7 +833,7 @@ fun SettingsContent(
 
             Section("Kalshi demo (play money)")
             Text(
-                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                "Separate from the local \$1,000 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
                     "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
                     "Paper Buy still works with no key and never hits this host.",
                 style = MaterialTheme.typography.labelMedium,
