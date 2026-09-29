@@ -67,6 +67,8 @@ class SignalHub(
     )
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
+    private val lastSnapshotPersistMs = ConcurrentHashMap<String, Long>()
+    private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
@@ -331,8 +333,36 @@ class SignalHub(
 
     private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
         val now = System.currentTimeMillis()
-        runCatching {
-            results?.enqueueSnapshot(
+        if (results != null && tick.source == TickSource.WS_ORDERBOOK &&
+            CryptoMarkets.isLiveTicker(tick.ticker) && scored.passedFilter &&
+            kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp() &&
+            forwardLoggedTickers.add(tick.ticker)) {
+            val logged = runCatching {
+                val side = SignalStance.resolve(
+                    storedSide = scored.predictedSide,
+                    modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                    marketYes = scored.marketMidPp,
+                    fairYes = scored.fairValuePp
+                ).storedSide
+                val row = com.dirk.kalshiodds.signal.feedback.ForwardTest.capture(
+                    ticker = tick.ticker,
+                    series = tick.series,
+                    atMs = now,
+                    modelYes = scored.fairValuePp / 100.0,
+                    marketYes = scored.marketMidPp / 100.0,
+                    side = side,
+                    book = scoring.book.snapshotBook(tick.ticker),
+                    feeRate = settings.feeRate
+                ) ?: return@runCatching false
+                results.enqueueForwardTest(row)
+                true
+            }.getOrDefault(false)
+            if (!logged) forwardLoggedTickers.remove(tick.ticker)
+        }
+        val lastSnapshot = lastSnapshotPersistMs[tick.ticker] ?: 0L
+        if (now - lastSnapshot >= 5_000L) {
+            lastSnapshotPersistMs[tick.ticker] = now
+            runCatching { results?.enqueueSnapshot(
                 ScoredSnapshotRow(
                     ticker = tick.ticker,
                     series = tick.series,
@@ -348,7 +378,7 @@ class SignalHub(
                     heavyMl = scored.heavyMl,
                     note = scored.ensembleNote
                 )
-            )
+            ) }
         }
         // SQLite/text already have the row. Skip the DataStore JSON rewrite
         // when heap is tight or another write is in flight — that rewrite is

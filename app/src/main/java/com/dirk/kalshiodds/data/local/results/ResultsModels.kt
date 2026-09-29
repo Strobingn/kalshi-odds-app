@@ -69,6 +69,23 @@ data class OddsMidRow(
     val noBid: Double? = null
 )
 
+/** First qualifying live signal for a market, retained independently of rolling predictions. */
+data class ForwardTestRow(
+    val ticker: String,
+    val series: String,
+    val capturedAtMs: Long,
+    val modelYes: Double,
+    val marketYes: Double,
+    val side: String,
+    val bookAsk: Double?,
+    val sizeAtAsk: Double?,
+    val contracts: Int?,
+    val allInUsd: Double?,
+    val feeUsd: Double?,
+    val quoteQualified: Boolean,
+    val outcome: String? = null
+)
+
 data class ResultsBundle(
     val snapshots: List<ScoredSnapshotRow> = emptyList(),
     val alerts: List<AlertRow> = emptyList(),
@@ -82,10 +99,12 @@ interface ResultsStore {
     fun insertScorecard(row: ScorecardRow)
     fun insertTicket(row: TicketAttemptRow)
     fun insertOddsMids(rows: List<OddsMidRow>)
+    fun insertForwardTests(rows: List<ForwardTestRow>)
     fun recentSnapshots(limit: Int = 80): List<ScoredSnapshotRow>
     fun recentAlerts(limit: Int = 40): List<AlertRow>
     fun recentScorecards(limit: Int = 80): List<ScorecardRow>
     fun recentTickets(limit: Int = 40): List<TicketAttemptRow>
     fun recentOddsMids(limit: Int = 800): List<OddsMidRow>
+    fun forwardTests(limit: Int = 5_000): List<ForwardTestRow>
     fun exportBundle(limit: Int = 400): ResultsBundle
 }

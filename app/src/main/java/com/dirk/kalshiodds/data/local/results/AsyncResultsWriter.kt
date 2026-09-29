@@ -27,17 +27,16 @@ class AsyncResultsWriter(
     private val tickets = ConcurrentLinkedQueue<TicketAttemptRow>()
     private val odds = ConcurrentLinkedQueue<OddsMidRow>()
     private val chartTicks = ConcurrentLinkedQueue<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
+    private val forwardTests = ConcurrentLinkedQueue<ForwardTestRow>()
     private val flushScheduled = AtomicBoolean(false)
 
     fun enqueueSnapshot(row: ScoredSnapshotRow) {
         snapshots.add(row)
-        textLog?.append(ResultsExporter.logLine(row))
         schedule()
     }
 
     fun enqueueAlert(row: AlertRow) {
         alerts.add(row)
-        textLog?.append(ResultsExporter.logLine(row))
         schedule()
     }
 
@@ -48,7 +47,6 @@ class AsyncResultsWriter(
 
     fun enqueueTicket(row: TicketAttemptRow) {
         tickets.add(row)
-        textLog?.append(ResultsExporter.logLine(row))
         schedule()
     }
 
@@ -59,6 +57,11 @@ class AsyncResultsWriter(
 
     fun enqueueChartTick(row: com.dirk.kalshiodds.data.local.archive.ChartTickRow) {
         chartTicks.add(row)
+        schedule()
+    }
+
+    fun enqueueForwardTest(row: ForwardTestRow) {
+        forwardTests.add(row)
         schedule()
     }
 
@@ -80,21 +83,33 @@ class AsyncResultsWriter(
 
     private fun pending(): Boolean =
         snapshots.isNotEmpty() || alerts.isNotEmpty() || scorecards.isNotEmpty() ||
-            tickets.isNotEmpty() || odds.isNotEmpty() || chartTicks.isNotEmpty()
+            tickets.isNotEmpty() || odds.isNotEmpty() || chartTicks.isNotEmpty() || forwardTests.isNotEmpty()
 
     @Synchronized
     private fun drain() {
+        runCatching {
+            val batch = ArrayList<ForwardTestRow>(maxBatch)
+            while (batch.size < maxBatch) {
+                val next = forwardTests.poll() ?: break
+                batch.add(next)
+            }
+            if (batch.isNotEmpty()) store.insertForwardTests(batch)
+        }
         runCatching {
             val batch = ArrayList<ScoredSnapshotRow>(maxBatch)
             while (batch.size < maxBatch) {
                 val next = snapshots.poll() ?: break
                 batch.add(next)
             }
-            if (batch.isNotEmpty()) store.insertSnapshots(batch)
+            if (batch.isNotEmpty()) {
+                batch.forEach { textLog?.append(ResultsExporter.logLine(it)) }
+                store.insertSnapshots(batch)
+            }
         }
         runCatching {
             while (true) {
                 val next = alerts.poll() ?: break
+                textLog?.append(ResultsExporter.logLine(next))
                 store.insertAlert(next)
             }
         }
@@ -107,6 +122,7 @@ class AsyncResultsWriter(
         runCatching {
             while (true) {
                 val next = tickets.poll() ?: break
+                textLog?.append(ResultsExporter.logLine(next))
                 store.insertTicket(next)
             }
         }

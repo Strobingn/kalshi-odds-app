@@ -62,6 +62,48 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
     }
 
+    override fun insertForwardTests(rows: List<ForwardTestRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                val v = ContentValues().apply {
+                    put("ticker", r.ticker); put("series", r.series); put("captured_at_ms", r.capturedAtMs)
+                    put("model_yes", r.modelYes); put("market_yes", r.marketYes); put("side", r.side)
+                    put("book_ask", r.bookAsk); put("size_at_ask", r.sizeAtAsk)
+                    put("contracts", r.contracts); put("all_in_usd", r.allInUsd); put("fee_usd", r.feeUsd)
+                    put("quote_qualified", if (r.quoteQualified) 1 else 0)
+                }
+                w.insertWithOnConflict(TABLE_FORWARD, null, v, SQLiteDatabase.CONFLICT_IGNORE)
+            }
+            w.execSQL("DELETE FROM $TABLE_FORWARD WHERE ticker NOT IN " +
+                "(SELECT ticker FROM $TABLE_FORWARD ORDER BY captured_at_ms DESC LIMIT $MAX_FORWARD)")
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+    }
+
+    override fun forwardTests(limit: Int): List<ForwardTestRow> {
+        val out = ArrayList<ForwardTestRow>()
+        db.readableDatabase.rawQuery(
+            "SELECT f.*, s.result AS outcome FROM $TABLE_FORWARD f " +
+                "LEFT JOIN $TABLE_SETTLED s ON s.ticker = f.ticker " +
+                "ORDER BY f.captured_at_ms DESC LIMIT ?",
+            arrayOf(limit.coerceIn(1, MAX_FORWARD).toString())
+        ).use { c ->
+            while (c.moveToNext()) out.add(ForwardTestRow(
+                ticker = c.str("ticker"), series = c.str("series"),
+                capturedAtMs = c.long("captured_at_ms"), modelYes = c.dbl("model_yes"),
+                marketYes = c.dbl("market_yes"), side = c.str("side"),
+                bookAsk = c.dblOrNull("book_ask"), sizeAtAsk = c.dblOrNull("size_at_ask"),
+                contracts = c.intOrNull("contracts"), allInUsd = c.dblOrNull("all_in_usd"),
+                feeUsd = c.dblOrNull("fee_usd"), quoteQualified = c.long("quote_qualified") == 1L,
+                outcome = c.strOrNull("outcome")
+            ))
+        }
+        return out
+    }
+
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
         query(TABLE_SNAP, limit) { cursorToSnap(it) }
 
@@ -877,6 +919,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createArchiveTables(db)
             createHistoryTables(db)
             createChartTickTable(db)
+            createForwardTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -887,6 +930,19 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             }
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
+            if (oldVersion < 6) createForwardTable(db)
+        }
+
+        private fun createForwardTable(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS $TABLE_FORWARD (
+                    ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
+                    model_yes REAL NOT NULL, market_yes REAL NOT NULL, side TEXT NOT NULL,
+                    book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL,
+                    fee_usd REAL, quote_qualified INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_forward_time ON $TABLE_FORWARD(captured_at_ms)")
         }
 
         private fun createChartTickTable(db: SQLiteDatabase) {
@@ -997,7 +1053,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 5
+        const val DB_VERSION = 6
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
@@ -1012,6 +1068,8 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val TABLE_FILL = "imported_fills"
         const val TABLE_CURSOR = "backfill_cursor"
         const val TABLE_CHART = com.dirk.kalshiodds.data.local.chart.ChartTickSchema.TABLE
+        const val TABLE_FORWARD = "forward_test"
+        const val MAX_FORWARD = 5_000
         const val MAX_SNAP = 1_200
         const val MAX_ALERT = 400
         const val MAX_CARD = 600

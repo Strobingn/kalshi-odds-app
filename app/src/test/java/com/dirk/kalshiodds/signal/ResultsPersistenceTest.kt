@@ -5,12 +5,14 @@ import com.dirk.kalshiodds.data.local.results.AsyncResultsWriter
 import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
 import com.dirk.kalshiodds.data.local.results.InMemoryResultsStore
 import com.dirk.kalshiodds.data.local.results.ResultsExporter
+import com.dirk.kalshiodds.data.local.results.RollingTextLog
 import com.dirk.kalshiodds.data.local.results.ScorecardRow
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
 import com.dirk.kalshiodds.signal.engine.BookScoreGate
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.ml.SafeMl
+import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -159,6 +161,27 @@ class ResultsPersistenceTest {
         }
         writer.flushNow()
         assertEquals(5, store.recentSnapshots(20).size)
+    }
+
+    @Test
+    fun resultsTextFileIsWrittenDuringDrainNotOnTheScoringCaller() {
+        val file = File.createTempFile("diphunter-results", ".log")
+        try {
+            val writer = AsyncResultsWriter(
+                store = InMemoryResultsStore(), textLog = RollingTextLog(file),
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+                flushDelayMs = 60_000L
+            )
+            writer.enqueueSnapshot(ScoredSnapshotRow(
+                ticker = "KXBTC15M-A", series = "KXBTC15M", side = "YES", edgePp = 5.0,
+                fairPp = 55.0, marketPp = 50.0, regime = null, uncertainty = null, createdAtMs = 1L
+            ))
+            assertEquals("", file.readText())
+            writer.flushNow()
+            assertTrue(file.readText().contains("KXBTC15M-A"))
+        } finally {
+            file.delete()
+        }
     }
 }
 

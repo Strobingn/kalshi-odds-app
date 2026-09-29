@@ -29,7 +29,9 @@ data class ScorecardUi(
     val exportMessage: String? = null,
     val sitOut: Boolean = false,
     val autoTuneNote: String = "",
-    val modelNote: String? = null
+    val modelNote: String? = null,
+    val forwardTest: com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary =
+        com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary()
 ) {
     companion object {
         val EMPTY = ScorecardUi(ScorecardCopy.EMPTY)
@@ -78,6 +80,22 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun exportForwardTest() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val csv = com.dirk.kalshiodds.signal.feedback.ForwardTest.csv(
+                        container.resultsStore.forwardTests()
+                    )
+                    ResultsFileExport.write(getApplication(), csv, prefix = "diphunter-forward-test")
+                }.getOrElse {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
+                }
+            }
+            _exportMessage.value = result.message
+        }
+    }
+
     val snapshot: StateFlow<ScorecardUi> = combine(
         container.logStore.entriesFlow,
         container.paper.book.state,
@@ -86,7 +104,10 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         combine(_exportMessage, _modelNote) { export, note -> export to note }
     ) { entries, paper, adapter, guard, notes ->
         val settings = container.hub.settings
-        val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
+        val (windows, forwardRows) = withContext(Dispatchers.IO) {
+            runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() } to
+                runCatching { container.resultsStore.forwardTests() }.getOrElse { emptyList() }
+        }
         ScorecardUi(
             view = ScorecardCopy.of(entries, paper, windows),
             metrics = ScorecardMetrics.compute(
@@ -105,7 +126,8 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             exportMessage = notes.first,
             sitOut = settings.isSittingOut(),
             autoTuneNote = settings.autoTuneNote,
-            modelNote = notes.second
+            modelNote = notes.second,
+            forwardTest = com.dirk.kalshiodds.signal.feedback.ForwardTest.summarize(forwardRows)
         )
     }.stateIn(
         viewModelScope,
