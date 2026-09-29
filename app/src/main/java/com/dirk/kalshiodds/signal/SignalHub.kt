@@ -333,7 +333,8 @@ class SignalHub(
 
     private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
         val now = System.currentTimeMillis()
-        if (results != null && tick.source == TickSource.WS_ORDERBOOK &&
+        val forwardWriter = results
+        if (forwardWriter != null && tick.source == TickSource.WS_ORDERBOOK &&
             CryptoMarkets.isLiveTicker(tick.ticker) && scored.passedFilter &&
             kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp() &&
             forwardLoggedTickers.add(tick.ticker)) {
@@ -354,7 +355,7 @@ class SignalHub(
                     book = scoring.book.snapshotBook(tick.ticker),
                     feeRate = settings.feeRate
                 ) ?: return@runCatching false
-                results.enqueueForwardTest(row)
+                forwardWriter.enqueueForwardTest(row)
                 true
             }.getOrDefault(false)
             if (!logged) forwardLoggedTickers.remove(tick.ticker)
