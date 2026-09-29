@@ -164,7 +164,7 @@ class ModelActivationTest {
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
         assertEquals(EdgeModelManifest.PROVENANCE_UNKNOWN, m.dataSource)
-        assertFalse(m.beatsMarket)
+        assertTrue("metrics can still beat the market; auto-activate is a separate gate", m.beatsMarket)
         val auto = ModelActivation.decide(m, modelValid = true)
         assertFalse(auto.activate)
         assertTrue(auto.reason.contains("provenance") || auto.reason.contains("synthetic"))

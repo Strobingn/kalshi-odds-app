@@ -167,7 +167,10 @@ class PaperAutopilotTest {
         assertEquals(0, placed.get())
         assertEquals(0, session.placementCount)
         assertTrue(session.snapshot().phase is TicketPhase.Idle)
-        val src = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/paper/PaperAutopilot.kt").readText()
+        val src = listOf(
+            java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/paper/PaperAutopilot.kt"),
+            java.io.File("src/main/java/com/dirk/kalshiodds/signal/paper/PaperAutopilot.kt")
+        ).first { it.isFile }.readText()
         assertFalse(src.contains("placeOrder"))
         assertFalse(src.contains("KalshiTradeClient"))
         assertFalse(src.contains("TicketSession"))

@@ -378,7 +378,7 @@ class OnlineAdapterTest {
             )
         }
         val state = OnlineAdapter.update(OnlineAdapter.identity(), rows, nowMs = now + 50)
-        assertTrue(state.ready)
+        assertFalse("12 settlements is below the 100-sample adapter gate", state.ready)
         // Stacked Platt layer is disabled — Calibrator is the only p remap.
         val cal = OnlineAdapter.apply(0.92, state)
         assertEquals(0.92, cal, 1e-12)

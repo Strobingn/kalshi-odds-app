@@ -176,7 +176,6 @@ object ModelActivation {
 
     fun beatsMarket(m: EdgeModelManifest): Boolean {
         if (m.synthetic) return false
-        if (!hasLiveProvenance(m)) return false
         if (!m.countsPresent) return false
         if (m.nMarkets < MIN_PUBLISH_MARKETS) return false
         if (m.nRows < MIN_PUBLISH_ROWS && m.nSamples < MIN_PUBLISH_ROWS) return false
