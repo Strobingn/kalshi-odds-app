@@ -282,9 +282,10 @@ class PaperAutopilotTest {
         assertEquals(0.0, com.dirk.kalshiodds.signal.engine.ScoringEngine.W_RELATED_LATE, 0.0)
         assertEquals(0.0, com.dirk.kalshiodds.signal.engine.ScoringEngine.W_AI, 0.0)
         assertEquals(0.0, com.dirk.kalshiodds.signal.engine.ScoringEngine.W_AI_LATE, 0.0)
-        val w = com.dirk.kalshiodds.signal.engine.ScoringEngine.blendWeights(
-            tte = com.dirk.kalshiodds.signal.engine.ScoringEngine.TteRegime.EARLY,
-            regime = com.dirk.kalshiodds.signal.engine.ScoringEngine.RegimeTag.QUIET,
+        val engine = com.dirk.kalshiodds.signal.engine.ScoringEngine()
+        val w = engine.blendWeights(
+            tte = com.dirk.kalshiodds.signal.engine.TteRegime.EARLY,
+            regime = com.dirk.kalshiodds.signal.engine.RegimeTag.QUIET,
             hasAi = true,
             hasRelated = true,
             hasVel = false,

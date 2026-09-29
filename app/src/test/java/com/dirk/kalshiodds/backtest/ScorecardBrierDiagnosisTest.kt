@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.feedback.ForecastUnits
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
