@@ -21,6 +21,7 @@ object SettingsRestore {
         o.put("bankrollUsd", s.bankrollUsd)
         o.put("edgeThresholdPp", s.edgeThresholdPp)
         o.put("paperTradingEnabled", s.paperTradingEnabled)
+        o.put("aiPaperAutopilotEnabled", s.aiPaperAutopilotEnabled)
         o.put("paperBankrollStartUsd", s.paperBankrollStartUsd)
         o.put("kellyFraction", s.kellyFraction)
         o.put("paperKellyFraction", s.paperKellyFraction)
@@ -49,6 +50,7 @@ object SettingsRestore {
             bankrollUsd = o.optDoubleOrNull("bankrollUsd"),
             edgeThresholdPp = o.optDoubleOrNull("edgeThresholdPp"),
             paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
+            aiPaperAutopilotEnabled = if (o.has("aiPaperAutopilotEnabled")) o.optBoolean("aiPaperAutopilotEnabled") else null,
             paperBankrollStartUsd = o.optDoubleOrNull("paperBankrollStartUsd"),
             kellyFraction = o.optDoubleOrNull("kellyFraction"),
             paperKellyFraction = o.optDoubleOrNull("paperKellyFraction"),
@@ -81,6 +83,7 @@ data class RestoredSettings(
     val bankrollUsd: Double? = null,
     val edgeThresholdPp: Double? = null,
     val paperTradingEnabled: Boolean? = null,
+    val aiPaperAutopilotEnabled: Boolean? = null,
     val paperBankrollStartUsd: Double? = null,
     val kellyFraction: Double? = null,
     val paperKellyFraction: Double? = null,

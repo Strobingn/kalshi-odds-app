@@ -16,6 +16,7 @@ import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.paper.PaperAskDepth
+import com.dirk.kalshiodds.signal.paper.PaperAutopilot
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
@@ -824,23 +825,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 quiet = s.settings.opportunityQuiet
             )
         }
-        if (s.settings.paperTradingEnabled) {
-            paperBook.configure(
-                kellyFraction = s.settings.paperKellyFraction,
-                feeRate = s.settings.feeRate,
-                startUsd = s.settings.paperBankrollStartUsd
-            )
-            val paperCtx = ctx.copy(
-                bankrollUsd = paperBook.snapshot().paperBankrollUsd,
-                bankrollSource = "paper"
-            )
-            val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { ticket ->
-                val market = live.firstOrNull { m -> m.ticker.equals(ticket.ticker, true) }
-                val depth = paperAskDepth(ticket.side, ticket.limitPrice, ticket.ticker, market)
-                paperBook.considerTicket(ticket, enabled = true, depthContracts = depth)
-            }
-        }
+        runPaperAutopilot(live)
         refreshPositionMarks()
     }
 
@@ -913,14 +898,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 if (logged != null) {
                     // Heads-up even when this Activity is in the foreground.
                     runCatching { container.lastMinuteNotifier.notifyFired(fired) }
-                    if (_state.value.settings.paperTradingEnabled) {
-                        paperBook.configure(
-                            kellyFraction = _state.value.settings.paperKellyFraction,
-                            feeRate = _state.value.settings.feeRate,
-                            startUsd = _state.value.settings.paperBankrollStartUsd
-                        )
-                        paperBook.considerLastMinute(fired, enabled = true, market = market, book = book)
-                    }
+                    runPaperAutopilot(listOf(market.copy(lastMinute = eval)))
                 }
             }
             market.copy(lastMinute = eval)
@@ -1069,24 +1047,48 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         return TicketBuilder.applySellQuote(ticket, count, KalshiPrice.usable(price) ?: ticket.limitPrice)
     }
 
-    private fun paperFromAlerts(alerts: List<SignalAlert>) {
-        if (!_state.value.settings.paperTradingEnabled) return
-        paperBook.configure(
-            kellyFraction = _state.value.settings.paperKellyFraction,
-            feeRate = _state.value.settings.feeRate,
-            startUsd = _state.value.settings.paperBankrollStartUsd
+    /**
+     * Alerts no longer auto-paper. AI paper fills go through
+     * [runPaperAutopilot] (EV at the ask, any time in the window).
+     */
+    private fun paperFromAlerts(@Suppress("UNUSED_PARAMETER") alerts: List<SignalAlert>) {
+        val live = MarketLifecycle.tradable(
+            _state.value.snapshot?.allMarkets.orEmpty(),
+            container.clock.nowMs()
         )
-        val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
-        val now = System.currentTimeMillis()
-        alerts.forEach { alert ->
-            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
-            val market = markets[alert.ticker]
-            if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
-            val ask = market?.let {
-                TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
-            }
-            val depth = paperAskDepth(alert.predictedSide, ask, alert.ticker, market)
-            paperBook.considerAlert(alert, ask, enabled = true, depthContracts = depth)
+        runPaperAutopilot(live)
+    }
+
+    /**
+     * Autonomous paper path. Never calls the live order client.
+     * Toggle off or paper-trading off → no AI paper bets.
+     */
+    private fun runPaperAutopilot(live: List<MarketUiModel>) {
+        val s = _state.value.settings
+        if (!s.paperTradingEnabled || !s.aiPaperAutopilotEnabled) return
+        paperBook.configure(
+            kellyFraction = s.paperKellyFraction,
+            feeRate = s.feeRate,
+            startUsd = s.paperBankrollStartUsd
+        )
+        val now = container.clock.nowMs()
+        val ctx = ticketContext(_state.value, now)
+        live.forEach { market ->
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(market.ticker)) return@forEach
+            val book = hub.scoring.book.snapshotBook(market.ticker)
+            val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
+            val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
+            PaperAutopilot.consider(
+                paperBook = paperBook,
+                market = market,
+                settings = s,
+                nowMs = now,
+                yesAsk = yesAsk,
+                noAsk = noAsk,
+                yesDepth = paperAskDepth("YES", yesAsk, market.ticker, market),
+                noDepth = paperAskDepth("NO", noAsk, market.ticker, market),
+                book = book
+            )
         }
     }
 

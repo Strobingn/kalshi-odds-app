@@ -104,7 +104,8 @@ object ScorecardLedger {
         val confidenceLegacy: Boolean = false,
         val kellyF: Double? = null,
         val kellyFraction: Double? = null,
-        val bankrollAfterUsd: Double? = null
+        val bankrollAfterUsd: Double? = null,
+        val evUsd: Double? = null
     )
 
     data class Snapshot(
@@ -253,10 +254,12 @@ object ScorecardLedger {
         if (PaperPickSource.parse(s) == PaperPickSource.LAST_MINUTE) return false
         if (PaperPickSource.parse(s) == PaperPickSource.MANUAL) return false
         return s.startsWith("ai") || s.contains("ai hunter") || s.contains("ai ticket") ||
-            s.contains("ai signal") || s.contains("hunter") && !s.contains("paper buy") ||
+            s.contains("ai signal") || s.contains("autopilot") ||
+            s.contains("hunter") && !s.contains("paper buy") ||
             PaperPickSource.parse(s) == PaperPickSource.TICKET ||
             PaperPickSource.parse(s) == PaperPickSource.LONG_SHOT ||
-            PaperPickSource.parse(s) == PaperPickSource.AI_ALERT
+            PaperPickSource.parse(s) == PaperPickSource.AI_ALERT ||
+            PaperPickSource.parse(s) == PaperPickSource.AUTOPILOT
     }
 
     fun isLastMinuteSource(fill: PaperFill): Boolean =
@@ -468,7 +471,8 @@ object ScorecardLedger {
             confidenceLegacy = false,
             kellyF = fill?.kellyF,
             kellyFraction = fill?.kellyFraction,
-            bankrollAfterUsd = fill?.bankrollAfterUsd
+            bankrollAfterUsd = fill?.bankrollAfterUsd,
+            evUsd = fill?.evUsd
         )
     }
 
@@ -512,7 +516,8 @@ object ScorecardLedger {
             confidenceLegacy = aiPct == null,
             kellyF = fill.kellyF,
             kellyFraction = fill.kellyFraction,
-            bankrollAfterUsd = fill.bankrollAfterUsd
+            bankrollAfterUsd = fill.bankrollAfterUsd,
+            evUsd = fill.evUsd
         )
     }
 

@@ -688,6 +688,7 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "model_asset": "edge_model.json",
         "tag": "edge-model-latest",
         "synthetic": bool(metrics.get("synthetic")),
+        "data_source": "synthetic_fixture" if metrics.get("synthetic") else "kalshi_settled_coinbase_spot_v1",
         "beats_market": bool(gate["beats_market"]),
         "publishable": bool(gate["publishable"]),
         "gate_reasons": gate["reasons"],

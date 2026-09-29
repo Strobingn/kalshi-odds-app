@@ -204,6 +204,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setPaperTrading(v: Boolean) = track("paper_trading", _state.value.settings.paperTradingEnabled, v) {
         prefs.updatePaperTrading(v)
     }
+    fun setAiPaperAutopilot(v: Boolean) = track(
+        "ai_paper_autopilot",
+        _state.value.settings.aiPaperAutopilotEnabled,
+        v
+    ) {
+        prefs.updateAiPaperAutopilot(v)
+    }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
     fun resetPaperBook() {
         val start = _state.value.settings.paperBankrollStartUsd

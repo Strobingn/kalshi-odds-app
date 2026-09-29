@@ -39,11 +39,13 @@ class ScorecardBrierDiagnosisTest {
         assertEquals(0, rows.count { ForecastUnits.hit(it) })
         val side = rows.map { ForecastUnits.sideBrier(it) }.average()
         val yes = rows.map { ForecastUnits.brier(it) }.average()
-        assertTrue("picked-side Brier is ~0.893, not the P(YES) 0.003", abs(side - 0.893) < 0.002)
+        assertEquals(yes, side, 1e-9)
+        assertTrue("complemented NO Brier equals P(YES) Brier (~0.003)", abs(side - 0.003) < 0.002)
+        assertFalse("old bug compared P(NO) with YES settling (~0.893)", abs(side - 0.893) < 0.002)
         assertEquals((0.945 - 1.0) * (0.945 - 1.0), yes, 1e-9)
         assertEquals(side, w.brier!!, 1e-9)
         assertEquals(yes, w.pUpBrier!!, 1e-9)
-        assertEquals("0.893", String.format(java.util.Locale.US, "%.3f", w.brier))
+        assertEquals("0.003", String.format(java.util.Locale.US, "%.3f", w.brier))
         assertEquals("0.003", String.format(java.util.Locale.US, "%.3f", w.pUpBrier))
     }
 }

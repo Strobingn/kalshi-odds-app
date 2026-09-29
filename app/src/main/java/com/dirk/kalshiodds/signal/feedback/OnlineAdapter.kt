@@ -22,8 +22,10 @@ import kotlinx.serialization.Serializable
  *    toward 1.5; if it disagreed, toward 0.5:
  *
  *        w_i ← (1−α) w_i + α · (1 + 0.5 · agree)
+ *        w_i ← (1−λ) w_i + λ · 1.0
  *
- *    then clipped to `[0.35, 2.0]`. α = [SignalConstants.ADAPTER_WEIGHT_EMA].
+ *    then clipped to `[0.35, 2.0]`. α = [SignalConstants.ADAPTER_WEIGHT_EMA],
+ *    λ = [SignalConstants.ADAPTER_PRIOR_SHRINK] (shrink toward the prior).
  *
  * 2. **Platt-style slope / intercept** on `logit(p)` via SGD:
  *
@@ -111,7 +113,8 @@ object OnlineAdapter {
         entries: List<PredictionLogEntry>,
         nowMs: Long = System.currentTimeMillis(),
         alpha: Double = SignalConstants.ADAPTER_WEIGHT_EMA,
-        lr: Double = SignalConstants.ADAPTER_LEARNING_RATE
+        lr: Double = SignalConstants.ADAPTER_LEARNING_RATE,
+        priorShrink: Double = SignalConstants.ADAPTER_PRIOR_SHRINK
     ): State {
         val fresh = entries
             .filter { e ->
@@ -140,7 +143,9 @@ object OnlineAdapter {
                     val agree = if (featureWantedYes == actualYes) 1.0 else -1.0
                     val prev = weights[key] ?: 1.0
                     val target = 1.0 + 0.5 * agree
-                    weights[key] = ((1.0 - alpha) * prev + alpha * target).coerceIn(0.35, 2.0)
+                    val ema = (1.0 - alpha) * prev + alpha * target
+                    val shrink = priorShrink.coerceIn(0.0, 1.0)
+                    weights[key] = ((1.0 - shrink) * ema + shrink * 1.0).coerceIn(0.35, 2.0)
                 }
             }
             val z = logit(p)

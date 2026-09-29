@@ -364,6 +364,40 @@ object FlipCheck {
         return allowsSide(verdict, side, ask, model)
     }
 
+    /**
+     * Lottery / realistic-move guard only — no 3pp edge margin.
+     * Paper autopilot uses this so small +EV edges can still size via Kelly.
+     * Cheap asks still need flip support; the underdog still needs
+     * [MIN_FLIP_PROB].
+     */
+    fun allowsRealisticMove(verdict: Verdict, side: String, ask: Double?): Boolean {
+        val px = KalshiPrice.usable(ask) ?: return false
+        val cheap = px + 1e-12 < CHEAP_ASK
+        val flipSupportsCheap = verdict.flipProb >= CHEAP_FLIP_SUPPORT - 1e-15 &&
+            verdict.distanceUsd <= 2.0 * verdict.typicalMoveUsd + 1e-9
+        if (cheap && !flipSupportsCheap) return false
+        return if (verdict.isLeading(side)) {
+            true
+        } else {
+            verdict.flipProb + 1e-15 >= MIN_FLIP_PROB
+        }
+    }
+
+    fun allowsRealisticMarketSide(
+        market: MarketUiModel,
+        side: String,
+        ask: Double?,
+        nowMs: Long,
+        sigmaPerSecUsd: Double? = null
+    ): Boolean {
+        val verdict = evaluateMarket(market, nowMs, sigmaPerSecUsd)
+        if (verdict == null) {
+            val px = KalshiPrice.usable(ask) ?: return false
+            return px + 1e-12 >= CHEAP_ASK
+        }
+        return allowsRealisticMove(verdict, side, ask)
+    }
+
     fun allowsFired(
         fired: LastMinuteFired,
         spotUsd: Double? = null,

@@ -133,6 +133,7 @@ fun ScorecardScreen(
                 }
             }
             item { LastMinuteScorecardCard(view.lastMinute) }
+            item { AutopilotScorecardCard(view.autopilot) }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }
@@ -268,6 +269,47 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
                     com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (pick.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
+    val colors = DipTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.AUTOPILOT_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.AUTOPILOT_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Text(
+            if (section.bets.isEmpty()) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        if (section.bets.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.bets.take(40).forEach { bet ->
+                Text(
+                    bet.line,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (bet.side.equals("NO", true)) colors.down else colors.up,
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
             }

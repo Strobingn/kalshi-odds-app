@@ -127,7 +127,7 @@ object TicketBuilder {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         val fired = market.lastMinute?.fired ?: return null
         val side = if (fired.side.equals("NO", true)) "NO" else "YES"
-        val ask = liveAsk(market, side, ctx) ?: KalshiPrice.usable(fired.ask) ?: return null
+        val ask = liveAsk(market, side, ctx) ?: return null
         val lm = market.lastMinute
         if (!FlipCheck.allowsFired(fired, lm?.spotUsd ?: market.spotUsd, lm?.strikeUsd ?: market.floorStrike, ask)) {
             return null
@@ -627,11 +627,13 @@ object TicketBuilder {
      * the tile showed 0.1¢. Tickets always re-read this.
      */
     fun liveAsk(market: MarketUiModel, side: String, ctx: Context): Double? {
+        val book = ctx.books[market.ticker]
+        // A live book snapshot wins. No sellers on this side → no ticket,
+        // even if a stale REST / tile ask still looks fillable.
+        if (book != null && !book.isEmpty()) return bookAsk(side, book)
         val tile = MarketQuoteView.of(market)
         val fromTile = if (side.equals("NO", true)) tile.noAsk else tile.yesAsk
-        if (fromTile != null) return fromTile
-        bookAsk(side, ctx.books[market.ticker])?.let { return it }
-        return bestAsk(market, side, ctx)
+        return fromTile ?: bestAsk(market, side, ctx)
     }
 
     fun liveAsk(market: MarketUiModel, side: String): Double? =
@@ -707,8 +709,12 @@ object TicketBuilder {
         } else {
             KalshiPrice.impliedAskFromOppositeBid(tick?.yesBid)
         }
-        val fromBook = bookAsk(side, book)
-        return listOfNotNull(fromQuote, fromTick, fromBook).minOrNull()
+        // Prefer the live book to a tick or a REST quote. Taking the minimum
+        // across observations at different times can fabricate a cheap ask.
+        // A book with no sellers on this side must not fall back to an older
+        // quote that suggests a fill is available.
+        if (book != null && !book.isEmpty()) return bookAsk(side, book)
+        return fromTick ?: fromQuote
     }
 
     /**
@@ -744,6 +750,9 @@ object TicketBuilder {
         }
         return listOfNotNull(market.volume, market.openInterest, market.liquidityDollars).maxOrNull()
     }
+
+    /** Ask from a live book only. Null when that side has no sellers. */
+    fun bookAskOrNull(side: String, book: BookLevelSnapshot?): Double? = bookAsk(side, book)
 
     private fun bookAsk(side: String, book: BookLevelSnapshot?): Double? {
         if (book == null || book.isEmpty()) return null

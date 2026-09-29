@@ -30,6 +30,9 @@ object ScorecardCopy {
     const val UNKNOWN_CONF_NOTE = ScorecardLedger.UNKNOWN_CONF_NOTE
     const val AI_TITLE = "AI picks"
     const val MANUAL_TITLE = "Manual Paper UP/DOWN"
+    const val AUTOPILOT_TITLE = "AI paper autopilot"
+    const val AUTOPILOT_SUBTITLE =
+        "Every AI paper bet — time, side, entry, AI %, EV, stake, fee, result. Separate from manual Paper UP/DOWN."
     const val LAST_MINUTE_TITLE = "Last-minute strategy"
     const val LAST_MINUTE_SUBTITLE =
         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE
@@ -88,6 +91,30 @@ object ScorecardCopy {
         val note: String? = null
     )
 
+    data class AutopilotBet(
+        val ticker: String,
+        val side: String,
+        val displaySide: String,
+        val createdAtMs: Long,
+        val entryAsk: Double?,
+        val aiPct: Double?,
+        val evUsd: Double?,
+        val stakeUsd: Double,
+        val feeUsd: Double?,
+        val result: String,
+        val line: String
+    )
+
+    data class AutopilotSection(
+        val bets: List<AutopilotBet> = emptyList(),
+        val openCount: Int = 0,
+        val settledCount: Int = 0,
+        val wins: Int = 0,
+        val losses: Int = 0,
+        val pnlUsd: Double = 0.0,
+        val record: String = EM_DASH
+    )
+
     data class LastMinuteSection(
         val wins: Int = 0,
         val losses: Int = 0,
@@ -120,6 +147,7 @@ object ScorecardCopy {
         val byConfidence: List<Bucket>,
         val bySource: List<Bucket> = emptyList(),
         val lastMinute: LastMinuteSection = LastMinuteSection(),
+        val autopilot: AutopilotSection = AutopilotSection(),
         val paperBankrollUsd: Double? = null
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
@@ -139,6 +167,12 @@ object ScorecardCopy {
             }
             if (lastMinute.picks.isNotEmpty()) {
                 lines += lastMinute.picks.map { com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(it) }
+            }
+            lines += AUTOPILOT_TITLE
+            lines += AUTOPILOT_SUBTITLE
+            lines += autopilot.record
+            if (autopilot.bets.isNotEmpty()) {
+                lines += autopilot.bets.map { it.line }
             }
             if (!showsEmptyState) {
                 lines += recordLine(summary)
@@ -240,7 +274,72 @@ object ScorecardCopy {
             byConfidence = ledger.byConfidence.map { toBucket(it) },
             bySource = mergeSourceBuckets(ledger.bySource.map { toBucket(it) }, lastMinute),
             lastMinute = lastMinute,
+            autopilot = autopilotSection(fills),
             paperBankrollUsd = paperBankrollUsd
+        )
+    }
+
+    fun autopilotSection(fills: List<PaperFill>): AutopilotSection {
+        val bets = fills
+            .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
+            .filter { ScorecardLedger.isAiSource(it.source) || ScorecardLedger.isAiSource(it.pickSource) }
+            .sortedByDescending { it.createdAtMs }
+            .map { autopilotBet(it) }
+        val settled = fills.filter {
+            ScorecardLedger.isScorecardTicker(it.ticker) &&
+                it.settled &&
+                it.won != null &&
+                (ScorecardLedger.isAiSource(it.source) || ScorecardLedger.isAiSource(it.pickSource))
+        }
+        val wins = settled.count { it.won == true }
+        val losses = settled.count { it.won == false }
+        val pnl = settled.sumOf { it.pnlUsd ?: 0.0 }
+        val rate = if (settled.isEmpty()) null else wins.toDouble() / settled.size
+        return AutopilotSection(
+            bets = bets,
+            openCount = bets.count { it.result == "OPEN" },
+            settledCount = settled.size,
+            wins = wins,
+            losses = losses,
+            pnlUsd = pnl,
+            record = if (bets.isEmpty()) {
+                EM_DASH
+            } else {
+                "${wins}-${losses} · ${percentOrDash(rate)} · ${settled.size} settled · ${bets.size} logged"
+            }
+        )
+    }
+
+    fun autopilotBet(fill: PaperFill): AutopilotBet {
+        val result = when {
+            !fill.settled -> "OPEN"
+            fill.outcome == "void" -> "void"
+            fill.won == true -> WON
+            else -> LOST
+        }
+        val side = if (fill.side.equals("NO", true)) "DOWN" else "UP"
+        val fee = ScorecardLedger.feeUsd(fill)
+        val time = WindowLabel.of(fill.ticker, fill.createdAtMs)
+        val ask = fill.limitPrice.takeIf { it > 0.0 }?.let {
+            String.format(Locale.US, "%.0f¢", it * 100.0)
+        } ?: EM_DASH
+        val ai = fill.aiPct?.let { String.format(Locale.US, "AI %.0f%%", it) } ?: "AI $EM_DASH"
+        val ev = fill.evUsd?.let { String.format(Locale.US, "EV $%.2f", it) } ?: "EV $EM_DASH"
+        val stake = String.format(Locale.US, "stake $%.2f", fill.stakeUsd)
+        val feeLine = fee?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee $EM_DASH"
+        val pnl = fill.pnlUsd?.let { ScorecardLedger.signedUsd(it) } ?: EM_DASH
+        return AutopilotBet(
+            ticker = fill.ticker,
+            side = fill.side,
+            displaySide = side,
+            createdAtMs = fill.createdAtMs,
+            entryAsk = fill.limitPrice.takeIf { it > 0.0 },
+            aiPct = fill.aiPct,
+            evUsd = fill.evUsd,
+            stakeUsd = fill.stakeUsd,
+            feeUsd = fee,
+            result = result,
+            line = "$time  $side  $ask  $ai  $ev  $stake  $feeLine  $result  $pnl  ${fill.ticker}"
         )
     }
 
@@ -391,9 +490,10 @@ object ScorecardCopy {
         val kelly = row.kellyF?.let { String.format(Locale.US, "Kelly f=%.3f", it) }
             ?: row.kellyFraction?.let { String.format(Locale.US, "Kelly ×%.2f", it) }
             ?: "Kelly $EM_DASH"
+        val ev = row.evUsd?.let { String.format(Locale.US, "EV $%.2f", it) } ?: "EV $EM_DASH"
         val bank = row.bankrollAfterUsd?.let { String.format(Locale.US, "bankroll $%.2f", it) }
             ?: "bankroll $EM_DASH"
-        return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $kelly  $bank  $result  $pnl  $strike  $fin  $src  ${row.ticker}"
+        return "${row.windowEt}  ${row.displaySide}  $ask  $ai  $mkt  $ct  $stake  $fee  $ev  $kelly  $bank  $result  $pnl  $strike  $fin  $src  ${row.ticker}"
     }
 
     fun recordLine(summary: HomeScorecardSummary): String =

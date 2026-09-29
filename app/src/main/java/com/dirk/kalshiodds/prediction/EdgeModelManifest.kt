@@ -25,7 +25,8 @@ data class EdgeModelManifest(
     val synthetic: Boolean = false,
     val countsPresent: Boolean = true,
     val brierMargin: Double = marketBrier - modelBrier,
-    val logLossMargin: Double = marketLogLoss - modelLogLoss
+    val logLossMargin: Double = marketLogLoss - modelLogLoss,
+    val dataSource: String = PROVENANCE_UNKNOWN
 ) {
     val beatsMarket: Boolean
         get() = ModelActivation.beatsMarket(this)
@@ -49,11 +50,16 @@ data class EdgeModelManifest(
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
         o.put("synthetic", synthetic)
+        o.put("data_source", dataSource)
         o.put("beats_market", beatsMarket)
         return o.toString()
     }
 
     companion object {
+        const val PROVENANCE_LIVE = "kalshi_settled_coinbase_spot_v1"
+        const val PROVENANCE_SYNTHETIC = "synthetic_fixture"
+        const val PROVENANCE_UNKNOWN = "unknown"
+
         fun parse(raw: String): EdgeModelManifest {
             val o = JSONObject(raw)
             val hasRows = o.has("n_rows") || o.has("n_samples")
@@ -94,10 +100,12 @@ data class EdgeModelManifest(
                 tag = o.optString("tag").ifBlank { "edge-model-latest" },
                 simPnl = o.optDoubleOrNull("sim_pnl"),
                 simHitRate = o.optDoubleOrNull("sim_hit_rate"),
-                synthetic = o.optBoolean("synthetic", false),
+                synthetic = o.optBoolean("synthetic", false) ||
+                    o.optString("data_source") == PROVENANCE_SYNTHETIC,
                 countsPresent = hasRows && hasMarkets && hasHoldout,
                 brierMargin = if (o.has("brier_margin")) o.optDouble("brier_margin") else marketBrier - modelBrier,
-                logLossMargin = if (o.has("logloss_margin")) o.optDouble("logloss_margin") else marketLl - modelLl
+                logLossMargin = if (o.has("logloss_margin")) o.optDouble("logloss_margin") else marketLl - modelLl,
+                dataSource = o.optString("data_source").ifBlank { PROVENANCE_UNKNOWN }
             )
         }
 
@@ -127,7 +135,11 @@ data class EdgeModelManifest(
                 synthetic = (m["synthetic"] ?: 0.0) > 0.5,
                 countsPresent = m.containsKey("n_markets") &&
                     (m.containsKey("n_rows") || m.containsKey("n_samples")) &&
-                    (m.containsKey("n_holdout") || m.containsKey("n_samples"))
+                    (m.containsKey("n_holdout") || m.containsKey("n_samples")),
+                dataSource = when {
+                    (m["synthetic"] ?: 0.0) > 0.5 -> PROVENANCE_SYNTHETIC
+                    else -> PROVENANCE_UNKNOWN
+                }
             )
         }
 
@@ -160,9 +172,11 @@ object ModelActivation {
     const val MIN_HOLDOUT_ROWS = 400
     const val MIN_BRIER_MARGIN = 0.010
     const val MIN_LOGLOSS_MARGIN = 0.010
+    const val PROVENANCE_LIVE = EdgeModelManifest.PROVENANCE_LIVE
 
     fun beatsMarket(m: EdgeModelManifest): Boolean {
         if (m.synthetic) return false
+        if (!hasLiveProvenance(m)) return false
         if (!m.countsPresent) return false
         if (m.nMarkets < MIN_PUBLISH_MARKETS) return false
         if (m.nRows < MIN_PUBLISH_ROWS && m.nSamples < MIN_PUBLISH_ROWS) return false
@@ -172,18 +186,29 @@ object ModelActivation {
         return true
     }
 
-    fun decide(manifest: EdgeModelManifest, modelValid: Boolean): ModelActivationDecision {
+    fun decide(
+        manifest: EdgeModelManifest,
+        modelValid: Boolean,
+        requireProvenance: Boolean = true
+    ): ModelActivationDecision {
         if (!modelValid) {
             return ModelActivationDecision(
                 activate = false,
                 reason = "Model JSON failed validation — previous model stays active."
             )
         }
-        if (manifest.synthetic) {
+        if (manifest.synthetic || manifest.dataSource == EdgeModelManifest.PROVENANCE_SYNTHETIC) {
             return ModelActivationDecision(
                 activate = false,
                 manifest = manifest,
                 reason = "Manifest is marked synthetic — falling back to market-only."
+            )
+        }
+        if (requireProvenance && !hasLiveProvenance(manifest)) {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Model provenance is missing or synthetic — previous model stays active."
             )
         }
         if (!manifest.countsPresent) {
@@ -231,6 +256,9 @@ object ModelActivation {
             activate = false,
             reason = "No manifest with sample counts — falling back to market-only."
         )
+
+    fun hasLiveProvenance(m: EdgeModelManifest): Boolean =
+        !m.synthetic && m.dataSource == EdgeModelManifest.PROVENANCE_LIVE
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.4f", v)
 }

@@ -10,6 +10,7 @@ import java.util.Locale
  */
 enum class PaperPickSource {
     AI_ALERT,
+    AUTOPILOT,
     LAST_MINUTE,
     LONG_SHOT,
     MANUAL,
@@ -18,6 +19,7 @@ enum class PaperPickSource {
     val label: String
         get() = when (this) {
             AI_ALERT -> "AI alert"
+            AUTOPILOT -> PaperAutopilot.SOURCE
             LAST_MINUTE -> "last-minute strategy"
             LONG_SHOT -> "long-shot finder"
             MANUAL -> "manual paper"
@@ -44,6 +46,7 @@ enum class PaperPickSource {
             entries.firstOrNull { it.label.equals(raw.trim(), ignoreCase = true) }?.let { return it }
             return when {
                 s == "ai signal" || s.contains("alert") -> AI_ALERT
+                s.contains("autopilot") || s == PaperAutopilot.SOURCE.lowercase(Locale.US) -> AUTOPILOT
                 s.contains("last-minute") || s.contains("last minute") || s.contains("last_minute") -> LAST_MINUTE
                 s.contains("long-shot") || s.contains("long shot") || s.contains("hunter_value") ||
                     s.contains("hunter value") -> LONG_SHOT
@@ -69,5 +72,6 @@ data class PaperFillMeta(
     val marketPct: Double? = null,
     val pickSource: PaperPickSource? = null,
     val kellyF: Double? = null,
-    val kellyFraction: Double? = null
+    val kellyFraction: Double? = null,
+    val evUsd: Double? = null
 )

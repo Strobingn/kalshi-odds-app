@@ -38,7 +38,7 @@ class ImportedModelStore(context: Context) {
             )
         }.getOrNull()
         val decision = if (manifest != null) {
-            ModelActivation.decide(manifest, modelValid = true)
+            ModelActivation.decide(manifest, modelValid = true, requireProvenance = false)
         } else {
             ModelActivation.decideMissingManifest()
         }
