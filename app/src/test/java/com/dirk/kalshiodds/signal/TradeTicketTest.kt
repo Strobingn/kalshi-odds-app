@@ -597,6 +597,40 @@ class TicketBuilderGateTest {
     }
 
     @Test
+    fun automaticHunterUsesOnlyVisibleTouchDepthForItsActualClip() {
+        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+        val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+            no = listOf(0.96 to 40.0)
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(), alertsPaused = false,
+            books = mapOf(m.ticker to book), nowMs = 1L
+        )
+        val ticket = TicketBuilder.proposeHunter(m, ctx)!!
+        assertEquals(40, ticket.contracts)
+        assertEquals(LiveOrderSizer.sizeWithinDepth(0.04, 40).feeUsd, ticket.feeUsd!!, 1e-9)
+        assertEquals(ticket.modelChance!! - ticket.allInUsd!! / 40, ticket.netEvPerContract!!, 1e-9)
+        assertTrue(ticket.allInUsd!! <= 5.0)
+        assertNull(TicketBuilder.propose(m, ctx)) // $5 to $100 payout needs deeper liquidity.
+    }
+
+    @Test
+    fun longShotCannotClaimInvisibleContractsOrZeroTouchSize() {
+        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+        val thin = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(no = listOf(0.96 to 15.0))
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(), alertsPaused = false,
+            books = mapOf(m.ticker to thin), nowMs = 1L
+        )
+        val ticket = TicketBuilder.proposeHunterValue(m, ctx)!!
+        assertEquals(15, ticket.contracts)
+        assertEquals(15, ticket.visibleContracts)
+        assertNull(TicketBuilder.proposeHunterValue(m, ctx.copy(books = mapOf(
+            m.ticker to com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(no = listOf(0.96 to 0.5))
+        ))))
+    }
+
+    @Test
     fun buyAskUsesBookInsteadOfStaleCheapQuote() {
         val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
         val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(

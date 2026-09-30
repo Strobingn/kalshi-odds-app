@@ -51,6 +51,18 @@ class LiveOrderSizerTest {
     }
 
     @Test
+    fun visibleDepthRepricesFeeForTheSmallerClip() {
+        val clip = LiveOrderSizer.sizeWithinDepth(0.04, 40)
+        assertEquals(40, clip.count)
+        assertEquals("40.00", clip.countWire)
+        assertEquals(LiveOrderSizer.feeUsd(40, 0.04), clip.feeUsd, 1e-9)
+        assertEquals(40 * 0.04 + clip.feeUsd, clip.allInUsd, 1e-9)
+        assertTrue(clip.allInUsd <= 5.0)
+        assertEquals(0, LiveOrderSizer.sizeWithinDepth(0.04, 0).count)
+        assertFalse(LiveOrderSizer.sizeWithinDepth(0.04, 0).ok)
+    }
+
+    @Test
     fun leftoverFiftyDollarWinTargetCannotResizeLiveAboveFive() {
         val fat = TradeTicket(
             id = "fat",

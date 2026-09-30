@@ -345,7 +345,20 @@ object TicketBuilder {
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
-        val live = LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+        // For automatic suggestions, the actual $5 clip must fit at the
+        // quoted touch. The payout check below can require a much smaller
+        // $1 clip, so passing it alone does not make the displayed size real.
+        val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
+        val live = if (kind != TicketKind.MANUAL && liveBook != null) {
+            LiveOrderSizer.sizeWithinDepth(
+                ask,
+                kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
+                SignalConstants.LIVE_ALL_IN_CAP_USD,
+                ctx.settings.feeRate
+            )
+        } else {
+            LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+        }
         if (!live.ok) {
             return if (kind == TicketKind.MANUAL) {
                 blocked(market, side, ctx, live.refusedReason ?: "Cannot size a $5 live order", stakeUsd)
@@ -435,7 +448,7 @@ object TicketBuilder {
             winTargetCapped = true,
             winTargetNote = String.format(
                 java.util.Locale.US,
-                "$5 all-in · min profit $%.0f · wins $%.2f",
+                "≤$5 all-in · min profit $%.0f · wins $%.2f",
                 minProfit,
                 live.profitIfWinUsd
             ),
@@ -474,7 +487,17 @@ object TicketBuilder {
             val probability = modelProb(market, side) ?: return@mapNotNull null
             if (probability !in 0.0..1.0) return@mapNotNull null
             val ask = bestAsk(market, side, ctx) ?: return@mapNotNull null
-            val clip = LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
+            val clip = if (liveBook != null) {
+                LiveOrderSizer.sizeWithinDepth(
+                    ask,
+                    kotlin.math.floor((quotedSize(market, side, liveBook) ?: 0.0) + 1e-9).toInt(),
+                    SignalConstants.LIVE_ALL_IN_CAP_USD,
+                    ctx.settings.feeRate
+                )
+            } else {
+                LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            }
             if (!clip.ok) return@mapNotNull null
             side to (probability - clip.allInUsd / clip.count)
         }.sortedByDescending { it.second }.map { it.first }

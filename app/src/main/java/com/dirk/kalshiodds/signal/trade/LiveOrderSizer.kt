@@ -140,6 +140,38 @@ object LiveOrderSizer {
         )
     }
 
+    /** Size a buy at the touch without assuming more contracts than the book shows. */
+    fun sizeWithinDepth(
+        price: Double,
+        visibleContracts: Int,
+        capUsd: Double = LIVE_ALL_IN_CAP_USD,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): Clip {
+        val capped = size(price, capUsd, feeRate)
+        if (!capped.ok) return capped
+        val count = minOf(capped.count, visibleContracts.coerceAtLeast(0))
+        if (count == 0) return capped.copy(
+            count = 0,
+            countWire = "0.00",
+            feeUsd = 0.0,
+            positionUsd = 0.0,
+            allInUsd = 0.0,
+            profitIfWinUsd = 0.0,
+            refusedReason = "No whole contracts visible at the quoted ask"
+        )
+        val fee = feeUsd(count, capped.price, feeRate)
+        val position = positionBd(count, capped.price).toDouble()
+        val allIn = position + fee
+        return capped.copy(
+            count = count,
+            countWire = String.format(Locale.US, "%.2f", count.toDouble()),
+            feeUsd = fee,
+            positionUsd = position,
+            allInUsd = allIn,
+            profitIfWinUsd = count * SignalConstants.CONTRACT_SETTLEMENT_USD - allIn
+        )
+    }
+
     /**
      * Last-chance cap on the ticket that is about to hit HTTP.
      * Never raises size. Refuses rather than send over the $5 all-in cap.
