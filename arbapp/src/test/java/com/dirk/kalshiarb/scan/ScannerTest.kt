@@ -228,10 +228,26 @@ class ScannerTest {
     @Test
     fun differentExpiriesDoNotLadder() {
         val e = event(
-            mkt("A", strike = "greater", floor = 100.0, close = "2026-09-30T21:00:00Z"),
-            mkt("B", strike = "greater", floor = 101.0, close = "2026-10-01T21:00:00Z")
+            mkt("K100", strike = "greater", floor = 100.0, close = "2026-09-30T21:00:00Z"),
+            mkt("K101", strike = "greater", floor = 101.0, close = "2026-10-01T21:00:00Z")
         )
         assertTrue(Structures.find(e).none { it.type == ArbType.LADDER })
+    }
+
+    @Test
+    fun differentSubjectsDoNotLadder() {
+        // First live scan flagged "BC by 2+" + NOT "SMU by 10+" as risk-free; both lose if SMU wins by 15.
+        assertEquals("KXNCAAFSPREAD-26OCT03BCSMU-BC", Structures.ladderSubject("KXNCAAFSPREAD-26OCT03BCSMU-BC2"))
+        assertEquals("KXNCAAFSPREAD-26OCT03BCSMU-SMU", Structures.ladderSubject("KXNCAAFSPREAD-26OCT03BCSMU-SMU10"))
+        assertEquals("KXNFLRSHYDS-X-CLERSANDERS23", Structures.ladderSubject("KXNFLRSHYDS-X-CLERSANDERS23-25"))
+        assertEquals(Structures.ladderSubject("KXBTCD-26SEP3017-T84999.99"), Structures.ladderSubject("KXBTCD-26SEP3017-T85249.99"))
+        val e = event(
+            mkt("S-BC2", strike = "greater", floor = 1.5),
+            mkt("S-SMU10", strike = "greater", floor = 9.5),
+            mkt("S-BC5", strike = "greater", floor = 4.5)
+        )
+        val lad = Structures.find(e).filter { it.type == ArbType.LADDER }
+        assertEquals(listOf(listOf("S-BC2", "S-BC5")), lad.map { s -> s.legs.map { it.ticker } })
     }
 
     // ---- depth / near miss -----------------------------------------------------

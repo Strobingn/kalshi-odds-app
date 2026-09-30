@@ -178,6 +178,22 @@ def test_ladder_violation() -> None:
     assert not [o for o in a.check_ladders(ev, ms, ok) if o["profit"] > 0]
 
 
+def test_ladder_only_nests_same_subject() -> None:
+    """Scan 1 bug: 'BC by 2+' vs NOT 'SMU by 10+' was called risk-free (both lose if SMU wins by 15)."""
+    assert a.ladder_subject("KXNCAAFSPREAD-26OCT03BCSMU-BC2") == "KXNCAAFSPREAD-26OCT03BCSMU-BC"
+    assert a.ladder_subject("KXNCAAFSPREAD-26OCT03BCSMU-SMU10") == "KXNCAAFSPREAD-26OCT03BCSMU-SMU"
+    assert a.ladder_subject("KXNFLRSHYDS-26OCT01PITCLE-CLERSANDERS23-25") == "KXNFLRSHYDS-26OCT01PITCLE-CLERSANDERS23"
+    assert a.ladder_subject("KXBTCD-26SEP3017-T84999.99") == a.ladder_subject("KXBTCD-26SEP3017-T85249.99")
+    ev = {"event_ticker": "S"}
+    ms = [mkt("S-BC2", "greater", floor=1.5), mkt("S-SMU10", "greater", floor=9.5)]
+    books = {"S-BC2": book(yes=[(0.05, 50)], no=[(0.90, 50)]), "S-SMU10": book(yes=[(0.80, 50)], no=[(0.10, 50)])}
+    assert a.check_ladders(ev, ms, books) == []
+    ms.append(mkt("S-BC5", "greater", floor=4.5))
+    books["S-BC5"] = book(yes=[(0.20, 9)], no=[(0.70, 9)])
+    opps = [o for o in a.check_ladders(ev, ms, books) if o["profit"] > 0]
+    assert [o["tickers"] for o in opps] == [["S-BC2", "S-BC5"]], opps
+
+
 def test_fixture_end_to_end_and_persistence() -> None:
     with tempfile.TemporaryDirectory() as td:
         md, js = Path(td) / "r.md", Path(td) / "r.json"

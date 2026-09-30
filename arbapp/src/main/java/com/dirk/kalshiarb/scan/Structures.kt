@@ -163,12 +163,27 @@ object Structures {
 
     // ---- strike ladders ---------------------------------------------------
 
+    /**
+     * What a strike is measured on: the ticker minus its strike number. One
+     * event can hold ladders on different things (BC by 2+ and SMU by 10+ in a
+     * spread event; each player's rushing yards). Only same-subject strikes are
+     * nested; "BC by 2+" + NOT "SMU by 10+" loses both legs if SMU wins by 15.
+     */
+    fun ladderSubject(ticker: String): String {
+        val parts = ticker.split("-").toMutableList()
+        if (parts.size >= 2 && parts.last().matches(Regex("[0-9.]+"))) {
+            return parts.dropLast(1).joinToString("-")
+        }
+        parts[parts.size - 1] = parts.last().replace(Regex("[0-9.]+$"), "")
+        return parts.joinToString("-")
+    }
+
     private fun ladders(e: EventInfo, active: List<MarketInfo>): List<Structure> {
         val out = ArrayList<Structure>()
         val groups = active.filter {
             val t = it.strikeType?.lowercase()
             (t in UPPER_OPEN && it.floorStrike != null) || (t in LOWER_OPEN && it.capStrike != null)
-        }.groupBy { it.strikeType!!.lowercase() to (it.closeTime ?: "") }
+        }.groupBy { Triple(it.strikeType!!.lowercase(), it.closeTime ?: "", ladderSubject(it.ticker)) }
 
         for ((key, ms) in groups) {
             if (ms.size < 2) continue

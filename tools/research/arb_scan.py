@@ -59,6 +59,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 import sys
 import time
 import urllib.error
@@ -429,15 +430,38 @@ def set_structure(event: dict, markets: list) -> dict:
     return dict(exhaustive=exhaustive, exclusive=exclusive, note="; ".join(notes))
 
 
+def ladder_subject(ticker: str | None) -> str:
+    """What a strike is measured on: the ticker with its strike number removed.
+
+    One event can hold ladders on different things (BC by 2+ and SMU by 10+ in
+    a spread event; each player's rushing yards). Only strikes on the same
+    subject are nested, so only those form a risk-free ladder.
+      KXNCAAFSPREAD-26OCT03BCSMU-BC2        -> ...-BC
+      KXNFLRSHYDS-26OCT01PITCLE-CLERSANDERS23-25 -> ...-CLERSANDERS23
+      KXBTCD-26SEP3017-T84999.99            -> ...-T
+    """
+    parts = (ticker or "").split("-")
+    if len(parts) >= 2 and re.fullmatch(r"[0-9.]+", parts[-1]):
+        return "-".join(parts[:-1])
+    parts[-1] = re.sub(r"[0-9.]+$", "", parts[-1])
+    return "-".join(parts)
+
+
 def ladders(markets: list) -> list:
-    """[(direction, [(strike, market)...] sorted by strike)] for same-type strike ladders."""
+    """[(direction, [(strike, market)...] sorted by strike)] for same-type, same-subject strike ladders."""
     out = []
     for direction, types, key in (("up", UP_TYPES, "floor_strike"), ("down", DOWN_TYPES, "cap_strike")):
         for st in types:
-            grp = [(_f(m.get(key)), m) for m in markets if (m.get("strike_type") or "").lower() == st]
-            grp = [(k, m) for k, m in grp if k is not None]
-            if len({k for k, _ in grp}) >= 2:
-                out.append((direction, sorted(grp, key=lambda t: t[0])))
+            groups: dict = {}
+            for m in markets:
+                if (m.get("strike_type") or "").lower() != st:
+                    continue
+                k = _f(m.get(key))
+                if k is not None:
+                    groups.setdefault(ladder_subject(m.get("ticker")), []).append((k, m))
+            for grp in groups.values():
+                if len({k for k, _ in grp}) >= 2:
+                    out.append((direction, sorted(grp, key=lambda t: t[0])))
     return out
 
 
