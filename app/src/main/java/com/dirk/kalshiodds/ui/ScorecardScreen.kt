@@ -133,6 +133,7 @@ fun ScorecardScreen(
                 }
             }
             item { LastMinuteScorecardCard(view.lastMinute) }
+            item { D3ScorecardCard(view.d3) }
             item { AutopilotScorecardCard(view.autopilot) }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
@@ -267,6 +268,69 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
             section.picks.take(40).forEach { pick ->
                 Text(
                     com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pick.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun D3ScorecardCard(section: ScorecardCopy.D3Section) {
+    val colors = DipTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.D3_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.D3_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Text(
+            if (section.picks.isEmpty()) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.wonUsdLine(section.wonUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.lostUsdLine(section.lostUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.netPnlLine(section.pnlUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.fillRateLine(section.fillRate),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        if (section.picks.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.picks.take(80).forEach { pick ->
+                Text(
+                    com.dirk.kalshiodds.signal.d3.D3Copy.pickLine(pick),
                     style = MaterialTheme.typography.labelMedium,
                     color = if (pick.side.equals("NO", true)) colors.down else colors.up,
                     modifier = Modifier.padding(vertical = 2.dp)

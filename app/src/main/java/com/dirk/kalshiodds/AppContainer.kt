@@ -92,6 +92,16 @@ class AppContainer(context: Context) {
     val lastMinuteEngine = com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine(nowMs = { clock.nowMs() })
     val brti = com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient()
     val lastMinuteNotifier = com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier(app)
+    val d3Store = com.dirk.kalshiodds.signal.d3.D3Store(app)
+    val d3Engine = com.dirk.kalshiodds.signal.d3.D3Engine(nowMs = { clock.nowMs() })
+    val d3Notifier = com.dirk.kalshiodds.signal.d3.D3Notifier(app)
+    val d3Markets = com.dirk.kalshiodds.signal.d3.D3MarketClient({
+        val keyed = hub.settings.tradingCredentialsConfigured()
+        NetworkModule.marketsApi(
+            demo = hub.settings.kalshiDemoEnabled,
+            credentials = if (keyed) ({ tradingCredentials() }) else null
+        )
+    })
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -133,10 +143,11 @@ class AppContainer(context: Context) {
         },
         model = model,
         logStore = logStore,
-        extraOpenTickers = { paper.book.openTickers() },
+        extraOpenTickers = { paper.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers() },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
             lastMinuteStore.settle(ticker, result)
+            d3Store.settle(ticker, result)
         },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {

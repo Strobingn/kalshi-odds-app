@@ -126,6 +126,10 @@ class MarketRepository(
         scorer.maybeScore(nowMs, minIntervalMs = 0L)
     }
 
+    fun noteCloseTime(ticker: String, closeTimeMs: Long) {
+        scorer.noteCloseTime(ticker, closeTimeMs)
+    }
+
     suspend fun refresh(
         watchBtc: Boolean = true,
         watchEth: Boolean = true,

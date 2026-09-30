@@ -726,6 +726,13 @@ fun SettingsContent(
                 Text(String.format(Locale.US, "Reset paper book to $%.0f", s.paperBankrollStartUsd))
             }
 
+            Section("D3 daily favourite (KXBTCD 5 PM ET)")
+            Text(
+                com.dirk.kalshiodds.signal.d3.D3Copy.SETTINGS_BODY,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+
             Section("Live Approve tickets (Kalshi V2)")
             Text(
                 "The card pick is the last-minute BRTI strategy (final 60 s, EV/\$ ≥ 0.35, first fire per window). " +

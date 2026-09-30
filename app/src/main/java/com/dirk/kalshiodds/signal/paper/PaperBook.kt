@@ -240,7 +240,7 @@ class PaperBook(
         if (!enabled) return null
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
-            ticket.kind == TicketKind.LAST_MINUTE
+            ticket.kind == TicketKind.LAST_MINUTE || ticket.kind == TicketKind.D3
         ) return null
         val model = ticket.modelChance
         val ask = KalshiPrice.usable(ticket.limitPrice)

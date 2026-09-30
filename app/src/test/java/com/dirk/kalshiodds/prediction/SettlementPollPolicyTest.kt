@@ -13,6 +13,7 @@ class SettlementPollPolicyTest {
     fun filtersToTrackedKxbtc15mAfterClose() {
         assertTrue(SettlementPollPolicy.isPollableTicker("KXBTC15M-27SEP161500-00"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXBTCD-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXBTCD-27SEP16", setOf("KXBTCD-27SEP16")))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXBTCY-27SEP16"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXGRAMMY-BESTSONG"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXCRYPTOLEAD15M-27SEP16"))
@@ -123,10 +124,19 @@ class SettlementPollPolicyTest {
         )
         val merged = SettlementPollPolicy.mergeTracked(
             open,
-            listOf("KXBTCD-NO", "KXBTC15M-PAPER"),
+            listOf("KXGRAMMY-NO", "KXBTC15M-PAPER"),
             closeTimeOf = { if (it == "KXBTC15M-PAPER") close else null }
         )
         assertEquals(setOf("KXBTC15M-KEEP", "KXBTC15M-PAPER"), merged.map { it.ticker }.toSet())
         assertEquals(close, merged.first { it.ticker == "KXBTC15M-KEEP" }.closeTimeMs)
+        val withHeld = SettlementPollPolicy.mergeTracked(
+            open,
+            listOf("KXBTCD-HELD", "KXGRAMMY-NO"),
+            closeTimeOf = { if (it == "KXBTCD-HELD") close else null }
+        )
+        assertTrue(withHeld.any { it.ticker == "KXBTCD-HELD" })
+        assertTrue(withHeld.none { it.ticker.startsWith("KXGRAMMY") })
+        assertEquals(close, withHeld.first { it.ticker == "KXBTCD-HELD" }.closeTimeMs)
+        assertEquals("KXBTCD", SettlementPollPolicy.seriesOf("KXBTCD-HELD"))
     }
 }

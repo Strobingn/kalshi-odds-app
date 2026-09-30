@@ -36,6 +36,8 @@ object ScorecardCopy {
     const val LAST_MINUTE_TITLE = "Last-minute strategy"
     const val LAST_MINUTE_SUBTITLE =
         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE
+    const val D3_TITLE = "D3 daily favourite"
+    const val D3_SUBTITLE = com.dirk.kalshiodds.signal.d3.D3Copy.EVIDENCE
     const val COMBINED_TITLE = "Combined"
     const val NO_BET_TITLE = "NO BET would-have-been"
     const val PICKS_TITLE = "Every settled pick"
@@ -147,6 +149,7 @@ object ScorecardCopy {
         val byConfidence: List<Bucket>,
         val bySource: List<Bucket> = emptyList(),
         val lastMinute: LastMinuteSection = LastMinuteSection(),
+        val d3: D3Section = D3Section(),
         val autopilot: AutopilotSection = AutopilotSection(),
         val paperBankrollUsd: Double? = null
     ) {
@@ -167,6 +170,16 @@ object ScorecardCopy {
             }
             if (lastMinute.picks.isNotEmpty()) {
                 lines += lastMinute.picks.map { com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(it) }
+            }
+            lines += D3_TITLE
+            lines += D3_SUBTITLE
+            lines += d3.record
+            if (d3.picks.isNotEmpty()) {
+                lines += com.dirk.kalshiodds.signal.d3.D3Copy.wonUsdLine(d3.wonUsd)
+                lines += com.dirk.kalshiodds.signal.d3.D3Copy.lostUsdLine(d3.lostUsd)
+                lines += com.dirk.kalshiodds.signal.d3.D3Copy.netPnlLine(d3.pnlUsd)
+                lines += com.dirk.kalshiodds.signal.d3.D3Copy.fillRateLine(d3.fillRate)
+                lines += d3.picks.map { com.dirk.kalshiodds.signal.d3.D3Copy.pickLine(it) }
             }
             lines += AUTOPILOT_TITLE
             lines += AUTOPILOT_SUBTITLE
@@ -235,7 +248,8 @@ object ScorecardCopy {
         paper: PaperBookState,
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE,
-        lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList()
+        lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList(),
+        d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList()
     ): View = of(
         entries = entries,
         fills = paper.fills + paper.archived.flatMap { it.fills },
@@ -243,6 +257,7 @@ object ScorecardCopy {
         windows = windows,
         zoneId = zoneId,
         lastMinutePicks = lastMinutePicks,
+        d3Picks = d3Picks,
         paperBankrollUsd = paper.paperBankrollUsd
     )
 
@@ -253,10 +268,12 @@ object ScorecardCopy {
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE,
         lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList(),
+        d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList(),
         paperBankrollUsd: Double? = null
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
         val lastMinute = lastMinuteSection(lastMinutePicks)
+        val d3 = d3Section(d3Picks)
         val summary = HomeScorecardSummary(
             wins = ledger.combined.wins,
             losses = ledger.combined.losses,
@@ -274,8 +291,50 @@ object ScorecardCopy {
             byConfidence = ledger.byConfidence.map { toBucket(it) },
             bySource = mergeSourceBuckets(ledger.bySource.map { toBucket(it) }, lastMinute),
             lastMinute = lastMinute,
+            d3 = d3,
             autopilot = autopilotSection(fills),
             paperBankrollUsd = paperBankrollUsd
+        )
+    }
+
+    data class D3Section(
+        val wins: Int = 0,
+        val losses: Int = 0,
+        val wonUsd: Double = 0.0,
+        val lostUsd: Double = 0.0,
+        val pnlUsd: Double = 0.0,
+        val fillRate: Double? = null,
+        val settledCount: Int = 0,
+        val picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList(),
+        val record: String = EM_DASH
+    )
+
+    fun d3Section(picks: List<com.dirk.kalshiodds.signal.d3.D3Pick>): D3Section {
+        val attempted = picks
+        val filled = picks.filter { it.filled }
+        val settled = filled.filter { it.settled && it.won != null }
+        val wins = settled.count { it.won == true }
+        val losses = settled.count { it.won == false }
+        val wonUsd = settled.filter { (it.pnlUsd ?: 0.0) > 0.0 }.sumOf { it.pnlUsd ?: 0.0 }
+        val lostUsd = settled.filter { (it.pnlUsd ?: 0.0) <= 0.0 }.sumOf { -(it.pnlUsd ?: 0.0) }
+        val pnl = settled.sumOf { it.pnlUsd ?: 0.0 }
+        val fillRate = if (attempted.isEmpty()) null else filled.size.toDouble() / attempted.size
+        return D3Section(
+            wins = wins,
+            losses = losses,
+            wonUsd = wonUsd,
+            lostUsd = lostUsd,
+            pnlUsd = pnl,
+            fillRate = fillRate,
+            settledCount = settled.size,
+            picks = picks,
+            record = if (attempted.isEmpty()) {
+                EM_DASH
+            } else {
+                com.dirk.kalshiodds.signal.d3.D3Copy.recordLine(
+                    wins, losses, wonUsd, lostUsd, pnl, fillRate, attempted.size
+                )
+            }
         )
     }
 

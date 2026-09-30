@@ -44,6 +44,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
+import com.dirk.kalshiodds.ui.components.D3Card
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
@@ -218,6 +219,15 @@ fun HomeScreen(
                                     },
                                     onOpenChart = { onOpenChart(market) }
                                 )
+                            }
+                        }
+                        if (state.d3.closeTimeEpochMs != null ||
+                            state.d3.qualifying.isNotEmpty() ||
+                            state.d3.todayPicks.isNotEmpty() ||
+                            state.d3.phase != com.dirk.kalshiodds.signal.d3.D3Phase.WAITING
+                        ) {
+                            item {
+                                D3Card(snapshot = state.d3)
                             }
                         }
                         item {

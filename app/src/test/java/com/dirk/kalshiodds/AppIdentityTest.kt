@@ -35,8 +35,8 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(35, BuildConfig.VERSION_CODE)
-        assertEquals("0.3.20", BuildConfig.VERSION_NAME)
+        assertEquals(36, BuildConfig.VERSION_CODE)
+        assertEquals("0.3.21", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertTrue(AppVersion.label.startsWith("${AppIdentity.LABEL} v"))
@@ -51,8 +51,8 @@ class AppIdentityTest {
         assertTrue(gradle.contains("namespace = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("versionCode = 35"))
-        assertTrue(gradle.contains("versionName = \"0.3.20\""))
+        assertTrue(gradle.contains("versionCode = 36"))
+        assertTrue(gradle.contains("versionName = \"0.3.21\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
@@ -75,6 +75,7 @@ class AppIdentityStorageAuditTest {
         assertEquals(AppIdentity.PREFS_KEEPALIVE, LiveSignalsPolicy.PREFS_NAME)
         assertEquals("diphunter_paper_book", AppIdentity.PREFS_PAPER)
         assertEquals("diphunter_last_minute", AppIdentity.PREFS_LAST_MINUTE)
+        assertEquals("diphunter_d3", AppIdentity.PREFS_D3)
         assertEquals("diphunter_last_order_error", AppIdentity.PREFS_LAST_ORDER)
         assertEquals("diphunter_oom", AppIdentity.PREFS_OOM)
         assertEquals("kalshi_signal_secrets", AppIdentity.PREFS_SECRETS)
@@ -86,6 +87,7 @@ class AppIdentityStorageAuditTest {
             AppIdentity.PREFS_KEEPALIVE,
             AppIdentity.PREFS_PAPER,
             AppIdentity.PREFS_LAST_MINUTE,
+            AppIdentity.PREFS_D3,
             AppIdentity.PREFS_LAST_ORDER,
             AppIdentity.PREFS_OOM,
             AppIdentity.PREFS_SECRETS,
@@ -111,6 +113,7 @@ class AppIdentityStorageAuditTest {
         assertEquals(AppIdentity.CHANNEL_FOREGROUND, LiveSignalsPolicy.CHANNEL_ONGOING)
         assertEquals(AppIdentity.CHANNEL_FOREGROUND_LEGACY, LiveSignalsPolicy.CHANNEL_LEGACY)
         assertEquals(AppIdentity.CHANNEL_LAST_MINUTE, LastMinuteNotifier.CHANNEL)
+        assertEquals(AppIdentity.CHANNEL_D3, com.dirk.kalshiodds.signal.d3.D3Notifier.CHANNEL)
         assertEquals(AppIdentity.CHANNEL_OPPORTUNITY, OpportunityNotifier.CHANNEL_OPPORTUNITY)
         assertEquals(AppIdentity.WM_LIVE_PERIODIC, LiveSignalsWatchdogWorker.PERIODIC_NAME)
         assertEquals(AppIdentity.WM_LIVE_SOON, LiveSignalsWatchdogWorker.SOON_NAME)
@@ -223,6 +226,7 @@ class AppIdentityStorageAuditTest {
             "diphunter_keepalive.xml",
             "diphunter_paper_book.xml",
             "diphunter_last_minute.xml",
+            "diphunter_d3.xml",
             "diphunter_last_order_error.xml",
             "diphunter_oom.xml",
             "kalshi_signal_secrets.xml",
@@ -237,6 +241,7 @@ class AppIdentityStorageAuditTest {
             "diphunter_signal_alerts",
             "diphunter_live_signals_ongoing",
             "diphunter_last_minute",
+            "diphunter_d3",
             "diphunter_opportunities",
             "diphunter_live_signals_watchdog",
             "diphunter_cloud_sync",

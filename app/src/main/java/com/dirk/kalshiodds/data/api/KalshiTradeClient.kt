@@ -217,6 +217,7 @@ class KalshiTradeClient(
                 ?: String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
             timeInForce = timeInForce,
             clientOrderId = clientOrderId,
+            postOnly = ticket.postOnly,
             reduceOnly = reduceOnly
         )
     }
@@ -241,7 +242,12 @@ class KalshiTradeClient(
 
     private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
         if (ticket.isSell) return ticket
-        val clip = LiveOrderSizer.enforce(ticket)
+        val feeRate = if (ticket.postOnly || ticket.kind == com.dirk.kalshiodds.signal.trade.TicketKind.D3) {
+            0.0
+        } else {
+            com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE
+        }
+        val clip = LiveOrderSizer.enforce(ticket, feeRate = feeRate)
         if (!clip.ok) {
             throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $10 all-in cap")
         }

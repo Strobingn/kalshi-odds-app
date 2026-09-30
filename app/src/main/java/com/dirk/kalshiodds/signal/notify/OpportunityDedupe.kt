@@ -21,6 +21,7 @@ object OpportunityDedupe {
         TicketKind.CONFIGURED -> "wintarget"
         TicketKind.MANUAL -> "manual"
         TicketKind.LAST_MINUTE -> "last_minute"
+        TicketKind.D3 -> "d3"
         TicketKind.SELL -> "sell"
     }
 
@@ -30,6 +31,7 @@ object OpportunityDedupe {
         return ticket.kind == TicketKind.HUNTER_VALUE ||
             ticket.kind == TicketKind.HUNTER ||
             ticket.kind == TicketKind.LAST_MINUTE ||
+            ticket.kind == TicketKind.D3 ||
             (ticket.winTargetUsd != null && ticket.kind != TicketKind.SELL && ticket.kind != TicketKind.LAST_MINUTE)
     }
 

@@ -4,12 +4,13 @@ import com.dirk.kalshiodds.domain.CryptoMarkets
 import retrofit2.HttpException
 
 /**
- * Settlement poller rules for KXBTC15M only.
+ * Settlement poller rules for KXBTC15M plus **held** KXBTCD (D3) tickets.
  *
  * 0.3.15 hit Kalshi with thousands of `GET /markets?status=settled`
  * calls (~5/s), including non-KXBTC15M tickers and the still-open
  * current window. This policy:
  *  - restricts to KXBTC15M tickers the app tracked / picked
+ *  - allows KXBTCD only when we hold a D3 ticket on that ticker
  *  - waits until [closeTimeMs]
  *  - backs off 5s → 15s → 30s → 60s (capped)
  *  - dedupes in-flight requests
@@ -20,6 +21,7 @@ object SettlementPollPolicy {
     val BACKOFF_MS: LongArray = longArrayOf(5_000L, 15_000L, 30_000L, 60_000L)
     const val MAX_BACKOFF_MS = 60_000L
     const val SERIES = "KXBTC15M"
+    const val D3_SERIES = com.dirk.kalshiodds.signal.d3.D3Constants.SERIES
 
     data class Tracked(
         val ticker: String,
@@ -31,11 +33,22 @@ object SettlementPollPolicy {
         val backoffIndex: Int = 0
     )
 
-    fun isPollableTicker(ticker: String): Boolean {
+    fun isD3Ticker(ticker: String): Boolean =
+        com.dirk.kalshiodds.signal.d3.D3Constants.isTicker(ticker)
+
+    fun seriesOf(ticker: String): String? {
+        val u = ticker.trim().uppercase()
+        if (u.startsWith(SERIES) && CryptoMarkets.isLiveTicker(u)) return SERIES
+        if (isD3Ticker(u)) return D3_SERIES
+        return null
+    }
+
+    fun isPollableTicker(ticker: String, heldD3: Set<String> = emptySet()): Boolean {
         val u = ticker.trim().uppercase()
         if (u.isEmpty()) return false
-        if (!u.startsWith(SERIES)) return false
-        return CryptoMarkets.isLiveTicker(u)
+        if (u.startsWith(SERIES)) return CryptoMarkets.isLiveTicker(u)
+        if (!isD3Ticker(u)) return false
+        return heldD3.any { it.equals(u, ignoreCase = true) }
     }
 
     fun afterClose(closeTimeMs: Long?, nowMs: Long): Boolean =
@@ -47,10 +60,11 @@ object SettlementPollPolicy {
         nowMs: Long,
         nextAttemptMs: Long,
         inFlight: Boolean,
-        globalHoldUntilMs: Long = 0L
+        globalHoldUntilMs: Long = 0L,
+        heldD3: Set<String> = emptySet()
     ): Boolean {
         if (inFlight) return false
-        if (!isPollableTicker(ticker)) return false
+        if (!isPollableTicker(ticker, heldD3)) return false
         if (!afterClose(closeTimeMs, nowMs)) return false
         if (nowMs < globalHoldUntilMs) return false
         return nowMs >= nextAttemptMs
@@ -104,7 +118,8 @@ object SettlementPollPolicy {
         nowMs: Long,
         schedules: Map<String, Schedule>,
         inFlight: Set<String>,
-        globalHoldUntilMs: Long = 0L
+        globalHoldUntilMs: Long = 0L,
+        heldD3: Set<String> = emptySet()
     ): List<String> {
         val seen = LinkedHashSet<String>()
         val out = ArrayList<String>()
@@ -118,7 +133,8 @@ object SettlementPollPolicy {
                     nowMs = nowMs,
                     nextAttemptMs = sched.nextAttemptMs,
                     inFlight = ticker in inFlight,
-                    globalHoldUntilMs = globalHoldUntilMs
+                    globalHoldUntilMs = globalHoldUntilMs,
+                    heldD3 = heldD3
                 )
             ) {
                 out.add(ticker)
@@ -132,19 +148,20 @@ object SettlementPollPolicy {
         extraTickers: Collection<String>,
         closeTimeOf: (String) -> Long?
     ): List<Tracked> {
+        val extras = extraTickers.map { it.trim().uppercase() }.filter { it.isNotEmpty() }.toSet()
+        val heldD3 = extras.filter { isD3Ticker(it) }.toSet()
         val out = LinkedHashMap<String, Tracked>()
         for (e in openLog) {
             if (e.outcome != null) continue
-            if (!isPollableTicker(e.ticker)) continue
+            if (!isPollableTicker(e.ticker, heldD3)) continue
             val key = e.ticker.uppercase()
             out[key] = Tracked(key, e.closeTimeMs ?: closeTimeOf(key))
         }
-        for (raw in extraTickers) {
-            if (!isPollableTicker(raw)) continue
-            val key = raw.uppercase()
-            val prev = out[key]
-            val close = prev?.closeTimeMs ?: closeTimeOf(key)
-            out[key] = Tracked(key, close)
+        for (raw in extras) {
+            if (!isPollableTicker(raw, heldD3)) continue
+            val prev = out[raw]
+            val close = prev?.closeTimeMs ?: closeTimeOf(raw)
+            out[raw] = Tracked(raw, close)
         }
         return out.values.toList()
     }

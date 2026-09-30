@@ -401,6 +401,86 @@ object HomeFixtures {
         )
     }
 
+    fun d3CloseMs(): Long =
+        ZonedDateTime.of(2026, 9, 30, 17, 0, 0, 0, ZoneId.of("America/New_York"))
+            .toInstant().toEpochMilli()
+
+    fun d3Signal(
+        side: String = "YES",
+        ask: Double = 0.91,
+        bid: Double = 0.89
+    ) = com.dirk.kalshiodds.signal.d3.D3Signal(
+        ticker = "KXBTCD-26SEP3017-T90000",
+        eventTicker = "KXBTCD-26SEP3017",
+        strikeUsd = 90_000.0,
+        subtitle = "$90,000 or above",
+        side = side,
+        displaySide = if (side == "NO") "DOWN" else "UP",
+        favAsk = ask,
+        favBid = bid - 0.01,
+        spread = ask - (bid - 0.01),
+        bidPrice = bid,
+        sizeAhead = 4.0,
+        depthContracts = 20,
+        contracts = 11,
+        stakeUsd = 9.79,
+        feeUsd = 0.0,
+        allInUsd = 9.79,
+        winRate = com.dirk.kalshiodds.signal.d3.D3Constants.HISTORICAL_WIN_RATE,
+        qualifiedAtMs = d3CloseMs() - 2 * 3_600_000L
+    )
+
+    fun d3WaitingSnapshot() = com.dirk.kalshiodds.signal.d3.D3Snapshot(
+        phase = com.dirk.kalshiodds.signal.d3.D3Phase.WAITING,
+        eventTicker = "KXBTCD-26SEP3017",
+        closeTimeEpochMs = d3CloseMs(),
+        startsInMs = 2 * 3_600_000L,
+        todayLine = com.dirk.kalshiodds.signal.d3.D3Copy.NO_RESULT_YET,
+        feeType = "quadratic"
+    )
+
+    fun d3ActiveSnapshot() = com.dirk.kalshiodds.signal.d3.D3Snapshot(
+        phase = com.dirk.kalshiodds.signal.d3.D3Phase.ACTIVE,
+        eventTicker = "KXBTCD-26SEP3017",
+        closeTimeEpochMs = d3CloseMs(),
+        qualifying = listOf(d3Signal(), d3Signal(side = "NO", ask = 0.92, bid = 0.90).copy(
+            ticker = "KXBTCD-26SEP3017-T88000",
+            subtitle = "$88,000 or above",
+            strikeUsd = 88_000.0
+        )),
+        todayLine = "Today paper 0-0 · +0.00 · 0 filled · 0 open",
+        feeType = "quadratic"
+    )
+
+    fun d3Pick() = com.dirk.kalshiodds.signal.d3.D3Pick(
+        id = "d3-1",
+        ticker = "KXBTCD-26SEP3017-T90000",
+        eventTicker = "KXBTCD-26SEP3017",
+        strikeUsd = 90_000.0,
+        subtitle = "$90,000 or above",
+        side = "YES",
+        bidPrice = 0.89,
+        contracts = 11,
+        stakeUsd = 9.79,
+        feeUsd = 0.0,
+        createdAtMs = d3CloseMs() - 2 * 3_600_000L,
+        filled = true,
+        filledAtMs = d3CloseMs() - 3_600_000L,
+        settled = true,
+        outcome = "yes",
+        won = true,
+        pnlUsd = 1.21
+    )
+
+    fun d3ScorecardUi(): ScorecardUi {
+        val base = sampleScorecardUi()
+        return base.copy(
+            view = base.view.copy(
+                d3 = ScorecardCopy.d3Section(listOf(d3Pick()))
+            )
+        )
+    }
+
     val SAMPLE_SCORECARD = HomeScorecardSummary(
         wins = 12,
         losses = 6,
@@ -598,7 +678,8 @@ object HomeFixtures {
         correct: Int = 12,
         total: Int = 18,
         brier: Double? = 0.211,
-        scorecard: HomeScorecardSummary = SAMPLE_SCORECARD
+        scorecard: HomeScorecardSummary = SAMPLE_SCORECARD,
+        d3: com.dirk.kalshiodds.signal.d3.D3Snapshot = com.dirk.kalshiodds.signal.d3.D3Snapshot.EMPTY
     ): OddsUiState = OddsUiState(
         isLoading = false,
         snapshot = MarketsSnapshot(
@@ -616,7 +697,8 @@ object HomeFixtures {
         paper = PaperBookState(),
         positions = emptyList(),
         recentAlerts = sampleAlerts(),
-        scorecardSummary = scorecard
+        scorecardSummary = scorecard,
+        d3 = d3
     )
 
     fun openPaperFill(

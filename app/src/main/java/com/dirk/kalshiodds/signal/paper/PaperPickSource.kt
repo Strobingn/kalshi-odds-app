@@ -12,6 +12,7 @@ enum class PaperPickSource {
     AI_ALERT,
     AUTOPILOT,
     LAST_MINUTE,
+    D3,
     LONG_SHOT,
     MANUAL,
     TICKET;
@@ -21,6 +22,7 @@ enum class PaperPickSource {
             AI_ALERT -> "AI alert"
             AUTOPILOT -> PaperAutopilot.SOURCE
             LAST_MINUTE -> "last-minute strategy"
+            D3 -> com.dirk.kalshiodds.signal.d3.D3Constants.STRATEGY_SOURCE
             LONG_SHOT -> "long-shot finder"
             MANUAL -> "manual paper"
             TICKET -> "ticket"
@@ -35,6 +37,7 @@ enum class PaperPickSource {
         fun fromTicketKind(kind: TicketKind): PaperPickSource = when (kind) {
             TicketKind.HUNTER_VALUE -> LONG_SHOT
             TicketKind.LAST_MINUTE -> LAST_MINUTE
+            TicketKind.D3 -> D3
             TicketKind.MANUAL, TicketKind.SELL -> MANUAL
             TicketKind.HUNTER, TicketKind.CONFIGURED -> TICKET
         }
@@ -48,6 +51,7 @@ enum class PaperPickSource {
                 s == "ai signal" || s.contains("alert") -> AI_ALERT
                 s.contains("autopilot") || s == PaperAutopilot.SOURCE.lowercase(Locale.US) -> AUTOPILOT
                 s.contains("last-minute") || s.contains("last minute") || s.contains("last_minute") -> LAST_MINUTE
+                s.contains("d3") || s.contains("daily favourite") || s.contains("daily favorite") -> D3
                 s.contains("long-shot") || s.contains("long shot") || s.contains("hunter_value") ||
                     s.contains("hunter value") -> LONG_SHOT
                 s == PaperTileBuy.SOURCE || s.startsWith("tile") || s.contains("manual") -> MANUAL

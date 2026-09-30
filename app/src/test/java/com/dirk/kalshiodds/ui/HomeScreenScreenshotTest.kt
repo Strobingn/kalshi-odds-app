@@ -510,6 +510,69 @@ class HomeScreenScreenshotTest {
     fun lastMinuteSettings() = snapSettings("last_minute_settings", dark = false)
 
     @Test
+    fun d3HomeWaiting() = snap(
+        "d3_home_waiting",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.actionableBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true,
+            d3 = HomeFixtures.d3WaitingSnapshot()
+        )
+    )
+
+    @Test
+    fun d3HomeActive() = snap(
+        "d3_home_active",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.actionableBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true,
+            d3 = HomeFixtures.d3ActiveSnapshot()
+        )
+    )
+
+    @Test
+    fun d3HomeWaitingLight() = snap(
+        "d3_home_waiting_light",
+        dark = false,
+        HomeFixtures.state(
+            HomeFixtures.actionableBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true,
+            d3 = HomeFixtures.d3WaitingSnapshot()
+        )
+    )
+
+    @Test
+    fun d3HomeActiveLight() = snap(
+        "d3_home_active_light",
+        dark = false,
+        HomeFixtures.state(
+            HomeFixtures.actionableBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true,
+            d3 = HomeFixtures.d3ActiveSnapshot()
+        )
+    )
+
+    @Test
+    fun d3ScorecardSection() = snapScorecard(
+        "d3_scorecard_section",
+        dark = true,
+        ui = HomeFixtures.d3ScorecardUi(),
+        height = 2400
+    )
+
+    @Test
+    fun d3Settings() = snapSettings("d3_settings", dark = false)
+
+    @Test
     fun beforeLightActionable() = snapBefore("before_0_3_11_light_actionable", dark = false, keyed = true)
 
     @Test

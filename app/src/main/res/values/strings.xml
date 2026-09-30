@@ -30,4 +30,7 @@
     <string name="last_minute_channel_name">Last-minute play</string>
     <string name="last_minute_channel_desc">Paper heads-up when the last-minute BRTI rule fires. Unproven on live order books. Approve + REAL MONEY still required — never auto-placed.</string>
     <string name="last_minute_alert_title">Last-minute play (paper): %1$s</string>
+    <string name="d3_channel_name">D3 daily favourite</string>
+    <string name="d3_channel_desc">Alert when a KXBTCD 5 PM ET favourite qualifies. Post-only limit bid. Approve + REAL MONEY still required — never auto-placed.</string>
+    <string name="d3_alert_title">D3 favourite: %1$s</string>
 </resources>

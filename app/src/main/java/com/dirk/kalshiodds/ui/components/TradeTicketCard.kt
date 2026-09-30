@@ -204,6 +204,7 @@ private fun ProposedTicketCard(
                         TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.LAST_MINUTE -> "LAST-MINUTE PLAY"
+                        TicketKind.D3 -> "D3 DAILY FAVOURITE"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
                     } + " · " + TradeModeLabel.forApprove(
@@ -516,6 +517,15 @@ internal fun ApproveTicketDialog(
                     Spacer(Modifier.height(8.dp))
                     Text(
                         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.CONFIRM_UNPROVEN,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentOrange
+                    )
+                }
+                if (ticket.kind == TicketKind.D3 && !ticket.isSell) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        com.dirk.kalshiodds.signal.d3.D3Copy.CONFIRM_POST_ONLY,
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = colors.accentOrange

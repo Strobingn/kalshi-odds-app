@@ -8,7 +8,8 @@ import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Resolves open prediction-log / paper tickers against settled Kalshi
- * markets. Restricted to KXBTC15M the app tracked, only after close_time,
+ * markets. Restricted to KXBTC15M the app tracked plus held KXBTCD (D3)
+ * tickets, only after close_time,
  * with 5s/15s/30s/60s backoff, in-flight dedupe, and 429 Retry-After.
  */
 class SettlementScorer(
@@ -36,7 +37,7 @@ class SettlementScorer(
     @Volatile private var globalHoldUntilMs: Long = 0L
 
     fun noteCloseTime(ticker: String, closeTimeMs: Long) {
-        if (!SettlementPollPolicy.isPollableTicker(ticker)) return
+        if (!SettlementPollPolicy.isPollableTicker(ticker) && !SettlementPollPolicy.isD3Ticker(ticker)) return
         if (closeTimeMs <= 0L) return
         closeTimes[ticker.uppercase()] = closeTimeMs
     }
@@ -62,12 +63,14 @@ class SettlementScorer(
         val tracked = SettlementPollPolicy.mergeTracked(open, extra) { ticker ->
             closeTime(ticker)
         }
+        val heldD3 = extra.filter { SettlementPollPolicy.isD3Ticker(it) }.map { it.uppercase() }.toSet()
         val due = SettlementPollPolicy.candidates(
             tracked = tracked,
             nowMs = nowMs,
             schedules = schedules,
             inFlight = inFlight,
-            globalHoldUntilMs = globalHoldUntilMs
+            globalHoldUntilMs = globalHoldUntilMs,
+            heldD3 = heldD3
         )
         for (ticker in due) {
             if (!inFlight.add(ticker)) continue
@@ -82,8 +85,9 @@ class SettlementScorer(
     private suspend fun pollTicker(ticker: String, nowMs: Long) {
         val prev = schedules[ticker] ?: SettlementPollPolicy.Schedule()
         try {
+            val series = SettlementPollPolicy.seriesOf(ticker) ?: SettlementPollPolicy.SERIES
             val resp = resolveApi().getMarkets(
-                seriesTicker = SettlementPollPolicy.SERIES,
+                seriesTicker = series,
                 status = "settled",
                 ticker = ticker,
                 limit = 5
