@@ -191,7 +191,7 @@ object Structures {
 
         for ((key, ms) in groups) {
             if (ms.size < 2) continue
-            val above = key.first in UPPER_OPEN
+            val above = key[0] in UPPER_OPEN
             val sorted = if (above) ms.sortedBy { it.floorStrike } else ms.sortedBy { it.capStrike }
             for (i in sorted.indices) for (j in i + 1 until sorted.size) {
                 val low = sorted[i]
