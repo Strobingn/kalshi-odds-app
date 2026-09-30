@@ -169,6 +169,21 @@ object Structures {
      * spread event; each player's rushing yards). Only same-subject strikes are
      * nested; "BC by 2+" + NOT "SMU by 10+" loses both legs if SMU wins by 15.
      */
+    /**
+     * Nested strikes price monotonically, give or take one stray level. Two or
+     * more breaks (a hump summing to ~$1) means exact-value buckets whatever
+     * strike_type says (KXSTARSHIPSPACE-26: 3:5c 4:35c 5:47c 6:12c 7:3c).
+     */
+    fun shapeSuspect(above: Boolean, sorted: List<MarketInfo>, tolE4: Int = 500): String? {
+        val mids = sorted.mapNotNull { m ->
+            val b = m.yesBidE4
+            val a = m.yesAskE4
+            if (b == null || a == null || a <= 0) null else (b + a) / 2
+        }
+        val breaks = mids.zipWithNext().count { (x, y) -> if (above) y > x + tolE4 else y < x - tolE4 }
+        return if (breaks >= 2) "Prices not monotone across strikes ($breaks breaks): looks like buckets, check the rules" else null
+    }
+
     /** Rules text with every number blanked: nested strikes differ only in the number. */
     fun rulesTemplate(rules: String?): String =
         (rules ?: "").trim().lowercase().replace(Regex("[0-9][0-9,]*(\\.[0-9]+)?"), "#")
@@ -184,6 +199,8 @@ object Structures {
 
     private fun ladders(e: EventInfo, active: List<MarketInfo>): List<Structure> {
         val out = ArrayList<Structure>()
+        // Nested strikes overlap, so a mutually exclusive event holds no ladder.
+        if (e.mutuallyExclusive) return out
         val groups = active.filter {
             val t = it.strikeType?.lowercase()
             (t in UPPER_OPEN && it.floorStrike != null) || (t in LOWER_OPEN && it.capStrike != null)
@@ -193,6 +210,7 @@ object Structures {
             if (ms.size < 2) continue
             val above = key[0] in UPPER_OPEN
             val sorted = if (above) ms.sortedBy { it.floorStrike } else ms.sortedBy { it.capStrike }
+            val suspect = shapeSuspect(above, sorted)
             for (i in sorted.indices) for (j in i + 1 until sorted.size) {
                 val low = sorted[i]
                 val high = sorted[j]
@@ -212,8 +230,8 @@ object Structures {
                     eventTitle = e.title,
                     legs = legs,
                     payoutPerSetCents = 100,
-                    verified = true,
-                    note = "Pays $1 outside the strikes, $2 between them"
+                    verified = suspect == null,
+                    note = suspect ?: "Pays $1 outside the strikes, $2 between them"
                 )
             }
         }

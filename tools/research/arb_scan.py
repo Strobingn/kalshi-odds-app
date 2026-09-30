@@ -548,9 +548,36 @@ def check_sets(event: dict, markets: list, books: dict, rate: float = FEE_RATE) 
     return out
 
 
+def _mid(m: dict) -> float | None:
+    yb, ya = top_quote(m)
+    if yb is None or ya is None or ya <= 0:
+        return None
+    return (yb + ya) / 2.0
+
+
+def ladder_shape_suspect(direction: str, grp: list, tol: float = 0.05) -> str | None:
+    """Metadata sanity check: nested strikes price monotonically, with at most a
+    stray level out of line. Two or more breaks (a hump that sums to ~$1) means
+    the markets are really exact-value buckets whatever strike_type says.
+    Scan 3: KXSTARSHIPSPACE-26 'less' mids 3:5c 4:35c 5:47c 6:12c 7:3c."""
+    mids = [(k, _mid(m)) for k, m in grp]
+    mids = [(k, p) for k, p in mids if p is not None]
+    breaks = 0
+    for (_, a), (_, b) in zip(mids, mids[1:]):
+        if (direction == "up" and b > a + tol) or (direction == "down" and b < a - tol):
+            breaks += 1
+    if breaks >= 2:
+        shape = " ".join(f"{k:g}:{p * 100:.0f}c" for k, p in mids)
+        return f"prices not monotone across strikes ({breaks} breaks: {shape}); likely exact-value buckets, check rules"
+    return None
+
+
 def check_ladders(event: dict, markets: list, books: dict, rate: float = FEE_RATE) -> list:
     out = []
+    if event.get("mutually_exclusive"):
+        return out  # nested strikes overlap, so an exclusive event holds no ladder
     for direction, grp in ladders(markets):
+        suspect = ladder_shape_suspect(direction, grp)
         for i in range(len(grp)):
             for j in range(i + 1, len(grp)):
                 (k1, m1), (k2, m2) = grp[i], grp[j]
@@ -568,7 +595,7 @@ def check_ladders(event: dict, markets: list, books: dict, rate: float = FEE_RAT
                 out.append(_opp("ladder", event, s, legs, 1.0,
                                 dict(tickers=[yes_m.get("ticker"), no_m.get("ticker")], direction=direction,
                                      strikes=[k1, k2], strike_type=(m1.get("strike_type") or "").lower(),
-                                     risk_free=True)))
+                                     risk_free=suspect is None, structure_note=suspect or "")))
     return out
 
 
@@ -825,7 +852,7 @@ def opp_key(o: dict) -> str:
 
 
 def is_risk_free(o: dict) -> bool:
-    return o["kind"] in ("box", "ladder") or bool(o.get("risk_free"))
+    return o["kind"] == "box" or bool(o.get("risk_free"))
 
 
 def locked_total(opps: list) -> float:
@@ -916,7 +943,7 @@ def render(snaps: list, interval: float) -> str:
     L.extend(_opp_table(sorted(uniq.values(), key=lambda o: -o["profit"])) if uniq else ["None found."])
     L.append("")
     if manual:
-        L.append("## Needs manual rule check (exhaustiveness / exclusivity only assumed) — NOT counted as risk-free")
+        L.append("## Needs manual rule check (exhaustiveness / exclusivity only assumed, or ladder prices look like buckets) — NOT counted as risk-free")
         mu: dict = {}
         for o in manual:
             mu.setdefault(opp_key(o), o)

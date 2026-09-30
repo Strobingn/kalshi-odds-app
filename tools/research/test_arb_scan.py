@@ -203,6 +203,24 @@ def test_ladder_only_nests_same_subject() -> None:
     assert a.check_ladders(ev, [r7, r5], rb) == []
 
 
+def test_bucket_shaped_ladder_is_not_risk_free() -> None:
+    """Scan 3: KXSTARSHIPSPACE-26 was tagged 'less' but priced like exact-count buckets."""
+    mids = {3: 0.05, 4: 0.35, 5: 0.47, 6: 0.12, 7: 0.03, 8: 0.03, 9: 0.02}
+    ms = [dict(mkt(f"SS-{k}.0", "less", cap=k), yes_bid_dollars=f"{p - 0.01:.2f}", yes_ask_dollars=f"{p + 0.01:.2f}")
+          for k, p in mids.items()]
+    books = {m["ticker"]: book(yes=[(mids[int(m["cap_strike"])] - 0.01, 50)], no=[(1 - mids[int(m["cap_strike"])] - 0.01, 50)])
+             for m in ms}
+    ev = {"event_ticker": "SS"}
+    opps = [o for o in a.check_ladders(ev, ms, books) if o["profit"] > 0]
+    assert opps and not any(a.is_risk_free(o) for o in opps)
+    assert "not monotone" in opps[0]["structure_note"]
+    assert a.check_ladders({"event_ticker": "SS", "mutually_exclusive": True}, ms, books) == []
+    # A single stale level in an otherwise monotone ladder is still a real ladder.
+    one = [dict(mkt(f"M-{k}", "less", cap=k), yes_bid_dollars=f"{p - 0.01:.2f}", yes_ask_dollars=f"{p + 0.01:.2f}")
+           for k, p in ((1, 0.10), (2, 0.40), (3, 0.30), (4, 0.80))]
+    assert a.ladder_shape_suspect("down", [(m["cap_strike"], m) for m in one]) is None
+
+
 def test_fixture_end_to_end_and_persistence() -> None:
     with tempfile.TemporaryDirectory() as td:
         md, js = Path(td) / "r.md", Path(td) / "r.json"

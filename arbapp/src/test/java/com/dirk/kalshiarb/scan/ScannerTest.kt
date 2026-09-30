@@ -251,6 +251,16 @@ class ScannerTest {
     }
 
     @Test
+    fun bucketShapedLadderIsUnverified() {
+        val mids = listOf(3 to 500, 4 to 3_500, 5 to 4_700, 6 to 1_200, 7 to 300)
+        val ms = mids.map { (k, p) -> mkt("SS-$k.0", strike = "less", cap = k.toDouble(), yesBid = p - 100, yesAsk = p + 100) }
+        val lad = Structures.find(event(*ms.toTypedArray())).filter { it.type == ArbType.LADDER }
+        assertTrue(lad.isNotEmpty())
+        assertTrue(lad.none { it.verified })
+        assertTrue(Structures.find(event(*ms.toTypedArray(), me = true)).none { it.type == ArbType.LADDER })
+    }
+
+    @Test
     fun differentRulesDoNotLadder() {
         val r7 = mkt("R-7.0", strike = "less", cap = 7.0)
             .copy(rulesPrimary = "If fewer than 7 Starship flights reach space in 2026, resolves Yes.")
