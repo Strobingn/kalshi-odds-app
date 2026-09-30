@@ -15,3 +15,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "DipHunter"
 include(":app")
+include(":arbapp")

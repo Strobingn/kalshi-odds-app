@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dark window behind Compose so launch doesn't flash white. -->
+    <style name="Theme.ArbHunter" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#FF0A1414</item>
+        <item name="android:navigationBarColor">#FF0A1414</item>
+        <item name="android:windowBackground">#FF0A1414</item>
+    </style>
+</resources>
