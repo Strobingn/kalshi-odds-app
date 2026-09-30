@@ -1,0 +1,69 @@
+name: Arb scan (Claude)
+
+# Structural (risk-free) arbitrage scan of live Kalshi order books
+# (tools/research/arb_scan.py). Report is printed to the log and the run
+# summary; the JSON of opportunities is uploaded as an artifact. Nothing is
+# committed or released, and no orders are placed (public read-only API).
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/arb_*.py"
+      - ".github/workflows/arb-scan.yml"
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: Number of snapshots
+        required: false
+        default: "15"
+      interval:
+        description: Seconds between snapshot starts
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: arb-scan-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: python3 tools/research/test_arb_scan.py
+
+      - name: Scan
+        run: |
+          python3 tools/research/arb_scan.py \
+            --repeat "${{ github.event.inputs.repeat || '15' }}" \
+            --interval "${{ github.event.inputs.interval || '60' }}" \
+            --out arb_scan.md --json arb_scan.json > /dev/null
+
+      - name: Print report
+        if: always()
+        run: |
+          echo "===== ARB SCAN REPORT ====="
+          cat arb_scan.md || echo "(no report written)"
+          echo "===== END ARB SCAN REPORT ====="
+          if [ -f arb_scan.md ]; then cat arb_scan.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: arb-scan-${{ github.run_number }}
+          path: |
+            arb_scan.json
+            arb_scan.md
+          if-no-files-found: ignore

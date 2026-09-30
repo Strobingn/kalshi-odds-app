@@ -1,0 +1,15 @@
+{"events": [
+ {"event_ticker": "KXTEST-RANGE", "series_ticker": "KXTEST", "title": "Synthetic price range", "category": "Test", "mutually_exclusive": true,
+  "markets": [
+   {"ticker": "KXTEST-RANGE-LO", "status": "active", "strike_type": "less", "cap_strike": 100, "yes_bid_dollars": "0.2800", "yes_ask_dollars": "0.3000"},
+   {"ticker": "KXTEST-RANGE-MID", "status": "active", "strike_type": "between", "floor_strike": 100, "cap_strike": 110, "yes_bid_dollars": "0.2800", "yes_ask_dollars": "0.3000"},
+   {"ticker": "KXTEST-RANGE-HI", "status": "active", "strike_type": "greater", "floor_strike": 110, "yes_bid_dollars": "0.2800", "yes_ask_dollars": "0.3000"}]},
+ {"event_ticker": "KXTEST-LADDER", "series_ticker": "KXTEST", "title": "Synthetic above ladder", "category": "Test", "mutually_exclusive": false,
+  "markets": [
+   {"ticker": "KXTEST-LADDER-T100", "status": "active", "strike_type": "greater", "floor_strike": 100, "yes_bid": 48, "yes_ask": 50},
+   {"ticker": "KXTEST-LADDER-T110", "status": "active", "strike_type": "greater", "floor_strike": 110, "yes_bid": 60, "yes_ask": 62}]},
+ {"event_ticker": "KXTEST-GAP", "series_ticker": "KXTEST", "title": "Synthetic non-exhaustive buckets", "category": "Test", "mutually_exclusive": false,
+  "markets": [
+   {"ticker": "KXTEST-GAP-A", "status": "active", "strike_type": "between", "floor_strike": 100, "cap_strike": 110, "yes_bid_dollars": "0.2000", "yes_ask_dollars": "0.2200"},
+   {"ticker": "KXTEST-GAP-B", "status": "active", "strike_type": "between", "floor_strike": 120, "cap_strike": 130, "yes_bid_dollars": "0.2000", "yes_ask_dollars": "0.2200"}]}
+]}
