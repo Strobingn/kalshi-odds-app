@@ -17,7 +17,11 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.15**
+Package: `com.dirk.kalshiodds` · version **0.3.21**
+
+## 0.3.21
+
+- **D3 daily favourite (KXBTCD 5 PM ET).** New home card below the Bitcoin 15m card and This window. From 14:00–16:00 ET, any strike whose favourite ask is 85–97¢ gets a post-only resting limit bid (best bid + 1¢ when the spread is ≥2¢). Paper (AI paper autopilot) fills only on a trade-through or after the size ahead of us trades; size is half-Kelly on the historical win rate with a book-depth cap. Live stays Approve + REAL MONEY, $10 all-in, never automatic. Maker fee is read from the series `fee_type` (quadratic; maker multiplier defaults to 0). Scorecard adds a separate D3 section. Settlement polls KXBTCD only for tickets we hold. Evidence (static): 297 fills, 284-13, +$137.66 after fees; BTC 115-4, +$70.52; forward test started 2026-09-30.
 
 ## 0.3.15
 

@@ -117,6 +117,7 @@ object TicketBuilder {
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
             TicketKind.LAST_MINUTE -> proposeLastMinute(market, ctx)
+            TicketKind.D3 -> proposeD3(market, ctx)
             TicketKind.SELL -> ticket
         } ?: ticket
     }
@@ -134,6 +135,107 @@ object TicketBuilder {
         }
         val stake = PayoutGate.clipStake(ctx.settings.ticketStakeUsd)
         return buildLastMinuteTicket(market, fired, ctx, stake, ask)
+    }
+
+    fun proposeD3(
+        signal: com.dirk.kalshiodds.signal.d3.D3Signal,
+        ctx: Context,
+        schedule: com.dirk.kalshiodds.signal.d3.D3Fees.Schedule = com.dirk.kalshiodds.signal.d3.D3Fees.fromSeries("quadratic", 1.0, 0.0)
+    ): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        return buildD3Ticket(signal, ctx, schedule)
+    }
+
+    fun proposeD3(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        val quote = com.dirk.kalshiodds.signal.d3.D3Quote(
+            ticker = market.ticker,
+            eventTicker = null,
+            title = market.title,
+            subtitle = market.subtitle,
+            strikeUsd = market.floorStrike,
+            yesBid = market.yesBid,
+            yesAsk = market.yesAsk,
+            noBid = market.noBid,
+            noAsk = market.noAsk,
+            yesAskSize = market.yesAskSize,
+            closeTimeEpochMs = market.closeTimeEpochMs,
+            status = market.status
+        )
+        val signal = com.dirk.kalshiodds.signal.d3.D3Strategy.evaluate(
+            com.dirk.kalshiodds.signal.d3.D3Strategy.Inputs(
+                quote = quote,
+                nowMs = ctx.nowMs,
+                book = ctx.books[market.ticker],
+                bankrollUsd = ctx.bankrollUsd ?: ctx.settings.ticketStakeUsd,
+                liveCapUsd = SignalConstants.LIVE_ALL_IN_CAP_USD
+            )
+        ) ?: return null
+        return buildD3Ticket(signal, ctx)
+    }
+
+    private fun buildD3Ticket(
+        signal: com.dirk.kalshiodds.signal.d3.D3Signal,
+        ctx: Context,
+        schedule: com.dirk.kalshiodds.signal.d3.D3Fees.Schedule = com.dirk.kalshiodds.signal.d3.D3Fees.fromSeries("quadratic", 1.0, 0.0)
+    ): TradeTicket? {
+        val px = KalshiPrice.usable(signal.bidPrice) ?: return null
+        val sized = com.dirk.kalshiodds.signal.d3.D3Strategy.liveSize(
+            bidPrice = px,
+            capUsd = SignalConstants.LIVE_ALL_IN_CAP_USD,
+            schedule = schedule,
+            depthContracts = signal.depthContracts
+        )
+        if (!sized.ok || sized.allInUsd > SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-9) return null
+        val side = if (signal.side.equals("NO", true)) "NO" else "YES"
+        val yesLimit = if (side == "YES") px else (1.0 - px)
+        val bookSide = if (side == "YES") "bid" else "ask"
+        val live = LiveOrderSizer.size(px, SignalConstants.LIVE_ALL_IN_CAP_USD, schedule.makerFeeRate)
+        val contracts = if (live.ok) live.count else sized.contracts
+        val allIn = if (live.ok) live.allInUsd else sized.allInUsd
+        val fee = if (live.ok) live.feeUsd else sized.feeUsd
+        if (contracts <= 0 || allIn > SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-9) return null
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = signal.ticker,
+            side = side,
+            bookSide = bookSide,
+            stakeUsd = allIn,
+            limitPrice = px,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = contracts,
+            estimatedFillUsd = allIn,
+            maxPayoutUsd = contracts * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = px,
+            title = signal.subtitle ?: signal.ticker,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "BID %s %s × %d = $%.2f post-only",
+                signal.displaySide,
+                com.dirk.kalshiodds.signal.d3.D3Copy.formatCents(px),
+                contracts,
+                allIn
+            ),
+            gateNote = "D3 daily favourite · post-only limit bid · $10 all-in · Approve + REAL MONEY still required",
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.D3,
+            impliedChance = signal.favAsk,
+            modelChance = signal.winRate,
+            fairChance = signal.winRate,
+            modelEdge = true,
+            profitIfWinUsd = contracts - allIn,
+            feeUsd = fee,
+            allInUsd = allIn,
+            belowMinProfit = false,
+            minProfitIfWinUsd = 0.0,
+            winTargetUsd = 0.0,
+            winTargetCapped = true,
+            winTargetNote = "D3 · $10 cap · post-only maker · no auto-fire",
+            bankrollSource = ctx.bankrollSource,
+            bankrollUsd = ctx.bankrollUsd ?: ctx.settings.bankrollUsd,
+            visibleContracts = signal.depthContracts,
+            postOnly = true
+        )
     }
 
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
@@ -451,6 +553,8 @@ object TicketBuilder {
                     "Manual buy · $10 all-in cap including fees · Approve still required"
                 TicketKind.LAST_MINUTE ->
                     "Last-minute strategy · $10 all-in · Approve + REAL MONEY still required"
+                TicketKind.D3 ->
+                    "D3 daily favourite · post-only limit bid · $10 all-in · Approve + REAL MONEY still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> SELL_IOC_NOTE
             },

@@ -81,16 +81,24 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
     val snapshot: StateFlow<ScorecardUi> = combine(
         container.logStore.entriesFlow,
         container.paper.book.state,
-        container.lastMinuteStore.state,
+        combine(container.lastMinuteStore.state, container.d3Store.state) { lm, d3 -> lm to d3 },
         container.guardrailStore.stateFlow,
         combine(_exportMessage, _modelNote, container.adapterStore.stateFlow) { export, note, adapter ->
             Triple(export, note, adapter)
         }
-    ) { entries, paper, lastMinute, guard, notes ->
+    ) { entries, paper, books, guard, notes ->
+        val lastMinute = books.first
+        val d3 = books.second
         val settings = container.hub.settings
         val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
         ScorecardUi(
-            view = ScorecardCopy.of(entries, paper, windows, lastMinutePicks = lastMinute.picks),
+            view = ScorecardCopy.of(
+                entries,
+                paper,
+                windows,
+                lastMinutePicks = lastMinute.picks,
+                d3Picks = d3.picks
+            ),
             metrics = ScorecardMetrics.compute(
                 entries = entries,
                 calibration = container.scoring.calibration,

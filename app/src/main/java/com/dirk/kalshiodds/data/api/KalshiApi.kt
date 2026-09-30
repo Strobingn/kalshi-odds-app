@@ -1,7 +1,10 @@
 package com.dirk.kalshiodds.data.api
 
 import com.dirk.kalshiodds.data.dto.MarketsResponse
+import com.dirk.kalshiodds.data.dto.SeriesResponse
+import com.dirk.kalshiodds.data.dto.TradesResponse
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
@@ -16,8 +19,22 @@ interface KalshiApi {
         @Query("status") status: String = "open",
         @Query("limit") limit: Int? = null,
         @Query("cursor") cursor: String? = null,
-        @Query("ticker") ticker: String? = null
+        @Query("ticker") ticker: String? = null,
+        @Query("event_ticker") eventTicker: String? = null
     ): MarketsResponse
+
+    @GET("series/{series_ticker}")
+    suspend fun getSeries(
+        @Path("series_ticker") seriesTicker: String
+    ): SeriesResponse
+
+    @GET("markets/trades")
+    suspend fun getTrades(
+        @Query("ticker") ticker: String,
+        @Query("limit") limit: Int? = 100,
+        @Query("min_ts") minTs: Long? = null,
+        @Query("cursor") cursor: String? = null
+    ): TradesResponse
 
     companion object {
         /** Public market-data host (also listed as a shared Trade API server). */
@@ -42,6 +59,7 @@ interface KalshiApi {
         fun publicBase(demo: Boolean): String = if (demo) DEMO_SHARED_BASE_URL else BASE_URL
 
         const val SERIES_BTC = "KXBTC15M"
+        const val SERIES_BTCD = "KXBTCD"
         const val SERIES_ETH = "KXETH15M"
         const val SERIES_SOL = "KXSOL15M"
         /** @deprecated Removed from the live watchlist — crypto-only app. Kept so old cache/tests compile. */

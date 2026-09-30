@@ -5,6 +5,8 @@ enum class TicketKind {
     CONFIGURED,
     /** Last-minute strategy fire — one per window. */
     LAST_MINUTE,
+    /** D3 daily 5 PM favourite — post-only maker bid. */
+    D3,
     /** Automatic hunter: $1 stake → ≥$25 max payout. */
     HUNTER,
     /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */
@@ -78,7 +80,9 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /** V2 `post_only` — D3 resting maker bids. */
+    val postOnly: Boolean = false
 ) {
     val displaySide: String get() = side.uppercase()
 

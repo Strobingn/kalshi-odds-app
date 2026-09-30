@@ -51,6 +51,7 @@ object CryptoMarkets {
     fun inferSeries(ticker: String): String {
         val u = ticker.uppercase()
         return when {
+            u.startsWith(KalshiApi.SERIES_BTCD) -> KalshiApi.SERIES_BTCD
             u.startsWith(KalshiApi.SERIES_ETH) || (u.contains("ETH") && !u.contains("BTC")) -> KalshiApi.SERIES_ETH
             u.startsWith(KalshiApi.SERIES_SOL) || u.contains("SOL") -> KalshiApi.SERIES_SOL
             u.startsWith(KalshiApi.SERIES_BTC) || u.contains("BTC") -> KalshiApi.SERIES_BTC
@@ -61,7 +62,7 @@ object CryptoMarkets {
     fun kindFor(ticker: String): SeriesKind = when (inferSeries(ticker)) {
         KalshiApi.SERIES_ETH -> SeriesKind.ETH
         KalshiApi.SERIES_SOL -> SeriesKind.SOL
-        KalshiApi.SERIES_BTC -> SeriesKind.BTC
+        KalshiApi.SERIES_BTC, KalshiApi.SERIES_BTCD -> SeriesKind.BTC
         else -> SeriesKind.CRYPTO
     }
 }

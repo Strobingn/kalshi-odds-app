@@ -33,5 +33,6 @@ object HomeHelp {
             "Tap a card for the full-screen chart. The primary button opens an approve-gated ticket — " +
             "nothing is sent until you tap Approve. NO BET cards keep Buy anyway for a manual ticket. " +
             "Paper UP and Paper DOWN are always on the card in LIVE \$ and paper mode — they never send a real order. " +
-            "Last-minute play is the card pick. $10 max bet; no min-profit gate. Home only displays them."
+            "Last-minute play is the card pick. $10 max bet; no min-profit gate. Home only displays them. " +
+            "BTC daily 5 PM favourite (D3) sits below the Bitcoin card."
 }

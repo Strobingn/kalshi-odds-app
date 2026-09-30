@@ -22,6 +22,7 @@ object AppIdentity {
     const val PREFS_KEEPALIVE = "diphunter_keepalive"
     const val PREFS_PAPER = "diphunter_paper_book"
     const val PREFS_LAST_MINUTE = "diphunter_last_minute"
+    const val PREFS_D3 = "diphunter_d3"
     const val PREFS_LAST_ORDER = "diphunter_last_order_error"
     const val PREFS_OOM = "diphunter_oom"
     const val PREFS_SECRETS = "kalshi_signal_secrets"
@@ -42,6 +43,7 @@ object AppIdentity {
     const val CHANNEL_FOREGROUND = "diphunter_live_signals_ongoing"
     const val CHANNEL_FOREGROUND_LEGACY = "diphunter_live_signals"
     const val CHANNEL_LAST_MINUTE = "diphunter_last_minute"
+    const val CHANNEL_D3 = "diphunter_d3"
     const val CHANNEL_OPPORTUNITY = "diphunter_opportunities"
 
     const val WM_LIVE_PERIODIC = "diphunter_live_signals_watchdog"
@@ -73,6 +75,7 @@ object AppIdentity {
         "SharedPreferences $PREFS_KEEPALIVE.xml",
         "SharedPreferences $PREFS_PAPER.xml",
         "SharedPreferences $PREFS_LAST_MINUTE.xml",
+        "SharedPreferences $PREFS_D3.xml",
         "SharedPreferences $PREFS_LAST_ORDER.xml",
         "SharedPreferences $PREFS_OOM.xml",
         "EncryptedSharedPreferences $PREFS_SECRETS.xml",
@@ -91,6 +94,7 @@ object AppIdentity {
         "channel $CHANNEL_FOREGROUND",
         "channel $CHANNEL_FOREGROUND_LEGACY",
         "channel $CHANNEL_LAST_MINUTE",
+        "channel $CHANNEL_D3",
         "channel $CHANNEL_OPPORTUNITY",
         "WorkManager $WM_LIVE_PERIODIC",
         "WorkManager $WM_LIVE_SOON",

@@ -72,7 +72,8 @@ data class OddsUiState(
     val liveCashUsd: Double? = null,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
-    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY
+    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
+    val d3: com.dirk.kalshiodds.signal.d3.D3Snapshot = com.dirk.kalshiodds.signal.d3.D3Snapshot.EMPTY
 )
 
 /**
@@ -175,6 +176,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching { restorePersistedState() }
             startPolling()
             startLastMinuteLoop()
+            startD3Loop()
         }
         viewModelScope.launch {
             runCatching {
@@ -812,11 +814,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val now = container.clock.nowMs()
         val markets = s.snapshot?.allMarkets.orEmpty()
         val live = MarketLifecycle.tradable(markets, now)
-        val liveTickers = live.map { it.ticker }.toSet()
+        val d3Tickers = s.d3.liveTickers
+        val liveTickers = live.map { it.ticker }.toSet() + d3Tickers
         val ctx = ticketContext(s, now)
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        val tickets = TicketBuilder.proposeAll(live, ctx)
+        val d3Tickets = s.d3.qualifying.mapNotNull {
+            TicketBuilder.proposeD3(it, ctx, container.d3Engine.schedule)
+        }
+        val tickets = TicketBuilder.proposeAll(live, ctx) + d3Tickets
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {
             container.opportunities.consider(
@@ -830,6 +836,84 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private var lastMinuteJob: Job? = null
+    private var d3Job: Job? = null
+    @Volatile private var d3Quotes: List<com.dirk.kalshiodds.signal.d3.D3Quote> = emptyList()
+
+    private fun startD3Loop() {
+        d3Job?.cancel()
+        _state.update {
+            it.copy(
+                d3 = container.d3Engine.snapshot(
+                    emptyList(),
+                    container.d3Store,
+                    now = container.clock.nowMs()
+                )
+            )
+        }
+        d3Job = viewModelScope.launch {
+            runCatching {
+                val schedule = withContext(Dispatchers.IO) { container.d3Markets.loadSchedule() }
+                container.d3Engine.applySchedule(schedule)
+            }
+            var lastMarketFetch = 0L
+            while (isActive) {
+                runCatching { tickD3(lastMarketFetch).also { lastMarketFetch = it } }
+                delay(5_000)
+            }
+        }
+    }
+
+    private suspend fun tickD3(lastMarketFetchMs: Long): Long {
+        val now = container.clock.nowMs()
+        val impliedClose = com.dirk.kalshiodds.signal.d3.D3Window.impliedCloseMs(now)
+        val phase = com.dirk.kalshiodds.signal.d3.D3Window.phase(now, impliedClose)
+        val interval = when (phase) {
+            com.dirk.kalshiodds.signal.d3.D3Phase.ACTIVE -> 15_000L
+            com.dirk.kalshiodds.signal.d3.D3Phase.WAITING -> 60_000L
+            com.dirk.kalshiodds.signal.d3.D3Phase.CLOSED -> 120_000L
+        }
+        var fetchedAt = lastMarketFetchMs
+        if (now - lastMarketFetchMs >= interval) {
+            val quotes = withContext(Dispatchers.IO) { container.d3Markets.loadFivePmQuotes() }
+            if (quotes.isNotEmpty()) d3Quotes = quotes
+            fetchedAt = now
+        }
+        val quotes = d3Quotes
+        val settings = _state.value.settings
+        val paperOn = settings.paperTradingEnabled && settings.aiPaperAutopilotEnabled
+        val trades = HashMap<String, List<com.dirk.kalshiodds.signal.d3.D3TradePrint>>()
+        if (paperOn) {
+            val resting = container.d3Engine.restingBids()
+            for (bid in resting) {
+                val prints = withContext(Dispatchers.IO) {
+                    runCatching { container.d3Markets.loadTrades(bid.ticker, bid.placedAtMs) }
+                        .getOrDefault(emptyList())
+                }
+                trades[bid.ticker.uppercase()] = prints
+            }
+        }
+        val bankroll = paperBook.snapshot().paperBankrollUsd
+        val fired = container.d3Engine.tickPaper(
+            quotes = quotes,
+            store = container.d3Store,
+            tradesByTicker = trades,
+            paperAutopilot = paperOn,
+            bankrollUsd = bankroll,
+            now = now
+        )
+        val snap = container.d3Engine.snapshot(quotes, container.d3Store, bankrollUsd = bankroll, now = now)
+        _state.update { it.copy(d3 = snap) }
+        fired.forEach { signal ->
+            runCatching { container.d3Notifier.notifyFired(signal) }
+        }
+        if (fired.isNotEmpty() || snap.qualifying.isNotEmpty()) {
+            scheduleRebuildTickets(immediate = true)
+        }
+        quotes.forEach { q ->
+            q.closeTimeEpochMs?.let { container.repository.noteCloseTime(q.ticker, it) }
+        }
+        return fetchedAt
+    }
 
     private fun startLastMinuteLoop() {
         lastMinuteJob?.cancel()

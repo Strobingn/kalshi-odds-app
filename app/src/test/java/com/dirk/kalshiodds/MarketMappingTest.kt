@@ -75,8 +75,11 @@ class CryptoMarketsTest {
     @Test
     fun inferSeries() {
         assertEquals("KXBTC15M", CryptoMarkets.inferSeries("KXBTC15M-X"))
+        assertEquals("KXBTCD", CryptoMarkets.inferSeries("KXBTCD-26SEP3017-T90000"))
         assertEquals("KXETH15M", CryptoMarkets.inferSeries("KXETH15M-X"))
         assertEquals("KXSOL15M", CryptoMarkets.inferSeries("KXSOL15M-X"))
         assertEquals(SeriesKind.ETH, CryptoMarkets.kindFor("KXETH15M-X"))
+        assertEquals(SeriesKind.BTC, CryptoMarkets.kindFor("KXBTCD-26SEP3017"))
+        assertFalse(CryptoMarkets.isLiveTicker("KXBTCD-26SEP3017-T90000"))
     }
 }
