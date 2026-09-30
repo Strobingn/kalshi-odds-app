@@ -46,7 +46,8 @@ class ClosedWindowPathAuditTest {
             "com/dirk/kalshiodds/signal/trade/BetCall.kt",
             "com/dirk/kalshiodds/signal/trade/LiveOrderGates.kt",
             "com/dirk/kalshiodds/data/api/KalshiTradeClient.kt",
-            "com/dirk/kalshiodds/ui/OddsViewModel.kt"
+            "com/dirk/kalshiodds/ui/OddsViewModel.kt",
+            "com/dirk/kalshiodds/signal/d3/D3Copy.kt"
         )
         val files = hits.map { it.path }.toSet()
         assertEquals(
@@ -100,6 +101,12 @@ class ClosedWindowPathAuditTest {
 
         val client = read("com/dirk/kalshiodds/data/api/KalshiTradeClient.kt")
         assertTrue(client.contains("ticket.blockedReason ?: \"Market closed\""))
+
+        val d3 = read("com/dirk/kalshiodds/signal/d3/D3Copy.kt")
+        assertTrue(d3.contains("\"Window closed\""))
+        assertFalse(d3.contains("lastError"))
+        assertFalse(d3.contains("WINDOW_CLOSED"))
+        assertFalse(d3.contains("blockedReason"))
 
         val home = read("com/dirk/kalshiodds/ui/HomeMarkets.kt")
         assertEquals(HomeMarkets.NEXT_WINDOW_LOADING, "Next window loading")

@@ -841,6 +841,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startD3Loop() {
         d3Job?.cancel()
+        _state.update {
+            it.copy(
+                d3 = container.d3Engine.snapshot(
+                    emptyList(),
+                    container.d3Store,
+                    now = container.clock.nowMs()
+                )
+            )
+        }
         d3Job = viewModelScope.launch {
             runCatching {
                 val schedule = withContext(Dispatchers.IO) { container.d3Markets.loadSchedule() }
