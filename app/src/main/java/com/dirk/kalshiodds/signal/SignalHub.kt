@@ -66,6 +66,7 @@ class SignalHub(
         }
     )
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
+    private val lastBookScoredMs = ConcurrentHashMap<String, Long>()
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
     private val lastSnapshotPersistMs = ConcurrentHashMap<String, Long>()
     private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
@@ -88,6 +89,13 @@ class SignalHub(
     val scores: StateFlow<Map<String, ScoringEngine.Score>> = _scores.asStateFlow()
 
     fun latestScores(): Map<String, ScoringEngine.Score> = _scores.value
+
+    /** A live book score, rather than an old cached quote after a WS gap. */
+    fun hasFreshBook(ticker: String, nowMs: Long, maxAgeMs: Long = 3_000L): Boolean {
+        val last = lastBookScoredMs[ticker] ?: return false
+        return wsLive && _status.value.state == WsConnectionState.CONNECTED &&
+            nowMs >= last && nowMs - last <= maxAgeMs
+    }
 
     fun applyCalibration(state: Calibrator.State) {
         scoring.calibration = state
@@ -276,6 +284,7 @@ class SignalHub(
         if (!BookScoreGate.shouldPublish(ticker, now, lastBookPublishMs)) return
         val tick = scoring.book.tickFromBook(ticker, receiveElapsedNanos) ?: return
         val scored = runCatching { scoring.score(tick, settings) }.getOrNull() ?: return
+        lastBookScoredMs[ticker] = now
         _scores.update { it + (ticker to scored) }
         persistScore(tick, scored)
         persistOddsMid(ticker, scored.marketMidPp)

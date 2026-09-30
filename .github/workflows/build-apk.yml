@@ -57,6 +57,8 @@ jobs:
             --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestSqliteTest' \
+            --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardTestTest' \
+            --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardSqliteTest' \
             --tests 'com.dirk.kalshiodds.signal.ResultsPersistenceTest' \
             --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
             --no-daemon --stacktrace

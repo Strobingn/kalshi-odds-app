@@ -53,6 +53,7 @@ fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
         onBack = onBack,
         onExport = viewModel::exportResults,
         onExportForward = viewModel::exportForwardTest,
+        onExportTicketForward = viewModel::exportTicketForward,
         onGetLatestModel = viewModel::getLatestModel
     )
 }
@@ -64,6 +65,7 @@ fun ScorecardScreen(
     onBack: () -> Unit,
     onExport: () -> Unit = {},
     onExportForward: () -> Unit = {},
+    onExportTicketForward: () -> Unit = {},
     onGetLatestModel: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
@@ -120,6 +122,7 @@ fun ScorecardScreen(
                 item { Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium) }
             }
             item { ForwardTestCard(ui.forwardTest, onExportForward) }
+            item { TicketForwardCard(ui.ticketForward, onExportTicketForward) }
             if (ui.sitOut) {
                 item {
                     Text(
@@ -227,6 +230,37 @@ private fun ForwardTestCard(summary: com.dirk.kalshiodds.signal.feedback.Forward
             style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
         Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export forward test CSV") }
+    }
+}
+
+@Composable
+private fun TicketForwardCard(
+    summary: com.dirk.kalshiodds.signal.feedback.TicketForwardTest.Summary,
+    onExport: () -> Unit
+) {
+    val colors = DipTheme.colors
+    val brier = if (summary.settled == 0) "Waiting for settled ticket suggestions" else String.format(
+        Locale.US, "Ticket model Brier %.3f vs book midpoint %.3f (lower wins)",
+        summary.modelBrier, summary.marketBrier
+    )
+    val proxy = summary.quotedProxyPnlUsd?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
+    val drawdown = summary.worstDrawdownUsd?.let { String.format(Locale.US, "%.2f", it) } ?: "—"
+    Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(16.dp)) {
+        Text("Ticket suggestion forward test", style = MaterialTheme.typography.titleMedium,
+            color = colors.textPrimary)
+        Spacer(Modifier.height(6.dp))
+        Text("${summary.captured} frozen tickets · ${summary.settled} settled · ${summary.wins} wins",
+            color = colors.textSecondary)
+        Text(brier, color = colors.textPrimary)
+        Text("Quoted-price proxy P&L: $proxy USD · worst drawdown: $drawdown",
+            color = colors.textPrimary)
+        Text("First fresh book-backed automatic ticket per BTC market, using the ticket's actual model " +
+            "probability, side, size and fee. Keep the app and Live signals running. No order is placed; " +
+            "visible depth does not prove a fill. Results across app builds or settings may differ. " +
+            "Small samples are provisional; inspect the CSV before drawing conclusions.",
+            style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        Spacer(Modifier.height(8.dp))
+        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export ticket test CSV") }
     }
 }
 

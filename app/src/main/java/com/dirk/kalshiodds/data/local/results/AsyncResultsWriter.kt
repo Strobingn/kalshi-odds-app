@@ -7,6 +7,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 /**
  * Batches SQLite / text-log writes off the scoring and UI threads.
@@ -28,7 +31,10 @@ class AsyncResultsWriter(
     private val odds = ConcurrentLinkedQueue<OddsMidRow>()
     private val chartTicks = ConcurrentLinkedQueue<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
     private val forwardTests = ConcurrentLinkedQueue<ForwardTestRow>()
+    private val ticketForward = ConcurrentLinkedQueue<TicketForwardRow>()
     private val flushScheduled = AtomicBoolean(false)
+    private val _forwardRevision = MutableStateFlow(0L)
+    val forwardRevision = _forwardRevision.asStateFlow()
 
     fun enqueueSnapshot(row: ScoredSnapshotRow) {
         snapshots.add(row)
@@ -65,6 +71,11 @@ class AsyncResultsWriter(
         schedule()
     }
 
+    fun enqueueTicketForward(row: TicketForwardRow) {
+        ticketForward.add(row)
+        schedule()
+    }
+
     fun flushNow() {
         drain()
     }
@@ -83,7 +94,8 @@ class AsyncResultsWriter(
 
     private fun pending(): Boolean =
         snapshots.isNotEmpty() || alerts.isNotEmpty() || scorecards.isNotEmpty() ||
-            tickets.isNotEmpty() || odds.isNotEmpty() || chartTicks.isNotEmpty() || forwardTests.isNotEmpty()
+            tickets.isNotEmpty() || odds.isNotEmpty() || chartTicks.isNotEmpty() ||
+            forwardTests.isNotEmpty() || ticketForward.isNotEmpty()
 
     @Synchronized
     private fun drain() {
@@ -93,7 +105,21 @@ class AsyncResultsWriter(
                 val next = forwardTests.poll() ?: break
                 batch.add(next)
             }
-            if (batch.isNotEmpty()) store.insertForwardTests(batch)
+            if (batch.isNotEmpty()) {
+                store.insertForwardTests(batch)
+                _forwardRevision.update { it + 1 }
+            }
+        }
+        runCatching {
+            val batch = ArrayList<TicketForwardRow>(maxBatch)
+            while (batch.size < maxBatch) {
+                val next = ticketForward.poll() ?: break
+                batch.add(next)
+            }
+            if (batch.isNotEmpty()) {
+                store.insertTicketForward(batch)
+                _forwardRevision.update { it + 1 }
+            }
         }
         runCatching {
             val batch = ArrayList<ScoredSnapshotRow>(maxBatch)

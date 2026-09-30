@@ -111,6 +111,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var lastWsState: WsConnectionState? = null
     private var rolloverBound = false
     private var lastRecordedTicketError: String? = null
+    private val ticketForwardLogged = ConcurrentHashMap.newKeySet<String>()
 
     init {
         ticketSession.onStart()
@@ -796,6 +797,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
         val tickets = TicketBuilder.proposeAll(live, ctx)
+        captureTicketForward(tickets, live, ctx, now)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {
             container.opportunities.consider(
@@ -813,6 +815,37 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
         refreshPositionMarks()
+    }
+
+    private fun captureTicketForward(
+        tickets: List<com.dirk.kalshiodds.signal.trade.TradeTicket>,
+        live: List<MarketUiModel>,
+        ctx: TicketBuilder.Context,
+        nowMs: Long
+    ) {
+        ticketForwardLogged.retainAll(live.map { it.ticker }.toSet())
+        for (ticket in tickets.filter { it.canApprove }.sortedByDescending { it.netEvUsd ?: Double.NEGATIVE_INFINITY }) {
+            if (ticket.ticker in ticketForwardLogged ||
+                !com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(ticket.ticker) ||
+                !hub.hasFreshBook(ticket.ticker, nowMs)) continue
+            val market = live.firstOrNull { it.ticker == ticket.ticker } ?: continue
+            val source = when {
+                market.importedModelPp?.isFinite() == true -> "imported"
+                market.aiYesPercent?.isFinite() == true -> "on-device AI"
+                market.digitalFairPp?.isFinite() == true -> "digital fair"
+                else -> continue
+            }
+            val row = com.dirk.kalshiodds.signal.feedback.TicketForwardTest.capture(
+                ticket = ticket,
+                book = ctx.books[ticket.ticker],
+                modelSource = source,
+                feeRate = ctx.settings.feeRate,
+                atMs = nowMs,
+                buildCode = com.dirk.kalshiodds.BuildConfig.VERSION_CODE
+            ) ?: continue
+            container.resultsWriter.enqueueTicketForward(row)
+            ticketForwardLogged.add(ticket.ticker)
+        }
     }
 
     private fun ticketContext(s: OddsUiState, nowMs: Long): TicketBuilder.Context {
