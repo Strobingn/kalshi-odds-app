@@ -1,0 +1,130 @@
+{
+  "cursor": "CgsIgICAgICAgICAARIHS1hIRUxMTw",
+  "events": [
+    {
+      "event_ticker": "KXHIGHNY-26SEP30",
+      "series_ticker": "KXHIGHNY",
+      "title": "Highest temperature in NYC on Sep 30, 2026?",
+      "sub_title": "On Sep 30, 2026",
+      "category": "Climate and Weather",
+      "mutually_exclusive": true,
+      "markets": [
+        {
+          "ticker": "KXHIGHNY-26SEP30-T58",
+          "event_ticker": "KXHIGHNY-26SEP30",
+          "status": "active",
+          "yes_sub_title": "57° or below",
+          "strike_type": "less",
+          "cap_strike": 58,
+          "yes_bid_dollars": "0.0400",
+          "yes_ask_dollars": "0.0500",
+          "no_bid_dollars": "0.9500",
+          "no_ask_dollars": "0.9600",
+          "close_time": "2026-10-01T04:59:00Z"
+        },
+        {
+          "ticker": "KXHIGHNY-26SEP30-B58.5",
+          "event_ticker": "KXHIGHNY-26SEP30",
+          "status": "active",
+          "yes_sub_title": "58° to 59°",
+          "strike_type": "between",
+          "floor_strike": 58,
+          "cap_strike": 59,
+          "yes_bid_dollars": "0.1900",
+          "yes_ask_dollars": "0.2000",
+          "no_bid_dollars": "0.8000",
+          "no_ask_dollars": "0.8100",
+          "close_time": "2026-10-01T04:59:00Z"
+        },
+        {
+          "ticker": "KXHIGHNY-26SEP30-B60.5",
+          "event_ticker": "KXHIGHNY-26SEP30",
+          "status": "active",
+          "yes_sub_title": "60° to 61°",
+          "strike_type": "between",
+          "floor_strike": 60,
+          "cap_strike": 61,
+          "yes_bid_dollars": "0.2900",
+          "yes_ask_dollars": "0.3000",
+          "no_bid_dollars": "0.7000",
+          "no_ask_dollars": "0.7100",
+          "close_time": "2026-10-01T04:59:00Z"
+        },
+        {
+          "ticker": "KXHIGHNY-26SEP30-B62.5",
+          "event_ticker": "KXHIGHNY-26SEP30",
+          "status": "active",
+          "yes_sub_title": "62° to 63°",
+          "strike_type": "between",
+          "floor_strike": 62,
+          "cap_strike": 63,
+          "yes_bid_dollars": "0.2400",
+          "yes_ask_dollars": "0.2500",
+          "no_bid_dollars": "0.7500",
+          "no_ask_dollars": "0.7600",
+          "close_time": "2026-10-01T04:59:00Z"
+        },
+        {
+          "ticker": "KXHIGHNY-26SEP30-T63",
+          "event_ticker": "KXHIGHNY-26SEP30",
+          "status": "active",
+          "yes_sub_title": "64° or above",
+          "strike_type": "greater",
+          "floor_strike": 63,
+          "yes_bid_dollars": "0.0900",
+          "yes_ask_dollars": "0.1000",
+          "no_bid_dollars": "0.9000",
+          "no_ask_dollars": "0.9100",
+          "close_time": "2026-10-01T04:59:00Z"
+        }
+      ]
+    },
+    {
+      "event_ticker": "KXBTCD-26SEP3017",
+      "series_ticker": "KXBTCD",
+      "title": "Bitcoin price on Sep 30, 2026 at 5pm EDT?",
+      "category": "Crypto",
+      "mutually_exclusive": false,
+      "markets": [
+        {
+          "ticker": "KXBTCD-26SEP3017-T107999.99",
+          "status": "active",
+          "yes_sub_title": "$108,000 or above",
+          "strike_type": "greater",
+          "floor_strike": 107999.99,
+          "yes_bid_dollars": "0.6100",
+          "yes_ask_dollars": "0.6200",
+          "close_time": "2026-09-30T21:00:00Z"
+        },
+        {
+          "ticker": "KXBTCD-26SEP3017-T108999.99",
+          "status": "active",
+          "yes_sub_title": "$109,000 or above",
+          "strike_type": "greater",
+          "floor_strike": 108999.99,
+          "yes_bid_dollars": "0.4000",
+          "yes_ask_dollars": "0.4100",
+          "close_time": "2026-09-30T21:00:00Z"
+        }
+      ]
+    },
+    {
+      "event_ticker": "KXLEGACY-26",
+      "series_ticker": "KXLEGACY",
+      "title": "Legacy cents payload",
+      "mutually_exclusive": false,
+      "markets": [
+        {
+          "ticker": "KXLEGACY-26-A",
+          "status": "active",
+          "subtitle": "Legacy A",
+          "yes_bid": 44,
+          "yes_ask": 45,
+          "no_bid": 55,
+          "no_ask": 56,
+          "floor_strike": null
+        }
+      ]
+    }
+  ]
+}
