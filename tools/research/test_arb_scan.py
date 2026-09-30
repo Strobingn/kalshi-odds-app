@@ -192,6 +192,15 @@ def test_ladder_only_nests_same_subject() -> None:
     books["S-BC5"] = book(yes=[(0.20, 9)], no=[(0.70, 9)])
     opps = [o for o in a.check_ladders(ev, ms, books) if o["profit"] > 0]
     assert [o["tickers"] for o in opps] == [["S-BC2", "S-BC5"]], opps
+    # Same subject but different written rules or close times: not nested.
+    r7 = dict(mkt("R-7.0", "less", cap=7), rules_primary="If fewer than 7 Starship flights reach space in 2026, resolves Yes.")
+    r5 = dict(mkt("R-5.0", "less", cap=5), rules_primary="If fewer than 5 Starship flights reach space before Jul 1, 2026, resolves Yes.")
+    rb = {"R-7.0": book(yes=[(0.01, 9)], no=[(0.97, 9)]), "R-5.0": book(yes=[(0.47, 9)], no=[(0.40, 9)])}
+    assert a.check_ladders(ev, [r7, r5], rb) == []
+    r5["rules_primary"] = r7["rules_primary"].replace("7", "5")
+    assert len(a.check_ladders(ev, [r7, r5], rb)) == 1
+    r5["close_time"] = "2026-07-01T00:00:00Z"
+    assert a.check_ladders(ev, [r7, r5], rb) == []
 
 
 def test_fixture_end_to_end_and_persistence() -> None:

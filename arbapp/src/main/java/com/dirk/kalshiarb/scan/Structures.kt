@@ -169,6 +169,10 @@ object Structures {
      * spread event; each player's rushing yards). Only same-subject strikes are
      * nested; "BC by 2+" + NOT "SMU by 10+" loses both legs if SMU wins by 15.
      */
+    /** Rules text with every number blanked: nested strikes differ only in the number. */
+    fun rulesTemplate(rules: String?): String =
+        (rules ?: "").trim().lowercase().replace(Regex("[0-9][0-9,]*(\\.[0-9]+)?"), "#")
+
     fun ladderSubject(ticker: String): String {
         val parts = ticker.split("-").toMutableList()
         if (parts.size >= 2 && parts.last().matches(Regex("[0-9.]+"))) {
@@ -183,7 +187,7 @@ object Structures {
         val groups = active.filter {
             val t = it.strikeType?.lowercase()
             (t in UPPER_OPEN && it.floorStrike != null) || (t in LOWER_OPEN && it.capStrike != null)
-        }.groupBy { Triple(it.strikeType!!.lowercase(), it.closeTime ?: "", ladderSubject(it.ticker)) }
+        }.groupBy { listOf(it.strikeType!!.lowercase(), it.closeTime ?: "", ladderSubject(it.ticker), rulesTemplate(it.rulesPrimary)) }
 
         for ((key, ms) in groups) {
             if (ms.size < 2) continue

@@ -250,6 +250,18 @@ class ScannerTest {
         assertEquals(listOf(listOf("S-BC2", "S-BC5")), lad.map { s -> s.legs.map { it.ticker } })
     }
 
+    @Test
+    fun differentRulesDoNotLadder() {
+        val r7 = mkt("R-7.0", strike = "less", cap = 7.0)
+            .copy(rulesPrimary = "If fewer than 7 Starship flights reach space in 2026, resolves Yes.")
+        val r5 = mkt("R-5.0", strike = "less", cap = 5.0)
+            .copy(rulesPrimary = "If fewer than 5 Starship flights reach space before Jul 1, 2026, resolves Yes.")
+        assertTrue(Structures.find(event(r7, r5)).none { it.type == ArbType.LADDER })
+        val same = r5.copy(rulesPrimary = r7.rulesPrimary!!.replace("7", "5"))
+        assertEquals(1, Structures.find(event(r7, same)).count { it.type == ArbType.LADDER })
+        assertEquals("fewer than # flights, $# each", Structures.rulesTemplate("Fewer than 12 flights, $1,000.50 each"))
+    }
+
     // ---- depth / near miss -----------------------------------------------------
 
     @Test

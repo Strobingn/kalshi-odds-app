@@ -447,6 +447,16 @@ def ladder_subject(ticker: str | None) -> str:
     return "-".join(parts)
 
 
+def rules_template(m: dict) -> str:
+    """rules_primary with every number blanked: nested strikes differ only in the number."""
+    return re.sub(r"[0-9][0-9,]*(\.[0-9]+)?", "#", (m.get("rules_primary") or "").strip().lower())
+
+
+def ladder_key(m: dict) -> tuple:
+    """Same subject, same close time, same written rule (numbers aside)."""
+    return (ladder_subject(m.get("ticker")), m.get("close_time") or "", rules_template(m))
+
+
 def ladders(markets: list) -> list:
     """[(direction, [(strike, market)...] sorted by strike)] for same-type, same-subject strike ladders."""
     out = []
@@ -458,7 +468,7 @@ def ladders(markets: list) -> list:
                     continue
                 k = _f(m.get(key))
                 if k is not None:
-                    groups.setdefault(ladder_subject(m.get("ticker")), []).append((k, m))
+                    groups.setdefault(ladder_key(m), []).append((k, m))
             for grp in groups.values():
                 if len({k for k, _ in grp}) >= 2:
                     out.append((direction, sorted(grp, key=lambda t: t[0])))
@@ -853,7 +863,8 @@ def _fmt_legs(o: dict) -> str:
     parts = []
     for lg in o["legs"]:
         fills = " + ".join(f"{n}@{p:.4f}" for p, n in lg["fills"])
-        parts.append(f"{lg['side']} {lg['ticker']} [{fills}] ${lg['cost']:.2f}")
+        sub = f" ({lg['subtitle']})" if lg.get("subtitle") else ""
+        parts.append(f"{lg['side']} {lg['ticker']}{sub} [{fills}] ${lg['cost']:.2f}")
     return "<br>".join(parts)
 
 

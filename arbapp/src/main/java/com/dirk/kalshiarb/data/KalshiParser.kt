@@ -66,7 +66,8 @@ object KalshiParser {
             yesAskE4 = o.priceE4("yes_ask_dollars", "yes_ask"),
             noBidE4 = o.priceE4("no_bid_dollars", "no_bid"),
             noAskE4 = o.priceE4("no_ask_dollars", "no_ask"),
-            closeTime = o.str("close_time")
+            closeTime = o.str("close_time"),
+            rulesPrimary = o.str("rules_primary")
         )
     }
 

@@ -19,7 +19,8 @@ data class MarketInfo(
     val yesAskE4: Int? = null,
     val noBidE4: Int? = null,
     val noAskE4: Int? = null,
-    val closeTime: String? = null
+    val closeTime: String? = null,
+    val rulesPrimary: String? = null
 ) {
     val isActive: Boolean get() = status.equals("active", true) || status.equals("open", true)
 
