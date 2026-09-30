@@ -1,0 +1,9 @@
+{
+ "KXTEST-RANGE-LO":  {"orderbook_fp": {"yes_dollars": [["0.2800", "10.00"]], "no_dollars": [["0.7000", "10.00"], ["0.6900", "5.00"]]}},
+ "KXTEST-RANGE-MID": {"orderbook_fp": {"yes_dollars": [["0.2800", "10.00"]], "no_dollars": [["0.7000", "8.00"]]}},
+ "KXTEST-RANGE-HI":  {"orderbook_fp": {"yes_dollars": [["0.2800", "10.00"]], "no_dollars": [["0.7000", "20.00"]]}},
+ "KXTEST-LADDER-T100": {"orderbook": {"yes": [[48, 30]], "no": [[50, 12]]}},
+ "KXTEST-LADDER-T110": {"orderbook": {"yes": [[60, 7]], "no": [[38, 30]]}},
+ "KXTEST-GAP-A": {"orderbook_fp": {"yes_dollars": [["0.2000", "50.00"]], "no_dollars": [["0.7800", "50.00"]]}},
+ "KXTEST-GAP-B": {"orderbook_fp": {"yes_dollars": [["0.2000", "50.00"]], "no_dollars": [["0.7800", "50.00"]]}}
+}
