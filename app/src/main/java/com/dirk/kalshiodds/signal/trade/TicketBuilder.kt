@@ -37,6 +37,7 @@ object TicketBuilder {
         val ticks: Map<String, MarketTick> = emptyMap(),
         val positions: List<LivePosition> = emptyList(),
         val idFactory: () -> String = { UUID.randomUUID().toString() },
+        val orderIdFactory: () -> String = { UUID.randomUUID().toString() },
         val nowMs: Long = System.currentTimeMillis(),
         val bankrollUsd: Double? = null,
         val bankrollSource: String? = null
@@ -197,6 +198,7 @@ object TicketBuilder {
         if (contracts <= 0 || allIn > SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-9) return null
         return TradeTicket(
             id = ctx.idFactory(),
+            clientOrderId = ctx.orderIdFactory(),
             ticker = signal.ticker,
             side = side,
             bookSide = bookSide,
@@ -387,6 +389,7 @@ object TicketBuilder {
         val bookSide = if (side == "YES") "ask" else "bid"
         return TradeTicket(
             id = ctx.idFactory(),
+            clientOrderId = ctx.orderIdFactory(),
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,
@@ -517,6 +520,7 @@ object TicketBuilder {
         val blockedReason = null
         return TradeTicket(
             id = ctx.idFactory(),
+            clientOrderId = ctx.orderIdFactory(),
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,
@@ -642,6 +646,7 @@ object TicketBuilder {
         )
         return TradeTicket(
             id = ctx.idFactory(),
+            clientOrderId = ctx.orderIdFactory(),
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,
@@ -689,6 +694,7 @@ object TicketBuilder {
         val bookSide = if (side == "YES") "bid" else "ask"
         return TradeTicket(
             id = ctx.idFactory(),
+            clientOrderId = ctx.orderIdFactory(),
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,

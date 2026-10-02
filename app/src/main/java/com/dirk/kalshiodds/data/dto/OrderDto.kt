@@ -62,6 +62,25 @@ data class CancelOrderV2Response(
 )
 
 @Serializable
+data class OrdersListResponse(
+    val orders: List<PortfolioOrderDto> = emptyList(),
+    val cursor: String? = null
+)
+
+@Serializable
+data class PortfolioOrderDto(
+    @SerialName("order_id") val orderId: String? = null,
+    @SerialName("client_order_id") val clientOrderId: String? = null,
+    val ticker: String? = null,
+    val status: String? = null,
+    @SerialName("fill_count") val fillCount: String? = null,
+    @SerialName("fill_count_fp") val fillCountFp: String? = null,
+    @SerialName("remaining_count") val remainingCount: String? = null,
+    @SerialName("remaining_count_fp") val remainingCountFp: String? = null,
+    @SerialName("yes_price_dollars") val yesPriceDollars: String? = null
+)
+
+@Serializable
 data class KalshiErrorBody(
     val code: String? = null,
     val message: String? = null,

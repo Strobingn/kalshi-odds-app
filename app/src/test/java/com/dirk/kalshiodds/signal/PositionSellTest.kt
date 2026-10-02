@@ -364,6 +364,7 @@ class SellTicketTest {
                 settings = SignalSettings(ticketsEnabled = true),
                 alertsPaused = false,
                 idFactory = { "s1" },
+                orderIdFactory = { "coid-once" },
                 nowMs = now
             )
         )!!
@@ -494,6 +495,9 @@ class SellTicketTest {
             limit: Int,
             cursor: String?
         ) = Response.success(com.dirk.kalshiodds.data.dto.PositionsResponse())
+
+        override suspend fun getOrders(limit: Int, cursor: String?) =
+            Response.success(com.dirk.kalshiodds.data.dto.OrdersListResponse())
 
         override suspend fun cancelOrderV2(
             orderId: String,

@@ -18,7 +18,9 @@ class SettlementScorer(
     private val extraOpenTickers: () -> Set<String> = { emptySet() },
     private val onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
     private val closeTimeOf: (String) -> Long? = { null },
-    private val nowMs: () -> Long = { System.currentTimeMillis() }
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val rateLimiter: com.dirk.kalshiodds.data.api.KalshiRateLimiter? = null,
+    private val feedHealth: com.dirk.kalshiodds.data.api.KalshiFeedHealth? = null
 ) {
     constructor(
         api: KalshiApi,
@@ -95,12 +97,15 @@ class SettlementScorer(
             val hit = resp.markets.firstOrNull { it.ticker.equals(ticker, ignoreCase = true) }
             val result = normalizeResult(hit?.result)
             if (result != null) {
+                rateLimiter?.onSuccess()
+                feedHealth?.clear()
                 applyResult(ticker, result)
                 schedules.remove(ticker)
             } else {
                 schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
             }
         } catch (e: HttpException) {
+            noteTransport(e)
             if (SettlementPollPolicy.isRateLimited(e)) {
                 val retry = SettlementPollPolicy.retryAfterMs(e)
                 val next = SettlementPollPolicy.after429(prev, nowMs, retry)
@@ -109,9 +114,19 @@ class SettlementScorer(
             } else {
                 schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
             }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            noteTransport(e)
             schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
         }
+    }
+
+    private fun noteTransport(error: Throwable) {
+        if (!com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(error)) return
+        val wait = rateLimiter?.onFailure(
+            com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(error),
+            com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error)
+        ) ?: com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error) ?: 1_000L
+        feedHealth?.note(error, wait)
     }
 
     private suspend fun applyResult(ticker: String, raw: String?) {

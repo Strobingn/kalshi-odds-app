@@ -32,7 +32,8 @@ class MarketRollover(
     private val retryMs: Long = POLL_MS,
     private val sleeper: suspend (Long) -> Unit = { delay(it) },
     private val staggerMs: Long = STAGGER_MS,
-    private val pollCapMs: Long = POLL_CAP_MS
+    private val pollCapMs: Long = POLL_CAP_MS,
+    private val onThrottle: (Throwable) -> Unit = {}
 ) {
     data class Event(
         val active: Map<String, MarketUiModel>,
@@ -64,6 +65,7 @@ class MarketRollover(
     )
     @Volatile private var lastCloseBySeries: Map<String, Long> = emptyMap()
     @Volatile private var backoffBySeries: Map<String, Long> = emptyMap()
+    @Volatile private var heldThisRound: Set<String> = emptySet()
     private var loop: Job? = null
 
     fun snapshot(): Event = last
@@ -123,6 +125,7 @@ class MarketRollover(
         val listed = mutableListOf<MarketUiModel>()
         val failed = mutableSetOf<String>()
         val limited = mutableSetOf<String>()
+        val held = mutableSetOf<String>()
         series.forEachIndexed { i, s ->
             if (i > 0) sleeper(staggerMs)
             try {
@@ -132,13 +135,25 @@ class MarketRollover(
                 failed += s
                 if (e.code() == 429) {
                     limited += s
+                    held += s
                     val wait = retryAfterMs(e) ?: nextBackoff(s)
                     backoffBySeries = backoffBySeries + (s to wait)
+                    onThrottle(e)
+                } else if (e.code() in 500..599) {
+                    held += s
+                    backoffBySeries = backoffBySeries + (s to nextBackoff(s))
+                    onThrottle(e)
                 }
+            } catch (e: java.io.IOException) {
+                failed += s
+                held += s
+                backoffBySeries = backoffBySeries + (s to nextBackoff(s))
+                onThrottle(e)
             } catch (_: Throwable) {
                 failed += s
             }
         }
+        heldThisRound = held
         return applyListed(listed, failed, limited)
     }
 
@@ -147,6 +162,7 @@ class MarketRollover(
         fetchFailed: Set<String> = emptySet(),
         rateLimited: Set<String> = emptySet()
     ): Event {
+        if (fetchFailed.isEmpty()) heldThisRound = emptySet()
         val series = watchedSeries()
         val event = compute(listed, series, last.active, lastCloseBySeries, fetchFailed, rateLimited, clock.nowMs())
         lastCloseBySeries = event.lastCloseMs
@@ -236,7 +252,7 @@ class MarketRollover(
         val closeWake = active.mapNotNull { it.closeTimeEpochMs }.minOrNull()?.plus(graceAfterCloseMs)
         val unresolved = retrying.isNotEmpty()
         val pollWait = if (unresolved) {
-            val limitedWait = rateLimited.mapNotNull { backoffBySeries[it] }.minOrNull()
+            val limitedWait = heldThisRound.mapNotNull { backoffBySeries[it] }.minOrNull()
             nowMs + (limitedWait ?: retryMs)
         } else {
             null

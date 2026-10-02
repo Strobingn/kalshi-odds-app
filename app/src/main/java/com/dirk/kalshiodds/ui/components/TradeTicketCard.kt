@@ -29,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.signal.trade.ApproveControls
+import com.dirk.kalshiodds.signal.trade.LimitPriceInput
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
@@ -55,9 +57,11 @@ fun TradeTicketsSection(
     onPaper: (String) -> Unit,
     onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
-    onCancelOrder: (String) -> Unit
+    onCancelOrder: (String) -> Unit,
+    onLimitCents: (String, String) -> Unit = { _, _ -> }
 ) {
     val colors = DipTheme.colors
+    val submittingId = (tickets.phase as? TicketPhase.Submitting)?.ticket?.id
     val proposals = tickets.proposals.sortedByDescending {
         if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
@@ -150,7 +154,9 @@ fun TradeTicketsSection(
                 paperTradingEnabled,
                 onReview,
                 onDismiss,
-                onPaper
+                onPaper,
+                submitting = ticket.id == submittingId,
+                onLimitCents = { text -> onLimitCents(ticket.id, text) }
             )
         }
     }
@@ -166,7 +172,8 @@ fun TradeTicketsSection(
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
             onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
-            onDismiss = onCancelApprove
+            onDismiss = onCancelApprove,
+            onLimitCents = { text -> onLimitCents(awaiting.ticket.id, text) }
         )
     }
 }
@@ -178,7 +185,9 @@ private fun ProposedTicketCard(
     paperTradingEnabled: Boolean = false,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
-    onPaper: (String) -> Unit
+    onPaper: (String) -> Unit,
+    submitting: Boolean = false,
+    onLimitCents: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val hunter = ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE
@@ -339,6 +348,9 @@ private fun ProposedTicketCard(
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = 6.dp)
             )
+            if (!ticket.isSell) {
+                LimitCentsField(ticket, onLimitCents)
+            }
             ticket.gateNote?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = colors.accentBlue)
             }
@@ -371,7 +383,7 @@ private fun ProposedTicketCard(
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = credentialsConfigured && ticket.canApprove,
+                    enabled = ApproveControls.enabled(credentialsConfigured, ticket.canApprove, submitting),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SideColor.ofTicketSide(ticket.side, colors),
                         contentColor = SideColor.onTicketSide(ticket.side, colors)
@@ -467,7 +479,8 @@ internal fun ApproveTicketDialog(
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
     onPaper: () -> Unit,
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onLimitCents: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
@@ -477,6 +490,9 @@ internal fun ApproveTicketDialog(
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
     }
+    var limitCents by remember(ticket.id) { mutableStateOf(LimitPriceInput.suggestedCents(ticket.limitPrice)) }
+    var confirmBusy by remember(ticket.id) { mutableStateOf(false) }
+    val limitError = if (ticket.isSell) null else LimitPriceInput.validationError(limitCents)
     AlertDialog(
         onDismissRequest = onDismiss,
                 title = {
@@ -601,6 +617,9 @@ internal fun ApproveTicketDialog(
                         )
                     }
                 }
+                if (!ticket.isSell) {
+                    LimitCentsField(ticket, onLimitCents, text = limitCents, onText = { limitCents = it })
+                }
                 if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE) {
                     Text(
                         ticket.gateNote ?: "Hunter path · Approve still required — never auto-placed.",
@@ -614,6 +633,8 @@ internal fun ApproveTicketDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    if (confirmBusy) return@Button
+                    confirmBusy = true
                     if (ticket.isSell) {
                         val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
                         val px = if (paperSell) {
@@ -628,9 +649,9 @@ internal fun ApproveTicketDialog(
                         onApprove()
                     }
                 },
-                enabled = when {
+                enabled = !confirmBusy && limitError == null && when {
                     paperSell || paperBuy -> ticket.canPaper || ticket.contracts > 0 || ticket.blockedReason != null
-                    else -> credentialsConfigured && ticket.canApprove
+                    else -> ApproveControls.enabled(credentialsConfigured, ticket.canApprove, submitting = false)
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = SideColor.ofTicketSide(ticket.side, colors),
@@ -660,6 +681,37 @@ internal fun ApproveTicketDialog(
                 TextButton(onClick = onDismiss) { Text("Cancel") }
             }
         }
+    )
+}
+
+@Composable
+private fun LimitCentsField(
+    ticket: TradeTicket,
+    onLimitCents: (String) -> Unit,
+    text: String? = null,
+    onText: ((String) -> Unit)? = null
+) {
+    val colors = DipTheme.colors
+    var local by remember(ticket.id) { mutableStateOf(text ?: LimitPriceInput.suggestedCents(ticket.limitPrice)) }
+    val shown = text ?: local
+    val error = LimitPriceInput.validationError(shown)
+    OutlinedTextField(
+        value = shown,
+        onValueChange = { raw ->
+            val next = raw.filter { it.isDigit() }.take(2)
+            if (onText != null) onText(next) else local = next
+            onLimitCents(next)
+        },
+        label = { Text("Limit price (¢)") },
+        isError = error != null,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    )
+    Text(
+        error ?: "1–99¢. Stake, contracts, fee, and the $10 cap update at this price.",
+        style = MaterialTheme.typography.labelMedium,
+        color = if (error != null) colors.accentRed else colors.textSecondary,
+        modifier = Modifier.padding(top = 4.dp)
     )
 }
 

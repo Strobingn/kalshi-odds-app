@@ -50,6 +50,48 @@ class KalshiTradeClient(
     private fun activeFallback(): KalshiTradeApi? =
         if (useDemo()) demoFallback ?: fallback else fallback
 
+    /**
+     * Orders already accepted under [clientOrderId]. Used before an Approve
+     * retry so a timeout cannot create a second real order.
+     */
+    suspend fun findByClientOrderId(clientOrderId: String): PlacedOrder? {
+        if (clientOrderId.isBlank()) return null
+        ensureKeys()
+        return try {
+            val first = activePrimary().getOrders(limit = 100)
+            val chosen = chooseHost(first) { activeFallback()?.getOrders(limit = 100) }
+            if (!chosen.isSuccessful) return null
+            val hit = chosen.body()?.orders.orEmpty().firstOrNull {
+                it.clientOrderId == clientOrderId
+            } ?: return null
+            PlacedOrder(
+                ticket = TradeTicket(
+                    id = clientOrderId,
+                    ticker = hit.ticker.orEmpty(),
+                    side = "YES",
+                    bookSide = "bid",
+                    stakeUsd = 0.0,
+                    limitPrice = hit.yesPriceDollars?.toDoubleOrNull() ?: 0.0,
+                    yesLimitPrice = hit.yesPriceDollars?.toDoubleOrNull() ?: 0.0,
+                    contracts = 0,
+                    estimatedFillUsd = 0.0,
+                    maxPayoutUsd = 0.0,
+                    estimatedAvgFill = 0.0,
+                    sizingNote = "existing order",
+                    clientOrderId = clientOrderId
+                ),
+                clientOrderId = clientOrderId,
+                orderId = hit.orderId,
+                fillCount = (hit.fillCountFp ?: hit.fillCount).toDoubleOrNullSafe() ?: 0.0,
+                remainingCount = (hit.remainingCountFp ?: hit.remainingCount).toDoubleOrNullSafe() ?: 0.0,
+                averageFillPrice = hit.yesPriceDollars.toDoubleOrNullSafe(),
+                placedAtMs = System.currentTimeMillis()
+            )
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     suspend fun createLimit(ticket: TradeTicket, clientOrderId: String): PlacedOrder {
         if (!ticket.canApprove) {
             throw IllegalStateException(ticket.blockedReason ?: "Market closed")
@@ -60,6 +102,9 @@ class KalshiTradeClient(
         return try {
             val first = activePrimary().createOrderV2(body)
             val chosen = chooseHost(first) { activeFallback()?.createOrderV2(body) }
+            if (chosen.code() == 409) {
+                findByClientOrderId(clientOrderId)?.let { return it }
+            }
             mapV2(sized, clientOrderId, chosen)
         } catch (e: Exception) {
             throw softFailure(e)

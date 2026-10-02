@@ -17,7 +17,17 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.21**
+Package: `com.dirk.kalshiodds` · version **0.3.22**
+
+## 0.3.22
+
+- Refresh, poll, and REST paths catch IO and HTTP failures and show **Offline** or **Rate-limited, retrying in Ns** instead of crashing.
+- Shared Kalshi backoff (exponential + jitter, Retry-After) across ticker, settlement, D3, and scorecard. Refresh taps are debounced and single-flight.
+- In-app update checks only `v*-debug` releases built from branch `kashi` (asset `DipHunter-debug.apk`, package `com.dirk.kalshiodds.kashi`) and verifies package id plus the debug cert before install.
+- Each ticket gets one `client_order_id` at creation. Approve retries reuse it, look up an existing order first, and the Approve button stays off while a request is in flight.
+- Paper and live tickets accept a typed limit in cents (1–99). Stake, contracts, fee, and the $10 all-in cap recompute at that price. Live still needs Approve and REAL MONEY.
+- Live keys are never written to plaintext if the Android Keystore fails. The save is refused and live trading stays off. Existing encrypted keys still load.
+- CI on `kashi` runs `testDebugUnitTest`.
 
 ## 0.3.21
 

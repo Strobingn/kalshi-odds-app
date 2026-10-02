@@ -47,6 +47,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import com.dirk.kalshiodds.data.api.KalshiRequestStatus
+import com.dirk.kalshiodds.data.api.RefreshGate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -383,11 +386,54 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         scheduleRebuildTickets()
     }
 
+    private val refreshGate = RefreshGate(debounceMs = 750L, nowMs = { container.clock.nowMs() })
+
     fun refresh() {
+        if (!refreshGate.tryAcquire()) return
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, userMessage = null) }
-            applyResult(doRefresh())
+            try {
+                _state.update { it.copy(isLoading = true, userMessage = null) }
+                val result = try {
+                    doRefresh()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    offlineSnapshot(t)
+                }
+                applyResult(result)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        userMessage = KalshiRequestStatus.message(
+                            t,
+                            container.kalshiTraffic.limiter.remainingHoldMs()
+                        )
+                    )
+                }
+            } finally {
+                refreshGate.release()
+            }
         }
+    }
+
+    private fun offlineSnapshot(error: Throwable): MarketsSnapshot {
+        val retry = container.kalshiTraffic.limiter.remainingHoldMs().takeIf { it > 0L } ?: 1_000L
+        val message = KalshiRequestStatus.message(error, retry)
+        container.kalshiTraffic.health.note(error, retry)
+        val cached = _state.value.snapshot
+        return (cached ?: MarketsSnapshot(
+            btc = emptyList(),
+            fetchedAtEpochMs = 0L,
+            fromCache = false
+        )).copy(
+            fromCache = cached != null,
+            errorMessage = message,
+            rateLimited = KalshiRequestStatus.isRateLimited(error) || KalshiRequestStatus.isServerError(error),
+            retryInMs = retry
+        )
     }
 
     private fun restartPolling() {
@@ -398,11 +444,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             while (isActive) {
-                runCatching {
+                try {
                     if (_state.value.snapshot == null) {
                         _state.update { it.copy(isLoading = true) }
                     }
                     applyResult(doRefresh())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    val retry = container.kalshiTraffic.limiter.remainingHoldMs()
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            userMessage = KalshiRequestStatus.message(t, retry)
+                        )
+                    }
                 }
                 delay(nextDelayMs())
             }
@@ -454,10 +510,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 isLoading = false,
                 snapshot = overlaid,
                 userMessage = when {
+                    !result.errorMessage.isNullOrBlank() -> result.errorMessage
                     event.retrying.isNotEmpty() -> null
-                    result.errorMessage != null && result.fromCache ->
-                        "Offline — showing cache (${result.errorMessage})"
-                    result.errorMessage != null -> result.errorMessage
                     else -> null
                 },
                 pollLabel = pollLabel,
@@ -535,6 +589,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * Explicit Approve for [ticketId] only. Nothing else in this ViewModel
      * (init, poll, score overlay) ever calls the trade client.
      */
+    fun reviseTicketLimit(ticketId: String, centsText: String) {
+        val cents = com.dirk.kalshiodds.signal.trade.LimitPriceInput.parse(centsText) ?: return
+        val fee = _state.value.settings.feeRate
+        ticketSession.revise(ticketId) {
+            com.dirk.kalshiodds.signal.trade.LimitPriceInput.apply(it, cents, fee)
+        }
+    }
+
+    private fun publishFeedBanner() {
+        val banner = container.kalshiTraffic.health.banner ?: return
+        _state.update { it.copy(userMessage = banner, isLoading = false) }
+    }
+
     fun approveTicket(ticketId: String) {
         viewModelScope.launch {
             val settings = _state.value.settings
@@ -858,6 +925,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             var lastMarketFetch = 0L
             while (isActive) {
                 runCatching { tickD3(lastMarketFetch).also { lastMarketFetch = it } }
+                .onFailure { t ->
+                    if (t is CancellationException) throw t
+                    container.kalshiTraffic.health.note(
+                        t,
+                        container.kalshiTraffic.limiter.remainingHoldMs().takeIf { it > 0L } ?: 1_000L
+                    )
+                }
+            publishFeedBanner()
                 delay(5_000)
             }
         }

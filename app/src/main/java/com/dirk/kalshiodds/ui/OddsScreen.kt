@@ -44,6 +44,7 @@ fun OddsScreen(
         onPaperSellTicket = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
         onCancelApprove = { viewModel.cancelTicketApprove() },
         onCancelOrder = { viewModel.cancelWorkingOrder(it) },
+        onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) },
         onResumeAlerts = { viewModel.resumeAlerts() }
     )
 }
