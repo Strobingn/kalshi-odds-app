@@ -211,9 +211,7 @@ class MainActivity : ComponentActivity() {
                         },
                         arb = {
                             val arbState by arbViewModel.state.collectAsStateWithLifecycle()
-                            com.dirk.kalshiodds.arb.ui.ArbColorsProvider(
-                                dark = androidx.compose.foundation.isSystemInDarkTheme()
-                            ) {
+                            com.dirk.kalshiodds.arb.ui.ArbColorsProvider {
                                 com.dirk.kalshiodds.arb.ui.ArbApp(
                                     state = arbState,
                                     vm = arbViewModel,

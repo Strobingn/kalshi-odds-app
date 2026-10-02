@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import com.dirk.kalshiodds.ui.theme.DipTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Card
@@ -101,7 +102,7 @@ fun ArbApp(state: ArbUiState, vm: ArbViewModel, onBack: () -> Unit) {
     }
 
     var tab by rememberSaveable { mutableIntStateOf(0) }
-    Scaffold(containerColor = MaterialTheme.colorScheme.background) { inner ->
+    Scaffold(containerColor = DipTheme.colors.bg) { inner ->
         Column(Modifier.fillMaxSize().padding(inner)) {
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
                 IconButton(onClick = onBack) {
@@ -111,7 +112,7 @@ fun ArbApp(state: ArbUiState, vm: ArbViewModel, onBack: () -> Unit) {
                     "Arb Hunter",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
+                    color = DipTheme.colors.textPrimary
                 )
             }
             TabRow(selectedTabIndex = tab) {
@@ -129,12 +130,12 @@ fun ArbApp(state: ArbUiState, vm: ArbViewModel, onBack: () -> Unit) {
 @Composable
 private fun Banner() {
     Card(
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        colors = CardDefaults.cardColors(containerColor = DipTheme.colors.surfaceAlt),
         modifier = Modifier.fillMaxWidth()
     ) {
         Text(
             READ_ONLY_BANNER,
-            color = MaterialTheme.colorScheme.onPrimaryContainer,
+            color = DipTheme.colors.textSecondary,
             style = MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(12.dp)
         )
@@ -162,7 +163,7 @@ private fun ScanTab(state: ArbUiState, vm: ArbViewModel, now: Long, onNotifyOn: 
                     Text(
                         "No risk-free set clears fees right now. That's the normal state.",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = DipTheme.colors.textSecondary
                     )
                 }
             }
@@ -190,7 +191,7 @@ private fun ScanTab(state: ArbUiState, vm: ArbViewModel, now: Long, onNotifyOn: 
                     Text(
                         report.warnings.joinToString("\n"),
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = DipTheme.colors.textSecondary
                     )
                 }
             }
@@ -210,7 +211,7 @@ private fun LazyListScope.collapsible(
         Text(
             (if (open) "▾ " else "▸ ") + title,
             style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = DipTheme.colors.textSecondary,
             modifier = Modifier.fillMaxWidth().clickable { onToggle() }.padding(vertical = 8.dp)
         )
     }
@@ -255,14 +256,14 @@ private fun SwitchRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
 private fun Summary(state: ArbUiState, now: Long) {
     val err = state.error
     if (err != null) {
-        Text("Scan failed: $err", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+        Text("Scan failed: $err", color = DipTheme.colors.accentRed, style = MaterialTheme.typography.bodyMedium)
     }
     val r = state.report ?: run {
         if (err == null) {
             Text(
                 "Tap Scan now to check every open Kalshi event.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = DipTheme.colors.textSecondary
             )
         }
         return
@@ -279,7 +280,7 @@ private fun Summary(state: ArbUiState, now: Long) {
             "${r.candidates} candidates · ${r.booksFetched} books · took ${Format.ago(r.finishedMs - r.startedMs)} · " +
                 "${Format.ago(now - r.finishedMs)} ago",
             style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = DipTheme.colors.textSecondary
         )
     }
 }
@@ -295,13 +296,13 @@ private fun OpportunityCard(o: Opportunity, firstSeenMs: Long?, now: Long) {
             Text(
                 "${s.type.label} · ${s.eventTicker}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary
+                color = DipTheme.colors.textPrimary
             )
             if (s.note.isNotBlank()) {
                 Text(
                     s.note,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (s.verified) MaterialTheme.colorScheme.onSurfaceVariant else colors.warn
+                    color = if (s.verified) DipTheme.colors.textSecondary else colors.warn
                 )
             }
             HorizontalDivider(Modifier.padding(vertical = 4.dp))
@@ -344,7 +345,7 @@ private fun OpportunityCard(o: Opportunity, firstSeenMs: Long?, now: Long) {
                 Text(
                     age,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = DipTheme.colors.textSecondary,
                     modifier = Modifier.weight(1f)
                 )
                 TextButton(onClick = {
@@ -377,7 +378,7 @@ private fun LogTab(state: ArbUiState, vm: ArbViewModel, now: Long) {
                     if (closed.isEmpty()) "No closed opportunities yet." else
                         "Closed ones lasted ${Format.ago(avgMs)} on average (between first and last scan that saw them).",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = DipTheme.colors.textSecondary
                 )
                 Spacer(Modifier.height(6.dp))
                 OutlinedButton(onClick = { vm.clearLog() }, enabled = log.isNotEmpty()) { Text("Clear log") }
@@ -403,17 +404,17 @@ private fun LogCard(e: PaperEntry, now: Long) {
                 )
                 Text(
                     if (e.open) "OPEN" else "GONE",
-                    color = if (e.open) colors.profit else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (e.open) colors.profit else DipTheme.colors.textSecondary,
                     fontWeight = FontWeight.Bold,
                     fontSize = 12.sp
                 )
             }
-            Text(e.type, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            Text(e.type, style = MaterialTheme.typography.bodySmall, color = DipTheme.colors.textPrimary)
             Text(e.legs, style = MaterialTheme.typography.bodySmall, maxLines = 3)
             Text(
                 "First ${timeFmt.format(Date(e.firstSeenMs))} · last ${timeFmt.format(Date(e.lastSeenMs))}",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = DipTheme.colors.textSecondary
             )
             Text(
                 "Lasted ${Format.ago(e.durationMs)} · seen in ${e.sightings} scans · peak ${e.peakSets} sets / " +
