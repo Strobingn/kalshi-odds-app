@@ -132,7 +132,8 @@ class Release0322ScreenshotTest {
                     onPaperTicket = {},
                     onPaperSellTicket = { _, _, _ -> },
                     onCancelApprove = {},
-                    onCancelOrder = {}
+                    onCancelOrder = {},
+                    nowMs = HomeFixtures.NOW_MS
                 )
             }
         }

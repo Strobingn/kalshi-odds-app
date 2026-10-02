@@ -364,6 +364,7 @@ class SellTicketTest {
                 settings = SignalSettings(ticketsEnabled = true),
                 alertsPaused = false,
                 idFactory = { "s1" },
+                orderIdFactory = { "coid-once" },
                 nowMs = now
             )
         )!!

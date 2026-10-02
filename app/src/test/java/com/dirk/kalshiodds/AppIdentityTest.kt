@@ -35,7 +35,7 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(36, BuildConfig.VERSION_CODE)
+        assertEquals(37, BuildConfig.VERSION_CODE)
         assertEquals("0.3.22", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)

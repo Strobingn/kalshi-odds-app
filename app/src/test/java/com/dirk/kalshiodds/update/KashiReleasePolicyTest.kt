@@ -104,20 +104,28 @@ class KashiReleasePolicyTest {
 
     @Test
     fun ciRunsUnitTestsOnKashiOnly() {
-        val yml = listOf(
-            java.io.File(".github/workflows/kashi-unit-tests.yml"),
-            java.io.File("workflows/kashi-unit-tests.yml")
-        ).first { it.isFile }.readText()
+        val root = repoRoot()
+        val yml = java.io.File(root, ".github/workflows/kashi-unit-tests.yml").readText()
         assertTrue(yml.contains("testDebugUnitTest"))
         assertTrue(yml.contains("branches: [kashi]"))
         assertFalse(yml.contains("assembleRelease"))
-        val gradle = listOf(
-            java.io.File("app/build.gradle.kts"),
-            java.io.File("build.gradle.kts")
-        ).first { it.isFile && it.readText().contains("versionName") }.readText()
+        val gradle = java.io.File(root, "app/build.gradle.kts").readText()
         assertTrue(gradle.contains(KashiReleasePolicy.CERT_SHA256))
         assertTrue(gradle.contains("versionName = \"0.3.22\""))
         assertTrue(gradle.contains("versionCode = 37"))
+    }
+
+    private fun repoRoot(): java.io.File {
+        var dir = java.io.File(".").absoluteFile
+        for (i in 0 until 6) {
+            if (java.io.File(dir, "settings.gradle.kts").isFile &&
+                java.io.File(dir, ".github/workflows/kashi-unit-tests.yml").isFile
+            ) {
+                return dir
+            }
+            dir = dir.parentFile ?: break
+        }
+        error("repo root not found from ${java.io.File(".").absolutePath}")
     }
 
     private fun selfSigned(): X509Certificate {
