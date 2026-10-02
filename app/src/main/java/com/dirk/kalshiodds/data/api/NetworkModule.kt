@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.data.api
 
+import com.dirk.kalshiodds.BuildConfig
 import com.jakewharton.retrofit2.converter.kotlinx.serialization.asConverterFactory
 import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
@@ -94,5 +95,5 @@ object NetworkModule {
             .create(KalshiTradeApi::class.java)
     }
 
-    const val USER_AGENT = "DipHunter/0.3.11 (Android; Dirk Diggler)"
+    val USER_AGENT: String = "DipHunter/${BuildConfig.VERSION_NAME} (Android)"
 }

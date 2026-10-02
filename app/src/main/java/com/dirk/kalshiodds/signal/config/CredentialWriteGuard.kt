@@ -11,6 +11,9 @@ object CredentialWriteGuard {
         "Key ID alone cannot trade — paste the PEM Kalshi downloaded (BEGIN RSA PRIVATE KEY or BEGIN PRIVATE KEY). One-line / CRLF pastes are OK."
     const val REJECT_PEM_ONLY =
         "Need the API Key ID shown next to the PEM on kalshi.com → Account → API Keys"
+    const val REJECT_UNENCRYPTED =
+        "Android Keystore encryption is unavailable, so this live trading key was not saved. " +
+            "Turn on a screen lock and try again. The key was not written to plain storage."
 
     fun rejectReason(keyId: String, pem: String, demo: Boolean = false): String? {
         val id = keyId.trim()
