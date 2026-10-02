@@ -31,6 +31,7 @@ object HomeCopy {
     const val SCORECARD_CONTENT_DESCRIPTION = "Scorecard"
     const val SETTINGS_CONTENT_DESCRIPTION = "Settings"
     const val REFRESH_CONTENT_DESCRIPTION = "Refresh"
+    const val ARB_BUTTON = "Arb"
 
     /** 0.3.12 top bar: title, LIVE chip, scorecard, settings, refresh. */
     val TOP_BAR_ACTIONS: List<String> = listOf(

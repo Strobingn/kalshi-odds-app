@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
     private val historyViewModel: com.dirk.kalshiodds.ui.HistoryViewModel by viewModels()
+    private val arbViewModel: com.dirk.kalshiodds.arb.ui.ArbViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                onOpenArb = { navigator.open(AppRoutes.ARB) },
                                 onOpenChart = {
                                     chartTicker = it.ticker
                                     navigator.open(AppRoutes.CHART)
@@ -204,6 +206,18 @@ class MainActivity : ComponentActivity() {
                                         chartTicker = null
                                         navigator.back()
                                     }
+                                )
+                            }
+                        },
+                        arb = {
+                            val arbState by arbViewModel.state.collectAsStateWithLifecycle()
+                            com.dirk.kalshiodds.arb.ui.ArbColorsProvider(
+                                dark = androidx.compose.foundation.isSystemInDarkTheme()
+                            ) {
+                                com.dirk.kalshiodds.arb.ui.ArbApp(
+                                    state = arbState,
+                                    vm = arbViewModel,
+                                    onBack = { navigator.back() }
                                 )
                             }
                         }
