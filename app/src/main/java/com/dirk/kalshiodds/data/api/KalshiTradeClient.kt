@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.KalshiErrorEnvelope
 import com.dirk.kalshiodds.data.dto.MarketPositionDto
+import com.dirk.kalshiodds.data.dto.PortfolioOrderDto
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -65,6 +66,39 @@ class KalshiTradeClient(
             throw softFailure(e)
         }
     }
+
+    /**
+     * Orders already on Kalshi for [clientOrderId]. Empty when the lookup
+     * fails — the caller still retries with the same client id.
+     */
+    suspend fun findByClientOrderId(ticket: TradeTicket, clientOrderId: String): PlacedOrder? {
+        if (clientOrderId.isBlank()) return null
+        ensureKeys()
+        for (status in listOf(null, "resting", "executed")) {
+            val match = runCatching { listOrders(ticket.ticker, status) }.getOrElse { emptyList() }
+                .firstOrNull { it.clientOrderId.equals(clientOrderId, ignoreCase = true) }
+            if (match != null) return match.toPlaced(ticket, clientOrderId)
+        }
+        return null
+    }
+
+    private suspend fun listOrders(ticker: String, status: String?): List<PortfolioOrderDto> {
+        val first = activePrimary().listOrders(ticker = ticker, status = status, limit = 200)
+        val chosen = chooseHost(first) { activeFallback()?.listOrders(ticker = ticker, status = status, limit = 200) }
+        if (!chosen.isSuccessful) return emptyList()
+        return chosen.body()?.orders.orEmpty()
+    }
+
+    private fun PortfolioOrderDto.toPlaced(ticket: TradeTicket, clientOrderId: String): PlacedOrder =
+        PlacedOrder(
+            ticket = ticket,
+            clientOrderId = this.clientOrderId ?: clientOrderId,
+            orderId = orderId,
+            fillCount = (fillCountFp ?: fillCount).toDoubleOrNullSafe() ?: 0.0,
+            remainingCount = (remainingCountFp ?: remainingCount).toDoubleOrNullSafe() ?: 0.0,
+            averageFillPrice = null,
+            placedAtMs = System.currentTimeMillis()
+        )
 
     suspend fun cancel(order: PlacedOrder): PlacedOrder {
         ensureKeys()

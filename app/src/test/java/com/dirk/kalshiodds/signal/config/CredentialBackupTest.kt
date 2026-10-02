@@ -47,21 +47,12 @@ class CredentialBackupTest {
     }
 
     @Test
-    fun committedDebugKeystoreHasExpectedSha256() {
-        val jks = listOf(
+    fun committedDebugKeystoreIsNotInTheTree() {
+        val present = listOf(
             java.io.File("signing/diphunter-debug.jks"),
             java.io.File("../signing/diphunter-debug.jks"),
             java.io.File("app/signing/diphunter-debug.jks")
-        ).firstOrNull { it.isFile } ?: java.io.File("signing/diphunter-debug.jks")
-        assertTrue("missing debug keystore at ${jks.absolutePath}", jks.isFile)
-        val proc = ProcessBuilder(
-            "keytool", "-list", "-v",
-            "-keystore", jks.absolutePath,
-            "-storepass", "diphunter-debug",
-            "-alias", "diphunter-debug"
-        ).redirectErrorStream(true).start()
-        val out = proc.inputStream.bufferedReader().readText()
-        proc.waitFor()
-        assertTrue(out.contains("64:E2:A4:3A:68:97:C4:55:6A:36:B8:2E:A3:1D:C8:95:50:C6:5E:56:B0:53:65:8E:14:38:BD:F3:C4:CC:46:08"))
+        ).filter { it.isFile }
+        assertTrue("keystore must not be committed: $present", present.isEmpty())
     }
 }

@@ -34,6 +34,8 @@ import com.dirk.kalshiodds.domain.withLiveQuote
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.random.Random
+import com.dirk.kalshiodds.data.repo.RefreshRecovery
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -382,7 +384,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun refresh() {
         viewModelScope.launch {
             _state.update { it.copy(isLoading = true, userMessage = null) }
-            applyResult(doRefresh())
+            try {
+                applyResult(doRefresh())
+            } catch (e: CancellationException) {
+                _state.update { it.copy(isLoading = false) }
+                throw e
+            } catch (e: Exception) {
+                applyThrown(e)
+            }
         }
     }
 
@@ -394,11 +403,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             while (isActive) {
-                runCatching {
+                try {
                     if (_state.value.snapshot == null) {
                         _state.update { it.copy(isLoading = true) }
                     }
                     applyResult(doRefresh())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // A thrown refresh used to be swallowed here, so HTTP 429
+                    // never lengthened the interval and the spinner could stick.
+                    applyThrown(e)
                 }
                 delay(nextDelayMs())
             }
@@ -409,21 +424,49 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value.settings
         refreshExternal()
         return repository.refresh(
-            watchBtc = true,
-            watchEth = false,
-            watchSol = false,
-            extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(s.extraTickerList()),
-            edgeThresholdPp = s.edgeThresholdPp
+            watchBtc = s.watchBtc,
+            watchEth = s.watchEth,
+            watchSol = s.watchSol,
+            extraTickers = s.extraTickerList(),
+            edgeThresholdPp = s.effectiveEdgeThresholdPp()
         )
     }
 
-    private fun applyResult(result: MarketsSnapshot) {
-        if (result.rateLimited) {
-            currentIntervalMs = min(max(currentIntervalMs * 2, INITIAL_BACKOFF_MS), MAX_BACKOFF_MS)
-        } else if (result.errorMessage == null) {
-            val wsLive = _state.value.signalStatus.state == WsConnectionState.CONNECTED
-            currentIntervalMs = if (wsLive) WS_METADATA_POLL_MS else max((currentIntervalMs * 4) / 5, BASE_POLL_MS)
+    private fun applyThrown(error: Exception) {
+        val rateLimited = RefreshRecovery.isRateLimited(error)
+        currentIntervalMs = RefreshRecovery.nextIntervalMs(
+            currentMs = currentIntervalMs,
+            rateLimited = rateLimited,
+            recovered = false,
+            wsLive = false,
+            baseMs = BASE_POLL_MS,
+            initialBackoffMs = INITIAL_BACKOFF_MS,
+            maxBackoffMs = MAX_BACKOFF_MS,
+            wsMetadataMs = WS_METADATA_POLL_MS
+        )
+        val message = RefreshRecovery.messageFor(error)
+        val cached = _state.value.snapshot != null
+        _state.update {
+            it.copy(
+                isLoading = false,
+                userMessage = if (cached) "Offline — showing cache ($message)" else message,
+                pollLabel = if (rateLimited) "Backing off ~${currentIntervalMs / 1000}s" else it.pollLabel
+            )
         }
+    }
+
+    private fun applyResult(result: MarketsSnapshot) {
+        val wsLive = _state.value.signalStatus.state == WsConnectionState.CONNECTED
+        currentIntervalMs = RefreshRecovery.nextIntervalMs(
+            currentMs = currentIntervalMs,
+            rateLimited = result.rateLimited,
+            recovered = result.errorMessage == null,
+            wsLive = wsLive,
+            baseMs = BASE_POLL_MS,
+            initialBackoffMs = INITIAL_BACKOFF_MS,
+            maxBackoffMs = MAX_BACKOFF_MS,
+            wsMetadataMs = WS_METADATA_POLL_MS
+        )
         val wsConnected = _state.value.signalStatus.state == WsConnectionState.CONNECTED
         val pollLabel = when {
             wsConnected -> "REST metadata ~${currentIntervalMs / 1000}s (WS live)"
@@ -528,6 +571,27 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * Explicit Approve for [ticketId] only. Nothing else in this ViewModel
      * (init, poll, score overlay) ever calls the trade client.
      */
+    fun reviseBuyTicket(ticketId: String, stakeUsd: Double, limitPrice: Double) {
+        val fee = _state.value.settings.feeRate
+        ticketSession.revise(ticketId) { ticket ->
+            if (ticket.isSell) ticket else TicketBuilder.repriceBuy(ticket, stakeUsd, limitPrice, fee)
+        }
+    }
+
+    /**
+     * Explicit Approve after the user edits limit and stake on the ticket.
+     * Still one tap, still the $5 all-in cap inside [TicketBuilder.repriceBuy].
+     */
+    fun approveBuyTicket(ticketId: String, stakeUsd: Double, limitPrice: Double) {
+        reviseBuyTicket(ticketId, stakeUsd, limitPrice)
+        val revised = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
+        if (revised != null && !revised.canApprove) {
+            ticketSession.failSoft(revised.blockedReason ?: "Ticket cannot be approved")
+            return
+        }
+        approveTicket(ticketId)
+    }
+
     fun approveTicket(ticketId: String) {
         viewModelScope.launch {
             val settings = _state.value.settings

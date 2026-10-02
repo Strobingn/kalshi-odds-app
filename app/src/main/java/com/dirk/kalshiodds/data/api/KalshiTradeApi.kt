@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.data.dto.CancelOrderV2Response
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.GetBalanceResponse
+import com.dirk.kalshiodds.data.dto.OrdersListResponse
 import com.dirk.kalshiodds.data.dto.PositionsResponse
 import retrofit2.Response
 import retrofit2.http.Body
@@ -37,6 +38,18 @@ interface KalshiTradeApi {
         @Query("limit") limit: Int = 200,
         @Query("cursor") cursor: String? = null
     ): Response<PositionsResponse>
+
+    /**
+     * Read-only order lookup. The retired v1 **write** `POST /portfolio/orders`
+     * is still never called. This GET lets a retry see an order Kalshi already
+     * accepted for the same client_order_id.
+     */
+    @GET("portfolio/orders")
+    suspend fun listOrders(
+        @Query("ticker") ticker: String? = null,
+        @Query("status") status: String? = null,
+        @Query("limit") limit: Int = 200
+    ): Response<OrdersListResponse>
 
     @POST("portfolio/events/orders")
     suspend fun createOrderV2(@Body body: CreateOrderV2Request): Response<CreateOrderV2Response>

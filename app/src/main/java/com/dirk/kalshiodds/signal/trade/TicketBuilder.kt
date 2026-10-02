@@ -164,6 +164,86 @@ object TicketBuilder {
     }
 
     /**
+     * Manual limit and stake for one order. Defaults the caller passes are
+     * the current ask and the ticket stake. Stake is clipped to the $5
+     * all-in cap. Does not place an order. A closed market stays blocked.
+     */
+    fun repriceBuy(
+        ticket: TradeTicket,
+        stakeUsd: Double,
+        limitPrice: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): TradeTicket {
+        if (ticket.isSell) return ticket
+        if (structuralBlock(ticket.blockedReason)) return ticket
+        val price = KalshiPrice.usable(limitPrice)
+        if (price == null) {
+            return ticket.copy(
+                blockedReason = "Type a limit between 0.1¢ and 99.9¢",
+                sizingNote = "Limit price was not usable — nothing sent"
+            )
+        }
+        val requested = stakeUsd.takeIf { it.isFinite() && it > 0.0 } ?: ticket.stakeUsd
+        val cap = requested.coerceAtMost(SignalConstants.LIVE_ALL_IN_CAP_USD)
+        val clipped = requested > SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-9
+        val live = LiveOrderSizer.size(price, cap, feeRate)
+        val yesLimit = if (ticket.side.equals("NO", true)) KalshiPrice.clipLimit(1.0 - price) else price
+        val clipNote = if (clipped) "Stake clipped to the \$5 live cap. " else ""
+        if (!live.ok) {
+            return ticket.copy(
+                limitPrice = price,
+                yesLimitPrice = yesLimit,
+                stakeUsd = cap,
+                contracts = 0,
+                estimatedFillUsd = 0.0,
+                allInUsd = 0.0,
+                feeUsd = 0.0,
+                blockedReason = live.refusedReason ?: "Cannot size this order under the \$5 cap",
+                sizingNote = clipNote + (live.refusedReason ?: "Cannot size")
+            )
+        }
+        val minProfit = ticket.minProfitIfWinUsd
+        val belowReason = if (minProfit != null &&
+            LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
+        ) {
+            LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
+        } else {
+            null
+        }
+        return ticket.copy(
+            stakeUsd = live.allInUsd,
+            limitPrice = price,
+            yesLimitPrice = yesLimit,
+            contracts = live.count,
+            estimatedFillUsd = live.allInUsd,
+            maxPayoutUsd = live.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = price,
+            feeUsd = live.feeUsd,
+            allInUsd = live.allInUsd,
+            profitIfWinUsd = live.profitIfWinUsd,
+            belowMinProfit = belowReason != null,
+            blockedReason = belowReason,
+            sizingNote = clipNote + String.format(
+                java.util.Locale.US,
+                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · \$5 cap",
+                live.count,
+                price * 100.0,
+                live.allInUsd,
+                live.feeUsd,
+                live.profitIfWinUsd
+            )
+        )
+    }
+
+    private fun structuralBlock(reason: String?): Boolean {
+        if (reason.isNullOrBlank()) return false
+        return reason == MARKET_CLOSED ||
+            reason == WINDOW_CLOSED ||
+            reason == NO_BUYERS ||
+            reason.startsWith("No sellers on")
+    }
+
+    /**
      * Sell / reduce [heldContracts] of [side] at the **fresh** best bid.
      * V2 `reduce_only` + IoC. Never places. [limitPrice] is clipped so it
      * cannot exceed the live bid — never a stale or higher quote.

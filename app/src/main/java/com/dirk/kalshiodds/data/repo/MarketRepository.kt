@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.local.CachedMarketsPayload
 import com.dirk.kalshiodds.data.local.MarketCache
+import com.dirk.kalshiodds.data.local.MarketSnapshotCache
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -24,7 +25,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import retrofit2.HttpException
+import kotlinx.coroutines.CancellationException
 
 data class MarketsSnapshot(
     val btc: List<MarketUiModel>,
@@ -77,7 +78,7 @@ class MarketRepository(
     context: Context,
     private val api: KalshiApi = NetworkModule.api,
     private val resolveApi: () -> KalshiApi = { api },
-    private val cache: MarketCache = MarketCache(context.applicationContext),
+    private val cache: MarketSnapshotCache = MarketCache(context.applicationContext),
     private val model: DipHunterModel = DipHunterModel(context.applicationContext),
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
     extraOpenTickers: () -> Set<String> = { emptySet() },
@@ -130,10 +131,13 @@ class MarketRepository(
         extraTickers: List<String> = emptyList(),
         edgeThresholdPp: Double = EDGE_ALERT_THRESHOLD_PP
     ): MarketsSnapshot = refreshMutex.withLock {
+        // ETH/SOL flags are honored only when that series is on the live
+        // allowlist. Today that list is Bitcoin, which matches Settings
+        // (those toggles are not shown). A saved watchEth=true does not poll ETH.
         refreshOnce(
-            watchBtc = true,
-            watchEth = false,
-            watchSol = false,
+            watchBtc = watchBtc && CryptoMarkets.isLiveSeries(KalshiApi.SERIES_BTC),
+            watchEth = watchEth && CryptoMarkets.isLiveSeries(KalshiApi.SERIES_ETH),
+            watchSol = watchSol && CryptoMarkets.isLiveSeries(KalshiApi.SERIES_SOL),
             extraTickers = CryptoMarkets.liveTickers(extraTickers),
             edgeThresholdPp = edgeThresholdPp
         )
@@ -145,8 +149,26 @@ class MarketRepository(
         watchSol: Boolean,
         extraTickers: List<String>,
         edgeThresholdPp: Double
+    ): MarketsSnapshot {
+        // try/catch must wrap coroutineScope. A failed async child cancels the
+        // scope and rethrows after the block, so a catch inside the scope
+        // never becomes this function's return value.
+        return try {
+            coroutineScope { fetchSnapshot(watchBtc, watchEth, watchSol, extraTickers, edgeThresholdPp) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            fallbackSnapshot(e)
+        }
+    }
+
+    private suspend fun fetchSnapshot(
+        watchBtc: Boolean,
+        watchEth: Boolean,
+        watchSol: Boolean,
+        extraTickers: List<String>,
+        edgeThresholdPp: Double
     ): MarketsSnapshot = coroutineScope {
-        try {
             val client = resolveApi()
             val btcDeferred = async {
                 if (watchBtc) client.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
@@ -198,33 +220,30 @@ class MarketRepository(
                 avgEdgeWhenRight = lastEdgeRight,
                 avgEdgeWhenWrong = lastEdgeWrong
             )
-        } catch (e: Exception) {
-            val rateLimited = isRateLimited(e)
-            val message = when {
-                rateLimited -> "Rate limited — backing off"
-                else -> e.message ?: "Network error"
-            }
-            val cached = cache.read()
-            if (cached != null) {
-                cached.toSnapshot(fromCache = true, errorMessage = message, rateLimited = rateLimited)
-            } else {
-                MarketsSnapshot(
-                    btc = emptyList(),
-                    eth = emptyList(),
-                    sol = emptyList(),
-                    extra = emptyList(),
-                    fetchedAtEpochMs = 0L,
-                    fromCache = false,
-                    errorMessage = message,
-                    rateLimited = rateLimited,
-                    modelScoreCorrect = lastScoreCorrect,
-                    modelScoreTotal = lastScoreTotal,
-                    modelMeanBrier = lastMeanBrier,
-                    avgEdgeWhenRight = lastEdgeRight,
-                    avgEdgeWhenWrong = lastEdgeWrong
-                )
-            }
+    }
+
+    private suspend fun fallbackSnapshot(error: Exception): MarketsSnapshot {
+        val rateLimited = RefreshRecovery.isRateLimited(error)
+        val message = RefreshRecovery.messageFor(error)
+        val cached = runCatching { cache.read() }.getOrNull()
+        if (cached != null) {
+            return cached.toSnapshot(fromCache = true, errorMessage = message, rateLimited = rateLimited)
         }
+        return MarketsSnapshot(
+            btc = emptyList(),
+            eth = emptyList(),
+            sol = emptyList(),
+            extra = emptyList(),
+            fetchedAtEpochMs = 0L,
+            fromCache = false,
+            errorMessage = message,
+            rateLimited = rateLimited,
+            modelScoreCorrect = lastScoreCorrect,
+            modelScoreTotal = lastScoreTotal,
+            modelMeanBrier = lastMeanBrier,
+            avgEdgeWhenRight = lastEdgeRight,
+            avgEdgeWhenWrong = lastEdgeWrong
+        )
     }
 
     private suspend fun refreshScorecard() {
@@ -298,14 +317,6 @@ class MarketRepository(
                 )
             }
         }
-    }
-
-    private fun isRateLimited(e: Exception): Boolean {
-        val code = when (e) {
-            is HttpException -> e.code()
-            else -> (e.cause as? HttpException)?.code()
-        }
-        return code == 429 || code == 503
     }
 
     private fun List<MarketDto>.cryptoOnly(): List<MarketDto> =

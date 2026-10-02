@@ -10,7 +10,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 `KXETH15M`, `KXSOL15M`, and extra tickers are recognized so stored rows can be filtered out of scorecard / signal history / paper P&L. They are never subscribed, polled, scored, alerted, or paper-traded. The live list is `CryptoMarkets.DEFAULT_SERIES`.
 
-**WTI crude (`KXWTI15M`) and all non-crypto markets are excluded** from defaults, UI toggles, REST watchlists, WebSocket subscriptions, scoring, and alerts.
+**WTI crude (`KXWTI15M`) is deprecated** and, with every other non-crypto market, is excluded from the live app: no toggle, no REST watch, no WebSocket subscription, no scoring, and no alerts.
 
 - **UI:** Jetpack Compose + Material 3
 - **Network:** Retrofit REST poll + optional authenticated Kalshi WebSocket
@@ -69,14 +69,14 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
 This branch builds **DipHunter GTP** with the independent Android application
 ID `com.dirk.kalshiodds.chatgtp` and a separate launcher icon. It installs
 alongside the original app and has its own local data and API-key settings.
-Each push to `chat-GTP` triggers the APK workflow and publishes the rolling
-`gtp-v1.0-chat-GTP` prerelease. Install future APKs from that same branch
-over this installation to keep its data: the signing certificate and package
-ID are stable and CI increases the version code for each new run. In **Settings
-→ Check for app update**, the app checks that same branch release and downloads
-the next APK. Android asks for approval to install an update from this app;
-confirm it to update in place without removing local data. Never switch APKs
-signed with another certificate or a different application ID.
+Each push publishes a rolling prerelease tagged `gtp-v<versionName>-<branch>`
+(for example `gtp-v1.0-main`). The in-app updater reads that tag from
+`BuildConfig.UPDATE_RELEASE_TAG`, set at build time from the branch, and
+refuses an APK whose signing certificate does not match the installed app.
+See [SIGNING.md](SIGNING.md). CI increases the version code for each new run.
+Android asks for approval to install an update from this app; confirm it to
+update in place when the certificate matches. A certificate change requires
+one uninstall. Never install an APK with a different application ID.
 
 The branch-only model workflow publishes `edge-model-chat-GTP` when manually
 dispatched on `chat-GTP`. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)
@@ -91,19 +91,9 @@ for the current evidence and unresolved trading risks.
 - Notifications when a Long-shot or $50 win-target card appears (Approve still required).
 - Adaptive launcher icon + per-coin / 4-hour ET scorecard breakdowns.
 
-## Stable debug signing (0.3.7)
+## Signing
 
-Sideloaded 0.3.5 / 0.3.6 debug APKs were signed with **different** Android Debug certs (one per cloud VM). Android then refused in-place update, uninstall wiped EncryptedSharedPreferences + SQLite, and the Kalshi API key had to be re-entered.
-
-`apksigner verify --print-certs` on the GitHub release assets:
-
-| Release | Signer DN | SHA-256 |
-|---------|-----------|---------|
-| v0.3.5-debug | `C=US, O=Android, CN=Android Debug` | `983e5822da123c66c2425980974778c33ee9fadcef8965f90a67a3440bfab1cf` |
-| v0.3.6-debug | `C=US, O=Android, CN=Android Debug` | `6613054f5eae9cab41bce2ac2c57b23601898b35b62feb591d18b18647dd287b` |
-| 0.3.7+ (`app/signing/diphunter-debug.jks`) | `CN=DipHunter Debug, OU=Sideload, O=Dirk` | `64e2a43a6897c4556a36b82ea31dc89550c65e56b053658e1438bdf3c4cc4608` |
-
-All **0.3.7+** debug APKs use that committed JKS (debug-only, private sideload). `./gradlew :app:assembleDebug` / `:app:verifyDebugCert` fail if the APK cert does not match. Override via `DIPHUNTER_DEBUG_*` Gradle properties or env/GitHub secrets. Back up the key from **Data → Back up credentials** (passphrase + SAF) before any uninstall. Encrypted credential prefs are excluded from Android Auto Backup.
+Release APKs are signed from GitHub Actions secrets (`RELEASE_KEYSTORE_BASE64`, `RELEASE_KEYSTORE_PASSWORD`, `RELEASE_KEY_ALIAS`, `RELEASE_KEY_PASSWORD`). Local builds and CI runs without those secrets use the standard Android debug keystore. The old committed `app/signing/diphunter-debug.jks` is no longer used, so the first install of a newly signed APK over an older one needs an uninstall. Details and the `keytool` command are in [SIGNING.md](SIGNING.md). Back up the Kalshi key from **Data → Back up credentials** before that uninstall. Encrypted credential prefs are excluded from Android Auto Backup.
 
 **0.3.7** puts UP (YES) and DOWN (NO) best bid/ask — in cents, high contrast — on every live market, replaces the sparkline with a two-line Canvas chart (tap for full-screen scrub), and adds a **Data** screen: streamed CSV/JSON import, Kalshi settled-window backfill (WorkManager, resumable), Coinbase spot backfill, optional Supabase restore, and imported logistic weights from `python3 ml/train_edge.py`. A volatility digital-option fair value sits on each card; the imported model blends with the market and only flags an edge past fees + a confidence margin. Scorecard shows model vs market Brier and a “not enough data yet” state under 100 settled signals. Still approve-gated; no unsupervised auto-bets; Heavy ML stays throttled. **0.3.6** stops Live Approve from showing a page-level `No ask to size a limit on <ticker>` when a rolling 15m window has just closed (or one side has no sellers). Expired/closed markets drop or move hunter/manual tickets to the current live window; a missing ask is a disabled ticket card (`Market closed` / `No sellers on YES right now`). Asks come from documented `*_dollars` fields (including deci-cent `"0.0060"`), the opposite-side bid, and the WS book. Approve is still the only path that hits Kalshi; paper stays isolated. **0.3.5** retires the Kalshi **v1 create-order fallback** that produced HTTP 410 `deprecated_v1_order_endpoint` on Live Approve, and adds a visible **paper book** ($100 start / $5 AI fills) on the home screen. **0.3.3 fixes two live 0.3.2 bugs:** (1) light-mode / Extended AI `ConcurrentModificationException` from iterating a live order-book TreeMap (and unsynchronized flicker / flow maps) while WS deltas mutated them — fail-soft snapshots + thread-safe structures; OverlayThrottle and the UP/DOWN hero stay. (2) inverted NO/DOWN recommendations when spot was hundreds of dollars **above** the 15m target and climbing — `delta = fair − mid` was a fade-the-expensive-YES rule that ignored `sign(spot − strike)`. Direction now locks to YES=UP / NO=DOWN for Kalshi crypto 15m “price up?” markets. **0.3.2** added latest-wins overlay throttle + live UP/DOWN hero. **0.3.1 stops remaining mid-session crashes after 0.3.0 Heavy ML** (book-delta scoring flood, tick-thread DataStore rewrites, unsynchronized ensemble, confirmed 256MB `OutOfMemoryError` on Galaxy S24 Ultra SM-S928U) and **persists results to SQLite + `results.log` + CSV export**. Default is **light mode** (0.2.x blend). One OOM immediately persists Heavy ML off; other failures auto-disable after 3. **0.3.0 added on-device heavy ML** (sequence CNN/LSTM, GBM, ensemble, uncertainty gate, continual calibration, policy-eval scorecard) **plus extended AI 10–19**. **0.2.4 stops mid-session crashes** from the 0.2.3 keep-alive path (shared TFLite, live order-book races, specialUse FGS). **0.2.3 keeps live odds alive in the background.** **0.2.2 added approve-gated limit tickets.** There is no unsupervised auto-bet, no background auto-fire, and no order without an in-app **Approve**. The RL sizer is **advisory only**. **Not financial advice. High variance — you can lose the full stake.**
 

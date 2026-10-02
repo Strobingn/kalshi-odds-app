@@ -2,7 +2,7 @@ name: Build DipHunter GTP APK
 
 on:
   push:
-    branches: [Claude, main, chat-GTP]
+    branches: [Claude, main, chat-GTP, grokbot]
   workflow_dispatch:
 
 permissions:
@@ -15,7 +15,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -40,33 +40,51 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
 
-      # Debug build: signed with the committed app/signing/diphunter-debug.jks,
-      # so every CI APK installs over the previous one.
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
-
-      - name: Trading and update regressions
+      - name: Decode release keystore
+        id: signing
+        env:
+          RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
-          ./gradlew :app:testDebugUnitTest \
-            --tests 'com.dirk.kalshiodds.signal.AllowlistTest' \
-            --tests 'com.dirk.kalshiodds.signal.TicketBuilderGateTest' \
-            --tests 'com.dirk.kalshiodds.signal.trade.LiveOrderSizerTest' \
-            --tests 'com.dirk.kalshiodds.signal.GuardrailsTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.ForecastUnitsTest' \
-            --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
-            --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestSqliteTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardTestTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardSqliteTest' \
-            --tests 'com.dirk.kalshiodds.signal.ResultsPersistenceTest' \
-            --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
-            --no-daemon --stacktrace
+          set -euo pipefail
+          if [ -n "${RELEASE_KEYSTORE_BASE64:-}" ] && [ -n "${RELEASE_KEYSTORE_PASSWORD:-}" ] && [ -n "${RELEASE_KEY_ALIAS:-}" ] && [ -n "${RELEASE_KEY_PASSWORD:-}" ]; then
+            mkdir -p "$RUNNER_TEMP/signing"
+            umask 077
+            printf '%s' "$RELEASE_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/signing/release.jks"
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+            echo "keystore=$RUNNER_TEMP/signing/release.jks" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Release signing secrets are missing (RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD). The APK will use the standard Android debug keystore and is not release-signed."
+            echo "mode=debug" >> "$GITHUB_OUTPUT"
+            echo "keystore=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Unit tests
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+
+      - name: Build APK
+        env:
+          UPDATE_RELEASE_TAG: gtp-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
+          RELEASE_STORE_FILE: ${{ steps.signing.outputs.keystore }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.signing.outputs.mode }}" = "release" ]; then
+            echo "Signing the APK with the release keystore from GitHub Actions secrets."
+            ./gradlew :app:assembleRelease --no-daemon --stacktrace
+          else
+            echo "::warning::Release signing secrets are missing. Building with the standard Android debug keystore. This APK is not release-signed."
+            ./gradlew :app:assembleDebug --no-daemon --stacktrace
+          fi
 
       - name: Rename APK
         id: apk
         run: |
-          src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
+          src=$(ls app/build/outputs/apk/release/*.apk app/build/outputs/apk/debug/*.apk 2>/dev/null | head -n1)
           out="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"

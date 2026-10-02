@@ -422,10 +422,7 @@ class KnownIssuesRegressionTest {
         val market = sample("KXETH15M-HUNTER", yesAsk = 0.03, noAsk = 0.97, aiYes = 4.0, predicted = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = nowMs)
         val hunter = TicketBuilder.proposeHunter(market, ctx)
-        assertNotNull(hunter)
-        assertEquals(TicketKind.HUNTER, hunter!!.kind)
-        assertFalse(hunter.modelEdge)
-        assertFalse(BetCall.qualifies(hunter, market, ctx))
+        assertNull(hunter)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         assertFalse(decision.isActionable)
@@ -1770,6 +1767,9 @@ class KnownIssuesRegressionTest {
             Response.success(
                 com.dirk.kalshiodds.data.dto.GetBalanceResponse(balance = 12_500, balanceDollars = "125.00")
             )
+
+        override suspend fun listOrders(ticker: String?, status: String?, limit: Int) =
+            Response.success(com.dirk.kalshiodds.data.dto.OrdersListResponse())
 
         override suspend fun getPositions(
             countFilter: String,
