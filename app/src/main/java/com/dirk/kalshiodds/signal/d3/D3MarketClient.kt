@@ -10,18 +10,20 @@ import com.dirk.kalshiodds.domain.parseCloseEpochMs
  * held / resting tickers only. Pages conservatively.
  */
 class D3MarketClient(
-    private val resolveApi: () -> KalshiApi
+    private val resolveApi: () -> KalshiApi,
+    private val rateLimiter: com.dirk.kalshiodds.data.api.KalshiRateLimiter? = null,
+    private val feedHealth: com.dirk.kalshiodds.data.api.KalshiFeedHealth? = null
 ) {
-    suspend fun loadSchedule(): D3Fees.Schedule {
+    suspend fun loadSchedule(): D3Fees.Schedule = guarded(com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane.D3) {
         val series = resolveApi().getSeries(D3Constants.SERIES).series
-        return D3Fees.fromSeries(
+        D3Fees.fromSeries(
             feeType = series?.feeType,
             feeMultiplier = series?.feeMultiplier,
             makerMultiplier = series?.makerFeeMultiplier
         )
-    }
+    } ?: D3Fees.fromSeries(null, null, null)
 
-    suspend fun loadFivePmQuotes(): List<D3Quote> {
+    suspend fun loadFivePmQuotes(): List<D3Quote> = guarded(com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane.D3) {
         val api = resolveApi()
         val out = ArrayList<D3Quote>()
         var cursor: String? = null
@@ -40,12 +42,13 @@ class D3MarketClient(
             }
             cursor = resp.cursor?.takeIf { it.isNotBlank() }
         } while (cursor != null && pages < 4 && out.size < 80)
-        return out
-    }
+        out
+    } ?: emptyList()
 
-    suspend fun loadTrades(ticker: String, minTsMs: Long? = null): List<D3TradePrint> {
+    suspend fun loadTrades(ticker: String, minTsMs: Long? = null): List<D3TradePrint> =
+        guarded(com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane.D3) {
         val resp = resolveApi().getTrades(ticker = ticker, limit = 100, minTs = minTsMs?.div(1000L))
-        return resp.trades.mapNotNull { t ->
+        resp.trades.mapNotNull { t ->
             val px = KalshiPrice.parseDollars(t.yesPriceDollars)
                 ?: t.yesPrice?.let { if (it > 1.0) it / 100.0 else it }?.let { KalshiPrice.usable(it) }
                 ?: return@mapNotNull null
@@ -59,6 +62,36 @@ class D3MarketClient(
                 count = count,
                 createdAtMs = ts
             )
+        }
+    } ?: emptyList()
+
+    private suspend fun <T> guarded(
+        lane: com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane,
+        block: suspend () -> T
+    ): T? {
+        val wait = rateLimiter?.reserve(lane) ?: 0L
+        if (wait > 0L) {
+            feedHealth?.show(com.dirk.kalshiodds.data.api.KalshiRequestStatus.rateLimited(wait))
+            return null
+        }
+        return try {
+            val value = block()
+            rateLimiter?.onSuccess()
+            feedHealth?.clear()
+            value
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val retry = if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(e)) {
+                rateLimiter?.onFailure(
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(e),
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(e)
+                ) ?: 1_000L
+            } else {
+                0L
+            }
+            feedHealth?.note(e, retry)
+            null
         }
     }
 }

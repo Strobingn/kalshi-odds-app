@@ -313,10 +313,10 @@ class SignalPreferences(
     suspend fun updateMetaLabel(value: Boolean) = edit { it[KEY_META] = value }
     suspend fun updatePathSim(value: Boolean) = edit { it[KEY_PATH_SIM] = value }
 
-    fun saveCredentials(keyId: String, pem: String) {
-        secrets.apiKeyId = keyId
-        secrets.privateKeyPem = PemNormalizer.normalize(pem)
-        secretRevision.value += 1
+    fun saveCredentials(keyId: String, pem: String): CredentialSave {
+        val saved = secrets.trySave(keyId, pem)
+        if (saved.stored) secretRevision.value += 1
+        return saved
     }
 
     fun clearCredentials() {

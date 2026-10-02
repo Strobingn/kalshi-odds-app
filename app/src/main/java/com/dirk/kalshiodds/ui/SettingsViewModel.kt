@@ -51,7 +51,9 @@ data class SettingsUiState(
     val connectionTestMessage: String? = null,
     val connectionTestOk: Boolean = false,
     val lastOrderError: String? = null,
-    val lastOrderErrorAtMs: Long = 0L
+    val lastOrderErrorAtMs: Long = 0L,
+    val updateMessage: String = "Kashi only · tags v*-debug from branch kashi · DipHunter-debug.apk",
+    val updateBusy: Boolean = false
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -73,7 +75,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         paperBankrollDraft = String.format(java.util.Locale.US, "%.0f", s.paperBankrollStartUsd),
                         credentialMessage = when {
                             prefs.needsReenterKey() ->
-                                "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                                com.dirk.kalshiodds.signal.config.LiveCredentialVault.UNREADABLE
                             prefs.needsReenterDemoKey() ->
                                 "Re-enter demo key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
                             else -> it.credentialMessage
@@ -396,14 +398,37 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
             return
         }
-        prefs.saveCredentials(keyId, pem)
-        _state.update {
-            it.copy(
-                pemDraft = "",
-                credentialMessage = "Key stored on device (PEM never logged)",
-                connectionTestOk = false,
-                connectionTestMessage = null
-            )
+        when (val saved = prefs.saveCredentials(keyId, pem)) {
+            is com.dirk.kalshiodds.signal.config.CredentialSave.Refused ->
+                _state.update { it.copy(credentialMessage = saved.reason) }
+            com.dirk.kalshiodds.signal.config.CredentialSave.Stored ->
+                _state.update {
+                    it.copy(
+                        pemDraft = "",
+                        credentialMessage = "Key stored on device (encrypted, PEM never logged)",
+                        connectionTestOk = false,
+                        connectionTestMessage = null
+                    )
+                }
+        }
+    }
+
+    fun checkForKashiUpdate() {
+        if (_state.value.updateBusy) return
+        viewModelScope.launch {
+            _state.update { it.copy(updateBusy = true, updateMessage = "Checking Kashi releases…") }
+            val message = withContext(Dispatchers.IO) {
+                runCatching {
+                    when (val check = com.dirk.kalshiodds.update.KashiUpdateClient.http().check(AppVersion.versionName)) {
+                        is com.dirk.kalshiodds.update.UpdateCheck.UpToDate ->
+                            "You're on the latest Kashi build (${AppVersion.versionName})."
+                        is com.dirk.kalshiodds.update.UpdateCheck.Available ->
+                            "Kashi ${check.release.tag} is available. Download is checked for package ${com.dirk.kalshiodds.update.KashiReleasePolicy.PACKAGE_ID} and the debug cert before install."
+                        is com.dirk.kalshiodds.update.UpdateCheck.Failed -> check.message
+                    }
+                }.getOrElse { com.dirk.kalshiodds.data.api.KalshiRequestStatus.OFFLINE }
+            }
+            _state.update { it.copy(updateBusy = false, updateMessage = message) }
         }
     }
 
@@ -435,7 +460,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
                         ?.use { it.readBytes() } ?: error("could not read backup")
                     val bundle = CredentialBackup.decryptAll(bytes, pass.toCharArray())
-                    prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    val saved = prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    if (saved is com.dirk.kalshiodds.signal.config.CredentialSave.Refused) {
+                        error(saved.reason)
+                    }
                     if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
                         prefs.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
                     }

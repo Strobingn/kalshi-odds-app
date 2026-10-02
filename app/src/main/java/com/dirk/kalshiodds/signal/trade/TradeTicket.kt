@@ -82,7 +82,12 @@ data class TradeTicket(
     /** Visible contracts at/under the limit (book or quoted size). */
     val visibleContracts: Int? = null,
     /** V2 `post_only` — D3 resting maker bids. */
-    val postOnly: Boolean = false
+    val postOnly: Boolean = false,
+    /**
+     * Kalshi `client_order_id`, minted once when the ticket is created
+     * and reused on every Approve retry. Empty only for hand-built fixtures.
+     */
+    val clientOrderId: String = ""
 ) {
     val displaySide: String get() = side.uppercase()
 

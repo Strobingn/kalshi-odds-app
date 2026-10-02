@@ -7,115 +7,102 @@ import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 
 /**
- * Device-local storage for Kalshi API Key ID + private key PEM.
+ * Device-local storage for the live Kalshi API Key ID + private key PEM.
  * PEM is never written to logs.
  *
- * EncryptedSharedPreferences is preferred. If the Android Keystore is
- * unavailable we fall back to a private prefs file. Cold start must read
- * **both** files so a previous fallback save is not lost when encryption
- * later succeeds (or the reverse).
+ * The only write target is EncryptedSharedPreferences. If the Android
+ * Keystore cannot open that file, saves are refused and live trading
+ * stays off — the key is not copied into plaintext prefs or files.
+ * When encryption works, a key left in the old fallback / legacy file
+ * is absorbed into the encrypted store once and then removed, so an
+ * upgrade can still read it.
  */
 class SecureCredentialStore(context: Context) {
 
     val keystoreInvalidated: Boolean
-        get() = lastKeystoreInvalidated
+        get() = vault.keystoreInvalidated
 
-    private val prefs: SharedPreferences = createPrefs(context.applicationContext)
+    val canStoreSecurely: Boolean
+        get() = vault.encryptedReady
+
+    private val vault: LiveCredentialVault = open(context.applicationContext)
 
     var apiKeyId: String
-        get() = prefs.getString(KEY_ID, "").orEmpty()
+        get() = vault.apiKeyId
         set(value) {
-            prefs.edit().putString(KEY_ID, value.trim()).commit()
+            if (!canStoreSecurely) return
+            vault.save(value, privateKeyPem)
         }
 
     var privateKeyPem: String
-        get() = PemNormalizer.normalize(prefs.getString(KEY_PEM, "").orEmpty())
+        get() = PemNormalizer.normalize(vault.privateKeyPem)
         set(value) {
-            prefs.edit().putString(KEY_PEM, PemNormalizer.normalize(value)).commit()
+            if (!canStoreSecurely) return
+            vault.save(apiKeyId, PemNormalizer.normalize(value))
         }
 
     val hasCredentials: Boolean
-        get() = apiKeyId.isNotBlank() && looksLikePem(privateKeyPem)
+        get() = canStoreSecurely && apiKeyId.isNotBlank() && looksLikePem(privateKeyPem)
 
     val keyIdWithoutPem: Boolean
-        get() = PemNormalizer.onlyKeyIdSaved(apiKeyId, prefs.getString(KEY_PEM, "").orEmpty())
+        get() = PemNormalizer.onlyKeyIdSaved(apiKeyId, vault.privateKeyPem)
+
+    fun trySave(keyId: String, pem: String): CredentialSave {
+        if (!canStoreSecurely) return CredentialSave.Refused(LiveCredentialVault.REFUSE)
+        return vault.save(keyId.trim(), PemNormalizer.normalize(pem))
+    }
 
     fun clear() {
-        prefs.edit().remove(KEY_ID).remove(KEY_PEM).commit()
+        vault.clear()
     }
 
     fun snapshot(): Pair<String, String> = apiKeyId to privateKeyPem
+
+    private class PrefBucket(private val prefs: SharedPreferences) : LiveCredentialVault.Bucket {
+        override fun get(key: String): String = prefs.getString(key, "").orEmpty()
+        override fun put(key: String, value: String) {
+            prefs.edit().putString(key, value).commit()
+        }
+        override fun remove(key: String) {
+            prefs.edit().remove(key).commit()
+        }
+    }
 
     companion object {
         private const val TAG = "DipHunterSecure"
         private const val PREFS_NAME = "kalshi_signal_secrets"
         private const val FALLBACK_NAME = "kalshi_signal_secrets_fallback"
         private const val LEGACY_PLAIN = "kalshi_signal_secrets_legacy"
-        private const val KEY_ID = "api_key_id"
-        private const val KEY_PEM = "private_key_pem"
-
-        @Volatile
-        var lastKeystoreInvalidated: Boolean = false
-            private set
 
         fun looksLikePem(pem: String): Boolean = PemNormalizer.looksLikePem(pem)
 
-        private fun createPrefs(context: Context): SharedPreferences {
-            val fallback = context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)
-            val legacy = context.getSharedPreferences(LEGACY_PLAIN, Context.MODE_PRIVATE)
+        private fun open(context: Context): LiveCredentialVault {
             val encrypted = tryCreateEncrypted(context)
-            if (encrypted != null) {
-                migrateIfEmpty(from = fallback, to = encrypted)
-                migrateIfEmpty(from = legacy, to = encrypted)
-                return encrypted
+            if (encrypted == null) {
+                Log.w(TAG, "EncryptedSharedPreferences unavailable — refusing plaintext fallback")
+                return LiveCredentialVault(encrypted = null)
             }
-            Log.w(TAG, "EncryptedSharedPreferences unavailable; using private prefs")
-            migrateIfEmpty(from = legacy, to = fallback)
-            return fallback
+            return LiveCredentialVault(
+                encrypted = PrefBucket(encrypted),
+                legacy = PrefBucket(context.getSharedPreferences(LEGACY_PLAIN, Context.MODE_PRIVATE)),
+                fallback = PrefBucket(context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE))
+            )
         }
 
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
             return try {
                 val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                val prefs = EncryptedSharedPreferences.create(
+                EncryptedSharedPreferences.create(
                     PREFS_NAME,
                     masterKey,
                     context,
                     EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
                     EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
                 )
-                lastKeystoreInvalidated = false
-                prefs
-            } catch (e: javax.crypto.AEADBadTagException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Encrypted prefs Keystore tag invalid — using fallback, re-enter key")
-                null
-            } catch (e: java.security.KeyStoreException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Keystore unavailable (${e.javaClass.simpleName})")
-                null
             } catch (e: Exception) {
-                val name = e.javaClass.simpleName
-                if (name.contains("AEAD", true) || name.contains("KeyStore", true) ||
-                    e.cause is javax.crypto.AEADBadTagException
-                ) {
-                    lastKeystoreInvalidated = true
-                    Log.w(TAG, "Encrypted prefs invalidated ($name) — using fallback")
-                    return null
-                }
-                Log.w(TAG, "EncryptedSharedPreferences unavailable ($name)")
+                Log.w(TAG, "EncryptedSharedPreferences unavailable (${e.javaClass.simpleName})")
                 null
             }
-        }
-
-        private fun migrateIfEmpty(from: SharedPreferences, to: SharedPreferences) {
-            val destId = to.getString(KEY_ID, "").orEmpty()
-            val destPem = to.getString(KEY_PEM, "").orEmpty()
-            val srcId = from.getString(KEY_ID, "").orEmpty()
-            val srcPem = from.getString(KEY_PEM, "").orEmpty()
-            if (!CredentialMigration.destNeedsSource(destId, destPem, srcId, srcPem)) return
-            to.edit().putString(KEY_ID, srcId).putString(KEY_PEM, srcPem).commit()
-            from.edit().remove(KEY_ID).remove(KEY_PEM).commit()
         }
     }
 }

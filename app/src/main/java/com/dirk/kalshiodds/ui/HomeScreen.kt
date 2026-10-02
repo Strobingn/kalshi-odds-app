@@ -77,6 +77,7 @@ fun HomeScreen(
     onPaperSellTicket: (String, Int, Double) -> Unit,
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit,
+    onLimitCents: (String, String) -> Unit = { _, _ -> },
     onResumeAlerts: () -> Unit = {},
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
@@ -254,7 +255,8 @@ fun HomeScreen(
                         onPaper = onPaperTicket,
                         onPaperSell = onPaperSellTicket,
                         onCancelApprove = onCancelApprove,
-                        onCancelOrder = onCancelOrder
+                        onCancelOrder = onCancelOrder,
+                        onLimitCents = onLimitCents
                     )
                     }
                 }

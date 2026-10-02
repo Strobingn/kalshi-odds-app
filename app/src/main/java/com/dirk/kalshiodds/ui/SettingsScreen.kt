@@ -83,7 +83,8 @@ fun SettingsScreen(
         onOpenData = onOpenData,
         scrollToApiKey = scrollToApiKey,
         onExportKeys = { exportKeys.launch("diphunter-kalshi-key.dhcred") },
-        onImportKeys = { importKeys.launch(arrayOf("*/*")) }
+        onImportKeys = { importKeys.launch(arrayOf("*/*")) },
+        onCheckUpdate = { viewModel.checkForKashiUpdate() }
     )
 }
 
@@ -96,7 +97,8 @@ fun SettingsContent(
     scrollToApiKey: Boolean = false,
     viewModel: SettingsViewModel? = null,
     onExportKeys: () -> Unit = {},
-    onImportKeys: () -> Unit = {}
+    onImportKeys: () -> Unit = {},
+    onCheckUpdate: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val s = state.settings
@@ -141,6 +143,22 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
+            Section("App update (Kashi only)")
+            Text(
+                "Checks Strobingn/kalshi-odds-app for tags v*-debug built from branch kashi, asset DipHunter-debug.apk. Never installs chat-GTP, main, Claude, or grokbot builds. The APK package and signing cert are checked before install.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                state.updateMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary
+            )
+            Button(
+                onClick = onCheckUpdate,
+                enabled = !state.updateBusy,
+                modifier = Modifier.height(48.dp)
+            ) { Text(if (state.updateBusy) "Checking…" else "Check for Kashi update") }
             Column(
                 modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -166,7 +184,8 @@ fun SettingsContent(
             }
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
-                    "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
+                    "RSA-PSS/SHA-256 or Ed25519. Stored only in EncryptedSharedPreferences. " +
+                    "If the Android Keystore fails, the key is not saved and live trading stays off. Never logged. " +
                     "Used for the public ticker / trade / orderbook_delta WebSocket and, after Live Approve, " +
                     "POST /trade-api/v2/portfolio/events/orders (V2 limit only — never /portfolio/orders).",
                 style = MaterialTheme.typography.labelMedium,

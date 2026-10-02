@@ -38,6 +38,12 @@ interface KalshiTradeApi {
         @Query("cursor") cursor: String? = null
     ): Response<PositionsResponse>
 
+    @GET("portfolio/orders")
+    suspend fun getOrders(
+        @Query("limit") limit: Int = 50,
+        @Query("cursor") cursor: String? = null
+    ): Response<com.dirk.kalshiodds.data.dto.OrdersListResponse>
+
     @POST("portfolio/events/orders")
     suspend fun createOrderV2(@Body body: CreateOrderV2Request): Response<CreateOrderV2Response>
 

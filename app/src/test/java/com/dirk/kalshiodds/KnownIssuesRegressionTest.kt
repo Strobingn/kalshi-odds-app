@@ -1780,6 +1780,9 @@ class KnownIssuesRegressionTest {
             cursor: String?
         ) = Response.success(com.dirk.kalshiodds.data.dto.PositionsResponse())
 
+        override suspend fun getOrders(limit: Int, cursor: String?) =
+            Response.success(com.dirk.kalshiodds.data.dto.OrdersListResponse())
+
         override suspend fun cancelOrderV2(
             orderId: String,
             marketTicker: String?,

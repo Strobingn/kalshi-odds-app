@@ -24,6 +24,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.dirk.kalshiodds.data.api.KalshiFeedHealth
+import com.dirk.kalshiodds.data.api.KalshiRateLimiter
+import com.dirk.kalshiodds.data.api.KalshiRequestStatus
+import kotlinx.coroutines.CancellationException
 import retrofit2.HttpException
 
 data class MarketsSnapshot(
@@ -34,8 +38,10 @@ data class MarketsSnapshot(
     val fetchedAtEpochMs: Long,
     val fromCache: Boolean,
     val errorMessage: String? = null,
-    /** True when Kalshi returned HTTP 429 or 503 — callers should back off. */
+    /** True when Kalshi returned HTTP 429 or 5xx — callers should back off. */
     val rateLimited: Boolean = false,
+    /** Suggested wait before the next try, when [rateLimited] or offline. */
+    val retryInMs: Long = 0L,
     val modelScoreCorrect: Int? = null,
     val modelScoreTotal: Int? = null,
     val modelMeanBrier: Double? = null,
@@ -85,11 +91,15 @@ class MarketRepository(
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
     extraOpenTickers: () -> Set<String> = { emptySet() },
     onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
+    private val rateLimiter: KalshiRateLimiter? = null,
+    private val feedHealth: KalshiFeedHealth? = null,
     private val scorer: SettlementScorer = SettlementScorer(
         resolveApi,
         logStore,
         extraOpenTickers,
-        onMarketSettled
+        onMarketSettled,
+        rateLimiter = rateLimiter,
+        feedHealth = feedHealth
     ),
     private val onCalibration: ((Calibrator.State) -> Unit)? = null,
     private val onAfterScore: (suspend () -> Unit)? = null
@@ -154,6 +164,17 @@ class MarketRepository(
         edgeThresholdPp: Double
     ): MarketsSnapshot = coroutineScope {
         try {
+            val hold = rateLimiter?.remainingHoldMs() ?: 0L
+            if (hold > 0L) {
+                val message = feedHealth?.banner ?: KalshiRequestStatus.rateLimited(hold)
+                return@coroutineScope failureSnapshot(
+                    message = message,
+                    rateLimited = true,
+                    retryInMs = hold
+                )
+            }
+            val spacing = rateLimiter?.reserve(KalshiRateLimiter.Lane.TICKER) ?: 0L
+            if (spacing > 0L) kotlinx.coroutines.delay(spacing)
             val client = resolveApi()
             val btcDeferred = async {
                 if (watchBtc) client.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
@@ -193,6 +214,8 @@ class MarketRepository(
             }
             runCatching { scorer.maybeScore(now) }
             refreshScorecard()
+            rateLimiter?.onSuccess()
+            feedHealth?.clear()
             MarketsSnapshot(
                 btc = btcUi,
                 eth = ethUi,
@@ -202,42 +225,67 @@ class MarketRepository(
                 fromCache = false,
                 errorMessage = null,
                 rateLimited = false,
+                retryInMs = 0L,
                 modelScoreCorrect = lastScoreCorrect,
                 modelScoreTotal = lastScoreTotal,
                 modelMeanBrier = lastMeanBrier,
                 avgEdgeWhenRight = lastEdgeRight,
                 avgEdgeWhenWrong = lastEdgeWrong
             )
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            val rateLimited = isRateLimited(e)
-            val message = when {
-                rateLimited -> "Rate limited — backing off"
-                else -> e.message ?: "Network error"
-            }
-            val cached = cache.read()
-            if (cached != null) {
-                cached.toSnapshot(fromCache = true, errorMessage = message, rateLimited = rateLimited)
+            val retry = if (KalshiRequestStatus.shouldBackoff(e)) {
+                rateLimiter?.onFailure(
+                    KalshiRequestStatus.httpCode(e),
+                    KalshiRequestStatus.retryAfterMs(e)
+                ) ?: KalshiRequestStatus.retryAfterMs(e) ?: 1_000L
             } else {
-                MarketsSnapshot(
-                    btc = emptyList(),
-                    eth = emptyList(),
-                    sol = emptyList(),
-                    extra = emptyList(),
-                    fetchedAtEpochMs = 0L,
-                    fromCache = false,
+                0L
+            }
+            val message = KalshiRequestStatus.message(e, retry)
+            feedHealth?.note(e, retry)
+            val cached = runCatching { cache.read() }.getOrNull()
+            if (cached != null) {
+                cached.toSnapshot(
+                    fromCache = true,
                     errorMessage = message,
-                    rateLimited = rateLimited,
-                    modelScoreCorrect = lastScoreCorrect,
-                    modelScoreTotal = lastScoreTotal,
-                    modelMeanBrier = lastMeanBrier,
-                    avgEdgeWhenRight = lastEdgeRight,
-                    avgEdgeWhenWrong = lastEdgeWrong
+                    rateLimited = KalshiRequestStatus.isRateLimited(e) || KalshiRequestStatus.isServerError(e),
+                    retryInMs = retry
+                )
+            } else {
+                failureSnapshot(
+                    message = message,
+                    rateLimited = KalshiRequestStatus.isRateLimited(e) || KalshiRequestStatus.isServerError(e),
+                    retryInMs = retry
                 )
             }
         }
     }
 
+    private fun failureSnapshot(
+        message: String,
+        rateLimited: Boolean,
+        retryInMs: Long
+    ): MarketsSnapshot = MarketsSnapshot(
+        btc = emptyList(),
+        eth = emptyList(),
+        sol = emptyList(),
+        extra = emptyList(),
+        fetchedAtEpochMs = 0L,
+        fromCache = false,
+        errorMessage = message,
+        rateLimited = rateLimited,
+        retryInMs = retryInMs,
+        modelScoreCorrect = lastScoreCorrect,
+        modelScoreTotal = lastScoreTotal,
+        modelMeanBrier = lastMeanBrier,
+        avgEdgeWhenRight = lastEdgeRight,
+        avgEdgeWhenWrong = lastEdgeWrong
+    )
+
     private suspend fun refreshScorecard() {
+        rateLimiter?.reserve(KalshiRateLimiter.Lane.SCORECARD)
         val entries = logStore.readAll()
         val fitted = Calibrator.fitEntries(entries)
         lastCalibration = fitted
@@ -324,7 +372,8 @@ class MarketRepository(
     private fun CachedMarketsPayload.toSnapshot(
         fromCache: Boolean,
         errorMessage: String? = null,
-        rateLimited: Boolean = false
+        rateLimited: Boolean = false,
+        retryInMs: Long = 0L
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
         return MarketsSnapshot(
@@ -340,6 +389,7 @@ class MarketRepository(
             fromCache = fromCache,
             errorMessage = errorMessage,
             rateLimited = rateLimited,
+            retryInMs = retryInMs,
             modelScoreCorrect = lastScoreCorrect,
             modelScoreTotal = lastScoreTotal,
             modelMeanBrier = lastMeanBrier,

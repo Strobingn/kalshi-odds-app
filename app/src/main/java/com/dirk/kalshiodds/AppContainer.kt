@@ -95,13 +95,18 @@ class AppContainer(context: Context) {
     val d3Store = com.dirk.kalshiodds.signal.d3.D3Store(app)
     val d3Engine = com.dirk.kalshiodds.signal.d3.D3Engine(nowMs = { clock.nowMs() })
     val d3Notifier = com.dirk.kalshiodds.signal.d3.D3Notifier(app)
-    val d3Markets = com.dirk.kalshiodds.signal.d3.D3MarketClient({
-        val keyed = hub.settings.tradingCredentialsConfigured()
-        NetworkModule.marketsApi(
-            demo = hub.settings.kalshiDemoEnabled,
-            credentials = if (keyed) ({ tradingCredentials() }) else null
-        )
-    })
+    val kalshiTraffic = com.dirk.kalshiodds.data.api.KalshiTraffic()
+    val d3Markets = com.dirk.kalshiodds.signal.d3.D3MarketClient(
+        resolveApi = {
+            val keyed = hub.settings.tradingCredentialsConfigured()
+            NetworkModule.marketsApi(
+                demo = hub.settings.kalshiDemoEnabled,
+                credentials = if (keyed) ({ tradingCredentials() }) else null
+            )
+        },
+        rateLimiter = kalshiTraffic.limiter,
+        feedHealth = kalshiTraffic.health
+    )
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -129,7 +134,10 @@ class AppContainer(context: Context) {
         cancelOrder = { order ->
             runCatching { tradeClient.cancel(order) }
         },
-        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
+        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) },
+        findExistingOrder = { clientOrderId ->
+            runCatching { tradeClient.findByClientOrderId(clientOrderId) }.getOrNull()
+        }
     )
     val clock: Clock = Clock.System
     val repository = MarketRepository(
@@ -150,6 +158,8 @@ class AppContainer(context: Context) {
             d3Store.settle(ticker, result)
         },
         onCalibration = { hub.applyCalibration(it) },
+        rateLimiter = kalshiTraffic.limiter,
+        feedHealth = kalshiTraffic.health,
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
             paper.book.settleFromLog(logStore.readAll())
@@ -174,6 +184,15 @@ class AppContainer(context: Context) {
         listOpen = { series -> repository.listOpen(series) },
         watchedSeries = {
             hub.settings.watchedSeries.toList().ifEmpty { CryptoMarkets.DEFAULT_SERIES }
+        },
+        onThrottle = { error ->
+            if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(error)) {
+                val wait = kalshiTraffic.limiter.onFailure(
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(error),
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error)
+                )
+                kalshiTraffic.health.note(error, wait)
+            }
         }
     )
 
