@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.signal.trade
 
+import com.dirk.kalshiodds.data.local.results.PendingClientOrder
+import com.dirk.kalshiodds.data.local.results.PendingOrderIdStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,7 +31,8 @@ class TicketSession(
      * Called before a retry so a timed-out Approve cannot place a second
      * real order. Null means Kalshi has no order with that id.
      */
-    private val findExistingOrder: suspend (clientOrderId: String) -> PlacedOrder? = { null }
+    private val findExistingOrder: suspend (clientOrderId: String, ticker: String) -> PlacedOrder? = { _, _ -> null },
+    private val pendingOrderIds: PendingOrderIdStore = PendingOrderIdStore.None
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
@@ -37,7 +40,7 @@ class TicketSession(
 
     private val voidedAtMs = mutableMapOf<String, Long>()
     private val announcedVoidIds = mutableSetOf<String>()
-    /** One client_order_id per ticker/side/kind, kept across retries. */
+    /** One client_order_id per ticker + side + buy/sell, kept across retries and process death. */
     private val orderIds = mutableMapOf<String, String>()
     /** Ids that have already been sent (or attempted) to Kalshi. */
     private val attemptedOrderIds = mutableSetOf<String>()
@@ -297,13 +300,13 @@ class TicketSession(
         }
         val clientOrderId = stableClientOrderId(ticket)
         val stamped = if (ticket.clientOrderId == clientOrderId) ticket else ticket.copy(clientOrderId = clientOrderId)
-        if (clientOrderId in attemptedOrderIds) {
-            val existing = runCatching { findExistingOrder(clientOrderId) }.getOrNull()
-            if (existing != null) {
-                return adoptExisting(cur, stamped, existing.copy(clientOrderId = clientOrderId, ticket = stamped))
-            }
+        // Look up before every live send, including the first attempt after a restart.
+        val existing = runCatching { findExistingOrder(clientOrderId, stamped.ticker) }.getOrNull()
+        if (existing != null) {
+            return adoptExisting(cur, stamped, existing.copy(clientOrderId = clientOrderId))
         }
         attemptedOrderIds.add(clientOrderId)
+        rememberPending(stamped, clientOrderId, attempted = true)
         _state.update {
             it.copy(
                 phase = TicketPhase.Submitting(stamped, clientOrderId),
@@ -330,7 +333,7 @@ class TicketSession(
         }
         val next = result.fold(
             onSuccess = { ack ->
-                orderIds.remove(orderKey(stamped))
+                clearPending(stamped)
                 val working = cur.working + ack
                 TicketUiState(
                     phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == stamped.id }),
@@ -390,11 +393,15 @@ class TicketSession(
     }
 
     private fun adoptExisting(cur: TicketUiState, ticket: TradeTicket, existing: PlacedOrder): TicketUiState {
-        orderIds.remove(orderKey(ticket))
+        clearPending(ticket)
+        val adopted = existing.copy(
+            ticket = exchangeTerms(ticket, existing),
+            clientOrderId = existing.clientOrderId.ifBlank { ticket.clientOrderId }
+        )
         val next = TicketUiState(
-            phase = TicketPhase.Submitted(existing, cur.proposals.filterNot { it.id == ticket.id }),
+            phase = TicketPhase.Submitted(adopted, cur.proposals.filterNot { it.id == ticket.id }),
             proposals = cur.proposals.filterNot { it.id == ticket.id },
-            working = cur.working + existing,
+            working = cur.working + adopted,
             lastError = null,
             placementCount = cur.placementCount
         )
@@ -402,15 +409,58 @@ class TicketSession(
         return next
     }
 
+    /**
+     * Stake, kind, and a rebuilt card do not mint a new id. Buy and sell stay distinct.
+     */
     private fun orderKey(ticket: TradeTicket): String =
-        "${ticket.ticker.uppercase()}|${ticket.side.uppercase()}|${ticket.kind}"
+        "${ticket.ticker.uppercase()}|${ticket.side.uppercase()}|${if (ticket.isSell) "SELL" else "BUY"}"
 
     private fun stableClientOrderId(ticket: TradeTicket): String {
         val key = orderKey(ticket)
         orderIds[key]?.let { return it }
+        pendingOrderIds.find(key)?.takeIf { it.clientOrderId.isNotBlank() }?.let { pending ->
+            orderIds[key] = pending.clientOrderId
+            if (pending.attempted) attemptedOrderIds.add(pending.clientOrderId)
+            return pending.clientOrderId
+        }
         val id = ticket.clientOrderId.takeIf { it.isNotBlank() } ?: idFactory()
         orderIds[key] = id
+        rememberPending(ticket, id, attempted = false)
         return id
+    }
+
+    private fun rememberPending(ticket: TradeTicket, clientOrderId: String, attempted: Boolean) {
+        val key = orderKey(ticket)
+        val prior = pendingOrderIds.find(key)
+        pendingOrderIds.save(
+            PendingClientOrder(
+                key = key,
+                clientOrderId = clientOrderId,
+                attempted = attempted || prior?.attempted == true,
+                ticker = ticket.ticker,
+                side = ticket.side,
+                kind = if (ticket.isSell) "SELL" else "BUY",
+                updatedAtMs = nowMs()
+            )
+        )
+    }
+
+    private fun clearPending(ticket: TradeTicket) {
+        val key = orderKey(ticket)
+        orderIds.remove(key)
+        pendingOrderIds.clear(key)
+    }
+
+    /** Exchange side, price, count, and ticker. Never the edited local ticket. */
+    private fun exchangeTerms(local: TradeTicket, existing: PlacedOrder): TradeTicket {
+        val remote = existing.ticket
+        return remote.copy(
+            id = local.id,
+            clientOrderId = existing.clientOrderId.ifBlank {
+                remote.clientOrderId.ifBlank { local.clientOrderId }
+            },
+            title = remote.title ?: local.title
+        )
     }
 
     private fun stamp(ticket: TradeTicket): TradeTicket {
@@ -454,8 +504,10 @@ class TicketSession(
 
     private fun forgetDropped(before: List<TradeTicket>, after: List<TradeTicket>) {
         val keep = after.map { it.id }.toSet()
-        before.map { it.id }.filter { it !in keep }.forEach { id ->
-            voidedAtMs.remove(id)
+        val keepKeys = after.map { orderKey(it) }.toSet()
+        before.filter { it.id !in keep }.forEach { ticket ->
+            voidedAtMs.remove(ticket.id)
+            if (orderKey(ticket) !in keepKeys) clearPending(ticket)
         }
     }
 

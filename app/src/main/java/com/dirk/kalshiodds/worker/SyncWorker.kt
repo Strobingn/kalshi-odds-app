@@ -58,7 +58,10 @@ class SyncWorker(
             settingsJson.lastOrNull()?.let { container.preferences.restoreSnapshot(it) }
             result
         }.getOrElse { SupabaseSync.Status(ok = false, message = it.message ?: "sync failed") }
-        runCatching { container.dataPrefs.updateSyncStatus(status.message, status.atMs) }
+        runCatching {
+            val atMs = if (status.ok) status.atMs else hub.lastSyncAtMs
+            container.dataPrefs.updateSyncStatus(status.message, atMs)
+        }
         if (status.ok) Result.success() else Result.retry()
     }
 

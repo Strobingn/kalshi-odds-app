@@ -332,9 +332,5 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         return "Model ${m.kind} v${m.version} · blend ${"%.2f".format(m.blendWeight)}$extra"
     }
 
-    private fun syncLine(s: DataHubSettings): String? {
-        if (!s.supabaseConfigured) return "Supabase not configured — History stays on this phone."
-        if (!s.syncEnabled) return "Cloud sync off"
-        return s.lastSyncMessage.ifBlank { "Cloud sync ready — never uploads the Kalshi key." }
-    }
+    private fun syncLine(s: DataHubSettings): String? = CloudSyncStatus.line(s)
 }
