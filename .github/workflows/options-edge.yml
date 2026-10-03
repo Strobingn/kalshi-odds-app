@@ -1,0 +1,76 @@
+name: Options edge (Claude)
+
+# Kalshi daily BTC/ETH "above K" markets vs Deribit options-implied odds
+# (tools/research/options_edge.py). Every 10 min logs sides whose ask is
+# ≥ 3¢ under the options fair after the fee, keeps the log in the rolling
+# `claude-recordings` release, then scores settled flags. Re-dispatches itself.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutes to watch this run"
+        default: "330"
+      chain:
+        description: "Start the next run when this one ends"
+        default: "true"
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/options_edge.py"
+      - ".github/workflows/options-edge.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: options-edge
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: claude-recordings
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: python3 tools/research/test_options_edge.py
+
+      - name: Restore log
+        run: gh release download "$RELEASE_TAG" -p options_log.jsonl -D . 2>/dev/null || touch options_log.jsonl
+
+      - name: Score before watching
+        run: |
+          echo "===== OPTIONS EDGE SCORE ====="
+          python3 tools/research/options_edge.py --log options_log.jsonl --score || true
+          echo "===== END OPTIONS EDGE SCORE ====="
+
+      - name: Watch
+        run: python3 tools/research/options_edge.py --log options_log.jsonl --minutes "${{ inputs.minutes || '330' }}" --every 600
+
+      - name: Save log
+        if: always()
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
+            --prerelease --title "Cloud recordings (Claude)" --notes "Research data recorded on GitHub runners." || true
+          gh release upload "$RELEASE_TAG" options_log.jsonl --clobber
+
+      - name: Score
+        if: always()
+        run: |
+          echo "===== OPTIONS EDGE SCORE ====="
+          python3 tools/research/options_edge.py --log options_log.jsonl --score || true
+          echo "===== END OPTIONS EDGE SCORE ====="
+
+      - name: Start the next run
+        if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' }}
+        run: gh workflow run options-edge.yml --ref "$GITHUB_REF_NAME" -f minutes=330 -f chain=true
