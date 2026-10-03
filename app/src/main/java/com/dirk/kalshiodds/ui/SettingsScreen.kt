@@ -125,7 +125,7 @@ fun SettingsContent(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary
                 )
             )
         }

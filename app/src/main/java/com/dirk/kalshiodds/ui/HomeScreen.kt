@@ -98,7 +98,7 @@ fun HomeScreen(
     }
     Scaffold(
         containerColor = colors.bg,
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = dipContentInsets(),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
@@ -125,7 +125,7 @@ fun HomeScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    actionIconContentColor = colors.accentBlue
+                    actionIconContentColor = colors.textSecondary
                 )
             )
         }
@@ -165,7 +165,7 @@ fun HomeScreen(
                             .fillMaxSize()
                             .background(colors.bg),
                         contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         state.pauseBanner?.let { banner ->
                             item {

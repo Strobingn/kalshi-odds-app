@@ -47,13 +47,18 @@ import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
+fun ScorecardScreen(
+    viewModel: ScorecardViewModel,
+    onBack: () -> Unit,
+    showBack: Boolean = true
+) {
     val ui by viewModel.snapshot.collectAsStateWithLifecycle()
     ScorecardScreen(
         ui = ui,
         onBack = onBack,
         onExport = viewModel::exportResults,
-        onGetLatestModel = viewModel::getLatestModel
+        onGetLatestModel = viewModel::getLatestModel,
+        showBack = showBack
     )
 }
 
@@ -63,7 +68,8 @@ fun ScorecardScreen(
     ui: ScorecardUi,
     onBack: () -> Unit,
     onExport: () -> Unit = {},
-    onGetLatestModel: () -> Unit = {}
+    onGetLatestModel: () -> Unit = {},
+    showBack: Boolean = true
 ) {
     val colors = DipTheme.colors
     val view = ui.view
@@ -72,18 +78,21 @@ fun ScorecardScreen(
 
     Scaffold(
         containerColor = colors.bg,
+        contentWindowInsets = dipContentInsets(),
         topBar = {
             TopAppBar(
                 title = { Text(ScorecardCopy.TITLE) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary
                 )
             )
         }
@@ -225,7 +234,7 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.LAST_MINUTE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -283,7 +292,7 @@ internal fun D3ScorecardCard(section: ScorecardCopy.D3Section) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.D3_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -346,7 +355,7 @@ internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.AUTOPILOT_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -387,7 +396,7 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -441,7 +450,7 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -597,7 +606,7 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -735,7 +744,7 @@ private fun HonestCard(h: ScorecardMetrics.Honest) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -833,7 +842,7 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -886,7 +895,7 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(
@@ -914,7 +923,7 @@ private fun ExtendedAiCard(line: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text("Extended AI (advisory)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)

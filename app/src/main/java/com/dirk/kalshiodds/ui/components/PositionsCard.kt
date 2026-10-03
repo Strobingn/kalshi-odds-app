@@ -32,8 +32,8 @@ fun PositionsCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, colors.accentBlue.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, colors.accentBlue.copy(alpha = 0.6f), com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {

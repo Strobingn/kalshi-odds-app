@@ -41,7 +41,12 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit) {
+fun DataScreen(
+    viewModel: DataViewModel,
+    onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
+    showBack: Boolean = true
+) {
     val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
     val importFile = rememberLauncherForActivityResult(
@@ -59,18 +64,21 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
     Scaffold(
         containerColor = colors.bg,
+        contentWindowInsets = dipContentInsets(),
         topBar = {
             TopAppBar(
                 title = { Text("Data") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary
                 )
             )
         }
@@ -275,7 +283,7 @@ private fun StatsCard(state: DataUiState) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text("DATA STATS", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)

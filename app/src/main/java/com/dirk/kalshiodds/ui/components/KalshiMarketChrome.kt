@@ -175,11 +175,12 @@ fun UpDownBuyButtons(
         (market.primaryHeroSide == null && (quotes.yesAsk ?: 0.5) >= 0.5)
     Row(
         modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Button(
             onClick = onBuyYes,
-            modifier = Modifier.weight(1f).height(52.dp),
+            modifier = Modifier.weight(1f).height(56.dp),
+            shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button,
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                 containerColor = if (tapeUp) colors.up else colors.up.copy(alpha = 0.75f),
                 contentColor = colors.onUp
@@ -187,7 +188,8 @@ fun UpDownBuyButtons(
         ) { Text(quotes.upButton) }
         Button(
             onClick = onBuyNo,
-            modifier = Modifier.weight(1f).height(52.dp),
+            modifier = Modifier.weight(1f).height(56.dp),
+            shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button,
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                 containerColor = colors.down,
                 contentColor = colors.onDown

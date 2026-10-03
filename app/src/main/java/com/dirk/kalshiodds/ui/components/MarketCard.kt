@@ -67,10 +67,10 @@ fun NextWindowLoadingCard(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, scheme.outline, RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
+            .border(1.dp, scheme.outlineVariant, com.dirk.kalshiodds.ui.theme.FieldShapes.card),
+        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.card,
         colors = CardDefaults.cardColors(
-            containerColor = scheme.surface,
+            containerColor = colors.surface,
             contentColor = scheme.onSurface
         )
     ) {
@@ -126,20 +126,20 @@ fun MarketCard(
 ) {
     val colors = DipTheme.colors
     val scheme = MaterialTheme.colorScheme
-    val cardBg = scheme.surface
+    val cardBg = colors.surface
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
     val clock = nowMs ?: System.currentTimeMillis()
     val call = decision ?: BetCall.decide(market, settings, clock)
     val headlineColor = SideColor.of(call.headline, colors)
-    val alertBorder = if (call.isActionable) headlineColor else scheme.outline
+    val alertBorder = if (call.isActionable) headlineColor else scheme.outlineVariant
     val quotes = MarketQuoteView.of(market)
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(if (call.isActionable) 2.dp else 1.dp, alertBorder, RoundedCornerShape(16.dp))
+            .border(if (call.isActionable) 2.dp else 1.dp, alertBorder, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
-        shape = RoundedCornerShape(16.dp),
+        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.card,
         colors = CardDefaults.cardColors(
             containerColor = cardBg,
             contentColor = valueColor
@@ -259,6 +259,7 @@ fun MarketCard(
                             containerColor = headlineColor,
                             contentColor = SideColor.on(call.headline, colors)
                         ),
+                        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button,
                         modifier = Modifier.fillMaxWidth().height(56.dp)
                     ) {
                         Text(HomeCopy.primaryButtonLabel(mode, call), fontWeight = FontWeight.Bold)

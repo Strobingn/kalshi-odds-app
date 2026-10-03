@@ -204,9 +204,9 @@ private fun ProposedTicketCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
+            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, com.dirk.kalshiodds.ui.theme.FieldShapes.card),
         colors = CardDefaults.cardColors(containerColor = colors.surface),
-        shape = RoundedCornerShape(16.dp)
+        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.card
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -517,6 +517,8 @@ internal fun ApproveTicketDialog(
     val shown = buyQuote ?: sellQuote ?: ticket
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.card,
                 title = {
             Text(
                 when {
@@ -680,7 +682,8 @@ internal fun ApproveTicketDialog(
                     containerColor = SideColor.ofTicketSide(ticket.side, colors),
                     contentColor = SideColor.onTicketSide(ticket.side, colors)
                 ),
-                modifier = Modifier.height(48.dp)
+                modifier = Modifier.height(com.dirk.kalshiodds.ui.theme.FieldMetrics.primaryTouch),
+                shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button
             ) {
                 val mode = TradeModeLabel.forApprove(
                     paperTradingEnabled = paperTradingEnabled,

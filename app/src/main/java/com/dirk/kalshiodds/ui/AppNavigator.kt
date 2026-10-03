@@ -17,9 +17,14 @@ object AppRoutes {
     const val HISTORY = "history"
     const val SIGNAL_HISTORY = "signal-history"
     const val CHART = "chart"
+    const val LIVE = "live"
+    const val MORE = "more"
+
+    /** FieldOps bottom bar, left to right. */
+    val TABS: List<String> = listOf(HOME, SCORECARD, LIVE, DATA, MORE)
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART
+        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, MORE
     )
 }
 
@@ -36,6 +41,14 @@ class AppNavigator(initial: List<String> = listOf(AppRoutes.HOME)) {
     fun open(route: String) {
         require(route in AppRoutes.ALL) { "unknown route $route" }
         if (_stack.last() == route) return
+        _stack.add(route)
+    }
+
+    /** Bottom-tab switch. The selected tab becomes the only root. */
+    fun selectTab(route: String) {
+        require(route in AppRoutes.TABS) { "not a tab $route" }
+        if (_stack.size == 1 && _stack.last() == route) return
+        _stack.clear()
         _stack.add(route)
     }
 
