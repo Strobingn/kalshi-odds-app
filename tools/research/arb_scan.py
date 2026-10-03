@@ -140,6 +140,10 @@ class HttpClient:
             q["cursor"] = cursor
         return self.get(f"{KALSHI}/events?{urllib.parse.urlencode(q)}") or {}
 
+    def series_events(self, series: str) -> dict:
+        q = {"status": "open", "with_nested_markets": "true", "limit": "200", "series_ticker": series}
+        return self.get(f"{KALSHI}/events?{urllib.parse.urlencode(q)}") or {}
+
     def orderbook(self, ticker: str) -> dict | None:
         return self.get(f"{KALSHI}/markets/{urllib.parse.quote(ticker)}/orderbook")
 
@@ -652,6 +656,14 @@ def cross_venue(client, events: list, books: dict, now_s: float, log) -> dict:
     """Kalshi KXBTC15M vs Polymarket btc-updown-15m-<start>. Gross/Kalshi-fee gaps only."""
     res = dict(status="ok", rows=[], note="")
     k15 = []
+    if not any((ev.get("series_ticker") or "").upper() == "KXBTC15M" for ev in events):
+        # The general listing is capped and rarely reaches the 15m series; ask for it directly.
+        fetch = getattr(client, "series_events", None)
+        if fetch is not None:
+            try:
+                events = list(events) + list((fetch("KXBTC15M") or {}).get("events") or [])
+            except Exception as e:  # noqa: BLE001 - optional section must never kill the scan
+                log(f"KXBTC15M series fetch failed: {e}")
     for ev in events:
         if (ev.get("series_ticker") or "").upper() != "KXBTC15M":
             continue
