@@ -257,19 +257,19 @@ private fun SpotPathCanvas(
                 val y = yOf(px)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, colors.accentOrange, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, colors.accentBlue, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
         }
         val endPx = lastSpot ?: series.lastOrNull()?.second
         val endT = series.lastOrNull()?.first ?: t1
         if (endPx != null) {
-            drawCircle(colors.accentOrange, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
+            drawCircle(colors.accentBlue, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
         }
     }
     Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         val now = lastSpot ?: series.lastOrNull()?.second
         Text(
             now?.let { String.format(Locale.US, "Now $%,.2f", it) } ?: "Spot",
-            color = colors.accentOrange,
+            color = colors.accentBlue,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold
         )

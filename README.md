@@ -17,7 +17,12 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.23**
+Package: `com.dirk.kalshiodds` · version **0.3.24**
+
+## 0.3.24
+
+- Wildlife FieldOps chrome: gray accent, light and dark surfaces, type, spacing, and corner radii. Green is still UP / YES and red is still DOWN / NO.
+- Five tabs (Home, Scorecard, Live, Data, More). Settings, History, and Signal history stay on More. Approve still needs the REAL MONEY confirm.
 
 ## 0.3.23
 

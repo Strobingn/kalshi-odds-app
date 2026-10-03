@@ -315,7 +315,7 @@ object HomeCardDetails {
     }
 
     /**
-     * Yellow-box copy only when the model's *likely* side disagrees with
+     * Warning copy only when the model's *likely* side disagrees with
      * market + spot. Stored [MarketUiModel.tapeConflictNote] is ignored
      * when it names the value side as what the AI "says".
      */

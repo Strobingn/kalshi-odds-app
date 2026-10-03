@@ -1,6 +1,9 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import com.dirk.kalshiodds.domain.MarketLifecycle
@@ -47,6 +50,41 @@ fun OddsScreen(
         onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) },
         onResumeAlerts = { viewModel.resumeAlerts() }
     )
+}
+
+@Composable
+fun LiveApproveScreen(viewModel: OddsViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val hasKey = state.settings.tradingCredentialsConfigured()
+    androidx.compose.material3.Scaffold(
+        containerColor = com.dirk.kalshiodds.ui.theme.DipTheme.colors.bg,
+        contentWindowInsets = dipContentInsets()
+    ) { padding ->
+        androidx.compose.foundation.layout.Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(com.dirk.kalshiodds.ui.theme.FieldMetrics.screenPadding)
+        ) {
+            com.dirk.kalshiodds.ui.components.TradeTicketsSection(
+                tickets = state.tickets,
+                credentialsConfigured = hasKey,
+                paperTradingEnabled = state.settings.paperTradingEnabled,
+                feeRate = state.settings.feeRate,
+                homeMode = false,
+                listVisible = true,
+                onReview = { viewModel.openTicketApprove(it) },
+                onDismiss = { viewModel.dismissTicket(it) },
+                onApprove = { viewModel.approveTicket(it) },
+                onApproveSell = { id, count, price -> viewModel.approveSellTicket(id, count, price) },
+                onPaper = { viewModel.paperTicket(it) },
+                onPaperSell = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
+                onCancelApprove = { viewModel.cancelTicketApprove() },
+                onCancelOrder = { viewModel.cancelWorkingOrder(it) },
+                onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) }
+            )
+        }
+    }
 }
 
 internal fun featuredLiveMarket(

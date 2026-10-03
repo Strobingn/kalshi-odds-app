@@ -37,8 +37,8 @@ fun PaperBookCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, colors.border, RoundedCornerShape(16.dp))
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(2.dp, colors.border, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -73,7 +73,7 @@ fun PaperBookCard(
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)
-            PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.accentOrange)
+            PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.textPrimary)
             val pnlColor = when {
                 paper.realizedPnlUsd > 0 -> colors.textPrimary
                 paper.realizedPnlUsd < 0 -> colors.textPrimary
@@ -152,7 +152,7 @@ private fun PaperLedgerRow(
         else -> "LOSS"
     }
     val color = when (status) {
-        "OPEN" -> colors.accentOrange
+        "OPEN" -> colors.textPrimary
         "WIN" -> colors.textPrimary
         "LOSS" -> colors.textPrimary
         else -> colors.accentBlue

@@ -61,8 +61,8 @@ fun ChartDetailScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue,
-                    actionIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary,
+                    actionIconContentColor = colors.textSecondary
                 )
             )
         }

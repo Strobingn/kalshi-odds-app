@@ -127,14 +127,40 @@ class MainActivity : ComponentActivity() {
                         scorecard = {
                             ScorecardScreen(
                                 viewModel = scorecardViewModel,
-                                onBack = { navigator.back() }
+                                onBack = { navigator.back() },
+                                showBack = navigator.canPop
                             )
                         },
                         data = {
                             DataScreen(
                                 viewModel = dataViewModel,
                                 onBack = { navigator.back() },
-                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) }
+                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
+                                showBack = navigator.canPop
+                            )
+                        },
+                        live = {
+                            com.dirk.kalshiodds.ui.LiveApproveScreen(oddsViewModel)
+                        },
+                        more = {
+                            val message = oddsState.userMessage.orEmpty()
+                            val failed = message.contains("offline", ignoreCase = true) ||
+                                message.contains("fail", ignoreCase = true)
+                            val pending = oddsState.snapshot?.fromCache == true
+                            val syncText = when {
+                                oddsState.isLoading -> "Syncing…"
+                                failed -> "Sync failed"
+                                pending -> "Pending sync"
+                                else -> "Synced"
+                            }
+                            com.dirk.kalshiodds.ui.MoreScreen(
+                                onOpen = { dest ->
+                                    if (dest.tab) navigator.selectTab(dest.route)
+                                    else navigator.open(dest.route)
+                                },
+                                syncText = syncText,
+                                syncFailed = failed && !oddsState.isLoading,
+                                syncPending = pending && !failed && !oddsState.isLoading
                             )
                         },
                         history = {
