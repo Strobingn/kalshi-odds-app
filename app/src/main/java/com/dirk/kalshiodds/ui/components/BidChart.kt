@@ -60,7 +60,7 @@ fun BidChart(
     liveDownLabel: String? = null
 ) {
     val colors = DipTheme.colors
-    val bg = MaterialTheme.colorScheme.surface
+    val bg = DipTheme.colors.surface
     val labelColor = checklistLabelColor(bg)
     val axisColor = Contrast.readable(MaterialTheme.colorScheme.onSurfaceVariant, bg, minRatio = Contrast.AA_LARGE)
     val downsampled = remember(points, heightDp) {

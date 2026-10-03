@@ -40,6 +40,9 @@ import java.util.Locale
 import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.fieldTextColors
 
 @Composable
 fun TradeTicketsSection(
@@ -210,9 +213,9 @@ private fun ProposedTicketCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
+            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, FieldShapes.card),
         colors = CardDefaults.cardColors(containerColor = colors.surface),
-        shape = RoundedCornerShape(16.dp)
+        shape = FieldShapes.card
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -356,6 +359,8 @@ private fun ProposedTicketCard(
                 modifier = Modifier.padding(top = 6.dp)
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = stakeText,
                 onValueChange = { stakeText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
                 label = { Text("Stake $ (max 5)") },
@@ -363,6 +368,8 @@ private fun ProposedTicketCard(
                 singleLine = true
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = centsText,
                 onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
                 label = { Text("Limit ¢ (ask)") },
@@ -386,7 +393,7 @@ private fun ProposedTicketCard(
                 Modifier.fillMaxWidth().padding(top = 10.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(
+                OutlinedButton(shape = FieldShapes.button,
                     onClick = {
                         if (!ticket.isSell) onReviseBuy(ticket.id, typedStake(), typedLimit())
                         onPaper(ticket.id)
@@ -402,7 +409,7 @@ private fun ProposedTicketCard(
                         else String.format(Locale.US, "PAPER $%.2f", ticket.stakeUsd)
                     )
                 }
-                Button(
+                Button(shape = FieldShapes.button,
                     onClick = {
                         if (!ticket.isSell) onReviseBuy(ticket.id, typedStake(), typedLimit())
                         onReview(ticket.id)
@@ -432,9 +439,9 @@ private fun ProposedTicketCard(
                     )
                 }
             }
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 onClick = { onDismiss(ticket.id) },
-                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(44.dp)
+                modifier = Modifier.fillMaxWidth().padding(top = 6.dp).height(FieldMetrics.minTouch)
             ) {
                 Text("Dismiss")
             }
@@ -471,9 +478,9 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
-        OutlinedButton(
+        OutlinedButton(shape = FieldShapes.button,
             onClick = { onCancel(id) },
-            modifier = Modifier.padding(top = 6.dp).height(44.dp)
+            modifier = Modifier.padding(top = 6.dp).height(FieldMetrics.minTouch)
         ) { Text("Cancel order") }
     }
 }
@@ -568,6 +575,8 @@ internal fun ApproveTicketDialog(
                     )
                 } else if (!paperSell && !paperBuy && ticket.blockedReason == null) {
                     OutlinedTextField(
+                        shape = FieldShapes.search,
+                        colors = fieldTextColors(),
                         value = stakeText,
                         onValueChange = { stakeText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
                         label = { Text("Stake $ (max 5)") },
@@ -575,6 +584,8 @@ internal fun ApproveTicketDialog(
                         singleLine = true
                     )
                     OutlinedTextField(
+                        shape = FieldShapes.search,
+                        colors = fieldTextColors(),
                         value = centsText,
                         onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
                         label = { Text("Limit ¢") },
@@ -638,6 +649,8 @@ internal fun ApproveTicketDialog(
                 }
                 if (ticket.isSell && ticket.blockedReason == null) {
                     OutlinedTextField(
+                        shape = FieldShapes.search,
+                        colors = fieldTextColors(),
                         value = countText,
                         onValueChange = { countText = it.filter { ch -> ch.isDigit() }.take(6) },
                         label = { Text("Contracts (max $held)") },
@@ -645,6 +658,8 @@ internal fun ApproveTicketDialog(
                     )
                     if (paperSell) {
                         OutlinedTextField(
+                            shape = FieldShapes.search,
+                            colors = fieldTextColors(),
                             value = centsText,
                             onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) },
                             label = { Text("Limit ¢ (best bid)") },
@@ -663,7 +678,7 @@ internal fun ApproveTicketDialog(
             }
         },
         confirmButton = {
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = {
                     if (ticket.isSell) {
                         val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts

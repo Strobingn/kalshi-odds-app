@@ -18,7 +18,7 @@ android {
         // GitHub Actions run numbers increase with each branch push, so a
         // new APK updates this separate installation without version downgrades.
         versionCode = 1_100_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.1"
+        versionName = "1.2"
         val updateBranch = System.getenv("GITHUB_REF_NAME")?.takeIf { it.isNotBlank() } ?: "local"
         val updateReleaseTag = System.getenv("UPDATE_RELEASE_TAG")?.takeIf { it.isNotBlank() }
             ?: "gtp-v1.0-$updateBranch"

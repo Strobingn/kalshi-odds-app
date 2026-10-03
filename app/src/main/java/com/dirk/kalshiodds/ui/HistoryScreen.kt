@@ -54,6 +54,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.fieldCard
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,7 +73,9 @@ fun HistoryScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text("History") },
+                title = {
+                    Text("History", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -119,9 +124,9 @@ fun HistoryScreen(
                     3 -> {
                         state.currentSettingsJson?.let { json ->
                             item {
-                                OutlinedButton(
+                                OutlinedButton(shape = FieldShapes.button,
                                     onClick = { viewModel.restoreSettings(json) },
-                                    modifier = Modifier.fillMaxWidth().height(44.dp)
+                                    modifier = Modifier.fillMaxWidth().height(FieldMetrics.minTouch)
                                 ) { Text("Restore current snapshot") }
                             }
                         }
@@ -133,7 +138,7 @@ fun HistoryScreen(
                 }
                 if (state.hasMore) {
                     item {
-                        OutlinedButton(
+                        OutlinedButton(shape = FieldShapes.button,
                             onClick = viewModel::loadMore,
                             modifier = Modifier.fillMaxWidth().height(48.dp)
                         ) { Text("Load more") }
@@ -212,7 +217,7 @@ private fun TotalsCard(t: HistoryAssembler.Totals) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+            .fieldCard(colors.surfaceAlt, colors.border)
             .padding(12.dp)
     ) {
         Text(
@@ -263,7 +268,7 @@ private fun BetRow(b: HistoryBet) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.surfaceAlt, RoundedCornerShape(10.dp))
+            .fieldCard(colors.surfaceAlt, colors.border)
             .padding(10.dp)
     ) {
         Text(
@@ -334,9 +339,9 @@ private fun SettingsRow(c: SettingsChange, viewModel: HistoryViewModel) {
             color = colors.textSecondary
         )
         if (c.snapshotJson != null) {
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 onClick = { viewModel.restoreSettings(c.snapshotJson) },
-                modifier = Modifier.padding(top = 4.dp).height(44.dp)
+                modifier = Modifier.padding(top = 4.dp).height(FieldMetrics.minTouch)
             ) { Text("Restore these settings") }
         }
     }
@@ -349,7 +354,7 @@ private fun MarketRow(row: SettledWindowRow, onOpen: () -> Unit) {
         Modifier
             .fillMaxWidth()
             .clickable(onClick = onOpen)
-            .background(colors.surfaceAlt, RoundedCornerShape(10.dp))
+            .fieldCard(colors.surfaceAlt, colors.border)
             .padding(10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

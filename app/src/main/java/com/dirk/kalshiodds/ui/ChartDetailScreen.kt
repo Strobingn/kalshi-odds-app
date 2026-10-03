@@ -49,7 +49,13 @@ fun ChartDetailScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text(com.dirk.kalshiodds.ui.WindowLabel.of(market.ticker, market.closeTimeEpochMs)) },
+                title = {
+                    Text(
+                        com.dirk.kalshiodds.ui.WindowLabel.of(market.ticker, market.closeTimeEpochMs),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

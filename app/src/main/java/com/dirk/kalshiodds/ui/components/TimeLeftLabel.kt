@@ -49,7 +49,7 @@ fun TimeLeftLabel(
         text = if (compact && text != "—" && text != "Expired") text else text,
         modifier = if (pill) {
             modifier
-                .background(color.copy(alpha = 0.16f), RoundedCornerShape(999.dp))
+                .background(color.copy(alpha = 0.16f), com.dirk.kalshiodds.ui.theme.FieldShapes.chip)
                 .padding(horizontal = 10.dp, vertical = 4.dp)
         } else {
             modifier
