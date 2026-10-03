@@ -292,7 +292,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     val bundle = com.dirk.kalshiodds.signal.config.CredentialBackup.decryptAll(
                         bytes, pass.toCharArray()
                     )
-                    container.preferences.saveCredentials(bundle.keyId, bundle.pem)
+                    val saved = container.preferences.saveCredentials(bundle.keyId, bundle.pem)
+                    if (saved != null) error(saved)
                     if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
                         container.preferences.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
                     }

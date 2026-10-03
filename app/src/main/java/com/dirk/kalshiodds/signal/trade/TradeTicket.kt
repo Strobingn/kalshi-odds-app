@@ -140,7 +140,13 @@ sealed class TicketPhase {
 
     data class Submitted(val order: PlacedOrder, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
 
-    data class Failed(val ticket: TradeTicket, val error: String, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
+    data class Failed(
+        val ticket: TradeTicket,
+        val error: String,
+        val proposals: List<TradeTicket> = emptyList(),
+        /** Same client_order_id as the attempt that failed — retries must reuse it. */
+        val clientOrderId: String = ""
+    ) : TicketPhase()
 
     data class Cancelled(val order: PlacedOrder, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
 

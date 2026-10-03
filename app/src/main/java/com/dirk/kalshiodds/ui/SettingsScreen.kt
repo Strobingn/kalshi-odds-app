@@ -386,7 +386,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum and Solana switches are not shown; saved values from older versions are not polled, scored, or paper-traded. WTI is deprecated and excluded.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )

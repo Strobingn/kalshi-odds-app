@@ -312,10 +312,10 @@ class LiveSignalsService : Service() {
                         container.hub.applyExternal(it)
                     }
                     val snap = container.repository.refresh(
-                        watchBtc = true,
-                        watchEth = false,
-                        watchSol = false,
-                        extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(settings.extraTickerList()),
+                        watchBtc = settings.watchBtc,
+                        watchEth = settings.watchEth,
+                        watchSol = settings.watchSol,
+                        extraTickers = settings.extraTickerList(),
                         edgeThresholdPp = settings.effectiveEdgeThresholdPp()
                     )
                     container.hub.ingestRestSnapshot(snap)

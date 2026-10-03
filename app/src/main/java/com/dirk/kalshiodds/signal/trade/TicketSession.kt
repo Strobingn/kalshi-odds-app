@@ -23,7 +23,13 @@ class TicketSession(
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
     private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
-    private val voidHoldMs: Long = VOID_HOLD_MS
+    private val voidHoldMs: Long = VOID_HOLD_MS,
+    /**
+     * Look up an order Kalshi may already have accepted for this client id.
+     * Used before a retry so a timed-out Approve does not send a second order.
+     * Null means "not found" — the same client id is still reused.
+     */
+    private val findExisting: suspend (ticket: TradeTicket, clientOrderId: String) -> PlacedOrder? = { _, _ -> null }
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
@@ -31,6 +37,9 @@ class TicketSession(
 
     private val voidedAtMs = mutableMapOf<String, Long>()
     private val announcedVoidIds = mutableSetOf<String>()
+    /** One client_order_id per ticket id. Retries reuse it so Kalshi rejects duplicates. */
+    private val clientOrderIds = mutableMapOf<String, String>()
+    private val attemptedIds = mutableSetOf<String>()
 
     /** Times [WINDOW_CLOSED_NOTICE] was raised for a newly voided ticket. */
     var windowClosedNoticeCount: Int = 0
@@ -43,6 +52,8 @@ class TicketSession(
         _state.value = TicketUiState(phase = TicketPhase.Idle)
         voidedAtMs.clear()
         announcedVoidIds.clear()
+        clientOrderIds.clear()
+        attemptedIds.clear()
         windowClosedNoticeCount = 0
     }
 
@@ -221,6 +232,8 @@ class TicketSession(
             val next = cur.proposals.filterNot { it.id == ticketId }
             voidedAtMs.remove(ticketId)
             announcedVoidIds.remove(ticketId)
+            clientOrderIds.remove(ticketId)
+            attemptedIds.remove(ticketId)
             val phase = if (next.isEmpty()) TicketPhase.Idle else TicketPhase.Proposed(next)
             cur.copy(phase = phase, proposals = next)
         }
@@ -255,6 +268,8 @@ class TicketSession(
         val ticket = when (val p = cur.phase) {
             is TicketPhase.AwaitingApprove -> p.ticket.takeIf { it.matchesApproval(ticketId) }
             is TicketPhase.Proposed -> p.tickets.firstOrNull { it.matchesApproval(ticketId) }
+            is TicketPhase.Failed -> p.ticket.takeIf { it.matchesApproval(ticketId) }
+                ?: p.proposals.firstOrNull { it.matchesApproval(ticketId) }
             else -> null
         } ?: run {
             _state.update {
@@ -273,49 +288,37 @@ class TicketSession(
         }
         if (cur.phase is TicketPhase.Submitting) return cur
 
-        val clientOrderId = (cur.phase as? TicketPhase.AwaitingApprove)
-            ?.clientOrderId
-            ?.takeIf { it.isNotBlank() }
-            ?: idFactory()
+        val clientOrderId = clientOrderIdFor(ticket.id, cur.phase)
         _state.update {
             it.copy(
                 phase = TicketPhase.Submitting(ticket, clientOrderId),
                 lastError = null
             )
         }
-        val result = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
-        runCatching {
-            onAttempt?.invoke(
-                com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
-                    ticker = ticket.ticker,
-                    side = ticket.side,
-                    stakeUsd = ticket.stakeUsd,
-                    approved = true,
-                    result = result.fold(
-                        onSuccess = { ack -> ack.error ?: ack.orderId ?: "submitted" },
-                        onFailure = { err -> humanError(err) }
-                    ),
-                    createdAtMs = System.currentTimeMillis(),
-                    clientOrderId = clientOrderId,
-                    note = "Approve-gated — never unsupervised"
-                )
-            )
+        if (ticket.id in attemptedIds) {
+            val already = runCatching { findExisting(ticket, clientOrderId) }.getOrNull()
+            if (already != null) {
+                recordAttempt(ticket, clientOrderId, Result.success(already))
+                val adopted = submittedState(cur, ticket, already)
+                _state.value = adopted
+                return adopted
+            }
         }
+        attemptedIds.add(ticket.id)
+        val placed = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
+        val result = if (placed.isFailure && isDuplicateClientOrder(placed.exceptionOrNull()?.message)) {
+            val already = runCatching { findExisting(ticket, clientOrderId) }.getOrNull()
+            if (already != null) Result.success(already) else placed
+        } else {
+            placed
+        }
+        recordAttempt(ticket, clientOrderId, result)
         val next = result.fold(
-            onSuccess = { ack ->
-                val working = cur.working + ack
-                TicketUiState(
-                    phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == ticket.id }),
-                    proposals = cur.proposals.filterNot { it.id == ticket.id },
-                    working = working,
-                    lastError = ack.error,
-                    placementCount = cur.placementCount + 1
-                )
-            },
+            onSuccess = { ack -> submittedState(cur, ticket, ack) },
             onFailure = { err ->
                 val msg = humanError(err)
                 TicketUiState(
-                    phase = TicketPhase.Failed(ticket, msg, cur.proposals),
+                    phase = TicketPhase.Failed(ticket, msg, cur.proposals, clientOrderId),
                     proposals = cur.proposals,
                     working = cur.working,
                     lastError = msg,
@@ -355,8 +358,59 @@ class TicketSession(
         others: List<TradeTicket>,
         existingId: String? = null
     ): TicketPhase.AwaitingApprove {
-        val id = existingId?.takeIf { it.isNotBlank() } ?: idFactory()
+        val id = existingId?.takeIf { it.isNotBlank() }
+            ?: clientOrderIds[ticket.id]?.takeIf { it.isNotBlank() }
+            ?: idFactory()
+        clientOrderIds[ticket.id] = id
         return TicketPhase.AwaitingApprove(ticket, others, id)
+    }
+
+    private fun clientOrderIdFor(ticketId: String, phase: TicketPhase): String {
+        clientOrderIds[ticketId]?.takeIf { it.isNotBlank() }?.let { return it }
+        val fromPhase = when (phase) {
+            is TicketPhase.AwaitingApprove -> phase.clientOrderId.takeIf { phase.ticket.id == ticketId }
+            is TicketPhase.Failed -> phase.clientOrderId.takeIf { it.isNotBlank() && phase.ticket.id == ticketId }
+            is TicketPhase.Submitting -> phase.clientOrderId.takeIf { phase.ticket.id == ticketId }
+            else -> null
+        }?.takeIf { it.isNotBlank() }
+        val id = fromPhase ?: idFactory()
+        clientOrderIds[ticketId] = id
+        return id
+    }
+
+    private fun submittedState(cur: TicketUiState, ticket: TradeTicket, ack: PlacedOrder): TicketUiState {
+        val working = cur.working + ack
+        return TicketUiState(
+            phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == ticket.id }),
+            proposals = cur.proposals.filterNot { it.id == ticket.id },
+            working = working,
+            lastError = ack.error,
+            placementCount = cur.placementCount + 1
+        )
+    }
+
+    private fun recordAttempt(
+        ticket: TradeTicket,
+        clientOrderId: String,
+        result: Result<PlacedOrder>
+    ) {
+        runCatching {
+            onAttempt?.invoke(
+                com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
+                    ticker = ticket.ticker,
+                    side = ticket.side,
+                    stakeUsd = ticket.stakeUsd,
+                    approved = true,
+                    result = result.fold(
+                        onSuccess = { ack -> ack.error ?: ack.orderId ?: "submitted" },
+                        onFailure = { err -> humanError(err) }
+                    ),
+                    createdAtMs = System.currentTimeMillis(),
+                    clientOrderId = clientOrderId,
+                    note = "Approve-gated — never unsupervised"
+                )
+            )
+        }
     }
 
     fun failSoft(message: String) {
@@ -397,6 +451,8 @@ class TicketSession(
         val keep = after.map { it.id }.toSet()
         before.map { it.id }.filter { it !in keep }.forEach { id ->
             voidedAtMs.remove(id)
+            clientOrderIds.remove(id)
+            attemptedIds.remove(id)
         }
     }
 
@@ -439,6 +495,13 @@ class TicketSession(
         fun isWindowClosedError(message: String?): Boolean {
             if (message.isNullOrBlank()) return false
             return isWindowClosedReason(message.trim())
+        }
+
+        fun isDuplicateClientOrder(message: String?): Boolean {
+            val lower = message?.lowercase().orEmpty()
+            if (lower.isBlank()) return false
+            return lower.contains("duplicate client_order_id") ||
+                (lower.contains("client_order_id") && (lower.contains("already") || lower.contains("duplicate")))
         }
 
         fun stalePageError(message: String): Boolean {

@@ -70,6 +70,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         keyIdDraft = s.apiKeyId,
                         bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd),
                         credentialMessage = when {
+                            !prefs.canSaveLiveSecrets() ->
+                                com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_UNENCRYPTED
                             prefs.needsReenterKey() ->
                                 "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
                             prefs.needsReenterDemoKey() ->
@@ -382,7 +384,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
             return
         }
-        prefs.saveCredentials(keyId, pem)
+        val saved = prefs.saveCredentials(keyId, pem)
+        if (saved != null) {
+            _state.update { it.copy(credentialMessage = saved) }
+            return
+        }
         _state.update {
             it.copy(
                 pemDraft = "",
@@ -421,7 +427,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
                         ?.use { it.readBytes() } ?: error("could not read backup")
                     val bundle = CredentialBackup.decryptAll(bytes, pass.toCharArray())
-                    prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    val saved = prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    if (saved != null) error(saved)
                     if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
                         prefs.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
                     }

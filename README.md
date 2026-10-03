@@ -10,7 +10,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 `KXETH15M`, `KXSOL15M`, and extra tickers are recognized so stored rows can be filtered out of scorecard / signal history / paper P&L. They are never subscribed, polled, scored, alerted, or paper-traded. The live list is `CryptoMarkets.DEFAULT_SERIES`.
 
-**WTI crude (`KXWTI15M`) and all non-crypto markets are excluded** from defaults, UI toggles, REST watchlists, WebSocket subscriptions, scoring, and alerts.
+**WTI crude (`KXWTI15M`) is deprecated** and, with every other non-crypto market, is excluded from the live app: no toggle, no REST watch, no WebSocket subscription, no scoring, and no alerts.
 
 - **UI:** Jetpack Compose + Material 3
 - **Network:** Retrofit REST poll + optional authenticated Kalshi WebSocket

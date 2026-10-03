@@ -33,7 +33,19 @@ data class CachedMarketsPayload(
     val fetchedAtEpochMs: Long = 0L
 )
 
-class MarketCache(private val context: Context) {
+interface MarketSnapshotCache {
+    val cachedFlow: Flow<CachedMarketsPayload?>
+    suspend fun read(): CachedMarketsPayload?
+    suspend fun write(
+        btc: List<MarketDto>,
+        eth: List<MarketDto>,
+        sol: List<MarketDto>,
+        extra: List<MarketDto> = emptyList(),
+        fetchedAtEpochMs: Long = System.currentTimeMillis()
+    )
+}
+
+class MarketCache(private val context: Context) : MarketSnapshotCache {
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -43,7 +55,7 @@ class MarketCache(private val context: Context) {
     private val keyPayload = stringPreferencesKey("cached_markets_json")
     private val keyFetchedAt = longPreferencesKey("fetched_at_epoch_ms")
 
-    val cachedFlow: Flow<CachedMarketsPayload?> = context.marketDataStore.data
+    override val cachedFlow: Flow<CachedMarketsPayload?> = context.marketDataStore.data
         .catch { emit(emptyPreferences()) }
         .map { prefs ->
             val raw = prefs[keyPayload] ?: return@map null
@@ -51,14 +63,14 @@ class MarketCache(private val context: Context) {
                 ?.cryptoOnly()
         }
 
-    suspend fun read(): CachedMarketsPayload? = cachedFlow.first()
+    override suspend fun read(): CachedMarketsPayload? = cachedFlow.first()
 
-    suspend fun write(
+    override suspend fun write(
         btc: List<MarketDto>,
         eth: List<MarketDto>,
         sol: List<MarketDto>,
-        extra: List<MarketDto> = emptyList(),
-        fetchedAtEpochMs: Long = System.currentTimeMillis()
+        extra: List<MarketDto>,
+        fetchedAtEpochMs: Long
     ) {
         val payload = CachedMarketsPayload(
             btc = btc.cryptoOnly(),

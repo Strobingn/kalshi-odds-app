@@ -29,8 +29,10 @@ private val Context.signalDataStore: DataStore<Preferences> by preferencesDataSt
 
 data class SignalSettings(
     val watchBtc: Boolean = true,
-    val watchEth: Boolean = true,
-    val watchSol: Boolean = true,
+    /** Retired. The live allowlist is Bitcoin-only; Settings does not show this toggle. */
+    val watchEth: Boolean = false,
+    /** Retired. The live allowlist is Bitcoin-only; Settings does not show this toggle. */
+    val watchSol: Boolean = false,
     val extraTickers: List<String> = emptyList(),
     val extraTickersText: String = "",
     val edgeThresholdPp: Double = SignalConstants.DEFAULT_EDGE_THRESHOLD_PP,
@@ -310,11 +312,14 @@ class SignalPreferences(
     suspend fun updateMetaLabel(value: Boolean) = edit { it[KEY_META] = value }
     suspend fun updatePathSim(value: Boolean) = edit { it[KEY_PATH_SIM] = value }
 
-    fun saveCredentials(keyId: String, pem: String) {
-        secrets.apiKeyId = keyId
-        secrets.privateKeyPem = PemNormalizer.normalize(pem)
-        secretRevision.value += 1
+    /** Null when the key was stored. A message means it was refused and not written. */
+    fun saveCredentials(keyId: String, pem: String): String? {
+        val error = secrets.saveLiveCredentials(keyId, pem)
+        if (error == null) secretRevision.value += 1
+        return error
     }
+
+    fun canSaveLiveSecrets(): Boolean = secrets.encryptionAvailable
 
     fun clearCredentials() {
         secrets.clear()
