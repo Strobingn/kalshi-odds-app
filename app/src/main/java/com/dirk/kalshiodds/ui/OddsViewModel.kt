@@ -633,11 +633,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
                 return@launch
             }
-            val now = System.currentTimeMillis()
             val snap = _state.value
-            val ctx = ticketContext(snap, now)
             ticketSession.revise(ticketId) { t ->
-                refreshSellAtConfirm(t, count, price, snap, ctx)
+                refreshSellAtConfirm(t, count, price, snap)
             }
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             if (ticket != null && !ticket.canApprove) {
@@ -1153,52 +1151,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
         count: Int,
         price: Double,
-        snap: OddsUiState,
-        ctx: TicketBuilder.Context
+        snap: OddsUiState
     ): com.dirk.kalshiodds.signal.trade.TradeTicket {
         if (!ticket.isSell) return ticket
-        if (ticket.paperOnly) {
-            return TicketBuilder.applySellQuote(ticket, count, KalshiPrice.usable(price) ?: ticket.limitPrice)
-        }
-        val market = snap.snapshot?.allMarkets.orEmpty()
-            .firstOrNull { it.ticker.equals(ticket.ticker, true) }
-            ?: sellMarketFallback(ticket, snap)
-        val fresh = market?.let { TicketBuilder.freshBestBid(it, ticket.side, ctx) }
-        if (fresh == null) {
-            return TicketBuilder.applySellQuote(ticket, count, bid = null)
-        }
-        // Live sell always uses the fresh book bid. Never a stale or higher limit.
-        return TicketBuilder.applySellQuote(ticket, count, fresh, snap.settings.feeRate)
-    }
-
-    private fun sellMarketFallback(
-        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
-        snap: OddsUiState
-    ): MarketUiModel? {
-        val pos = snap.positions.firstOrNull {
-            it.ticker.equals(ticket.ticker, true) && it.side.equals(ticket.side, true)
-        } ?: return null
-        return MarketUiModel(
-            ticker = ticket.ticker,
-            title = pos.title ?: ticket.title ?: ticket.ticker,
-            subtitle = null,
-            floorStrike = null,
-            yesBid = if (ticket.side == "YES") pos.bestBid else null,
-            yesAsk = null,
-            noBid = if (ticket.side == "NO") pos.bestBid else null,
-            noAsk = null,
-            lastPrice = pos.bestBid,
-            yesProbabilityPercent = null,
-            noProbabilityPercent = null,
-            volume = null,
-            volume24h = null,
-            openInterest = null,
-            liquidityDollars = null,
-            closeTimeLocal = null,
-            closeTimeEpochMs = pos.closeTimeEpochMs,
-            status = "active",
-            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticket.ticker).label
-        )
+        val bid = KalshiPrice.usable(price) ?: ticket.limitPrice
+        // Send the contracts and price the confirm sheet showed. Do not re-price after confirm.
+        return TicketBuilder.applySellQuote(ticket, count, bid, snap.settings.feeRate)
     }
 
     private fun resizeSell(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, count: Int, price: Double): com.dirk.kalshiodds.signal.trade.TradeTicket {

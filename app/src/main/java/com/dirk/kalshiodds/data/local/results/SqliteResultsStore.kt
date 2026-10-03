@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * a process kill. Writes are serialized by SQLite; callers should use
  * [AsyncResultsWriter] so scoring never blocks.
  */
-class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
+class SqliteResultsStore(context: Context) : ResultsDatabase {
     private val db = Helper(context.applicationContext)
 
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -73,6 +73,52 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     override fun recentTickets(limit: Int): List<TicketAttemptRow> =
         query(TABLE_TICKET, limit) { cursorToTicket(it) }
+
+    override fun save(order: PendingClientOrder) {
+        val values = ContentValues().apply {
+            put("order_key", order.key)
+            put("client_order_id", order.clientOrderId)
+            put("attempted", if (order.attempted) 1 else 0)
+            put("ticker", order.ticker)
+            put("side", order.side)
+            put("kind", order.kind)
+            put("updated_at_ms", order.updatedAtMs)
+        }
+        db.writableDatabase.insertWithOnConflict(
+            TABLE_PENDING,
+            null,
+            values,
+            SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun find(key: String): PendingClientOrder? {
+        db.readableDatabase.query(
+            TABLE_PENDING,
+            null,
+            "order_key = ?",
+            arrayOf(key),
+            null,
+            null,
+            null,
+            "1"
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return PendingClientOrder(
+                key = c.str("order_key"),
+                clientOrderId = c.str("client_order_id"),
+                attempted = c.long("attempted") != 0L,
+                ticker = c.strOrNull("ticker").orEmpty(),
+                side = c.strOrNull("side").orEmpty(),
+                kind = c.strOrNull("kind").orEmpty(),
+                updatedAtMs = c.long("updated_at_ms")
+            )
+        }
+    }
+
+    override fun clear(key: String) {
+        db.writableDatabase.delete(TABLE_PENDING, "order_key = ?", arrayOf(key))
+    }
 
     override fun recentOddsMids(limit: Int): List<OddsMidRow> =
         query(TABLE_ODDS, limit) { cursorToOdds(it) }
@@ -920,6 +966,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createHistoryTables(db)
             createChartTickTable(db)
             createPaperFillTable(db)
+            createPendingOrdersTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -937,6 +984,23 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         override fun onOpen(db: SQLiteDatabase) {
             super.onOpen(db)
             applyPaperFillColumns(db)
+            createPendingOrdersTable(db)
+        }
+
+        private fun createPendingOrdersTable(db: SQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_PENDING (
+                  order_key TEXT PRIMARY KEY,
+                  client_order_id TEXT NOT NULL,
+                  attempted INTEGER NOT NULL,
+                  ticker TEXT,
+                  side TEXT,
+                  kind TEXT,
+                  updated_at_ms INTEGER NOT NULL
+                )
+                """.trimIndent()
+            )
         }
 
         private fun createPaperFillTable(db: SQLiteDatabase) {
@@ -1068,6 +1132,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val TABLE_ALERT = "alerts_fired"
         const val TABLE_CARD = "scorecard_rows"
         const val TABLE_TICKET = "ticket_attempts"
+        const val TABLE_PENDING = "pending_client_orders"
         const val TABLE_ODDS = "odds_mids"
         const val TABLE_SETTLED = "settled_windows"
         const val TABLE_PATH = "price_path"

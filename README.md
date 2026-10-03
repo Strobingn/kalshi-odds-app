@@ -17,7 +17,16 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.22**
+Package: `com.dirk.kalshiodds` · version **0.3.23**
+
+## 0.3.23
+
+- A failed BTC fetch still shows the last saved odds with the Offline banner. An empty successful fetch does not wipe that cache, and a stored `watch_btc=false` cannot turn Bitcoin off.
+- A timed-out order found on Kalshi keeps that order's side, action, price, count, and ticker (YES and NO). The lookup walks up to five order pages.
+- The pending `client_order_id` is stored in SQLite and reused after a process kill, a stake edit, a card rebuild, or dismiss-and-rebuy. Every live Approve looks for that id before sending.
+- The REAL MONEY sheet shows the contracts, cost, fee, and profit for the limit you typed, and that is what gets sent.
+- A Keystore lockout deletes only the broken encrypted prefs and recreates the master key so a replacement live key can be saved. It is never written in plaintext.
+- Data shows **Last synced** in local time. A failed sync shows the HTTP status and a short reason (401 bad key, 404 table missing, RLS denied, offline). Rows written to the shared `diphunter_sync` table are prefixed `kashi:`; pull reads only those rows. The Kalshi key is never uploaded.
 
 ## 0.3.22
 

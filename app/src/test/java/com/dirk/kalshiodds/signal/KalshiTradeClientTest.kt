@@ -5,6 +5,8 @@ import com.dirk.kalshiodds.data.api.KalshiTradeClient
 import com.dirk.kalshiodds.data.dto.CancelOrderV2Response
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
+import com.dirk.kalshiodds.data.dto.OrdersListResponse
+import com.dirk.kalshiodds.data.dto.PortfolioOrderDto
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlinx.coroutines.runBlocking
@@ -161,6 +163,157 @@ class KalshiTradeClientTest {
     }
 
     @Test
+    fun confirmQuoteIsWhatCreateLimitSends() = runBlocking {
+        val api = RecordingTradeApi(
+            create = Response.success(
+                201,
+                CreateOrderV2Response(orderId = "ord-q", fillCount = "0.00", remainingCount = "22.00")
+            )
+        )
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+        val confirmed = com.dirk.kalshiodds.signal.trade.LimitPriceInput.apply(
+            sampleTicket().copy(side = "NO", bookSide = "ask", limitPrice = 0.25, yesLimitPrice = 0.75),
+            40,
+            com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE
+        )
+        val placed = client.createLimit(confirmed, "cid-quote")
+        val body = api.creates.single()
+        assertEquals(confirmed.contracts, body.count.toDouble().toInt())
+        assertEquals(
+            com.dirk.kalshiodds.domain.KalshiPrice.toWireDollars(confirmed.yesLimitPrice),
+            body.price
+        )
+        assertEquals(confirmed.contracts, placed.ticket.contracts)
+        assertEquals(confirmed.limitPrice, placed.ticket.limitPrice, 1e-9)
+        assertEquals(confirmed.stakeUsd, placed.ticket.stakeUsd, 1e-6)
+    }
+
+    @Test
+    fun adoptYesOrderUsesExchangeSidePriceCountAndTicker() = runBlocking {
+        val api = pageApi(
+            OrdersListResponse(
+                orders = listOf(
+                    order(
+                        clientOrderId = "cid-yes",
+                        ticker = "KXBTC15M-YES",
+                        side = "yes",
+                        action = "buy",
+                        yes = "0.2400",
+                        no = "0.7600",
+                        count = "12.00"
+                    )
+                )
+            )
+        )
+        val found = client(api).findByClientOrderId("cid-yes", "KXBTC15M-YES")!!
+        assertEquals("YES", found.ticket.side)
+        assertEquals("bid", found.ticket.bookSide)
+        assertEquals("KXBTC15M-YES", found.ticket.ticker)
+        assertEquals(12, found.ticket.contracts)
+        assertEquals(0.24, found.ticket.limitPrice, 1e-9)
+        assertEquals(12 * 0.24, found.ticket.stakeUsd, 1e-6)
+        assertFalse(found.ticket.isSell)
+        assertEquals("KXBTC15M-YES", api.queriedTickers.single())
+    }
+
+    @Test
+    fun adoptNoOrderUsesExchangeSidePriceCountAndTicker() = runBlocking {
+        val api = pageApi(
+            OrdersListResponse(
+                orders = listOf(
+                    order(
+                        clientOrderId = "cid-no",
+                        ticker = "KXBTC15M-NO",
+                        side = "no",
+                        action = "buy",
+                        yes = "0.2400",
+                        no = "0.7600",
+                        count = "10.00"
+                    )
+                )
+            )
+        )
+        val found = client(api).findByClientOrderId("cid-no")!!
+        assertEquals("NO", found.ticket.side)
+        assertEquals("ask", found.ticket.bookSide)
+        assertEquals("KXBTC15M-NO", found.ticket.ticker)
+        assertEquals(10, found.ticket.contracts)
+        assertEquals(0.76, found.ticket.limitPrice, 1e-9)
+        assertEquals(7.60, found.ticket.stakeUsd, 1e-6)
+        assertFalse(found.ticket.isSell)
+    }
+
+    @Test
+    fun adoptNoSellUsesSellKindAndBidBook() = runBlocking {
+        val api = pageApi(
+            OrdersListResponse(
+                orders = listOf(
+                    order(
+                        clientOrderId = "cid-sell",
+                        ticker = "KXBTC15M-SELL",
+                        side = "no",
+                        action = "sell",
+                        yes = "0.4000",
+                        no = "0.6000",
+                        count = "4.00"
+                    )
+                )
+            )
+        )
+        val found = client(api).findByClientOrderId("cid-sell")!!
+        assertEquals("NO", found.ticket.side)
+        assertEquals("bid", found.ticket.bookSide)
+        assertTrue(found.ticket.isSell)
+        assertEquals(4, found.ticket.contracts)
+        assertEquals(0.60, found.ticket.limitPrice, 1e-9)
+    }
+
+    @Test
+    fun orderLookupWalksCursorAndStopsAfterFivePages() = runBlocking {
+        val api = object : RecordingTradeApi() {
+            var pages = 0
+            override suspend fun getOrders(limit: Int, cursor: String?, ticker: String?): Response<OrdersListResponse> {
+                pages += 1
+                val hit = if (pages == 6) {
+                    listOf(order(clientOrderId = "cid-late", ticker = "KXBTC15M-LATE", side = "no", action = "buy", yes = "0.2000", no = "0.8000", count = "3.00"))
+                } else {
+                    listOf(order(clientOrderId = "other-$pages", ticker = "KXBTC15M-X", side = "yes", action = "buy", yes = "0.2000", no = "0.8000", count = "1.00"))
+                }
+                return Response.success(OrdersListResponse(orders = hit, cursor = "c$pages"))
+            }
+        }
+        val found = client(api).findByClientOrderId("cid-late")
+        assertEquals(null, found)
+        assertEquals(com.dirk.kalshiodds.data.api.KalshiTradeClient.MAX_ORDER_LOOKUP_PAGES, api.pages)
+    }
+
+    @Test
+    fun orderOnSecondPageIsAdopted() = runBlocking {
+        val api = object : RecordingTradeApi() {
+            override suspend fun getOrders(limit: Int, cursor: String?, ticker: String?): Response<OrdersListResponse> {
+                return if (cursor == null) {
+                    Response.success(
+                        OrdersListResponse(
+                            orders = listOf(order(clientOrderId = "nope", ticker = "KXBTC15M-A", side = "yes", action = "buy", yes = "0.1000", no = "0.9000", count = "1.00")),
+                            cursor = "next"
+                        )
+                    )
+                } else {
+                    Response.success(
+                        OrdersListResponse(
+                            orders = listOf(order(clientOrderId = "cid-p2", ticker = "KXBTC15M-P2", side = "no", action = "buy", yes = "0.3000", no = "0.7000", count = "8.00"))
+                        )
+                    )
+                }
+            }
+        }
+        val found = client(api).findByClientOrderId("cid-p2")!!
+        assertEquals("NO", found.ticket.side)
+        assertEquals(8, found.ticket.contracts)
+        assertEquals("KXBTC15M-P2", found.ticket.ticker)
+    }
+
+    @Test
     fun missingKeysNeverPosts() = runBlocking {
         val api = RecordingTradeApi()
         val client = KalshiTradeClient(primary = api, credentials = { "" to "" })
@@ -189,15 +342,43 @@ class KalshiTradeClientTest {
         kind = TicketKind.HUNTER
     )
 
+    private fun client(api: RecordingTradeApi) =
+        KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+
+    private fun pageApi(page: OrdersListResponse) = RecordingTradeApi().also { it.ordersPage = page }
+
+    private fun order(
+        clientOrderId: String,
+        ticker: String,
+        side: String,
+        action: String,
+        yes: String,
+        no: String,
+        count: String
+    ) = PortfolioOrderDto(
+        orderId = "ord-$clientOrderId",
+        clientOrderId = clientOrderId,
+        ticker = ticker,
+        side = side,
+        action = action,
+        yesPriceDollars = yes,
+        noPriceDollars = no,
+        initialCountFp = count,
+        remainingCountFp = count,
+        fillCountFp = "0.00"
+    )
+
     private fun error(code: Int, body: String): Response<CreateOrderV2Response> =
         Response.error(code, body.toResponseBody("application/json".toMediaType()))
 
-    private class RecordingTradeApi(
+    private open class RecordingTradeApi(
         var create: Response<CreateOrderV2Response> = Response.success(
             CreateOrderV2Response(orderId = "x")
         )
     ) : KalshiTradeApi {
         val creates = mutableListOf<CreateOrderV2Request>()
+        val queriedTickers = mutableListOf<String?>()
+        var ordersPage: OrdersListResponse = OrdersListResponse()
 
         override suspend fun createOrderV2(body: CreateOrderV2Request): Response<CreateOrderV2Response> {
             creates += body
@@ -213,8 +394,10 @@ class KalshiTradeClientTest {
             cursor: String?
         ) = Response.success(com.dirk.kalshiodds.data.dto.PositionsResponse())
 
-        override suspend fun getOrders(limit: Int, cursor: String?) =
-            Response.success(com.dirk.kalshiodds.data.dto.OrdersListResponse())
+        open override suspend fun getOrders(limit: Int, cursor: String?, ticker: String?): Response<OrdersListResponse> {
+            queriedTickers += ticker
+            return Response.success(ordersPage)
+        }
 
         override suspend fun cancelOrderV2(
             orderId: String,

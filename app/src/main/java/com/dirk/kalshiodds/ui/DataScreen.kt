@@ -214,9 +214,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            state.syncLine?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentBlue)
-            }
+            CloudSyncStatusBlock(state.settings)
             OutlinedButton(
                 onClick = viewModel::syncNow,
                 enabled = state.settings.supabaseConfigured && state.settings.syncEnabled,

@@ -72,12 +72,19 @@ data class PortfolioOrderDto(
     @SerialName("order_id") val orderId: String? = null,
     @SerialName("client_order_id") val clientOrderId: String? = null,
     val ticker: String? = null,
+    /** Outcome side: `yes` or `no`. */
+    val side: String? = null,
+    /** `buy` or `sell`. */
+    val action: String? = null,
     val status: String? = null,
     @SerialName("fill_count") val fillCount: String? = null,
     @SerialName("fill_count_fp") val fillCountFp: String? = null,
     @SerialName("remaining_count") val remainingCount: String? = null,
     @SerialName("remaining_count_fp") val remainingCountFp: String? = null,
-    @SerialName("yes_price_dollars") val yesPriceDollars: String? = null
+    @SerialName("initial_count_fp") val initialCountFp: String? = null,
+    @SerialName("count_fp") val countFp: String? = null,
+    @SerialName("yes_price_dollars") val yesPriceDollars: String? = null,
+    @SerialName("no_price_dollars") val noPriceDollars: String? = null
 )
 
 @Serializable

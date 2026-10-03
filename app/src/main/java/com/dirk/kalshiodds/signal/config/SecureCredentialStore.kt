@@ -71,6 +71,8 @@ class SecureCredentialStore(context: Context) {
     companion object {
         private const val TAG = "DipHunterSecure"
         private const val PREFS_NAME = "kalshi_signal_secrets"
+        /** Same alias androidx.security.crypto.MasterKeys uses. That field is package-private. */
+        private const val MASTER_KEY_ALIAS = "_androidx_security_master_key_"
         private const val FALLBACK_NAME = "kalshi_signal_secrets_fallback"
         private const val LEGACY_PLAIN = "kalshi_signal_secrets_legacy"
 
@@ -90,18 +92,37 @@ class SecureCredentialStore(context: Context) {
         }
 
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
-            return try {
-                val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
-                EncryptedSharedPreferences.create(
-                    PREFS_NAME,
-                    masterKey,
-                    context,
-                    EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-                    EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-                )
-            } catch (e: Exception) {
-                Log.w(TAG, "EncryptedSharedPreferences unavailable (${e.javaClass.simpleName})")
-                null
+            val opener = EncryptedStoreOpen(
+                create = { createEncrypted(context) },
+                resetBroken = { resetBrokenEncryptedPrefs(context) }
+            )
+            val prefs = opener.open()
+            if (prefs == null) {
+                Log.w(TAG, "EncryptedSharedPreferences unavailable — refusing plaintext fallback")
+            }
+            return prefs
+        }
+
+        private fun createEncrypted(context: Context): SharedPreferences {
+            val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
+            return EncryptedSharedPreferences.create(
+                PREFS_NAME,
+                masterKey,
+                context,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        }
+
+        /** Delete only the broken encrypted file and its master key. Not plaintext copies. */
+        private fun resetBrokenEncryptedPrefs(context: Context) {
+            Log.w(TAG, "Keystore lockout — recreating encrypted prefs")
+            runCatching { context.deleteSharedPreferences(PREFS_NAME) }
+            runCatching {
+                val ks = java.security.KeyStore.getInstance("AndroidKeyStore")
+                ks.load(null)
+                val alias = MASTER_KEY_ALIAS
+                if (ks.containsAlias(alias)) ks.deleteEntry(alias)
             }
         }
     }

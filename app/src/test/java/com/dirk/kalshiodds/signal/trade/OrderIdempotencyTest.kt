@@ -29,7 +29,7 @@ class OrderIdempotencyTest {
                 if (calls == 1) Result.failure(SocketTimeoutException("timeout"))
                 else Result.success(placed(id))
             },
-            findExistingOrder = { null },
+            findExistingOrder = { _, _ -> null },
             idFactory = { "should-not-replace-minted-id" }
         )
         val ticket = manual()
@@ -49,7 +49,7 @@ class OrderIdempotencyTest {
                 if (sent.size == 1) Result.failure(SocketTimeoutException("timeout"))
                 else Result.success(placed(id, ticket))
             },
-            findExistingOrder = { id ->
+            findExistingOrder = { id, _ ->
                 if (sent.isNotEmpty() && id == "minted-at-create") placed(id) else null
             },
             idFactory = { "other" }

@@ -10,6 +10,7 @@ import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
 import com.dirk.kalshiodds.data.prefs.DataHubSettings
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.paper.PaperFill
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -47,15 +48,18 @@ class SupabaseSync(
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
         if (!settings.supabaseConfigured) return emptyList()
-        val raw = restGet(settings, TABLE) ?: return emptyList()
-        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        val raw = restGet(settings, TABLE)
+        val arr = runCatching { JSONArray(raw) }.getOrElse {
+            throw SyncHttpException("Sync failed — response was not JSON")
+        }
         val out = ArrayList<SyncMerge.Record>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             val key = o.optString("key")
             val kind = o.optString("kind")
             val payload = o.opt("payload")?.toString() ?: continue
-            if (key.isBlank() || SyncMerge.isForbiddenPayload(payload)) continue
+            if (!acceptsPulledRow(key, kind)) continue
+            if (SyncMerge.isForbiddenPayload(payload)) continue
             out.add(
                 SyncMerge.Record(
                     key = key,
@@ -70,7 +74,9 @@ class SupabaseSync(
 
     fun push(settings: DataHubSettings, rows: List<SyncMerge.Record>): Int {
         if (!settings.supabaseConfigured || rows.isEmpty()) return 0
-        val safe = rows.filter { !SyncMerge.isForbiddenPayload(it.payload) }
+        val safe = rows
+            .filter { !SyncMerge.isForbiddenPayload(it.payload) }
+            .map { it.copy(key = namespaceKey(it.key)) }
         if (safe.isEmpty()) return 0
         val arr = JSONArray()
         for (r in safe) {
@@ -81,8 +87,8 @@ class SupabaseSync(
             o.put("payload", JSONObject(r.payload))
             arr.put(o)
         }
-        val ok = restUpsert(settings, arr.toString())
-        return if (ok) safe.size else 0
+        restUpsert(settings, arr.toString())
+        return safe.size
     }
 
     fun pack(bundle: LocalBundle): List<SyncMerge.Record> {
@@ -278,15 +284,20 @@ class SupabaseSync(
                 pushed = pushed
             )
         } catch (t: Throwable) {
-            Status(ok = false, message = t.message ?: "Sync failed")
+            Status(ok = false, message = t.message?.takeIf { it.isNotBlank() } ?: "Sync failed")
         }
     }
 
     private fun rec(key: String, kind: String, at: Long, payload: JSONObject) =
-        SyncMerge.Record(key, kind, at, payload.toString())
+        SyncMerge.Record(namespaceKey(key), kind, at, payload.toString())
 
-    private fun restGet(settings: DataHubSettings, table: String): String? {
-        val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$table?select=*&limit=2000"
+    private fun restGet(settings: DataHubSettings, table: String): String {
+        val url = settings.supabaseUrl.trimEnd('/').toHttpUrl().newBuilder()
+            .addPathSegments("rest/v1/$table")
+            .addEncodedQueryParameter("select", "*")
+            .addEncodedQueryParameter("limit", "2000")
+            .addEncodedQueryParameter("key", "like.kashi:*")
+            .build()
         val req = Request.Builder()
             .url(url)
             .header("apikey", settings.supabaseAnonKey)
@@ -295,17 +306,10 @@ class SupabaseSync(
             .header("User-Agent", NetworkModule.USER_AGENT)
             .get()
             .build()
-        return try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                resp.body?.string()
-            }
-        } catch (_: Exception) {
-            null
-        }
+        return execute(req)
     }
 
-    private fun restUpsert(settings: DataHubSettings, body: String): Boolean {
+    private fun restUpsert(settings: DataHubSettings, body: String) {
         val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$TABLE"
         val req = Request.Builder()
             .url(url)
@@ -313,21 +317,61 @@ class SupabaseSync(
             .header("Authorization", "Bearer ${settings.supabaseAnonKey}")
             .header("Accept", "application/json")
             .header("Prefer", "resolution=merge-duplicates,return=minimal")
+            .header("Content-Type", "application/json")
             .header("User-Agent", NetworkModule.USER_AGENT)
             .post(body.toRequestBody(JSON))
             .build()
-        return try {
-            http.newCall(req).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
-            false
+        execute(req)
+    }
+
+    private fun execute(req: Request): String {
+        val resp = try {
+            http.newCall(req).execute()
+        } catch (e: Exception) {
+            throw SyncHttpException(describeFailure(0, null, e))
+        }
+        resp.use {
+            val text = it.body?.string().orEmpty()
+            if (!it.isSuccessful) throw SyncHttpException(describeFailure(it.code, text, null))
+            return text
         }
     }
 
     companion object {
         const val TABLE = "diphunter_sync"
+        const val KEY_PREFIX = "kashi:"
+        /** PostgREST `like` filter. `*` is the wildcard. */
+        const val PULL_FILTER = "key=like.kashi:*"
         private val JSON = "application/json; charset=utf-8".toMediaType()
         val FORBIDDEN_SETTING_KEYS = setOf(
             "api_key_id", "apikeyid", "private_key_pem", "pem", "github_token", "githubtoken"
         )
+
+        fun namespaceKey(key: String): String =
+            if (key.startsWith(KEY_PREFIX)) key else KEY_PREFIX + key
+
+        /** Only this app's rows. Other DipHunter builds share the table. */
+        fun acceptsPulledRow(key: String, kind: String): Boolean {
+            if (!key.startsWith(KEY_PREFIX)) return false
+            if (kind.equals("healthcheck", ignoreCase = true)) return false
+            if (key.startsWith("grokbot:", ignoreCase = true)) return false
+            return true
+        }
+
+        fun describeFailure(code: Int, body: String?, transport: Throwable?): String {
+            if (transport != null || code <= 0) return "offline"
+            val lower = body.orEmpty().lowercase()
+            val reason = when {
+                code == 401 || lower.contains("invalid api key") || lower.contains("jwt") -> "bad key"
+                code == 404 || lower.contains("does not exist") || lower.contains("pgrst205") ||
+                    lower.contains("could not find the table") -> "table missing"
+                code == 403 || lower.contains("row-level security") || lower.contains("rls") ||
+                    lower.contains("permission denied") -> "RLS denied"
+                else -> body?.lineSequence()?.firstOrNull { it.isNotBlank() }?.take(80) ?: "request failed"
+            }
+            return "$code $reason"
+        }
     }
 }
+
+class SyncHttpException(message: String) : Exception(message)

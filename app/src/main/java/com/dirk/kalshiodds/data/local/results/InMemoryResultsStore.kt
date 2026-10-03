@@ -13,7 +13,7 @@ class InMemoryResultsStore(
     private val maxTickets: Int = 200,
     private val maxOdds: Int = 1_200,
     private val maxChartTicks: Int = 2_880
-) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
+) : ResultsDatabase {
     private val nextId = AtomicLong(1L)
     private val snapshots = ArrayDeque<ScoredSnapshotRow>()
     private val alerts = ArrayDeque<AlertRow>()
@@ -29,6 +29,7 @@ class InMemoryResultsStore(
     private val settingsChanges = ArrayDeque<com.dirk.kalshiodds.data.local.history.SettingsChange>()
     private val sessions = LinkedHashMap<String, com.dirk.kalshiodds.data.local.history.HistorySession>()
     private val chartTickRows = ArrayDeque<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
+    private val pendingOrders = LinkedHashMap<String, PendingClientOrder>()
 
     @Synchronized
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -281,4 +282,17 @@ class InMemoryResultsStore(
     @Synchronized
     override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> =
         sessions.values.sortedByDescending { it.startedAtMs }.take(limit.coerceAtLeast(0))
+
+    @Synchronized
+    override fun save(order: PendingClientOrder) {
+        pendingOrders[order.key] = order
+    }
+
+    @Synchronized
+    override fun find(key: String): PendingClientOrder? = pendingOrders[key]
+
+    @Synchronized
+    override fun clear(key: String) {
+        pendingOrders.remove(key)
+    }
 }

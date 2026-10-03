@@ -45,11 +45,11 @@ class AppContainer(context: Context) {
     val opportunities = com.dirk.kalshiodds.signal.notify.OpportunityNotifier(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
-    private val resultsImpl = runCatching { SqliteResultsStore(app) as ResultsStore }
-        .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
+    private val resultsImpl: com.dirk.kalshiodds.data.local.results.ResultsDatabase =
+        runCatching { SqliteResultsStore(app) }
+            .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
     val resultsStore: ResultsStore = resultsImpl
-    val archive: com.dirk.kalshiodds.data.local.archive.DataArchive =
-        resultsImpl as com.dirk.kalshiodds.data.local.archive.DataArchive
+    val archive: com.dirk.kalshiodds.data.local.archive.DataArchive = resultsImpl
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
@@ -135,9 +135,10 @@ class AppContainer(context: Context) {
             runCatching { tradeClient.cancel(order) }
         },
         onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) },
-        findExistingOrder = { clientOrderId ->
-            runCatching { tradeClient.findByClientOrderId(clientOrderId) }.getOrNull()
-        }
+        findExistingOrder = { clientOrderId, ticker ->
+            runCatching { tradeClient.findByClientOrderId(clientOrderId, ticker) }.getOrNull()
+        },
+        pendingOrderIds = resultsImpl
     )
     val clock: Clock = Clock.System
     val repository = MarketRepository(

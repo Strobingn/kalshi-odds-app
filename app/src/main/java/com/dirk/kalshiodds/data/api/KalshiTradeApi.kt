@@ -41,7 +41,8 @@ interface KalshiTradeApi {
     @GET("portfolio/orders")
     suspend fun getOrders(
         @Query("limit") limit: Int = 50,
-        @Query("cursor") cursor: String? = null
+        @Query("cursor") cursor: String? = null,
+        @Query("ticker") ticker: String? = null
     ): Response<com.dirk.kalshiodds.data.dto.OrdersListResponse>
 
     @POST("portfolio/events/orders")

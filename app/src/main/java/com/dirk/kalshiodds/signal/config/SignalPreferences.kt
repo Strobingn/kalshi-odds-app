@@ -387,7 +387,7 @@ class SignalPreferences(
     private fun Preferences.toSettings(): SignalSettings {
         val extraText = this[KEY_EXTRA] ?: def.extraTickers.joinToString(", ")
         return SignalSettings(
-            watchBtc = this[KEY_WATCH_BTC] ?: def.watchBtc,
+            watchBtc = withBitcoinForcedOn(this[KEY_WATCH_BTC] ?: def.watchBtc),
             watchEth = this[KEY_WATCH_ETH] ?: def.watchEth,
             watchSol = this[KEY_WATCH_SOL] ?: def.watchSol,
             extraTickers = CryptoMarkets.filterCrypto(parseTickerList(extraText)),
@@ -466,6 +466,9 @@ class SignalPreferences(
 
     companion object {
         private val KEY_WATCH_BTC = booleanPreferencesKey("watch_btc")
+
+        /** Old installs may have watch_btc=false. Bitcoin stays on the home list. */
+        fun withBitcoinForcedOn(stored: Boolean): Boolean = true
         private val KEY_WATCH_ETH = booleanPreferencesKey("watch_eth")
         private val KEY_WATCH_SOL = booleanPreferencesKey("watch_sol")
         private val KEY_EXTRA = stringPreferencesKey("extra_tickers")

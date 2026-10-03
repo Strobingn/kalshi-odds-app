@@ -246,6 +246,7 @@ fun HomeScreen(
                         tickets = state.tickets,
                         credentialsConfigured = hasKey,
                         paperTradingEnabled = state.settings.paperTradingEnabled,
+                        feeRate = state.settings.feeRate,
                         homeMode = true,
                         listVisible = false,
                         onReview = onReviewTicket,
