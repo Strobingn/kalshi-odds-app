@@ -56,6 +56,8 @@ import com.dirk.kalshiodds.ui.theme.checklistValueColor
 import java.util.Locale
 import kotlin.math.abs
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
 
 @Composable
 fun NextWindowLoadingCard(
@@ -63,15 +65,14 @@ fun NextWindowLoadingCard(
     modifier: Modifier = Modifier
 ) {
     val colors = DipTheme.colors
-    val scheme = MaterialTheme.colorScheme
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(1.dp, scheme.outline, RoundedCornerShape(16.dp)),
-        shape = RoundedCornerShape(16.dp),
+            .border(1.dp, colors.border, FieldShapes.card),
+        shape = FieldShapes.card,
         colors = CardDefaults.cardColors(
-            containerColor = scheme.surface,
-            contentColor = scheme.onSurface
+            containerColor = colors.surface,
+            contentColor = colors.textPrimary
         )
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -125,21 +126,19 @@ fun MarketCard(
     detailsInitiallyOpen: Boolean = true
 ) {
     val colors = DipTheme.colors
-    val scheme = MaterialTheme.colorScheme
-    val cardBg = scheme.surface
+    val cardBg = colors.surface
     val labelColor = checklistLabelColor(cardBg)
     val valueColor = checklistValueColor(cardBg)
     val clock = nowMs ?: System.currentTimeMillis()
     val call = decision ?: BetCall.decide(market, settings, clock)
     val headlineColor = SideColor.of(call.headline, colors)
-    val alertBorder = if (call.isActionable) headlineColor else scheme.outline
     val quotes = MarketQuoteView.of(market)
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .border(if (call.isActionable) 2.dp else 1.dp, alertBorder, RoundedCornerShape(16.dp))
+            .border(1.dp, if (call.isActionable) headlineColor else colors.border, FieldShapes.card)
             .then(if (onOpenChart != null) Modifier.clickable(onClick = onOpenChart) else Modifier),
-        shape = RoundedCornerShape(16.dp),
+        shape = FieldShapes.card,
         colors = CardDefaults.cardColors(
             containerColor = cardBg,
             contentColor = valueColor
@@ -246,6 +245,7 @@ fun MarketCard(
                 val buy = if (call.headline == BetCall.Headline.BET_DOWN) onBuyNo else onBuyYes
                 if (buy != null) {
                     Button(
+                        shape = FieldShapes.button,
                         onClick = buy,
                         colors = ButtonDefaults.buttonColors(
                             containerColor = headlineColor,
@@ -272,8 +272,9 @@ fun MarketCard(
                 val anyway = if (anywaySide == "NO") onBuyNo else onBuyYes
                 if (anyway != null) {
                     OutlinedButton(
+                        shape = FieldShapes.button,
                         onClick = anyway,
-                        modifier = Modifier.fillMaxWidth().height(40.dp)
+                        modifier = Modifier.fillMaxWidth().height(FieldMetrics.minTouch)
                     ) { Text(HomeCopy.BUY_ANYWAY) }
                 }
             }
@@ -292,6 +293,7 @@ fun MarketCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Button(
+                    shape = FieldShapes.button,
                     onClick = { onPaperUp?.invoke() },
                     enabled = onPaperUp != null && paperUpOk,
                     colors = ButtonDefaults.buttonColors(
@@ -312,6 +314,7 @@ fun MarketCard(
                     )
                 }
                 Button(
+                    shape = FieldShapes.button,
                     onClick = { onPaperDown?.invoke() },
                     enabled = onPaperDown != null && paperDownOk,
                     colors = ButtonDefaults.buttonColors(
@@ -347,8 +350,9 @@ fun MarketCard(
             }
             if (onSell != null) {
                 OutlinedButton(
+                    shape = FieldShapes.button,
                     onClick = onSell,
-                    modifier = Modifier.fillMaxWidth().height(40.dp)
+                    modifier = Modifier.fillMaxWidth().height(FieldMetrics.minTouch)
                 ) { Text("Sell") }
             }
 
@@ -689,7 +693,7 @@ private fun OddsColumn(
     endAligned: Boolean = false,
     big: Boolean = true
 ) {
-    val bg = MaterialTheme.colorScheme.surface
+    val bg = DipTheme.colors.surface
     val labelColor = checklistLabelColor(bg)
     val valueColor = Contrast.readable(accent, bg, minRatio = Contrast.AA_LARGE)
     Column(
@@ -819,7 +823,7 @@ private fun ChecklistBlock(market: MarketUiModel) {
     val items = PreTradeChecklist.items(market)
     val clipboard = LocalClipboardManager.current
     var copied by remember(market.ticker) { mutableStateOf(false) }
-    val bg = MaterialTheme.colorScheme.surface
+    val bg = DipTheme.colors.surface
     val labelColor = checklistLabelColor(bg)
     val valueColor = checklistValueColor(bg)
     Spacer(Modifier.height(4.dp))
@@ -844,6 +848,7 @@ private fun ChecklistBlock(market: MarketUiModel) {
         }
     }
     OutlinedButton(
+        shape = FieldShapes.button,
         onClick = {
             clipboard.setText(AnnotatedString(PreTradeChecklist.copyText(market)))
             copied = true
@@ -862,7 +867,7 @@ private fun ChecklistBlock(market: MarketUiModel) {
 
 @Composable
 private fun Metric(label: String, value: String) {
-    val bg = MaterialTheme.colorScheme.surface
+    val bg = DipTheme.colors.surface
     val labelColor = checklistLabelColor(bg)
     val valueColor = checklistValueColor(bg)
     Column {

@@ -98,6 +98,32 @@ class PredictionLogStore(private val context: Context) {
 
     suspend fun readAll(): List<PredictionLogEntry> = entriesFlow.first()
 
+    suspend fun exportJson(): String = json.encodeToString(readAll())
+
+    suspend fun mergeJson(raw: String) {
+        if (raw.isBlank() || raw == "[]") return
+        val incoming = decode(raw)
+        if (incoming.isEmpty()) return
+        context.predictionLogStore.edit { prefs ->
+            val merged = mergeEntries(decode(prefs[key]), incoming)
+            prefs[key] = json.encodeToString(merged)
+        }
+    }
+
+    internal fun mergeEntries(
+        existing: List<PredictionLogEntry>,
+        incoming: List<PredictionLogEntry>
+    ): List<PredictionLogEntry> {
+        val list = existing.toMutableList()
+        for (entry in incoming) {
+            val dup = list.any { it.ticker == entry.ticker && it.timestampMs == entry.timestampMs }
+            if (!dup) list.add(entry)
+        }
+        list.sortBy { it.timestampMs }
+        while (list.size > maxEntries) list.removeAt(0)
+        return list
+    }
+
     suspend fun upsertOpenPrediction(
         ticker: String,
         series: String,

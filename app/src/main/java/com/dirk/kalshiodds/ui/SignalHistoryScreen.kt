@@ -35,7 +35,13 @@ fun SignalHistoryScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text(HomeCopy.SIGNAL_HISTORY) },
+                title = {
+                    Text(
+                        HomeCopy.SIGNAL_HISTORY,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")

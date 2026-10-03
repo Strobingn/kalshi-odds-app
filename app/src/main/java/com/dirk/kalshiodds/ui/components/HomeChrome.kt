@@ -38,6 +38,8 @@ import com.dirk.kalshiodds.ui.HomeCopy
 import com.dirk.kalshiodds.ui.HomeScorecardSummary
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.fieldCard
 
 @Composable
 fun TradeModeChip(label: String, modifier: Modifier = Modifier) {
@@ -49,7 +51,7 @@ fun TradeModeChip(label: String, modifier: Modifier = Modifier) {
         color = accent,
         fontWeight = FontWeight.Bold,
         modifier = modifier
-            .background(accent.copy(alpha = 0.14f), RoundedCornerShape(999.dp))
+            .background(accent.copy(alpha = 0.14f), FieldShapes.chip)
             .padding(horizontal = 10.dp, vertical = 4.dp)
     )
 }
@@ -69,7 +71,7 @@ fun ThisWindowCard(
     Column(
         modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {

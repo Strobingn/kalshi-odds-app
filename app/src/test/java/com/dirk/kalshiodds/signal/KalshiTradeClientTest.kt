@@ -5,6 +5,8 @@ import com.dirk.kalshiodds.data.api.KalshiTradeClient
 import com.dirk.kalshiodds.data.dto.CancelOrderV2Response
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
+import com.dirk.kalshiodds.data.dto.OrdersListResponse
+import com.dirk.kalshiodds.data.dto.PortfolioOrderDto
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlinx.coroutines.runBlocking
@@ -161,6 +163,68 @@ class KalshiTradeClientTest {
     }
 
     @Test
+    fun adoptUsesKalshiSidePriceAndCountFromALaterPage() = runBlocking {
+        val filler = (1..200).map {
+            PortfolioOrderDto(
+                orderId = "other-$it",
+                clientOrderId = "other-$it",
+                bookSide = "bid",
+                yesPriceDollars = "0.1000",
+                initialCountFp = "1.00"
+            )
+        }
+        val match = PortfolioOrderDto(
+            orderId = "ord-real",
+            clientOrderId = "cid-real",
+            ticker = "KXBTC15M-26SEP241445-45",
+            bookSide = "bid",
+            outcomeSide = "yes",
+            yesPriceDollars = "0.4000",
+            noPriceDollars = "0.6000",
+            initialCountFp = "12.00",
+            fillCountFp = "0.00",
+            remainingCountFp = "12.00"
+        )
+        val api = PagingTradeApi(
+            listOf(
+                OrdersListResponse(orders = filler, cursor = "page-2"),
+                OrdersListResponse(orders = listOf(match), cursor = "")
+            )
+        )
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+        val edited = sampleTicket().copy(limitPrice = 0.20, yesLimitPrice = 0.20, contracts = 24, stakeUsd = 4.8)
+        val placed = client.findByClientOrderId(edited, "cid-real")
+        assertEquals("ord-real", placed?.orderId)
+        assertEquals(0.40, placed!!.ticket.limitPrice, 1e-9)
+        assertEquals(12, placed.ticket.contracts)
+        assertEquals("YES", placed.ticket.side)
+        assertEquals("bid", placed.ticket.bookSide)
+        assertTrue(api.pagesFetched >= 2)
+        assertTrue(placed.ticket.sizingNote.contains("Adopted"))
+    }
+
+    @Test
+    fun adoptNoSideUsesTheNoPriceNotTheEditedYesTicket() = runBlocking {
+        val match = PortfolioOrderDto(
+            orderId = "ord-no",
+            clientOrderId = "cid-no",
+            bookSide = "ask",
+            outcomeSide = "no",
+            yesPriceDollars = "0.8000",
+            noPriceDollars = "0.2000",
+            initialCountFp = "20.00"
+        )
+        val api = PagingTradeApi(listOf(OrdersListResponse(orders = listOf(match), cursor = "")))
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+        val edited = sampleTicket().copy(side = "YES", limitPrice = 0.40, contracts = 10)
+        val placed = client.findByClientOrderId(edited, "cid-no")
+        assertEquals("NO", placed!!.ticket.side)
+        assertEquals("ask", placed.ticket.bookSide)
+        assertEquals(0.20, placed.ticket.limitPrice, 1e-9)
+        assertEquals(20, placed.ticket.contracts)
+    }
+
+    @Test
     fun missingKeysNeverPosts() = runBlocking {
         val api = RecordingTradeApi()
         val client = KalshiTradeClient(primary = api, credentials = { "" to "" })
@@ -192,6 +256,26 @@ class KalshiTradeClientTest {
     private fun error(code: Int, body: String): Response<CreateOrderV2Response> =
         Response.error(code, body.toResponseBody("application/json".toMediaType()))
 
+    private class PagingTradeApi(
+        private val pages: List<OrdersListResponse>
+    ) : KalshiTradeApi {
+        var pagesFetched: Int = 0
+        override suspend fun listOrders(ticker: String?, status: String?, limit: Int, cursor: String?): Response<OrdersListResponse> {
+            if (status != null) return Response.success(OrdersListResponse())
+            val page = pages.getOrNull(pagesFetched) ?: OrdersListResponse()
+            pagesFetched += 1
+            return Response.success(page)
+        }
+        override suspend fun createOrderV2(body: CreateOrderV2Request) =
+            Response.success(CreateOrderV2Response(orderId = "x"))
+        override suspend fun getBalance() =
+            Response.success(com.dirk.kalshiodds.data.dto.GetBalanceResponse(balance = 1_000, balanceDollars = "10.00"))
+        override suspend fun getPositions(countFilter: String, limit: Int, cursor: String?) =
+            Response.success(com.dirk.kalshiodds.data.dto.PositionsResponse())
+        override suspend fun cancelOrderV2(orderId: String, marketTicker: String?, exchangeIndex: Int) =
+            Response.success(CancelOrderV2Response(orderId = orderId))
+    }
+
     private class RecordingTradeApi(
         var create: Response<CreateOrderV2Response> = Response.success(
             CreateOrderV2Response(orderId = "x")
@@ -206,6 +290,9 @@ class KalshiTradeClientTest {
 
         override suspend fun getBalance() =
             Response.success(com.dirk.kalshiodds.data.dto.GetBalanceResponse(balance = 12_500, balanceDollars = "125.00"))
+
+        override suspend fun listOrders(ticker: String?, status: String?, limit: Int, cursor: String?) =
+            Response.success(com.dirk.kalshiodds.data.dto.OrdersListResponse())
 
         override suspend fun getPositions(
             countFilter: String,
