@@ -1,0 +1,52 @@
+name: News-window study (Claude)
+
+# tools/research/event_study.py on the settled-market cache (90 days so there
+# are enough 8:30 / 9:30 / 10:00 ET windows). Report printed to the log.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/event_study.py"
+      - ".github/workflows/event-study.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Lookback days of settled markets
+        required: false
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: event-study-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: tools/backtest/cache
+          key: backtest-cache-${{ github.run_id }}
+          restore-keys: backtest-cache-
+
+      - name: Refresh settled markets (incremental)
+        run: |
+          cd tools/backtest
+          python3 -c "from pathlib import Path; from fetch import run_fetch; print(run_fetch(Path('cache'), days=${{ github.event.inputs.days || '90' }}))"
+
+      - name: Study
+        run: |
+          echo "===== NEWS WINDOW STUDY ====="
+          python3 tools/research/event_study.py --cache tools/backtest/cache
+          echo "===== END NEWS WINDOW STUDY ====="
