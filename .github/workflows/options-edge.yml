@@ -2,8 +2,8 @@ name: Options edge (Claude)
 
 # Kalshi daily BTC/ETH "above K" markets vs Deribit options-implied odds
 # (tools/research/options_edge.py). Every 10 min logs sides whose ask is
-# ≥ 3¢ under the options fair after the fee, keeps the log in the rolling
-# `claude-recordings` release, then scores settled flags. Re-dispatches itself.
+# ≥ 3¢ under the options fair after the fee, keeps the log in the Actions
+# cache (key claude-options-log-*), then scores settled flags. Re-dispatches itself.
 
 on:
   workflow_dispatch:
@@ -29,7 +29,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: claude-recordings
   GH_TOKEN: ${{ github.token }}
 
 jobs:
@@ -46,29 +45,36 @@ jobs:
         run: python3 tools/research/test_options_edge.py
 
       - name: Restore log
-        run: gh release download "$RELEASE_TAG" -p options_log.jsonl -D . 2>/dev/null || touch options_log.jsonl
+        uses: actions/cache/restore@v4
+        with:
+          path: optlog
+          key: claude-options-log-${{ github.run_id }}
+          restore-keys: claude-options-log-
+
+      - name: Prepare log
+        run: mkdir -p optlog && touch optlog/options_log.jsonl && wc -l optlog/options_log.jsonl
 
       - name: Score before watching
         run: |
           echo "===== OPTIONS EDGE SCORE ====="
-          python3 tools/research/options_edge.py --log options_log.jsonl --score || true
+          python3 tools/research/options_edge.py --log optlog/options_log.jsonl --score || true
           echo "===== END OPTIONS EDGE SCORE ====="
 
       - name: Watch
-        run: python3 tools/research/options_edge.py --log options_log.jsonl --minutes "${{ inputs.minutes || '330' }}" --every 600
+        run: python3 tools/research/options_edge.py --log optlog/options_log.jsonl --minutes "${{ inputs.minutes || '330' }}" --every 600
 
       - name: Save log
         if: always()
-        run: |
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" \
-            --prerelease --title "Cloud recordings (Claude)" --notes "Research data recorded on GitHub runners." || true
-          gh release upload "$RELEASE_TAG" options_log.jsonl --clobber
+        uses: actions/cache/save@v4
+        with:
+          path: optlog
+          key: claude-options-log-${{ github.run_id }}
 
       - name: Score
         if: always()
         run: |
           echo "===== OPTIONS EDGE SCORE ====="
-          python3 tools/research/options_edge.py --log options_log.jsonl --score || true
+          python3 tools/research/options_edge.py --log optlog/options_log.jsonl --score || true
           echo "===== END OPTIONS EDGE SCORE ====="
 
       - name: Start the next run

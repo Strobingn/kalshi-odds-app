@@ -2,7 +2,7 @@ name: Cloud recorder (Claude)
 
 # Records Kalshi 15m crypto books/trades/settlements + Coinbase spot at ~1 s
 # (tools/research/cloud_recorder.py, same format as the phone's recorder),
-# appends to the rolling `claude-recordings` release, then reruns the lag and
+# keeps them in the Actions cache (key claude-recordings-*), then reruns the lag and
 # maker studies on everything recorded so far. Each run re-dispatches itself,
 # so recording continues back to back until a run is started with chain=false.
 
@@ -30,7 +30,6 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: claude-recordings
   GH_TOKEN: ${{ github.token }}
 
 jobs:
@@ -49,27 +48,24 @@ jobs:
           python3 tools/research/test_recordings.py
 
       - name: Restore earlier recordings
-        run: |
-          mkdir -p rec
-          if gh release download "$RELEASE_TAG" -p recordings.tar -D . 2>/dev/null; then
-            tar -xf recordings.tar -C rec && rm recordings.tar
-          fi
-          ls -la rec | tail -n 20
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings so far
+        run: mkdir -p rec && ls -la rec | tail -n 20
 
       - name: Record
         run: python3 tools/research/cloud_recorder.py --out rec --minutes "${{ inputs.minutes || '330' }}"
 
       - name: Save recordings
         if: always()
-        run: |
-          tar -cf recordings.tar -C rec .
-          ls -la recordings.tar
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease \
-              --title "Cloud recordings (Claude)" \
-              --notes "1 s Kalshi 15m crypto books/trades/settlements + Coinbase spot, recorded on GitHub runners by tools/research/cloud_recorder.py. Same format as the app's Export recordings."
-          fi
-          gh release upload "$RELEASE_TAG" recordings.tar --clobber
+        uses: actions/cache/save@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
 
       - name: Lag study + maker sim
         if: always()
