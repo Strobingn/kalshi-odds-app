@@ -648,6 +648,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { prefs.updatePaperTrading(enabled) }
     }
 
+    /** Settings and the empty board both use this. Polling restarts from the settings flow. */
+    fun watchBitcoin(enabled: Boolean) {
+        viewModelScope.launch { prefs.updateWatchBtc(enabled) }
+    }
+
     fun resetPaperBook() {
         val before = paperBook.snapshot().cashUsd
         val snap = _state.value.settings

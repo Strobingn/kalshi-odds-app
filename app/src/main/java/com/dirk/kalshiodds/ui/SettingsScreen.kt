@@ -399,6 +399,14 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             ToggleRow("Watch Bitcoin", s.watchBtc) { viewModel?.setWatchBtc(it) }
+            if (!s.watchBtc) {
+                Text(
+                    WatchBitcoinNotice.SETTINGS_WARNING,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.accentOrange,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
 
             Section("Edge threshold")
             if (s.isSittingOut()) {

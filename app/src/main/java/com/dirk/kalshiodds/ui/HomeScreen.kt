@@ -79,6 +79,7 @@ fun HomeScreen(
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit,
     onResumeAlerts: () -> Unit = {},
+    onWatchBitcoin: () -> Unit = {},
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
 ) {
@@ -91,6 +92,10 @@ fun HomeScreen(
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
     val best = HomeMarkets.best(ranked, decisions)
+    val watchBitcoinOff = WatchBitcoinNotice.boardHidden(
+        state.settings.watchBtc,
+        windowMarkets.size
+    )
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.userMessage) {
         val msg = state.userMessage ?: return@LaunchedEffect
@@ -187,6 +192,27 @@ fun HomeScreen(
                                 Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                             }
                         }
+                        if (watchBitcoinOff) {
+                            item {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(colors.accentOrange.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        WatchBitcoinNotice.HOME_EMPTY,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.accentOrange,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Button(onClick = onWatchBitcoin) {
+                                        Text(WatchBitcoinNotice.TURN_ON)
+                                    }
+                                }
+                            }
+                        } else {
                         item {
                             ThisWindowCard(
                                 market = best?.first,
@@ -219,6 +245,7 @@ fun HomeScreen(
                                     onOpenChart = { onOpenChart(market) }
                                 )
                             }
+                        }
                         }
                         item {
                             Text(
