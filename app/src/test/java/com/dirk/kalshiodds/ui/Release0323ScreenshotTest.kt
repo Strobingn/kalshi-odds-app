@@ -18,10 +18,46 @@ import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
+import com.dirk.kalshiodds.ui.components.workingOrderDetail
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
 import java.io.File
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+
+class WorkingOrderDetailTest {
+    @Test
+    fun workingCardShowsTheFullOrderId() {
+        val order = PlacedOrder(
+            ticket = TradeTicket(
+                id = "adopted-no",
+                ticker = "KXBTC15M-26SEP251530-30",
+                side = "NO",
+                bookSide = "ask",
+                stakeUsd = 7.60,
+                limitPrice = 0.76,
+                yesLimitPrice = 0.24,
+                contracts = 10,
+                estimatedFillUsd = 7.60,
+                maxPayoutUsd = 10.0,
+                estimatedAvgFill = 0.76,
+                sizingNote = "existing order",
+                kind = TicketKind.MANUAL,
+                clientOrderId = "cid-no-adopted"
+            ),
+            clientOrderId = "cid-no-adopted",
+            orderId = "ord-no-99",
+            fillCount = 0.0,
+            remainingCount = 10.0,
+            averageFillPrice = 0.76,
+            placedAtMs = 1L
+        )
+        val line = workingOrderDetail(order)
+        assertTrue(line, line.contains("id ord-no-99"))
+        assertFalse(line, line.endsWith("id ord-no-9"))
+    }
+}
 
 /** 0.3.23: cached odds on an offline cold start, and a NO adopted working order. */
 class Release0323ScreenshotTest {

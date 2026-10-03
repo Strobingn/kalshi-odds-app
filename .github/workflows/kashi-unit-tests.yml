@@ -21,10 +21,9 @@ jobs:
           java-version: "17"
       - name: Android SDK
         uses: android-actions/setup-android@v3
-      - name: Accept SDK licenses and install platform 35
-        run: |
-          set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+        with:
+          # cmdline-tools 16 dropped the obsolete "tools" package. The action
+          # default is "tools platform-tools", which makes sdkmanager exit 1.
+          packages: 'platforms;android-35 build-tools;35.0.0'
       - name: testDebugUnitTest
         run: ./gradlew testDebugUnitTest --stacktrace

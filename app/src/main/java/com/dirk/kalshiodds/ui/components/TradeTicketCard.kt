@@ -421,6 +421,20 @@ private fun ProposedTicketCard(
     }
 }
 
+/** Full Kalshi order id — the header and this card must show the same string. */
+internal fun workingOrderDetail(order: PlacedOrder): String {
+    val id = order.orderId ?: "pending id"
+    return String.format(
+        Locale.US,
+        "%d ct @ %s · filled %.0f · rest %.0f · id %s",
+        order.ticket.contracts,
+        KalshiQuoteDisplay.formatPriceCents(order.ticket.limitPrice),
+        order.fillCount,
+        order.remainingCount,
+        id
+    )
+}
+
 @Composable
 private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
     val colors = DipTheme.colors
@@ -438,15 +452,7 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
             color = colors.accentBlue
         )
         Text(
-            String.format(
-                Locale.US,
-                "%d ct @ %s · filled %.0f · rest %.0f · id %s",
-                order.ticket.contracts,
-                KalshiQuoteDisplay.formatPriceCents(order.ticket.limitPrice),
-                order.fillCount,
-                order.remainingCount,
-                id.take(8)
-            ),
+            workingOrderDetail(order),
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
