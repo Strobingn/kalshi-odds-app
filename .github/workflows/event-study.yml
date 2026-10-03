@@ -8,6 +8,7 @@ on:
     branches: [Claude]
     paths:
       - "tools/research/event_study.py"
+      - "tools/research/favorite_study.py"
       - ".github/workflows/event-study.yml"
   workflow_dispatch:
     inputs:
@@ -50,3 +51,6 @@ jobs:
           echo "===== NEWS WINDOW STUDY ====="
           python3 tools/research/event_study.py --cache tools/backtest/cache
           echo "===== END NEWS WINDOW STUDY ====="
+          echo "===== FAVORITE STUDY ====="
+          python3 tools/research/favorite_study.py --cache tools/backtest/cache
+          echo "===== END FAVORITE STUDY ====="
