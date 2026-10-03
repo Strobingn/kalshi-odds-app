@@ -1,0 +1,86 @@
+name: Cloud recorder (Claude)
+
+# Records Kalshi 15m crypto books/trades/settlements + Coinbase spot at ~1 s
+# (tools/research/cloud_recorder.py, same format as the phone's recorder),
+# appends to the rolling `claude-recordings` release, then reruns the lag and
+# maker studies on everything recorded so far. Each run re-dispatches itself,
+# so recording continues back to back until a run is started with chain=false.
+
+on:
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Minutes to record this run"
+        default: "330"
+      chain:
+        description: "Start the next run when this one ends"
+        default: "true"
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/cloud_recorder.py"
+      - ".github/workflows/record.yml"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: cloud-recorder
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: claude-recordings
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: |
+          python3 tools/research/test_cloud_recorder.py
+          python3 tools/research/test_recordings.py
+
+      - name: Restore earlier recordings
+        run: |
+          mkdir -p rec
+          if gh release download "$RELEASE_TAG" -p recordings.tar -D . 2>/dev/null; then
+            tar -xf recordings.tar -C rec && rm recordings.tar
+          fi
+          ls -la rec | tail -n 20
+
+      - name: Record
+        run: python3 tools/research/cloud_recorder.py --out rec --minutes "${{ inputs.minutes || '330' }}"
+
+      - name: Save recordings
+        if: always()
+        run: |
+          tar -cf recordings.tar -C rec .
+          ls -la recordings.tar
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --target "$GITHUB_SHA" --prerelease \
+              --title "Cloud recordings (Claude)" \
+              --notes "1 s Kalshi 15m crypto books/trades/settlements + Coinbase spot, recorded on GitHub runners by tools/research/cloud_recorder.py. Same format as the app's Export recordings."
+          fi
+          gh release upload "$RELEASE_TAG" recordings.tar --clobber
+
+      - name: Lag study + maker sim
+        if: always()
+        run: |
+          echo "===== LAG STUDY ====="
+          python3 tools/research/lag_study.py rec || echo "(lag study failed)"
+          echo "===== END LAG STUDY ====="
+          echo "===== MAKER SIM ====="
+          python3 tools/research/maker_sim.py --dir rec --series BTC --iters 1000 || echo "(maker sim failed)"
+          echo "===== END MAKER SIM ====="
+
+      - name: Start the next run
+        if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' }}
+        run: gh workflow run record.yml --ref "$GITHUB_REF_NAME" -f minutes=330 -f chain=true

@@ -30,6 +30,7 @@ jobs:
           python3 tools/research/test_settlement.py
           python3 tools/research/test_recordings.py
           python3 tools/research/test_arb_scan.py
+          python3 tools/research/test_cloud_recorder.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue
