@@ -77,10 +77,25 @@ data class PortfolioOrderDto(
     @SerialName("client_order_id") val clientOrderId: String? = null,
     val ticker: String? = null,
     val status: String? = null,
+    /** Canonical book side: `bid` = YES, `ask` = NO. */
+    @SerialName("book_side") val bookSide: String? = null,
+    /** Directional exposure. Prefer this over deprecated [side]. */
+    @SerialName("outcome_side") val outcomeSide: String? = null,
+    /** Deprecated yes/no side. Kept so older rows still adopt the real side. */
+    val side: String? = null,
+    val action: String? = null,
+    @SerialName("yes_price_dollars") val yesPriceDollars: String? = null,
+    @SerialName("no_price_dollars") val noPriceDollars: String? = null,
+    @SerialName("yes_price") val yesPriceCents: Int? = null,
+    @SerialName("no_price") val noPriceCents: Int? = null,
     @SerialName("fill_count_fp") val fillCountFp: String? = null,
     @SerialName("remaining_count_fp") val remainingCountFp: String? = null,
+    @SerialName("initial_count_fp") val initialCountFp: String? = null,
     @SerialName("fill_count") val fillCount: String? = null,
-    @SerialName("remaining_count") val remainingCount: String? = null
+    @SerialName("remaining_count") val remainingCount: String? = null,
+    @SerialName("initial_count") val initialCount: String? = null,
+    @SerialName("taker_fees_dollars") val takerFeesDollars: String? = null,
+    @SerialName("maker_fees_dollars") val makerFeesDollars: String? = null
 )
 
 @Serializable

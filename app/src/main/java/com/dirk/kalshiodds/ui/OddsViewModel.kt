@@ -442,7 +442,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             baseMs = BASE_POLL_MS,
             initialBackoffMs = INITIAL_BACKOFF_MS,
             maxBackoffMs = MAX_BACKOFF_MS,
-            wsMetadataMs = WS_METADATA_POLL_MS
+            wsMetadataMs = WS_METADATA_POLL_MS,
+            retryAfterMs = RefreshRecovery.retryAfterMs(error)
         )
         val message = RefreshRecovery.messageFor(error)
         val cached = _state.value.snapshot != null
@@ -465,7 +466,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             baseMs = BASE_POLL_MS,
             initialBackoffMs = INITIAL_BACKOFF_MS,
             maxBackoffMs = MAX_BACKOFF_MS,
-            wsMetadataMs = WS_METADATA_POLL_MS
+            wsMetadataMs = WS_METADATA_POLL_MS,
+            retryAfterMs = result.retryAfterMs
         )
         val wsConnected = _state.value.signalStatus.state == WsConnectionState.CONNECTED
         val pollLabel = when {

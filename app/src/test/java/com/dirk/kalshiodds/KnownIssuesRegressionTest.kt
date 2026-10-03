@@ -1768,7 +1768,7 @@ class KnownIssuesRegressionTest {
                 com.dirk.kalshiodds.data.dto.GetBalanceResponse(balance = 12_500, balanceDollars = "125.00")
             )
 
-        override suspend fun listOrders(ticker: String?, status: String?, limit: Int) =
+        override suspend fun listOrders(ticker: String?, status: String?, limit: Int, cursor: String?) =
             Response.success(com.dirk.kalshiodds.data.dto.OrdersListResponse())
 
         override suspend fun getPositions(

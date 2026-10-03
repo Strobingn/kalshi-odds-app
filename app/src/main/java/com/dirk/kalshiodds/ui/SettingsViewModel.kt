@@ -73,7 +73,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                             !prefs.canSaveLiveSecrets() ->
                                 com.dirk.kalshiodds.signal.config.CredentialWriteGuard.REJECT_UNENCRYPTED
                             prefs.needsReenterKey() ->
-                                "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                                com.dirk.kalshiodds.signal.config.KeystoreRecovery.REENTER_AFTER_RESET
                             prefs.needsReenterDemoKey() ->
                                 "Re-enter demo key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
                             else -> it.credentialMessage
@@ -434,6 +434,106 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     connectionTestMessage = if (restored) null else it.connectionTestMessage
                 )
             }
+        }
+    }
+
+    fun backupEverything(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val app = getApplication<Application>()
+                    val container = KalshiOddsApp.from(app).container
+                    val pass = _state.value.credPassphrase
+                    val settings = prefs.hydrate()
+                    val resultsJson = ResultsExporter.jsonWithHistory(
+                        container.resultsStore.exportBundle(),
+                        settings = container.archive.recentSettingsChanges(400),
+                        sessions = container.archive.recentSessions(200)
+                    )
+                    val predictionJson = container.logStore.exportJson()
+                    val credentialBytes = if (pass.length >= 6) {
+                        val (id, pem) = prefs.credentialSnapshot()
+                        if (id.isNotBlank() && pem.isNotBlank()) {
+                            val (demoId, demoPem) = prefs.demoSnapshot()
+                            CredentialBackup.encrypt(id, pem, pass.toCharArray(), demoId, demoPem)
+                        } else {
+                            null
+                        }
+                    } else if (pass.isNotEmpty()) {
+                        error("Passphrase must be at least 6 characters, or leave it blank to omit the API key")
+                    } else {
+                        null
+                    }
+                    val exported = com.dirk.kalshiodds.data.local.AppBackup.export(
+                        settings = settings,
+                        resultsJson = resultsJson,
+                        predictionLogJson = predictionJson,
+                        credentialBytes = credentialBytes,
+                        exportedAtMs = System.currentTimeMillis()
+                    )
+                    app.contentResolver.openOutputStream(uri)?.use { it.write(exported.text.toByteArray()) }
+                        ?: error("could not write backup")
+                    when {
+                        exported.includesCredentials ->
+                            "Full backup written. Settings, history, and the passphrase-encrypted API key are in this one file."
+                        pass.length >= 6 ->
+                            "Full backup written. Settings and history are included. No Kalshi key was saved, so the encrypted key block was omitted."
+                        else ->
+                            "Full backup written. Settings and history are included. The API key was left out — type a passphrase of at least 6 characters to include it."
+                    }
+                }.getOrElse { it.message ?: "backup failed" }
+            }
+            _state.update { it.copy(exportMessage = result) }
+        }
+    }
+
+    fun restoreEverything(uri: Uri) {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val app = getApplication<Application>()
+                    val container = KalshiOddsApp.from(app).container
+                    val text = app.contentResolver.openInputStream(uri)?.use { it.readBytes() }?.toString(Charsets.UTF_8)
+                        ?: error("could not read backup")
+                    val pass = _state.value.credPassphrase
+                    val restored = com.dirk.kalshiodds.data.local.AppBackup.restore(
+                        text,
+                        pass.takeIf { it.isNotEmpty() }?.toCharArray()
+                    )
+                    prefs.restoreBackup(restored.settingsJson)
+                    val store = container.resultsStore
+                    val archive = container.archive
+                    if (restored.results.batch.snapshots.isNotEmpty()) {
+                        store.insertSnapshots(restored.results.batch.snapshots)
+                    }
+                    restored.results.batch.alerts.forEach { store.insertAlert(it) }
+                    restored.results.batch.scorecards.forEach { store.insertScorecard(it) }
+                    restored.results.batch.tickets.forEach { store.insertTicket(it) }
+                    archive.insertFills(restored.results.batch.fills)
+                    restored.results.batch.settingsChanges.forEach { archive.insertSettingsChange(it) }
+                    restored.results.batch.sessions.forEach { archive.insertSession(it) }
+                    container.logStore.mergeJson(restored.predictionLogJson)
+                    val creds = restored.credentials
+                    val keyNote = if (creds != null) {
+                        val saved = prefs.saveCredentials(creds.keyId, creds.pem)
+                        if (saved != null) error(saved)
+                        if (creds.demoKeyId.isNotBlank() && creds.demoPem.isNotBlank()) {
+                            prefs.saveDemoCredentials(creds.demoKeyId, creds.demoPem)
+                        }
+                        restored.credentialNote
+                    } else {
+                        restored.credentialNote
+                    }
+                    "Restored settings and history. $keyNote"
+                }.getOrElse { e ->
+                    when (e) {
+                        is com.dirk.kalshiodds.data.local.AppBackup.BadFile ->
+                            "Not a DipHunter full backup — nothing was changed"
+                        else -> e.message ?: "restore failed"
+                    }
+                }
+            }
+            _state.update { it.copy(exportMessage = result, credentialMessage = result) }
         }
     }
 

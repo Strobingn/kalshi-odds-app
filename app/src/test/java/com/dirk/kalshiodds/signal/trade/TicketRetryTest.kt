@@ -80,6 +80,131 @@ class TicketRetryTest {
     }
 
     @Test
+    fun pendingClientOrderIdSurvivesDismissAndANewProcess() = runBlocking {
+        val store = MemoryOrderIntentStore()
+        val ids = mutableListOf<String>()
+        var n = 0
+        fun session() = TicketSession(
+            placeOrder = { _, clientOrderId ->
+                ids += clientOrderId
+                Result.failure(IllegalStateException("timeout"))
+            },
+            intentStore = store,
+            idFactory = { "id-${++n}" }
+        )
+        val first = session()
+        first.addManual(buyTicket())
+        first.approve("t1")
+        first.dismiss("t1")
+        val second = session()
+        second.onStart()
+        second.addManual(buyTicket())
+        second.approve("t1")
+        assertEquals(listOf("id-1", "id-1"), ids)
+        assertEquals("id-1", store.load().single().clientOrderId)
+        assertEquals(PendingOrderIntent.STATE_UNCERTAIN, store.load().single().state)
+    }
+
+    @Test
+    fun editingTermsDoesNotSendOrDropThePendingOrder() = runBlocking {
+        val store = MemoryOrderIntentStore()
+        val ids = mutableListOf<String>()
+        val session = TicketSession(
+            placeOrder = { _, clientOrderId ->
+                ids += clientOrderId
+                Result.failure(IllegalStateException("timeout"))
+            },
+            intentStore = store,
+            idFactory = { "id-keep" }
+        )
+        session.addManual(buyTicket())
+        session.approve("t1")
+        session.revise("t1") {
+            it.copy(limitPrice = 0.20, yesLimitPrice = 0.20, contracts = 24, stakeUsd = 4.8)
+        }
+        session.openApprove("t1")
+        val blocked = session.approve("t1")
+        assertEquals(listOf("id-keep"), ids)
+        assertEquals(TicketSession.TERMS_CHANGED_WHILE_PENDING, blocked.lastError)
+        val kept = store.load().single()
+        assertEquals("id-keep", kept.clientOrderId)
+        assertEquals(12, kept.contracts)
+        assertEquals(0.40, kept.limitPrice, 1e-9)
+    }
+
+    @Test
+    fun editedRetryAdoptsTheOriginalOrderWhenKalshiAlreadyHasIt() = runBlocking {
+        var places = 0
+        val session = TicketSession(
+            placeOrder = { _, _ ->
+                places += 1
+                Result.failure(IllegalStateException("timeout"))
+            },
+            findExisting = { _, clientOrderId -> placed(buyTicket(), clientOrderId, "already") },
+            idFactory = { "id-keep" }
+        )
+        session.addManual(buyTicket())
+        session.approve("t1")
+        session.revise("t1") {
+            it.copy(limitPrice = 0.20, yesLimitPrice = 0.20, contracts = 24, stakeUsd = 4.8)
+        }
+        session.openApprove("t1")
+        val adopted = session.approve("t1")
+        assertEquals(1, places)
+        val order = (adopted.phase as TicketPhase.Submitted).order
+        assertEquals("already", order.orderId)
+        assertEquals(0.40, order.ticket.limitPrice, 1e-9)
+        assertEquals(12, order.ticket.contracts)
+    }
+
+    @Test
+    fun definitiveRejectLetsTheNextApproveUseANewClientOrderId() = runBlocking {
+        val store = MemoryOrderIntentStore()
+        val ids = mutableListOf<String>()
+        var n = 0
+        var reject = true
+        val session = TicketSession(
+            placeOrder = { ticket, clientOrderId ->
+                ids += clientOrderId
+                if (reject) {
+                    reject = false
+                    Result.failure(IllegalStateException("HTTP 400 Rejected — check price"))
+                } else {
+                    Result.success(placed(ticket, clientOrderId, "ord-new"))
+                }
+            },
+            intentStore = store,
+            idFactory = { "id-${++n}" }
+        )
+        session.addManual(buyTicket())
+        val failed = session.approve("t1")
+        assertTrue(failed.phase is TicketPhase.Failed)
+        assertTrue(store.load().isEmpty())
+        session.openApprove("t1")
+        val submitted = session.approve("t1")
+        assertTrue(submitted.phase is TicketPhase.Submitted)
+        assertEquals(listOf("id-1", "id-2"), ids)
+    }
+
+    @Test
+    fun confirmQuoteMatchesTheOrderApproveSubmitsAndKeepsTheCap() {
+        val ticket = buyTicket()
+        val quote = ConfirmQuote.buy(ticket, stakeText = "5", centsText = "20")
+        val submitted = TicketBuilder.repriceBuy(ticket, quote.submittedStakeUsd, quote.submittedLimitPrice)
+        assertEquals(0.20, quote.submittedLimitPrice, 1e-9)
+        assertEquals(submitted.contracts, quote.contracts)
+        assertEquals(submitted.allInUsd ?: -1.0, quote.allInUsd, 1e-9)
+        assertEquals(submitted.feeUsd ?: -1.0, quote.feeUsd, 1e-9)
+        assertTrue(quote.contracts > ticket.contracts)
+        assertTrue(quote.allInUsd <= 5.0 + 1e-6)
+        val capped = ConfirmQuote.buy(ticket, stakeText = "40", centsText = "20")
+        val cappedSubmit = TicketBuilder.repriceBuy(ticket, capped.submittedStakeUsd, capped.submittedLimitPrice)
+        assertEquals(cappedSubmit.contracts, capped.contracts)
+        assertTrue(capped.allInUsd <= 5.0 + 1e-6)
+        assertTrue(capped.withinCap)
+    }
+
+    @Test
     fun repriceBuyUsesTypedLimitAndKeepsTheFiveDollarCap() {
         val ticket = buyTicket()
         val clipped = TicketBuilder.repriceBuy(ticket, stakeUsd = 25.0, limitPrice = 0.33)

@@ -29,7 +29,8 @@ class TicketSession(
      * Used before a retry so a timed-out Approve does not send a second order.
      * Null means "not found" — the same client id is still reused.
      */
-    private val findExisting: suspend (ticket: TradeTicket, clientOrderId: String) -> PlacedOrder? = { _, _ -> null }
+    private val findExisting: suspend (ticket: TradeTicket, clientOrderId: String) -> PlacedOrder? = { _, _ -> null },
+    private val intentStore: OrderIntentStore = MemoryOrderIntentStore()
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
@@ -40,6 +41,12 @@ class TicketSession(
     /** One client_order_id per ticket id. Retries reuse it so Kalshi rejects duplicates. */
     private val clientOrderIds = mutableMapOf<String, String>()
     private val attemptedIds = mutableSetOf<String>()
+    /** Survives dismiss, a new ticket id, and process death until the order resolves. */
+    private val pendingIntents = mutableListOf<PendingOrderIntent>()
+
+    init {
+        reloadIntents()
+    }
 
     /** Times [WINDOW_CLOSED_NOTICE] was raised for a newly voided ticket. */
     var windowClosedNoticeCount: Int = 0
@@ -55,6 +62,7 @@ class TicketSession(
         clientOrderIds.clear()
         attemptedIds.clear()
         windowClosedNoticeCount = 0
+        reloadIntents()
     }
 
     /**
@@ -288,17 +296,35 @@ class TicketSession(
         }
         if (cur.phase is TicketPhase.Submitting) return cur
 
-        val clientOrderId = clientOrderIdFor(ticket.id, cur.phase)
+        val conflict = pendingIntents.firstOrNull { it.isOpen && it.matchesSlot(ticket) && !it.sameTerms(ticket) }
+        if (conflict != null) {
+            val already = runCatching { findExisting(ticket, conflict.clientOrderId) }.getOrNull()
+            if (already != null) {
+                recordAttempt(ticket, conflict.clientOrderId, Result.success(already))
+                clearIntent(conflict.clientOrderId, ticket.id)
+                val adopted = submittedState(cur, ticket, already)
+                _state.value = adopted
+                return adopted
+            }
+            _state.update { it.copy(lastError = TERMS_CHANGED_WHILE_PENDING) }
+            return _state.value
+        }
+        val preexisting = pendingIntents.firstOrNull { it.isOpen && it.sameTerms(ticket) }
+        val clientOrderId = preexisting?.clientOrderId ?: clientOrderIdFor(ticket.id, cur.phase)
+        if (preexisting == null) {
+            upsertIntent(PendingOrderIntent.from(ticket, clientOrderId, PendingOrderIntent.STATE_INFLIGHT, nowMs()))
+        }
         _state.update {
             it.copy(
                 phase = TicketPhase.Submitting(ticket, clientOrderId),
                 lastError = null
             )
         }
-        if (ticket.id in attemptedIds) {
+        if (preexisting != null || ticket.id in attemptedIds) {
             val already = runCatching { findExisting(ticket, clientOrderId) }.getOrNull()
             if (already != null) {
                 recordAttempt(ticket, clientOrderId, Result.success(already))
+                clearIntent(clientOrderId, ticket.id)
                 val adopted = submittedState(cur, ticket, already)
                 _state.value = adopted
                 return adopted
@@ -314,9 +340,19 @@ class TicketSession(
         }
         recordAttempt(ticket, clientOrderId, result)
         val next = result.fold(
-            onSuccess = { ack -> submittedState(cur, ticket, ack) },
+            onSuccess = { ack ->
+                clearIntent(clientOrderId, ticket.id)
+                submittedState(cur, ticket, ack)
+            },
             onFailure = { err ->
                 val msg = humanError(err)
+                if (isDefinitiveReject(msg)) {
+                    clearIntent(clientOrderId, ticket.id)
+                } else {
+                    upsertIntent(
+                        PendingOrderIntent.from(ticket, clientOrderId, PendingOrderIntent.STATE_UNCERTAIN, nowMs())
+                    )
+                }
                 TicketUiState(
                     phase = TicketPhase.Failed(ticket, msg, cur.proposals, clientOrderId),
                     proposals = cur.proposals,
@@ -373,9 +409,32 @@ class TicketSession(
             is TicketPhase.Submitting -> phase.clientOrderId.takeIf { phase.ticket.id == ticketId }
             else -> null
         }?.takeIf { it.isNotBlank() }
-        val id = fromPhase ?: idFactory()
+        // A definitive reject clears the map and the persisted intent. Do not
+        // resurrect that id from the Failed phase — the next Approve mints a new one.
+        if (fromPhase != null && pendingIntents.any { it.clientOrderId == fromPhase }) {
+            clientOrderIds[ticketId] = fromPhase
+            return fromPhase
+        }
+        val id = idFactory()
         clientOrderIds[ticketId] = id
         return id
+    }
+
+    private fun reloadIntents() {
+        pendingIntents.clear()
+        pendingIntents += intentStore.load().filter { it.isOpen }
+    }
+
+    private fun upsertIntent(intent: PendingOrderIntent) {
+        val idx = pendingIntents.indexOfFirst { it.clientOrderId == intent.clientOrderId }
+        if (idx >= 0) pendingIntents[idx] = intent else pendingIntents += intent
+        intentStore.save(pendingIntents.toList())
+    }
+
+    private fun clearIntent(clientOrderId: String, ticketId: String) {
+        pendingIntents.removeAll { it.clientOrderId == clientOrderId }
+        if (clientOrderIds[ticketId] == clientOrderId) clientOrderIds.remove(ticketId)
+        intentStore.save(pendingIntents.toList())
     }
 
     private fun submittedState(cur: TicketUiState, ticket: TradeTicket, ack: PlacedOrder): TicketUiState {
@@ -485,6 +544,8 @@ class TicketSession(
         const val WINDOW_CLOSED = TicketBuilder.WINDOW_CLOSED
         const val WINDOW_CLOSED_NOTICE = "That window closed. Nothing was sent."
         const val VOID_HOLD_MS = 5_000L
+        const val TERMS_CHANGED_WHILE_PENDING =
+            "A previous order on this market is still unconfirmed. The new price or size was not sent, and the original order id was kept."
 
         fun ticketKey(t: TradeTicket): String =
             "${t.ticker}|${t.side}|${t.kind}|${t.stakeUsd}"
@@ -502,6 +563,38 @@ class TicketSession(
             if (lower.isBlank()) return false
             return lower.contains("duplicate client_order_id") ||
                 (lower.contains("client_order_id") && (lower.contains("already") || lower.contains("duplicate")))
+        }
+
+        /** Timeout, transport, and 5xx/429/409 stay bound to the same client_order_id. */
+        fun isUncertainFailure(message: String?): Boolean {
+            val lower = message?.lowercase().orEmpty()
+            if (lower.isBlank()) return true
+            if (isDuplicateClientOrder(message)) return true
+            if (lower.contains("timeout") || lower.contains("timed out")) return true
+            if (lower.contains("failed to connect") || lower.contains("unable to resolve")) return true
+            if (lower.contains("socket") || lower.contains("network") || lower.contains("offline")) return true
+            if (lower.contains("http 429") || lower.contains("rate limited")) return true
+            if (lower.contains("http 500") || lower.contains("http 502") ||
+                lower.contains("http 503") || lower.contains("http 504")
+            ) return true
+            if (lower.contains("trade request failed") || lower.contains("try again")) return true
+            return false
+        }
+
+        fun isDefinitiveReject(message: String?): Boolean {
+            if (isUncertainFailure(message)) return false
+            val lower = message?.lowercase().orEmpty()
+            return lower.contains("http 400") ||
+                lower.contains("http 401") ||
+                lower.contains("http 403") ||
+                lower.contains("http 404") ||
+                lower.contains("http 410") ||
+                lower.contains("rejected") ||
+                lower.contains("api key missing") ||
+                lower.contains("cannot size") ||
+                lower.contains("exceeds") ||
+                lower.contains("unauthorized") ||
+                lower.contains("forbidden")
         }
 
         fun stalePageError(message: String): Boolean {

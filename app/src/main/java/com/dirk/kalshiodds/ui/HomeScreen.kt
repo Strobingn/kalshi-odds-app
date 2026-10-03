@@ -246,7 +246,8 @@ fun HomeScreen(
                         onPaper = onPaperTicket,
                         onPaperSell = onPaperSellTicket,
                         onCancelApprove = onCancelApprove,
-                        onCancelOrder = onCancelOrder
+                        onCancelOrder = onCancelOrder,
+                        feeRate = state.settings.feeRate
                     )
                     }
                 }

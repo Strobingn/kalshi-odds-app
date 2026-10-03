@@ -57,7 +57,8 @@ fun TradeTicketsSection(
     onPaper: (String) -> Unit,
     onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
-    onCancelOrder: (String) -> Unit
+    onCancelOrder: (String) -> Unit,
+    feeRate: Double = com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE
 ) {
     val colors = DipTheme.colors
     val proposals = tickets.proposals.sortedByDescending {
@@ -170,7 +171,8 @@ fun TradeTicketsSection(
             onApproveBuy = { stake, price -> onApproveBuy(awaiting.ticket.id, stake, price) },
             onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
-            onDismiss = onCancelApprove
+            onDismiss = onCancelApprove,
+            feeRate = feeRate
         )
     }
 }
@@ -502,7 +504,8 @@ internal fun ApproveTicketDialog(
     onApproveBuy: (Double, Double) -> Unit = { _, _ -> onApprove() },
     onPaper: () -> Unit,
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    feeRate: Double = com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE
 ) {
     val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
@@ -578,20 +581,34 @@ internal fun ApproveTicketDialog(
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
                         singleLine = true
                     )
-                    TicketMetricRow("Contracts", ticket.contracts.toString())
-                    TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+                    val quote = com.dirk.kalshiodds.signal.trade.ConfirmQuote.buy(
+                        ticket,
+                        stakeText,
+                        centsText,
+                        feeRate
+                    )
+                    TicketMetricRow("Contracts", quote.contracts.toString())
+                    TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(quote.submittedLimitPrice))
                     TicketMetricRow(
                         "Fee",
-                        String.format(Locale.US, "$%.2f", ticket.feeUsd ?: 0.0)
+                        String.format(Locale.US, "$%.2f", quote.feeUsd)
                     )
                     TicketMetricRow(
                         "Total cost",
-                        String.format(Locale.US, "$%.2f", ticket.allInUsd ?: ticket.stakeUsd)
+                        String.format(Locale.US, "$%.2f", quote.allInUsd)
                     )
                     TicketMetricRow(
                         "Profit if win",
-                        String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
+                        String.format(Locale.US, "$%.2f", quote.profitIfWinUsd)
                     )
+                    quote.blockedReason?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.accentRed,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                 } else if (paperSell || paperBuy) {
                     Text(
                         String.format(
@@ -659,15 +676,26 @@ internal fun ApproveTicketDialog(
                     } else if (paperBuy) {
                         onPaper()
                     } else {
-                        val stake = stakeText.toDoubleOrNull() ?: ticket.stakeUsd
-                        val cents = centsText.toDoubleOrNull()
-                        val price = if (cents != null) cents / 100.0 else ticket.limitPrice
-                        onApproveBuy(stake, price)
+                        val quote = com.dirk.kalshiodds.signal.trade.ConfirmQuote.buy(
+                            ticket,
+                            stakeText,
+                            centsText,
+                            feeRate
+                        )
+                        onApproveBuy(quote.submittedStakeUsd, quote.submittedLimitPrice)
                     }
                 },
                 enabled = when {
                     paperSell || paperBuy -> ticket.canPaper || ticket.contracts > 0 || ticket.blockedReason != null
-                    else -> credentialsConfigured && ticket.canApprove
+                    else -> {
+                        val quote = com.dirk.kalshiodds.signal.trade.ConfirmQuote.buy(
+                            ticket,
+                            stakeText,
+                            centsText,
+                            feeRate
+                        )
+                        credentialsConfigured && ticket.canApprove && (ticket.isSell || quote.withinCap)
+                    }
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = SideColor.ofTicketSide(ticket.side, colors),
@@ -683,7 +711,10 @@ internal fun ApproveTicketDialog(
                     canApprove = ticket.canApprove,
                     blockedReason = ticket.blockedReason
                 )
-                Text(HomeCopy.confirmApproveLabel(mode, ticket.stakeUsd, ticket.isSell))
+                val shownStake = if (ticket.isSell) ticket.stakeUsd else {
+                    com.dirk.kalshiodds.signal.trade.ConfirmQuote.buy(ticket, stakeText, centsText, feeRate).allInUsd
+                }
+                Text(HomeCopy.confirmApproveLabel(mode, shownStake, ticket.isSell))
             }
         },
         dismissButton = {

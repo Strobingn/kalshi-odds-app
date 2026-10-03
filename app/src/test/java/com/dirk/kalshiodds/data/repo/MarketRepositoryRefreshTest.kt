@@ -41,6 +41,74 @@ class MarketRepositoryRefreshTest {
     }
 
     @Test
+    fun emptyFetchDoesNotOverwriteAGoodCache() = runBlocking {
+        val cache = MemoryCache(
+            CachedMarketsPayload(
+                btc = listOf(MarketDto(ticker = "KXBTC15M-CACHED", status = "active", yesAskDollars = "0.4000")),
+                fetchedAtEpochMs = 50L
+            )
+        )
+        val snap = repo(EmptyApi(), cache).refresh(watchBtc = true, watchEth = false, watchSol = false)
+        assertEquals(listOf("KXBTC15M-CACHED"), snap.btc.map { it.ticker })
+        assertTrue(snap.fromCache)
+        assertEquals(listOf("KXBTC15M-CACHED"), cache.read()?.btc?.map { it.ticker })
+    }
+
+    @Test
+    fun turningBitcoinOffLeavesTheCachedBoardOnDisk() = runBlocking {
+        val cache = MemoryCache(
+            CachedMarketsPayload(
+                btc = listOf(MarketDto(ticker = "KXBTC15M-CACHED", status = "active", yesAskDollars = "0.4000")),
+                fetchedAtEpochMs = 50L
+            )
+        )
+        val api = EmptyApi()
+        val snap = repo(api, cache).refresh(watchBtc = false, watchEth = false, watchSol = false)
+        assertTrue(snap.btc.isEmpty())
+        assertEquals(0, api.calls)
+        assertEquals(listOf("KXBTC15M-CACHED"), cache.read()?.btc?.map { it.ticker })
+    }
+
+    @Test
+    fun childFetchFailureStillReturnsTheDiskCache() = runBlocking {
+        val cache = MemoryCache(
+            CachedMarketsPayload(
+                btc = listOf(MarketDto(ticker = "KXBTC15M-CACHED", status = "active", yesAskDollars = "0.4000")),
+                fetchedAtEpochMs = 50L
+            )
+        )
+        val snap = repo(ThrowingApi(IOException("offline")), cache).refresh(watchBtc = true)
+        assertTrue(snap.fromCache)
+        assertEquals("offline", snap.errorMessage)
+        assertEquals(listOf("KXBTC15M-CACHED"), snap.btc.map { it.ticker })
+    }
+
+    @Test
+    fun rateLimitKeepsRetryAfterOnTheCachedSnapshot() = runBlocking {
+        val cache = MemoryCache(
+            CachedMarketsPayload(
+                btc = listOf(MarketDto(ticker = "KXBTC15M-CACHED", status = "active", yesAskDollars = "0.4000")),
+                fetchedAtEpochMs = 50L
+            )
+        )
+        val body = "slow".toResponseBody("text/plain".toMediaType())
+        val raw = okhttp3.Response.Builder()
+            .request(okhttp3.Request.Builder().url("https://example.com/markets").build())
+            .protocol(okhttp3.Protocol.HTTP_1_1)
+            .code(429)
+            .message("Too Many Requests")
+            .header("Retry-After", "30")
+            .body(body)
+            .build()
+        val snap = repo(
+            ThrowingApi(HttpException(Response.error<MarketsResponse>("slow".toResponseBody("text/plain".toMediaType()), raw))),
+            cache
+        ).refresh(watchBtc = true)
+        assertEquals(30_000L, snap.retryAfterMs)
+        assertEquals(listOf("KXBTC15M-CACHED"), snap.btc.map { it.ticker })
+    }
+
+    @Test
     fun offlineWithNoCacheReturnsAnErrorSnapshot() = runBlocking {
         val api = ThrowingApi(IOException("offline"))
         val snap = repo(api, MemoryCache(null)).refresh()
@@ -64,6 +132,20 @@ class MarketRepositoryRefreshTest {
     private fun http(code: Int): HttpException = HttpException(
         Response.error<MarketsResponse>(code, "limited".toResponseBody("text/plain".toMediaType()))
     )
+
+    private class EmptyApi : KalshiApi {
+        var calls: Int = 0
+        override suspend fun getMarkets(
+            seriesTicker: String,
+            status: String,
+            limit: Int?,
+            cursor: String?,
+            ticker: String?
+        ): MarketsResponse {
+            calls += 1
+            return MarketsResponse()
+        }
+    }
 
     private class ThrowingApi(private val error: Exception) : KalshiApi {
         val series = mutableListOf<String>()

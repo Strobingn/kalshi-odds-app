@@ -36,7 +36,7 @@ jobs:
         id: ver
         run: |
           name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
-          code=$((1000000 + GITHUB_RUN_NUMBER))
+          code=$((1100000 + GITHUB_RUN_NUMBER))
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
 

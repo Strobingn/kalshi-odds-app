@@ -41,7 +41,9 @@ data class MarketsSnapshot(
     val modelScoreTotal: Int? = null,
     val modelMeanBrier: Double? = null,
     val avgEdgeWhenRight: Double? = null,
-    val avgEdgeWhenWrong: Double? = null
+    val avgEdgeWhenWrong: Double? = null,
+    /** Retry-After from a 429/503, when the response included one. */
+    val retryAfterMs: Long? = null
 ) {
     val allMarkets: List<MarketUiModel> get() = btc + eth + sol + extra
 
@@ -190,12 +192,35 @@ class MarketRepository(
                 .cryptoOnly()
                 .filter { it.ticker !in seen }
             val now = System.currentTimeMillis()
-            cache.write(btcMarkets, ethMarkets, solMarkets, extraMarkets, now)
-            val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now, edgeThresholdPp)
-            val ethUi = model.annotate(ethMarkets.map { it.toUiModel(SeriesKind.ETH) }, now, edgeThresholdPp)
-            val solUi = model.annotate(solMarkets.map { it.toUiModel(SeriesKind.SOL) }, now, edgeThresholdPp)
+            val previous = runCatching { cache.read() }.getOrNull()
+            fun keep(watching: Boolean, fresh: List<MarketDto>, cached: List<MarketDto>): List<MarketDto> = when {
+                !watching -> cached
+                fresh.isEmpty() && cached.isNotEmpty() -> cached
+                else -> fresh
+            }
+            val btcKept = keep(watchBtc, btcMarkets, previous?.btc.orEmpty())
+            val ethKept = keep(watchEth, ethMarkets, previous?.eth.orEmpty())
+            val solKept = keep(watchSol, solMarkets, previous?.sol.orEmpty())
+            val extraKept = keep(extraTickers.isNotEmpty(), extraMarkets, previous?.extra.orEmpty())
+            val preservedEmpty = (watchBtc && btcMarkets.isEmpty() && btcKept.isNotEmpty()) ||
+                (watchEth && ethMarkets.isEmpty() && ethKept.isNotEmpty()) ||
+                (watchSol && solMarkets.isEmpty() && solKept.isNotEmpty()) ||
+                (extraTickers.isNotEmpty() && extraMarkets.isEmpty() && extraKept.isNotEmpty())
+            val freshAny = (watchBtc && btcMarkets.isNotEmpty()) ||
+                (watchEth && ethMarkets.isNotEmpty()) ||
+                (watchSol && solMarkets.isNotEmpty()) ||
+                (extraTickers.isNotEmpty() && extraMarkets.isNotEmpty())
+            val stamp = if (freshAny) now else previous?.fetchedAtEpochMs?.takeIf { it > 0L } ?: now
+            cache.write(btcKept, ethKept, solKept, extraKept, stamp)
+            val btcShown = if (watchBtc) btcKept else emptyList()
+            val ethShown = if (watchEth) ethKept else emptyList()
+            val solShown = if (watchSol) solKept else emptyList()
+            val extraShown = if (extraTickers.isNotEmpty()) extraKept else emptyList()
+            val btcUi = model.annotate(btcShown.map { it.toUiModel(SeriesKind.BTC) }, now, edgeThresholdPp)
+            val ethUi = model.annotate(ethShown.map { it.toUiModel(SeriesKind.ETH) }, now, edgeThresholdPp)
+            val solUi = model.annotate(solShown.map { it.toUiModel(SeriesKind.SOL) }, now, edgeThresholdPp)
             val extraUi = model.annotate(
-                extraMarkets.map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
+                extraShown.map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
                 now,
                 edgeThresholdPp
             )
@@ -210,9 +235,9 @@ class MarketRepository(
                 eth = ethUi,
                 sol = solUi,
                 extra = extraUi,
-                fetchedAtEpochMs = now,
-                fromCache = false,
-                errorMessage = null,
+                fetchedAtEpochMs = stamp,
+                fromCache = preservedEmpty,
+                errorMessage = if (preservedEmpty) "Kalshi returned no markets — showing the last saved board" else null,
                 rateLimited = false,
                 modelScoreCorrect = lastScoreCorrect,
                 modelScoreTotal = lastScoreTotal,
@@ -225,9 +250,15 @@ class MarketRepository(
     private suspend fun fallbackSnapshot(error: Exception): MarketsSnapshot {
         val rateLimited = RefreshRecovery.isRateLimited(error)
         val message = RefreshRecovery.messageFor(error)
+        val retryAfterMs = RefreshRecovery.retryAfterMs(error)
         val cached = runCatching { cache.read() }.getOrNull()
         if (cached != null) {
-            return cached.toSnapshot(fromCache = true, errorMessage = message, rateLimited = rateLimited)
+            return cached.toSnapshot(
+                fromCache = true,
+                errorMessage = message,
+                rateLimited = rateLimited,
+                retryAfterMs = retryAfterMs
+            )
         }
         return MarketsSnapshot(
             btc = emptyList(),
@@ -238,6 +269,7 @@ class MarketRepository(
             fromCache = false,
             errorMessage = message,
             rateLimited = rateLimited,
+            retryAfterMs = retryAfterMs,
             modelScoreCorrect = lastScoreCorrect,
             modelScoreTotal = lastScoreTotal,
             modelMeanBrier = lastMeanBrier,
@@ -325,7 +357,8 @@ class MarketRepository(
     private fun CachedMarketsPayload.toSnapshot(
         fromCache: Boolean,
         errorMessage: String? = null,
-        rateLimited: Boolean = false
+        rateLimited: Boolean = false,
+        retryAfterMs: Long? = null
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
         return MarketsSnapshot(
@@ -341,6 +374,7 @@ class MarketRepository(
             fromCache = fromCache,
             errorMessage = errorMessage,
             rateLimited = rateLimited,
+            retryAfterMs = retryAfterMs,
             modelScoreCorrect = lastScoreCorrect,
             modelScoreTotal = lastScoreTotal,
             modelMeanBrier = lastMeanBrier,

@@ -51,6 +51,7 @@ class SecureCredentialStore(context: Context) {
             .putString(KEY_ID, keyId.trim())
             .putString(KEY_PEM, PemNormalizer.normalize(pem))
             .commit()
+        KeystoreRecovery.wipedUndecryptableSecrets = false
         return null
     }
 
@@ -97,6 +98,13 @@ class SecureCredentialStore(context: Context) {
         }
 
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
+            openEncrypted(context)?.let { return it }
+            if (!lastKeystoreInvalidated) return null
+            if (!KeystoreRecovery.wipeBrokenSecrets(context)) return null
+            return openEncrypted(context)?.also { lastKeystoreInvalidated = false }
+        }
+
+        private fun openEncrypted(context: Context): SharedPreferences? {
             return try {
                 val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
                 val prefs = EncryptedSharedPreferences.create(
@@ -108,24 +116,13 @@ class SecureCredentialStore(context: Context) {
                 )
                 lastKeystoreInvalidated = false
                 prefs
-            } catch (e: javax.crypto.AEADBadTagException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Encrypted prefs Keystore tag invalid — using fallback, re-enter key")
-                null
-            } catch (e: java.security.KeyStoreException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Keystore unavailable (${e.javaClass.simpleName})")
-                null
             } catch (e: Exception) {
-                val name = e.javaClass.simpleName
-                if (name.contains("AEAD", true) || name.contains("KeyStore", true) ||
-                    e.cause is javax.crypto.AEADBadTagException
-                ) {
+                if (KeystoreRecovery.isInvalidKey(e)) {
                     lastKeystoreInvalidated = true
-                    Log.w(TAG, "Encrypted prefs invalidated ($name) — using fallback")
+                    Log.w(TAG, "Encrypted prefs Keystore invalid (${e.javaClass.simpleName}) — resetting")
                     return null
                 }
-                Log.w(TAG, "EncryptedSharedPreferences unavailable ($name)")
+                Log.w(TAG, "EncryptedSharedPreferences unavailable (${e.javaClass.simpleName})")
                 null
             }
         }

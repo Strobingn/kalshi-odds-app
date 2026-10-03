@@ -75,6 +75,12 @@ fun SettingsScreen(
     val importKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let { viewModel.restoreCredentials(it) } }
+    val exportEverything = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? -> uri?.let { viewModel.backupEverything(it) } }
+    val importEverything = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let { viewModel.restoreEverything(it) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
         viewModel.refreshLastOrderError()
@@ -86,7 +92,9 @@ fun SettingsScreen(
         onOpenData = onOpenData,
         scrollToApiKey = scrollToApiKey,
         onExportKeys = { exportKeys.launch("diphunter-kalshi-key.dhcred") },
-        onImportKeys = { importKeys.launch(arrayOf("*/*")) }
+        onImportKeys = { importKeys.launch(arrayOf("*/*")) },
+        onExportEverything = { exportEverything.launch("diphunter-backup.json") },
+        onImportEverything = { importEverything.launch(arrayOf("application/json", "*/*")) }
     )
 }
 
@@ -99,7 +107,9 @@ fun SettingsContent(
     scrollToApiKey: Boolean = false,
     viewModel: SettingsViewModel? = null,
     onExportKeys: () -> Unit = {},
-    onImportKeys: () -> Unit = {}
+    onImportKeys: () -> Unit = {},
+    onExportEverything: () -> Unit = {},
+    onImportEverything: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val s = state.settings
@@ -384,10 +394,11 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum and Solana switches are not shown; saved values from older versions are not polled, scored, or paper-traded. WTI is deprecated and excluded.",
+                "Bitcoin 15-minute markets (KXBTC15M). Turn this off to hide Bitcoin, and turn it back on here. Ethereum and Solana stay blocked: they are not polled, scored, or paper-traded. An empty or failed fetch does not erase the last good board.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
+            ToggleRow("Watch Bitcoin", s.watchBtc) { viewModel?.setWatchBtc(it) }
 
             Section("Edge threshold")
             if (s.isSittingOut()) {
@@ -630,6 +641,18 @@ fun SettingsContent(
             }
             Button(onClick = { viewModel?.exportResults() }, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
+            }
+            Section("Back up everything")
+            Text(
+                "One file restores settings, results, and history after a reinstall. " +
+                    "The API key is optional: type a passphrase of at least 6 characters and it is included, labelled, and encrypted. " +
+                    "Leave the passphrase blank to leave the key out. The key is never stored in plaintext in this file.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(onClick = onExportEverything) { Text("Back up everything") }
+                OutlinedButton(onClick = onImportEverything) { Text("Restore") }
             }
             state.exportMessage?.let {
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)

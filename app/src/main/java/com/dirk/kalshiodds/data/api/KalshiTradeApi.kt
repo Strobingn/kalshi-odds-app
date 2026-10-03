@@ -44,11 +44,17 @@ interface KalshiTradeApi {
      * is still never called. This GET lets a retry see an order Kalshi already
      * accepted for the same client_order_id.
      */
+    /**
+     * Get Orders has no `client_order_id` filter (ticker, status, limit, cursor).
+     * Callers page with [cursor] until the id shows up or the cursor is exhausted.
+     * https://docs.kalshi.com/api-reference/orders/get-orders
+     */
     @GET("portfolio/orders")
     suspend fun listOrders(
         @Query("ticker") ticker: String? = null,
         @Query("status") status: String? = null,
-        @Query("limit") limit: Int = 200
+        @Query("limit") limit: Int = 200,
+        @Query("cursor") cursor: String? = null
     ): Response<OrdersListResponse>
 
     @POST("portfolio/events/orders")
