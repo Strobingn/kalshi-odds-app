@@ -326,9 +326,9 @@ class MarketRepository(
 
     private suspend fun logPredictions(markets: List<MarketUiModel>, series: SeriesKind, now: Long) {
         for (m in markets) {
-            if (!CryptoMarkets.isCryptoTicker(m.ticker)) continue
-            val yesPct = m.aiYesPercent ?: continue
-            val noPct = m.aiNoPercent ?: (100.0 - yesPct)
+            if (!CryptoMarkets.isBtc15m(series.ticker, m.ticker)) continue
+            val yesPct = com.dirk.kalshiodds.domain.FairValue.yesPp(m) ?: continue
+            val noPct = (100.0 - yesPct).coerceIn(0.0, 100.0)
             val midPct = m.yesProbabilityPercent ?: continue
             runCatching {
                 val predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideFromProbability(yesPct / 100.0)
@@ -359,7 +359,7 @@ class MarketRepository(
                         timeToMoveSec = m.timeToMoveSec,
                         midVolPp = m.midVolPp,
                         pFill = m.pFill,
-                        mlpYes = m.mlpPp?.div(100.0),
+                        mlpYes = if (m.showAiPercent) m.mlpPp?.div(100.0) else null,
                         cnnYes = m.cnnPp?.div(100.0),
                         gbmYes = m.gbmPp?.div(100.0),
                         entryAsk = sized.entryAsk,

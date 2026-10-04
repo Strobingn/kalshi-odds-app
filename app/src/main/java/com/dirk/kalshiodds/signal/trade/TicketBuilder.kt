@@ -545,14 +545,8 @@ object TicketBuilder {
     }
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
-        val yes = if (market.showAiPercent) {
-            market.importedModelPp?.div(100.0)
-                ?: market.aiYesPercent?.div(100.0)
-                ?: market.digitalFairPp?.div(100.0)
-        } else {
-            market.digitalFairPp?.div(100.0)
-        }
-        if (yes == null || !yes.isFinite()) return null
+        val yes = com.dirk.kalshiodds.domain.FairValue.yesPp(market)?.div(100.0) ?: return null
+        if (!yes.isFinite()) return null
         return if (side == "NO") 1.0 - yes else yes
     }
 

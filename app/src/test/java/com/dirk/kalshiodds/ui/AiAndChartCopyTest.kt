@@ -38,12 +38,27 @@ class AiAndChartCopyTest {
         )
         assertNull(banner.banner)
         assertFalse(banner.conflict)
-        val hiddenEdge = hidden.copy(importedModelPp = 90.0, aiYesPercent = 80.0, digitalFairPp = 42.0)
-        assertEquals(
-            0.42,
-            com.dirk.kalshiodds.signal.trade.TicketBuilder.modelProb(hiddenEdge, "YES")!!,
-            1e-9
+        val hiddenEdge = hidden.copy(
+            importedModelPp = 90.0,
+            aiYesPercent = 80.0,
+            digitalFairPp = 42.0,
+            fairValuePp = 61.0,
+            yesAsk = 0.40,
+            yesProbabilityPercent = 40.0
         )
+        val card = HomeCardDetails.modelYesPercent(hiddenEdge)
+        val ticket = com.dirk.kalshiodds.signal.trade.TicketBuilder.modelProb(hiddenEdge, "YES")
+        assertEquals(61.0, card!!, 1e-9)
+        assertEquals(0.61, ticket!!, 1e-9)
+        assertEquals(
+            com.dirk.kalshiodds.domain.FairValue.edgeVsAskPp(hiddenEdge, "YES")!!,
+            card - hiddenEdge.yesAsk!! * 100.0,
+            1e-6
+        )
+        assertEquals(card - hiddenEdge.yesAsk!! * 100.0, ticket * 100.0 - hiddenEdge.yesAsk!! * 100.0, 1e-6)
+        val noScore = hidden.copy(aiYesPercent = null, importedModelPp = null, digitalFairPp = 55.0, fairValuePp = null, yesAsk = 0.30)
+        assertEquals(55.0, HomeCardDetails.modelYesPercent(noScore)!!, 1e-9)
+        assertEquals(0.55, com.dirk.kalshiodds.signal.trade.TicketBuilder.modelProb(noScore, "YES")!!, 1e-9)
     }
 
     @Test

@@ -216,7 +216,7 @@ object HomeCardDetails {
     }
 
     fun modelYesPercent(market: MarketUiModel): Double? =
-        SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+        com.dirk.kalshiodds.domain.FairValue.yesPp(market)
 
     /** Side with more than 50% model probability. 50% is not a pick. */
     fun likelySide(market: MarketUiModel): String? =

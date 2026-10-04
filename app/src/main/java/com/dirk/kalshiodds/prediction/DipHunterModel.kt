@@ -73,7 +73,8 @@ class DipHunterModel(
                 aiNoPercent = if (showAi) pred.no * 100.0 else null,
                 aiConfidence = if (showAi) pred.confidence else null,
                 aiNote = if (showAi) pred.note else null,
-                showAiPercent = showAi
+                showAiPercent = showAi,
+                fairValuePp = market.fairValuePp ?: market.digitalFairPp
             ).withEdgeMetrics(edgeThresholdPp)
         }
 

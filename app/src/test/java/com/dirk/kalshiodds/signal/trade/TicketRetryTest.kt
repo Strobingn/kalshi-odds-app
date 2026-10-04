@@ -248,6 +248,32 @@ class TicketRetryTest {
     }
 
     @Test
+    fun newTicketIdAfterRestartReusesTheOriginalClientOrderId() = runBlocking {
+        val store = MemoryOrderIntentStore()
+        val sent = mutableListOf<String>()
+        var n = 0
+        fun session() = TicketSession(
+            placeOrder = { _: TradeTicket, clientOrderId: String ->
+                sent += clientOrderId
+                Result.failure(IllegalStateException("timeout"))
+            },
+            intentStore = store,
+            idFactory = { "coid-${++n}" },
+            nowMs = { 1_800_000_000_000L }
+        )
+        val first = session()
+        first.addManual(buyTicket())
+        first.approve("t1")
+        assertEquals(listOf("coid-1"), sent)
+        val second = session()
+        second.onStart()
+        second.addManual(buyTicket().copy(id = "t2"))
+        second.approve("t2")
+        assertEquals(listOf("coid-1", "coid-1"), sent)
+        assertEquals(listOf("coid-1"), store.load().map { it.clientOrderId }.distinct())
+    }
+
+    @Test
     fun unknownCloseTimeNeverDropsThePendingOrder() = runBlocking {
         var now = 1_800_000_000_000L
         val store = MemoryOrderIntentStore()
