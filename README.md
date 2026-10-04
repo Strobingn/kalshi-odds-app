@@ -19,6 +19,25 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.3 (Claude branch, Bitcoin Claude)
+
+**No way of betting this market came out positive.** A study of Kalshi's own public trade history (952 settled `KXBTC15M` windows, 33.3M trades, 2026-09-24 → 2026-10-04) found that buying at the ask lost 1.01¢ per contract (−2.1% of stake, 95% CI [−1.14, −0.87]), almost all of it the fee. Resting orders earned +0.29¢ per fill only at the front of the queue and lost 0.9–1.5¢ behind the 2,000–10,000 contracts that normally sit at the best bid. Full write-up: [`docs/tape-study-2026-10-04.md`](docs/tape-study-2026-10-04.md). 1.3 does not add a live strategy; it shows the cost, limits the damage, and paper-tests the one lead that turned up.
+
+- **What this bet costs, on the REAL MONEY sheet.** Every live buy now shows the win rate it needs to break even (all-in cost per contract) next to the win rate the price implies, the fee as a share of the bet, and what past buyers at that price and with that much time left got in the study (for example, buyers at 20–30¢ lost 10.0% of their stake; with 10–15 min left buyers lost 5.2%). Display only: it never sizes, gates or places an order. `TakerCost` / `TakerCostTest`.
+- **Daily live cap.** Live buys stop once the day's all-in total reaches the cap (default **$50**, Settings → Live Approve tickets, 0 = off). A buy that would pass it is not sent and the reason is shown. Sells and paper are never blocked. The count resets at midnight on the phone; the part of a resting order Kalshi confirms as cancelled is given back. `LiveDailyCap` / `LiveDailyCapTest`.
+- **Trade-tape study tool.** `tools/research/tape_study.py` (`pull`, `report`, `makersim`, `hourly`, `streaks`) reproduces the write-up from public data, no API key.
+- **Flow fade, paper only.** The one lead from 18 order-flow rules on the same tape: after 30 s of at least 3:1 one-sided taker buying, the other side won 69.0% at a 63.4¢ ask, +4.2¢ per contract after the fee over 700 bets (95% CI [+0.9, +7.4], 99% CI [−0.2, +8.3]). It is the best of 18 tries and nearly all of it comes from the last 4 of 11 days, so it is not proven. A new home card, **Flow fade · PAPER**, runs the rule on live trades and logs paper bets only (needs Live signals on). Write-up: [`docs/flow-fade-2026-10-04.md`](docs/flow-fade-2026-10-04.md); tool: `tools/research/flow_study.py`. `FlowFadeRule` / `FlowFadeTest`.
+- **Update from inside the app.** Settings → **App update** shows this build's number, checks GitHub for a newer `Claude` build when Settings opens or on tap, and Download hands the APK to the browser. Every CI APK is signed with the same committed debug key, so it installs over the old one and keeps settings and the Kalshi key. `AppUpdate` / `AppUpdateTest`.
+
+| Control | Code | Test |
+|---------|------|------|
+| Cost lines on the confirm sheet | `TakerCost.of` → `TakerCostLines` | `TakerCostTest` |
+| Daily cap before a live buy | `OddsViewModel.approveLiveWithinCap` → `LiveDailyCap.blockReason` | `LiveDailyCapTest.buysFitUntilTheCapThenBlockWithAReason` |
+| Cap slider | `LiveDailyCapSetting` → `LiveDailyCapStore.setCapUsd` | `LiveDailyCapTest.storePersistsAndRollsOverAtMidnight` |
+| Cancel gives the cap back | `OddsViewModel.cancelWorkingOrder` → `LiveDailyCap.cancelledCostOf` | `LiveDailyCapTest.cancelReleasesOnlyWhatKalshiReportedCancelled` |
+| Flow-fade paper entry | `SignalHub.maybeFlowFade` → `FlowFadeRule.evaluate` → `LateFavoriteLedger.record` | `FlowFadeTest` |
+| Check for update | `AppUpdateSetting` → `AppUpdateChecker.check` → `AppUpdate.decide` | `AppUpdateTest` |
+
 ## 0.3.15
 
 - **Sticky "Window closed" after rollover.** 0.3.14 kept MANUAL / SELL tickets from a closed 15-minute window forever (`preservedManuals` / `voidTickers`) and set `lastError = Window closed` on every refresh. Once a Buy/Sell card was open across a rollover, the error stuck on the fresh window and the dead card never left. A closed window now shows a one-time notice (`That window closed. Nothing was sent.`), voids the ticket so Approve cannot place, then drops it after ~5s / the next refresh and clears `lastError`. `lastOrderError` is recorded once per voided ticket. An in-flight Submitting order is left alone.
