@@ -78,7 +78,10 @@ class MarketRollover(
         if (loop?.isActive == true) return
         loop = scope.launch {
             while (isActive) {
-                runCatching { refreshFromRest() }
+                val uiUp = com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
+                if (uiUp) {
+                    runCatching { refreshFromRest() }
+                }
                 sleeper(nextDelayMs())
             }
         }
@@ -92,7 +95,9 @@ class MarketRollover(
     fun nextDelayMs(): Long {
         val now = clock.nowMs()
         val wake = last.nextWakeMs ?: return retryMs
-        return (wake - now).coerceAtLeast(50L)
+        // A wake already in the past used to floor at 50ms and spin the
+        // home poller. Never poll faster than [retryMs].
+        return (wake - now).coerceAtLeast(retryMs)
     }
 
     fun onReconnect(): Event {

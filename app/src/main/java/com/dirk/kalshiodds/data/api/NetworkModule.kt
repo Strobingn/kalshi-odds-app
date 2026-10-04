@@ -24,6 +24,7 @@ object NetworkModule {
         OkHttpClient.Builder()
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
+            .addInterceptor(KalshiRest.gate)
             .addInterceptor(logging)
             .addInterceptor { chain ->
                 val request = chain.request().newBuilder()
@@ -34,6 +35,9 @@ object NetworkModule {
             }
             .build()
     }
+
+    /** Shared client. The Kalshi token-bucket gate is the first interceptor. */
+    fun sharedClient(): OkHttpClient = okHttp
 
     val api: KalshiApi by lazy { publicClient(KalshiApi.BASE_URL) }
 

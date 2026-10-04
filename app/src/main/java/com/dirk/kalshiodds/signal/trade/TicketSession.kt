@@ -301,7 +301,23 @@ class TicketSession(
         val clientOrderId = stableClientOrderId(ticket)
         val stamped = if (ticket.clientOrderId == clientOrderId) ticket else ticket.copy(clientOrderId = clientOrderId)
         // Look up before every live send, including the first attempt after a restart.
-        val existing = runCatching { findExistingOrder(clientOrderId, stamped.ticker) }.getOrNull()
+        // A rate-limited lookup must not fall through into a second real order.
+        val lookup = runCatching { findExistingOrder(clientOrderId, stamped.ticker) }
+        val lookupErr = lookup.exceptionOrNull()
+        if (lookupErr != null && isRateLimitedMessage(lookupErr.message)) {
+            val msg = humanError(lookupErr)
+            val kept = cur.proposals.map { if (it.id == stamped.id) stamped else it }
+            val next = TicketUiState(
+                phase = TicketPhase.Failed(stamped, msg, kept),
+                proposals = kept,
+                working = cur.working,
+                lastError = msg,
+                placementCount = cur.placementCount
+            )
+            _state.value = next
+            return next
+        }
+        val existing = lookup.getOrNull()
         if (existing != null) {
             return adoptExisting(cur, stamped, existing.copy(clientOrderId = clientOrderId))
         }
@@ -556,6 +572,13 @@ class TicketSession(
             val lower = message.lowercase()
             return lower.startsWith("no ask to size") ||
                 lower.contains("no ask to size a limit")
+        }
+
+        fun isRateLimitedMessage(message: String?): Boolean {
+            val lower = message?.lowercase().orEmpty()
+            return lower.contains("rate limited") ||
+                lower.contains("too_many_requests") ||
+                lower.contains("429")
         }
 
         fun humanError(err: Throwable): String {

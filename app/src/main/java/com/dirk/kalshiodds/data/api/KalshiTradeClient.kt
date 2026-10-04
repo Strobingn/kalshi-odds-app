@@ -73,7 +73,12 @@ class KalshiTradeClient(
                 val chosen = chooseHost(first) {
                     activeFallback()?.getOrders(limit = 100, cursor = cursor, ticker = filter)
                 }
-                if (!chosen.isSuccessful) return null
+                if (!chosen.isSuccessful) {
+                    if (chosen.code() == 429) {
+                        throw httpFailure(chosen.code(), chosen.errorBody()?.string())
+                    }
+                    return null
+                }
                 val body = chosen.body()
                 val hit = body?.orders.orEmpty().firstOrNull { it.clientOrderId == clientOrderId }
                 if (hit != null) return placedFromExisting(hit, clientOrderId)

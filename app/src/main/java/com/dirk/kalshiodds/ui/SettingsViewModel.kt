@@ -52,8 +52,10 @@ data class SettingsUiState(
     val connectionTestOk: Boolean = false,
     val lastOrderError: String? = null,
     val lastOrderErrorAtMs: Long = 0L,
-    val updateMessage: String = "Kashi only · tags v*-debug from branch kashi · DipHunter-debug.apk",
-    val updateBusy: Boolean = false
+    val updateMessage: String = "Checks v0.3.*-debug releases for DipHunter-debug.apk. Other tags are ignored.",
+    val updateBusy: Boolean = false,
+    val updateProgress: Int? = null,
+    val updateNeedsUnknownApps: Boolean = false
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -413,22 +415,98 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun setColorStyle(style: String) {
+        viewModelScope.launch {
+            prefs.updateColorStyle(style)
+        }
+    }
+
+    fun openUnknownAppsSettings() {
+        val ctx = getApplication<Application>()
+        runCatching {
+            ctx.startActivity(com.dirk.kalshiodds.update.KashiApkInstaller(ctx).unknownAppsIntent())
+        }
+    }
+
     fun checkForKashiUpdate() {
         if (_state.value.updateBusy) return
         viewModelScope.launch {
-            _state.update { it.copy(updateBusy = true, updateMessage = "Checking Kashi releases…") }
-            val message = withContext(Dispatchers.IO) {
-                runCatching {
-                    when (val check = com.dirk.kalshiodds.update.KashiUpdateClient.http().check(AppVersion.versionName)) {
-                        is com.dirk.kalshiodds.update.UpdateCheck.UpToDate ->
-                            "You're on the latest Kashi build (${AppVersion.versionName})."
-                        is com.dirk.kalshiodds.update.UpdateCheck.Available ->
-                            "Kashi ${check.release.tag} is available. Download is checked for package ${com.dirk.kalshiodds.update.KashiReleasePolicy.PACKAGE_ID} and the debug cert before install."
-                        is com.dirk.kalshiodds.update.UpdateCheck.Failed -> check.message
-                    }
-                }.getOrElse { com.dirk.kalshiodds.data.api.KalshiRequestStatus.OFFLINE }
+            _state.update {
+                it.copy(
+                    updateBusy = true,
+                    updateProgress = null,
+                    updateNeedsUnknownApps = false,
+                    updateMessage = "Checking for updates…"
+                )
             }
-            _state.update { it.copy(updateBusy = false, updateMessage = message) }
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { runUpdateCheck() }.getOrElse {
+                    UpdateOutcome.Message(com.dirk.kalshiodds.data.api.KalshiRequestStatus.OFFLINE)
+                }
+            }
+            _state.update {
+                it.copy(
+                    updateBusy = false,
+                    updateProgress = null,
+                    updateMessage = outcome.message,
+                    updateNeedsUnknownApps = outcome.needsUnknownApps
+                )
+            }
+        }
+    }
+
+    private suspend fun runUpdateCheck(): UpdateOutcome {
+        val client = com.dirk.kalshiodds.update.KashiUpdateClient.http()
+        val check = client.check(AppVersion.versionName)
+        prefs.markKashiUpdateCheck(System.currentTimeMillis())
+        return when (check) {
+            is com.dirk.kalshiodds.update.UpdateCheck.UpToDate -> {
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(null)
+                UpdateOutcome.Message("You're on the latest Kashi build (${AppVersion.versionName}).")
+            }
+            is com.dirk.kalshiodds.update.UpdateCheck.Failed -> UpdateOutcome.Message(check.message)
+            is com.dirk.kalshiodds.update.UpdateCheck.Available -> {
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(check.release)
+                downloadAndPrompt(client, check.release)
+            }
+        }
+    }
+
+    private fun downloadAndPrompt(
+        client: com.dirk.kalshiodds.update.KashiUpdateClient,
+        release: com.dirk.kalshiodds.update.KashiReleasePolicy.Release
+    ): UpdateOutcome {
+        val ctx = getApplication<Application>()
+        val dest = java.io.File(ctx.cacheDir, "updates/DipHunter-debug.apk")
+        val downloaded = client.downloadTo(release, dest) { read, total ->
+            val pct = if (total > 0L) ((read * 100L) / total).toInt().coerceIn(0, 100) else null
+            _state.update { it.copy(updateProgress = pct, updateMessage = "Downloading ${release.tag}…") }
+        }
+        return when (downloaded) {
+            is com.dirk.kalshiodds.update.DownloadResult.Rejected ->
+                UpdateOutcome.Message(downloaded.reason)
+            is com.dirk.kalshiodds.update.DownloadResult.Failed ->
+                UpdateOutcome.Message(downloaded.message)
+            is com.dirk.kalshiodds.update.DownloadResult.Verified -> {
+                when (val prompt = com.dirk.kalshiodds.update.KashiApkInstaller(ctx).promptInstall(dest)) {
+                    com.dirk.kalshiodds.update.InstallPrompt.Started ->
+                        UpdateOutcome.Message("Opening the installer for ${release.tag}.")
+                    com.dirk.kalshiodds.update.InstallPrompt.NeedUnknownApps ->
+                        UpdateOutcome.Message(
+                            com.dirk.kalshiodds.update.InstallUnknownApps.GUIDE,
+                            needsUnknownApps = true
+                        )
+                    is com.dirk.kalshiodds.update.InstallPrompt.Rejected ->
+                        UpdateOutcome.Message(prompt.reason)
+                }
+            }
+        }
+    }
+
+    private data class UpdateOutcome(val message: String, val needsUnknownApps: Boolean = false) {
+        companion object {
+            fun Message(message: String, needsUnknownApps: Boolean = false) =
+                UpdateOutcome(message, needsUnknownApps)
         }
     }
 

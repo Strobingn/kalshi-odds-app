@@ -97,7 +97,9 @@ data class SignalSettings(
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false,
     val kalshiDemoEnabled: Boolean = false,
-    val demoCredentialsConfigured: Boolean = false
+    val demoCredentialsConfigured: Boolean = false,
+    /** "classic" (0.3.23, default) or "fieldops" (0.3.24). */
+    val colorStyle: String = com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC
 ) {
     val credentialsConfigured: Boolean get() = apiKeyId.isNotBlank() && hasPrivateKey
 
@@ -156,6 +158,15 @@ class SignalPreferences(
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem)
         )
     }
+
+    suspend fun updateColorStyle(value: String) = edit {
+        it[KEY_COLOR_STYLE] = com.dirk.kalshiodds.ui.theme.ColorStyles.normalize(value)
+    }
+
+    suspend fun lastKashiUpdateCheckMs(): Long =
+        runCatching { app.signalDataStore.data.first()[KEY_UPDATE_CHECK_MS] ?: 0L }.getOrDefault(0L)
+
+    suspend fun markKashiUpdateCheck(nowMs: Long) = edit { it[KEY_UPDATE_CHECK_MS] = nowMs }
 
     suspend fun updateWatchBtc(value: Boolean) = edit { it[KEY_WATCH_BTC] = value }
     suspend fun updateWatchEth(value: Boolean) = edit { it[KEY_WATCH_ETH] = value }
@@ -460,7 +471,8 @@ class SignalPreferences(
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem),
             kalshiDemoEnabled = this[KEY_KALSHI_DEMO] ?: false,
-            demoCredentialsConfigured = extras?.hasDemoCredentials == true
+            demoCredentialsConfigured = extras?.hasDemoCredentials == true,
+            colorStyle = com.dirk.kalshiodds.ui.theme.ColorStyles.normalize(this[KEY_COLOR_STYLE])
         )
     }
 
@@ -543,6 +555,8 @@ class SignalPreferences(
         private val KEY_CONFORMAL = booleanPreferencesKey("conformal_enabled")
         private val KEY_META = booleanPreferencesKey("meta_label_enabled")
         private val KEY_PATH_SIM = booleanPreferencesKey("path_sim_enabled")
+        private val KEY_COLOR_STYLE = stringPreferencesKey("color_style")
+        private val KEY_UPDATE_CHECK_MS = longPreferencesKey("kashi_update_checked_at_ms")
         private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
         private val KEY_STAKE_V0316 = booleanPreferencesKey("last_minute_stake_v0316")
 

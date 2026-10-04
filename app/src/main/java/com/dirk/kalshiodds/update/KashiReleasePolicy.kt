@@ -8,9 +8,11 @@ import org.json.JSONObject
  *
  * Releases are listed from [RELEASES_URL]. `/releases/latest` is never
  * used — that pointer can belong to another branch's rolling release.
- * A build is eligible only when the tag is `vX.Y.Z-debug`, GitHub says
- * it was created from branch `kashi`, and the asset is exactly
- * [ASSET_NAME].
+ * A build is eligible only when the tag is `v0.3.Z-debug` and the asset
+ * is exactly [ASSET_NAME]. Other tags (gtp-*, grokbot, v1.x, Claude)
+ * are ignored. GitHub's target_commitish is a commit SHA, not a branch
+ * name, so it is not used as a filter. The download URL is always the
+ * canonical release asset, never an arbitrary browser_download_url.
  */
 object KashiReleasePolicy {
     const val OWNER = "Strobingn"
@@ -21,7 +23,10 @@ object KashiReleasePolicy {
     const val CERT_SHA256 = "64e2a43a6897c4556a36b82ea31dc89550c65e56b053658e1438bdf3c4cc4608"
     const val RELEASES_URL = "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=30"
 
-    val TAG: Regex = Regex("^v\\d+\\.\\d+\\.\\d+-debug$")
+    val TAG: Regex = Regex("^v0\\.3\\.\\d+-debug$")
+
+    fun assetUrl(tag: String): String =
+        "https://github.com/$OWNER/$REPO/releases/download/$tag/$ASSET_NAME"
 
     data class Asset(val name: String, val downloadUrl: String)
 
@@ -52,10 +57,8 @@ object KashiReleasePolicy {
                 val asset = assets.optJSONObject(i) ?: continue
                 val name = asset.optString("name")
                 if (name == ASSET_NAME) {
-                    match = Asset(
-                        name = name,
-                        downloadUrl = asset.optString("browser_download_url")
-                    )
+                    val tag = obj.optString("tag_name")
+                    match = Asset(name = name, downloadUrl = assetUrl(tag))
                     break
                 }
             }
@@ -71,8 +74,8 @@ object KashiReleasePolicy {
     fun eligible(release: Release): Boolean {
         if (release.draft) return false
         if (!TAG.matches(release.tag)) return false
-        if (release.targetCommitish != BRANCH) return false
         val asset = release.asset ?: return false
+        if (asset.downloadUrl != assetUrl(release.tag)) return false
         if (asset.name != ASSET_NAME) return false
         if (!allowedDownloadUrl(asset.downloadUrl)) return false
         return versionOf(release.versionName) != null
@@ -103,6 +106,12 @@ object KashiReleasePolicy {
         if (parts.size != 3) return null
         val nums = parts.map { it.toIntOrNull() ?: return null }
         return Triple(nums[0], nums[1], nums[2])
+    }
+
+    fun compareVersions(a: String, b: String): Int? {
+        val left = versionOf(a) ?: return null
+        val right = versionOf(b) ?: return null
+        return compare(left, right)
     }
 
     private fun compare(a: Triple<Int, Int, Int>, b: Triple<Int, Int, Int>): Int {

@@ -94,6 +94,7 @@ fun HomeScreen(
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.userMessage) {
         val msg = state.userMessage ?: return@LaunchedEffect
+        if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.isQuietStatus(msg)) return@LaunchedEffect
         snackbar.showSnackbar(msg)
     }
     Scaffold(
@@ -182,9 +183,33 @@ fun HomeScreen(
                                 }
                             }
                         }
+                        state.updateBanner?.let { banner ->
+                            item {
+                                Text(
+                                    banner,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary,
+                                    modifier = Modifier.clickable { onOpenSettings() }
+                                )
+                            }
+                        }
+                        state.pollLabel.takeIf { it.startsWith("Backing off") }?.let { label ->
+                            item {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
                         state.userMessage?.takeIf { !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) }?.let { msg ->
                             item {
-                                Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                                val quiet = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isQuietStatus(msg)
+                                Text(
+                                    msg,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (quiet) colors.textSecondary else MaterialTheme.colorScheme.error
+                                )
                             }
                         }
                         item {
