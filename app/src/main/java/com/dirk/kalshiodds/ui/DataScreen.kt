@@ -128,7 +128,7 @@ fun DataScreen(
 
             Section("Import file")
             Text(
-                "Pick a DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
+                "Pick a Bitcoin Kalshi CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
