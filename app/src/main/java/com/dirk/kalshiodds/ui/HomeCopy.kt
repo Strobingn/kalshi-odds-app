@@ -51,9 +51,21 @@ object HomeCopy {
     ): HomeScorecardSummary = HomeScorecardSummary.of(entries, paperPnlUsd)
 
     fun scorecardSummaryLine(summary: HomeScorecardSummary): String {
-        if (summary.settledCount <= 0) return HomeScorecardSummary.NO_SETTLED
-        val pct = ((summary.hitRate ?: 0.0) * 100.0).roundToInt()
-        return "${summary.wins}-${summary.losses} · $pct% · ${HomeScorecardSummary.paperPnlPart(summary.paperPnlUsd)}"
+        if (summary.settledCount <= 0 && summary.evSideSettled <= 0) return HomeScorecardSummary.NO_SETTLED
+        val primary = if (summary.settledCount <= 0) {
+            "No model-winner picks"
+        } else {
+            val pct = ((summary.hitRate ?: 0.0) * 100.0).roundToInt()
+            "${summary.wins}-${summary.losses} · $pct%"
+        }
+        val pnl = "lifetime ${HomeScorecardSummary.paperPnlPart(summary.paperPnlUsd)}"
+        val ev = if (summary.evSideSettled > 0) {
+            val pct = ((summary.evSideHitRate ?: 0.0) * 100.0).roundToInt()
+            " · EV side ${summary.evSideWins}-${summary.evSideLosses} · $pct%"
+        } else {
+            ""
+        }
+        return "$primary · $pnl$ev"
     }
 
     fun scorecardSummaryLine(

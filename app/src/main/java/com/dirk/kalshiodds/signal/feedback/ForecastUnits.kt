@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.signal.feedback
 
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
+import com.dirk.kalshiodds.signal.model.ProbabilityClamp
 import com.dirk.kalshiodds.signal.model.SignalStance
 import kotlin.math.abs
 
@@ -28,6 +29,22 @@ object ForecastUnits {
 
     fun predictedYesSide(e: PredictionLogEntry): Boolean =
         probability01(e.predictedYes) > 0.5
+
+    /**
+     * Side the model thinks will win: YES when P(YES) > 50%, NO when
+     * P(YES) < 50%. Null when the 2–98% clamp is binding, or at exactly 50%.
+     * This is not the EV side (model versus market).
+     */
+    fun modelWinnerSide(e: PredictionLogEntry): String? {
+        val p = probability01(e.predictedYes)
+        if (!p.isFinite()) return null
+        if (ProbabilityClamp.binding(p)) return null
+        return when {
+            p > 0.5 + 1e-12 -> "YES"
+            p < 0.5 - 1e-12 -> "NO"
+            else -> null
+        }
+    }
 
     /** YES if the app picked YES / UP; NO otherwise. Null side → P(YES) > 0.5. */
     fun pickedSideIsYes(e: PredictionLogEntry): Boolean {

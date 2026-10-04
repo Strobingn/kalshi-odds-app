@@ -46,6 +46,8 @@ class KalshiHttpGate(
         val response = chain.proceed(request)
         if (response.code == 429) {
             bucket.noteWrite429(retryAfterMs(response))
+        } else if (response.code in 200..299) {
+            cache.clear()
         }
         return response
     }
@@ -102,6 +104,11 @@ class KalshiHttpGate(
             sleep(wait)
             slept += wait
         }
+    }
+
+    /** Drop cached GETs so the next read hits Kalshi. Writes call this on success. */
+    fun clearReadCache() {
+        cache.clear()
     }
 
     private fun fresh(key: String): Snap? {

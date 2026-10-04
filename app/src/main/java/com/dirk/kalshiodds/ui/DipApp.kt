@@ -56,7 +56,8 @@ fun DipApp(
     signalHistory: @Composable () -> Unit,
     chart: @Composable () -> Unit,
     live: @Composable () -> Unit = {},
-    more: @Composable () -> Unit = {}
+    more: @Composable () -> Unit = {},
+    realMoney: @Composable () -> Unit = {}
 ) {
     BackHandler(enabled = navigator.canPop && !sheetOpen) {
         navigator.back()
@@ -67,7 +68,7 @@ fun DipApp(
     val showBar = navigator.current in AppRoutes.TABS
     CompositionLocalProvider(LocalDipTabBar provides showBar) {
         if (!showBar) {
-            RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more)
+            RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney)
         } else {
             Column(
                 Modifier
@@ -75,7 +76,7 @@ fun DipApp(
                     .background(MaterialTheme.colorScheme.background)
             ) {
                 Box(Modifier.weight(1f)) {
-                    RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more)
+                    RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney)
                 }
                 DipBottomBar(
                     current = navigator.current,
@@ -98,7 +99,8 @@ private fun RouteBody(
     signalHistory: @Composable () -> Unit,
     chart: @Composable () -> Unit,
     live: @Composable () -> Unit,
-    more: @Composable () -> Unit
+    more: @Composable () -> Unit,
+    realMoney: @Composable () -> Unit
 ) {
     when (navigator.current) {
         AppRoutes.SETTINGS -> settings()
@@ -108,6 +110,7 @@ private fun RouteBody(
         AppRoutes.SIGNAL_HISTORY -> signalHistory()
         AppRoutes.CHART -> chart()
         AppRoutes.LIVE -> live()
+        AppRoutes.REAL_MONEY -> realMoney()
         AppRoutes.MORE -> more()
         else -> home()
     }

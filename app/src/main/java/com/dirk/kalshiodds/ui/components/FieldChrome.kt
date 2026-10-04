@@ -24,6 +24,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Receipt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -259,6 +260,7 @@ private fun tabIcon(route: String): ImageVector = when (route) {
     AppRoutes.HOME -> Icons.Filled.Home
     AppRoutes.SCORECARD -> Icons.Filled.Assessment
     AppRoutes.LIVE -> Icons.Filled.Receipt
+    AppRoutes.REAL_MONEY -> Icons.Filled.AccountBalance
     AppRoutes.DATA -> Icons.Filled.Storage
     AppRoutes.SETTINGS -> Icons.Filled.Settings
     AppRoutes.HISTORY -> Icons.Filled.History

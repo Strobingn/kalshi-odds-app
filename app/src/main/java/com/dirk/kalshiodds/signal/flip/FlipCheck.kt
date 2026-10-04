@@ -370,12 +370,13 @@ object FlipCheck {
      * Cheap asks still need flip support; the underdog still needs
      * [MIN_FLIP_PROB].
      */
+    /**
+     * Paper autopilot only. Cheap asks are never allowed — the live
+     * Approve path uses [allowsSide], which still has its own cheap-ask rule.
+     */
     fun allowsRealisticMove(verdict: Verdict, side: String, ask: Double?): Boolean {
         val px = KalshiPrice.usable(ask) ?: return false
-        val cheap = px + 1e-12 < CHEAP_ASK
-        val flipSupportsCheap = verdict.flipProb >= CHEAP_FLIP_SUPPORT - 1e-15 &&
-            verdict.distanceUsd <= 2.0 * verdict.typicalMoveUsd + 1e-9
-        if (cheap && !flipSupportsCheap) return false
+        if (px + 1e-12 < CHEAP_ASK) return false
         return if (verdict.isLeading(side)) {
             true
         } else {

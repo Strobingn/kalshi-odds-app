@@ -19,12 +19,13 @@ object AppRoutes {
     const val CHART = "chart"
     const val LIVE = "live"
     const val MORE = "more"
+    const val REAL_MONEY = "real-money"
 
     /** FieldOps bottom bar, left to right. */
-    val TABS: List<String> = listOf(HOME, SCORECARD, LIVE, DATA, MORE)
+    val TABS: List<String> = listOf(HOME, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, MORE
+        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, REAL_MONEY, MORE
     )
 }
 

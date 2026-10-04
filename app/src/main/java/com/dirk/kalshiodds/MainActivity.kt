@@ -145,6 +145,16 @@ class MainActivity : ComponentActivity() {
                         live = {
                             com.dirk.kalshiodds.ui.LiveApproveScreen(oddsViewModel)
                         },
+                        realMoney = {
+                            com.dirk.kalshiodds.ui.RealMoneyScreen(
+                                odds = oddsViewModel,
+                                settings = settingsViewModel,
+                                onOpenApiKey = {
+                                    settingsFocusApiKey = true
+                                    navigator.open(AppRoutes.SETTINGS)
+                                }
+                            )
+                        },
                         more = {
                             val message = oddsState.userMessage.orEmpty()
                             val failed = message.contains("offline", ignoreCase = true) ||

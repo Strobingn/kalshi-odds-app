@@ -76,6 +76,7 @@ data class OddsUiState(
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
     val liveCashUsd: Double? = null,
+    val restingOrders: List<com.dirk.kalshiodds.signal.trade.RestingOrder> = emptyList(),
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
     val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
@@ -165,7 +166,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
-                    HomeScorecardSummary.of(entries, paper.liveRealizedPnlUsd)
+                    HomeScorecardSummary.of(
+                        entries,
+                        paper.lifetimeRealizedPnlUsd ?: paper.liveRealizedPnlUsd
+                    )
                 }.collect { summary ->
                     _state.update { it.copy(scorecardSummary = summary) }
                 }
@@ -1151,13 +1155,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 decoratePositions(_state.value.positions)
                 return@launch
             }
-            val (rows, cash) = withContext(Dispatchers.IO) {
+            val fetched = withContext(Dispatchers.IO) {
                 val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
                 val cashUsd = runCatching { container.tradeClient.getCashUsd() }.getOrNull()
-                positions to cashUsd
+                val resting = runCatching { container.tradeClient.listRestingOrders() }
+                Triple(positions, cashUsd, resting)
             }
-            if (cash != null) {
-                _state.update { it.copy(liveCashUsd = cash) }
+            val (rows, cash, orders) = fetched
+            _state.update { cur ->
+                cur.copy(
+                    liveCashUsd = cash ?: cur.liveCashUsd,
+                    restingOrders = orders.getOrElse { cur.restingOrders }
+                )
             }
             val parsed = PositionParser.parseAll(rows)
             decoratePositions(parsed)

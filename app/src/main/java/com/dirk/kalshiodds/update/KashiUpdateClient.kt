@@ -53,7 +53,7 @@ class KashiUpdateClient(
         onProgress: (read: Long, total: Long) -> Unit = { _, _ -> }
     ): DownloadResult {
         if (!KashiReleasePolicy.eligible(release)) {
-            return DownloadResult.Rejected("Release is not a Kashi v0.3.*-debug build")
+            return DownloadResult.Rejected("Release is not a Kashi vX.Y.Z-debug build for this app")
         }
         val url = release.asset?.downloadUrl.orEmpty()
         if (!KashiReleasePolicy.allowedDownloadUrl(url)) {

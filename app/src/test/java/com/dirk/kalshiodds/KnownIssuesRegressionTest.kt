@@ -972,9 +972,9 @@ class KnownIssuesRegressionTest {
         assertEquals(12, summary.wins)
         assertEquals(6, summary.losses)
         assertEquals(18, summary.settledCount)
-        assertEquals("12-6 · 67% · paper +$12.40", summary.line())
+        assertEquals("12-6 · 67% · lifetime paper +$12.40 · EV side 12-6 · 67%", summary.line())
         assertEquals(
-            "12-6 · 67% · paper +$12.40",
+            "12-6 · 67% · lifetime paper +$12.40 · EV side 12-6 · 67%",
             HomeCopy.scorecardSummaryLine(wins + losses + noBet + unsettled, 12.40)
         )
         assertEquals(HomeScorecardSummary.NO_SETTLED, HomeScorecardSummary.of(emptyList(), 99.0).line())

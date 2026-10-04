@@ -26,6 +26,12 @@ object PaperKellySizer {
     const val MIN_KELLY_FRACTION = SignalConstants.PAPER_KELLY_FRACTION_MIN
     const val MAX_KELLY_FRACTION = SignalConstants.PAPER_KELLY_FRACTION_MAX
 
+    /**
+     * Full Kelly f is capped here before any fraction is applied.
+     * There is still no dollar cap — only this fraction of bankroll.
+     */
+    const val MAX_FULL_KELLY_F = 0.10
+
     data class Result(
         val skip: Boolean,
         val reason: String? = null,
@@ -70,7 +76,8 @@ object PaperKellySizer {
         bankrollUsd: Double,
         kellyFraction: Double = DEFAULT_KELLY_FRACTION,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
-        depthContracts: Int? = null
+        depthContracts: Int? = null,
+        maxStakeUsd: Double? = null
     ): Result {
         val px = KalshiPrice.usable(ask)
             ?: return Result(skip = true, reason = "Paper skip — unusable ask")
@@ -80,7 +87,8 @@ object PaperKellySizer {
         val bankroll = bankrollUsd.takeIf { it.isFinite() && it > 0.0 }
             ?: return Result(skip = true, reason = "Paper skip — empty bankroll")
         val cost1 = KalshiFee.totalCost(1, px, feeRate)
-        val f = fullKellyFromCost(p, cost1)
+        val rawF = fullKellyFromCost(p, cost1)
+        val f = if (rawF.isFinite() && rawF > 0.0) rawF.coerceAtMost(MAX_FULL_KELLY_F) else rawF
         if (!f.isFinite() || f <= 0.0) {
             return Result(
                 skip = true,
@@ -92,7 +100,8 @@ object PaperKellySizer {
             )
         }
         val target = bankroll * f * frac
-        val cap = min(target, bankroll)
+        val stakeCap = maxStakeUsd?.takeIf { it.isFinite() }
+        val cap = if (stakeCap != null) min(min(target, bankroll), stakeCap.coerceAtLeast(0.0)) else min(target, bankroll)
         if (cap + 1e-9 < cost1) {
             return Result(
                 skip = true,

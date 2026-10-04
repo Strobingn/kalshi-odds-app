@@ -6,18 +6,22 @@ import org.junit.Test
 
 class DipNavTest {
     @Test
-    fun fiveTabsMatchFieldOpsOrder() {
+    fun tabsMatchFieldOpsOrder() {
         assertEquals(
             listOf(
                 AppRoutes.HOME,
                 AppRoutes.SCORECARD,
                 AppRoutes.LIVE,
+                AppRoutes.REAL_MONEY,
                 AppRoutes.DATA,
                 AppRoutes.MORE
             ),
             DipNav.tabs
         )
-        assertEquals(listOf("Home", "Scorecard", "Live", "Data", "More"), DipNav.tabs.map { DipNav.tabLabel.getValue(it) })
+        assertEquals(
+            listOf("Home", "Scorecard", "Live", "Real Money", "Data", "More"),
+            DipNav.tabs.map { DipNav.tabLabel.getValue(it) }
+        )
     }
 
     @Test

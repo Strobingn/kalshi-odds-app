@@ -26,11 +26,13 @@ sealed class InstallPrompt {
 }
 class KashiApkInstaller(private val context: Context) {
     fun verify(file: File): ApkInstallDecision {
-        val archive = ApkArchiveInspector.inspect(file.readBytes())
-        val fromZip = ApkInstallGate.decide(archive.packageName, archive.certSha256)
-        if (fromZip is ApkInstallDecision.Reject) return fromZip
         val fromPm = packageManagerFacts(file)
-        return ApkInstallGate.decide(fromPm.packageName, fromPm.certSha256)
+        return InstalledApkCheck.decide(
+            archivePackage = fromPm.packageName,
+            archiveCertSha256 = fromPm.certSha256,
+            installedPackage = context.packageName,
+            installedCertSha256 = installedCertSha256()
+        )
     }
 
     fun promptInstall(file: File): InstallPrompt {
@@ -87,6 +89,25 @@ class KashiApkInstaller(private val context: Context) {
             session.commit(pending.intentSender)
         }
         return ApkInstallDecision.Allow
+    }
+
+    private fun installedCertSha256(): String? {
+        val flags = if (Build.VERSION.SDK_INT >= 28) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val info = runCatching {
+            context.packageManager.getPackageInfo(context.packageName, flags)
+        }.getOrNull() ?: return null
+        val signature = if (Build.VERSION.SDK_INT >= 28) {
+            info.signingInfo?.apkContentsSigners?.firstOrNull()
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures?.firstOrNull()
+        }
+        return signature?.let { sha256(it) }
     }
 
     private fun packageManagerFacts(file: File): ApkArchiveInspector.Facts {

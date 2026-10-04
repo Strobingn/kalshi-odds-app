@@ -148,13 +148,21 @@ class SupabaseSync(
                 .put("contracts", f.contracts)
                 .put("limitPrice", f.limitPrice)
                 .put("createdAtMs", f.createdAtMs)
+                .put("updatedAtMs", f.syncAtMs())
                 .put("settled", f.settled)
                 .put("pnlUsd", f.pnlUsd)
+                .put("source", f.source)
                 .put("note", f.note)
+            f.outcome?.let { payload.put("outcome", it) }
+            f.won?.let { payload.put("won", it) }
+            f.aiPct?.takeIf { it.isFinite() }?.let { payload.put("aiPct", it) }
+            f.aiConfidence?.takeIf { it.isFinite() }?.let { payload.put("aiConfidence", it) }
+            f.marketPct?.takeIf { it.isFinite() }?.let { payload.put("marketPct", it) }
+            f.pickSource?.takeIf { it.isNotBlank() }?.let { payload.put("pickSource", it) }
             f.kellyF?.takeIf { it.isFinite() }?.let { payload.put("kellyF", it) }
             f.kellyFraction?.takeIf { it.isFinite() }?.let { payload.put("kellyFraction", it) }
             f.bankrollAfterUsd?.takeIf { it.isFinite() }?.let { payload.put("bankrollAfterUsd", it) }
-            out.add(rec("paper:${f.id}", "paper", f.createdAtMs, payload))
+            out.add(rec("paper:${f.id}", "paper", f.syncAtMs(), payload))
         }
         bundle.settingsSnapshot?.takeIf { !SyncMerge.isForbiddenPayload(it) }?.let { snap ->
             out.add(
@@ -233,9 +241,12 @@ class SupabaseSync(
                         source = o.optString("source").ifBlank { "supabase" },
                         createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
                         settled = o.optBoolean("settled"),
-                        pnlUsd = o.optDouble("pnlUsd").takeIf { o.has("pnlUsd") },
+                        outcome = o.optString("outcome").takeIf { it.isNotBlank() },
+                        won = if (o.has("won") && !o.isNull("won")) o.optBoolean("won") else null,
+                        pnlUsd = o.optDouble("pnlUsd").takeIf { o.has("pnlUsd") && !o.isNull("pnlUsd") },
                         note = o.optString("note"),
-                        aiPct = o.optDouble("aiPct").takeIf { o.has("aiPct") },
+                        aiPct = o.optDouble("aiPct").takeIf { o.has("aiPct") && !o.isNull("aiPct") },
+                        updatedAtMs = o.optLong("updatedAtMs", rec.updatedAtMs),
                         aiConfidence = o.optDouble("aiConfidence").takeIf { o.has("aiConfidence") },
                         marketPct = o.optDouble("marketPct").takeIf { o.has("marketPct") },
                         pickSource = o.optString("pickSource").takeIf { it.isNotBlank() },

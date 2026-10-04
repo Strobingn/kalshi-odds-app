@@ -391,6 +391,18 @@ class SignalPreferences(
         }
     }
 
+    /**
+     * 0.3.28 one-time: the paper book that ran to about $10 is archived
+     * and the bankroll starts again at $1,000. Scorecard and prediction
+     * history are not touched — [PaperBook.reset] only archives the ledger.
+     */
+    suspend fun applyPaperBankrollReset0328IfNeeded(book: com.dirk.kalshiodds.signal.paper.PaperBook) {
+        val due = app.signalDataStore.data.first()[KEY_PAPER_RESET_0328] != true
+        if (!due) return
+        book.reset(com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD)
+        edit { it[KEY_PAPER_RESET_0328] = true }
+    }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         app.signalDataStore.edit(block)
     }
@@ -558,6 +570,7 @@ class SignalPreferences(
         private val KEY_COLOR_STYLE = stringPreferencesKey("color_style")
         private val KEY_UPDATE_CHECK_MS = longPreferencesKey("kashi_update_checked_at_ms")
         private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
+        private val KEY_PAPER_RESET_0328 = booleanPreferencesKey("paper_bankroll_reset_v0328")
         private val KEY_STAKE_V0316 = booleanPreferencesKey("last_minute_stake_v0316")
 
         fun parseTickerList(text: String): List<String> =
