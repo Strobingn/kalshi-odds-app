@@ -18,25 +18,37 @@ import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
 
-/** Checks this build's own branch release and hands a verified package to Android. */
+/** Checks this build's rolling release and hands a verified package to Android. */
 object AppUpdater {
-    private const val VERSION_BASE = 1_000_000
+    const val DOWNLOAD_PREFIX =
+        "https://github.com/Strobingn/kalshi-odds-app/releases/download/"
 
     fun releaseTag(): String = BuildConfig.UPDATE_RELEASE_TAG
 
     fun releaseApiUrl(tag: String = releaseTag()): String =
         "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases/tags/$tag"
 
-    /** True only when both sides have certificates and the sets match. */
+    fun acceptsDownloadUrl(url: String): Boolean = url.startsWith(DOWNLOAD_PREFIX)
+
+    /** True only when both sides have certificates and the SHA-256 sets match. */
     fun sameSigningCertificates(installed: List<ByteArray>, downloaded: List<ByteArray>): Boolean {
         if (installed.isEmpty() || downloaded.isEmpty()) return false
-        return installed.map { sha256(it) }.toSet() == downloaded.map { sha256(it) }.toSet()
+        return certificateSha256(installed) == certificateSha256(downloaded)
     }
+
+    fun certificateSha256(certs: List<ByteArray>): Set<String> = certs.map { sha256(it) }.toSet()
 
     fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
 
-    data class Asset(val url: String, val versionCode: Int)
+    data class Asset(val url: String, val versionCode: Int, val applicationId: String?)
+
+    sealed class Pick {
+        data class Update(val asset: Asset) : Pick()
+        /** Another app's release. Do not offer it and do not treat it as "already current". */
+        data object ForeignApp : Pick()
+        data object None : Pick()
+    }
 
     sealed class Result {
         data object Current : Result()
@@ -44,19 +56,36 @@ object AppUpdater {
         data class Failed(val reason: String) : Result()
     }
 
-    fun parseAsset(releaseJson: String): Asset? {
-        val arr = JSONObject(releaseJson).getJSONArray("assets")
+    fun parseAsset(releaseJson: String): Asset? = when (val pick = pickRelease(releaseJson)) {
+        is Pick.Update -> pick.asset
+        else -> null
+    }
+
+    /**
+     * The rolling tag is the only release the updater reads. A body
+     * `applicationId` that is not this app is skipped entirely, so a higher
+     * version from another branch cannot block the next real update.
+     */
+    fun pickRelease(releaseJson: String): Pick {
+        val root = runCatching { JSONObject(releaseJson) }.getOrNull() ?: return Pick.None
+        val body = root.optString("body")
+        val bodyApp = bodyField(body, "applicationId")
+        val bodyCode = bodyField(body, "versionCode")?.toIntOrNull()
+        if (bodyApp != null && bodyApp != BuildConfig.APPLICATION_ID) return Pick.ForeignApp
+        val arr = root.optJSONArray("assets") ?: return Pick.None
+        var fallback: Asset? = null
         for (i in 0 until arr.length()) {
-            val item = arr.getJSONObject(i)
+            val item = arr.optJSONObject(i) ?: continue
             val name = item.optString("name")
-            if (!name.startsWith("DipHunter-GTP-") || !name.endsWith(".apk")) continue
-            val run = Regex("-(\\d+)\\.apk$").find(name)?.groupValues?.get(1)?.toIntOrNull()
-                ?: continue
             val url = item.optString("browser_download_url")
-            if (!url.startsWith("https://github.com/Strobingn/kalshi-odds-app/releases/download/")) continue
-            return Asset(url, VERSION_BASE + run)
+            if (!name.endsWith(".apk")) continue
+            if (!acceptsDownloadUrl(url)) continue
+            val code = bodyCode ?: runNumber(name)?.let { BuildConfig.VERSION_CODE_BASE + it } ?: continue
+            val asset = Asset(url, code, bodyApp ?: BuildConfig.APPLICATION_ID)
+            if (name == BuildConfig.UPDATE_ASSET_NAME) return Pick.Update(asset)
+            if (fallback == null && name.startsWith("DipHunter")) fallback = asset
         }
-        return null
+        return fallback?.let { Pick.Update(it) } ?: Pick.None
     }
 
     suspend fun checkAndDownload(context: Context): Result = withContext(Dispatchers.IO) {
@@ -67,8 +96,16 @@ object AppUpdater {
                 if (!response.isSuccessful) error("Release unavailable (HTTP ${response.code})")
                 response.body?.string() ?: error("Empty release")
             }
-            val asset = parseAsset(release) ?: error("Release has no branch APK")
+            val asset = when (val pick = pickRelease(release)) {
+                is Pick.ForeignApp -> return@withContext Result.Current
+                is Pick.None -> error("Release has no branch APK")
+                is Pick.Update -> pick.asset
+            }
+            if (asset.applicationId != null && asset.applicationId != BuildConfig.APPLICATION_ID) {
+                return@withContext Result.Current
+            }
             if (asset.versionCode <= BuildConfig.VERSION_CODE) return@withContext Result.Current
+            if (!acceptsDownloadUrl(asset.url)) error("Download URL is not this repository")
             val dest = File(context.cacheDir, "updates/DipHunter-GTP.apk")
             dest.parentFile?.mkdirs()
             val temp = File(dest.parentFile, "DipHunter-GTP.pending.apk")
@@ -83,7 +120,10 @@ object AppUpdater {
                 }
                 if (temp.length() == 0L) error("Empty APK")
                 val packageName = context.packageManager.getPackageArchiveInfo(temp.absolutePath, 0)?.packageName
-                if (packageName != context.packageName) error("Downloaded APK is for a different app")
+                if (packageName != context.packageName) {
+                    temp.delete()
+                    return@withContext Result.Current
+                }
                 val flags = signingFlags()
                 val installed = runCatching {
                     context.packageManager.getPackageInfo(context.packageName, flags)
@@ -118,6 +158,12 @@ object AppUpdater {
         context.startActivity(intent)
         return "Confirm the Android update prompt to keep your existing app data."
     }
+
+    internal fun bodyField(body: String, key: String): String? =
+        Regex("""(?:^|\n)\s*$key\s*[:=]\s*(\S+)""").find(body)?.groupValues?.get(1)
+
+    internal fun runNumber(name: String): Int? =
+        Regex("-(\\d+)\\.apk$").find(name)?.groupValues?.get(1)?.toIntOrNull()
 
     private fun signingFlags(): Int =
         if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES

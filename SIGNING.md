@@ -11,7 +11,7 @@ Published DipHunter APKs are signed with a release keystore kept in GitHub Actio
 | `RELEASE_KEY_ALIAS` | Key alias inside the keystore |
 | `RELEASE_KEY_PASSWORD` | Key password |
 
-CI decodes the keystore into a temporary file and passes the path and passwords to Gradle through environment variables. The workflow does not print those values. If any secret is missing (a fork, or a local build), the build still succeeds and signs with the standard Android debug keystore (`~/.android/debug.keystore`). CI logs a warning that the APK is not release-signed.
+CI decodes the keystore into a temporary file and passes the path and passwords to Gradle through environment variables. The workflow does not print those values. A push to `grokbot` fails when any of those secrets is missing or empty, and it does not publish a debug-signed APK. Pull-request builds, including forks, may compile with the runner debug keystore and never publish a release.
 
 ## Generate a keystore
 
@@ -32,6 +32,6 @@ Store that line as `RELEASE_KEYSTORE_BASE64`. Use the alias and passwords you ch
 
 ## One-time reinstall
 
-Older installs were signed with `app/signing/diphunter-debug.jks`. That certificate is no longer used. Android refuses to install an APK signed with a different certificate over the existing app. Uninstall once, then install the new APK. Uninstall clears app data, including the Kalshi API key — export a keys backup from Settings first if you need it.
+Older installs were signed with `app/signing/diphunter-debug.jks`. That keystore and its passwords are in public git history (`271856d`, `a558f6c`) and are treated as a public certificate. Nothing in the tree or the workflow uses that file. v1.2+ is signed with the private release key. Android refuses an update over the old certificate, so those installs must uninstall once, then install the new APK. Uninstall clears app data, including the Kalshi API key — export a keys backup from Settings first if you need it.
 
 After that, updates signed with the same certificate install in place. The in-app updater compares the downloaded APK with the certificate of the app that is already installed, not with a fingerprint baked into the source.

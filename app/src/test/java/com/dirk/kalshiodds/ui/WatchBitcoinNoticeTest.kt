@@ -16,6 +16,6 @@ class WatchBitcoinNoticeTest {
         assertTrue(WatchBitcoinNotice.TURN_ON.contains("Watch Bitcoin"))
         assertTrue(WatchBitcoinNotice.boardHidden(watchBtc = false, visibleMarkets = 0))
         assertFalse(WatchBitcoinNotice.boardHidden(watchBtc = true, visibleMarkets = 0))
-        assertFalse(WatchBitcoinNotice.boardHidden(watchBtc = false, visibleMarkets = 1))
+        assertTrue(WatchBitcoinNotice.boardHidden(watchBtc = false, visibleMarkets = 1))
     }
 }

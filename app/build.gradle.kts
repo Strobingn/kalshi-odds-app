@@ -6,6 +6,10 @@ plugins {
     id("app.cash.paparazzi")
 }
 
+// Single versionCode offset. AppUpdater reads BuildConfig.VERSION_CODE_BASE.
+// .github/workflows/build-apk.yml reads this same literal.
+val versionCodeBase = 1_100_000
+
 android {
     namespace = "com.dirk.kalshiodds"
     compileSdk = 35
@@ -17,15 +21,22 @@ android {
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a
         // new APK updates this separate installation without version downgrades.
-        versionCode = 1_100_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.2"
-        val updateBranch = System.getenv("GITHUB_REF_NAME")?.takeIf { it.isNotBlank() } ?: "local"
+        versionCode = versionCodeBase + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
+        versionName = "1.3"
+        val updateBranch = System.getenv("GITHUB_REF_NAME")?.takeIf { it.isNotBlank() } ?: "grokbot"
+        val safeBranch = updateBranch.replace("\\", "").replace("\"", "").replace(" ", "")
         val updateReleaseTag = System.getenv("UPDATE_RELEASE_TAG")?.takeIf { it.isNotBlank() }
-            ?: "gtp-v1.0-$updateBranch"
+            ?: "$safeBranch-latest"
+        buildConfigField("int", "VERSION_CODE_BASE", versionCodeBase.toString())
         buildConfigField(
             "String",
             "UPDATE_RELEASE_TAG",
             "\"${updateReleaseTag.replace("\\", "").replace("\"", "")}\""
+        )
+        buildConfigField(
+            "String",
+            "UPDATE_ASSET_NAME",
+            "\"DipHunter-$safeBranch.apk\""
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -8,6 +8,7 @@ import com.dirk.kalshiodds.data.local.MarketSnapshotCache
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import java.io.IOException
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -109,6 +110,35 @@ class MarketRepositoryRefreshTest {
     }
 
     @Test
+    fun offlineWithWatchBitcoinOffDoesNotShowTheCachedBoard() = runBlocking {
+        val cache = FailWriteCache(cachedPayload(), IOException("offline"))
+        val snap = repo(EmptyApi(), cache).refresh(watchBtc = false)
+        assertEquals("offline", snap.errorMessage)
+        assertTrue(snap.btc.isEmpty())
+        assertEquals(listOf("KXBTC15M-CACHED"), cache.read()?.btc?.map { it.ticker })
+    }
+
+    @Test
+    fun rateLimitedWithWatchBitcoinOffDoesNotShowTheCachedBoard() = runBlocking {
+        val cache = FailWriteCache(cachedPayload(), http(429))
+        val snap = repo(EmptyApi(), cache).refresh(watchBtc = false)
+        assertTrue(snap.rateLimited)
+        assertTrue(snap.btc.isEmpty())
+        assertEquals(listOf("KXBTC15M-CACHED"), cache.read()?.btc?.map { it.ticker })
+    }
+
+    @Test
+    fun coldStartCacheStaysHiddenWhenWatchBitcoinIsOff() = runBlocking {
+        val cache = cachedBoard()
+        val snap = repo(EmptyApi(), cache).cachedBoard(watchBtc = false).first()
+        assertTrue(snap!!.btc.isEmpty())
+        assertTrue(snap.fromCache)
+        assertEquals(listOf("KXBTC15M-CACHED"), cache.read()?.btc?.map { it.ticker })
+        val shown = repo(EmptyApi(), cache).cachedBoard(watchBtc = true).first()
+        assertEquals(listOf("KXBTC15M-CACHED"), shown!!.btc.map { it.ticker })
+    }
+
+    @Test
     fun offlineWithNoCacheReturnsAnErrorSnapshot() = runBlocking {
         val api = ThrowingApi(IOException("offline"))
         val snap = repo(api, MemoryCache(null)).refresh()
@@ -116,6 +146,31 @@ class MarketRepositoryRefreshTest {
         assertFalse(snap.fromCache)
         assertEquals("offline", snap.errorMessage)
         assertTrue(snap.btc.isEmpty())
+    }
+
+    private fun cachedPayload() = CachedMarketsPayload(
+        btc = listOf(MarketDto(ticker = "KXBTC15M-CACHED", status = "active", yesAskDollars = "0.4000")),
+        fetchedAtEpochMs = 50L
+    )
+
+    private fun cachedBoard() = MemoryCache(cachedPayload())
+
+    private class FailWriteCache(
+        initial: CachedMarketsPayload?,
+        private val error: Exception
+    ) : MarketSnapshotCache {
+        private var payload = initial
+        override val cachedFlow = MutableStateFlow(payload)
+        override suspend fun read(): CachedMarketsPayload? = payload
+        override suspend fun write(
+            btc: List<MarketDto>,
+            eth: List<MarketDto>,
+            sol: List<MarketDto>,
+            extra: List<MarketDto>,
+            fetchedAtEpochMs: Long
+        ) {
+            throw error
+        }
     }
 
     private fun repo(api: KalshiApi, cache: MarketSnapshotCache): MarketRepository {

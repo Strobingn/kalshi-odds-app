@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.trade
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -202,6 +203,44 @@ class TicketRetryTest {
         assertEquals(cappedSubmit.contracts, capped.contracts)
         assertTrue(capped.allInUsd <= 5.0 + 1e-6)
         assertTrue(capped.withinCap)
+    }
+
+    @Test
+    fun pendingOrderDropsOnceItsMarketHasClosed() = runBlocking {
+        val ticker = "KXBTC15M-26SEP241645-45"
+        val close = com.dirk.kalshiodds.ui.WindowLabel.closeEpochMs(ticker)!!
+        var now = close - 60_000L
+        val store = MemoryOrderIntentStore()
+        fun session() = TicketSession(
+            placeOrder = { _: TradeTicket, _: String -> Result.failure(IllegalStateException("timeout")) },
+            intentStore = store,
+            idFactory = { "id-old" },
+            nowMs = { now }
+        )
+        val open = session()
+        open.addManual(buyTicket().copy(ticker = ticker))
+        open.approve("t1")
+        assertEquals(1, store.load().size)
+        now = close + 1_000L
+        session().onStart()
+        assertTrue(store.load().isEmpty())
+        assertTrue(PendingOrderIntent.marketClosed(ticker, now))
+        assertFalse(PendingOrderIntent.marketClosed("KXBTC15M-T", now))
+    }
+
+    @Test
+    fun handEditedLimitRechecksEdgeWithoutBlockingTheEdit() {
+        val ticket = buyTicket().copy(modelChance = 0.45, limitPrice = 0.20, impliedChance = 0.20)
+        val worse = TicketBuilder.repriceBuy(ticket, stakeUsd = 5.0, limitPrice = 0.50)
+        assertEquals(0.50, worse.limitPrice, 1e-9)
+        assertTrue(worse.edgeCheckNote!!.contains("does not clear"))
+        assertTrue(worse.blockedReason == null || !worse.blockedReason!!.contains("Edge"))
+        val quote = ConfirmQuote.buy(ticket, stakeText = "5", centsText = "50")
+        assertEquals(worse.edgeCheckNote, quote.edgeNote)
+        assertEquals(quote.contracts, TicketBuilder.repriceBuy(ticket, quote.submittedStakeUsd, quote.submittedLimitPrice).contracts)
+        val better = TicketBuilder.repriceBuy(ticket, stakeUsd = 5.0, limitPrice = 0.20)
+        assertTrue(better.edgeCheckNote!!.contains("clears"))
+        assertTrue(better.contracts > 0)
     }
 
     @Test

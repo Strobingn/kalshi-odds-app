@@ -74,7 +74,9 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /** Recomputed when the limit is edited. Display only — typing stays enabled. */
+    val edgeCheckNote: String? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

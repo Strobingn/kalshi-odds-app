@@ -3,6 +3,7 @@ name: Build DipHunter GTP APK
 on:
   push:
     branches: [Claude, main, chat-GTP, grokbot]
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -35,10 +36,17 @@ jobs:
       - name: Read version
         id: ver
         run: |
+          set -euo pipefail
           name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
-          code=$((1100000 + GITHUB_RUN_NUMBER))
+          base=$(sed -n 's/^val versionCodeBase = \([0-9_]*\).*/\1/p' app/build.gradle.kts | tr -d '_')
+          if [ -z "$base" ]; then
+            echo "::error::versionCodeBase is missing from app/build.gradle.kts"
+            exit 1
+          fi
+          code=$((base + GITHUB_RUN_NUMBER))
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
 
       - name: Decode release keystore
         id: signing
@@ -56,7 +64,7 @@ jobs:
             echo "mode=release" >> "$GITHUB_OUTPUT"
             echo "keystore=$RUNNER_TEMP/signing/release.jks" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::Release signing secrets are missing (RELEASE_KEYSTORE_BASE64, RELEASE_KEYSTORE_PASSWORD, RELEASE_KEY_ALIAS, RELEASE_KEY_PASSWORD). The APK will use the standard Android debug keystore and is not release-signed."
+            echo "::warning::Release signing secrets are missing. This build will not be published."
             echo "mode=debug" >> "$GITHUB_OUTPUT"
             echo "keystore=" >> "$GITHUB_OUTPUT"
           fi
@@ -64,9 +72,33 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 
+      - name: Gate release signing
+        id: gate
+        run: |
+          set -euo pipefail
+          event="${{ github.event_name }}"
+          ref="${{ github.ref }}"
+          mode="${{ steps.signing.outputs.mode }}"
+          # Fork and same-repo pull requests may compile unsigned. They never publish.
+          if [ "$event" = "pull_request" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Pushes and manual runs on grokbot must be release-signed. Do not
+          # fall back to the runner debug key and do not publish that APK.
+          if [ "$ref" = "refs/heads/grokbot" ] && [ "$mode" != "release" ]; then
+            echo "::error::RELEASE_KEYSTORE_* secrets are required on grokbot. Refusing to publish a debug-signed APK."
+            exit 1
+          fi
+          if [ "$mode" = "release" ]; then
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build APK
         env:
-          UPDATE_RELEASE_TAG: gtp-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
+          UPDATE_RELEASE_TAG: ${{ github.ref_name }}-latest
           RELEASE_STORE_FILE: ${{ steps.signing.outputs.keystore }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
@@ -77,41 +109,64 @@ jobs:
             echo "Signing the APK with the release keystore from GitHub Actions secrets."
             ./gradlew :app:assembleRelease --no-daemon --stacktrace
           else
-            echo "::warning::Release signing secrets are missing. Building with the standard Android debug keystore. This APK is not release-signed."
+            echo "Building unsigned-for-release (debug keystore). This APK will not be published."
             ./gradlew :app:assembleDebug --no-daemon --stacktrace
           fi
 
       - name: Rename APK
         id: apk
         run: |
+          set -euo pipefail
           src=$(ls app/build/outputs/apk/release/*.apk app/build/outputs/apk/debug/*.apk 2>/dev/null | head -n1)
-          out="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
-          cp "$src" "$out"
-          echo "path=$out" >> "$GITHUB_OUTPUT"
+          versioned="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
+          stable="DipHunter-${{ github.ref_name }}.apk"
+          cp "$src" "$versioned"
+          cp "$src" "$stable"
+          echo "versioned=$versioned" >> "$GITHUB_OUTPUT"
+          echo "stable=$stable" >> "$GITHUB_OUTPUT"
+          echo "path=$versioned" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
-          path: ${{ steps.apk.outputs.path }}
+          path: ${{ steps.apk.outputs.versioned }}
           if-no-files-found: error
 
       - name: Publish GitHub release
+        if: steps.gate.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="gtp-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
-          notes="DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
-          # Rolling release per version + branch: move the tag to this commit.
-          gh release delete "$tag" --yes --cleanup-tag || true
-          gh release create "$tag" "${{ steps.apk.outputs.path }}" \
+          versioned_tag="gtp-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
+          rolling_tag="${{ github.ref_name }}-latest"
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          {
+            echo "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from ${{ github.ref_name }} @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+            echo
+            echo "applicationId: com.dirk.kalshiodds.chatgtp"
+            echo "versionCode: ${{ steps.ver.outputs.code }}"
+            echo "versionName: ${{ steps.ver.outputs.name }}"
+            echo "asset: ${{ steps.apk.outputs.stable }}"
+            echo
+            echo "The in-app updater reads only the rolling tag ${rolling_tag}. v1.2+ is signed with the private release key. The old debug certificate that was committed to git is public; installs still on that certificate must uninstall once."
+          } > "$notes_file"
+          # Keep a versioned prerelease for humans. The updater does not read it.
+          gh release delete "$versioned_tag" --yes --cleanup-tag || true
+          gh release create "$versioned_tag" "${{ steps.apk.outputs.versioned }}" \
             --target "$GITHUB_SHA" \
             --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
-            --notes "$notes" \
+            --notes-file "$notes_file" \
             --prerelease
-          # GitHub can leave a freshly uploaded prerelease as a draft even
-          # when `release create` exits successfully. The in-app updater needs
-          # the public release-by-tag endpoint, so verify it before success.
-          gh release edit "$tag" --draft=false --prerelease
-          gh release view "$tag" --json isDraft --jq '.isDraft' | grep -qx false
+          gh release edit "$versioned_tag" --draft=false --prerelease
+          # Rolling tag the updater polls. Stable asset name, replaced every push.
+          gh release delete "$rolling_tag" --yes --cleanup-tag || true
+          gh release create "$rolling_tag" "${{ steps.apk.outputs.stable }}" \
+            --target "$GITHUB_SHA" \
+            --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ github.ref_name }}) latest" \
+            --notes-file "$notes_file" \
+            --prerelease
+          gh release edit "$rolling_tag" --draft=false --prerelease
+          gh release view "$rolling_tag" --json isDraft --jq '.isDraft' | grep -qx false
+          gh release view "$versioned_tag" --json isDraft --jq '.isDraft' | grep -qx false

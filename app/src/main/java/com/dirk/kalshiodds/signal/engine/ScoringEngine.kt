@@ -141,7 +141,8 @@ class ScoringEngine(
         val digitalFairPp: Double? = null,
         val importedModelPp: Double? = null,
         val modelEdgeQualified: Boolean = true,
-        val blendWeight: Double? = null
+        val blendWeight: Double? = null,
+        val showAiPercent: Boolean = true
     )
 
     data class BlendWeights(
@@ -617,7 +618,7 @@ class ScoringEngine(
         var modelEdgeQualified = true
         var importedBlendW: Double? = null
         val loaded = edgeModel
-        if (loaded != null) {
+        if (loaded != null && loaded.usedForBtc()) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
                     spot = spotFeat?.lastPrice,
@@ -642,7 +643,16 @@ class ScoringEngine(
             fair = (0.55 * (fair / 100.0) + 0.45 * blended).times(100.0).coerceIn(2.0, 98.0)
             delta = fair - midPp
             predictedSide = if (delta >= 0) "YES" else "NO"
+        } else if (loaded != null) {
+            importedBlendW = loaded.blendWeight.toDouble()
         }
+        val trainedOnBtc = loaded?.countsOnBtc() == true
+        val showAi = com.dirk.kalshiodds.signal.model.AiDisplay.visible(
+            channelWeight = w.ai,
+            importedWeight = if (trainedOnBtc) loaded?.blendWeight?.toDouble() else 0.0,
+            trainedOnBtc = trainedOnBtc
+        )
+        val modelForDisplay = if (showAi) importedModelPp ?: aiPp else null
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
             spotReturn5m = spotFeat?.spotReturn5m,
@@ -656,7 +666,8 @@ class ScoringEngine(
             priorStreak = tapeStreak[tick.ticker] ?: 0,
             yesBid = tick.yesBid,
             noBid = tick.noBid,
-            modelYesPercent = importedModelPp ?: aiPp
+            modelYesPercent = modelForDisplay,
+            modelActive = showAi
         )
         tapeStreak[tick.ticker] = tape.disagreementStreak
         lastPrimarySide[tick.ticker] = tape.primarySide
@@ -681,7 +692,8 @@ class ScoringEngine(
             spotLabel = combinedSpotLabel,
             heavyNote = if (settings.heavyMlEnabled) heavyOut.note else null,
             uncertaintyBlocked = uncBlocked,
-            extendedNote = extOut?.note
+            extendedNote = extOut?.note,
+            modelPp = modelForDisplay
         )
         heavy.rememberInference(
             ticker = tick.ticker,
@@ -769,9 +781,10 @@ class ScoringEngine(
             primaryHeroSide = tape.primarySide,
             modelLeanSide = if (tape.conflict) tape.modelSide else null,
             digitalFairPp = digitalFairPp,
-            importedModelPp = importedModelPp,
+            importedModelPp = if (showAi) importedModelPp else null,
             modelEdgeQualified = modelEdgeQualified,
-            blendWeight = importedBlendW
+            blendWeight = importedBlendW,
+            showAiPercent = showAi
         )
     }
 
@@ -934,14 +947,15 @@ class ScoringEngine(
         spotLabel: String? = null,
         heavyNote: String? = null,
         uncertaintyBlocked: Boolean = false,
-        extendedNote: String? = null
+        extendedNote: String? = null,
+        modelPp: Double? = aiPp
     ): String {
         val parts = mutableListOf<String>()
         parts += "${regime.shortLabel}/${tte.shortLabel}"
         if (calibrated) parts += "cal"
         if (adapterReady) parts += "adapt"
-        if (aiPp != null) {
-            parts += String.format(java.util.Locale.US, "AI %.0f%% vs mkt %.0f%%", aiPp, midPp)
+        if (modelPp != null) {
+            parts += String.format(java.util.Locale.US, "AI %.0f%% vs mkt %.0f%%", modelPp, midPp)
         } else {
             parts += String.format(java.util.Locale.US, "mkt %.0f%%", midPp)
         }

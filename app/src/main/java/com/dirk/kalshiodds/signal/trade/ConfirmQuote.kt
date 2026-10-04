@@ -18,7 +18,9 @@ object ConfirmQuote {
         val feeUsd: Double,
         val allInUsd: Double,
         val profitIfWinUsd: Double,
-        val blockedReason: String?
+        val blockedReason: String?,
+        /** Same edge check [TicketBuilder.repriceBuy] stored. Does not change the order. */
+        val edgeNote: String? = null
     ) {
         val withinCap: Boolean
             get() = allInUsd <= SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-6 && contracts > 0 && blockedReason == null
@@ -41,7 +43,8 @@ object ConfirmQuote {
             feeUsd = priced.feeUsd ?: 0.0,
             allInUsd = priced.allInUsd ?: priced.stakeUsd,
             profitIfWinUsd = priced.profitIfWinUsd ?: priced.potentialGainUsd,
-            blockedReason = priced.blockedReason
+            blockedReason = priced.blockedReason,
+            edgeNote = priced.edgeCheckNote
         )
     }
 }

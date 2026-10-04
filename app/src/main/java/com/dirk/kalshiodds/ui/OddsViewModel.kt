@@ -46,6 +46,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -178,24 +180,30 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             runCatching {
-                repository.cachedSnapshot.collect { cached ->
-                    if (cached == null) return@collect
-                    val cur = _state.value.snapshot
-                    val shouldApply = cur == null ||
-                        cur.allMarkets.isEmpty() ||
-                        (cur.fromCache && cached.fetchedAtEpochMs >= cur.fetchedAtEpochMs)
-                    if (!shouldApply) return@collect
-                    val overlaid = attachHistory(
-                        cached.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
-                    )
-                    _state.update {
-                        it.copy(
-                            snapshot = overlaid,
-                            isLoading = false,
-                            modelScoreLabel = scoreLabel(overlaid)
+                prefs.settings.map { it.watchBtc }.distinctUntilChanged().collectLatest { watchBtc ->
+                    repository.cachedBoard(watchBtc).collect { cached ->
+                        if (cached == null) return@collect
+                        if (!watchBtc) {
+                            _state.update { it.copy(snapshot = cached, isLoading = false) }
+                            return@collect
+                        }
+                        val cur = _state.value.snapshot
+                        val shouldApply = cur == null ||
+                            cur.allMarkets.isEmpty() ||
+                            (cur.fromCache && cached.fetchedAtEpochMs >= cur.fetchedAtEpochMs)
+                        if (!shouldApply) return@collect
+                        val overlaid = attachHistory(
+                            cached.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
                         )
+                        _state.update {
+                            it.copy(
+                                snapshot = overlaid,
+                                isLoading = false,
+                                modelScoreLabel = scoreLabel(overlaid)
+                            )
+                        }
+                        scheduleRebuildTickets()
                     }
-                    scheduleRebuildTickets()
                 }
             }
         }
@@ -278,8 +286,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         seedOddsHistory()
         seedChartWindows()
-        val cached = runCatching { repository.cachedSnapshot.first() }.getOrNull()
-        if (cached != null && (_state.value.snapshot == null || _state.value.snapshot!!.allMarkets.isEmpty())) {
+        val watchBtc = (hydrated ?: _state.value.settings).watchBtc
+        val cached = runCatching { repository.cachedBoard(watchBtc).first() }.getOrNull()
+        if (!watchBtc && cached != null) {
+            _state.update { it.copy(snapshot = cached, isLoading = false) }
+        } else if (cached != null && (_state.value.snapshot == null || _state.value.snapshot!!.allMarkets.isEmpty())) {
             val overlaid = attachHistory(
                 cached.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
             )

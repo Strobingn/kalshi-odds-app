@@ -40,6 +40,27 @@ object AppBackup {
 
     class BadFile(message: String = "Not a DipHunter full backup") : IllegalArgumentException(message)
 
+    /** Paper / live / demo mode stays whatever the phone is using now. */
+    fun stripTradingMode(json: String): String {
+        val o = runCatching { JSONObject(json) }.getOrElse { return json }
+        o.remove("paperTradingEnabled")
+        o.remove("kalshiDemoEnabled")
+        return o.toString()
+    }
+
+    /** Restore must not bring ETH/SOL rows back into the BTC learner. */
+    fun btcPredictionLog(raw: String): String {
+        val arr = runCatching { JSONArray(raw) }.getOrElse { return "[]" }
+        val kept = JSONArray()
+        for (i in 0 until arr.length()) {
+            val row = arr.optJSONObject(i) ?: continue
+            if (com.dirk.kalshiodds.domain.CryptoMarkets.isBtc15m(row.optString("series"), row.optString("ticker"))) {
+                kept.put(row)
+            }
+        }
+        return kept.toString()
+    }
+
     fun settingsJson(settings: SignalSettings): String {
         val o = JSONObject()
         o.put("watchBtc", settings.watchBtc)
@@ -111,7 +132,7 @@ object AppBackup {
     fun restore(text: String, passphrase: CharArray?): Restored {
         val root = runCatching { JSONObject(text) }.getOrElse { throw BadFile() }
         if (root.optString("format") != FORMAT) throw BadFile()
-        val settings = root.optJSONObject("settings")?.toString().orEmpty()
+        val settings = stripTradingMode(root.optJSONObject("settings")?.toString().orEmpty())
         val resultsObj = root.optJSONObject("results")
         val results = if (resultsObj == null) {
             ResultsImporter.Parsed(
@@ -121,7 +142,7 @@ object AppBackup {
         } else {
             ResultsImporter.parse(StringReader(resultsObj.toString()))
         }
-        val prediction = root.optJSONArray("predictionLog")?.toString() ?: "[]"
+        val prediction = btcPredictionLog(root.optJSONArray("predictionLog")?.toString() ?: "[]")
         val creds = root.optJSONObject("credentials")
         val included = creds?.optBoolean("included") == true
         if (!included) {

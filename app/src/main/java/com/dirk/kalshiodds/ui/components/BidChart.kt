@@ -40,6 +40,10 @@ import java.util.Locale
 import java.util.TimeZone
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
+/** Spot series is gray (`accentOrange` is a gray token). Caption must not say orange. */
+const val CHART_SPOT_CAPTION =
+    "Gray = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids. Drag to scrub."
+
 /**
  * Two-line UP/DOWN bid chart. Canvas only — no charting library.
  */

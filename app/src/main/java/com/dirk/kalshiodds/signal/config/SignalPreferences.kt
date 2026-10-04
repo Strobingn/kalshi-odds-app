@@ -339,14 +339,14 @@ class SignalPreferences(
         r.ticketStakeUsd?.let { updateTicketStakeUsd(it) }
         r.bankrollUsd?.let { updateBankrollUsd(it) }
         r.edgeThresholdPp?.let { updateEdgeThresholdPp(it) }
-        r.paperTradingEnabled?.let { updatePaperTrading(it) }
         r.minConfidence?.let { updateMinConfidence(it) }
         r.maxSpreadCents?.let { updateMaxSpreadCents(it) }
     }
 
-    /** Applies a full-backup settings object. Never writes API keys. */
+    /** Applies a full-backup settings object. Never writes API keys or paper/live/demo mode. */
     suspend fun restoreBackup(json: String) {
-        val o = runCatching { org.json.JSONObject(json) }.getOrNull() ?: return
+        val stripped = com.dirk.kalshiodds.data.local.AppBackup.stripTradingMode(json)
+        val o = runCatching { org.json.JSONObject(stripped) }.getOrNull() ?: return
         fun bool(key: String): Boolean? = if (o.has(key) && !o.isNull(key)) o.optBoolean(key) else null
         fun dbl(key: String): Double? =
             if (o.has(key) && !o.isNull(key)) o.optDouble(key).takeIf { it.isFinite() } else null
@@ -369,7 +369,6 @@ class SignalPreferences(
         dbl("bankrollUsd")?.let { updateBankrollUsd(it) }
         dbl("feeRate")?.let { updateFeeRate(it) }
         bool("ticketsEnabled")?.let { updateTicketsEnabled(it) }
-        bool("paperTradingEnabled")?.let { updatePaperTrading(it) }
         dbl("ticketStakeUsd")?.let { updateTicketStakeUsd(it) }
         bool("ticketRespectGates")?.let { updateTicketRespectGates(it) }
         dbl("hunterValueStakeUsd")?.let { updateHunterValueStakeUsd(it) }
@@ -382,7 +381,6 @@ class SignalPreferences(
             updateWinTargetAbsCapUsd(dbl("winTargetAbsCapUsd"))
         }
         dbl("minProfitIfWinUsd")?.let { updateMinProfitIfWinUsd(it) }
-        bool("kalshiDemoEnabled")?.let { updateKalshiDemo(it) }
         int("streakPauseN")?.let { updateStreakPauseN(it) }
         dbl("drawdownUsd")?.let { updateDrawdownUsd(it) }
         bool("resumeOnNewSession")?.let { updateResumeOnNewSession(it) }

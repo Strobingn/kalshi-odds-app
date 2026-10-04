@@ -43,6 +43,14 @@ object WindowLabel {
         TIME.format(ZonedDateTime.ofInstant(Instant.ofEpochMilli(epochMs), ET))
 
     fun parseTickerClock(ticker: String): String? {
+        val zdt = closeZoned(ticker) ?: return null
+        return TIME.format(zdt)
+    }
+
+    /** Close instant encoded in a 15m ticker, or null when the ticker has no clock. */
+    fun closeEpochMs(ticker: String): Long? = closeZoned(ticker)?.toInstant()?.toEpochMilli()
+
+    private fun closeZoned(ticker: String): ZonedDateTime? {
         val key = ticker.split("-").getOrNull(1) ?: return null
         val m = WINDOW.matchEntire(key) ?: return null
         val day = m.groupValues[1].toInt()
@@ -52,7 +60,6 @@ object WindowLabel {
         val hour = hhmm / 100
         val minute = hhmm % 100
         if (hour !in 0..23 || minute !in 0..59 || day !in 1..31) return null
-        val zdt = ZonedDateTime.of(year, month, day, hour, minute, 0, 0, ET)
-        return TIME.format(zdt)
+        return runCatching { ZonedDateTime.of(year, month, day, hour, minute, 0, 0, ET) }.getOrNull()
     }
 }

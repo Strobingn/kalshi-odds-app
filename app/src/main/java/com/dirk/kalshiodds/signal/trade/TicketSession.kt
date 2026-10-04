@@ -295,6 +295,7 @@ class TicketSession(
             return _state.value
         }
         if (cur.phase is TicketPhase.Submitting) return cur
+        reloadIntents()
 
         val conflict = pendingIntents.firstOrNull { it.isOpen && it.matchesSlot(ticket) && !it.sameTerms(ticket) }
         if (conflict != null) {
@@ -421,8 +422,11 @@ class TicketSession(
     }
 
     private fun reloadIntents() {
+        val loaded = intentStore.load()
+        val kept = PendingOrderIntent.stillPending(loaded, nowMs())
         pendingIntents.clear()
-        pendingIntents += intentStore.load().filter { it.isOpen }
+        pendingIntents += kept
+        if (kept.size != loaded.size) intentStore.save(kept)
     }
 
     private fun upsertIntent(intent: PendingOrderIntent) {

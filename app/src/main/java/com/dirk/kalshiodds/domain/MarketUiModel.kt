@@ -105,7 +105,12 @@ data class MarketUiModel(
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
     val featureDevs: Map<String, Double> = emptyMap(),
     /** Kalshi `open_time`. When null, 15m windows infer close − [MarketLifecycle.WINDOW_MS]. */
-    val openTimeEpochMs: Long? = null
+    val openTimeEpochMs: Long? = null,
+    /**
+     * False when the AI channel weight is 0 and no BTC-trained imported model
+     * is in the blend. Cards then hide the AI percent and the AI banner.
+     */
+    val showAiPercent: Boolean = true
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -277,7 +282,8 @@ fun MarketUiModel.withSignalScore(
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
         spotVsTargetUsd = score.spotVsTargetUsd,
-        featureDevs = score.featureDevs
+        featureDevs = score.featureDevs,
+        showAiPercent = score.showAiPercent
     )
 }
 

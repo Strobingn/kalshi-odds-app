@@ -89,7 +89,7 @@ class PipelineParityTest {
     }
 
     @Test
-    fun resolveSidePrefersHeroOverFade() {
+    fun resolveSideUsesEdgeAfterFeesNotTheFavourite() {
         val m = MarketUiModel(
             ticker = "KXBTC15M-X",
             title = "BTC",
@@ -114,7 +114,8 @@ class PipelineParityTest {
             primaryHeroSide = "YES",
             netEdgePp = -2.0
         )
-        assertEquals("YES", TicketBuilder.resolveSide(m))
+        assertEquals("NO", TicketBuilder.resolveSide(m))
+        assertFalse(TicketBuilder.resolveSide(m).equals("YES"))
         assertFalse(
             TicketBuilder.modelBeatsImplied(
                 model = 0.32,

@@ -61,6 +61,37 @@ class AppBackupTest {
     }
 
     @Test
+    fun restoreDropsModeFlagsAndEthSolRows() {
+        val settings = SignalSettings(
+            watchBtc = true,
+            paperTradingEnabled = false,
+            kalshiDemoEnabled = true,
+            ticketStakeUsd = 4.0
+        )
+        val log = """[
+            {"ticker":"KXBTC15M-A","series":"KXBTC15M","predictedYes":0.6},
+            {"ticker":"KXETH15M-B","series":"KXETH15M","predictedYes":0.7},
+            {"ticker":"KXSOL15M-C","series":"KXSOL15M","predictedYes":0.4}
+        ]"""
+        val exported = AppBackup.export(settings, "{}", log, null, 3L)
+        assertTrue(exported.text.contains("paperTradingEnabled"))
+        assertTrue(exported.text.contains("kalshiDemoEnabled"))
+        val restored = AppBackup.restore(exported.text, null)
+        val json = org.json.JSONObject(restored.settingsJson)
+        assertFalse(json.has("paperTradingEnabled"))
+        assertFalse(json.has("kalshiDemoEnabled"))
+        assertEquals(4.0, json.getDouble("ticketStakeUsd"), 0.0)
+        assertTrue(restored.predictionLogJson.contains("KXBTC15M-A"))
+        assertFalse(restored.predictionLogJson.contains("KXETH15M"))
+        assertFalse(restored.predictionLogJson.contains("KXSOL15M"))
+        val parsed = com.dirk.kalshiodds.data.local.history.SettingsRestore.parse(
+            """{"paperTradingEnabled":false,"ticketStakeUsd":2.0,"kalshiDemoEnabled":true}"""
+        )
+        assertEquals(null, parsed.paperTradingEnabled)
+        assertEquals(2.0, parsed.ticketStakeUsd!!, 0.0)
+    }
+
+    @Test
     fun blankPassphraseOmitsCredentials() {
         val exported = AppBackup.export(SignalSettings(), "{}", "[]", null, 1L)
         assertFalse(exported.includesCredentials)

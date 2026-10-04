@@ -105,9 +105,12 @@ class MarketRepository(
 
     private val refreshMutex = Mutex()
 
-    val cachedSnapshot: Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
-        payload?.toSnapshot(fromCache = true)
+    /** Cold start and offline reads. [watchBtc] false yields an empty board; the disk cache is kept. */
+    fun cachedBoard(watchBtc: Boolean): Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
+        payload?.toSnapshot(fromCache = true, watchBtc = watchBtc)
     }
+
+    val cachedSnapshot: Flow<MarketsSnapshot?> = cachedBoard(watchBtc = true)
 
     suspend fun listOpen(series: String): List<MarketUiModel> {
         val resp = resolveApi().getMarkets(seriesTicker = series, status = "open")
@@ -160,7 +163,7 @@ class MarketRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            fallbackSnapshot(e)
+            fallbackSnapshot(e, watchBtc)
         }
     }
 
@@ -247,7 +250,7 @@ class MarketRepository(
             )
     }
 
-    private suspend fun fallbackSnapshot(error: Exception): MarketsSnapshot {
+    private suspend fun fallbackSnapshot(error: Exception, watchBtc: Boolean): MarketsSnapshot {
         val rateLimited = RefreshRecovery.isRateLimited(error)
         val message = RefreshRecovery.messageFor(error)
         val retryAfterMs = RefreshRecovery.retryAfterMs(error)
@@ -257,7 +260,8 @@ class MarketRepository(
                 fromCache = true,
                 errorMessage = message,
                 rateLimited = rateLimited,
-                retryAfterMs = retryAfterMs
+                retryAfterMs = retryAfterMs,
+                watchBtc = watchBtc
             )
         }
         return MarketsSnapshot(
@@ -358,11 +362,13 @@ class MarketRepository(
         fromCache: Boolean,
         errorMessage: String? = null,
         rateLimited: Boolean = false,
-        retryAfterMs: Long? = null
+        retryAfterMs: Long? = null,
+        watchBtc: Boolean = true
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
+        val btcRows = if (watchBtc) btc.filter { CryptoMarkets.isCryptoTicker(it.ticker) } else emptyList()
         return MarketsSnapshot(
-            btc = model.annotate(btc.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.BTC) }, now),
+            btc = model.annotate(btcRows.map { it.toUiModel(SeriesKind.BTC) }, now),
             eth = model.annotate(eth.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.ETH) }, now),
             sol = model.annotate(sol.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.SOL) }, now),
             extra = model.annotate(

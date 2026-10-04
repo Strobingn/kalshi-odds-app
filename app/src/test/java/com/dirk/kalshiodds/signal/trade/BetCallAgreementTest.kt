@@ -57,6 +57,27 @@ class BetCallAgreementTest {
     }
 
     @Test
+    fun bothSidesQualifyOnEdgeAfterFeesNotTheFavourite() {
+        val market = sample(yesAsk = 0.30, noAsk = 0.22, aiYes = 48.0, predicted = "YES").copy(
+            primaryHeroSide = "YES",
+            yesBid = 0.28,
+            noBid = 0.20
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(minProfitIfWinUsd = 0.0),
+            alertsPaused = false
+        )
+        assertEquals("NO", TicketBuilder.resolveSide(market))
+        val decision = BetCall.decide(market, ctx)
+        assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
+        assertEquals("NO", decision.side)
+        assertTrue(decision.ticket!!.modelChance!! > 0.0)
+        val yesEdge = TicketBuilder.sideEdgeAfterFees(market, "YES")!!
+        val noEdge = TicketBuilder.sideEdgeAfterFees(market, "NO")!!
+        assertTrue(noEdge > yesEdge)
+    }
+
+    @Test
     fun sortPutsActionableFirst() {
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 70.0, "YES"), SignalSettings())) == 1)

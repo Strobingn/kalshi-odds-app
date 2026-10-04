@@ -337,10 +337,10 @@ class OnlineAdapterTest {
     @Test
     fun overconfidentSlopeDampsProbability() {
         val now = 20_000L
-        val rows = (1..12).map { i ->
+        val rows = (1..SignalConstants.MIN_ADAPTER_SAMPLES).map { i ->
             settled(
-                ticker = "KXETH15M-$i",
-                series = "KXETH15M",
+                ticker = "KXBTC15M-$i",
+                series = "KXBTC15M",
                 hit = i % 2 == 0,
                 ts = now + i,
                 mid = 0.50,
@@ -357,6 +357,43 @@ class OnlineAdapterTest {
     }
 
     @Test
+    fun ethAndSolRowsDoNotTrainTheBtcAdapter() {
+        val rows = (1..SignalConstants.MIN_ADAPTER_SAMPLES).map { i ->
+            settled("KXETH15M-$i", "KXETH15M", true, i.toLong(), features = mapOf("ai" to 8.0), pYes = 0.9)
+        } + (1..20).map { i ->
+            settled("KXSOL15M-$i", "KXSOL15M", false, 1_000L + i, features = mapOf("ai" to -8.0), pYes = 0.1)
+        }
+        val state = OnlineAdapter.update(OnlineAdapter.identity(), rows)
+        assertEquals(0, state.sampleCount)
+        assertEquals(1.0, state.weight("ai"), 1e-9)
+        assertFalse(state.ready)
+        assertEquals(0.7, OnlineAdapter.apply(0.7, state), 1e-9)
+    }
+
+    fun belowOneHundredSamplesAreLoggedButNotApplied() {
+        val rows = (1 until SignalConstants.MIN_ADAPTER_SAMPLES).map { i ->
+            settled(
+                ticker = "KXBTC15M-$i",
+                series = "KXBTC15M",
+                hit = true,
+                ts = i.toLong(),
+                features = mapOf("ai" to 8.0),
+                pYes = 0.8
+            )
+        }
+        assertTrue(rows.size < SignalConstants.MIN_ADAPTER_SAMPLES)
+        assertTrue(SignalConstants.MIN_ADAPTER_SAMPLES >= 100)
+        val state = OnlineAdapter.update(OnlineAdapter.identity(), rows)
+        assertEquals(rows.size, state.sampleCount)
+        assertFalse(state.ready)
+        assertEquals(0.8, OnlineAdapter.apply(0.8, state), 1e-9)
+        val base = com.dirk.kalshiodds.signal.engine.ScoringEngine.BlendWeights(
+            ai = 0.2, flow = 0.2, related = 0.1, velocity = 0.1, imbalance = 0.1,
+            leadLag = 0.1, depth = 0.1, cancel = 0.05, spot = 0.05
+        )
+        assertTrue(OnlineAdapter.scaleBlend(base, state) === base)
+    }
+
     fun watermarkSkipsAlreadyProcessed() {
         val first = listOf(
             settled("A", "KXBTC15M", true, 5, features = mapOf("ai" to 2.0), pYes = 0.60)

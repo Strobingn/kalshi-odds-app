@@ -26,6 +26,27 @@ import java.time.ZoneOffset
 
 class CalibratorTest {
     @Test
+    fun fitEntriesIgnoresEthAndSol() {
+        fun row(series: String, yes: Boolean) = PredictionLogEntry(
+            ticker = "$series-T",
+            series = series,
+            predictedYes = 0.8,
+            predictedNo = 0.2,
+            marketMid = 0.5,
+            timestampMs = 1L,
+            closeTimeMs = 1L,
+            outcome = if (yes) "yes" else "no"
+        )
+        val btc = List(20) { row("KXBTC15M", true) }
+        val mixed = btc + List(30) { row("KXETH15M", false) } + List(30) { row("KXSOL15M", false) }
+        val only = Calibrator.fitEntries(btc)
+        val withAlts = Calibrator.fitEntries(mixed)
+        assertEquals(only.sampleCount, withAlts.sampleCount)
+        assertEquals(only.temperature, withAlts.temperature, 1e-9)
+        assertEquals(0, Calibrator.fitEntries(List(40) { row("KXETH15M", false) }).sampleCount)
+    }
+
+    @Test
     fun coldStartIsIdentity() {
         val cold = Calibrator.fit(List(5) { Calibrator.Sample(0.7, true) })
         assertFalse(cold.ready)

@@ -14,6 +14,7 @@ object WatchBitcoinNotice {
 
     const val TURN_ON = "Turn Watch Bitcoin on"
 
-    fun boardHidden(watchBtc: Boolean, visibleMarkets: Int): Boolean =
-        !watchBtc && visibleMarkets <= 0
+    /** The switch hides the board even when a cached snapshot still has markets. */
+    @Suppress("UNUSED_PARAMETER")
+    fun boardHidden(watchBtc: Boolean, visibleMarkets: Int = 0): Boolean = !watchBtc
 }

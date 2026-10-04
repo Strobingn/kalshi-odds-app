@@ -76,7 +76,7 @@ object Calibrator {
     }
 
     fun fitEntries(entries: List<PredictionLogEntry>, nowMs: Long = System.currentTimeMillis()): State {
-        val samples = entries.mapNotNull { e ->
+        val samples = entries.filter { com.dirk.kalshiodds.domain.CryptoMarkets.isBtc15m(it.series, it.ticker) }.mapNotNull { e ->
             val y = when (e.outcome?.lowercase()) {
                 "yes" -> true
                 "no" -> false

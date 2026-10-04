@@ -130,6 +130,7 @@ private fun AskHeroSide(
 
 @Composable
 fun AiFairLabel(market: MarketUiModel, modifier: Modifier = Modifier) {
+    if (!market.showAiPercent) return
     val colors = DipTheme.colors
     val ai = KalshiQuoteDisplay.aiLabel(
         (market.importedModelPp ?: market.aiYesPercent)?.div(100.0)

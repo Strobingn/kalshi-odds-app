@@ -77,6 +77,15 @@ data class PendingOrderIntent(
             return array.toString()
         }
 
+        /** True once the ticker's 15m window has closed. Unparseable tickers are kept. */
+        fun marketClosed(ticker: String, nowMs: Long): Boolean {
+            val close = com.dirk.kalshiodds.ui.WindowLabel.closeEpochMs(ticker) ?: return false
+            return nowMs >= close
+        }
+
+        fun stillPending(intents: List<PendingOrderIntent>, nowMs: Long): List<PendingOrderIntent> =
+            intents.filter { it.isOpen && !marketClosed(it.ticker, nowMs) }
+
         fun decode(raw: String?): List<PendingOrderIntent> {
             if (raw.isNullOrBlank()) return emptyList()
             val array = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()

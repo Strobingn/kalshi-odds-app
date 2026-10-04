@@ -116,6 +116,7 @@ class PredictionLogStore(private val context: Context) {
     ): List<PredictionLogEntry> {
         val list = existing.toMutableList()
         for (entry in incoming) {
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isBtc15m(entry.series, entry.ticker)) continue
             val dup = list.any { it.ticker == entry.ticker && it.timestampMs == entry.timestampMs }
             if (!dup) list.add(entry)
         }

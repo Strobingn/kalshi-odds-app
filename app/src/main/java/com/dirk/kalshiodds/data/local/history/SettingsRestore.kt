@@ -45,7 +45,7 @@ object SettingsRestore {
             ticketStakeUsd = o.optDoubleOrNull("ticketStakeUsd"),
             bankrollUsd = o.optDoubleOrNull("bankrollUsd"),
             edgeThresholdPp = o.optDoubleOrNull("edgeThresholdPp"),
-            paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
+            paperTradingEnabled = null,
             minConfidence = o.optDoubleOrNull("minConfidence"),
             maxSpreadCents = o.optDoubleOrNull("maxSpreadCents"),
             minProfitIfWinUsd = o.optDoubleOrNull("minProfitIfWinUsd")

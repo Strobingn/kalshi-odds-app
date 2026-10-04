@@ -157,7 +157,8 @@ fun TradeTicketsSection(
                 onReview,
                 onDismiss,
                 onPaper,
-                onReviseBuy
+                onReviseBuy,
+                feeRate
             )
         }
     }
@@ -188,7 +189,8 @@ private fun ProposedTicketCard(
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onPaper: (String) -> Unit,
-    onReviseBuy: (String, Double, Double) -> Unit = { _, _, _ -> }
+    onReviseBuy: (String, Double, Double) -> Unit = { _, _, _ -> },
+    feeRate: Double = com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE
 ) {
     var stakeText by remember(ticket.id, ticket.stakeUsd) {
         mutableStateOf(String.format(Locale.US, "%.2f", ticket.stakeUsd.coerceAtMost(5.0)))
@@ -374,8 +376,17 @@ private fun ProposedTicketCard(
                 onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
                 label = { Text("Limit ¢ (ask)") },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                singleLine = true
+                singleLine = true,
+                enabled = true
             )
+            com.dirk.kalshiodds.signal.trade.ConfirmQuote.buy(ticket, stakeText, centsText, feeRate).edgeNote?.let { note ->
+                Text(
+                    note,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
             ticket.gateNote?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = colors.accentBlue)
             }
@@ -590,7 +601,8 @@ internal fun ApproveTicketDialog(
                         onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(8) },
                         label = { Text("Limit ¢") },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        singleLine = true
+                        singleLine = true,
+                        enabled = true
                     )
                     val quote = com.dirk.kalshiodds.signal.trade.ConfirmQuote.buy(
                         ticket,
@@ -612,6 +624,14 @@ internal fun ApproveTicketDialog(
                         "Profit if win",
                         String.format(Locale.US, "$%.2f", quote.profitIfWinUsd)
                     )
+                    quote.edgeNote?.let {
+                        Text(
+                            it,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.textSecondary,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
                     quote.blockedReason?.let {
                         Text(
                             it,

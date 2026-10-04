@@ -180,7 +180,8 @@ object TicketBuilder {
         if (price == null) {
             return ticket.copy(
                 blockedReason = "Type a limit between 0.1¢ and 99.9¢",
-                sizingNote = "Limit price was not usable — nothing sent"
+                sizingNote = "Limit price was not usable — nothing sent",
+                edgeCheckNote = edgeAfterFeesNote(ticket.modelChance, limitPrice, feeRate, stakeUsd)
             )
         }
         val requested = stakeUsd.takeIf { it.isFinite() && it > 0.0 } ?: ticket.stakeUsd
@@ -199,7 +200,8 @@ object TicketBuilder {
                 allInUsd = 0.0,
                 feeUsd = 0.0,
                 blockedReason = live.refusedReason ?: "Cannot size this order under the \$5 cap",
-                sizingNote = clipNote + (live.refusedReason ?: "Cannot size")
+                sizingNote = clipNote + (live.refusedReason ?: "Cannot size"),
+                edgeCheckNote = edgeAfterFeesNote(ticket.modelChance, price, feeRate, cap)
             )
         }
         val minProfit = ticket.minProfitIfWinUsd
@@ -210,6 +212,7 @@ object TicketBuilder {
         } else {
             null
         }
+        val edgeNote = edgeAfterFeesNote(ticket.modelChance, price, feeRate, live.allInUsd)
         return ticket.copy(
             stakeUsd = live.allInUsd,
             limitPrice = price,
@@ -231,7 +234,8 @@ object TicketBuilder {
                 live.allInUsd,
                 live.feeUsd,
                 live.profitIfWinUsd
-            )
+            ),
+            edgeCheckNote = edgeNote
         )
     }
 
@@ -629,17 +633,63 @@ object TicketBuilder {
         )
     }
 
-    fun resolveSide(market: MarketUiModel): String? {
-        val primary = market.primaryHeroSide?.uppercase()
-        if (primary == "YES" || primary == "NO") return primary
-        val predicted = market.predictedSide?.uppercase()
-        if (predicted == "YES" || predicted == "NO") return predicted
+    /**
+     * Side with the larger edge after fees. A market favourite is not a tie-break.
+     * Exact ties return null so the caller does not prefer the expensive side.
+     */
+    fun resolveSide(market: MarketUiModel, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): String? {
+        val yes = sideEdgeAfterFees(market, "YES", feeRate)
+        val no = sideEdgeAfterFees(market, "NO", feeRate)
+        if (yes != null || no != null) {
+            return when {
+                no == null -> "YES"
+                yes == null -> "NO"
+                yes > no + 1e-12 -> "YES"
+                no > yes + 1e-12 -> "NO"
+                else -> null
+            }
+        }
         val net = market.netEdgePp ?: market.edgePp ?: return null
         return when {
-            net > 0 -> "YES"
-            net < 0 -> "NO"
+            net > 0.0 -> "YES"
+            net < 0.0 -> "NO"
             else -> null
         }
+    }
+
+    /** Model probability minus the ask minus the fee on that ask. Null when either input is missing. */
+    fun sideEdgeAfterFees(market: MarketUiModel, side: String, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double? {
+        val probability = modelProb(market, side) ?: return null
+        val ask = bestAsk(market, side) ?: return null
+        return probability - ask - KalshiFee.perContract(ask, feeRate)
+    }
+
+    fun edgeAfterFees(ticket: TradeTicket, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
+        val model = ticket.modelChance?.takeIf { it.isFinite() }
+        val price = KalshiPrice.usable(ticket.limitPrice)
+        if (model != null && price != null) {
+            val stake = ticket.stakeUsd.takeIf { it.isFinite() && it > 0.0 }
+                ?: SignalConstants.DEFAULT_TICKET_STAKE_USD
+            return model - price - KalshiFee.perContract(price, feeRate, stake)
+        }
+        return ticket.netEvPerContract ?: Double.NEGATIVE_INFINITY
+    }
+
+    /**
+     * Shown after a hand-edited limit. Does not disable the field or Approve.
+     */
+    fun edgeAfterFeesNote(
+        modelChance: Double?,
+        limitPrice: Double,
+        feeRate: Double,
+        stakeUsd: Double
+    ): String? {
+        val model = modelChance?.takeIf { it.isFinite() } ?: return "Edge not checked — no model probability on this ticket"
+        val price = KalshiPrice.usable(limitPrice) ?: return "Edge not checked — limit price is not usable"
+        val stake = stakeUsd.takeIf { it.isFinite() && it > 0.0 } ?: SignalConstants.DEFAULT_TICKET_STAKE_USD
+        val edgePp = (model - price - KalshiFee.perContract(price, feeRate, stake)) * 100.0
+        val verdict = if (edgePp > 0.0) "clears" else "does not clear"
+        return String.format(java.util.Locale.US, "Edge after fees %+.1f pp — %s", edgePp, verdict)
     }
 
     fun bestAsk(market: MarketUiModel, side: String): Double? =
