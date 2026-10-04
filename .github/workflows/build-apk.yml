@@ -47,6 +47,9 @@ jobs:
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "base=$base" >> "$GITHUB_OUTPUT"
+          # pull_request refs look like 36/merge. A slash cannot be a filename or tag.
+          safe=$(printf '%s' "${{ github.ref_name }}" | tr '/ ' '--')
+          echo "ref=$safe" >> "$GITHUB_OUTPUT"
 
       - name: Decode release keystore
         id: signing
@@ -98,7 +101,7 @@ jobs:
 
       - name: Build APK
         env:
-          UPDATE_RELEASE_TAG: ${{ github.ref_name }}-latest
+          UPDATE_RELEASE_TAG: ${{ steps.ver.outputs.ref }}-latest
           RELEASE_STORE_FILE: ${{ steps.signing.outputs.keystore }}
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
@@ -122,8 +125,8 @@ jobs:
             echo "::error::No APK was produced"
             exit 1
           fi
-          versioned="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
-          stable="DipHunter-${{ github.ref_name }}.apk"
+          versioned="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}-${{ github.run_number }}.apk"
+          stable="DipHunter-${{ steps.ver.outputs.ref }}.apk"
           cp "$src" "$versioned"
           cp "$src" "$stable"
           echo "versioned=$versioned" >> "$GITHUB_OUTPUT"
@@ -133,7 +136,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
+          name: DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}
           path: ${{ steps.apk.outputs.versioned }}
           if-no-files-found: error
 
@@ -143,11 +146,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          versioned_tag="gtp-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
-          rolling_tag="${{ github.ref_name }}-latest"
+          versioned_tag="gtp-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}"
+          rolling_tag="${{ steps.ver.outputs.ref }}-latest"
           notes_file="$RUNNER_TEMP/release-notes.md"
           {
-            echo "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from ${{ github.ref_name }} @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+            echo "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from ${{ steps.ver.outputs.ref }} @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
             echo
             echo "applicationId: com.dirk.kalshiodds.chatgtp"
             echo "versionCode: ${{ steps.ver.outputs.code }}"
@@ -160,7 +163,7 @@ jobs:
           gh release delete "$versioned_tag" --yes --cleanup-tag || true
           gh release create "$versioned_tag" "${{ steps.apk.outputs.versioned }}" \
             --target "$GITHUB_SHA" \
-            --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
+            --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.ref }})" \
             --notes-file "$notes_file" \
             --prerelease
           gh release edit "$versioned_tag" --draft=false --prerelease
@@ -168,7 +171,7 @@ jobs:
           gh release delete "$rolling_tag" --yes --cleanup-tag || true
           gh release create "$rolling_tag" "${{ steps.apk.outputs.stable }}" \
             --target "$GITHUB_SHA" \
-            --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ github.ref_name }}) latest" \
+            --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.ref }}) latest" \
             --notes-file "$notes_file" \
             --prerelease
           gh release edit "$rolling_tag" --draft=false --prerelease
