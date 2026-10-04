@@ -33,6 +33,7 @@ object LiveOrderGates {
         Gate("long_shot", "ask ≤20¢ and AI beats implied after fees", "Long-shot needs a cheap ask and a model edge"),
         Gate("live_all_in_cap", "$5 including fees", "Cannot size a live order under the $5 all-in cap"),
         Gate("min_profit_if_win", "$10", "Profit if win is below the minimum — ticket disabled"),
+        Gate("daily_live_cap", "$50 of live buys per day", "Daily live cap reached — nothing was sent"),
         Gate("allowlist", "off until enough samples", "Series is muted by the allowlist"),
         Gate("confidence_filter", "min 0.45", "Confidence is below the Settings floor"),
         Gate("skip_filter", "on when ticketRespectGates", "Skip filter blocked this ticket"),
