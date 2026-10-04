@@ -126,6 +126,7 @@ class SignalHub(
         if (tickers.isNotEmpty()) {
             runCatching { scoring.book.pruneTo(tickers) }
             runCatching { flowWindow.retain(tickers) }
+            runCatching { flowMaker.retain(tickers) }
             lastSpotRescoreMs.keys.retainAll(tickers)
             _scores.update { cur -> cur.filterKeys { it in tickers } }
         }
@@ -175,11 +176,22 @@ class SignalHub(
     /** Rolling 30 s taker flow per ticker, fed by every public trade. */
     val flowWindow = com.dirk.kalshiodds.signal.flowfade.FlowWindow()
 
+    /** Resting paper orders for the flow-fade tracker. Paper only. */
+    val flowMaker = com.dirk.kalshiodds.signal.flowfade.MakerPaperBook()
+
     fun ingestTick(tick: MarketTick) {
         // Every trade counts toward the flow window; the mailbox below is latest-wins.
-        if (tick.source == TickSource.WS_TRADE && flowFade != null) {
+        val fadeLedger = flowFade
+        if (tick.source == TickSource.WS_TRADE && fadeLedger != null) {
             runCatching {
-                flowWindow.onTrade(tick.ticker, tick.takerSide, tick.tradeSize, System.currentTimeMillis())
+                val now = System.currentTimeMillis()
+                // A print can fill the resting paper order posted before it; then it joins the flow window.
+                flowMaker.onTrade(tick.ticker, tick.takerSide, tick.lastPrice, tick.tradeSize, now)?.let { order ->
+                    if (!fadeLedger.hasEntry(order.ticker)) {
+                        com.dirk.kalshiodds.signal.flowfade.FlowFadeRule.filled(order, now)?.let { fadeLedger.record(it) }
+                    }
+                }
+                flowWindow.onTrade(tick.ticker, tick.takerSide, tick.tradeSize, now)
             }
         }
         if (tickMailbox.offer(tick.ticker, tick)) {
@@ -356,9 +368,11 @@ class SignalHub(
     }
 
     /**
-     * Paper-only flow-fade tracker. Cheap exits first: no ledger, outside the
-     * time band, or already entered this market. Logs to [flowFade]; there is
-     * no path from here to an order.
+     * Paper-only flow-fade tracker: posts a resting paper bid on the side
+     * takers are not buying ([flowMaker]); [ingestTick] records it in
+     * [flowFade] when later prints fill it. Cheap exits first: no ledger,
+     * outside the time band, already filled this market, or an order is
+     * still resting. There is no path from here to a real order.
      */
     private fun maybeFlowFade(tick: MarketTick, scored: ScoringEngine.Score) {
         val ledger = flowFade ?: return
@@ -371,31 +385,31 @@ class SignalHub(
         if (!CryptoMarkets.isLiveTicker(tick.ticker) || ledger.hasEntry(tick.ticker)) return
         runCatching {
             val now = System.currentTimeMillis()
+            flowMaker.expire(tick.ticker, now)
+            if (flowMaker.pending(tick.ticker) != null) return
             val (takerYes, takerNo) = flowWindow.sums(tick.ticker, now)
-            // Quotes come from the book when it has them: a trade tick carries only the print price.
+            // Bids come from the book when it has them: a trade tick carries only the print price.
             val top = scoring.book.topOfBook(tick.ticker)
-            val yesBid = top?.yesBid ?: tick.yesBid.takeIf { tick.source != TickSource.WS_TRADE }
+            val quoted = tick.source != TickSource.WS_TRADE
+            val yesBid = top?.yesBid ?: tick.yesBid.takeIf { quoted }
             val noBid = top?.noBid ?: tick.noBid
-            val yesAsk = KalshiPrice.usable(top?.yesAsk)
-                ?: KalshiPrice.impliedAskFromOppositeBid(noBid)
-                ?: KalshiPrice.usable(tick.yesAsk.takeIf { tick.source != TickSource.WS_TRADE })
-            val noAsk = KalshiPrice.usable(top?.noAsk)
-                ?: KalshiPrice.impliedAskFromOppositeBid(yesBid)
-                ?: KalshiPrice.usable(tick.noAsk)
-            val decision = com.dirk.kalshiodds.signal.flowfade.FlowFadeRule.evaluate(
-                com.dirk.kalshiodds.signal.flowfade.FlowFadeRule.Inputs(
+                ?: KalshiPrice.usable(top?.yesAsk ?: tick.yesAsk.takeIf { quoted })?.let { 1.0 - it }
+            val order = com.dirk.kalshiodds.signal.flowfade.FlowFadeRule.order(
+                com.dirk.kalshiodds.signal.flowfade.FlowFadeRule.MakerInputs(
                     ticker = tick.ticker,
                     nowMs = now,
                     tteSeconds = tte,
                     takerYes = takerYes,
                     takerNo = takerNo,
-                    yesAsk = yesAsk,
-                    noAsk = noAsk
+                    yesBid = yesBid,
+                    noBid = noBid,
+                    yesBidQty = top?.yesBidQty,
+                    noBidQty = top?.noBidQty
                 ),
                 alreadyEntered = false
             ) ?: return
-            ledger.record(decision)?.let {
-                Log.d(TAG, "flowfade paper ${it.ticker} ${it.side} @ ${it.ask} imb=${it.z} tte=${it.tteSeconds}")
+            if (flowMaker.post(order)) {
+                Log.d(TAG, "flowfade resting ${order.ticker} ${order.side} @ ${order.price} queue=${order.queueAhead} imb=${order.imbalance}")
             }
         }.onFailure { CrashBreadcrumb.record("flowfade ${tick.ticker}", it) }
     }
