@@ -132,7 +132,8 @@ fun MarketCard(
     val clock = nowMs ?: System.currentTimeMillis()
     val call = decision ?: BetCall.decide(market, settings, clock)
     val headlineColor = SideColor.of(call.headline, colors)
-    val alertBorder = if (call.isActionable) headlineColor else scheme.outlineVariant
+    val headlineFill = SideColor.fill(call.headline, colors)
+    val alertBorder = if (call.isActionable) headlineFill else scheme.outlineVariant
     val quotes = MarketQuoteView.of(market)
     Card(
         modifier = modifier
@@ -203,7 +204,8 @@ fun MarketCard(
                     bidLabel = quotes.noBidLabel,
                     aiLabel = HomeCopy.tileAiDown(market),
                     profitLabel = HomeCopy.tileTenDollarDown(market),
-                    accent = colors.down,
+                    accent = colors.downInk,
+                    borderColor = colors.downButton,
                     container = colors.downContainer,
                     highlighted = call.headline == BetCall.Headline.BET_DOWN,
                     modifier = Modifier.weight(1f)
@@ -256,7 +258,7 @@ fun MarketCard(
                     Button(
                         onClick = buy,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = headlineColor,
+                            containerColor = headlineFill,
                             contentColor = SideColor.on(call.headline, colors)
                         ),
                         shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button,
@@ -324,9 +326,9 @@ fun MarketCard(
                     onClick = { onPaperDown?.invoke() },
                     enabled = onPaperDown != null && paperDownOk,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.down,
+                        containerColor = colors.downButton,
                         contentColor = colors.onDown,
-                        disabledContainerColor = colors.down.copy(alpha = 0.38f),
+                        disabledContainerColor = colors.downButton.copy(alpha = 0.38f),
                         disabledContentColor = colors.onDown.copy(alpha = 0.70f)
                     ),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
@@ -762,7 +764,8 @@ private fun PriceTile(
     accent: Color,
     container: Color,
     highlighted: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    borderColor: Color = accent
 ) {
     val labelColor = Contrast.readable(
         MaterialTheme.colorScheme.onSurfaceVariant,
@@ -773,8 +776,8 @@ private fun PriceTile(
     Column(
         modifier
             .then(
-                if (highlighted) Modifier.border(2.dp, accent, RoundedCornerShape(12.dp))
-                else Modifier.border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
+                if (highlighted) Modifier.border(2.dp, borderColor, RoundedCornerShape(12.dp))
+                else Modifier.border(1.dp, borderColor.copy(alpha = 0.35f), RoundedCornerShape(12.dp))
             )
             .background(container, RoundedCornerShape(12.dp))
             .padding(horizontal = 10.dp, vertical = 10.dp),
@@ -937,7 +940,7 @@ internal fun LastMinutePlayBox(
     val colors = DipTheme.colors
     val fired = snap.phase == com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.FIRED
     val border = when {
-        fired && call.headline == BetCall.Headline.BET_DOWN -> colors.down
+        fired && call.headline == BetCall.Headline.BET_DOWN -> colors.downButton
         fired && call.headline == BetCall.Headline.BET_UP -> colors.up
         else -> MaterialTheme.colorScheme.outline
     }

@@ -628,7 +628,7 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
             }
             drawPath(
                 path,
-                if (last >= 0) colors.up else colors.down,
+                if (last >= 0) colors.up else colors.downButton,
                 style = Stroke(width = 3f, cap = StrokeCap.Round)
             )
             val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)

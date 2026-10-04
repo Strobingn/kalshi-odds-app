@@ -191,7 +191,7 @@ fun UpDownBuyButtons(
             modifier = Modifier.weight(1f).height(56.dp),
             shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button,
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
-                containerColor = colors.down,
+                containerColor = colors.downButton,
                 contentColor = colors.onDown
             )
         ) { Text(quotes.downButton) }

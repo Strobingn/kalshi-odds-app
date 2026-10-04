@@ -314,7 +314,7 @@ fun SettingsContent(
                     )
                     .then(
                         if (lastErr == null) Modifier
-                        else Modifier.border(1.dp, colors.accentRed, RoundedCornerShape(12.dp))
+                        else Modifier.border(1.dp, colors.downButton, RoundedCornerShape(12.dp))
                     )
                     .padding(12.dp)
             )

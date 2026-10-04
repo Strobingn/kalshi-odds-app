@@ -129,7 +129,7 @@ fun TradeTicketsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(10.dp))
-                        .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
+                        .border(1.dp, colors.downButton, RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 )
             }
@@ -258,7 +258,7 @@ private fun ProposedTicketCard(
                         .padding(top = 8.dp)
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(10.dp))
-                        .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
+                        .border(1.dp, colors.downButton, RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 )
             } else if (ticket.isSell) {
