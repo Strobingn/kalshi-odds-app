@@ -16,8 +16,20 @@ android {
         applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
-        versionCode = 33
-        versionName = "1.2"
+        versionCode = 34
+        versionName = "1.3"
+        // In-app update check (ui/AppUpdate.kt): the Build APK run that made
+        // this APK. 0 / "local" when built outside GitHub Actions.
+        buildConfigField(
+            "int",
+            "CI_RUN_NUMBER",
+            (System.getenv("GITHUB_RUN_NUMBER") ?: "0").toIntOrNull()?.toString() ?: "0"
+        )
+        buildConfigField(
+            "String",
+            "GIT_SHA",
+            "\"" + (System.getenv("GITHUB_SHA") ?: "local").filter { it.isLetterOrDigit() }.take(7) + "\""
+        )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
