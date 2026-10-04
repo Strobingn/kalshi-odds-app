@@ -14,27 +14,35 @@ import kotlin.math.abs
 import kotlinx.serialization.json.Json
 
 /**
- * "Fade the flow" rule from docs/flow-fade-2026-10-04.md. **PAPER ONLY.**
- * Nothing here places an order; the tracker logs what the rule would do.
+ * "Fade the flow" from docs/flow-fade-2026-10-04.md. **PAPER ONLY.** Nothing
+ * here places an order; the tracker logs what the rule would do.
  *
- * On the public trade tape (952 settled KXBTC15M windows, 2026-09-24 →
- * 10-04), when takers' buying over the last 30 s was at least 3:1 on one
- * side, the *other* side won more often than its price: 700 first-trigger
- * bets, 69.0% wins at a 63.4¢ ask, +4.2¢ per contract after the taker fee
- * (95% CI [+0.9, +7.4], 99% CI [−0.2, +8.4]); +3.2¢ with a 1¢ worse fill,
- * +3.9¢ entering 30 s late, positive on 8 of 11 days. It was the best of
- * 18 rules tried on the same 11 days, so it is a lead, not a proven edge.
- * This tracker collects live windows before anyone trusts it.
+ * Signal: takers' buying over the last 30 s is at least 3:1 on one side.
+ * On 2,088 settled KXBTC15M windows (2026-09-12 → 10-04) following that
+ * flow lost 4.2¢ per contract (99% CI [−6.7, −1.7]). Two ways to take the
+ * other side were tested:
  *
- * Rule, once per market (first qualifying moment), fixed on purpose:
+ * - **Buying at the ask** ([evaluate]) looked good on the 11 days it was
+ *   found on (+2.9¢) and failed on the 12 earlier days (−2.9¢, 3 of 12
+ *   days positive). All 23 days: −0.0¢, 95% CI [−2.2, +2.3]. Retired; kept
+ *   only so the tests document it.
+ * - **Resting a no-fee bid** on the side takers are not buying ([order] +
+ *   [MakerPaperBook]) made +1.8¢ per fill with 2,000 contracts queued
+ *   ahead and +1.0¢ with 5,000 (95% CIs include zero; the earlier 12 days
+ *   alone are about flat). Without the signal the same resting order loses
+ *   0.8–1.2¢. This is what the tracker now runs. Not proven.
+ *
+ * Resting rule, one fill per market:
  * - watched live market with [MIN_TTE_SECONDS] ≤ time left ≤ [MAX_TTE_SECONDS]
- *   (60 s to 870 s into the window)
  * - taker contracts in the last [WINDOW_MS]: total ≥ [MIN_CONTRACTS] and
  *   |imbalance| ≥ [MIN_ABS_IMBALANCE], imbalance = (yes − no) / (yes + no)
- * - buy the side takers are **not** buying, at its best ask, only if
- *   [MIN_ASK] ≤ ask ≤ [MAX_ASK]
- * - $5 all-in with the exact taker fee ([LateFavoriteRule.sizeAllIn]);
- *   stress case = the same bet at ask + 1¢
+ * - join the best bid on the side takers are **not** buying, only if
+ *   [MIN_ASK] ≤ bid ≤ [MAX_ASK]; the size shown at that price when the
+ *   order is posted is the queue ahead ([DEFAULT_QUEUE_AHEAD] if unknown)
+ * - filled only after that queue has traded at the price, or when a print
+ *   trades through it; cancelled after [CANCEL_MS]
+ * - $5 at the bid, no fee; stress line = the same fill with a
+ *   [MAKER_FEE_STRESS] maker fee
  */
 object FlowFadeRule {
 
@@ -46,6 +54,17 @@ object FlowFadeRule {
     const val MIN_TTE_SECONDS = 30L
     const val MAX_TTE_SECONDS = 840L
     const val WORSE_FILL_SLIPPAGE = 0.01
+
+    /** A resting paper order is cancelled this long after it is posted. */
+    const val CANCEL_MS = 30_000L
+
+    /** Queue assumed ahead when the book shows no size (median seen at the best bid). */
+    const val DEFAULT_QUEUE_AHEAD = 3_500.0
+
+    /** Maker fee coefficient for the stress line (the series charges makers 0 today). */
+    const val MAKER_FEE_STRESS = 0.0175
+
+    const val STAKE_USD = 5.0
 
     private const val EPS = 1e-9
 
@@ -68,8 +87,9 @@ object FlowFadeRule {
     }
 
     /**
-     * The paper bet the rule takes now, or null. The returned decision's
-     * `z` holds the flow imbalance that triggered it (the ledger's column).
+     * The retired buy-at-the-ask version: the bet it would take now, or
+     * null. The decision's `z` holds the flow imbalance. Not wired to the
+     * tracker any more (it failed out of sample).
      */
     fun evaluate(inputs: Inputs, alreadyEntered: Boolean): LateFavoriteRule.Decision? {
         if (alreadyEntered) return null
@@ -96,6 +116,152 @@ object FlowFadeRule {
             worseAsk = worseAsk,
             worse = LateFavoriteRule.sizeAllIn(worseAsk)
         )
+    }
+
+    data class MakerInputs(
+        val ticker: String,
+        val nowMs: Long,
+        val tteSeconds: Long?,
+        val takerYes: Double,
+        val takerNo: Double,
+        val yesBid: Double?,
+        val noBid: Double?,
+        /** Contracts shown at the best YES / NO bid, when the book has them. */
+        val yesBidQty: Double? = null,
+        val noBidQty: Double? = null
+    )
+
+    /** A resting paper bid: buy [side] at [price] once [queueAhead] contracts have traded there. */
+    data class Order(
+        val ticker: String,
+        val side: String,
+        val price: Double,
+        val queueAhead: Double,
+        val postedAtMs: Long,
+        val tteSeconds: Long,
+        val imbalance: Double
+    )
+
+    /** The resting paper order to post now, or null. Same signal as [evaluate]. */
+    fun order(inputs: MakerInputs, alreadyEntered: Boolean): Order? {
+        if (alreadyEntered) return null
+        if (!CryptoMarkets.isLiveTicker(inputs.ticker)) return null
+        val tte = inputs.tteSeconds ?: return null
+        if (tte < MIN_TTE_SECONDS || tte > MAX_TTE_SECONDS) return null
+        if (inputs.takerYes + inputs.takerNo + EPS < MIN_CONTRACTS) return null
+        val imb = imbalance(inputs.takerYes, inputs.takerNo) ?: return null
+        if (abs(imb) + EPS < MIN_ABS_IMBALANCE) return null
+        // Takers are buying YES → they sell NO into the NO bid: rest there.
+        val side = if (imb > 0.0) "NO" else "YES"
+        val bid = KalshiPrice.usable(if (side == "YES") inputs.yesBid else inputs.noBid) ?: return null
+        if (bid + EPS < MIN_ASK || bid - EPS > MAX_ASK) return null
+        if (sizeResting(bid) == null) return null
+        val shown = (if (side == "YES") inputs.yesBidQty else inputs.noBidQty)
+            ?.takeIf { it.isFinite() && it >= 0.0 }
+        return Order(
+            ticker = inputs.ticker,
+            side = side,
+            price = bid,
+            queueAhead = shown ?: DEFAULT_QUEUE_AHEAD,
+            postedAtMs = inputs.nowMs,
+            tteSeconds = tte,
+            imbalance = imb
+        )
+    }
+
+    /**
+     * [STAKE_USD] of contracts at a resting [price]. [makerFeeRate] 0 is
+     * today's schedule; the stress line uses [MAKER_FEE_STRESS].
+     */
+    fun sizeResting(price: Double?, makerFeeRate: Double = 0.0): LateFavoriteRule.Sized? {
+        val p = KalshiPrice.usable(price) ?: return null
+        var c = kotlin.math.floor(STAKE_USD / p + EPS).toInt()
+        fun fee(n: Int) = kotlin.math.ceil(makerFeeRate * n * p * (1.0 - p) * 100.0 - 1e-7) / 100.0
+        while (c > 0 && c * p + fee(c) > STAKE_USD + EPS) c--
+        if (c <= 0) return null
+        return LateFavoriteRule.Sized(contracts = c, costUsd = c * p + fee(c), feeUsd = fee(c))
+    }
+
+    /** The ledger row for [order] once it fills at [filledAtMs]; null if it cannot be sized. */
+    fun filled(order: Order, filledAtMs: Long): LateFavoriteRule.Decision? {
+        val sized = sizeResting(order.price) ?: return null
+        return LateFavoriteRule.Decision(
+            ticker = order.ticker,
+            nowMs = filledAtMs,
+            tteSeconds = order.tteSeconds,
+            z = order.imbalance,
+            side = order.side,
+            ask = order.price,
+            sized = sized,
+            worseAsk = order.price,
+            worse = sizeResting(order.price, MAKER_FEE_STRESS)
+        )
+    }
+}
+
+/**
+ * Resting paper orders, one per ticker. Conservative fills: an order fills
+ * only when the contracts shown ahead of it have traded at its price after
+ * it was posted, or when a print trades through its price. Cancels ahead of
+ * it never move it up. Thread-safe; fed with every public trade.
+ */
+class MakerPaperBook(private val cancelMs: Long = FlowFadeRule.CANCEL_MS) {
+    private class Slot(val order: FlowFadeRule.Order) {
+        var tradedAtPrice = 0.0
+    }
+
+    private val slots = ConcurrentHashMap<String, Slot>()
+
+    fun pending(ticker: String): FlowFadeRule.Order? = slots[ticker]?.order
+
+    /** Post [order] unless its ticker already has one resting. */
+    fun post(order: FlowFadeRule.Order): Boolean = slots.putIfAbsent(order.ticker, Slot(order)) == null
+
+    /** Drop the order on [ticker] if it is older than the cancel time. Returns it when dropped. */
+    fun expire(ticker: String, nowMs: Long): FlowFadeRule.Order? {
+        val slot = slots[ticker] ?: return null
+        if (nowMs - slot.order.postedAtMs <= cancelMs) return null
+        return if (slots.remove(ticker, slot)) slot.order else null
+    }
+
+    /**
+     * A public trade on [ticker]: [takerSide] "yes" = the taker bought YES
+     * at [yesPrice]. Returns the resting order when this print fills it.
+     * A NO bid at q is hit by takers buying YES at 1 − q or higher; a YES
+     * bid at b is hit by takers buying NO when YES trades at b or lower.
+     */
+    fun onTrade(ticker: String, takerSide: String?, yesPrice: Double?, count: Double?, nowMs: Long): FlowFadeRule.Order? {
+        val slot = slots[ticker] ?: return null
+        val order = slot.order
+        if (nowMs - order.postedAtMs > cancelMs) {
+            slots.remove(ticker, slot)
+            return null
+        }
+        val c = count?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val p = yesPrice?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 } ?: return null
+        val takerYes = when (takerSide?.lowercase(Locale.US)) {
+            "yes" -> true
+            "no" -> false
+            else -> return null
+        }
+        val restingNo = order.side.equals("NO", ignoreCase = true)
+        if (takerYes != restingNo) return null   // this taker is not selling our side
+        val level = if (restingNo) 1.0 - order.price else order.price
+        val through = if (restingNo) p > level + TICK_EPS else p < level - TICK_EPS
+        val atLevel = abs(p - level) <= TICK_EPS
+        val fill = synchronized(slot) {
+            if (atLevel) slot.tradedAtPrice += c
+            through || (atLevel && slot.tradedAtPrice > order.queueAhead)
+        }
+        return if (fill && slots.remove(ticker, slot)) order else null
+    }
+
+    fun retain(tickers: Set<String>) {
+        slots.keys.retainAll(tickers)
+    }
+
+    private companion object {
+        const val TICK_EPS = 5e-4
     }
 }
 
@@ -194,7 +360,8 @@ class FlowFadeStore(context: Context) {
 
     companion object {
         private const val PREFS = "bitcoin_claude_flow_fade"
-        private const val KEY = "state_json"
+        // New key: the buy-at-the-ask rows from the first 1.3 build are not mixed in.
+        private const val KEY = "resting_state_json"
     }
 }
 
@@ -208,22 +375,24 @@ data class FlowFadeSummary(
     val note: String
 ) {
     companion object {
-        const val TITLE = "Flow fade · PAPER"
+        const val TITLE = "Flow fade (resting bid) · PAPER"
         const val TARGET_SETTLED = 1000
         const val NOTE =
-            "Paper only. Buys the side takers are not buying after 30 s of 3:1 one-sided flow. " +
-                "History: +4.2¢ per contract over 700 bets, not proven. Needs ~1,000 live windows and Live signals on."
+            "Paper only. After 30 s of 3:1 one-sided taker buying, rests a no-fee bid on the other side and " +
+                "counts a fill only once the queue ahead has traded. History over 23 days: about +1 to +2¢ per fill, " +
+                "not proven. Buying at the ask on this signal failed its test and was retired. " +
+                "Needs ~1,000 live fills and Live signals on."
 
         fun of(state: LateFavoriteState): FlowFadeSummary {
             val t = state.totals
             val winPct = t.winRate?.let { String.format(Locale.US, " (%.1f%%)", it * 100.0) }.orEmpty()
-            val avgAsk = t.avgAsk?.let { String.format(Locale.US, " at %.0f¢", it * 100.0) }.orEmpty()
+            val avgAsk = t.avgAsk?.let { String.format(Locale.US, " at a %.0f¢ bid", it * 100.0) }.orEmpty()
             val voids = if (t.voids > 0) " · ${t.voids} void" else ""
             val record = "${t.wins}-${t.losses}$winPct$avgAsk · ${t.settledBets} / $TARGET_SETTLED settled$voids"
             val perBet = t.perBetUsd?.let { " · ${LateFavoriteSummary.money(it)}/bet" }.orEmpty()
             val pnl = "P&L ${LateFavoriteSummary.money(t.pnlUsd)}$perBet"
             val worsePerBet = t.perBetWorseUsd?.let { " · ${LateFavoriteSummary.money(it)}/bet" }.orEmpty()
-            val worse = "Worse fill (+1¢) ${LateFavoriteSummary.money(t.pnlWorseUsd)}$worsePerBet"
+            val worse = "With a maker fee ${LateFavoriteSummary.money(t.pnlWorseUsd)}$worsePerBet"
             val open = state.openEntries
             val openLine = if (open.isEmpty()) {
                 "Open: none"
