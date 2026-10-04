@@ -538,6 +538,7 @@ internal fun ApproveTicketDialog(
                         "Profit if win",
                         String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
                     )
+                    TakerCostLines(ticket)
                 } else if (paperSell || paperBuy) {
                     Text(
                         String.format(
@@ -641,6 +642,44 @@ internal fun ApproveTicketDialog(
             }
         }
     )
+}
+
+/**
+ * What this buy costs ([com.dirk.kalshiodds.signal.trade.TakerCost]): the
+ * break-even win rate, the fee share, and what past buyers at this price
+ * and time got. Display only.
+ */
+@Composable
+internal fun TakerCostLines(ticket: TradeTicket) {
+    val colors = DipTheme.colors
+    val cost = remember(ticket.id, ticket.limitPrice, ticket.contracts) {
+        com.dirk.kalshiodds.signal.trade.TakerCost.of(ticket, System.currentTimeMillis())
+    } ?: return
+    Column(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+        Text(
+            "WHAT THIS BET COSTS",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary,
+            fontWeight = FontWeight.Bold
+        )
+        Text(cost.breakEvenLine, style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
+        Text(cost.feeLine, style = MaterialTheme.typography.labelMedium, color = colors.textPrimary)
+        listOfNotNull(cost.priceLine, cost.timeLine).forEach { line ->
+            Text(
+                line,
+                style = MaterialTheme.typography.labelMedium,
+                color = if (cost.warn) colors.accentOrange else colors.textPrimary,
+                fontWeight = if (cost.warn) FontWeight.SemiBold else FontWeight.Normal
+            )
+        }
+        if (cost.priceLine != null || cost.timeLine != null) {
+            Text(
+                com.dirk.kalshiodds.signal.trade.TakerCost.FOOTNOTE,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+        }
+    }
 }
 
 @Composable
