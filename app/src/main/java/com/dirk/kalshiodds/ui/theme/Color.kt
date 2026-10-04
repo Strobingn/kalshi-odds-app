@@ -3,53 +3,56 @@ package com.dirk.kalshiodds.ui.theme
 import androidx.compose.ui.graphics.Color
 
 /**
- * FieldOps palette, split into dark and light constants so [DipPalette]
- * does not depend on a process-wide theme flag.
+ * Classic palette from 0.3.23 (tag v0.3.23-debug, commit cfe5f7ba).
+ * This is the default. FieldOps lives in [FieldSwatch] and is opt-in.
  *
- * Composables must read [DipTheme.colors]. The legacy names [AccentBlue]
- * and [AccentOrange] in [FieldSwatch] are gray aliases and are never blue.
- * Warning text uses [StatusUrgent] (a red), never yellow or amber.
- * Green is buying UP. Red is buying DOWN.
+ * Composables must read [DipTheme.colors]. Green = buying UP. Red = buying DOWN.
  */
-val Bg = Color(FieldSwatch.Dark.Background)
-val Surface = Color(FieldSwatch.Dark.Card)
-val SurfaceAlt = Color(FieldSwatch.Dark.SurfaceBright)
-val Border = Color(FieldSwatch.Dark.OutlineVariant)
-val TextPrimary = Color(FieldSwatch.Dark.OnSurface)
-val TextSecondary = Color(FieldSwatch.Dark.OnSurfaceVariant)
-/** Gray accent. Not blue. */
-val AccentBlue = Color(FieldSwatch.Dark.AccentBlue)
-val UpColor = Color(FieldSwatch.Dark.Success)
-val UpContainer = Color(0xFF0E2A14)
-val DownColor = Color(FieldSwatch.Dark.Error)
-val DownContainer = Color(FieldSwatch.Dark.ErrorContainer)
-/** Urgent red for warnings. Not yellow, amber, or gold. */
-val AccentOrange = Color(FieldSwatch.Dark.StatusUrgent)
+val Bg = Color(0xFF0D1117)
+val Surface = Color(0xFF161B22)
+val SurfaceAlt = Color(0xFF21262D)
+val Border = Color(0xFF30363D)
+val TextPrimary = Color(0xFFF0F6FC)
+val TextSecondary = Color(0xFF8B949E)
+val AccentBlue = Color(0xFF58A6FF)
+val UpColor = Color(0xFF3FB950)
+val UpContainer = Color(0xFF14301C)
+val DownColor = Color(0xFFF85149)
+val DownContainer = Color(0xFF301616)
+val AccentOrange = Color(0xFFD29922)
 val AccentRed = DownColor
-val OnAccentDark = Color(FieldSwatch.Dark.OnPrimary)
-val OnUpDark = Color(FieldSwatch.Dark.OnPrimary)
-val OnDownDark = Color(FieldSwatch.Dark.OnError)
+val OnAccentDark = Color(0xFF0D1117)
+val OnUpDark = OnAccentDark
+val OnDownDark = OnAccentDark
 
-val LightBg = Color(FieldSwatch.Light.Background)
-val LightSurface = Color(FieldSwatch.Light.Elevated)
-val LightSurfaceAlt = Color(FieldSwatch.Light.SurfaceVariant)
-val LightBorder = Color(FieldSwatch.Light.OutlineVariant)
-val LightTextPrimary = Color(FieldSwatch.Light.OnSurface)
-val LightTextSecondary = Color(FieldSwatch.Light.OnSurfaceVariant)
-/** Gray accent. Not blue. */
-val LightAccentBlue = Color(FieldSwatch.Light.AccentBlue)
-val LightUpColor = Color(FieldSwatch.Light.Success)
-val LightUpContainer = Color(0xFFE8F5E9)
-val LightDownColor = Color(FieldSwatch.Light.Error)
-val LightDownContainer = Color(FieldSwatch.Light.ErrorContainer)
-/** Urgent red for warnings. Not yellow, amber, or gold. */
-val LightAccentOrange = Color(FieldSwatch.Light.StatusUrgent)
+val LightBg = Color(0xFFF6F8FA)
+val LightSurface = Color(0xFFFFFFFF)
+val LightSurfaceAlt = Color(0xFFEEF2F6)
+val LightBorder = Color(0xFFD0D7DE)
+val LightTextPrimary = Color(0xFF1F2328)
+val LightTextSecondary = Color(0xFF57606A)
+val LightAccentBlue = Color(0xFF0550AE)
+val LightUpColor = Color(0xFF116329)
+val LightUpContainer = Color(0xFFDCEFE3)
+val LightDownColor = Color(0xFFA0111F)
+val LightDownContainer = Color(0xFFF8D6D9)
+val LightAccentOrange = Color(0xFF7D4E00)
 val LightAccentRed = LightDownColor
-val OnAccentLight = Color(FieldSwatch.Light.OnPrimary)
-val OnUpLight = Color(FieldSwatch.Light.OnPrimary)
-val OnDownLight = Color(FieldSwatch.Light.OnError)
+val OnAccentLight = Color(0xFFFFFFFF)
+val OnUpLight = OnAccentLight
+val OnDownLight = OnAccentLight
 
-val GradientStartDark = Color(FieldSwatch.Dark.GradientStart)
-val GradientEndDark = Color(FieldSwatch.Dark.GradientEnd)
-val GradientStartLight = Color(FieldSwatch.Light.GradientStart)
-val GradientEndLight = Color(FieldSwatch.Light.GradientEnd)
+val GradientStartDark = Color(0xFF58A6FF)
+val GradientEndDark = Color(0xFF1F6FEB)
+val GradientStartLight = Color(0xFF0550AE)
+val GradientEndLight = Color(0xFF0969DA)
+
+object ColorStyles {
+    const val CLASSIC = "classic"
+    const val FIELDOPS = "fieldops"
+
+    fun normalize(raw: String?): String =
+        if (raw.equals(FIELDOPS, ignoreCase = true)) FIELDOPS else CLASSIC
+
+    fun isFieldOps(raw: String?): Boolean = normalize(raw) == FIELDOPS
+}

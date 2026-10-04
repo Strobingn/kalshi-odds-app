@@ -47,6 +47,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import com.dirk.kalshiodds.data.api.KalshiPollBudget
 import com.dirk.kalshiodds.data.api.KalshiRequestStatus
 import com.dirk.kalshiodds.data.api.RefreshGate
 import kotlinx.coroutines.CancellationException
@@ -57,7 +58,9 @@ data class OddsUiState(
     val isLoading: Boolean = false,
     val snapshot: MarketsSnapshot? = null,
     val userMessage: String? = null,
-    val pollLabel: String = "Polling ~750ms",
+    val pollLabel: String = "Polling ~2s",
+    /** Quiet line when a newer v0.3.*-debug build is on GitHub. */
+    val updateBanner: String? = null,
     val modelScoreLabel: String? = null,
     val signalStatus: SignalStatus = SignalStatus(),
     val recentAlerts: List<SignalAlert> = emptyList(),
@@ -225,6 +228,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         bindRollover()
+        startPositionLoop()
+        viewModelScope.launch {
+            runCatching {
+                com.dirk.kalshiodds.update.UpdateAvailability.offer.collect { offer ->
+                    _state.update {
+                        it.copy(updateBanner = offer?.let { rel -> "Update ${rel.tag} available" })
+                    }
+                }
+            }
+        }
         viewModelScope.launch {
             runCatching {
                 hub.status.collect { status ->
@@ -444,6 +457,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         pollJob?.cancel()
         pollJob = viewModelScope.launch {
             while (isActive) {
+                if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) {
+                    delay(1_000L)
+                    continue
+                }
                 try {
                     if (_state.value.snapshot == null) {
                         _state.update { it.copy(isLoading = true) }
@@ -522,7 +539,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         publishSupportState()
         scheduleRebuildTickets()
-        refreshPositions()
         scheduleChartBackfill(overlaid)
     }
 
@@ -902,6 +918,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private var lastMinuteJob: Job? = null
     private var d3Job: Job? = null
+    private var positionJob: Job? = null
+    private val lastD3TradeFetch = ConcurrentHashMap<String, Long>()
     @Volatile private var d3Quotes: List<com.dirk.kalshiodds.signal.d3.D3Quote> = emptyList()
 
     private fun startD3Loop() {
@@ -922,6 +940,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
             var lastMarketFetch = 0L
             while (isActive) {
+                if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) {
+                    delay(5_000)
+                    continue
+                }
                 runCatching { tickD3(lastMarketFetch).also { lastMarketFetch = it } }
                 .onFailure { t ->
                     if (t is CancellationException) throw t
@@ -958,11 +980,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (paperOn) {
             val resting = container.d3Engine.restingBids()
             for (bid in resting) {
+                val key = bid.ticker.uppercase()
+                val last = lastD3TradeFetch[key] ?: 0L
+                if (now - last < com.dirk.kalshiodds.data.api.KalshiPollBudget.D3_TRADES_MS) continue
                 val prints = withContext(Dispatchers.IO) {
                     runCatching { container.d3Markets.loadTrades(bid.ticker, bid.placedAtMs) }
                         .getOrDefault(emptyList())
                 }
-                trades[bid.ticker.uppercase()] = prints
+                lastD3TradeFetch[key] = now
+                trades[key] = prints
             }
         }
         val bankroll = paperBook.snapshot().paperBankrollUsd
@@ -1101,9 +1127,26 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         decoratePositions(raw)
     }
 
+    private fun startPositionLoop() {
+        positionJob?.cancel()
+        positionJob = viewModelScope.launch {
+            var lastFetch = 0L
+            while (isActive) {
+                val visible = com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
+                val now = System.currentTimeMillis()
+                if (visible && now - lastFetch >= KalshiPollBudget.POSITIONS_MS) {
+                    lastFetch = now
+                    refreshPositions()
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
     private fun refreshPositions() {
         viewModelScope.launch {
             val settings = _state.value.settings
+            if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) return@launch
             if (!settings.tradingCredentialsConfigured()) {
                 decoratePositions(_state.value.positions)
                 return@launch
@@ -1320,13 +1363,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
             (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
         }
-        return minOf(poll, container.rollover.nextDelayMs()).coerceAtLeast(50L)
+        // Do not inherit MarketRollover's wake. That floor used to be 50ms
+        // and stacked a second GET /markets on top of this loop.
+        return poll.coerceAtLeast(MIN_POLL_MS)
     }
 
     companion object {
-        const val BASE_POLL_MS = 750L
+        const val BASE_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val JITTER_MS = 250L
-        const val MIN_POLL_MS = 500L
+        const val MIN_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
         const val WS_METADATA_POLL_MS = 15_000L

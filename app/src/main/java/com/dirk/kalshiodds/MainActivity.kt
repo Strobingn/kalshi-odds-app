@@ -77,7 +77,10 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         setContent {
-            KalshiOddsTheme {
+            val colorStyle by androidx.compose.runtime.remember {
+                KalshiOddsApp.from(this@MainActivity).container.preferences.settings.map { it.colorStyle }
+            }.collectAsStateWithLifecycle(initialValue = com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC)
+            KalshiOddsTheme(colorStyle = colorStyle) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val navigator = rememberSaveable(saver = AppNavigator.Saver) { AppNavigator() }
                     var settingsFocusApiKey by rememberSaveable { mutableStateOf(false) }
@@ -160,7 +163,11 @@ class MainActivity : ComponentActivity() {
                                 },
                                 syncText = syncText,
                                 syncFailed = failed && !oddsState.isLoading,
-                                syncPending = pending && !failed && !oddsState.isLoading
+                                syncPending = pending && !failed && !oddsState.isLoading,
+                                onCheckUpdate = {
+                                    navigator.open(AppRoutes.SETTINGS)
+                                    settingsViewModel.checkForKashiUpdate()
+                                }
                             )
                         },
                         history = {

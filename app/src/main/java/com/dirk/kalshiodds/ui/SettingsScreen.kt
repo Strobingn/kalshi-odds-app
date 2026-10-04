@@ -143,9 +143,9 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Section("App update (Kashi only)")
+            Section("App update")
             Text(
-                "Checks Strobingn/kalshi-odds-app for tags v*-debug built from branch kashi, asset DipHunter-debug.apk. Never installs chat-GTP, main, Claude, or grokbot builds. The APK package and signing cert are checked before install.",
+                "Checks GitHub for the newest v0.3.*-debug release and downloads DipHunter-debug.apk. Tags like gtp-*, grokbot, and v1.x are ignored. The package id and debug cert are checked before the installer opens.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
@@ -154,11 +154,55 @@ fun SettingsContent(
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textPrimary
             )
+            state.updateProgress?.let { pct ->
+                Text(
+                    "Download $pct%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
             Button(
                 onClick = onCheckUpdate,
                 enabled = !state.updateBusy,
                 modifier = Modifier.height(48.dp)
-            ) { Text(if (state.updateBusy) "Checking…" else "Check for Kashi update") }
+            ) {
+                Text(
+                    when {
+                        state.updateBusy && state.updateProgress != null -> "Downloading ${state.updateProgress}%"
+                        state.updateBusy -> "Checking…"
+                        else -> "Check for updates"
+                    }
+                )
+            }
+            if (state.updateNeedsUnknownApps) {
+                OutlinedButton(onClick = { viewModel?.openUnknownAppsSettings() }) {
+                    Text("Allow install unknown apps")
+                }
+            }
+            Section("Color style: Classic / FieldOps")
+            Text(
+                "Classic is the 0.3.23 palette. FieldOps is the gray 0.3.24 look. Green is UP, red is DOWN.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val classic = !com.dirk.kalshiodds.ui.theme.ColorStyles.isFieldOps(s.colorStyle)
+                if (classic) {
+                    Button(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC) }) {
+                        Text("Classic")
+                    }
+                    OutlinedButton(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.FIELDOPS) }) {
+                        Text("FieldOps")
+                    }
+                } else {
+                    OutlinedButton(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC) }) {
+                        Text("Classic")
+                    }
+                    Button(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.FIELDOPS) }) {
+                        Text("FieldOps")
+                    }
+                }
+            }
             Column(
                 modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
                 verticalArrangement = Arrangement.spacedBy(12.dp)

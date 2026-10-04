@@ -80,6 +80,9 @@ class KalshiOddsApp : Application() {
             }
         })
         appScope.launch {
+            runCatching { checkKashiUpdateIfDue() }
+        }
+        appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
             runCatching { container.preferences.applyLastMinuteStakeIfNeeded() }
             runCatching { restorePersistedHistory() }
@@ -98,6 +101,27 @@ class KalshiOddsApp : Application() {
                         // Off: the running service observes DataStore and stopSelfs.
                     }
             }
+        }
+    }
+
+    private suspend fun checkKashiUpdateIfDue() {
+        val prefs = container.preferences
+        val now = System.currentTimeMillis()
+        val last = prefs.lastKashiUpdateCheckMs()
+        if (!com.dirk.kalshiodds.update.UpdateCheckSchedule.due(last, now)) return
+        val check = com.dirk.kalshiodds.update.KashiUpdateClient.http().check(
+            com.dirk.kalshiodds.ui.AppVersion.versionName
+        )
+        when (check) {
+            is com.dirk.kalshiodds.update.UpdateCheck.Available -> {
+                prefs.markKashiUpdateCheck(now)
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(check.release)
+            }
+            is com.dirk.kalshiodds.update.UpdateCheck.UpToDate -> {
+                prefs.markKashiUpdateCheck(now)
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(null)
+            }
+            is com.dirk.kalshiodds.update.UpdateCheck.Failed -> Unit
         }
     }
 

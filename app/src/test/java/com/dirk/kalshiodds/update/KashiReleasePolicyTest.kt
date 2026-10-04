@@ -36,10 +36,47 @@ class KashiReleasePolicyTest {
         """.trimIndent()
         val chosen = KashiReleasePolicy.choose(KashiReleasePolicy.parse(json), "0.3.21")
         assertEquals("v0.3.22-debug", chosen?.tag)
-        assertEquals("kashi", chosen?.targetCommitish)
+        assertEquals(
+            KashiReleasePolicy.assetUrl("v0.3.22-debug"),
+            chosen?.asset?.downloadUrl
+        )
         assertFalse(KashiReleasePolicy.RELEASES_URL.contains("/releases/latest"))
         assertTrue(KashiReleasePolicy.RELEASES_URL.contains("Strobingn/kalshi-odds-app"))
         assertNull(KashiReleasePolicy.choose(KashiReleasePolicy.parse(json), "0.3.22"))
+    }
+
+    @Test
+    fun onlyV03DebugTagsBeatTheInstalledVersion() {
+        val json = """
+            [
+              {"tag_name":"v0.3.25-debug","target_commitish":"d72b4442e221b9356368bfd60b371f4a2cfa88da","draft":false,
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://example.invalid/nope.apk"}]},
+              {"tag_name":"v0.3.24-debug","target_commitish":"9da31fc9728900272f2ff195a63fc83341e501dc","draft":false,
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.24-debug/DipHunter-debug.apk"}]},
+              {"tag_name":"v1.2-Claude","target_commitish":"e028133b","draft":false,
+                "assets":[{"name":"DipHunter-v1.2-Claude-55.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.2-Claude/DipHunter-v1.2-Claude-55.apk"}]},
+              {"tag_name":"gtp-v1.2-grokbot","target_commitish":"4b5a292c","draft":false,
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/gtp-v1.2-grokbot/DipHunter-debug.apk"}]},
+              {"tag_name":"v1.0-grokbot-claude","target_commitish":"db810921","draft":false,
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.0-grokbot-claude/DipHunter-debug.apk"}]},
+              {"tag_name":"v0.4.0-debug","target_commitish":"kashi","draft":false,
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.4.0-debug/DipHunter-debug.apk"}]}
+            ]
+        """.trimIndent()
+        val parsed = KashiReleasePolicy.parse(json)
+        assertEquals(1, parsed.count { KashiReleasePolicy.eligible(it) && it.tag == "v0.3.25-debug" })
+        assertTrue(parsed.none { KashiReleasePolicy.eligible(it) && !it.tag.startsWith("v0.3.") })
+        val chosen = KashiReleasePolicy.choose(parsed, "0.3.24")
+        assertEquals("v0.3.25-debug", chosen?.tag)
+        assertEquals(KashiReleasePolicy.assetUrl("v0.3.25-debug"), chosen?.asset?.downloadUrl)
+        assertNull(KashiReleasePolicy.choose(parsed, "0.3.25"))
+        assertNull(KashiReleasePolicy.choose(parsed, "0.3.26"))
+        assertEquals(1, KashiReleasePolicy.compareVersions("0.3.10", "0.3.9"))
+        assertEquals(-1, KashiReleasePolicy.compareVersions("0.3.26", "0.3.27"))
+        assertEquals(0, KashiReleasePolicy.compareVersions("v0.3.26-debug", "0.3.26"))
+        assertTrue(com.dirk.kalshiodds.update.UpdateCheckSchedule.due(0L, 1L))
+        assertFalse(com.dirk.kalshiodds.update.UpdateCheckSchedule.due(1_000L, 1_000L + 6L * 60 * 60 * 1000 - 1))
+        assertTrue(com.dirk.kalshiodds.update.UpdateCheckSchedule.due(1_000L, 1_000L + com.dirk.kalshiodds.update.UpdateCheckSchedule.INTERVAL_MS))
     }
 
     @Test
@@ -111,8 +148,8 @@ class KashiReleasePolicyTest {
         assertFalse(yml.contains("assembleRelease"))
         val gradle = java.io.File(root, "app/build.gradle.kts").readText()
         assertTrue(gradle.contains(KashiReleasePolicy.CERT_SHA256))
-        assertTrue(gradle.contains("versionName = \"0.3.25\""))
-        assertTrue(gradle.contains("versionCode = 40"))
+        assertTrue(gradle.contains("versionName = \"0.3.26\""))
+        assertTrue(gradle.contains("versionCode = 41"))
     }
 
     private fun repoRoot(): java.io.File {

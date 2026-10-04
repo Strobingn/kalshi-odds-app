@@ -40,7 +40,7 @@ data class DipPalette(
     val gradientEnd: Color
 )
 
-val DarkPalette = DipPalette(
+val ClassicDarkPalette = DipPalette(
     bg = Bg,
     surface = Surface,
     surfaceAlt = SurfaceAlt,
@@ -63,7 +63,7 @@ val DarkPalette = DipPalette(
     gradientEnd = GradientEndDark
 )
 
-val LightPalette = DipPalette(
+val ClassicLightPalette = DipPalette(
     bg = LightBg,
     surface = LightSurface,
     surfaceAlt = LightSurfaceAlt,
@@ -86,15 +86,74 @@ val LightPalette = DipPalette(
     gradientEnd = GradientEndLight
 )
 
+/** Default palette. Exact 0.3.23 colors. */
+val DarkPalette = ClassicDarkPalette
+val LightPalette = ClassicLightPalette
+
+val FieldOpsDarkPalette = DipPalette(
+    bg = Color(FieldSwatch.Dark.Background),
+    surface = Color(FieldSwatch.Dark.Card),
+    surfaceAlt = Color(FieldSwatch.Dark.SurfaceBright),
+    border = Color(FieldSwatch.Dark.OutlineVariant),
+    textPrimary = Color(FieldSwatch.Dark.OnSurface),
+    textSecondary = Color(FieldSwatch.Dark.OnSurfaceVariant),
+    accentBlue = Color(FieldSwatch.Dark.AccentBlue),
+    up = Color(FieldSwatch.Dark.Success),
+    upContainer = Color(0xFF0E2A14),
+    down = Color(FieldSwatch.Dark.Error),
+    downContainer = Color(FieldSwatch.Dark.ErrorContainer),
+    accentOrange = Color(FieldSwatch.Dark.StatusUrgent),
+    accentRed = Color(FieldSwatch.Dark.Error),
+    onAccentBlue = Color(FieldSwatch.Dark.OnPrimary),
+    onUp = Color(FieldSwatch.Dark.OnPrimary),
+    onDown = Color(FieldSwatch.Dark.OnError),
+    onAccentOrange = Color(FieldSwatch.Dark.OnError),
+    onAccentRed = Color(FieldSwatch.Dark.OnError),
+    gradientStart = Color(FieldSwatch.Dark.GradientStart),
+    gradientEnd = Color(FieldSwatch.Dark.GradientEnd)
+)
+
+val FieldOpsLightPalette = DipPalette(
+    bg = Color(FieldSwatch.Light.Background),
+    surface = Color(FieldSwatch.Light.Elevated),
+    surfaceAlt = Color(FieldSwatch.Light.SurfaceVariant),
+    border = Color(FieldSwatch.Light.OutlineVariant),
+    textPrimary = Color(FieldSwatch.Light.OnSurface),
+    textSecondary = Color(FieldSwatch.Light.OnSurfaceVariant),
+    accentBlue = Color(FieldSwatch.Light.AccentBlue),
+    up = Color(FieldSwatch.Light.Success),
+    upContainer = Color(0xFFE8F5E9),
+    down = Color(FieldSwatch.Light.Error),
+    downContainer = Color(FieldSwatch.Light.ErrorContainer),
+    accentOrange = Color(FieldSwatch.Light.StatusUrgent),
+    accentRed = Color(FieldSwatch.Light.Error),
+    onAccentBlue = Color(FieldSwatch.Light.OnPrimary),
+    onUp = Color(FieldSwatch.Light.OnPrimary),
+    onDown = Color(FieldSwatch.Light.OnError),
+    onAccentOrange = Color(FieldSwatch.Light.OnPrimary),
+    onAccentRed = Color(FieldSwatch.Light.OnPrimary),
+    gradientStart = Color(FieldSwatch.Light.GradientStart),
+    gradientEnd = Color(FieldSwatch.Light.GradientEnd)
+)
+
 val LocalDipPalette = staticCompositionLocalOf { DarkPalette }
 
 object DipTheme {
     val colors: DipPalette
         @Composable get() = LocalDipPalette.current
 
-    fun palette(dark: Boolean): DipPalette = if (dark) DarkPalette else LightPalette
+    fun palette(dark: Boolean, colorStyle: String = ColorStyles.CLASSIC): DipPalette {
+        val field = ColorStyles.isFieldOps(colorStyle)
+        return when {
+            field && dark -> FieldOpsDarkPalette
+            field -> FieldOpsLightPalette
+            dark -> ClassicDarkPalette
+            else -> ClassicLightPalette
+        }
+    }
 
-    fun contrastPairs(dark: Boolean): List<ThemeRoles.Pair> = ThemeRoles.forPalette(palette(dark))
+    fun contrastPairs(dark: Boolean, colorStyle: String = ColorStyles.CLASSIC): List<ThemeRoles.Pair> =
+        ThemeRoles.forPalette(palette(dark, colorStyle))
 }
 
 object ThemeRoles {
@@ -216,6 +275,50 @@ private val LightColors = lightColorScheme(
     inversePrimary = Color(FieldSwatch.Dark.Primary)
 )
 
+private val ClassicDarkColors = darkColorScheme(
+    primary = AccentBlue,
+    onPrimary = OnAccentDark,
+    secondary = AccentBlue,
+    onSecondary = OnAccentDark,
+    background = Bg,
+    onBackground = TextPrimary,
+    surface = Surface,
+    onSurface = TextPrimary,
+    surfaceVariant = SurfaceAlt,
+    onSurfaceVariant = TextSecondary,
+    outline = Border,
+    error = AccentRed,
+    onError = OnAccentDark,
+    errorContainer = DownContainer,
+    onErrorContainer = DownColor
+)
+
+private val ClassicLightColors = lightColorScheme(
+    primary = LightAccentBlue,
+    onPrimary = OnAccentLight,
+    secondary = LightAccentBlue,
+    onSecondary = OnAccentLight,
+    background = LightBg,
+    onBackground = LightTextPrimary,
+    surface = LightSurface,
+    onSurface = LightTextPrimary,
+    surfaceVariant = LightSurfaceAlt,
+    onSurfaceVariant = LightTextSecondary,
+    outline = LightBorder,
+    error = LightAccentRed,
+    onError = OnAccentLight,
+    errorContainer = LightDownContainer,
+    onErrorContainer = LightDownColor
+)
+
+private fun materialColors(darkTheme: Boolean, colorStyle: String) =
+    when {
+        ColorStyles.isFieldOps(colorStyle) && darkTheme -> DarkColors
+        ColorStyles.isFieldOps(colorStyle) -> LightColors
+        darkTheme -> ClassicDarkColors
+        else -> ClassicLightColors
+    }
+
 private fun Context.findActivity(): Activity? {
     var ctx: Context? = this
     while (ctx is ContextWrapper) {
@@ -228,9 +331,10 @@ private fun Context.findActivity(): Activity? {
 @Composable
 fun KalshiOddsTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
+    colorStyle: String = ColorStyles.CLASSIC,
     content: @Composable () -> Unit
 ) {
-    val palette = if (darkTheme) DarkPalette else LightPalette
+    val palette = DipTheme.palette(darkTheme, colorStyle)
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
@@ -251,7 +355,7 @@ fun KalshiOddsTheme(
     }
     CompositionLocalProvider(LocalDipPalette provides palette) {
         MaterialTheme(
-            colorScheme = if (darkTheme) DarkColors else LightColors,
+            colorScheme = materialColors(darkTheme, colorStyle),
             typography = AppTypography,
             shapes = AppShapes,
             content = content

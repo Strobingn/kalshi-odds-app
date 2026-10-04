@@ -35,8 +35,8 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(40, BuildConfig.VERSION_CODE)
-        assertEquals("0.3.25", BuildConfig.VERSION_NAME)
+        assertEquals(41, BuildConfig.VERSION_CODE)
+        assertEquals("0.3.26", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertTrue(AppVersion.label.startsWith("${AppIdentity.LABEL} v"))
@@ -51,15 +51,15 @@ class AppIdentityTest {
         assertTrue(gradle.contains("namespace = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("versionCode = 40"))
-        assertTrue(gradle.contains("versionName = \"0.3.25\""))
+        assertTrue(gradle.contains("versionCode = 41"))
+        assertTrue(gradle.contains("versionName = \"0.3.26\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
         ).first { it.isFile }.readText()
         assertTrue(manifest.contains("android:label=\"@string/app_name\""))
-        assertFalse(manifest.contains("android:authorities="))
-        assertFalse(manifest.contains("FileProvider"))
+        assertTrue(manifest.contains("androidx.core.content.FileProvider"))
+        assertTrue(manifest.contains(".fileprovider"))
         assertFalse(manifest.contains("android:scheme="))
     }
 }

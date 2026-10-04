@@ -21,6 +21,12 @@ object KalshiRequestStatus {
         return "Kalshi unavailable, retrying in ${seconds}s"
     }
 
+    /** Gray status copy. Not an error color and not yellow. */
+    fun isQuietStatus(message: String?): Boolean {
+        if (message.isNullOrBlank()) return false
+        return isFeedBanner(message) || message.startsWith("Backing off")
+    }
+
     fun isFeedBanner(message: String?): Boolean {
         if (message.isNullOrBlank()) return false
         return message == OFFLINE ||

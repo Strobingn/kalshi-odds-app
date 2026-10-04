@@ -32,6 +32,7 @@ fun MoreScreen(
     syncText: String,
     syncFailed: Boolean,
     syncPending: Boolean,
+    onCheckUpdate: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var query by rememberSaveable { mutableStateOf("") }
@@ -77,6 +78,10 @@ fun MoreScreen(
                             onClick = { onOpen(action) }
                         )
                     }
+                    FieldActionButton(
+                        label = "Check for updates",
+                        onClick = onCheckUpdate
+                    )
                 }
                 Spacer(modifier = Modifier.height(FieldMetrics.space8))
                 FieldSearchBar(

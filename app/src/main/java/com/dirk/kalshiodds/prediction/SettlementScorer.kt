@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentHashMap
  * markets. Restricted to KXBTC15M the app tracked plus held KXBTCD (D3)
  * tickets, only after close_time,
  * with 5s/15s/30s/60s backoff, in-flight dedupe, and 429 Retry-After.
+ * Due tickers for one series share a single GET.
  */
 class SettlementScorer(
     private val resolveApi: () -> KalshiApi,
@@ -47,7 +48,10 @@ class SettlementScorer(
     fun closeTime(ticker: String): Long? =
         closeTimes[ticker.uppercase()] ?: closeTimeOf(ticker.uppercase()) ?: closeTimeOf(ticker)
 
-    suspend fun maybeScore(nowMs: Long = this.nowMs(), minIntervalMs: Long = 15_000L) {
+    suspend fun maybeScore(
+        nowMs: Long = this.nowMs(),
+        minIntervalMs: Long = com.dirk.kalshiodds.data.api.KalshiPollBudget.SETTLEMENT_MS
+    ) {
         val hold = globalHoldUntilMs
         if (nowMs < hold) return
         if (minIntervalMs > 0L && nowMs - lastRunMs < minIntervalMs) return
@@ -74,49 +78,66 @@ class SettlementScorer(
             globalHoldUntilMs = globalHoldUntilMs,
             heldD3 = heldD3
         )
-        for (ticker in due) {
-            if (!inFlight.add(ticker)) continue
-            try {
-                pollTicker(ticker, nowMs)
-            } finally {
-                inFlight.remove(ticker)
+        val accepted = due.filter { inFlight.add(it) }
+        if (accepted.isEmpty()) return
+        try {
+            val groups = LinkedHashMap<String, MutableList<String>>()
+            for (ticker in accepted) {
+                val series = SettlementPollPolicy.seriesOf(ticker) ?: continue
+                groups.getOrPut(series) { ArrayList() }.add(ticker)
             }
+            for ((series, tickers) in groups) {
+                pollSeries(series, tickers, nowMs)
+            }
+        } finally {
+            accepted.forEach { inFlight.remove(it) }
         }
     }
 
-    private suspend fun pollTicker(ticker: String, nowMs: Long) {
-        val prev = schedules[ticker] ?: SettlementPollPolicy.Schedule()
+    /**
+     * One settled-market page per series. Tickers that are not past close
+     * never reach this method. KXBTCD is included only for held D3 tickets.
+     */
+    private suspend fun pollSeries(series: String, tickers: List<String>, nowMs: Long) {
         try {
-            val series = SettlementPollPolicy.seriesOf(ticker) ?: SettlementPollPolicy.SERIES
             val resp = resolveApi().getMarkets(
                 seriesTicker = series,
                 status = "settled",
-                ticker = ticker,
-                limit = 5
+                limit = 200
             )
-            val hit = resp.markets.firstOrNull { it.ticker.equals(ticker, ignoreCase = true) }
-            val result = normalizeResult(hit?.result)
-            if (result != null) {
-                rateLimiter?.onSuccess()
-                feedHealth?.clear()
-                applyResult(ticker, result)
-                schedules.remove(ticker)
-            } else {
-                schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+            val byTicker = resp.markets.associateBy { it.ticker.uppercase() }
+            rateLimiter?.onSuccess()
+            feedHealth?.clear()
+            for (ticker in tickers) {
+                val prev = schedules[ticker] ?: SettlementPollPolicy.Schedule()
+                val result = normalizeResult(byTicker[ticker]?.result)
+                if (result != null) {
+                    applyResult(ticker, result)
+                    schedules.remove(ticker)
+                } else {
+                    schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+                }
             }
         } catch (e: HttpException) {
             noteTransport(e)
-            if (SettlementPollPolicy.isRateLimited(e)) {
-                val retry = SettlementPollPolicy.retryAfterMs(e)
-                val next = SettlementPollPolicy.after429(prev, nowMs, retry)
+            val limited = SettlementPollPolicy.isRateLimited(e)
+            val retry = if (limited) SettlementPollPolicy.retryAfterMs(e) else null
+            for (ticker in tickers) {
+                val prev = schedules[ticker] ?: SettlementPollPolicy.Schedule()
+                val next = if (limited) {
+                    SettlementPollPolicy.after429(prev, nowMs, retry)
+                } else {
+                    SettlementPollPolicy.afterMiss(prev, nowMs)
+                }
                 schedules[ticker] = next
-                globalHoldUntilMs = maxOf(globalHoldUntilMs, next.nextAttemptMs)
-            } else {
-                schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+                if (limited) globalHoldUntilMs = maxOf(globalHoldUntilMs, next.nextAttemptMs)
             }
         } catch (e: Exception) {
             noteTransport(e)
-            schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+            for (ticker in tickers) {
+                val prev = schedules[ticker] ?: SettlementPollPolicy.Schedule()
+                schedules[ticker] = SettlementPollPolicy.afterMiss(prev, nowMs)
+            }
         }
     }
 

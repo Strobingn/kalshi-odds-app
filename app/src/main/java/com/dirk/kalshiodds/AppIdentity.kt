@@ -13,7 +13,7 @@ object AppIdentity {
     const val NAMESPACE = "com.dirk.kalshiodds"
     const val LABEL = "Bitcoin Kalshi"
 
-    /** No FileProvider is declared. If one is added, use this authority. */
+    /** FileProvider for the in-app debug APK. Authority stays on this applicationId. */
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"
 
     const val DB_RESULTS = "diphunter_results.db"
@@ -63,10 +63,10 @@ object AppIdentity {
         "applicationId=$APPLICATION_ID",
         "namespace=$NAMESPACE (Kotlin package unchanged)",
         "launcher/notification label=$LABEL",
-        "FileProvider=none (would be \${applicationId}.fileprovider = $FILE_PROVIDER_AUTHORITY)",
-        "ContentProvider=none",
+        "FileProvider=\${applicationId}.fileprovider = $FILE_PROVIDER_AUTHORITY",
+        "ContentProvider=FileProvider",
         "deep links=none",
-        "manifest authorities=none",
+        "manifest authorities=\${applicationId}.fileprovider",
         "PendingIntent targets=explicit MainActivity / LiveSignalsService",
         "intent actions stay $NAMESPACE.signal.service.STOP_LIVE_SIGNALS / RESUME_LIVE_SIGNALS",
         "battery settings URI=package:\$packageName",
