@@ -73,6 +73,9 @@ data class OddsUiState(
     val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
     /** Paper-only late-favorite tracker ledger (home card). */
     val lateFavorite: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
+    /** Paper-only flow-fade tracker (same ledger type as the late favorite). */
+    val flowFade: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState()
 )
 
@@ -88,6 +91,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = container.preferences
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
+
+    /** Daily cap on live buys (Settings → Live Approve tickets). Never touches paper or sells. */
+    private val liveCap = com.dirk.kalshiodds.signal.trade.LiveDailyCapStore.get(application)
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -160,6 +166,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 container.lateFavorite.ledger.state.collect { lf ->
                     _state.update { it.copy(lateFavorite = lf) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.flowFade.ledger.state.collect { ff ->
+                    _state.update { it.copy(flowFade = ff) }
                 }
             }
         }
@@ -554,10 +567,35 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 )
             ) {
                 com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Paper -> applyPaperBuy(ticketId)
-                com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Live -> ticketSession.approve(ticketId)
+                com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Live -> approveLiveWithinCap(ticketId, ticket)
                 is com.dirk.kalshiodds.signal.trade.ApproveRouter.Decision.Blocked ->
                     ticketSession.failSoft(decision.reason)
             }
+        }
+    }
+
+    /**
+     * Live Approve behind the daily cap. A buy that would pass the cap is
+     * not sent and the reason is shown; sells are never capped. An accepted
+     * buy is counted at its all-in cost.
+     */
+    private suspend fun approveLiveWithinCap(
+        ticketId: String,
+        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket?
+    ) {
+        val isBuy = ticket != null && !ticket.isSell
+        if (isBuy) {
+            val cost = com.dirk.kalshiodds.signal.trade.LiveDailyCap.costOf(ticket!!)
+            liveCap.blockReason(cost)?.let { reason ->
+                ticketSession.failSoft(reason)
+                return
+            }
+        }
+        val before = ticketSession.placementCount
+        val next = ticketSession.approve(ticketId)
+        if (isBuy && next.placementCount > before) {
+            val placed = (next.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted)?.order?.ticket
+            liveCap.record(com.dirk.kalshiodds.signal.trade.LiveDailyCap.costOf(placed ?: ticket!!))
         }
     }
 
@@ -584,7 +622,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelWorkingOrder(orderId: String) {
-        viewModelScope.launch { ticketSession.cancelWorking(orderId) }
+        viewModelScope.launch {
+            val next = ticketSession.cancelWorking(orderId)
+            // Give the cancelled, unfilled part of a live buy back to today's cap.
+            val cancelled = (next.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Cancelled)
+                ?.order
+                ?.takeIf { it.orderId == orderId && !it.ticket.isSell }
+            if (cancelled != null) {
+                liveCap.release(com.dirk.kalshiodds.signal.trade.LiveDailyCap.cancelledCostOf(cancelled))
+            }
+        }
     }
 
     fun setPaperTrading(enabled: Boolean) {

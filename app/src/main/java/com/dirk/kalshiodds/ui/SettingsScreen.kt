@@ -140,6 +140,8 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
+            // No network call when rendered without a ViewModel (previews, screenshot tests).
+            AppUpdateSetting(autoCheck = viewModel != null)
             Column(
                 modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -813,6 +815,7 @@ fun SettingsContent(
                 valueRange = 0f..50f,
                 steps = 49
             )
+            LiveDailyCapSetting()
             ToggleRow("Show live trade tickets", s.ticketsEnabled, { viewModel?.setTicketsEnabled(it) })
             Text(
                 String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),

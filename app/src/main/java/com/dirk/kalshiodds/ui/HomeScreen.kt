@@ -226,6 +226,9 @@ fun HomeScreen(
                             item(key = "late_favorite") {
                                 LateFavoriteCard(state.lateFavorite)
                             }
+                            item(key = "flow_fade") {
+                                com.dirk.kalshiodds.ui.components.FlowFadeCard(state.flowFade)
+                            }
                         }
                         item {
                             Text(
