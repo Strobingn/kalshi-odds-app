@@ -4,11 +4,13 @@ Working branch for review findings and improvements. All work stays on this bran
 
 ## Changes vs main
 
-- `worker/MarketRefreshWorker.kt`, `worker/SyncWorker.kt`: cap WorkManager
-  retries at 3 attempts. Both workers previously returned `Result.retry()`
-  on any exception, so a permanent failure (bad credentials, revoked
-  Supabase project, API schema change) retried with backoff forever and
-  looked "fine" while silently doing nothing.
+- `worker/MarketRefreshWorker.kt`, `worker/SyncWorker.kt`,
+  `worker/BackfillWorker.kt`: cap WorkManager retries at 3 attempts. All
+  three workers previously returned `Result.retry()` on any exception, so a
+  permanent failure (bad credentials, revoked Supabase project, API schema
+  change) retried with backoff forever and looked "fine" while silently
+  doing nothing. `BackfillWorker` also now surfaces the failure message in
+  its output data.
 
 ## Recommended, not yet applied (GitHub token lacks `workflow` scope)
 
