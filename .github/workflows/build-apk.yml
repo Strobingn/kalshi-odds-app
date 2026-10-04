@@ -117,7 +117,11 @@ jobs:
         id: apk
         run: |
           set -euo pipefail
-          src=$(ls app/build/outputs/apk/release/*.apk app/build/outputs/apk/debug/*.apk 2>/dev/null | head -n1)
+          src=$(find app/build/outputs/apk -name '*.apk' -type f | head -n1)
+          if [ -z "$src" ]; then
+            echo "::error::No APK was produced"
+            exit 1
+          fi
           versioned="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
           stable="DipHunter-${{ github.ref_name }}.apk"
           cp "$src" "$versioned"
