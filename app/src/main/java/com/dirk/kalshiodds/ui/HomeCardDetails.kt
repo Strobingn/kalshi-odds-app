@@ -18,8 +18,8 @@ import kotlin.math.roundToInt
  * Details toggle; this object puts the dropped fields back.
  */
 object HomeCardDetails {
-    const val SECTION = "DIP HUNTER AI"
-    const val EDGE_TITLE = "Dip Hunter edge"
+    const val SECTION = "BITCOIN CLAUDE AI"
+    const val EDGE_TITLE = "Bitcoin Claude edge"
     const val MARKET_REF = "Kalshi market (reference)"
     const val LIVE_BOOK = "LIVE BOOK · UP / DOWN"
     const val DETAILS = "Details"

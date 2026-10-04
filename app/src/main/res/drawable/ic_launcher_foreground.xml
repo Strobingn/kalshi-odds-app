@@ -1,28 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Dip Hunter Claude: price dips, the dip is marked, then it rebounds up.
+<!-- Bitcoin Claude: a bitcoin B inside an open ring (the C).
      Content stays inside the 66dp adaptive-icon safe zone (21..87). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Price line: down into the dip, then up to the top right. -->
+    <!-- C: open ring, amber. -->
+    <path
+        android:strokeWidth="6.5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M74.68,36.64 A27,27 0 1 0 74.68,71.36">
+        <aapt:attr name="android:strokeColor">
+            <gradient
+                android:type="linear"
+                android:startX="27"
+                android:startY="27"
+                android:endX="70"
+                android:endY="81">
+                <item android:offset="0" android:color="#FFFFC247" />
+                <item android:offset="1" android:color="#FFF7931A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- B: stem and two bowls. -->
     <path
         android:strokeColor="#FFFFFF"
-        android:strokeWidth="6"
+        android:strokeWidth="5.5"
         android:strokeLineCap="round"
         android:strokeLineJoin="round"
         android:fillColor="#00000000"
-        android:pathData="M24,46 L33,38 L45,66 L56,52 L64,58 L77,38" />
-    <!-- Arrowhead on the rebound. -->
+        android:pathData="M47,40.5 V67.5 M47,40.5 H57 a6.75,6.75 0 0 1 0,13.5 H47 M47,54 H59 a6.75,6.75 0 0 1 0,13.5 H47" />
+    <!-- The two bitcoin ticks, top and bottom. -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M83,29 L82,44 L70,36 Z" />
-    <!-- The dip, marked. -->
-    <path
-        android:fillColor="#FFB020"
-        android:pathData="M45,66 m-7,0 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
-    <path
-        android:fillColor="#14213D"
-        android:pathData="M45,66 m-3,0 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0" />
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M51.5,34.5 V40 M58,34.5 V40 M51.5,68 V73.5 M58,68 V73.5" />
 </vector>

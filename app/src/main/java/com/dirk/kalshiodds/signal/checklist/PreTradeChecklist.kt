@@ -70,7 +70,7 @@ object PreTradeChecklist {
             else -> "cleared"
         }
         return buildString {
-            appendLine("Dip Hunter checklist (advisory — no order)")
+            appendLine("Bitcoin Claude checklist (advisory — no order)")
             appendLine("Ticker: ${market.ticker}")
             appendLine("Likely side: $likely")
             appendLine("Value side: $value")

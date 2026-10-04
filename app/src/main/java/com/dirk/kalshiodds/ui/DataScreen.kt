@@ -123,7 +123,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
             Section("Import file")
             Text(
-                "Pick a DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
+                "Pick a Bitcoin Claude or DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

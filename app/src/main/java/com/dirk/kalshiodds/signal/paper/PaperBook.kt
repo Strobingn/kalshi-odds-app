@@ -138,7 +138,7 @@ class PaperBook(
             side = alert.predictedSide,
             limitPrice = px,
             source = "AI signal",
-            note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" }
+            note = alert.reason.ifBlank { "LiveCall / Bitcoin Claude signal" }
         )
     }
 

@@ -27,7 +27,7 @@ object CredentialBackup {
     private const val KEY_LEN_BITS = 256
 
     class WrongPassphrase : IllegalArgumentException("wrong passphrase")
-    class BadFile : IllegalArgumentException("not a DipHunter credential backup")
+    class BadFile : IllegalArgumentException("not a Bitcoin Claude credential backup")
 
     data class Contents(
         val keyId: String,
