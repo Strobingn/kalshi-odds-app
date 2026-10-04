@@ -88,6 +88,32 @@ class KalshiSessionTrafficTest {
     }
 
     @Test
+    fun successfulOrderOrCancelClearsTheGetCache() {
+        var now = 0L
+        val hits = AtomicInteger()
+        val gate = KalshiHttpGate(
+            KalshiTokenBucket(nowMs = { now }, randomUnit = { 0.0 }),
+            nowMs = { now },
+            sleep = { ms -> now += ms }
+        )
+        val client = client(gate) {
+            hits.incrementAndGet()
+            response(it, 200, """{"order_id":"x"}""")
+        }
+        client.newCall(get(MARKETS)).execute().close()
+        client.newCall(get(MARKETS)).execute().close()
+        assertEquals(1, hits.get())
+        val post = Request.Builder().url(ORDER).post("{}".toRequestBody("application/json".toMediaType())).build()
+        client.newCall(post).execute().close()
+        client.newCall(get(MARKETS)).execute().close()
+        assertEquals(3, hits.get())
+        val delete = Request.Builder().url(ORDER).delete().build()
+        client.newCall(delete).execute().close()
+        client.newCall(get(MARKETS)).execute().close()
+        assertEquals(5, hits.get())
+    }
+
+    @Test
     fun writeDeniedDoesNotHitNetworkAndNamesApprove() {
         var now = 0L
         val hits = AtomicInteger()

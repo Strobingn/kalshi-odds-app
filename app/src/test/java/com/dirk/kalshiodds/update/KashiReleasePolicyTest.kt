@@ -23,6 +23,7 @@ class KashiReleasePolicyTest {
         val json = """
             [
               {"tag_name":"v0.3.22-debug","target_commitish":"kashi","draft":false,
+                "body":"app-id: com.dirk.kalshiodds.kashi",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.22-debug/DipHunter-debug.apk"}]},
               {"tag_name":"v0.3.22-debug","target_commitish":"chat-GTP","draft":false,
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/chat/DipHunter-debug.apk"}]},
@@ -50,8 +51,10 @@ class KashiReleasePolicyTest {
         val json = """
             [
               {"tag_name":"v0.3.25-debug","target_commitish":"d72b4442e221b9356368bfd60b371f4a2cfa88da","draft":false,
+                "body":"app-id: com.dirk.kalshiodds.kashi",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://example.invalid/nope.apk"}]},
               {"tag_name":"v0.3.24-debug","target_commitish":"9da31fc9728900272f2ff195a63fc83341e501dc","draft":false,
+                "body":"app-id: com.dirk.kalshiodds.kashi",
                 "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.24-debug/DipHunter-debug.apk"}]},
               {"tag_name":"v1.2-Claude","target_commitish":"e028133b","draft":false,
                 "assets":[{"name":"DipHunter-v1.2-Claude-55.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.2-Claude/DipHunter-v1.2-Claude-55.apk"}]},
@@ -130,6 +133,7 @@ class KashiReleasePolicyTest {
             tag = "v0.3.22-debug",
             targetCommitish = "kashi",
             draft = false,
+            notes = KashiReleasePolicy.APP_ID_MARKER,
             asset = KashiReleasePolicy.Asset(
                 "DipHunter-debug.apk",
                 "https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.22-debug/DipHunter-debug.apk"
@@ -148,8 +152,58 @@ class KashiReleasePolicyTest {
         assertFalse(yml.contains("assembleRelease"))
         val gradle = java.io.File(root, "app/build.gradle.kts").readText()
         assertTrue(gradle.contains(KashiReleasePolicy.CERT_SHA256))
-        assertTrue(gradle.contains("versionName = \"0.3.27\""))
-        assertTrue(gradle.contains("versionCode = 42"))
+        assertTrue(gradle.contains("versionName = \"0.3.28\""))
+        assertTrue(gradle.contains("versionCode = 43"))
+    }
+
+    @Test
+    fun higherVersionWithoutMarkerIsSkippedAndLowerKashiReleaseIsOffered() {
+        val json = """
+            [
+              {"tag_name":"v1.2.0-debug","draft":false,"body":"other branch",
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.2.0-debug/DipHunter-debug.apk"}]},
+              {"tag_name":"v0.3.28-debug","draft":false,"body":"app-id: com.dirk.kalshiodds.kashi",
+                "assets":[{"name":"DipHunter-debug.apk","browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/v0.3.28-debug/DipHunter-debug.apk"}]}
+            ]
+        """.trimIndent()
+        val chosen = KashiReleasePolicy.choose(KashiReleasePolicy.parse(json), "0.3.27")
+        assertEquals("v0.3.28-debug", chosen?.tag)
+        assertNull(KashiReleasePolicy.choose(KashiReleasePolicy.parse(json), "0.3.28"))
+    }
+
+    @Test
+    fun tagParsingAcceptsV0328AndV040() {
+        assertEquals(Triple(0, 3, 28), KashiReleasePolicy.versionOf("v0.3.28-debug"))
+        assertEquals(Triple(0, 4, 0), KashiReleasePolicy.versionOf("v0.4.0"))
+        assertEquals(1, KashiReleasePolicy.compareVersions("v0.4.0-debug", "0.3.28"))
+        assertTrue(KashiReleasePolicy.TAG.matches("v0.3.28-debug"))
+        assertTrue(KashiReleasePolicy.TAG.matches("v0.4.0-debug"))
+        assertFalse(KashiReleasePolicy.TAG.matches("v1.2-debug"))
+    }
+
+    @Test
+    fun downloadedApkWithWrongPackageOrCertIsRefused() {
+        val installed = KashiReleasePolicy.CERT_SHA256
+        assertTrue(
+            InstalledApkCheck.decide(KashiReleasePolicy.PACKAGE_ID, installed, KashiReleasePolicy.PACKAGE_ID, installed)
+                is ApkInstallDecision.Allow
+        )
+        val wrongPkg = InstalledApkCheck.decide(
+            "com.dirk.kalshiodds",
+            installed,
+            KashiReleasePolicy.PACKAGE_ID,
+            installed
+        )
+        assertTrue(wrongPkg is ApkInstallDecision.Reject)
+        assertTrue((wrongPkg as ApkInstallDecision.Reject).reason.contains("com.dirk.kalshiodds.kashi"))
+        val wrongCert = InstalledApkCheck.decide(
+            KashiReleasePolicy.PACKAGE_ID,
+            "ab".repeat(32),
+            KashiReleasePolicy.PACKAGE_ID,
+            installed
+        )
+        assertTrue(wrongCert is ApkInstallDecision.Reject)
+        assertTrue((wrongCert as ApkInstallDecision.Reject).reason.contains("certificate"))
     }
 
     private fun repoRoot(): java.io.File {

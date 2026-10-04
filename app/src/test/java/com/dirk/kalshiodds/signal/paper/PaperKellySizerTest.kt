@@ -29,8 +29,10 @@ class PaperKellySizerTest {
         assertEquals(expectedF, f, 1e-9)
         val sized = PaperKellySizer.size(p, ask, bankroll, frac, depthContracts = DEEP)
         assertTrue(sized.ok)
-        assertEquals(expectedF, sized.kellyF, 1e-9)
-        val target = bankroll * expectedF * frac
+        val capped = kotlin.math.min(expectedF, PaperKellySizer.MAX_FULL_KELLY_F)
+        assertEquals(capped, sized.kellyF, 1e-9)
+        assertTrue(sized.kellyF <= PaperKellySizer.MAX_FULL_KELLY_F + 1e-12)
+        val target = bankroll * capped * frac
         assertTrue(sized.allInUsd <= target + 1e-6)
         assertTrue(sized.allInUsd <= bankroll + 1e-9)
         assertEquals(KalshiFee.totalCost(sized.contracts, ask), sized.allInUsd, 1e-9)

@@ -84,6 +84,7 @@ class KalshiOddsApp : Application() {
         }
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
+            runCatching { container.preferences.applyPaperBankrollReset0328IfNeeded(container.paper.book) }
             runCatching { container.preferences.applyLastMinuteStakeIfNeeded() }
             runCatching { restorePersistedHistory() }
             runCatching { firstLaunchSync() }

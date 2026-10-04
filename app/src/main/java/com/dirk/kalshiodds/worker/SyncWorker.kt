@@ -33,6 +33,7 @@ class SyncWorker(
         val status = runCatching {
             val store = container.resultsStore
             val archive = container.archive
+            val startedMs = System.currentTimeMillis()
             val paper = container.paper.book.snapshot()
             val settings = container.preferences.hydrate()
             val result = SupabaseSync().roundTrip(
@@ -42,19 +43,15 @@ class SyncWorker(
                     alerts = store.recentAlerts(200),
                     tickets = store.recentTickets(200),
                     settingsChanges = archive.recentSettingsChanges(200),
-                    paperFills = paper.fills,
+                    paperFills = paper.fillsForSync(),
                     settingsSnapshot = SettingsRestore.snapshot(settings)
                 ),
                 store = store,
                 lastPushMs = hub.lastSyncAtMs,
                 onSettings = { json -> settingsJson += json },
-                onPaper = { fill ->
-                    val cur = container.paper.book.snapshot()
-                    if (cur.fills.none { it.id == fill.id }) {
-                        container.paper.book.hydrate(cur.copy(fills = (listOf(fill) + cur.fills).take(40)))
-                    }
-                }
+                onPaper = { fill -> container.paper.book.upsertFromSync(fill) }
             )
+            if (result.ok) container.paper.book.acknowledgePaperSync(startedMs)
             settingsJson.lastOrNull()?.let { container.preferences.restoreSnapshot(it) }
             result
         }.getOrElse { SupabaseSync.Status(ok = false, message = it.message ?: "sync failed") }

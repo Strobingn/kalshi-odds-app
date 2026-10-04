@@ -22,6 +22,7 @@ object DipNav {
         AppRoutes.HOME to "Home",
         AppRoutes.SCORECARD to "Scorecard",
         AppRoutes.LIVE to "Live",
+        AppRoutes.REAL_MONEY to "Real Money",
         AppRoutes.DATA to "Data",
         AppRoutes.MORE to "More"
     )
@@ -32,6 +33,13 @@ object DipNav {
             "Today",
             "Live Approve",
             "Tickets wait for Approve and the REAL MONEY confirm",
+            tab = true
+        ),
+        MoreDestination(
+            AppRoutes.REAL_MONEY,
+            "Today",
+            "Real Money",
+            "Kalshi cash, Approve, and real orders — never automatic",
             tab = true
         ),
         MoreDestination(
@@ -83,6 +91,7 @@ object DipNav {
         AppRoutes.HOME -> "Home tab"
         AppRoutes.SCORECARD -> "Scorecard tab"
         AppRoutes.LIVE -> "Live tab"
+        AppRoutes.REAL_MONEY -> "Real Money tab"
         AppRoutes.DATA -> "Data tab"
         AppRoutes.MORE -> "More tab"
         AppRoutes.SETTINGS -> "More → Settings"

@@ -20,11 +20,17 @@ import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Before
 import org.junit.Test
 
 private const val DEEP = 100_000
 
 class PaperAutopilotTest {
+
+    @Before
+    fun resetAutopilot() {
+        PaperAutopilot.resetSession()
+    }
 
     private val nowMs = HomeFixtures.NOW_MS
     private val settings = SignalSettings(
@@ -65,15 +71,15 @@ class PaperAutopilotTest {
             nowMs = { clock.get() }
         )
         val first = edgeMarket(yesAsk = 0.20, aiYes = 80.0)
-        val a = PaperAutopilot.consider(book, first, settings, nowMs, yesDepth = DEEP, noDepth = DEEP)
+        val a = enter(book, first, nowMs, depth = 4)
         assertNotNull(a)
         clock.addAndGet(5_000)
-        val same = PaperAutopilot.consider(book, first, settings, nowMs + 5_000, yesDepth = DEEP, noDepth = DEEP)
+        val same = PaperAutopilot.consider(book, first, settings, nowMs + 5_000, yesDepth = 4, noDepth = 4)
         assertNull(same)
         assertEquals(1, book.snapshot().fills.size)
         clock.addAndGet(5_000)
         val moved = edgeMarket(yesAsk = 0.28, aiYes = 80.0)
-        val b = PaperAutopilot.consider(book, moved, settings, nowMs + 10_000, yesDepth = DEEP, noDepth = DEEP)
+        val b = PaperAutopilot.consider(book, moved, settings, nowMs + 10_000, yesDepth = 4, noDepth = 4)
         assertNotNull(b)
         assertEquals(2, book.snapshot().fills.size)
         assertEquals(2, book.snapshot().fills.count { !it.settled })
@@ -84,14 +90,14 @@ class PaperAutopilotTest {
     fun kellySizesOnChangingBankroll() {
         val book = PaperBook(idFactory = { "k1" }, nowMs = { nowMs })
         val firstMkt = edgeMarket(ticker = "KXBTC15M-WIN1-50", yesAsk = 0.25, aiYes = 80.0)
-        val first = PaperAutopilot.consider(book, firstMkt, settings, nowMs, yesDepth = DEEP, noDepth = DEEP)!!
+        val first = enter(book, firstMkt, nowMs)!!
         val afterOpen = book.snapshot().paperBankrollUsd
         assertEquals(1_000.0, afterOpen, 1e-9)
         book.settle(first.ticker, "yes")
         val afterWin = book.snapshot().paperBankrollUsd
         assertTrue(afterWin > 1_000.0)
         val secondMkt = edgeMarket(ticker = "KXBTC15M-WIN2-50", yesAsk = 0.25, aiYes = 80.0)
-        val second = PaperAutopilot.consider(book, secondMkt, settings, nowMs + 1, yesDepth = DEEP, noDepth = DEEP)!!
+        val second = enter(book, secondMkt, nowMs + 1)!!
         val sizedOnNew = PaperKellySizer.size(
             0.80,
             0.25,
@@ -110,7 +116,7 @@ class PaperAutopilotTest {
     fun depthCapLimitsContracts() {
         val book = PaperBook()
         val m = edgeMarket(yesAsk = 0.25, aiYes = 80.0)
-        val fill = PaperAutopilot.consider(book, m, settings, nowMs, yesDepth = 2, noDepth = 2)
+        val fill = enter(book, m, nowMs, depth = 2)
         assertNotNull(fill)
         assertEquals(2, fill!!.contracts)
         val uncapped = PaperKellySizer.size(0.80, 0.25, 1_000.0, depthContracts = DEEP)
@@ -162,7 +168,7 @@ class PaperAutopilotTest {
         )
         val book = PaperBook()
         val m = edgeMarket()
-        val fill = PaperAutopilot.consider(book, m, settings, nowMs, yesDepth = DEEP, noDepth = DEEP)
+        val fill = enter(book, m, nowMs)
         assertNotNull(fill)
         assertEquals(0, placed.get())
         assertEquals(0, session.placementCount)
@@ -190,16 +196,7 @@ class PaperAutopilotTest {
         val picked = PaperAutopilot.pickSide(0.35, 0.80, 0.22)
         assertEquals("NO", picked!!.side)
         val book = PaperBook()
-        val fill = PaperAutopilot.consider(
-            book,
-            m,
-            settings,
-            nowMs,
-            yesAsk = 0.80,
-            noAsk = 0.22,
-            yesDepth = DEEP,
-            noDepth = DEEP
-        )
+        val fill = enter(book, m, nowMs, yesAsk = 0.80, noAsk = 0.22)
         assertNotNull(fill)
         assertEquals("NO", fill!!.side)
     }
@@ -207,7 +204,7 @@ class PaperAutopilotTest {
     @Test
     fun scorecardListsEveryAiPaperBetSeparateFromManual() {
         val book = PaperBook(idFactory = { "sc1" }, nowMs = { nowMs })
-        val fill = PaperAutopilot.consider(book, edgeMarket(), settings, nowMs, yesDepth = DEEP, noDepth = DEEP)!!
+        val fill = enter(book, edgeMarket(), nowMs)!!
         book.settle(fill.ticker, "yes")
         val manual = TradeTicket(
             id = "man",
@@ -264,6 +261,17 @@ class PaperAutopilotTest {
             yes = listOf(0.18 to 40.0),
             no = listOf(0.80 to 40.0)
         )
+        PaperAutopilot.consider(
+            book,
+            m,
+            settings,
+            nowMs,
+            yesAsk = 0.20,
+            noAsk = 0.82,
+            yesDepth = DEEP,
+            noDepth = DEEP,
+            book = liveSellers
+        )
         val ok = PaperAutopilot.consider(
             book,
             m,
@@ -300,6 +308,25 @@ class PaperAutopilotTest {
         )!!
         assertEquals(0.0, w.related, 1e-12)
         assertEquals(0.0, w.ai, 1e-12)
+    }
+
+    private fun enter(
+        book: PaperBook,
+        market: MarketUiModel,
+        atMs: Long,
+        depth: Int = DEEP,
+        yesAsk: Double? = market.yesAsk,
+        noAsk: Double? = market.noAsk,
+        bookSnap: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null
+    ): PaperFill? {
+        PaperAutopilot.consider(
+            book, market, settings, atMs,
+            yesAsk = yesAsk, noAsk = noAsk, yesDepth = depth, noDepth = depth, book = bookSnap
+        )
+        return PaperAutopilot.consider(
+            book, market, settings, atMs,
+            yesAsk = yesAsk, noAsk = noAsk, yesDepth = depth, noDepth = depth, book = bookSnap
+        )
     }
 
     private fun edgeMarket(

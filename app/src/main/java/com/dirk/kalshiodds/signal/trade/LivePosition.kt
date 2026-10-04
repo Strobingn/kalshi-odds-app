@@ -11,6 +11,17 @@ import kotlin.math.abs
  * [position_fp] is signed: positive = YES contracts, negative = NO
  * (GET /portfolio/positions).
  */
+/** One resting Kalshi order from GET /portfolio/orders. Not a paper fill. */
+data class RestingOrder(
+    val orderId: String,
+    val ticker: String,
+    val side: String,
+    val remaining: Double,
+    val filled: Double,
+    val price: Double?,
+    val status: String
+)
+
 data class LivePosition(
     val ticker: String,
     val side: String,

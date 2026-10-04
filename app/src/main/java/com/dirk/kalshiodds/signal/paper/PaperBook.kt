@@ -51,8 +51,14 @@ data class PaperFill(
     /** Paper bankroll (start + settled P&L) after this fill settled. */
     val bankrollAfterUsd: Double? = null,
     /** Expected $ of this clip at fill time (`n × (p − ask − fee)`). */
-    val evUsd: Double? = null
+    val evUsd: Double? = null,
+    /**
+     * Bumped when the fill is created and again when it settles.
+     * 0 on pre-0.3.28 JSON — [syncAtMs] falls back to [createdAtMs].
+     */
+    val updatedAtMs: Long = 0L
 ) {
+    fun syncAtMs(): Long = if (updatedAtMs > 0L) updatedAtMs else createdAtMs
     val displaySide: String get() = side.uppercase()
 
     companion object {
@@ -128,7 +134,12 @@ data class PaperBookState(
      * ledger ([SignalConstants.PAPER_LEDGER_MAX]). Null on pre-0.3.19
      * JSON — [migrate] seeds it from the fills still on disk.
      */
-    val lifetimeRealizedPnlUsd: Double? = null
+    val lifetimeRealizedPnlUsd: Double? = null,
+    /**
+     * Fills evicted from the 80-row ledger, kept so cloud sync still
+     * upserts them. Cleared after a successful push of those rows.
+     */
+    val syncTail: List<PaperFill> = emptyList()
 ) {
     val openStakeUsd: Double get() = fills.filter { !it.settled }.sumOf { it.stakeUsd }
     val realizedPnlUsd: Double get() = lifetimeRealizedPnlUsd ?: fills.mapNotNull { it.pnlUsd }.sum()
@@ -139,6 +150,12 @@ data class PaperBookState(
     val openCount: Int get() = fills.count { !it.settled }
     /** Start + lifetime settled P&L — the Kelly bankroll shown on the scorecard. */
     val paperBankrollUsd: Double get() = startingUsd + realizedPnlUsd
+
+    /** Live ledger + trimmed tail + reset archives, newest status per id. */
+    fun fillsForSync(): List<PaperFill> {
+        val all = fills + syncTail + archived.flatMap { it.fills }
+        return all.groupBy { it.id }.map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
+    }
 
     companion object {
         /** 0.3.19: $100 start → $1,000, preserving realized P&L. */
@@ -203,7 +220,7 @@ class PaperBook(
                 archivedAtMs = nowMs(),
                 startingUsd = cur.startingUsd,
                 cashUsd = cur.cashUsd,
-                fills = cur.fills,
+                fills = (cur.fills + cur.syncTail).map { it.copy(updatedAtMs = nowMs()) },
                 note = "Paper book reset — ledger archived"
             )
             publish(
@@ -360,7 +377,9 @@ class PaperBook(
         winProb: Double,
         depthContracts: Int?,
         evPerContract: Double? = null,
-        enabled: Boolean
+        enabled: Boolean,
+        bankrollUsd: Double? = null,
+        maxStakeUsd: Double? = null
     ): PaperFill? {
         if (!enabled) return null
         val px = KalshiPrice.usable(ask) ?: return null
@@ -381,8 +400,50 @@ class PaperBook(
             winChance = p,
             depthContracts = depthContracts,
             meta = meta,
-            allowMultipleOpen = true
+            allowMultipleOpen = true,
+            bankrollUsd = bankrollUsd,
+            maxStakeUsd = maxStakeUsd
         )
+    }
+
+    /**
+     * Cloud sync upsert. Updates settled status / P&L / AI fields on a
+     * row we already have, or inserts a fill this phone has not seen.
+     */
+    fun upsertFromSync(incoming: PaperFill) {
+        synchronized(lock) {
+            val cur = _state.value
+            val idx = cur.fills.indexOfFirst { it.id == incoming.id }
+            if (idx >= 0) {
+                val merged = mergeSyncFill(cur.fills[idx], incoming)
+                if (merged == cur.fills[idx]) return
+                val next = cur.fills.toMutableList()
+                next[idx] = merged
+                publish(cur.copy(fills = next))
+                return
+            }
+            val tailIdx = cur.syncTail.indexOfFirst { it.id == incoming.id }
+            if (tailIdx >= 0) {
+                val merged = mergeSyncFill(cur.syncTail[tailIdx], incoming)
+                if (merged == cur.syncTail[tailIdx]) return
+                val next = cur.syncTail.toMutableList()
+                next[tailIdx] = merged
+                publish(cur.copy(syncTail = next))
+                return
+            }
+            val (kept, tail) = retainLedger(cur, listOf(incoming) + cur.fills)
+            publish(cur.copy(fills = kept, syncTail = tail))
+        }
+    }
+
+    /** Drop tail rows whose sync timestamp is at or before a successful push. */
+    fun acknowledgePaperSync(beforeMs: Long) {
+        synchronized(lock) {
+            val cur = _state.value
+            val next = cur.syncTail.filter { it.syncAtMs() > beforeMs }
+            if (next.size == cur.syncTail.size) return
+            publish(cur.copy(syncTail = next))
+        }
     }
 
     /** User tapped Paper on a ticket. Still never hits Kalshi. */
@@ -436,11 +497,12 @@ class PaperBook(
                 winTargetUsd = winTargetUsd,
                 meta = meta
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val (fills, tail) = retainLedger(cur, listOf(row) + cur.fills)
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd - stake,
                     fills = fills,
+                    syncTail = tail,
                     lastMessage = String.format(
                         java.util.Locale.US,
                         "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · %s",
@@ -549,7 +611,7 @@ class PaperBook(
                 winTargetUsd = winTargetUsd,
                 meta = meta
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val (fills, tail) = retainLedger(cur, listOf(row) + cur.fills)
             val msg = String.format(
                 java.util.Locale.US,
                 "PAPER %s %s · $%.2f · %d ct @ %.1f¢%s · fee $%.2f · never Kalshi",
@@ -565,6 +627,7 @@ class PaperBook(
                 cur.copy(
                     cashUsd = cur.cashUsd - debit,
                     fills = fills,
+                    syncTail = tail,
                     lastMessage = msg
                 )
             )
@@ -636,11 +699,12 @@ class PaperBook(
                 ),
                 meta = meta.copy(pickSource = meta.pickSource ?: PaperPickSource.MANUAL)
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val (fills, tail) = retainLedger(cur, listOf(row) + cur.fills)
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd - allInUsd,
                     fills = fills,
+                    syncTail = tail,
                     lastMessage = message
                 )
             )
@@ -683,6 +747,7 @@ class PaperBook(
                 outcome = "sell",
                 won = pnl >= 0.0,
                 pnlUsd = pnl,
+                updatedAtMs = nowMs(),
                 note = "Paper sell $qty ct @ ${String.format(java.util.Locale.US, "%.1f¢", px * 100)} · never sent to Kalshi"
             )
             val leftover = if (remaining > 0) {
@@ -698,12 +763,14 @@ class PaperBook(
                 leftover?.let { add(it) }
                 add(sold)
                 cur.fills.filterNot { it.id == open.id }.forEach { add(it) }
-            }.take(SignalConstants.PAPER_LEDGER_MAX)
+            }
+            val (keptSells, tail) = retainLedger(cur, nextFills)
             val lifetime = nextLifetime(cur, pnl)
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd + proceeds,
-                    fills = nextFills,
+                    fills = keptSells,
+                    syncTail = tail,
                     lifetimeRealizedPnlUsd = lifetime,
                     lastMessage = String.format(
                         java.util.Locale.US,
@@ -745,7 +812,8 @@ class PaperBook(
                     settled = true,
                     outcome = outcome,
                     won = won,
-                    pnlUsd = pnl
+                    pnlUsd = pnl,
+                    updatedAtMs = nowMs()
                 ).also { changed += it }
             }
             if (changed.isEmpty()) return emptyList()
@@ -807,7 +875,9 @@ class PaperBook(
         depthContracts: Int? = null,
         winTargetUsd: Double? = null,
         meta: PaperFillMeta = PaperFillMeta(),
-        allowMultipleOpen: Boolean = false
+        allowMultipleOpen: Boolean = false,
+        bankrollUsd: Double? = null,
+        maxStakeUsd: Double? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -820,14 +890,16 @@ class PaperBook(
             ) {
                 return null
             }
-            val bankroll = cur.paperBankrollUsd.coerceAtLeast(cur.cashUsd)
+            val bankroll = bankrollUsd?.takeIf { it.isFinite() && it > 0.0 }
+                ?: cur.paperBankrollUsd.coerceAtLeast(cur.cashUsd)
             val sized = PaperKellySizer.size(
                 winProb = p,
                 ask = px,
                 bankrollUsd = bankroll,
                 kellyFraction = kellyFraction,
                 feeRate = feeRate,
-                depthContracts = depthContracts
+                depthContracts = depthContracts,
+                maxStakeUsd = maxStakeUsd
             )
             if (!sized.ok) {
                 publish(cur.copy(lastMessage = sized.reason ?: "Paper skip $ticker — Kelly ≤ 0"))
@@ -869,11 +941,12 @@ class PaperBook(
                     win * SignalConstants.CONTRACT_SETTLEMENT_USD - sized.costPerContract
                 })?.let { it * useQty }
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val (fills, tail) = retainLedger(cur, listOf(row) + cur.fills)
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd - allIn,
                     fills = fills,
+                    syncTail = tail,
                     lastMessage = String.format(
                         java.util.Locale.US,
                         "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · Kelly f=%.3f · %s",
@@ -905,7 +978,9 @@ class PaperBook(
         kellyFraction: Double? = null,
         bankrollAfterUsd: Double? = null,
         evUsd: Double? = null
-    ): PaperFill = PaperFill(
+    ): PaperFill {
+        val at = nowMs()
+        return PaperFill(
         id = idFactory(),
         ticker = ticker,
         side = side,
@@ -913,7 +988,8 @@ class PaperBook(
         contracts = contracts,
         limitPrice = limitPrice,
         source = source,
-        createdAtMs = nowMs(),
+        createdAtMs = at,
+        updatedAtMs = at,
         note = note,
         winTargetUsd = winTargetUsd,
         aiPct = meta.aiPct,
@@ -925,6 +1001,45 @@ class PaperBook(
         bankrollAfterUsd = bankrollAfterUsd,
         evUsd = evUsd ?: meta.evUsd
     )
+    }
+
+    private fun retainLedger(
+        cur: PaperBookState,
+        newestFirst: List<PaperFill>
+    ): Pair<List<PaperFill>, List<PaperFill>> {
+        val kept = newestFirst.take(SignalConstants.PAPER_LEDGER_MAX)
+        val at = nowMs()
+        val overflow = newestFirst.drop(SignalConstants.PAPER_LEDGER_MAX).map { row ->
+            if (row.updatedAtMs >= at) row else row.copy(updatedAtMs = at)
+        }
+        return kept to mergeSyncTail(cur.syncTail, overflow)
+    }
+
+    private fun mergeSyncTail(tail: List<PaperFill>, extra: List<PaperFill>): List<PaperFill> {
+        if (extra.isEmpty()) return tail
+        val byId = LinkedHashMap<String, PaperFill>()
+        (extra + tail).forEach { row ->
+            val prev = byId[row.id]
+            if (prev == null || row.syncAtMs() >= prev.syncAtMs()) byId[row.id] = row
+        }
+        return byId.values.toList()
+    }
+
+    private fun mergeSyncFill(local: PaperFill, incoming: PaperFill): PaperFill {
+        if (incoming.syncAtMs() < local.syncAtMs()) return local
+        return local.copy(
+            settled = incoming.settled || local.settled,
+            outcome = incoming.outcome ?: local.outcome,
+            won = incoming.won ?: local.won,
+            pnlUsd = incoming.pnlUsd ?: local.pnlUsd,
+            source = incoming.source.ifBlank { local.source },
+            aiPct = incoming.aiPct ?: local.aiPct,
+            aiConfidence = incoming.aiConfidence ?: local.aiConfidence,
+            marketPct = incoming.marketPct ?: local.marketPct,
+            pickSource = incoming.pickSource ?: local.pickSource,
+            updatedAtMs = incoming.syncAtMs()
+        )
+    }
 
     private fun nextLifetime(cur: PaperBookState, addedPnl: Double): Double {
         val prev = cur.lifetimeRealizedPnlUsd ?: cur.fills.mapNotNull { it.pnlUsd }.sum()

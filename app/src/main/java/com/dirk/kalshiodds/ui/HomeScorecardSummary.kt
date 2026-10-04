@@ -16,7 +16,12 @@ data class HomeScorecardSummary(
     val losses: Int = 0,
     val hitRate: Double? = null,
     val paperPnlUsd: Double = 0.0,
-    val settledCount: Int = 0
+    val settledCount: Int = 0,
+    /** Model-versus-market side, kept as its own labelled stat. */
+    val evSideWins: Int = 0,
+    val evSideLosses: Int = 0,
+    val evSideHitRate: Double? = null,
+    val evSideSettled: Int = 0
 ) {
     fun line(): String = HomeCopy.scorecardSummaryLine(this)
 
@@ -30,13 +35,23 @@ data class HomeScorecardSummary(
         ): HomeScorecardSummary {
             val settled = ScorecardMetrics.settledScoredPicks(entries)
                 .filter { CryptoMarkets.isLiveTicker(it.ticker) }
-            val all = ScorecardMetrics.window(settled)
+            val ev = ScorecardMetrics.window(settled)
+            val modelRows = settled.mapNotNull { row ->
+                val side = com.dirk.kalshiodds.signal.feedback.ForecastUnits.modelWinnerSide(row)
+                    ?: return@mapNotNull null
+                if (row.predictedSide.equals(side, ignoreCase = true)) row else row.copy(predictedSide = side)
+            }
+            val model = ScorecardMetrics.window(modelRows)
             return HomeScorecardSummary(
-                wins = all.hits,
-                losses = (all.total - all.hits).coerceAtLeast(0),
-                hitRate = all.hitRate,
+                wins = model.hits,
+                losses = (model.total - model.hits).coerceAtLeast(0),
+                hitRate = model.hitRate,
                 paperPnlUsd = paperPnlUsd,
-                settledCount = all.total
+                settledCount = model.total,
+                evSideWins = ev.hits,
+                evSideLosses = (ev.total - ev.hits).coerceAtLeast(0),
+                evSideHitRate = ev.hitRate,
+                evSideSettled = ev.total
             )
         }
 

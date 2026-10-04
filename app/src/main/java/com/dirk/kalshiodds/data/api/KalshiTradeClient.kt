@@ -294,6 +294,40 @@ class KalshiTradeClient(
         return if (detail.isNotBlank()) "$hint — $detail" else hint
     }
 
+    suspend fun listRestingOrders(): List<com.dirk.kalshiodds.signal.trade.RestingOrder> {
+        ensureKeys()
+        return try {
+            val first = activePrimary().getOrders(limit = 50)
+            val chosen = chooseHost(first) { activeFallback()?.getOrders(limit = 50) }
+            if (!chosen.isSuccessful) return emptyList()
+            chosen.body()?.orders.orEmpty().mapNotNull { dto ->
+                val status = dto.status?.trim()?.lowercase().orEmpty()
+                val remaining = (dto.remainingCountFp ?: dto.remainingCount).toDoubleOrNullSafe() ?: 0.0
+                val filled = (dto.fillCountFp ?: dto.fillCount).toDoubleOrNullSafe() ?: 0.0
+                val open = status == "resting" || status == "pending" ||
+                    (remaining > 0.0 && status != "canceled" && status != "cancelled" && status != "executed")
+                if (!open) return@mapNotNull null
+                val yes = dto.yesPriceDollars.toDoubleOrNullSafe()
+                val no = dto.noPriceDollars.toDoubleOrNullSafe()
+                val side = when (dto.side?.trim()?.uppercase()) {
+                    "NO", "DOWN" -> "NO"
+                    else -> "YES"
+                }
+                com.dirk.kalshiodds.signal.trade.RestingOrder(
+                    orderId = dto.orderId.orEmpty(),
+                    ticker = dto.ticker.orEmpty(),
+                    side = side,
+                    remaining = remaining,
+                    filled = filled,
+                    price = if (side == "NO") no ?: yes else yes ?: no,
+                    status = status.ifBlank { "resting" }
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun listMarketPositions(): List<MarketPositionDto> {
         ensureKeys()
         return try {
