@@ -358,7 +358,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Dip Hunter battery usage to Unrestricted. This never auto-trades.",
+                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Bitcoin Kalshi battery usage to Unrestricted. This never auto-trades.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -377,7 +377,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Bitcoin-only. Bitcoin Kalshi watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )

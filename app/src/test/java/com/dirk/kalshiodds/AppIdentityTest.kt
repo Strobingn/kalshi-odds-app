@@ -35,8 +35,8 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(39, BuildConfig.VERSION_CODE)
-        assertEquals("0.3.24", BuildConfig.VERSION_NAME)
+        assertEquals(40, BuildConfig.VERSION_CODE)
+        assertEquals("0.3.25", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertTrue(AppVersion.label.startsWith("${AppIdentity.LABEL} v"))
@@ -51,8 +51,8 @@ class AppIdentityTest {
         assertTrue(gradle.contains("namespace = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("versionCode = 39"))
-        assertTrue(gradle.contains("versionName = \"0.3.24\""))
+        assertTrue(gradle.contains("versionCode = 40"))
+        assertTrue(gradle.contains("versionName = \"0.3.25\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
@@ -144,7 +144,7 @@ class AppIdentityStorageAuditTest {
             )
         }
         val strings = files.first { it.name == "strings.xml" }.readText()
-        assertTrue(strings.contains(">DipHunter (Kashi)<"))
+        assertTrue(strings.contains(">Bitcoin Kalshi<"))
     }
 
     @Test

@@ -11,7 +11,7 @@ package com.dirk.kalshiodds
 object AppIdentity {
     const val APPLICATION_ID = "com.dirk.kalshiodds.kashi"
     const val NAMESPACE = "com.dirk.kalshiodds"
-    const val LABEL = "DipHunter (Kashi)"
+    const val LABEL = "Bitcoin Kalshi"
 
     /** No FileProvider is declared. If one is added, use this authority. */
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"
