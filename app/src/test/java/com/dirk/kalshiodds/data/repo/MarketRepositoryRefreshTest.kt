@@ -139,6 +139,26 @@ class MarketRepositoryRefreshTest {
     }
 
     @Test
+    fun loadPurgesEthAndSolFromTheCache() = runBlocking {
+        val cache = MemoryCache(
+            CachedMarketsPayload(
+                btc = listOf(MarketDto(ticker = "KXBTC15M-CACHED", status = "active", yesAskDollars = "0.4000")),
+                eth = listOf(MarketDto(ticker = "KXETH15M-OLD", status = "active", yesAskDollars = "0.5000")),
+                sol = listOf(MarketDto(ticker = "KXSOL15M-OLD", status = "active", yesAskDollars = "0.5000")),
+                fetchedAtEpochMs = 50L
+            )
+        )
+        val snap = repo(EmptyApi(), cache).refresh(watchBtc = true)
+        assertEquals(listOf("KXBTC15M-CACHED"), snap.btc.map { it.ticker })
+        assertTrue(snap.eth.isEmpty())
+        assertTrue(snap.sol.isEmpty())
+        val stored = cache.read()!!
+        assertTrue(stored.eth.isEmpty())
+        assertTrue(stored.sol.isEmpty())
+        assertEquals(listOf("KXBTC15M-CACHED"), stored.btc.map { it.ticker })
+    }
+
+    @Test
     fun offlineWithNoCacheReturnsAnErrorSnapshot() = runBlocking {
         val api = ThrowingApi(IOException("offline"))
         val snap = repo(api, MemoryCache(null)).refresh()

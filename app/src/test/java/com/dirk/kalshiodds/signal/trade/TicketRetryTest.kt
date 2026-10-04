@@ -206,26 +206,65 @@ class TicketRetryTest {
     }
 
     @Test
-    fun pendingOrderDropsOnceItsMarketHasClosed() = runBlocking {
-        val ticker = "KXBTC15M-26SEP241645-45"
-        val close = com.dirk.kalshiodds.ui.WindowLabel.closeEpochMs(ticker)!!
+    fun realTickerKeepsTheClientOrderIdUntilClosePlusGrace() = runBlocking {
+        val ticker = "KXBTC15M-26OCT041915-15"
+        val close = java.time.ZonedDateTime.of(
+            java.time.LocalDateTime.of(2026, 10, 4, 19, 15),
+            java.time.ZoneId.of("America/New_York")
+        ).toInstant().toEpochMilli()
+        assertEquals(close, com.dirk.kalshiodds.ui.WindowLabel.closeEpochMs(ticker))
         var now = close - 60_000L
+        val store = MemoryOrderIntentStore()
+        val sent = mutableListOf<String>()
+        var n = 0
+        fun session() = TicketSession(
+            placeOrder = { _: TradeTicket, clientOrderId: String ->
+                sent += clientOrderId
+                Result.failure(IllegalStateException("timeout"))
+            },
+            intentStore = store,
+            idFactory = { "id-${++n}" },
+            nowMs = { now }
+        )
+        val ticket = buyTicket().copy(ticker = ticker, closeTimeEpochMs = close)
+        val first = session()
+        first.addManual(ticket)
+        first.approve("t1")
+        assertEquals(listOf("id-1"), sent)
+        assertEquals(close, store.load().single().closeTimeEpochMs)
+        val restarted = session()
+        restarted.onStart()
+        restarted.addManual(ticket)
+        restarted.openApprove("t1")
+        restarted.approve("t1")
+        assertEquals(listOf("id-1", "id-1"), sent)
+        assertEquals("id-1", store.load().single().clientOrderId)
+        now = close + PendingOrderIntent.CLOSE_GRACE_MS - 1_000L
+        session().onStart()
+        assertEquals(1, store.load().size)
+        now = close + PendingOrderIntent.CLOSE_GRACE_MS
+        session().onStart()
+        assertTrue(store.load().isEmpty())
+    }
+
+    @Test
+    fun unknownCloseTimeNeverDropsThePendingOrder() = runBlocking {
+        var now = 1_800_000_000_000L
         val store = MemoryOrderIntentStore()
         fun session() = TicketSession(
             placeOrder = { _: TradeTicket, _: String -> Result.failure(IllegalStateException("timeout")) },
             intentStore = store,
-            idFactory = { "id-old" },
+            idFactory = { "id-keep" },
             nowMs = { now }
         )
-        val open = session()
-        open.addManual(buyTicket().copy(ticker = ticker))
-        open.approve("t1")
+        val first = session()
+        first.addManual(buyTicket())
+        first.approve("t1")
         assertEquals(1, store.load().size)
-        now = close + 1_000L
+        now += 400L * 24 * 60 * 60 * 1000
         session().onStart()
-        assertTrue(store.load().isEmpty())
-        assertTrue(PendingOrderIntent.marketClosed(ticker, now))
-        assertFalse(PendingOrderIntent.marketClosed("KXBTC15M-T", now))
+        assertEquals("id-keep", store.load().single().clientOrderId)
+        assertFalse(PendingOrderIntent.expired(null, "KXBTC15M-T", now))
     }
 
     @Test

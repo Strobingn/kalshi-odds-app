@@ -363,7 +363,8 @@ object TicketBuilder {
             heldContracts = held,
             paperOnly = paperOnly,
             feeUsd = fee,
-            allInUsd = proceeds
+            allInUsd = proceeds,
+            closeTimeEpochMs = market.closeTimeEpochMs
         )
     }
 
@@ -538,14 +539,19 @@ object TicketBuilder {
             ),
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
-            visibleContracts = quoted?.toInt()
+            visibleContracts = quoted?.toInt(),
+            closeTimeEpochMs = market.closeTimeEpochMs
         )
     }
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
-        val yes = market.importedModelPp?.div(100.0)
-            ?: market.aiYesPercent?.div(100.0)
-            ?: market.digitalFairPp?.div(100.0)
+        val yes = if (market.showAiPercent) {
+            market.importedModelPp?.div(100.0)
+                ?: market.aiYesPercent?.div(100.0)
+                ?: market.digitalFairPp?.div(100.0)
+        } else {
+            market.digitalFairPp?.div(100.0)
+        }
         if (yes == null || !yes.isFinite()) return null
         return if (side == "NO") 1.0 - yes else yes
     }
@@ -629,7 +635,8 @@ object TicketBuilder {
             },
             createdAtMs = ctx.nowMs,
             kind = TicketKind.MANUAL,
-            blockedReason = reason
+            blockedReason = reason,
+            closeTimeEpochMs = market.closeTimeEpochMs
         )
     }
 

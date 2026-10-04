@@ -76,7 +76,9 @@ data class TradeTicket(
     /** Visible contracts at/under the limit (book or quoted size). */
     val visibleContracts: Int? = null,
     /** Recomputed when the limit is edited. Display only — typing stays enabled. */
-    val edgeCheckNote: String? = null
+    val edgeCheckNote: String? = null,
+    /** Kalshi `close_time` for this contract. Null means the pending order must not expire. */
+    val closeTimeEpochMs: Long? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

@@ -7,6 +7,8 @@ import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.local.CachedMarketsPayload
 import com.dirk.kalshiodds.data.local.MarketCache
 import com.dirk.kalshiodds.data.local.MarketSnapshotCache
+import com.dirk.kalshiodds.data.local.bitcoinOnly
+import com.dirk.kalshiodds.data.local.hasRetiredSeries
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -105,6 +107,15 @@ class MarketRepository(
 
     private val refreshMutex = Mutex()
 
+    /** Drop stored ETH/SOL the first time this process reads the cache. */
+    private suspend fun loadCache(): CachedMarketsPayload? {
+        val raw = cache.read() ?: return null
+        if (!raw.hasRetiredSeries()) return raw
+        val cleaned = raw.bitcoinOnly()
+        cache.write(cleaned.btc, emptyList(), emptyList(), cleaned.extra, cleaned.fetchedAtEpochMs)
+        return cleaned
+    }
+
     /** Cold start and offline reads. [watchBtc] false yields an empty board; the disk cache is kept. */
     fun cachedBoard(watchBtc: Boolean): Flow<MarketsSnapshot?> = cache.cachedFlow.map { payload ->
         payload?.toSnapshot(fromCache = true, watchBtc = watchBtc)
@@ -195,7 +206,7 @@ class MarketRepository(
                 .cryptoOnly()
                 .filter { it.ticker !in seen }
             val now = System.currentTimeMillis()
-            val previous = runCatching { cache.read() }.getOrNull()
+            val previous = runCatching { loadCache() }.getOrNull()
             fun keep(watching: Boolean, fresh: List<MarketDto>, cached: List<MarketDto>): List<MarketDto> = when {
                 !watching -> cached
                 fresh.isEmpty() && cached.isNotEmpty() -> cached
@@ -214,7 +225,13 @@ class MarketRepository(
                 (watchSol && solMarkets.isNotEmpty()) ||
                 (extraTickers.isNotEmpty() && extraMarkets.isNotEmpty())
             val stamp = if (freshAny) now else previous?.fetchedAtEpochMs?.takeIf { it > 0L } ?: now
-            cache.write(btcKept, ethKept, solKept, extraKept, stamp)
+            cache.write(
+                btcKept.filter { CryptoMarkets.isBtc15m("", it.ticker) },
+                emptyList(),
+                emptyList(),
+                emptyList(),
+                stamp
+            )
             val btcShown = if (watchBtc) btcKept else emptyList()
             val ethShown = if (watchEth) ethKept else emptyList()
             val solShown = if (watchSol) solKept else emptyList()
@@ -254,7 +271,7 @@ class MarketRepository(
         val rateLimited = RefreshRecovery.isRateLimited(error)
         val message = RefreshRecovery.messageFor(error)
         val retryAfterMs = RefreshRecovery.retryAfterMs(error)
-        val cached = runCatching { cache.read() }.getOrNull()
+        val cached = runCatching { loadCache() }.getOrNull()
         if (cached != null) {
             return cached.toSnapshot(
                 fromCache = true,
@@ -366,16 +383,13 @@ class MarketRepository(
         watchBtc: Boolean = true
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
-        val btcRows = if (watchBtc) btc.filter { CryptoMarkets.isCryptoTicker(it.ticker) } else emptyList()
+        val kept = bitcoinOnly()
+        val btcRows = if (watchBtc) kept.btc else emptyList()
         return MarketsSnapshot(
             btc = model.annotate(btcRows.map { it.toUiModel(SeriesKind.BTC) }, now),
-            eth = model.annotate(eth.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.ETH) }, now),
-            sol = model.annotate(sol.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.SOL) }, now),
-            extra = model.annotate(
-                extra.filter { CryptoMarkets.isCryptoTicker(it.ticker) }
-                    .map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
-                now
-            ),
+            eth = emptyList(),
+            sol = emptyList(),
+            extra = emptyList(),
             fetchedAtEpochMs = fetchedAtEpochMs,
             fromCache = fromCache,
             errorMessage = errorMessage,

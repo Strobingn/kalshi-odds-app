@@ -176,6 +176,7 @@ fun SettingsContent(
                         updateMessage = "Checking branch release…"
                         updateMessage = when (val result = AppUpdater.checkAndDownload(context)) {
                             AppUpdater.Result.Current -> "This app is up to date."
+                            is AppUpdater.Result.Skipped -> result.message
                             is AppUpdater.Result.Failed -> result.reason
                             is AppUpdater.Result.Ready -> runCatching {
                                 AppUpdater.showInstaller(context, result.apk)

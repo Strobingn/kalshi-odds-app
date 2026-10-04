@@ -38,6 +38,12 @@ class AiAndChartCopyTest {
         )
         assertNull(banner.banner)
         assertFalse(banner.conflict)
+        val hiddenEdge = hidden.copy(importedModelPp = 90.0, aiYesPercent = 80.0, digitalFairPp = 42.0)
+        assertEquals(
+            0.42,
+            com.dirk.kalshiodds.signal.trade.TicketBuilder.modelProb(hiddenEdge, "YES")!!,
+            1e-9
+        )
     }
 
     @Test

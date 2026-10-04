@@ -158,6 +158,7 @@ jobs:
             echo "asset: ${{ steps.apk.outputs.stable }}"
             echo
             echo "The in-app updater reads only the rolling tag ${rolling_tag}. v1.2+ is signed with the private release key. The old debug certificate that was committed to git is public; installs still on that certificate must uninstall once."
+            echo "From 1.2, install 1.3 once by hand from the grokbot-latest release; later updates arrive in-app."
           } > "$notes_file"
           # Keep a versioned prerelease for humans. The updater does not read it.
           gh release delete "$versioned_tag" --yes --cleanup-tag || true

@@ -65,6 +65,11 @@ class AppUpdaterTest {
             "browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/grokbot-latest/${BuildConfig.UPDATE_ASSET_NAME}"}]}"""
         assertTrue(AppUpdater.pickRelease(raw) is AppUpdater.Pick.ForeignApp)
         assertNull(AppUpdater.parseAsset(raw))
+        val skipped = AppUpdater.decide(AppUpdater.pickRelease(raw)) as AppUpdater.Result.Skipped
+        assertEquals(
+            "Skipped a release for another app; you're on the latest grokbot build.",
+            skipped.message
+        )
     }
 
     @Test

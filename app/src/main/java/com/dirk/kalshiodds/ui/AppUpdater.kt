@@ -52,8 +52,24 @@ object AppUpdater {
 
     sealed class Result {
         data object Current : Result()
+        data class Skipped(val message: String) : Result()
         data class Ready(val apk: File) : Result()
         data class Failed(val reason: String) : Result()
+    }
+
+    const val SKIPPED_OTHER_APP =
+        "Skipped a release for another app; you're on the latest grokbot build."
+
+    /** Null means the caller should download. A foreign package is skipped, not "up to date". */
+    fun decide(pick: Pick): Result? = when (pick) {
+        is Pick.ForeignApp -> Result.Skipped(SKIPPED_OTHER_APP)
+        is Pick.None -> null
+        is Pick.Update -> when {
+            pick.asset.applicationId != null && pick.asset.applicationId != BuildConfig.APPLICATION_ID ->
+                Result.Skipped(SKIPPED_OTHER_APP)
+            pick.asset.versionCode <= BuildConfig.VERSION_CODE -> Result.Current
+            else -> null
+        }
     }
 
     fun parseAsset(releaseJson: String): Asset? = when (val pick = pickRelease(releaseJson)) {
@@ -96,15 +112,9 @@ object AppUpdater {
                 if (!response.isSuccessful) error("Release unavailable (HTTP ${response.code})")
                 response.body?.string() ?: error("Empty release")
             }
-            val asset = when (val pick = pickRelease(release)) {
-                is Pick.ForeignApp -> return@withContext Result.Current
-                is Pick.None -> error("Release has no branch APK")
-                is Pick.Update -> pick.asset
-            }
-            if (asset.applicationId != null && asset.applicationId != BuildConfig.APPLICATION_ID) {
-                return@withContext Result.Current
-            }
-            if (asset.versionCode <= BuildConfig.VERSION_CODE) return@withContext Result.Current
+            val pick = pickRelease(release)
+            decide(pick)?.let { return@withContext it }
+            val asset = (pick as? Pick.Update)?.asset ?: error("Release has no branch APK")
             if (!acceptsDownloadUrl(asset.url)) error("Download URL is not this repository")
             val dest = File(context.cacheDir, "updates/DipHunter-GTP.apk")
             dest.parentFile?.mkdirs()
@@ -122,7 +132,7 @@ object AppUpdater {
                 val packageName = context.packageManager.getPackageArchiveInfo(temp.absolutePath, 0)?.packageName
                 if (packageName != context.packageName) {
                     temp.delete()
-                    return@withContext Result.Current
+                    return@withContext Result.Skipped(SKIPPED_OTHER_APP)
                 }
                 val flags = signingFlags()
                 val installed = runCatching {

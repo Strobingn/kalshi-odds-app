@@ -17,15 +17,20 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds.chatgtp` · version **1.3 (grokbot)**
+Package: `com.dirk.kalshiodds.chatgtp` · version **1.3.1 (grokbot)**
 
 ## 1.3 (grokbot)
 
 - In-app updates read the rolling tag `grokbot-latest` (stable asset `DipHunter-grokbot.apk`) and the same versionCode base as the build. A downloaded APK is offered only when its package is `com.dirk.kalshiodds.chatgtp` and its signing certificate SHA-256 matches this install.
 - The old debug certificate from `app/signing/diphunter-debug.jks` (commits `271856d`, `a558f6c`) is **public**. v1.2+ is signed with the private release key. Installs still on that old certificate must uninstall once before this build will update in place.
 - Pushes to `grokbot` fail the release job when `RELEASE_KEYSTORE_*` secrets are missing. Pull-request builds may compile unsigned and never publish.
+- From 1.2, install 1.3 once by hand from the grokbot-latest release; later updates arrive in-app.
 
-## 0.3.15
+## 1.3.1
+
+- Pending orders expire from Kalshi's `close_time` plus 10 minutes. A missing close time is kept. Ticker clocks are `yyMMMddHHmm` in America/New_York.
+- Cached ETH/SOL rows are filtered out and purged on load. A hidden AI model is not shown or scored; fair value is used instead.
+- A release for another app is reported as skipped, not as up to date.
 
 ## 0.3.15
 

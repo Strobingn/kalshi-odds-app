@@ -9,9 +9,10 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
- * Human window title from a Kalshi 15m ticker
- * (`KXBTC15M-26SEP251345-45` → `BTC · 1:45 PM window`).
- * Clock is America/New_York. Does not change trading logic.
+ * Human window title from a Kalshi 15m ticker.
+ * The clock token is `yyMMMddHHmm` in America/New_York
+ * (`KXBTC15M-26OCT041915-15` → 2026-Oct-04 19:15 ET).
+ * A token that does not match returns null. Does not change trading logic.
  */
 object WindowLabel {
     val ET: ZoneId = ZoneId.of("America/New_York")
@@ -47,15 +48,18 @@ object WindowLabel {
         return TIME.format(zdt)
     }
 
-    /** Close instant encoded in a 15m ticker, or null when the ticker has no clock. */
+    /**
+     * Close instant encoded in a 15m ticker (`yy MMM dd HHmm`), or null when
+     * the ticker has no clock. Callers must keep a pending order when this is null.
+     */
     fun closeEpochMs(ticker: String): Long? = closeZoned(ticker)?.toInstant()?.toEpochMilli()
 
     private fun closeZoned(ticker: String): ZonedDateTime? {
         val key = ticker.split("-").getOrNull(1) ?: return null
         val m = WINDOW.matchEntire(key) ?: return null
-        val day = m.groupValues[1].toInt()
+        val year = 2000 + m.groupValues[1].toInt()
         val month = MONTHS[m.groupValues[2].uppercase(Locale.US)] ?: return null
-        val year = 2000 + m.groupValues[3].toInt()
+        val day = m.groupValues[3].toInt()
         val hhmm = m.groupValues[4].toInt()
         val hour = hhmm / 100
         val minute = hhmm % 100

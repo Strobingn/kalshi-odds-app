@@ -21,7 +21,9 @@ data class PendingOrderIntent(
     val bookSide: String,
     val kind: String,
     val state: String,
-    val updatedAtMs: Long
+    val updatedAtMs: Long,
+    /** Kalshi market `close_time`. Null is fail-safe: the record is kept. */
+    val closeTimeEpochMs: Long? = null
 ) {
     val isOpen: Boolean get() = state == STATE_INFLIGHT || state == STATE_UNCERTAIN
 
@@ -48,11 +50,14 @@ data class PendingOrderIntent(
         .put("kind", kind)
         .put("state", state)
         .put("updatedAtMs", updatedAtMs)
+        .apply { closeTimeEpochMs?.let { put("closeTimeEpochMs", it) } }
 
     companion object {
         const val STATE_INFLIGHT = "inflight"
         const val STATE_UNCERTAIN = "uncertain"
         const val PRICE_EPSILON = 0.0005
+        /** Keep the record until this long after Kalshi's close_time. */
+        const val CLOSE_GRACE_MS = 10 * 60_000L
 
         fun actionOf(ticket: TradeTicket): String = if (ticket.isSell) "SELL" else "BUY"
 
@@ -68,7 +73,8 @@ data class PendingOrderIntent(
             bookSide = ticket.bookSide,
             kind = ticket.kind.name,
             state = state,
-            updatedAtMs = nowMs
+            updatedAtMs = nowMs,
+            closeTimeEpochMs = ticket.closeTimeEpochMs
         )
 
         fun encode(intents: List<PendingOrderIntent>): String {
@@ -77,14 +83,18 @@ data class PendingOrderIntent(
             return array.toString()
         }
 
-        /** True once the ticker's 15m window has closed. Unparseable tickers are kept. */
-        fun marketClosed(ticker: String, nowMs: Long): Boolean {
-            val close = com.dirk.kalshiodds.ui.WindowLabel.closeEpochMs(ticker) ?: return false
-            return nowMs >= close
+        /**
+         * Drop only after the stored Kalshi close_time plus [CLOSE_GRACE_MS].
+         * A missing close_time may fall back to a yyMMMddHHmm ticker clock.
+         * If that parse fails, keep the record — never treat it as already closed.
+         */
+        fun expired(closeTimeEpochMs: Long?, ticker: String, nowMs: Long): Boolean {
+            val close = closeTimeEpochMs ?: com.dirk.kalshiodds.ui.WindowLabel.closeEpochMs(ticker) ?: return false
+            return nowMs >= close + CLOSE_GRACE_MS
         }
 
         fun stillPending(intents: List<PendingOrderIntent>, nowMs: Long): List<PendingOrderIntent> =
-            intents.filter { it.isOpen && !marketClosed(it.ticker, nowMs) }
+            intents.filter { it.isOpen && !expired(it.closeTimeEpochMs, it.ticker, nowMs) }
 
         fun decode(raw: String?): List<PendingOrderIntent> {
             if (raw.isNullOrBlank()) return emptyList()
@@ -107,7 +117,12 @@ data class PendingOrderIntent(
                     bookSide = o.optString("bookSide", "bid"),
                     kind = o.optString("kind", "MANUAL"),
                     state = o.optString("state", STATE_UNCERTAIN),
-                    updatedAtMs = o.optLong("updatedAtMs")
+                    updatedAtMs = o.optLong("updatedAtMs"),
+                    closeTimeEpochMs = if (o.has("closeTimeEpochMs") && !o.isNull("closeTimeEpochMs")) {
+                        o.optLong("closeTimeEpochMs")
+                    } else {
+                        null
+                    }
                 )
             }
             return out.filter { it.isOpen }
