@@ -28,6 +28,8 @@ data class DipPalette(
     val up: Color,
     val upContainer: Color,
     val down: Color,
+    val downInk: Color,
+    val downButton: Color,
     val downContainer: Color,
     val accentOrange: Color,
     val accentRed: Color,
@@ -51,14 +53,16 @@ val ClassicDarkPalette = DipPalette(
     up = UpColor,
     upContainer = UpContainer,
     down = DownColor,
+    downInk = DownInk,
+    downButton = DownButton,
     downContainer = DownContainer,
     accentOrange = AccentOrange,
     accentRed = AccentRed,
     onAccentBlue = OnAccentDark,
     onUp = OnUpDark,
-    onDown = OnDownDark,
+    onDown = OnDownButton,
     onAccentOrange = OnDownDark,
-    onAccentRed = OnDownDark,
+    onAccentRed = OnDownButton,
     gradientStart = GradientStartDark,
     gradientEnd = GradientEndDark
 )
@@ -74,6 +78,8 @@ val ClassicLightPalette = DipPalette(
     up = LightUpColor,
     upContainer = LightUpContainer,
     down = LightDownColor,
+    downInk = LightDownColor,
+    downButton = LightDownButton,
     downContainer = LightDownContainer,
     accentOrange = LightAccentOrange,
     accentRed = LightAccentRed,
@@ -86,7 +92,7 @@ val ClassicLightPalette = DipPalette(
     gradientEnd = GradientEndLight
 )
 
-/** Default palette. Exact 0.3.23 colors. */
+/** Default palette. Non-red tokens match 0.3.23. Reds are the 0.3.27 deeper set. */
 val DarkPalette = ClassicDarkPalette
 val LightPalette = ClassicLightPalette
 
@@ -101,6 +107,8 @@ val FieldOpsDarkPalette = DipPalette(
     up = Color(FieldSwatch.Dark.Success),
     upContainer = Color(0xFF0E2A14),
     down = Color(FieldSwatch.Dark.Error),
+    downInk = Color(FieldSwatch.Dark.Error),
+    downButton = Color(FieldSwatch.Dark.Error),
     downContainer = Color(FieldSwatch.Dark.ErrorContainer),
     accentOrange = Color(FieldSwatch.Dark.StatusUrgent),
     accentRed = Color(FieldSwatch.Dark.Error),
@@ -124,6 +132,8 @@ val FieldOpsLightPalette = DipPalette(
     up = Color(FieldSwatch.Light.Success),
     upContainer = Color(0xFFE8F5E9),
     down = Color(FieldSwatch.Light.Error),
+    downInk = Color(FieldSwatch.Light.Error),
+    downButton = Color(FieldSwatch.Light.Error),
     downContainer = Color(FieldSwatch.Light.ErrorContainer),
     accentOrange = Color(FieldSwatch.Light.StatusUrgent),
     accentRed = Color(FieldSwatch.Light.Error),
@@ -183,8 +193,9 @@ object ThemeRoles {
         Pair("card", "DOWN on surfaceAlt", p.down, p.surfaceAlt),
         Pair("card", "UP on upContainer", p.up, p.upContainer),
         Pair("card", "DOWN on downContainer", p.down, p.downContainer),
+        Pair("card", "DOWN ink on downContainer", p.downInk, p.downContainer),
         Pair("button", "UP label", p.onUp, p.up),
-        Pair("button", "DOWN label", p.onDown, p.down),
+        Pair("button", "DOWN label", p.onDown, p.downButton),
         Pair("card", "BET UP on surface", p.up, p.surface),
         Pair("card", "BET DOWN on surface", p.down, p.surface),
         Pair("card", "NO BET on surface", p.textSecondary, p.surface),

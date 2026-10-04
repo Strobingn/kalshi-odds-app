@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Default colors are the 0.3.23 classic palette. FieldOps stays selectable. */
+/** Non-red defaults stay the 0.3.23 classic palette. DOWN reds are the 0.3.27 deeper set. */
 class ClassicPaletteTest {
 
     @Test
@@ -20,7 +20,10 @@ class ClassicPaletteTest {
         assertEquals(Color(0xFF3FB950), ClassicDarkPalette.up)
         assertEquals(Color(0xFF14301C), ClassicDarkPalette.upContainer)
         assertEquals(Color(0xFFF85149), ClassicDarkPalette.down)
-        assertEquals(Color(0xFF301616), ClassicDarkPalette.downContainer)
+        assertEquals(Color(0xFFE04E44), ClassicDarkPalette.downInk)
+        assertEquals(Color(0xFFC62828), ClassicDarkPalette.downButton)
+        assertEquals(Color(0xFFFFFFFF), ClassicDarkPalette.onDown)
+        assertEquals(Color(0xFF1C0A0A), ClassicDarkPalette.downContainer)
         assertEquals(Color(0xFFD29922), ClassicDarkPalette.accentOrange)
         assertEquals(Color(0xFFF6F8FA), ClassicLightPalette.bg)
         assertEquals(Color(0xFFFFFFFF), ClassicLightPalette.surface)
@@ -29,7 +32,11 @@ class ClassicPaletteTest {
         assertEquals(Color(0xFF57606A), ClassicLightPalette.textSecondary)
         assertEquals(Color(0xFF0550AE), ClassicLightPalette.accentBlue)
         assertEquals(Color(0xFF116329), ClassicLightPalette.up)
-        assertEquals(Color(0xFFA0111F), ClassicLightPalette.down)
+        assertEquals(Color(0xFF8E1515), ClassicLightPalette.down)
+        assertEquals(Color(0xFF8E1515), ClassicLightPalette.downInk)
+        assertEquals(Color(0xFFB71C1C), ClassicLightPalette.downButton)
+        assertEquals(Color(0xFFFFFFFF), ClassicLightPalette.onDown)
+        assertEquals(Color(0xFFF6D2D5), ClassicLightPalette.downContainer)
         assertEquals(Color(0xFF7D4E00), ClassicLightPalette.accentOrange)
         assertEquals(ClassicDarkPalette, DipTheme.palette(dark = true))
         assertEquals(ClassicLightPalette, DipTheme.palette(dark = false))

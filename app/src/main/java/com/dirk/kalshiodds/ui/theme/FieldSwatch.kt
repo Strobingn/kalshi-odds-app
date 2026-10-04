@@ -38,21 +38,21 @@ object FieldSwatch {
         const val Outline: Long = 0xFF5A5A5A
         const val OutlineVariant: Long = 0xFF5A5A5A
         /**
-         * Light red on the lifted dark cards. Brighter than the old #EF9A9A so a
-         * 15% badge wash still clears 4.5:1 on #333333. Not yellow.
+         * Light red on the lifted dark cards, a step darker than #FFB4B4.
+         * Still clears 4.5:1 on #404040, and a near-black label clears the fill.
          */
-        const val Error: Long = 0xFFFFB4B4
+        const val Error: Long = 0xFFFFA0A0
         const val OnError: Long = 0xFF3B0002
-        const val ErrorContainer: Long = 0xFF5C1A1A
+        const val ErrorContainer: Long = 0xFF4A1212
         const val OnErrorContainer: Long = 0xFFFFDAD6
         const val StatusPending: Long = 0xFFD6D6D6
         const val StatusInProgress: Long = 0xFFC4C4C4
         const val StatusCompleted: Long = 0xFFA5D6A7
-        const val StatusCancelled: Long = 0xFFFFB4B4
-        /** Light red for urgent text on dark cards. Not yellow. */
-        const val StatusUrgent: Long = 0xFFFFB0A8
+        const val StatusCancelled: Long = 0xFFFFA0A0
+        /** Light red for urgent text on dark cards, a step darker than #FFB0A8. Not yellow. */
+        const val StatusUrgent: Long = 0xFFFFA29A
         /** Dark red for urgent text on the light Today hero. Not for dark cards. */
-        const val OnHeroWarning: Long = 0xFF4A0C0C
+        const val OnHeroWarning: Long = 0xFF3E0808
         const val AccentBlue: Long = 0xFFD0D0D0
         const val AccentPurple: Long = 0xFFC0C0C0
         const val AccentOrange: Long = 0xFFB8B8B8
@@ -84,19 +84,19 @@ object FieldSwatch {
         const val OnSurfaceMuted: Long = 0xFF575B63
         const val Outline: Long = 0xFF74777F
         const val OutlineVariant: Long = 0xFFC4C4C4
-        const val Error: Long = 0xFF9B1B1B
+        const val Error: Long = 0xFF8E1515
         const val OnError: Long = 0xFFFFFFFF
-        const val ErrorContainer: Long = 0xFFFFDAD6
+        const val ErrorContainer: Long = 0xFFF6D0CC
         const val OnErrorContainer: Long = 0xFF410002
         /** Dark enough that pending chips clear 4.5:1 on the light card wash. */
         const val StatusPending: Long = 0xFF585C61
         const val StatusInProgress: Long = 0xFF3A3A3A
         const val StatusCompleted: Long = 0xFF1B5E20
-        const val StatusCancelled: Long = 0xFF9B1B1B
-        /** Dark red for urgent text on light cards. Not yellow or orange. */
-        const val StatusUrgent: Long = 0xFF93000A
+        const val StatusCancelled: Long = 0xFF8E1515
+        /** Dark red for urgent text on light cards, a step darker than #93000A. Not yellow or orange. */
+        const val StatusUrgent: Long = 0xFF820008
         /** Light red for urgent text on the dark Today hero. Not for light cards. */
-        const val OnHeroWarning: Long = 0xFFFFCDD2
+        const val OnHeroWarning: Long = 0xFFFFC2C9
         /** Dictate FAB fill. Distinct from PrimaryContainer so the label stays AA. */
         const val SecondaryContainer: Long = 0xFFE0E0E0
         const val AccentBlue: Long = 0xFF3A3A3A

@@ -177,15 +177,15 @@ fun BidChart(
                 }
             }
             line({ it.upBidCents }, colors.up)
-            line({ it.downBidCents }, colors.down)
+            line({ it.downBidCents }, colors.downButton)
             if (scrub && scrubIdx != null) {
                 val x = xOf(pick.tMs)
                 drawLine(axisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
                 pick.upBidCents?.let { drawCircle(colors.up, 4.dp.toPx(), Offset(x, yOf(it))) }
-                pick.downBidCents?.let { drawCircle(colors.down, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.downButton, 4.dp.toPx(), Offset(x, yOf(it))) }
             } else {
                 pick.upBidCents?.let { drawCircle(colors.up, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
-                pick.downBidCents?.let { drawCircle(colors.down, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.downButton, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
