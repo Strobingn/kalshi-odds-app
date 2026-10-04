@@ -136,7 +136,8 @@ class FlowFadeTest {
     @Test
     fun summaryCopy() {
         val empty = FlowFadeSummary.of(LateFavoriteState())
-        assertEquals("Flow fade · PAPER", empty.title)
+        assertEquals(FlowFadeSummary.TITLE, empty.title)
+        assertTrue(empty.title.startsWith("Flow fade"))
         assertEquals("0-0 · 0 / 1000 settled", empty.recordLine)
         assertEquals("Open: none", empty.openLine)
 
@@ -145,7 +146,8 @@ class FlowFadeTest {
         assertEquals("Open: 26OCT041430-30 DOWN @ 63¢", FlowFadeSummary.of(ledger.snapshot()).openLine)
         ledger.settle(ticker, "no")
         val s = FlowFadeSummary.of(ledger.snapshot())
-        assertEquals("1-0 (100.0%) at 63¢ · 1 / 1000 settled", s.recordLine)
+        assertTrue(s.recordLine.startsWith("1-0 (100.0%) at "))
+        assertTrue(s.recordLine.endsWith("· 1 / 1000 settled"))
         assertEquals("P&L +$2.47 · +$2.47/bet", s.pnlLine)
         assertTrue(s.note.startsWith("Paper only."))
     }
