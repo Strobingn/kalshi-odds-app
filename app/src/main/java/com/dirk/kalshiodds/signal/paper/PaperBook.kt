@@ -15,7 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
 /**
- * Isolated paper book. Never calls Kalshi. $100 start / $5 per AI fill.
+ * Isolated paper book. Never calls Kalshi. The automatic path has unlimited
+ * synthetic credit; manual Paper controls retain their cash-limited behavior.
  */
 @Serializable
 data class PaperFill(
@@ -31,6 +32,8 @@ data class PaperFill(
     val outcome: String? = null,
     val won: Boolean? = null,
     val pnlUsd: Double? = null,
+    /** Simulated taker fee paid when this paper fill was opened. */
+    val feeUsd: Double = 0.0,
     val note: String,
     val winTargetUsd: Double? = null
 ) {
@@ -105,7 +108,8 @@ class PaperBook(
     }
 
     /**
-     * Auto-log a $5 paper fill when an AI hunter / configured ticket would trade.
+     * Legacy cash-capped auto fill. Kept for historical imports and focused
+     * unit tests; the active paper autopilot uses [considerUnboundedTicket].
      * Manual live tickets are ignored — those need an explicit Paper tap.
      */
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
@@ -139,6 +143,52 @@ class PaperBook(
             limitPrice = px,
             source = "AI signal",
             note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" }
+        )
+    }
+
+    /**
+     * Automatic paper execution with unlimited synthetic credit. It takes the
+     * currently visible contracts at the touch, rather than inventing fills
+     * beyond the displayed order book. It never reads a Kalshi balance,
+     * credentials, or calls the live trading client.
+     */
+    fun considerUnboundedTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
+        if (!enabled || !ticket.canApprove) return null
+        if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
+        val visible = ticket.visibleContracts?.takeIf { it > 0 } ?: return null
+        val source = when (ticket.kind) {
+            TicketKind.HUNTER -> "AI autopilot hunter"
+            TicketKind.HUNTER_VALUE -> "AI autopilot long-shot"
+            else -> "AI autopilot"
+        }
+        return unboundedFill(
+            ticker = ticket.ticker,
+            side = ticket.side,
+            limitPrice = ticket.estimatedAvgFill.takeIf { it > 0.0 } ?: ticket.limitPrice,
+            contracts = visible,
+            source = source,
+            note = "Unlimited-credit paper autopilot · visible touch liquidity only · never sent to Kalshi",
+            winTargetUsd = ticket.winTargetUsd
+        )
+    }
+
+    /** Same unlimited-credit paper execution for an alert that has no ticket. */
+    fun considerUnboundedAlert(
+        alert: SignalAlert,
+        ask: Double?,
+        visibleContracts: Int?,
+        enabled: Boolean
+    ): PaperFill? {
+        if (!enabled || SignalStance.isNoBetSide(alert.predictedSide)) return null
+        val px = KalshiPrice.usable(ask) ?: return null
+        val quantity = visibleContracts?.takeIf { it > 0 } ?: return null
+        return unboundedFill(
+            ticker = alert.ticker,
+            side = alert.predictedSide,
+            limitPrice = px,
+            contracts = quantity,
+            source = "AI autopilot signal",
+            note = "Unlimited-credit paper autopilot · visible touch liquidity only · ${alert.reason.ifBlank { "AI signal" }} · never sent to Kalshi"
         )
     }
 
@@ -298,6 +348,7 @@ class PaperBook(
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),
+                feeUsd = fees,
                 note = buildString {
                     append(note)
                     if (capped) append(" · capped to paper cash")
@@ -493,7 +544,7 @@ class PaperBook(
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                val pnl = payout - fill.stakeUsd
+                val pnl = payout - fill.stakeUsd - fill.feeUsd
                 cash += payout
                 fill.copy(
                     settled = true,
@@ -593,6 +644,60 @@ class PaperBook(
                         row.contracts,
                         row.limitPrice * 100,
                         source
+                    )
+                )
+            )
+            return row
+        }
+    }
+
+    private fun unboundedFill(
+        ticker: String,
+        side: String,
+        limitPrice: Double,
+        contracts: Int,
+        source: String,
+        note: String,
+        winTargetUsd: Double? = null
+    ): PaperFill? {
+        if (CryptoMarkets.isRetiredTicker(ticker)) return null
+        val want = if (side.equals("NO", true)) "NO" else "YES"
+        val px = KalshiPrice.usable(limitPrice) ?: return null
+        val quantity = contracts.coerceAtLeast(0)
+        if (quantity < 1) return null
+        synchronized(lock) {
+            val cur = _state.value
+            val stake = quantity * px
+            val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.total(quantity, px)
+            val row = PaperFill(
+                id = idFactory(),
+                ticker = ticker,
+                side = want,
+                stakeUsd = stake,
+                contracts = quantity,
+                limitPrice = px,
+                source = source,
+                createdAtMs = nowMs(),
+                feeUsd = fee,
+                note = "$note · fee ${fmt(fee)}",
+                winTargetUsd = winTargetUsd
+            )
+            // Unlike the manually funded paper book, autopilot has neither a
+            // cash balance nor position/ledger count limit. It records every
+            // independent pass through the live model.
+            val fills = listOf(row) + cur.fills
+            publish(
+                cur.copy(
+                    cashUsd = cur.cashUsd - stake - fee,
+                    fills = fills,
+                    lastMessage = String.format(
+                        java.util.Locale.US,
+                        "PAPER AUTO %s %s · %d visible ct @ %.1f¢ · all-in $%.2f · unlimited synthetic credit · never Kalshi",
+                        row.displaySide,
+                        row.ticker,
+                        row.contracts,
+                        row.limitPrice * 100,
+                        stake + fee
                     )
                 )
             )
