@@ -127,6 +127,17 @@ class BackNavigationTest {
         assertTrue(rule.activity.isFinishing)
     }
 
+    @Test
+    fun selectingBottomTabReplacesBackStack() {
+        val nav = AppNavigator()
+        nav.open(AppRoutes.CHART)
+        nav.selectPrimary(AppRoutes.SCORECARD)
+
+        assertEquals(AppRoutes.SCORECARD, nav.current)
+        assertFalse(nav.canPop)
+        assertFalse(nav.back())
+    }
+
     private fun assertSheetBackCancelsWithoutOrder(sell: Boolean) {
         val nav = AppNavigator()
         var sheetOpen by mutableStateOf(true)
