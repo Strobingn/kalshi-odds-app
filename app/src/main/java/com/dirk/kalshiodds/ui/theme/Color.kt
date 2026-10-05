@@ -33,10 +33,12 @@ val LightBorder = Color(0xFFD0D7DE)
 val LightTextPrimary = Color(0xFF1F2328)
 val LightTextSecondary = Color(0xFF57606A)
 val LightAccentBlue = Color(0xFF0550AE)
-val LightUpColor = Color(0xFF116329)
-val LightUpContainer = Color(0xFFDCEFE3)
-val LightDownColor = Color(0xFFA0111F)
-val LightDownContainer = Color(0xFFF8D6D9)
+// Stronger light-mode UP/DOWN cards: still readable on a white app surface,
+// but no longer washed out beside the live-price text.
+val LightUpColor = Color(0xFF075E2A)
+val LightUpContainer = Color(0xFFC2E5CF)
+val LightDownColor = Color(0xFF8D0D19)
+val LightDownContainer = Color(0xFFF2BEC4)
 val LightAccentOrange = Color(0xFF7D4E00)
 val LightAccentRed = LightDownColor
 val OnAccentLight = Color(0xFFFFFFFF)
