@@ -58,7 +58,6 @@ fun RealMoneyScreen(
         autopilotMode = mode,
         liveArmed = state.liveAutopilotArmed,
         liveApproveTapped = state.liveAutopilotApproveTapped,
-        dailyCapUsd = state.settings.liveAutopilotDailyCapUsd,
         dailySpentUsd = state.shadow.spentOn(day),
         shadowTickets = state.shadow.tickets,
         shadowBankrollUsd = state.shadow.bankrollUsd,
@@ -119,6 +118,9 @@ fun RealMoneyScreen(
                     Button(onClick = { odds.confirmLiveAutopilotRealMoney() }, modifier = Modifier.fillMaxWidth()) {
                         Text("Confirm REAL MONEY")
                     }
+                }
+                page.largeClipWarning?.let { warn ->
+                    Text(warn, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
                 }
                 page.liveError?.let { err ->
                     Text(err, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)

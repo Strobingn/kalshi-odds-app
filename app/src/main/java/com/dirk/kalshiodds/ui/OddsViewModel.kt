@@ -515,8 +515,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         refreshExternal()
         return repository.refresh(
             watchBtc = true,
-            watchEth = false,
-            watchSol = false,
+            watchEth = true,
+            watchSol = true,
             extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(s.extraTickerList()),
             edgeThresholdPp = s.edgeThresholdPp
         )
@@ -1302,9 +1302,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val now = container.clock.nowMs()
         val ctx = ticketContext(_state.value, now)
         val day = com.dirk.kalshiodds.signal.paper.LiveAutopilotGate.dayKey(now)
-        val shadowSnap = shadowBook.snapshot()
         live.forEach { market ->
-            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(market.ticker)) return@forEach
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(market.ticker)) return@forEach
             val book = hub.scoring.book.snapshotBook(market.ticker)
             val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
             val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
@@ -1326,21 +1325,24 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             if (!tick.decision.ok || picked == null) return@forEach
             if (mode == com.dirk.kalshiodds.signal.paper.AutopilotMode.PAPER) return@forEach
             val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
-            val remaining = (s.liveAutopilotDailyCapUsd - shadowSnap.spentOn(day)).coerceAtLeast(0.0)
-            val cap = min(com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, remaining)
+            val sized = com.dirk.kalshiodds.signal.paper.AutopilotOrderSize.quote(
+                decision = tick.decision,
+                fill = tick.fill,
+                depth = depth,
+                kellyFraction = s.paperKellyFraction,
+                feeRate = s.feeRate,
+                cashUsd = paperBook.snapshot().cashUsd
+            )
             val tags = com.dirk.kalshiodds.signal.paper.AutopilotRegime.tags(market, picked.side, picked.ask, now)
-            val draft = com.dirk.kalshiodds.signal.paper.ShadowOrderPayload.draft(
+            val draft = com.dirk.kalshiodds.signal.paper.ShadowOrderPayload.fromKelly(
                 ticker = market.ticker,
                 side = picked.side,
-                ask = picked.ask,
+                sized = sized,
                 depth = depth,
                 reason = "Autopilot edge ${String.format(java.util.Locale.US, "%.1f¢", picked.evPerContract * 100)} after fees",
                 nowMs = now,
                 clientOrderId = java.util.UUID.randomUUID().toString(),
-                capUsd = cap,
-                feeRate = s.feeRate,
-                regimeKey = tags.key,
-                cashUsd = shadowBook.snapshot().cashUsd
+                regimeKey = tags.key
             )
             val recorded = shadowBook.record(draft)
             val ticket = recorded.ticket
@@ -1359,13 +1361,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     shadowPrice = ticket.limitPrice,
                     shadowDepthFill = ticket.depthFill,
                     shadowAllInUsd = ticket.stakeUsd,
-                    spentTodayUsd = shadowBook.snapshot().spentOn(day),
-                    dailyCapUsd = s.liveAutopilotDailyCapUsd,
                     alreadyAttempted = shadowBook.snapshot().attempted(ticket.clientOrderId)
                 )
             )
             if (!dispatch.shouldPlace || !recorded.isNew) return@forEach
-            if (!shadowBook.claimLive(ticket.clientOrderId, day, ticket.stakeUsd, s.liveAutopilotDailyCapUsd)) {
+            if (!shadowBook.claimLive(ticket.clientOrderId, day, ticket.stakeUsd)) {
                 return@forEach
             }
             viewModelScope.launch {

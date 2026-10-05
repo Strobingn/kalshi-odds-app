@@ -87,7 +87,12 @@ data class TradeTicket(
      * Kalshi `client_order_id`, minted once when the ticket is created
      * and reused on every Approve retry. Empty only for hand-built fixtures.
      */
-    val clientOrderId: String = ""
+    val clientOrderId: String = "",
+    /**
+     * Armed Autopilot clip. [com.dirk.kalshiodds.data.api.KalshiTradeClient]
+     * sends this count as sized. Manual Approve tickets stay at the $10 cap.
+     */
+    val kellyAutopilot: Boolean = false
 ) {
     val displaySide: String get() = side.uppercase()
 

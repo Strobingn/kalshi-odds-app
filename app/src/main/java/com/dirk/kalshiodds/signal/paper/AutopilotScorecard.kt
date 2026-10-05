@@ -31,7 +31,7 @@ object AutopilotScorecard {
         entries: List<PredictionLogEntry> = emptyList(),
         bankrollUsd: Double? = null
     ): Report {
-        val edge = fills.filter { isAutopilotEdge(it) && ScorecardLedger.isScorecardTicker(it.ticker) }
+        val edge = fills.filter { isAutopilotEdge(it) && com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(it.ticker) }
         val settled = edge.filter { it.settled && it.won != null }
         val pnl = settled.sumOf { it.pnlUsd ?: 0.0 }
         val wins = settled.count { it.won == true }

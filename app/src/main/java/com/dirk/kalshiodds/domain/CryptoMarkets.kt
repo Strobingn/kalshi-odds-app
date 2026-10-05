@@ -3,14 +3,20 @@ package com.dirk.kalshiodds.domain
 import com.dirk.kalshiodds.data.api.KalshiApi
 
 /**
- * Live universe for Dip Hunter. 0.3.14 is **Bitcoin-only** ([KalshiApi.SERIES_BTC]).
- * ETH / SOL / extras are recognized so stored rows can be filtered out, but
- * they are never subscribed, polled, scored, alerted, or paper-traded.
- * WTI and other non-crypto contracts stay rejected.
+ * Home stays Bitcoin ([KalshiApi.SERIES_BTC]). Autopilot paper, shadow, and
+ * limited live also watch ETH and SOL 15-minute markets. Daily, XRP, HYPE,
+ * sports, and other series stay out. WTI and other non-crypto contracts stay rejected.
  */
 object CryptoMarkets {
-    /** Single live watchlist. Home, rollover, WS, scoring, and paper all read this. */
+    /** Home card. Not the Autopilot watchlist. */
     val DEFAULT_SERIES: List<String> = listOf(KalshiApi.SERIES_BTC)
+
+    /** BTC, ETH, and SOL 15-minute markets. No other series. */
+    val AUTOPILOT_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTC,
+        KalshiApi.SERIES_ETH,
+        KalshiApi.SERIES_SOL
+    )
 
     fun isLiveSeries(series: String): Boolean =
         DEFAULT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
@@ -21,12 +27,18 @@ object CryptoMarkets {
     fun liveTickers(tickers: Iterable<String>): List<String> =
         tickers.map { it.trim() }.filter { it.isNotEmpty() && isLiveTicker(it) }.distinct()
 
-    /** KXETH15M / KXSOL15M — recognized so stored rows can be filtered, never live. */
-    fun isRetiredTicker(ticker: String): Boolean {
-        val series = inferSeries(ticker)
-        return series.equals(KalshiApi.SERIES_ETH, ignoreCase = true) ||
-            series.equals(KalshiApi.SERIES_SOL, ignoreCase = true)
+    fun isAutopilotSeries(series: String): Boolean =
+        AUTOPILOT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
+
+    /** KXBTC15M, KXETH15M, KXSOL15M only. Daily, yearly, XRP, HYPE, and sports are not included. */
+    fun isAutopilotTicker(ticker: String): Boolean {
+        val u = ticker.trim().uppercase()
+        if (u.isEmpty()) return false
+        return AUTOPILOT_SERIES.any { u.startsWith(it) }
     }
+
+    /** Nothing in the Autopilot 15m set is retired. Other series are simply not watched. */
+    fun isRetiredTicker(ticker: String): Boolean = false
 
     /** Tokens that identify a crypto-denominated Kalshi series or ticker. */
     private val CRYPTO_TOKENS = listOf(

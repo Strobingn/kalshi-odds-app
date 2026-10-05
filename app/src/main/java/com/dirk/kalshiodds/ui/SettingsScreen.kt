@@ -421,7 +421,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. Bitcoin Kalshi watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Home shows Bitcoin. Autopilot also watches ETH and SOL 15-minute markets. XRP, HYPE, sports, and other series stay off.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
@@ -761,9 +761,11 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             Text(
-                "Autopilot mode. Paper books simulated fills. Shadow builds the exact Kalshi order and never submits it. " +
+                "Autopilot covers BTC, ETH, and SOL 15-minute markets. Paper books simulated fills. " +
+                    "Shadow builds the same Kelly order and never submits it. " +
                     "Limited live stays off until you arm it on the Real Money tab with Approve, then REAL MONEY. " +
-                    "Live sends only when paper and shadow agree, at most $10 a ticket, and only up to the daily cap. " +
+                    "Live sends only when paper and shadow agree, sized by the same fee-aware Kelly as paper. " +
+                    "There is no $10 or daily dollar cap on Autopilot. Manual Approve stays $10. " +
                     "A missing key or an order error stops it. No retry.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -775,23 +777,7 @@ fun SettingsContent(
             Text(
                 String.format(
                     Locale.US,
-                    "Live Autopilot daily cap  $%.0f  (default $50)",
-                    s.liveAutopilotDailyCapUsd
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Slider(
-                value = s.liveAutopilotDailyCapUsd.toFloat().coerceIn(10f, 200f),
-                onValueChange = { viewModel?.setLiveAutopilotDailyCap(it.toDouble()) },
-                valueRange = 10f..200f,
-                steps = 18
-            )
-            Text(
-                String.format(
-                    Locale.US,
-                    "Paper Kelly fraction  %.2f  (0.50 = half-Kelly · AI paper only · live stays \$10)",
+                    "Paper Kelly fraction  %.2f  (0.50 = half-Kelly · Autopilot paper, shadow, and live · manual Approve stays \$10)",
                     s.paperKellyFraction
                 ),
                 style = MaterialTheme.typography.bodyMedium,

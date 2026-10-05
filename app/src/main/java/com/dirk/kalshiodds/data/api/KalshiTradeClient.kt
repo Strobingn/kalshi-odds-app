@@ -382,6 +382,12 @@ class KalshiTradeClient(
 
     private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
         if (ticket.isSell) return ticket
+        if (ticket.kellyAutopilot) {
+            if (ticket.contracts < 1 || com.dirk.kalshiodds.domain.KalshiPrice.usable(ticket.limitPrice) == null) {
+                throw IllegalStateException("Autopilot order has no Kelly size")
+            }
+            return ticket
+        }
         val feeRate = if (ticket.postOnly || ticket.kind == com.dirk.kalshiodds.signal.trade.TicketKind.D3) {
             0.0
         } else {

@@ -3,7 +3,6 @@ package com.dirk.kalshiodds.signal.paper
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
-import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import java.util.Locale
@@ -35,31 +34,31 @@ object ShadowOrderPayload {
         val timestamp_ms: Long
     )
 
-    fun draft(
+    /**
+     * Payload for the Kelly clip [sized]. Count and price match the paper
+     * decision. There is no $10 clip. This function does not submit.
+     */
+    fun fromKelly(
         ticker: String,
         side: String,
-        ask: Double,
+        sized: PaperKellySizer.Result,
         depth: Int?,
         reason: String,
         nowMs: Long,
         clientOrderId: String,
-        capUsd: Double,
-        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
         regimeKey: String? = null,
-        cashUsd: Double = SignalConstants.PAPER_START_USD,
         id: String = ""
     ): ShadowTicket {
         val outcome = if (side.equals("NO", true)) "NO" else "YES"
-        val px = KalshiPrice.usable(ask) ?: 0.0
-        val room = capUsd.coerceAtMost(LiveOrderSizer.LIVE_ALL_IN_CAP_USD)
-        val clip = LiveOrderSizer.size(px, room, feeRate)
-        val yesPx = if (outcome == "YES") clip.price else KalshiPrice.clipLimit(1.0 - clip.price)
+        val px = sized.ask.takeIf { it > 0.0 } ?: KalshiPrice.usable(sized.ask) ?: 0.0
+        val yesPx = if (outcome == "YES") px else KalshiPrice.clipLimit(1.0 - px)
         val bookSide = if (outcome == "YES") "bid" else "ask"
         val yesWire = KalshiPrice.toWireDollars(yesPx) ?: String.format(Locale.US, "%.4f", yesPx)
+        val countWire = String.format(Locale.US, "%.2f", sized.contracts.toDouble())
         val body = CreateOrderV2Request(
             ticker = ticker,
             side = bookSide,
-            count = clip.countWire,
+            count = countWire,
             price = yesWire,
             timeInForce = CreateOrderV2Request.TIME_IN_FORCE_GTC,
             clientOrderId = clientOrderId,
@@ -81,13 +80,11 @@ object ShadowOrderPayload {
             reason = reason,
             timestamp_ms = nowMs
         )
-        val depthFill = clip.ok && depth != null && depth >= clip.count
-        val booked = depthFill && cashUsd + 1e-9 >= clip.allInUsd
+        val depthFill = sized.ok && depth != null && depth >= sized.contracts
         val unfilled = when {
-            !clip.ok -> clip.refusedReason ?: "Cannot size a live order under the cap"
-            depth == null || depth < clip.count ->
-                "Would not fill — ask size ${depth ?: 0} is below ${clip.count} contracts at the limit"
-            !booked -> "Shadow bankroll cannot cover the exact order — not marked as a fill"
+            !sized.ok -> sized.reason ?: "Kelly size is empty"
+            depth == null || depth < sized.contracts ->
+                "Would not fill — ask size ${depth ?: 0} is below ${sized.contracts} contracts at the limit"
             else -> null
         }
         return ShadowTicket(
@@ -96,25 +93,25 @@ object ShadowOrderPayload {
             side = outcome,
             action = "buy",
             bookSide = bookSide,
-            count = clip.count,
-            limitPrice = clip.price,
+            count = sized.contracts,
+            limitPrice = px,
             yesLimitPrice = yesPx,
             clientOrderId = clientOrderId,
             createdAtMs = nowMs,
             reason = reason,
             payloadJson = json.encodeToString(wire),
             depthFill = depthFill,
-            booked = booked,
+            booked = depthFill,
             unfilledReason = unfilled,
-            stakeUsd = if (clip.ok) clip.allInUsd else 0.0,
-            feeUsd = clip.feeUsd,
+            stakeUsd = if (sized.ok) sized.allInUsd else 0.0,
+            feeUsd = sized.feeUsd,
             regimeKey = regimeKey
         )
     }
 
     /**
-     * Ticket shaped exactly like the shadow payload so a later live send
-     * can reuse the $10 cap. This function does not submit.
+     * Ticket shaped exactly like the shadow payload. Kelly size is kept.
+     * Manual Approve tickets stay on the $10 cap. This function does not submit.
      */
     fun toTradeTicket(ticket: ShadowTicket): TradeTicket = TradeTicket(
         id = ticket.id.ifBlank { ticket.clientOrderId },
@@ -128,8 +125,9 @@ object ShadowOrderPayload {
         estimatedFillUsd = ticket.stakeUsd,
         maxPayoutUsd = ticket.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
         estimatedAvgFill = ticket.limitPrice,
-        sizingNote = "Limited live autopilot · $10 all-in · paper+shadow agreement",
-        gateNote = "Armed session · Approve + REAL MONEY already confirmed · daily cap still applies",
+        sizingNote = "Limited live autopilot · fee-aware Kelly · paper+shadow agreement",
+        gateNote = "Armed session · Approve + REAL MONEY already confirmed · no dollar cap",
+        kellyAutopilot = true,
         kind = TicketKind.CONFIGURED,
         feeUsd = ticket.feeUsd,
         allInUsd = ticket.stakeUsd,
