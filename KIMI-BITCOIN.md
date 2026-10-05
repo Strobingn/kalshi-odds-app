@@ -5,6 +5,8 @@ Working branch created from `main` for review findings and improvements.
 
 ## Code changes vs main
 
+### Reliability
+
 - `worker/MarketRefreshWorker.kt`, `worker/SyncWorker.kt`,
   `worker/BackfillWorker.kt`: cap WorkManager retries at 3 attempts
   (`MAX_RUN_ATTEMPTS`). All three previously returned `Result.retry()` on
@@ -13,55 +15,50 @@ Working branch created from `main` for review findings and improvements.
   "fine" while silently doing nothing. `BackfillWorker` also now surfaces
   the failure message in its output data.
 
-## Findings (review of main @ d34495b)
+### Rebrand: "Bitcoin Kimi"
 
-### Profitability reality check (from docs/backtest-2026-09-25.md)
+- `res/values/strings.xml`: `app_name` = **Bitcoin Kimi**; notification
+  channel/title strings renamed to match.
+- New launcher logo: `drawable/ic_launcher_bitcoin_kimi_foreground.xml`
+  (orange #F7931A coin with a stylized ₿ mark, sized to the adaptive-icon
+  safe zone) + `ic_launcher_bitcoin_kimi_monochrome.xml`; both
+  `mipmap-anydpi-v26` adaptive icons point at them; launcher background is
+  now dark `#101418`.
+- `ui/AppVersion.kt`: version label reads "Bitcoin Kimi v...".
 
-The existing out-of-sample replay is the most honest evidence available:
+### In-app updates
 
-- App picks as shipped: 1,451 OOS bets, **-$226.50** (-3.3% ROI), CI
-  crosses zero.
-- Naive always-favorite: -$1,119. Always-cheap: -$1,727. Random side:
-  -$439. Every naive strategy loses.
-- Market mid (Brier 0.1592) is **more accurate than the blended model**
-  (0.1610). The market is near-efficient; prediction-only edges are very
-  hard.
-- No tuned rule produced a positive OOS edge whose 95% CI excludes zero.
+- `ui/AppUpdater.kt`: now polls the rolling release tag
+  **`kimi-v1.0-KIMI-Bitcoin`** and accepts `BitcoinKimi-*.apk` assets
+  (previously the `gtp-v1.0-chat-GTP` tag and `DipHunter-GTP-*` assets).
+  `AppUpdaterTest` updated to match. Version codes stay monotonic
+  (1,000,000 + CI run number), so each new CI build offers itself as an
+  in-app update over the previous install.
 
-### Where a real edge could live (ranked)
+### CI (IMPORTANT — not yet committed)
 
-1. **Settlement-mechanics edge (most promising, already in
-   docs/profit-research-chat-GTP-2026-09-28.md).** KXBTC15M settles against
-   the final-minute average of the CF Benchmarks BRTI, not the last trade.
-   Kalshi streams the running average + observation count on the
-   `cfbenchmarks_value` WebSocket. At observation k of 60, with
-   `S_k = k × running_avg`, the remaining average only needs to exceed
-   `(60K − S_k) / (60 − k)` to settle above strike K. Late in the final
-   minute the outcome becomes near-deterministic arithmetic while the book
-   may lag. This is an arithmetic edge, not a prediction edge — the only
-   kind that reliably exists. **Next engineering step (per the research
-   doc): a timestamped benchmark/book recorder + chronological replay
-   harness. The lag must be measured, never assumed.**
-2. **Late-window harvesting (real but thin).** OOS: 2–1 minutes left won
-   94.9% at 92.9¢ avg ask (+$7.86 over 39 bets). High win rate, tiny
-   margin; one loss wipes ~14 wins; CI crosses zero. Capacity-limited.
-3. **The 32–50¢ slice (hypothesis, not result).** App picks at 32–50¢ went
-   60.9% on 92 OOS bets, +$89.46, CI excluded zero — the only slice that
-   did. Exploratory and untuned; live-paper-test it before sizing.
-4. **Execution hygiene (guaranteed small savings).** Prefer resting maker
-   orders over taker (7% round-lot taker fee), never cross wide spreads,
-   skip markets within 5bp of strike — that bucket lost -$224.65, the worst
-   slice in the whole backtest. Avoiding bad bets beat every picking
-   strategy in the data.
+The GitHub token available to the assistant lacks the `workflow` scope, so
+changes under `.github/workflows/` were rejected with 403. To make CI
+fire and produce the APK + release that the in-app updater reads, apply
+this one-file change manually (web editor works):
 
-### CI / testing gaps (recommended; not pushed — token lacks `workflow` scope)
+In `.github/workflows/build-apk.yml` **on the KIMI-Bitcoin branch**:
 
-- `.github/workflows/build-apk.yml` triggers only on `Claude`, `main`,
-  `chat-GTP`. Add `KIMI-Bitcoin` (and any other working branch) to the
-  push-trigger list so branches get built/tested/released.
-- The APK workflow runs only ~13 cherry-picked test classes. Most of the
-  suite (including the 80KB `KnownIssuesRegressionTest`) never runs in CI.
-  Proposed `.github/workflows/unit-tests.yml`:
+1. Trigger list: `branches: [Claude, main, chat-GTP]` →
+   `branches: [KIMI-Bitcoin]` (or just add `KIMI-Bitcoin` to the list).
+2. Rename APK step: `DipHunter-GTP-v...` → `BitcoinKimi-v...`.
+3. Upload artifact name: `DipHunter-GTP-v...` → `BitcoinKimi-v...`.
+4. Publish step: `tag="gtp-v..."` → `tag="kimi-v..."`, and the release
+   title/notes "DipHunter GTP" → "Bitcoin Kimi".
+
+After that, every push to `KIMI-Bitcoin` builds a signed APK, publishes
+the rolling `kimi-v1.0-KIMI-Bitcoin` prerelease, and installed apps pick
+it up via the in-app "Check for app update" flow.
+
+Also recommended: add a `unit-tests.yml` running the **full**
+`:app:testDebugUnitTest` suite (the APK workflow only runs ~13
+cherry-picked test classes; most of the suite, including
+`KnownIssuesRegressionTest`, never runs in CI):
 
 ```yaml
 name: Unit tests
@@ -90,3 +87,33 @@ jobs:
       - name: All unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
 ```
+
+## Findings (review of main @ d34495b)
+
+### Profitability reality check (from docs/backtest-2026-09-25.md)
+
+- App picks as shipped: 1,451 OOS bets, **-$226.50** (-3.3% ROI), CI
+  crosses zero.
+- Naive always-favorite: -$1,119. Always-cheap: -$1,727. Random side:
+  -$439. Every naive strategy loses.
+- Market mid (Brier 0.1592) is **more accurate than the blended model**
+  (0.1610). The market is near-efficient; prediction-only edges are very
+  hard.
+
+### Where a real edge could live (ranked)
+
+1. **Settlement-mechanics edge** (docs/profit-research-chat-GTP-2026-09-28.md):
+   KXBTC15M settles against the final-minute average of the CF Benchmarks
+   BRTI. The `cfbenchmarks_value` WebSocket streams the running average +
+   count; at observation k of 60, `S_k = k × running_avg`, so the
+   remaining average only needs `(60K − S_k) / (60 − k)`. Late in the
+   final minute the outcome is near-deterministic arithmetic while the
+   book may lag. Measure the lag with a timestamped recorder + replay
+   before betting — never assume it.
+2. **Late-window harvesting**: OOS 2–1m left won 94.9% at 92.9¢ avg ask
+   (+$7.86 / 39 bets). Thin margin; one loss wipes ~14 wins.
+3. **32–50¢ slice**: 60.9% on 92 OOS bets, +$89.46, CI excluded zero —
+   the only slice that did. Hypothesis, not result; paper-test first.
+4. **Execution hygiene**: prefer maker orders over taker (7% fee), never
+   cross wide spreads, skip markets within 5bp of strike (worst bucket:
+   -$224.65).
