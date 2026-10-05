@@ -236,7 +236,7 @@ fun DataScreen(
                 color = colors.textSecondary
             )
             Text(
-                "Get latest model downloads the edge-model-latest release when one has been published. It shows holdout Brier and log-loss, and activates the model only if it beats the market. A model that does not beat the market is rejected. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Get latest model checks the newest model-YYYYMMDD release (legacy edge-model-latest is accepted only when it matches this package). It checks sha256 and activates the model only if it beats the market after fees. A model that does not beat the market is rejected and the bundled DipHunter model stays active. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

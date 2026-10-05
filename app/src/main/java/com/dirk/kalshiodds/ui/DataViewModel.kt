@@ -205,14 +205,13 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     when (val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)) {
                         is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready -> {
-                            val d = out.fetch.decision
-                            if (d.activate) {
-                                modelStore.activate(out.fetch.model, out.fetch.manifest)
-                                container.scoring.edgeModel = out.fetch.model
-                            }
+                            val reason = com.dirk.kalshiodds.prediction.PublishedModelInstaller.apply(
+                                modelStore,
+                                out
+                            ) { model -> container.scoring.edgeModel = model }
                             val m = out.fetch.manifest
                             buildString {
-                                append(d.reason)
+                                append(reason)
                                 append(" · n=")
                                 append(m.nSamples)
                                 append(" · Brier ")

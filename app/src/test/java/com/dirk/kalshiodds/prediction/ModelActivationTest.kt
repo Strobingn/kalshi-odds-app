@@ -18,7 +18,12 @@ class ModelActivationTest {
         marketBrier = 0.186,
         modelLogLoss = 0.480,
         marketLogLoss = 0.520,
+        simPnl = 12.5,
+        simTrades = 40,
+        marketPnl = -3.0,
+        packageId = "com.dirk.kalshiodds.kashi",
         countsPresent = true,
+        beatMarketFlag = true,
         dataSource = EdgeModelManifest.PROVENANCE_LIVE
     )
 
@@ -36,6 +41,11 @@ class ModelActivationTest {
               "market_brier": 0.186,
               "model_logloss": 0.48,
               "market_logloss": 0.52,
+              "sim_pnl": 12.5,
+              "sim_trades": 40,
+              "market_pnl": -3.0,
+              "package": "com.dirk.kalshiodds.kashi",
+              "beat_market": true,
               "synthetic": false,
               "data_source": "kalshi_settled_coinbase_spot_v1"
             }
@@ -60,6 +70,9 @@ class ModelActivationTest {
               "market_brier": 0.22,
               "model_logloss": 0.40,
               "market_logloss": 0.58,
+              "sim_pnl": 12.5,
+              "sim_trades": 40,
+              "market_pnl": -3.0,
               "data_source": "kalshi_settled_coinbase_spot_v1"
             }
         """.trimIndent()
@@ -143,6 +156,8 @@ class ModelActivationTest {
         assertEquals(m.nMarkets, again.nMarkets)
         assertEquals(m.nRows, again.nRows)
         assertEquals(m.beatsMarket, again.beatsMarket)
+        assertEquals(m.simTrades, again.simTrades)
+        assertEquals(m.packageId, again.packageId)
         assertFalse(again.synthetic)
     }
 
@@ -159,7 +174,11 @@ class ModelActivationTest {
               "model_brier": 0.16,
               "market_brier": 0.186,
               "model_logloss": 0.48,
-              "market_logloss": 0.52
+              "market_logloss": 0.52,
+              "sim_pnl": 12.5,
+              "sim_trades": 40,
+              "market_pnl": -3.0,
+              "beat_market": true
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
@@ -181,6 +200,29 @@ class ModelActivationTest {
         val d = ModelActivation.decide(m, modelValid = true)
         assertFalse(d.activate)
         assertTrue(d.reason.contains("synthetic") || d.reason.contains("provenance"))
+    }
+
+    @Test
+    fun refusesNegativeFeeAwarePnl() {
+        val m = honestPass().copy(simPnl = -4.0, marketPnl = -10.0)
+        assertFalse(m.beatsMarket)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("does not beat") || d.reason.contains("bundled"))
+    }
+
+    @Test
+    fun refusesWhenPnlLosesToMarketFollow() {
+        val m = honestPass().copy(simPnl = 5.0, marketPnl = 9.0)
+        assertFalse(m.beatsMarket)
+        assertFalse(ModelActivation.decide(m, modelValid = true).activate)
+    }
+
+    @Test
+    fun refusesExplicitBeatMarketFalse() {
+        val m = honestPass().copy(beatMarketFlag = false)
+        assertFalse(m.beatsMarket)
+        assertFalse(ModelActivation.decide(m, modelValid = true).activate)
     }
 
     @Test

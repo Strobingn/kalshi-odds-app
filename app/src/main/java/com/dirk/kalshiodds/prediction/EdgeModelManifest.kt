@@ -22,6 +22,12 @@ data class EdgeModelManifest(
     val tag: String = "edge-model-latest",
     val simPnl: Double? = null,
     val simHitRate: Double? = null,
+    val simTrades: Int = 0,
+    val marketPnl: Double? = null,
+    val packageId: String = "",
+    val sha256: String = "",
+    /** Explicit JSON flag. Null when the file omits both beat keys. */
+    val beatMarketFlag: Boolean? = null,
     val synthetic: Boolean = false,
     val countsPresent: Boolean = true,
     val brierMargin: Double = marketBrier - modelBrier,
@@ -49,8 +55,13 @@ data class EdgeModelManifest(
         o.put("tag", tag)
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
+        o.put("sim_trades", simTrades)
+        if (marketPnl != null) o.put("market_pnl", marketPnl)
+        if (packageId.isNotBlank()) o.put("package", packageId)
+        if (sha256.isNotBlank()) o.put("sha256", sha256)
         o.put("synthetic", synthetic)
         o.put("data_source", dataSource)
+        o.put("beat_market", beatsMarket)
         o.put("beats_market", beatsMarket)
         return o.toString()
     }
@@ -100,6 +111,15 @@ data class EdgeModelManifest(
                 tag = o.optString("tag").ifBlank { "edge-model-latest" },
                 simPnl = o.optDoubleOrNull("sim_pnl"),
                 simHitRate = o.optDoubleOrNull("sim_hit_rate"),
+                simTrades = if (o.has("sim_trades")) o.optInt("sim_trades") else 0,
+                marketPnl = o.optDoubleOrNull("market_pnl"),
+                packageId = o.optString("package"),
+                sha256 = o.optString("sha256"),
+                beatMarketFlag = when {
+                    o.has("beat_market") -> o.optBoolean("beat_market")
+                    o.has("beats_market") -> o.optBoolean("beats_market")
+                    else -> null
+                },
                 synthetic = o.optBoolean("synthetic", false) ||
                     o.optString("data_source") == PROVENANCE_SYNTHETIC,
                 countsPresent = hasRows && hasMarkets && hasHoldout,
@@ -132,6 +152,13 @@ data class EdgeModelManifest(
                 marketLogLoss = m["market_logloss"] ?: error("model missing market_logloss"),
                 simPnl = m["sim_pnl"],
                 simHitRate = m["sim_hit_rate"],
+                simTrades = (m["sim_trades"] ?: 0.0).toInt(),
+                marketPnl = m["market_pnl"],
+                beatMarketFlag = when {
+                    m.containsKey("beat_market") -> m["beat_market"]!! > 0.5
+                    m.containsKey("beats_market") -> m["beats_market"]!! > 0.5
+                    else -> null
+                },
                 synthetic = (m["synthetic"] ?: 0.0) > 0.5,
                 countsPresent = m.containsKey("n_markets") &&
                     (m.containsKey("n_rows") || m.containsKey("n_samples")) &&
@@ -172,9 +199,11 @@ object ModelActivation {
     const val MIN_HOLDOUT_ROWS = 400
     const val MIN_BRIER_MARGIN = 0.010
     const val MIN_LOGLOSS_MARGIN = 0.010
+    const val MIN_SIM_TRADES = 30
     const val PROVENANCE_LIVE = EdgeModelManifest.PROVENANCE_LIVE
 
     fun beatsMarket(m: EdgeModelManifest): Boolean {
+        if (m.beatMarketFlag == false) return false
         if (m.synthetic) return false
         if (!m.countsPresent) return false
         if (m.nMarkets < MIN_PUBLISH_MARKETS) return false
@@ -182,6 +211,11 @@ object ModelActivation {
         if (m.nHoldout < MIN_HOLDOUT_ROWS) return false
         if (m.brierMargin < MIN_BRIER_MARGIN) return false
         if (m.logLossMargin < MIN_LOGLOSS_MARGIN) return false
+        val pnl = m.simPnl
+        if (pnl == null || pnl <= 0.0) return false
+        if (m.simTrades < MIN_SIM_TRADES) return false
+        val market = m.marketPnl
+        if (market == null || pnl <= market) return false
         return true
     }
 
@@ -234,18 +268,20 @@ object ModelActivation {
             return ModelActivationDecision(
                 activate = false,
                 manifest = manifest,
-                reason = "Holdout does not beat the market by the required margin " +
+                reason = "Holdout does not beat the market after fees " +
                     "(Brier ${fmt(manifest.modelBrier)} vs ${fmt(manifest.marketBrier)}, " +
-                    "log-loss ${fmt(manifest.modelLogLoss)} vs ${fmt(manifest.marketLogLoss)}). " +
-                    "Falling back to market-only."
+                    "log-loss ${fmt(manifest.modelLogLoss)} vs ${fmt(manifest.marketLogLoss)}, " +
+                    "P&L ${fmt(manifest.simPnl ?: 0.0)} vs market-follow ${fmt(manifest.marketPnl ?: 0.0)}). " +
+                    "Falling back to the bundled model."
             )
         }
         return ModelActivationDecision(
             activate = true,
             manifest = manifest,
-            reason = "Activated — holdout beats market " +
+            reason = "Activated — holdout beats market after fees " +
                 "(Brier ${fmt(manifest.modelBrier)} < ${fmt(manifest.marketBrier)}, " +
                 "log-loss ${fmt(manifest.modelLogLoss)} < ${fmt(manifest.marketLogLoss)}, " +
+                "P&L ${fmt(manifest.simPnl ?: 0.0)} > market-follow ${fmt(manifest.marketPnl ?: 0.0)}, " +
                 "markets=${manifest.nMarkets}, rows=${manifest.nRows}, holdout=${manifest.nHoldout})."
         )
     }

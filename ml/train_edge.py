@@ -2,9 +2,10 @@
 """
 Offline edge trainer for DipHunter (Kashi).
 
-Walk-forward logistic on settled Kalshi KXBTC15M 15m markets + Coinbase
-BTC-USD 1-minute candles. Calibrates (Platt) on a held-out fold, reports
-Brier / log-loss vs the market on a later time-ordered holdout.
+Walk-forward logistic on settled Kalshi BTC/ETH/SOL 15m markets
+(KXBTC15M, KXETH15M, KXSOL15M) plus public Coinbase 1-minute candles.
+Calibrates (Platt) on a held-out fold, then scores a later time-ordered
+holdout on Brier / log-loss and fee-aware P&L versus the market.
 
 A failing Kalshi/Coinbase fetch or a short sample is a hard error.
 Synthetic data is written only with --fixture (explicit test mode) and
@@ -17,6 +18,7 @@ is never marked beats_market / publishable.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import sys
@@ -34,9 +36,8 @@ REPO = Path(__file__).resolve().parents[1]
 ML_DIR = REPO / "ml"
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 COINBASE = "https://api.exchange.coinbase.com"
-# App is Bitcoin-only. Other series stay in PRODUCT so ETH/SOL paths
-# can still be requested explicitly without being the default crawl.
-DEFAULT_SERIES = ["KXBTC15M"]
+# Public market data only. Never a Kalshi account key.
+DEFAULT_SERIES = ["KXBTC15M", "KXETH15M", "KXSOL15M"]
 ALL_SERIES = ["KXBTC15M", "KXETH15M", "KXSOL15M"]
 PRODUCT = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
 FEATURE_NAMES = [
@@ -54,7 +55,7 @@ FEATURE_NAMES = [
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
-UA = "DipHunterTrainer/0.3.18"
+UA = "DipHunterTrainer/0.3.34"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
 SPOT_LOOKBACK_BARS = 16
 # Edge momentum / realized_vol: last 8 one-minute Coinbase closes.
@@ -536,23 +537,39 @@ def logloss(p: list[float], y: list[int]) -> float:
     return s / len(y)
 
 
+def side_pnl(side_yes: bool, mid: float, yi: int) -> float:
+    """One-contract taker P&L after the quadratic fee.
+
+    YES pays ``mid``. NO pays ``1 - mid``. Fee is ``feeRate × P × (1 − P)``
+    on the price of the side that is bought (not rounded to the cent).
+    """
+    raw = mid if side_yes else (1.0 - mid)
+    price = min(0.99, max(0.01, raw))
+    fee = FEE_RATE * price * (1.0 - price)
+    win = (yi == 1) if side_yes else (yi == 0)
+    return (1.0 - price - fee) if win else (-price - fee)
+
+
 def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, float]:
+    """Selective model policy: trade only when |model − mid| clears fee + margin."""
     pnl = 0.0
     n = 0
     hits = 0
     for pi, m, yi in zip(p, mids, y):
         gap = abs(pi - m)
-        fee = FEE_RATE * m * (1 - m)
+        fee = FEE_RATE * m * (1.0 - m)
         if gap <= fee + CONF_MARGIN:
             continue
         side_yes = pi > m
-        price = m
-        fee_c = FEE_RATE * price * (1 - price)
-        win = (yi == 1) if side_yes else (yi == 0)
-        pnl += (1.0 - price - fee_c) if win else (-price - fee_c)
+        pnl += side_pnl(side_yes, m, yi)
         n += 1
-        hits += int(win)
+        hits += int((yi == 1) if side_yes else (yi == 0))
     return {"n": n, "pnl": pnl, "hit_rate": (hits / n) if n else 0.0}
+
+
+def market_follow_pnl(mids: list[float], y: list[int]) -> float:
+    """Buy the market favourite on every row, same fee model. Baseline to beat."""
+    return sum(side_pnl(m >= 0.5, m, yi) for m, yi in zip(mids, y))
 
 
 def _order(X, y, mids, times):
@@ -591,6 +608,7 @@ def evaluate_holdout(X: list[list[float]], y: list[int], mids: list[float], time
             "sim_trades": 0,
             "sim_pnl": 0.0,
             "sim_hit_rate": 0.0,
+            "market_pnl": market_follow_pnl(mids, y) if y else 0.0,
             "split": {"train": tr, "val": va, "cal": cal, "n": n},
         }
     Ztr, mean, std = standardize(X[:tr])
@@ -613,6 +631,7 @@ def evaluate_holdout(X: list[list[float]], y: list[int], mids: list[float], time
         "sim_trades": pnl["n"],
         "sim_pnl": pnl["pnl"],
         "sim_hit_rate": pnl["hit_rate"],
+        "market_pnl": market_follow_pnl(mh, yh),
         "split": {"train": tr, "val": va - tr, "cal": cal - va, "holdout": n - cal, "n": n},
         "platt_fit_on": "calibration_fold",
     }
@@ -667,11 +686,27 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
     return X, y, mids, times, ids
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None) -> None:
+def model_tag(trained_at: str) -> str:
+    day = trained_at[:10].replace("-", "")
+    return f"model-{day}"
+
+
+def write_manifest(
+    metrics: dict[str, Any],
+    path: Path,
+    *,
+    trained_at: str | None = None,
+    sha256: str = "",
+    series: list[str] | None = None,
+) -> None:
     gate = gates.publish_decision(metrics)
+    stamp = trained_at or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     payload = {
         "version": "2",
-        "trained_at": trained_at or datetime.now(timezone.utc).isoformat(),
+        "trained_at": stamp,
+        "package": gates.PACKAGE_ID,
+        "sha256": sha256,
+        "series": series or list(DEFAULT_SERIES),
         "n_samples": int(metrics.get("n_rows") or metrics.get("n_samples") or 0),
         "n_rows": int(metrics.get("n_rows") or 0),
         "n_markets": int(metrics.get("n_markets") or 0),
@@ -684,20 +719,24 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "logloss_margin": gate["logloss_margin"],
         "sim_trades": metrics.get("sim_trades"),
         "sim_pnl": metrics.get("sim_pnl"),
+        "market_pnl": metrics.get("market_pnl"),
         "sim_hit_rate": metrics.get("sim_hit_rate"),
+        "fee_rate": FEE_RATE,
         "model_asset": "edge_model.json",
-        "tag": "edge-model-latest",
+        "tag": model_tag(stamp),
         "synthetic": bool(metrics.get("synthetic")),
         "data_source": "synthetic_fixture" if metrics.get("synthetic") else "kalshi_settled_coinbase_spot_v1",
+        "beat_market": bool(gate["beat_market"]),
         "beats_market": bool(gate["beats_market"]),
         "publishable": bool(gate["publishable"]),
         "gate_reasons": gate["reasons"],
         "min_markets": gates.MIN_PUBLISH_MARKETS,
         "min_rows": gates.MIN_PUBLISH_ROWS,
         "min_holdout": gates.MIN_HOLDOUT_ROWS,
+        "min_sim_trades": gates.MIN_SIM_TRADES,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {path}", flush=True)
 
 
@@ -719,7 +758,7 @@ def export(model: dict[str, Any], metrics: dict[str, Any], path: Path) -> None:
         "metrics": {**metrics, **{k: gate[k] for k in ("beats_market", "publishable", "brier_margin", "logloss_margin", "synthetic")}},
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {path}", flush=True)
 
 
@@ -736,7 +775,11 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=3650, help="Lookback; 0 = no time cutoff (full history)")
     ap.add_argument("--max-markets", type=int, default=50_000)
-    ap.add_argument("--series", default="KXBTC15M", help="Comma-separated series (default BTC only)")
+    ap.add_argument(
+        "--series",
+        default=",".join(DEFAULT_SERIES),
+        help="Comma-separated series (default BTC, ETH, and SOL 15m)",
+    )
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
     ap.add_argument("--fixture", action="store_true", help="Explicit test mode: synthetic data, never publishable")
@@ -782,7 +825,15 @@ def main(argv: list[str] | None = None) -> int:
 
     model = fit_final(X, y, times)
     export(model, metrics, out_path)
-    write_manifest(metrics, man_path)
+    digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
+    trained_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    write_manifest(
+        metrics,
+        man_path,
+        trained_at=trained_at,
+        sha256=digest,
+        series=series_list,
+    )
 
     if not args.fixture:
         sample = {
