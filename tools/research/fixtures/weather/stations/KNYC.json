@@ -1,0 +1,13 @@
+{
+ "geometry": {
+  "coordinates": [
+   -73.96925,
+   40.77898
+  ],
+  "type": "Point"
+ },
+ "properties": {
+  "name": "New York City, Central Park",
+  "timeZone": "America/New_York"
+ }
+}

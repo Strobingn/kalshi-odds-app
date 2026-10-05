@@ -1,0 +1,24 @@
+{
+ "candlesticks": [
+  {
+   "end_period_ts": 1759440600,
+   "volume": 10,
+   "yes_ask": {
+    "close_dollars": "0.3600"
+   },
+   "yes_bid": {
+    "close_dollars": "0.3200"
+   }
+  },
+  {
+   "end_period_ts": 1759498200,
+   "volume": 10,
+   "yes_ask": {
+    "close_dollars": "0.3600"
+   },
+   "yes_bid": {
+    "close_dollars": "0.3200"
+   }
+  }
+ ]
+}

@@ -1,0 +1,44 @@
+{
+ "series": [
+  {
+   "category": "Climate and Weather",
+   "fee_multiplier": 1,
+   "fee_type": "quadratic",
+   "settlement_sources": [
+    {
+     "name": "National Weather Service",
+     "url": "https://forecast.weather.gov/product.php?site=OKX&product=CLI&issuedby=NYC"
+    }
+   ],
+   "ticker": "KXHIGHNY",
+   "title": "Highest temperature in NYC today?"
+  },
+  {
+   "category": "Climate and Weather",
+   "settlement_sources": [
+    {
+     "name": "National Weather Service",
+     "url": "https://www.weather.gov/lot/"
+    }
+   ],
+   "ticker": "KXHIGHCHI",
+   "title": "Highest temperature in Chicago today?"
+  },
+  {
+   "category": "Climate and Weather",
+   "settlement_sources": [],
+   "ticker": "KXHIGHDEN",
+   "title": "Highest temperature in Denver today?"
+  },
+  {
+   "category": "Climate and Weather",
+   "ticker": "KXLOWNY",
+   "title": "Lowest temperature in NYC today?"
+  },
+  {
+   "category": "Climate and Weather",
+   "ticker": "KXRAINNYC",
+   "title": "Rain in NYC this month?"
+  }
+ ]
+}

@@ -1,0 +1,10 @@
+[
+ {
+  "issuanceTime": "2025-10-05T21:30:00+00:00",
+  "productText": "\nCDUS41 KOKX 052030\nCLINYC\n\nCLIMATE REPORT\nNATIONAL WEATHER SERVICE NEW YORK, NY\n400 PM EDT SUN OCT 5 2025\n\n...................................\n\n...THE CENTRAL PARK NY CLIMATE SUMMARY FOR OCTOBER 5 2025...\nVALID TODAY AS OF 0400 PM LOCAL TIME.\nCLIMATE NORMAL PERIOD 1991 TO 2020\nCLIMATE RECORD PERIOD 1869 TO 2025\n\n\nWEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST\n                VALUE   (LST)  VALUE       VALUE  FROM      YEAR\n                                                  NORMAL\n...................................................................\nTEMPERATURE (F)\n TODAY\n  MAXIMUM         71    2:51 PM  88    1941  70      1       75\n  MINIMUM         55    6:12 AM  38    1888  56     -1       60\n  AVERAGE         63                          63      0       68\n"
+ },
+ {
+  "issuanceTime": "2025-10-05T06:30:00+00:00",
+  "productText": "\nCDUS41 KOKX 052030\nCLINYC\n\nCLIMATE REPORT\nNATIONAL WEATHER SERVICE NEW YORK, NY\n130 AM EDT SUN OCT 5 2025\n\n...................................\n\n...THE CENTRAL PARK NY CLIMATE SUMMARY FOR OCTOBER 4 2025...\n\nCLIMATE NORMAL PERIOD 1991 TO 2020\nCLIMATE RECORD PERIOD 1869 TO 2025\n\n\nWEATHER ITEM   OBSERVED TIME   RECORD YEAR NORMAL DEPARTURE LAST\n                VALUE   (LST)  VALUE       VALUE  FROM      YEAR\n                                                  NORMAL\n...................................................................\nTEMPERATURE (F)\n YESTERDAY\n  MAXIMUM         75    2:51 PM  88    1941  70      1       75\n  MINIMUM         55    6:12 AM  38    1888  56     -1       60\n  AVERAGE         63                          63      0       68\n"
+ }
+]
