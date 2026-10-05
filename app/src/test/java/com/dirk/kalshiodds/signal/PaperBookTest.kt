@@ -157,6 +157,31 @@ class PaperBookTest {
         assertTrue(fill.note.contains("win-target"))
     }
 
+    @Test
+    fun unlimitedAutopilotUsesVisibleDepthWithoutPaperCashOrPositionCaps() {
+        val book = PaperBook(idFactory = { "auto-${bookIds++}" }, nowMs = { 12L })
+        val ticket = hunterTicket(ticker = "KXBTC15M-AUTO").copy(
+            limitPrice = 0.40,
+            estimatedAvgFill = 0.40,
+            visibleContracts = 2_000
+        )
+
+        val first = book.considerUnboundedTicket(ticket, enabled = true)!!
+        val second = book.considerUnboundedTicket(ticket, enabled = true)!!
+
+        assertEquals(2_000, first.contracts)
+        assertEquals(2_000, second.contracts)
+        assertTrue(first.feeUsd > 0.0)
+        assertEquals(2, book.snapshot().fills.count { !it.settled })
+        assertTrue(book.snapshot().cashUsd < 0.0)
+
+        book.settle(ticket.ticker, "yes")
+        assertEquals(2, book.snapshot().fills.count { it.settled })
+        assertTrue(book.snapshot().realizedPnlUsd.isFinite())
+    }
+
+    private var bookIds: Int = 0
+
     private fun hunterTicket(
         id: String = "t1",
         ticker: String = "KXBTC15M-26SEP241445-45",
