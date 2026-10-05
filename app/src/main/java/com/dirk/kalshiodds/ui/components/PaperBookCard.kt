@@ -56,7 +56,7 @@ fun PaperBookCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Start / reset $100 · win-target sizing · never hits Kalshi",
+                        "Unlimited-credit AI autopilot · visible-touch fills · never hits Kalshi",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
@@ -84,9 +84,9 @@ fun PaperBookCard(
         if (!homeMode) {
             Text(
                 if (enabled) {
-                    "AI hunter / LiveCall signals auto-log a paper fill here. Live Approve (below) is the only path that can place a real V2 order."
+                    "AI signals auto-fill their visible touch size with unlimited synthetic credit. Live Approve (below) is the only path that can place a real V2 order."
                 } else {
-                    "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
+                    "Paper autopilot is off. Flip the switch to auto-fill AI signals with unlimited synthetic credit."
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
