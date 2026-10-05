@@ -141,7 +141,7 @@ sealed class ApkInstallDecision {
  */
 object InstalledApkCheck {
     const val REFUSE_PACKAGE =
-        "Refusing install — this APK is not Bitcoin Kalshi (com.dirk.kalshiodds.kashi)."
+        "Refusing install — this APK is not Kalshi Trader (com.dirk.kalshiodds.kashi)."
     const val REFUSE_CERT =
         "Refusing install — the APK is not signed with this app's certificate."
     const val REFUSE_UNREADABLE =

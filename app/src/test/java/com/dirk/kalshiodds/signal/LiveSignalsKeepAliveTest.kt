@@ -197,7 +197,7 @@ class LiveSignalsKeepAliveTest {
         assertEquals("diphunter_keepalive", LiveSignalsPolicy.PREFS_NAME)
         assertEquals("live_signals_enabled", LiveSignalsPolicy.PREFS_ENABLED_KEY)
         assertEquals("live_signals_timeout_paused", LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY)
-        assertEquals("Bitcoin Kalshi", LiveSignalsPolicy.NOTIFICATION_TITLE)
+        assertEquals("Kalshi Trader", LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertEquals(
             "com.dirk.kalshiodds.signal.service.RESUME_LIVE_SIGNALS",
             LiveSignalsPolicy.ACTION_RESUME

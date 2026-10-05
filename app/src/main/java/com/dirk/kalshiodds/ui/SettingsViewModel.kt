@@ -563,7 +563,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 }.getOrElse { e ->
                     when (e) {
                         is CredentialBackup.WrongPassphrase -> "Wrong passphrase — key not changed"
-                        is CredentialBackup.BadFile -> "Not a Bitcoin Kalshi keys backup — key not changed"
+                        is CredentialBackup.BadFile -> "Not a Kalshi Trader keys backup — key not changed"
                         else -> e.message ?: "restore failed"
                     }
                 }
