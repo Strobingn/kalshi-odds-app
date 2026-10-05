@@ -1,0 +1,65 @@
+name: Endgame maker (Claude)
+
+# Resting bids in the last 90 s of KXBTC15M / KXETH15M / KXSOL15M
+# (tools/research/endgame_maker.py), run on the 1 s recordings that
+# record.yml keeps in the Actions cache. The cache is restored READ-ONLY here
+# (never saved). The Markdown report goes to the job log between markers and
+# to the run summary. Nothing is committed, released or traded.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/endgame_maker.py"
+      - "tools/research/test_endgame_maker.py"
+      - ".github/workflows/endgame-maker.yml"
+  workflow_dispatch:
+    inputs:
+      iters:
+        description: Bootstrap resamples
+        required: false
+        default: "2000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: endgame-maker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests (synthetic recordings)
+        run: |
+          python3 tools/research/test_endgame_maker.py
+          python3 tools/research/test_maker_sim.py
+
+      - name: Restore recordings (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings
+        run: |
+          mkdir -p rec
+          ls -la rec | tail -n 30
+          python3 tools/research/recordings.py rec || true
+
+      - name: Endgame maker study
+        run: |
+          python3 tools/research/endgame_maker.py --dir rec --iters "${{ github.event.inputs.iters || '2000' }}" --out endgame_maker.md > /dev/null
+          echo "===== ENDGAME MAKER ====="
+          cat endgame_maker.md
+          echo "===== END ENDGAME MAKER ====="
+          cat endgame_maker.md >> "$GITHUB_STEP_SUMMARY"
