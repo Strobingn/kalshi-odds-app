@@ -1,0 +1,57 @@
+name: Cross-coin lag (Claude)
+
+# tools/research/cross_lag.py on the cloud recorder's 1 s recordings: does the
+# KXETH15M / KXSOL15M book lag a BTC move? Recordings are restored READ-ONLY
+# from the recorder's Actions cache (this workflow never saves a cache), and
+# the report is printed to the job log between the CROSS LAG markers.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/cross_lag.py"
+      - "tools/research/test_cross_lag.py"
+      - ".github/workflows/cross-lag.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cross-lag-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests (synthetic recordings, no network)
+        run: python3 tools/research/test_cross_lag.py
+
+      - name: Restore recordings (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings
+        run: |
+          mkdir -p rec
+          ls -la rec | tail -n 40
+          python3 tools/research/recordings.py rec
+
+      - name: Cross-coin lag study
+        run: |
+          echo "===== CROSS LAG ====="
+          rc=0
+          python3 tools/research/cross_lag.py rec || rc=$?
+          [ "$rc" -eq 0 ] || echo "(cross lag study failed, exit $rc)"
+          echo "===== END CROSS LAG ====="
+          exit "$rc"
