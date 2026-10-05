@@ -26,6 +26,17 @@ jobs:
         run: python3 ml/test_train_edge.py
       - name: Train
         run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+      - name: Verify model provenance
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("ml/edge_model_manifest.json").read_text())
+          assert manifest["data_source"] == "kalshi_settled_coinbase_spot_v1"
+          assert manifest["n_samples"] > 0
+          assert manifest["trained_at"]
+          PY
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
