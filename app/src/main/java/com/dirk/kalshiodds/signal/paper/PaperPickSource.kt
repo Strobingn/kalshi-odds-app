@@ -77,5 +77,10 @@ data class PaperFillMeta(
     val pickSource: PaperPickSource? = null,
     val kellyF: Double? = null,
     val kellyFraction: Double? = null,
-    val evUsd: Double? = null
+    val evUsd: Double? = null,
+    val regimeVol: String? = null,
+    val regimeRole: String? = null,
+    val regimeSession: String? = null,
+    val regimePath: String? = null,
+    val regimeStrike: String? = null
 )

@@ -21,6 +21,7 @@ object AppIdentity {
 
     const val PREFS_KEEPALIVE = "diphunter_keepalive"
     const val PREFS_PAPER = "diphunter_paper_book"
+    const val PREFS_SHADOW = "diphunter_shadow_book"
     const val PREFS_LAST_MINUTE = "diphunter_last_minute"
     const val PREFS_D3 = "diphunter_d3"
     const val PREFS_LAST_ORDER = "diphunter_last_order_error"
@@ -74,6 +75,7 @@ object AppIdentity {
         "SQLite databases/$DB_RESULTS v$DB_VERSION (+ -wal -shm); paper_fills lives in this file",
         "SharedPreferences $PREFS_KEEPALIVE.xml",
         "SharedPreferences $PREFS_PAPER.xml",
+        "SharedPreferences $PREFS_SHADOW.xml",
         "SharedPreferences $PREFS_LAST_MINUTE.xml",
         "SharedPreferences $PREFS_D3.xml",
         "SharedPreferences $PREFS_LAST_ORDER.xml",

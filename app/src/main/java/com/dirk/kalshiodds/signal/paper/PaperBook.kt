@@ -56,7 +56,17 @@ data class PaperFill(
      * Bumped when the fill is created and again when it settles.
      * 0 on pre-0.3.28 JSON — [syncAtMs] falls back to [createdAtMs].
      */
-    val updatedAtMs: Long = 0L
+    val updatedAtMs: Long = 0L,
+    /** Volatility bucket at fill time. Null on pre-0.3.32 rows. */
+    val regimeVol: String? = null,
+    /** favorite or underdog, from the filled ask. */
+    val regimeRole: String? = null,
+    /** Session tag or ET time-of-day bucket. */
+    val regimeSession: String? = null,
+    /** trend / chop / quiet / vol from the card regime tag. */
+    val regimePath: String? = null,
+    /** Distance-to-strike bucket. */
+    val regimeStrike: String? = null
 ) {
     fun syncAtMs(): Long = if (updatedAtMs > 0L) updatedAtMs else createdAtMs
     val displaySide: String get() = side.uppercase()
@@ -423,7 +433,8 @@ class PaperBook(
         evPerContract: Double? = null,
         enabled: Boolean,
         bankrollUsd: Double? = null,
-        maxStakeUsd: Double? = null
+        maxStakeUsd: Double? = null,
+        regime: AutopilotRegime.Tags? = null
     ): PaperFill? {
         if (!enabled) return null
         val px = KalshiPrice.usable(ask) ?: return null
@@ -432,7 +443,12 @@ class PaperBook(
             aiPct = PaperFill.pctFromUnit(p),
             marketPct = PaperFill.pctFromUnit(px),
             pickSource = PaperPickSource.AUTOPILOT,
-            evUsd = evPerContract
+            evUsd = evPerContract,
+            regimeVol = regime?.vol,
+            regimeRole = regime?.role,
+            regimeSession = regime?.session,
+            regimePath = regime?.path,
+            regimeStrike = regime?.strike
         )
         if (!PaperFill.allowCreate(PaperPickSource.AUTOPILOT, meta.aiPct)) return null
         return fill(
@@ -1054,7 +1070,12 @@ class PaperBook(
         kellyF = kellyF,
         kellyFraction = kellyFraction,
         bankrollAfterUsd = bankrollAfterUsd,
-        evUsd = evUsd ?: meta.evUsd
+        evUsd = evUsd ?: meta.evUsd,
+        regimeVol = meta.regimeVol,
+        regimeRole = meta.regimeRole,
+        regimeSession = meta.regimeSession,
+        regimePath = meta.regimePath,
+        regimeStrike = meta.regimeStrike
     )
     }
 
@@ -1092,6 +1113,11 @@ class PaperBook(
             aiConfidence = incoming.aiConfidence ?: local.aiConfidence,
             marketPct = incoming.marketPct ?: local.marketPct,
             pickSource = incoming.pickSource ?: local.pickSource,
+            regimeVol = incoming.regimeVol ?: local.regimeVol,
+            regimeRole = incoming.regimeRole ?: local.regimeRole,
+            regimeSession = incoming.regimeSession ?: local.regimeSession,
+            regimePath = incoming.regimePath ?: local.regimePath,
+            regimeStrike = incoming.regimeStrike ?: local.regimeStrike,
             updatedAtMs = incoming.syncAtMs()
         )
     }

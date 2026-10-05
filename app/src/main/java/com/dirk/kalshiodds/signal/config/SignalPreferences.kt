@@ -65,6 +65,9 @@ data class SignalSettings(
     val ticketsEnabled: Boolean = true,
     val paperTradingEnabled: Boolean = SignalConstants.DEFAULT_PAPER_TRADING,
     val aiPaperAutopilotEnabled: Boolean = SignalConstants.DEFAULT_AI_PAPER_AUTOPILOT,
+    /** [com.dirk.kalshiodds.signal.paper.AutopilotMode] name. Default PAPER. Live stays disarmed. */
+    val autopilotMode: String = com.dirk.kalshiodds.signal.paper.AutopilotMode.PAPER.name,
+    val liveAutopilotDailyCapUsd: Double = SignalConstants.DEFAULT_LIVE_AUTOPILOT_DAILY_CAP_USD,
     val paperBankrollStartUsd: Double = SignalConstants.PAPER_START_USD,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
@@ -106,6 +109,9 @@ data class SignalSettings(
     /** Live / demo V2 orders. Paper Buy never consults this. */
     fun tradingCredentialsConfigured(): Boolean =
         if (kalshiDemoEnabled) demoCredentialsConfigured else credentialsConfigured
+
+    fun autopilotModeEnum(): com.dirk.kalshiodds.signal.paper.AutopilotMode =
+        com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(autopilotMode)
 
     fun keyIdWithoutPem(): Boolean = apiKeyId.isNotBlank() && !hasPrivateKey
 
@@ -241,6 +247,15 @@ class SignalPreferences(
     suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
     suspend fun updatePaperTrading(value: Boolean) = edit { it[KEY_PAPER] = value }
     suspend fun updateAiPaperAutopilot(value: Boolean) = edit { it[KEY_AI_PAPER_AUTOPILOT] = value }
+    suspend fun updateAutopilotMode(value: String) = edit {
+        it[KEY_AUTOPILOT_MODE] = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(value).name
+    }
+    suspend fun updateLiveAutopilotDailyCapUsd(value: Double) = edit {
+        it[KEY_LIVE_AUTOPILOT_DAILY] = value.coerceIn(
+            SignalConstants.LIVE_AUTOPILOT_DAILY_CAP_MIN_USD,
+            SignalConstants.LIVE_AUTOPILOT_DAILY_CAP_MAX_USD
+        )
+    }
     suspend fun updatePaperBankrollStartUsd(value: Double) = edit {
         it[KEY_PAPER_START] = value.coerceIn(100.0, 1_000_000.0)
     }
@@ -370,6 +385,8 @@ class SignalPreferences(
         r.edgeThresholdPp?.let { updateEdgeThresholdPp(it) }
         r.paperTradingEnabled?.let { updatePaperTrading(it) }
         r.aiPaperAutopilotEnabled?.let { updateAiPaperAutopilot(it) }
+        r.autopilotMode?.let { updateAutopilotMode(it) }
+        r.liveAutopilotDailyCapUsd?.let { updateLiveAutopilotDailyCapUsd(it) }
         r.paperBankrollStartUsd?.let { updatePaperBankrollStartUsd(it) }
         r.kellyFraction?.let { updateKellyFraction(it) }
         r.paperKellyFraction?.let { updatePaperKellyFraction(it) }
@@ -447,6 +464,12 @@ class SignalPreferences(
             ticketsEnabled = this[KEY_TICKETS] ?: def.ticketsEnabled,
             paperTradingEnabled = this[KEY_PAPER] ?: def.paperTradingEnabled,
             aiPaperAutopilotEnabled = this[KEY_AI_PAPER_AUTOPILOT] ?: SignalConstants.DEFAULT_AI_PAPER_AUTOPILOT,
+            autopilotMode = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(this[KEY_AUTOPILOT_MODE]).name,
+            liveAutopilotDailyCapUsd = (this[KEY_LIVE_AUTOPILOT_DAILY]
+                ?: SignalConstants.DEFAULT_LIVE_AUTOPILOT_DAILY_CAP_USD).coerceIn(
+                SignalConstants.LIVE_AUTOPILOT_DAILY_CAP_MIN_USD,
+                SignalConstants.LIVE_AUTOPILOT_DAILY_CAP_MAX_USD
+            ),
             paperBankrollStartUsd = this[KEY_PAPER_START] ?: SignalConstants.PAPER_START_USD,
             ticketStakeUsd = (this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd).coerceIn(
                 SignalConstants.TICKET_STAKE_MIN_USD,
@@ -528,6 +551,8 @@ class SignalPreferences(
         private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
         private val KEY_PAPER = booleanPreferencesKey("paper_trading_enabled")
         private val KEY_AI_PAPER_AUTOPILOT = booleanPreferencesKey("ai_paper_autopilot_enabled")
+        private val KEY_AUTOPILOT_MODE = stringPreferencesKey("autopilot_mode")
+        private val KEY_LIVE_AUTOPILOT_DAILY = doublePreferencesKey("live_autopilot_daily_cap_usd")
         private val KEY_PAPER_START = doublePreferencesKey("paper_bankroll_start_usd")
         private val KEY_KALSHI_DEMO = booleanPreferencesKey("kalshi_demo_enabled")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")

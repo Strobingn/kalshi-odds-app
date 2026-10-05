@@ -391,11 +391,35 @@ internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
             color = colors.textSecondary
         )
         Text(
-            if (section.bets.isEmpty()) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            section.bankrollLabel,
             fontSize = 28.sp,
             fontWeight = FontWeight.Bold,
             color = colors.textPrimary
         )
+        Text(
+            section.pnlLabel,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        if (section.credibility.isNotBlank()) {
+            Text(section.credibility, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        }
+        if (section.favoriteLogLine.isNotBlank()) {
+            Text(section.favoriteLogLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        }
+        if (section.edgeFillLine.isNotBlank()) {
+            Text(section.edgeFillLine, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+        }
+        if (section.laterSliceLine.isNotBlank()) {
+            Text(section.laterSliceLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        }
+        section.regimeLines.forEach { line ->
+            Text(line, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        }
+        if (section.shadowLine.isNotBlank()) {
+            Text(section.shadowLine, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+        }
         Spacer(Modifier.height(8.dp))
         Text(
             section.record,

@@ -126,6 +126,11 @@ object SignalConstants {
      */
     const val LIVE_ALL_IN_CAP_USD = 10.0
 
+    /** Limited live Autopilot daily spend. Editable in Settings. Default $50. */
+    const val DEFAULT_LIVE_AUTOPILOT_DAILY_CAP_USD = 50.0
+    const val LIVE_AUTOPILOT_DAILY_CAP_MIN_USD = 10.0
+    const val LIVE_AUTOPILOT_DAILY_CAP_MAX_USD = 200.0
+
     /**
      * Min-profit-if-win is gone in 0.3.16. Kept at 0 so leftover prefs
      * and History restore cannot block a ticket.
