@@ -1,7 +1,7 @@
 name: Train edge model
 
 on:
-  # Run this workflow on chat-GTP for a branch-only model release. GitHub
+  # Run this workflow on KIMI-Bitcoin for a branch-only model release. GitHub
   # schedules run the default branch and would use main's trainer instead.
   workflow_dispatch:
     inputs:
@@ -40,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release delete edge-model-chat-GTP --yes --cleanup-tag || true
+          gh release delete edge-model-KIMI-Bitcoin --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
           p = pathlib.Path("ml/edge_model_manifest.json")
@@ -56,7 +56,7 @@ jobs:
           )
           PY
           )
-          gh release create edge-model-chat-GTP \
+          gh release create edge-model-KIMI-Bitcoin \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
             --title "Edge model (latest)" \
