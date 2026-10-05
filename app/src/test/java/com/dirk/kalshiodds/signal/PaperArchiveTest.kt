@@ -36,4 +36,45 @@ class PaperArchiveTest {
         assertEquals(1, snap.archived[0].fills.size)
         assertEquals("KXBTC15M-A", snap.archived[0].fills[0].ticker)
     }
+
+    @Test
+    fun upsertFromSyncSkipsFillIdsAlreadyArchived() {
+        val archived = PaperFill(
+            id = "pre-reset",
+            ticker = "KXBTC15M-OLD",
+            side = "YES",
+            stakeUsd = 10.0,
+            contracts = 9_346,
+            limitPrice = 0.001,
+            source = "AI hunter",
+            createdAtMs = 1L,
+            settled = true,
+            won = true,
+            pnlUsd = 9_336.0,
+            note = "archived"
+        )
+        val book = PaperBook(
+            initial = PaperBookState(
+                startingUsd = 1_000.0,
+                cashUsd = 1_000.0,
+                lifetimeRealizedPnlUsd = 0.0,
+                archived = listOf(
+                    com.dirk.kalshiodds.signal.paper.PaperArchive(
+                        archivedAtMs = 1L,
+                        startingUsd = 1_000.0,
+                        cashUsd = 10.0,
+                        fills = listOf(archived)
+                    )
+                )
+            )
+        )
+        book.upsertFromSync(archived.copy(updatedAtMs = 50L, pnlUsd = 9_336.0))
+        val snap = book.snapshot()
+        assertTrue(snap.fills.none { it.id == "pre-reset" })
+        assertTrue(snap.syncTail.none { it.id == "pre-reset" })
+        assertTrue(snap.scorecardFills().none { it.id == "pre-reset" })
+        val fresh = archived.copy(id = "post-reset", pnlUsd = 1.25, updatedAtMs = 60L, limitPrice = 0.40, contracts = 2)
+        book.upsertFromSync(fresh)
+        assertEquals(listOf("post-reset"), book.snapshot().scorecardFills().map { it.id })
+    }
 }

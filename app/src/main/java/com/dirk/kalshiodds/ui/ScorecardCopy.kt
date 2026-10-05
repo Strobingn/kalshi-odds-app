@@ -20,7 +20,10 @@ import java.util.Locale
  */
 object ScorecardCopy {
     const val TITLE = "Scorecard"
-    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Missing entry ask counts in W-L at $0 (Unknown price)."
+    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Paper dollars are settled fills in the current book only. A log row with no fill counts in W-L at $0."
+    const val ARCHIVE_TITLE = "Pre-reset archive (before 0.3.28 reset)"
+    const val RECONCILE_WARN = "Paper P&L does not match the bankroll (off by more than 1¢)."
+    const val HYPOTHETICAL_LABEL = "Hypothetical (per 1 contract)"
     const val NO_SETTLED = HomeScorecardSummary.NO_SETTLED
     const val TIME_TITLE = "By time of day"
     const val SIDE_TITLE = "By side"
@@ -151,7 +154,10 @@ object ScorecardCopy {
         val lastMinute: LastMinuteSection = LastMinuteSection(),
         val d3: D3Section = D3Section(),
         val autopilot: AutopilotSection = AutopilotSection(),
-        val paperBankrollUsd: Double? = null
+        val paperBankrollUsd: Double? = null,
+        val reconcileWarning: String? = null,
+        val hypotheticalLine: String? = null,
+        val archive: ArchiveSection = ArchiveSection()
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
         val showsEmptyState: Boolean get() = showsEmptyState(settledCount)
@@ -187,11 +193,17 @@ object ScorecardCopy {
             if (autopilot.bets.isNotEmpty()) {
                 lines += autopilot.bets.map { it.line }
             }
+            if (archive.fillCount > 0) {
+                lines += ARCHIVE_TITLE
+                lines += archive.line
+            }
             if (!showsEmptyState) {
                 lines += recordLine(summary)
                 lines += winRateLine(summary)
                 lines += paperPnlLine(summary)
                 paperBankrollLine(paperBankrollUsd)?.let { lines += it }
+                reconcileWarning?.let { lines += it }
+                hypotheticalLine?.let { lines += it }
                 lines += settledCountLine(summary)
                 lines += COMBINED_TITLE
                 lines += recordLine(ledger.combined)
@@ -252,13 +264,15 @@ object ScorecardCopy {
         d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList()
     ): View = of(
         entries = entries,
-        fills = paper.fills + paper.archived.flatMap { it.fills },
+        fills = paper.scorecardFills(),
         paperPnlUsd = paper.realizedPnlUsd,
         windows = windows,
         zoneId = zoneId,
         lastMinutePicks = lastMinutePicks,
         d3Picks = d3Picks,
-        paperBankrollUsd = paper.paperBankrollUsd
+        paperBankrollUsd = paper.paperBankrollUsd,
+        startingUsd = paper.startingUsd,
+        archivedFills = paper.archivedFills()
     )
 
     fun of(
@@ -269,7 +283,9 @@ object ScorecardCopy {
         zoneId: ZoneId = ET_ZONE,
         lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList(),
         d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList(),
-        paperBankrollUsd: Double? = null
+        paperBankrollUsd: Double? = null,
+        startingUsd: Double? = null,
+        archivedFills: List<PaperFill> = emptyList()
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
         val lastMinute = lastMinuteSection(lastMinutePicks)
@@ -293,7 +309,50 @@ object ScorecardCopy {
             lastMinute = lastMinute,
             d3 = d3,
             autopilot = autopilotSection(fills),
-            paperBankrollUsd = paperBankrollUsd
+            paperBankrollUsd = paperBankrollUsd,
+            reconcileWarning = reconcileWarning(ledger.combined.money.pnlUsd, paperBankrollUsd, startingUsd),
+            hypotheticalLine = hypotheticalLine(ledger.hypotheticalPerContractUsd, ledger.hypotheticalPicks),
+            archive = archiveSection(archivedFills)
+        )
+    }
+
+    data class ArchiveSection(
+        val wins: Int = 0,
+        val losses: Int = 0,
+        val pnlUsd: Double = 0.0,
+        val settledCount: Int = 0,
+        val fillCount: Int = 0,
+        val line: String = EM_DASH
+    )
+
+    fun reconcileWarning(combinedPnlUsd: Double, bankrollUsd: Double?, startingUsd: Double?): String? {
+        if (bankrollUsd == null || startingUsd == null) return null
+        if (!bankrollUsd.isFinite() || !startingUsd.isFinite()) return null
+        val delta = bankrollUsd - startingUsd
+        return if (kotlin.math.abs(combinedPnlUsd - delta) > 0.01) RECONCILE_WARN else null
+    }
+
+    fun hypotheticalLine(usd: Double, picks: Int): String? {
+        if (picks <= 0) return null
+        return "$HYPOTHETICAL_LABEL ${ScorecardLedger.signedUsd(usd)} · $picks picks, not in Paper P&L"
+    }
+
+    fun logCountLine(open: Int, voidCount: Int, settled: Int): String =
+        "Log: open $open · void $voidCount · settled $settled"
+
+    fun archiveSection(fills: List<PaperFill>): ArchiveSection {
+        if (fills.isEmpty()) return ArchiveSection()
+        val ledger = ScorecardLedger.of(emptyList(), fills)
+        val record = ledger.combined
+        val pnl = record.money.pnlUsd
+        val line = "${record.wins}-${record.losses} · ${ScorecardLedger.signedUsd(pnl)} · ${fills.size} fills"
+        return ArchiveSection(
+            wins = record.wins,
+            losses = record.losses,
+            pnlUsd = pnl,
+            settledCount = record.settledCount,
+            fillCount = fills.size,
+            line = line
         )
     }
 

@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +28,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -171,11 +175,14 @@ fun ScorecardScreen(
             if (snap != null) {
                 item {
                     Text(
-                        "Open ${snap.openCount} · void ${snap.voidCount} · settled ${snap.sampleCount}",
+                        ScorecardCopy.logCountLine(snap.openCount, snap.voidCount, snap.sampleCount),
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
                 }
+            }
+            if (view.archive.fillCount > 0) {
+                item { PreResetArchiveCard(view.archive) }
             }
             if (view.showsEmptyState) {
                 item {
@@ -188,12 +195,31 @@ fun ScorecardScreen(
                 }
             } else {
                 item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
+                view.hypotheticalLine?.let { line ->
+                    item {
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textSecondary
+                        )
+                    }
+                }
                 view.paperBankrollUsd?.let { roll ->
                     item {
                         Text(
                             ScorecardCopy.paperBankrollLine(roll) ?: "",
                             style = MaterialTheme.typography.bodyLarge,
                             color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                view.reconcileWarning?.let { warn ->
+                    item {
+                        Text(
+                            warn,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.accentOrange,
                             fontWeight = FontWeight.SemiBold
                         )
                     }
@@ -386,6 +412,40 @@ internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
                     modifier = Modifier.padding(vertical = 2.dp)
                 )
             }
+        }
+    }
+}
+
+@Composable
+internal fun PreResetArchiveCard(section: ScorecardCopy.ArchiveSection) {
+    val colors = DipTheme.colors
+    var open by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .clickable { open = !open }
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.ARCHIVE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            section.line,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Text(
+            if (open) "Hide fills" else "Show fills",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        if (open) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Won ${section.wins} · lost ${section.losses} · ${section.settledCount} settled · P&L ${ScorecardLedger.signedUsd(section.pnlUsd)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary
+            )
         }
     }
 }

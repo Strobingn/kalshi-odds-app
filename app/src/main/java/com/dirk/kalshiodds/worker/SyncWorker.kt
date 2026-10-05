@@ -51,12 +51,12 @@ class SyncWorker(
                 onSettings = { json -> settingsJson += json },
                 onPaper = { fill -> container.paper.book.upsertFromSync(fill) }
             )
-            if (result.ok) container.paper.book.acknowledgePaperSync(startedMs)
+            if (result.acknowledgePaper) container.paper.book.acknowledgePaperSync(startedMs)
             settingsJson.lastOrNull()?.let { container.preferences.restoreSnapshot(it) }
             result
         }.getOrElse { SupabaseSync.Status(ok = false, message = it.message ?: "sync failed") }
         runCatching {
-            val atMs = if (status.ok) status.atMs else hub.lastSyncAtMs
+            val atMs = if (status.ok || status.advanced) status.atMs else hub.lastSyncAtMs
             container.dataPrefs.updateSyncStatus(status.message, atMs)
         }
         if (status.ok) Result.success() else Result.retry()

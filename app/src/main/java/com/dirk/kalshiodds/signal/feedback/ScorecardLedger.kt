@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
+import com.dirk.kalshiodds.signal.model.ProbabilityClamp
 import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import com.dirk.kalshiodds.signal.paper.PaperPickSource
@@ -29,17 +30,24 @@ import kotlin.math.abs
  * Bitcoin-only: [isScorecardTicker] / [CryptoMarkets.isLiveTicker]
  * (KXBTC15M). Stored ETH/SOL rows are ignored.
  *
- * Entry ask / contracts / stake / fee:
- *  1. Prefer a matched paper fill.
- *  2. Else use values stored on the prediction-log row (new AI picks
- *     persist these at signal time).
- *  3. Else if the entry ask is known, derive contracts/stake/fee/P&L
- *     from the same $10 paper-stake clip [paperClipFromAsk] that
- *     [com.dirk.kalshiodds.ui.HomeCopy.tenDollarWins] uses to score
- *     tiles (`LiveOrderSizer.size(ask, $10)`).
- *  4. If the entry ask was never stored, the row cannot have a real $
- *     outcome: count it in W-L, put P&L $0 in the Unknown-price bucket,
- *     and show "entry not recorded".
+ * Paper P&L, Won, Lost, avg win/loss, and biggest win/loss come only
+ * from real settled fills in the current (post-reset) book. A
+ * prediction-log row with no fill still counts in W-L and win rate,
+ * at $0. Asks outside 2–98¢ ([ProbabilityClamp.LO]/[ProbabilityClamp.HI])
+ * are an unknown price, not a $10 clip — a 0.1¢ ask used to size
+ * thousands of contracts and invent a four-figure "win".
+ *
+ * 0.3.29 does not wipe the device. The inflated number was a display
+ * mix of the pre-reset archive and those hypothetical clips. After
+ * update the cards recompute from the live book (including fills that
+ * rolled into the sync tail / retained history). Archived fills stay
+ * on their own card.
+ *
+ * Entry ask / contracts / stake / fee on a row:
+ *  1. Prefer a matched paper fill (its stored pnlUsd).
+ *  2. Else the row counts in W-L at $0. A separate hypothetical line
+ *     may show per-contract `(won ? 1−ask : −ask)` for asks inside
+ *     2–98¢. That line is not Paper P&L.
  */
 object ScorecardLedger {
 
@@ -121,7 +129,10 @@ object ScorecardLedger {
         val picks: List<PickRow>,
         val cumulativePnl: List<Pair<Long, Double>>,
         val openCount: Int,
-        val voidCount: Int
+        val voidCount: Int,
+        /** Sum of per-contract hypotheticals for log rows with no fill. Not Paper P&L. */
+        val hypotheticalPerContractUsd: Double = 0.0,
+        val hypotheticalPicks: Int = 0
     )
 
     data class StoredEntry(
@@ -173,6 +184,9 @@ object ScorecardLedger {
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE
     ): Snapshot {
+        val uniqueFills = fills
+            .groupBy { it.id }
+            .map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
         val btcEntries = entries.filter { isScorecardTicker(it.ticker) }
         val scored = btcEntries.filter {
             (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
@@ -182,9 +196,10 @@ object ScorecardLedger {
             (it.outcome.equals("yes", true) || it.outcome.equals("no", true)) &&
                 SignalStance.isNoBetSide(it.predictedSide)
         }
-        val settledFills = fills.filter {
+        val settledFills = uniqueFills.filter {
             isScorecardTicker(it.ticker) && it.settled && it.won != null
         }
+        val (hypUsd, hypN) = hypotheticalPerContract(scored, settledFills.filter { !isLastMinuteSource(it) })
         val scoredFills = settledFills.filter { !isLastMinuteSource(it) }
         val aiFills = scoredFills.filter { isAiSource(it.source) }
         val manualFills = scoredFills.filter { !isAiSource(it.source) }
@@ -219,15 +234,15 @@ object ScorecardLedger {
         val allMoneyRows = aiPicks + manualRows
         val displayPicks = (allMoneyRows + noBetRows).sortedByDescending { it.settledAtMs }
 
-        val ai = record(aiPicks)
-        val manual = record(manualRows)
+        val ai = record(aiPicks).copy(money = moneyOf(aiFills))
+        val manual = record(manualRows).copy(money = moneyOf(manualFills))
         val combined = Record(
             wins = ai.wins + manual.wins,
             losses = ai.losses + manual.losses,
             settledCount = ai.settledCount + manual.settledCount,
             hitRate = rate(ai.wins + manual.wins, ai.settledCount + manual.settledCount),
             streak = streakOf(allMoneyRows.sortedByDescending { it.settledAtMs }),
-            money = moneyOfRows(allMoneyRows)
+            money = moneyOf(settledFills)
         )
         return Snapshot(
             ai = ai,
@@ -242,7 +257,9 @@ object ScorecardLedger {
             picks = displayPicks,
             cumulativePnl = cumulative(allMoneyRows),
             openCount = btcEntries.count { it.outcome == null },
-            voidCount = btcEntries.count { it.outcome.equals("void", true) }
+            voidCount = btcEntries.count { it.outcome.equals("void", true) },
+            hypotheticalPerContractUsd = hypUsd,
+            hypotheticalPicks = hypN
         )
     }
 
@@ -307,11 +324,27 @@ object ScorecardLedger {
      * [com.dirk.kalshiodds.ui.HomeCopy.tenDollarWins]:
      * `LiveOrderSizer.size(ask, PAPER_STAKE_USD)`.
      */
-    fun paperClipFromAsk(ask: Double?): LiveOrderSizer.Clip? {
+    /**
+     * Ask usable for a paper clip or a per-contract hypothetical.
+     * Below [ProbabilityClamp.LO] (2¢) or above [ProbabilityClamp.HI]
+     * (98¢) is an unknown price — including Kalshi's 0.1¢ tick, which
+     * used to size thousands of contracts under a $10 clip.
+     */
+    fun scoreAsk(ask: Double?): Double? {
         val px = KalshiPrice.usable(ask) ?: return null
+        if (px + 1e-12 < ProbabilityClamp.LO || px - 1e-12 > ProbabilityClamp.HI) return null
+        return px
+    }
+
+    fun paperClipFromAsk(ask: Double?): LiveOrderSizer.Clip? {
+        val px = scoreAsk(ask) ?: return null
         val clip = LiveOrderSizer.size(px, PAPER_STAKE_USD)
         return clip.takeIf { it.ok }
     }
+
+    /** Per-contract hypothetical: won ? (1 − ask) : −ask. Not a paper fill. */
+    fun hypotheticalPerContract(won: Boolean, ask: Double): Double =
+        if (won) 1.0 - ask else -ask
 
     fun captureEntryFromBook(
         sideYes: Boolean,
@@ -320,12 +353,12 @@ object ScorecardLedger {
         yesBid: Double? = null
     ): StoredEntry {
         val ask = if (sideYes) {
-            KalshiPrice.usable(yesAsk)
+            scoreAsk(yesAsk)
         } else {
-            KalshiPrice.usable(noAsk) ?: yesBid?.let { KalshiPrice.usable(1.0 - it) }
+            scoreAsk(noAsk) ?: yesBid?.let { scoreAsk(1.0 - it) }
         }
         val clip = paperClipFromAsk(ask)
-        if (clip == null) return StoredEntry(ask, null, null, null)
+        if (clip == null) return StoredEntry(null, null, null, null)
         return StoredEntry(
             entryAsk = clip.price,
             contracts = clip.count,
@@ -531,65 +564,51 @@ object ScorecardLedger {
     )
 
     /**
-     * Resolve entry / size / P&L for one AI log row. Fill wins if present.
-     * Otherwise stored log fields. Otherwise the $10 paper-stake rule when
-     * the ask is known. Missing ask → W-L still counts, P&L is $0.
+     * Dollars come from a matched paper fill only. A log row with no
+     * fill counts in W-L at $0 — never a hypothetical $10 clip.
+     * [won] is unused for dollars; the hypothetical line uses it separately.
      */
-    private fun sizePick(entry: PredictionLogEntry, fill: PaperFill?, won: Boolean): SizedPick {
-        val fillAsk = fill?.limitPrice?.takeIf { it > 0.0 }
-        val storedAsk = KalshiPrice.usable(entry.entryAsk)
-        val ask = fillAsk ?: storedAsk
-        if (ask == null && fill == null) {
+    private fun sizePick(
+        entry: PredictionLogEntry,
+        fill: PaperFill?,
+        @Suppress("UNUSED_PARAMETER") won: Boolean
+    ): SizedPick {
+        if (fill == null) {
+            val ask = scoreAsk(entry.entryAsk)
             return SizedPick(
-                entryAsk = null,
+                entryAsk = ask,
                 contracts = null,
                 stakeUsd = null,
                 feeUsd = null,
                 pnlUsd = 0.0,
-                entryNotRecorded = true
+                entryNotRecorded = ask == null
             )
         }
-        val clip = if (fill == null) paperClipFromAsk(ask) else null
-        val contracts = fill?.contracts?.takeIf { it > 0 }
-            ?: entry.contracts?.takeIf { it > 0 }
-            ?: clip?.count
-        val stake = fill?.stakeUsd
-            ?: entry.stakeUsd
-            ?: clip?.allInUsd
-        val fee = fill?.let { feeUsd(it) }
-            ?: entry.feeUsd
-            ?: clip?.feeUsd
-        val pnl = when {
-            fill?.pnlUsd != null -> fill.pnlUsd
-            contracts != null && stake != null && ask != null ->
-                pnlFromPosition(won, contracts, stake, fee, ask)
-            clip != null -> if (won) clip.profitIfWinUsd else -clip.allInUsd
-            else -> 0.0
-        }
+        val ask = fill.limitPrice.takeIf { it > 0.0 }
         return SizedPick(
             entryAsk = ask,
-            contracts = contracts,
-            stakeUsd = stake,
-            feeUsd = fee,
-            pnlUsd = pnl,
-            entryNotRecorded = false
+            contracts = fill.contracts.takeIf { it > 0 },
+            stakeUsd = fill.stakeUsd,
+            feeUsd = feeUsd(fill),
+            pnlUsd = fill.pnlUsd ?: 0.0,
+            entryNotRecorded = ask == null
         )
     }
 
-    private fun pnlFromPosition(
-        won: Boolean,
-        contracts: Int,
-        stake: Double,
-        fee: Double?,
-        ask: Double
-    ): Double {
-        val pos = contracts * ask
-        val allIn = when {
-            fee != null && abs(stake - (pos + fee)) <= 0.02 -> stake
-            fee != null && abs(stake - pos) <= 0.02 -> stake + fee
-            else -> stake
+    private fun hypotheticalPerContract(
+        entries: List<PredictionLogEntry>,
+        fills: List<PaperFill>
+    ): Pair<Double, Int> {
+        val pool = fills.toMutableList()
+        var sum = 0.0
+        var n = 0
+        for (entry in entries) {
+            if (takeMatchingFill(pool, entry) != null) continue
+            val ask = scoreAsk(entry.entryAsk) ?: continue
+            sum += hypotheticalPerContract(ForecastUnits.hit(entry), ask)
+            n += 1
         }
-        return if (won) contracts * 1.0 - allIn else -allIn
+        return sum to n
     }
 
     private fun sideBuckets(rows: List<PickRow>): List<Bucket> {

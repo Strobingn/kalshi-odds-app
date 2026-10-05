@@ -97,6 +97,76 @@ data class SignalSnapshot(
     val tteSeconds: Long? = null
 )
 
+/**
+ * How an open prediction row is refreshed.
+ *
+ * The first captured entry ask / contracts / stake / fee stick
+ * (`prev ?: snapshot`). If the logged side changes, the price is
+ * replaced together with the side — a missing ask on the new side
+ * becomes null, never the other side's penny price.
+ *
+ * Open rows whose close time is more than [STALE_OPEN_GRACE_MS] ago
+ * are evicted so they stop occupying the 400-row log. They are not
+ * given a made-up settlement.
+ */
+internal object OpenPredictionMerge {
+    const val STALE_OPEN_GRACE_MS = 30L * 60L * 1000L
+
+    data class Frozen(
+        val predictedSide: String?,
+        val entryAsk: Double?,
+        val contracts: Int?,
+        val stakeUsd: Double?,
+        val feeUsd: Double?
+    )
+
+    fun sideChanged(prevSide: String?, nextSide: String?): Boolean {
+        if (prevSide.isNullOrBlank() || nextSide.isNullOrBlank()) return false
+        val prev = com.dirk.kalshiodds.signal.model.SignalStance.normalizeSide(prevSide)
+        val next = com.dirk.kalshiodds.signal.model.SignalStance.normalizeSide(nextSide)
+        if (prev == null || next == null) return !prevSide.equals(nextSide, ignoreCase = true)
+        return prev != next
+    }
+
+    fun freeze(
+        prevSide: String?,
+        prevAsk: Double?,
+        prevContracts: Int?,
+        prevStake: Double?,
+        prevFee: Double?,
+        snapSide: String?,
+        snapAsk: Double?,
+        snapContracts: Int?,
+        snapStake: Double?,
+        snapFee: Double?
+    ): Frozen {
+        return if (sideChanged(prevSide, snapSide)) {
+            Frozen(
+                predictedSide = snapSide,
+                entryAsk = snapAsk,
+                contracts = snapContracts,
+                stakeUsd = snapStake,
+                feeUsd = snapFee
+            )
+        } else {
+            Frozen(
+                predictedSide = snapSide ?: prevSide,
+                entryAsk = prevAsk ?: snapAsk,
+                contracts = prevContracts ?: snapContracts,
+                stakeUsd = prevStake ?: snapStake,
+                feeUsd = prevFee ?: snapFee
+            )
+        }
+    }
+
+    fun isStaleOpen(outcome: String?, closeTimeMs: Long?, nowMs: Long, graceMs: Long = STALE_OPEN_GRACE_MS): Boolean {
+        if (outcome != null) return false
+        val close = closeTimeMs ?: return false
+        if (close <= 0L) return false
+        return nowMs >= close + graceMs
+    }
+}
+
 class PredictionLogStore(private val context: Context) {
 
     private val json = Json {
@@ -126,7 +196,16 @@ class PredictionLogStore(private val context: Context) {
         snapshot: SignalSnapshot? = null
     ) {
         context.predictionLogStore.edit { prefs ->
-            val list = decode(prefs[key]).toMutableList()
+            val raw = decode(prefs[key])
+            val swept = raw.filterNot {
+                OpenPredictionMerge.isStaleOpen(it.outcome, it.closeTimeMs, timestampMs)
+            }
+            val sweptAny = swept.size != raw.size
+            val list = swept.toMutableList()
+            if (OpenPredictionMerge.isStaleOpen(null, closeTimeMs, timestampMs)) {
+                if (sweptAny) prefs[key] = json.encodeToString(list)
+                return@edit
+            }
             val existingIdx = list.indexOfLast { it.ticker == ticker && it.outcome == null }
             val rawYes = snapshot?.rawPredictedYes
             val tteSec = snapshot?.tteSeconds
@@ -144,15 +223,28 @@ class PredictionLogStore(private val context: Context) {
                 // Do not freeze at LATE — keep the first sample per TTE bucket
                 // and still refresh the displayed row so scorecard is current.
                 if (age < throttleMs && !moved && samples.size == prev.calSamples.size) {
+                    if (sweptAny) prefs[key] = json.encodeToString(list)
                     return@edit
                 }
+                val frozen = OpenPredictionMerge.freeze(
+                    prevSide = prev.predictedSide,
+                    prevAsk = prev.entryAsk,
+                    prevContracts = prev.contracts,
+                    prevStake = prev.stakeUsd,
+                    prevFee = prev.feeUsd,
+                    snapSide = snapshot?.predictedSide,
+                    snapAsk = snapshot?.entryAsk,
+                    snapContracts = snapshot?.contracts,
+                    snapStake = snapshot?.stakeUsd,
+                    snapFee = snapshot?.feeUsd
+                )
                 list[existingIdx] = prev.copy(
                     predictedYes = predictedYes,
                     predictedNo = predictedNo,
                     marketMid = marketMid,
                     timestampMs = timestampMs,
                     closeTimeMs = closeTimeMs ?: prev.closeTimeMs,
-                    predictedSide = snapshot?.predictedSide ?: prev.predictedSide,
+                    predictedSide = frozen.predictedSide,
                     edgePp = snapshot?.edgePp ?: prev.edgePp,
                     confidence = snapshot?.confidence ?: prev.confidence,
                     regime = snapshot?.regime ?: prev.regime,
@@ -168,10 +260,10 @@ class PredictionLogStore(private val context: Context) {
                     mlpYes = snapshot?.mlpYes ?: prev.mlpYes,
                     cnnYes = snapshot?.cnnYes ?: prev.cnnYes,
                     gbmYes = snapshot?.gbmYes ?: prev.gbmYes,
-                    entryAsk = snapshot?.entryAsk ?: prev.entryAsk,
-                    contracts = snapshot?.contracts ?: prev.contracts,
-                    stakeUsd = snapshot?.stakeUsd ?: prev.stakeUsd,
-                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd,
+                    entryAsk = frozen.entryAsk,
+                    contracts = frozen.contracts,
+                    stakeUsd = frozen.stakeUsd,
+                    feeUsd = frozen.feeUsd,
                     rawPredictedYes = rawYes ?: prev.rawPredictedYes,
                     displayedYes = snapshot?.displayedYes ?: prev.displayedYes,
                     tteSeconds = tteSec ?: prev.tteSeconds,
