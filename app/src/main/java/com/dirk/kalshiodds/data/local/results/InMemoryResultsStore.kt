@@ -223,7 +223,7 @@ class InMemoryResultsStore(
 
     @Synchronized
     override fun existingSnapshotKeys(): Set<String> =
-        snapshots.map { "${it.ticker}|${it.createdAtMs}" }.toSet()
+        snapshots.map { "${it.ticker}|${it.createdAtMs}|${it.side}" }.toSet()
 
     @Synchronized
     override fun existingAlertIds(): Set<String> = alerts.map { it.alertId }.toSet()

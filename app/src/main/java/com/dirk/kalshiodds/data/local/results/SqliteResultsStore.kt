@@ -715,8 +715,14 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
 
     override fun existingSnapshotKeys(): Set<String> {
         val out = HashSet<String>()
-        db.readableDatabase.rawQuery("SELECT ticker, created_at_ms FROM $TABLE_SNAP", null).use { c ->
-            while (c.moveToNext()) out.add("${c.getString(0)}|${c.getLong(1)}")
+        db.readableDatabase.rawQuery(
+            "SELECT ticker, created_at_ms, side FROM $TABLE_SNAP",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val side = if (c.isNull(2)) "" else c.getString(2).orEmpty()
+                out.add("${c.getString(0)}|${c.getLong(1)}|$side")
+            }
         }
         return out
     }
