@@ -1,15 +1,12 @@
 package com.dirk.kalshiodds.data.supabase
 
-import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.importing.ImportBatch
 import com.dirk.kalshiodds.data.importing.ResultsImporter
 import com.dirk.kalshiodds.data.importing.SeenKeys
 import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
 import com.dirk.kalshiodds.data.prefs.DataHubSettings
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONArray
-import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
@@ -22,7 +19,8 @@ class SupabaseMirror(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
-        .build()
+        .build(),
+    private val pageSize: Int = SYNC_PAGE_SIZE
 ) {
     data class Restore(
         val batch: ImportBatch,
@@ -34,18 +32,28 @@ class SupabaseMirror(
         if (!settings.supabaseConfigured) {
             return Restore(ImportBatch(), emptyList(), "Supabase is not configured")
         }
-        val base = settings.supabaseUrl.trimEnd('/')
-        val key = settings.supabaseAnonKey
-        val snapshots = get(base, key, "diphunter_snapshots")
-            ?: get(base, key, "diphunter_results")
-        val settledJson = get(base, key, "diphunter_settled")
-        val historyJson = get(base, key, "diphunter_history")
-            ?: get(base, key, "diphunter_settings")
-        if (snapshots == null && settledJson == null) {
+        val errors = ArrayList<String>()
+        fun read(table: String): String? = try {
+            get(settings, table)
+        } catch (t: Throwable) {
+            errors += (t.message ?: "error reading $table")
+            null
+        }
+        val snapshots = read("diphunter_snapshots") ?: read("diphunter_results")
+        val settledJson = read("diphunter_settled")
+        val historyJson = read("diphunter_history") ?: read("diphunter_settings")
+        if (snapshots == null && settledJson == null && errors.isEmpty()) {
             return Restore(
                 ImportBatch(),
                 emptyList(),
                 "No diphunter_snapshots / diphunter_results / diphunter_settled tables (or RLS blocked the anon key)."
+            )
+        }
+        if (snapshots == null && settledJson == null) {
+            return Restore(
+                ImportBatch(),
+                emptyList(),
+                FAILURE_PREFIX + errors.joinToString("; ")
             )
         }
         val parsed = if (snapshots != null) {
@@ -86,32 +94,27 @@ class SupabaseMirror(
                 sessions = parsed.batch.sessions + historyBatch.sessions
             )
         }
+        val summary = "Supabase: ${parsed.summary.message}; ${settled.size} settled windows; " +
+            "${merged.settingsChanges.size} settings; ${merged.sessions.size} sessions"
+        val message = if (errors.isEmpty()) summary else FAILURE_PREFIX + errors.joinToString("; ") + ". " + summary
         return Restore(
             batch = merged,
             settled = settled,
-            message = "Supabase: ${parsed.summary.message}; ${settled.size} settled windows; " +
-                "${merged.settingsChanges.size} settings; ${merged.sessions.size} sessions"
+            message = message
         )
     }
 
-    private fun get(base: String, key: String, table: String): String? {
-        val url = "$base/rest/v1/$table?select=*&limit=1000"
-        val req = Request.Builder()
-            .url(url)
-            .header("apikey", key)
-            .header("Authorization", "Bearer $key")
-            .header("Accept", "application/json")
-            .header("User-Agent", NetworkModule.USER_AGENT)
-            .get()
-            .build()
-        return try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                resp.body?.string()
-            }
-        } catch (_: Exception) {
-            null
-        }
+    private fun get(settings: DataHubSettings, table: String): String? =
+        SupabaseRest(http, pageSize).downloadObjectArray(
+            settings = settings,
+            table = table,
+            keyPrefix = null,
+            orders = listOf("key.asc", "id.asc", "ticker.asc"),
+            optional = true
+        )
+
+    companion object {
+        const val FAILURE_PREFIX = "Supabase restore failed: "
     }
 }
 

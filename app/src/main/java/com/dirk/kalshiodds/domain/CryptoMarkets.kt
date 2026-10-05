@@ -58,6 +58,17 @@ object CryptoMarkets {
         }
     }
 
+    /**
+     * Rows the Bitcoin calibrator and reweighter may learn from.
+     * A non-empty series that is not KXBTC15M is rejected even if the ticker looks familiar.
+     */
+    fun isBtc15m(series: String?, ticker: String?): Boolean {
+        val s = series?.trim().orEmpty()
+        if (s.equals(KalshiApi.SERIES_BTC, ignoreCase = true)) return true
+        if (s.isNotEmpty()) return false
+        return ticker?.trim()?.startsWith(KalshiApi.SERIES_BTC, ignoreCase = true) == true
+    }
+
     fun kindFor(ticker: String): SeriesKind = when (inferSeries(ticker)) {
         KalshiApi.SERIES_ETH -> SeriesKind.ETH
         KalshiApi.SERIES_SOL -> SeriesKind.SOL

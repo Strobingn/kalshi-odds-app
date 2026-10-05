@@ -273,10 +273,10 @@ class MarketRollover(
             "created"
         )
 
-        fun retryAfterMs(error: HttpException): Long? {
+        fun retryAfterMs(error: HttpException, nowMs: Long = System.currentTimeMillis()): Long? {
             val raw = error.response()?.headers()?.get("Retry-After") ?: return null
-            val seconds = raw.trim().toLongOrNull() ?: return null
-            return (seconds * 1_000L).coerceAtLeast(POLL_MS)
+            val parsed = com.dirk.kalshiodds.data.repo.RefreshRecovery.parseRetryAfterHeader(raw, nowMs) ?: return null
+            return parsed.coerceAtLeast(POLL_MS)
         }
     }
 }

@@ -140,6 +140,9 @@ class ScorecardCopyTest {
         assertTrue(src.contains("LazyColumn"))
         assertTrue(src.contains("clearStaleLifecycleNotice").not())
         assertTrue(src.contains("ENTRY_NOT_RECORDED") || src.contains("entry not recorded"))
+        assertTrue(src.contains("ScorecardCopy.headerCounts"))
+        assertTrue(src.contains("ScorecardCopy.ARCHIVE_TITLE"))
+        assertFalse(src.contains("snap.sampleCount"))
     }
 
     @Test

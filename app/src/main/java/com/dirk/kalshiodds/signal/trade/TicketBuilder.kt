@@ -164,6 +164,90 @@ object TicketBuilder {
     }
 
     /**
+     * Manual limit and stake for one order. Defaults the caller passes are
+     * the current ask and the ticket stake. Stake is clipped to the $5
+     * all-in cap. Does not place an order. A closed market stays blocked.
+     */
+    fun repriceBuy(
+        ticket: TradeTicket,
+        stakeUsd: Double,
+        limitPrice: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): TradeTicket {
+        if (ticket.isSell) return ticket
+        if (structuralBlock(ticket.blockedReason)) return ticket
+        val price = KalshiPrice.usable(limitPrice)
+        if (price == null) {
+            return ticket.copy(
+                blockedReason = "Type a limit between 0.1¢ and 99.9¢",
+                sizingNote = "Limit price was not usable — nothing sent",
+                edgeCheckNote = edgeAfterFeesNote(ticket.modelChance, limitPrice, feeRate, stakeUsd)
+            )
+        }
+        val requested = stakeUsd.takeIf { it.isFinite() && it > 0.0 } ?: ticket.stakeUsd
+        val cap = requested.coerceAtMost(SignalConstants.LIVE_ALL_IN_CAP_USD)
+        val clipped = requested > SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-9
+        val live = LiveOrderSizer.size(price, cap, feeRate)
+        val yesLimit = if (ticket.side.equals("NO", true)) KalshiPrice.clipLimit(1.0 - price) else price
+        val clipNote = if (clipped) "Stake clipped to the \$5 live cap. " else ""
+        if (!live.ok) {
+            return ticket.copy(
+                limitPrice = price,
+                yesLimitPrice = yesLimit,
+                stakeUsd = cap,
+                contracts = 0,
+                estimatedFillUsd = 0.0,
+                allInUsd = 0.0,
+                feeUsd = 0.0,
+                blockedReason = live.refusedReason ?: "Cannot size this order under the \$5 cap",
+                sizingNote = clipNote + (live.refusedReason ?: "Cannot size"),
+                edgeCheckNote = edgeAfterFeesNote(ticket.modelChance, price, feeRate, cap)
+            )
+        }
+        val minProfit = ticket.minProfitIfWinUsd
+        val belowReason = if (minProfit != null &&
+            LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
+        ) {
+            LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
+        } else {
+            null
+        }
+        val edgeNote = edgeAfterFeesNote(ticket.modelChance, price, feeRate, live.allInUsd)
+        return ticket.copy(
+            stakeUsd = live.allInUsd,
+            limitPrice = price,
+            yesLimitPrice = yesLimit,
+            contracts = live.count,
+            estimatedFillUsd = live.allInUsd,
+            maxPayoutUsd = live.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = price,
+            feeUsd = live.feeUsd,
+            allInUsd = live.allInUsd,
+            profitIfWinUsd = live.profitIfWinUsd,
+            belowMinProfit = belowReason != null,
+            blockedReason = belowReason,
+            sizingNote = clipNote + String.format(
+                java.util.Locale.US,
+                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · \$5 cap",
+                live.count,
+                price * 100.0,
+                live.allInUsd,
+                live.feeUsd,
+                live.profitIfWinUsd
+            ),
+            edgeCheckNote = edgeNote
+        )
+    }
+
+    private fun structuralBlock(reason: String?): Boolean {
+        if (reason.isNullOrBlank()) return false
+        return reason == MARKET_CLOSED ||
+            reason == WINDOW_CLOSED ||
+            reason == NO_BUYERS ||
+            reason.startsWith("No sellers on")
+    }
+
+    /**
      * Sell / reduce [heldContracts] of [side] at the **fresh** best bid.
      * V2 `reduce_only` + IoC. Never places. [limitPrice] is clipped so it
      * cannot exceed the live bid — never a stale or higher quote.
@@ -279,7 +363,8 @@ object TicketBuilder {
             heldContracts = held,
             paperOnly = paperOnly,
             feeUsd = fee,
-            allInUsd = proceeds
+            allInUsd = proceeds,
+            closeTimeEpochMs = market.closeTimeEpochMs
         )
     }
 
@@ -454,15 +539,14 @@ object TicketBuilder {
             ),
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
-            visibleContracts = quoted?.toInt()
+            visibleContracts = quoted?.toInt(),
+            closeTimeEpochMs = market.closeTimeEpochMs
         )
     }
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
-        val yes = market.importedModelPp?.div(100.0)
-            ?: market.aiYesPercent?.div(100.0)
-            ?: market.digitalFairPp?.div(100.0)
-        if (yes == null || !yes.isFinite()) return null
+        val yes = com.dirk.kalshiodds.domain.FairValue.yesPp(market)?.div(100.0) ?: return null
+        if (!yes.isFinite()) return null
         return if (side == "NO") 1.0 - yes else yes
     }
 
@@ -545,21 +629,68 @@ object TicketBuilder {
             },
             createdAtMs = ctx.nowMs,
             kind = TicketKind.MANUAL,
-            blockedReason = reason
+            blockedReason = reason,
+            closeTimeEpochMs = market.closeTimeEpochMs
         )
     }
 
-    fun resolveSide(market: MarketUiModel): String? {
-        val primary = market.primaryHeroSide?.uppercase()
-        if (primary == "YES" || primary == "NO") return primary
-        val predicted = market.predictedSide?.uppercase()
-        if (predicted == "YES" || predicted == "NO") return predicted
+    /**
+     * Side with the larger edge after fees. A market favourite is not a tie-break.
+     * Exact ties return null so the caller does not prefer the expensive side.
+     */
+    fun resolveSide(market: MarketUiModel, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): String? {
+        val yes = sideEdgeAfterFees(market, "YES", feeRate)
+        val no = sideEdgeAfterFees(market, "NO", feeRate)
+        if (yes != null || no != null) {
+            return when {
+                no == null -> "YES"
+                yes == null -> "NO"
+                yes > no + 1e-12 -> "YES"
+                no > yes + 1e-12 -> "NO"
+                else -> null
+            }
+        }
         val net = market.netEdgePp ?: market.edgePp ?: return null
         return when {
-            net > 0 -> "YES"
-            net < 0 -> "NO"
+            net > 0.0 -> "YES"
+            net < 0.0 -> "NO"
             else -> null
         }
+    }
+
+    /** Model probability minus the ask minus the fee on that ask. Null when either input is missing. */
+    fun sideEdgeAfterFees(market: MarketUiModel, side: String, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double? {
+        val probability = modelProb(market, side) ?: return null
+        val ask = bestAsk(market, side) ?: return null
+        return probability - ask - KalshiFee.perContract(ask, feeRate)
+    }
+
+    fun edgeAfterFees(ticket: TradeTicket, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double {
+        val model = ticket.modelChance?.takeIf { it.isFinite() }
+        val price = KalshiPrice.usable(ticket.limitPrice)
+        if (model != null && price != null) {
+            val stake = ticket.stakeUsd.takeIf { it.isFinite() && it > 0.0 }
+                ?: SignalConstants.DEFAULT_TICKET_STAKE_USD
+            return model - price - KalshiFee.perContract(price, feeRate, stake)
+        }
+        return ticket.netEvPerContract ?: Double.NEGATIVE_INFINITY
+    }
+
+    /**
+     * Shown after a hand-edited limit. Does not disable the field or Approve.
+     */
+    fun edgeAfterFeesNote(
+        modelChance: Double?,
+        limitPrice: Double,
+        feeRate: Double,
+        stakeUsd: Double
+    ): String? {
+        val model = modelChance?.takeIf { it.isFinite() } ?: return "Edge not checked — no model probability on this ticket"
+        val price = KalshiPrice.usable(limitPrice) ?: return "Edge not checked — limit price is not usable"
+        val stake = stakeUsd.takeIf { it.isFinite() && it > 0.0 } ?: SignalConstants.DEFAULT_TICKET_STAKE_USD
+        val edgePp = (model - price - KalshiFee.perContract(price, feeRate, stake)) * 100.0
+        val verdict = if (edgePp > 0.0) "clears" else "does not clear"
+        return String.format(java.util.Locale.US, "Edge after fees %+.1f pp — %s", edgePp, verdict)
     }
 
     fun bestAsk(market: MarketUiModel, side: String): Double? =

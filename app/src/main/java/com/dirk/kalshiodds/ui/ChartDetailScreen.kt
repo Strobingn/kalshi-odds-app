@@ -49,7 +49,13 @@ fun ChartDetailScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text(com.dirk.kalshiodds.ui.WindowLabel.of(market.ticker, market.closeTimeEpochMs)) },
+                title = {
+                    Text(
+                        com.dirk.kalshiodds.ui.WindowLabel.of(market.ticker, market.closeTimeEpochMs),
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -103,7 +109,7 @@ fun ChartDetailScreen(
                 liveDownLabel = quotes.downChartLabel
             )
             Text(
-                "Orange = Coinbase/Binance spot with dashed TARGET. Green/red = UP/DOWN best bids. Drag to scrub.",
+                com.dirk.kalshiodds.ui.components.CHART_SPOT_CAPTION,
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = 12.dp)

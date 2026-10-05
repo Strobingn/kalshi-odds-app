@@ -11,28 +11,49 @@ import androidx.security.crypto.MasterKeys
  * PEM is never written to logs.
  *
  * EncryptedSharedPreferences is preferred. If the Android Keystore is
- * unavailable we fall back to a private prefs file. Cold start must read
- * **both** files so a previous fallback save is not lost when encryption
- * later succeeds (or the reverse).
+ * unavailable, previously saved keys can still be read from the private
+ * file, but new live trading keys are refused. Cold start still reads
+ * both files so a previous fallback save is not lost when encryption
+ * later succeeds.
  */
 class SecureCredentialStore(context: Context) {
 
     val keystoreInvalidated: Boolean
         get() = lastKeystoreInvalidated
 
-    private val prefs: SharedPreferences = createPrefs(context.applicationContext)
+    private val opened = openStore(context.applicationContext)
+    private val prefs: SharedPreferences = opened.prefs
+
+    /** False when Android Keystore could not encrypt prefs. Live keys must not be written. */
+    val encryptionAvailable: Boolean = opened.encrypted
 
     var apiKeyId: String
         get() = prefs.getString(KEY_ID, "").orEmpty()
         set(value) {
+            if (!encryptionAvailable && value.isNotBlank()) return
             prefs.edit().putString(KEY_ID, value.trim()).commit()
         }
 
     var privateKeyPem: String
         get() = PemNormalizer.normalize(prefs.getString(KEY_PEM, "").orEmpty())
         set(value) {
+            if (!encryptionAvailable && value.isNotBlank()) return
             prefs.edit().putString(KEY_PEM, PemNormalizer.normalize(value)).commit()
         }
+
+    /**
+     * Writes a live Kalshi key only when EncryptedSharedPreferences is active.
+     * Returns [CredentialWriteGuard.REJECT_UNENCRYPTED] and writes nothing otherwise.
+     */
+    fun saveLiveCredentials(keyId: String, pem: String): String? {
+        if (!encryptionAvailable) return CredentialWriteGuard.REJECT_UNENCRYPTED
+        prefs.edit()
+            .putString(KEY_ID, keyId.trim())
+            .putString(KEY_PEM, PemNormalizer.normalize(pem))
+            .commit()
+        KeystoreRecovery.wipedUndecryptableSecrets = false
+        return null
+    }
 
     val hasCredentials: Boolean
         get() = apiKeyId.isNotBlank() && looksLikePem(privateKeyPem)
@@ -60,21 +81,30 @@ class SecureCredentialStore(context: Context) {
 
         fun looksLikePem(pem: String): Boolean = PemNormalizer.looksLikePem(pem)
 
-        private fun createPrefs(context: Context): SharedPreferences {
+        private data class Opened(val prefs: SharedPreferences, val encrypted: Boolean)
+
+        private fun openStore(context: Context): Opened {
             val fallback = context.getSharedPreferences(FALLBACK_NAME, Context.MODE_PRIVATE)
             val legacy = context.getSharedPreferences(LEGACY_PLAIN, Context.MODE_PRIVATE)
             val encrypted = tryCreateEncrypted(context)
             if (encrypted != null) {
                 migrateIfEmpty(from = fallback, to = encrypted)
                 migrateIfEmpty(from = legacy, to = encrypted)
-                return encrypted
+                return Opened(encrypted, encrypted = true)
             }
-            Log.w(TAG, "EncryptedSharedPreferences unavailable; using private prefs")
+            Log.w(TAG, "EncryptedSharedPreferences unavailable; live key writes are refused")
             migrateIfEmpty(from = legacy, to = fallback)
-            return fallback
+            return Opened(fallback, encrypted = false)
         }
 
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
+            openEncrypted(context)?.let { return it }
+            if (!lastKeystoreInvalidated) return null
+            if (!KeystoreRecovery.wipeBrokenSecrets(context)) return null
+            return openEncrypted(context)?.also { lastKeystoreInvalidated = false }
+        }
+
+        private fun openEncrypted(context: Context): SharedPreferences? {
             return try {
                 val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
                 val prefs = EncryptedSharedPreferences.create(
@@ -86,24 +116,13 @@ class SecureCredentialStore(context: Context) {
                 )
                 lastKeystoreInvalidated = false
                 prefs
-            } catch (e: javax.crypto.AEADBadTagException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Encrypted prefs Keystore tag invalid — using fallback, re-enter key")
-                null
-            } catch (e: java.security.KeyStoreException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Keystore unavailable (${e.javaClass.simpleName})")
-                null
             } catch (e: Exception) {
-                val name = e.javaClass.simpleName
-                if (name.contains("AEAD", true) || name.contains("KeyStore", true) ||
-                    e.cause is javax.crypto.AEADBadTagException
-                ) {
+                if (KeystoreRecovery.isInvalidKey(e)) {
                     lastKeystoreInvalidated = true
-                    Log.w(TAG, "Encrypted prefs invalidated ($name) — using fallback")
+                    Log.w(TAG, "Encrypted prefs Keystore invalid (${e.javaClass.simpleName}) — resetting")
                     return null
                 }
-                Log.w(TAG, "EncryptedSharedPreferences unavailable ($name)")
+                Log.w(TAG, "EncryptedSharedPreferences unavailable (${e.javaClass.simpleName})")
                 null
             }
         }

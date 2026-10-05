@@ -19,6 +19,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.fieldCard
 
 @Composable
 fun PositionsCard(
@@ -32,8 +35,7 @@ fun PositionsCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, colors.accentBlue.copy(alpha = 0.6f), RoundedCornerShape(16.dp))
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -50,7 +52,7 @@ fun PositionsCard(
             )
         }
         if (onViewHistory != null) {
-            OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
+            OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(FieldMetrics.minTouch)) {
                 Text("View all")
             }
         }
@@ -95,11 +97,12 @@ private fun PositionRow(pos: LivePosition, onSell: (String, String) -> Unit) {
             fontWeight = FontWeight.Bold
         )
         Button(
+            shape = FieldShapes.button,
             onClick = { onSell(pos.ticker, pos.side) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 8.dp)
-                .height(44.dp)
+                .height(FieldMetrics.minTouch)
         ) { Text("Sell") }
     }
 }

@@ -29,8 +29,10 @@ private val Context.signalDataStore: DataStore<Preferences> by preferencesDataSt
 
 data class SignalSettings(
     val watchBtc: Boolean = true,
-    val watchEth: Boolean = true,
-    val watchSol: Boolean = true,
+    /** Retired. The live allowlist is Bitcoin-only; Settings does not show this toggle. */
+    val watchEth: Boolean = false,
+    /** Retired. The live allowlist is Bitcoin-only; Settings does not show this toggle. */
+    val watchSol: Boolean = false,
     val extraTickers: List<String> = emptyList(),
     val extraTickersText: String = "",
     val edgeThresholdPp: Double = SignalConstants.DEFAULT_EDGE_THRESHOLD_PP,
@@ -287,11 +289,14 @@ class SignalPreferences(
     suspend fun updateMetaLabel(value: Boolean) = edit { it[KEY_META] = value }
     suspend fun updatePathSim(value: Boolean) = edit { it[KEY_PATH_SIM] = value }
 
-    fun saveCredentials(keyId: String, pem: String) {
-        secrets.apiKeyId = keyId
-        secrets.privateKeyPem = PemNormalizer.normalize(pem)
-        secretRevision.value += 1
+    /** Null when the key was stored. A message means it was refused and not written. */
+    fun saveCredentials(keyId: String, pem: String): String? {
+        val error = secrets.saveLiveCredentials(keyId, pem)
+        if (error == null) secretRevision.value += 1
+        return error
     }
+
+    fun canSaveLiveSecrets(): Boolean = secrets.encryptionAvailable
 
     fun clearCredentials() {
         secrets.clear()
@@ -304,7 +309,10 @@ class SignalPreferences(
 
     /** True when EncryptedSharedPreferences died and no usable key loaded. */
     fun needsReenterKey(): Boolean =
-        CredentialWriteGuard.needsReenterBanner(secrets.hasCredentials, secrets.keystoreInvalidated)
+        CredentialWriteGuard.needsReenterBanner(
+            secrets.hasCredentials,
+            secrets.keystoreInvalidated || KeystoreRecovery.wipedUndecryptableSecrets
+        )
 
     /** Demo vault died and no usable demo PEM loaded. */
     fun needsReenterDemoKey(): Boolean =
@@ -331,9 +339,51 @@ class SignalPreferences(
         r.ticketStakeUsd?.let { updateTicketStakeUsd(it) }
         r.bankrollUsd?.let { updateBankrollUsd(it) }
         r.edgeThresholdPp?.let { updateEdgeThresholdPp(it) }
-        r.paperTradingEnabled?.let { updatePaperTrading(it) }
         r.minConfidence?.let { updateMinConfidence(it) }
         r.maxSpreadCents?.let { updateMaxSpreadCents(it) }
+    }
+
+    /** Applies a full-backup settings object. Never writes API keys or paper/live/demo mode. */
+    suspend fun restoreBackup(json: String) {
+        val stripped = com.dirk.kalshiodds.data.local.AppBackup.stripTradingMode(json)
+        val o = runCatching { org.json.JSONObject(stripped) }.getOrNull() ?: return
+        fun bool(key: String): Boolean? = if (o.has(key) && !o.isNull(key)) o.optBoolean(key) else null
+        fun dbl(key: String): Double? =
+            if (o.has(key) && !o.isNull(key)) o.optDouble(key).takeIf { it.isFinite() } else null
+        fun int(key: String): Int? = if (o.has(key) && !o.isNull(key)) o.optInt(key) else null
+        bool("watchBtc")?.let { updateWatchBtc(it) }
+        bool("watchEth")?.let { updateWatchEth(it) }
+        bool("watchSol")?.let { updateWatchSol(it) }
+        bool("notificationsEnabled")?.let { updateNotifications(it) }
+        bool("opportunityAlertsEnabled")?.let { updateOpportunityAlerts(it) }
+        bool("opportunityQuiet")?.let { updateOpportunityQuiet(it) }
+        bool("liveSignalsEnabled")?.let { updateLiveSignals(it) }
+        bool("subscribeTrades")?.let { updateSubscribeTrades(it) }
+        dbl("edgeThresholdPp")?.let { updateEdgeThresholdPp(it) }
+        bool("autoTuneEnabled")?.let { updateAutoTuneEnabled(it) }
+        bool("autoTuneManualOverride")?.let { updateAutoTuneOverride(it) }
+        dbl("minConfidence")?.let { updateMinConfidence(it) }
+        dbl("minLiquidity")?.let { updateMinLiquidity(it) }
+        dbl("maxSpreadCents")?.let { updateMaxSpreadCents(it) }
+        bool("hideWeakOpportunities")?.let { updateHideWeak(it) }
+        dbl("bankrollUsd")?.let { updateBankrollUsd(it) }
+        dbl("feeRate")?.let { updateFeeRate(it) }
+        bool("ticketsEnabled")?.let { updateTicketsEnabled(it) }
+        dbl("ticketStakeUsd")?.let { updateTicketStakeUsd(it) }
+        bool("ticketRespectGates")?.let { updateTicketRespectGates(it) }
+        dbl("hunterValueStakeUsd")?.let { updateHunterValueStakeUsd(it) }
+        dbl("hunterValuePayoutUsd")?.let { updateHunterValuePayoutUsd(it) }
+        dbl("longShotMaxAsk")?.let { updateLongShotMaxAsk(it) }
+        bool("winTargetEnabled")?.let { updateWinTargetEnabled(it) }
+        dbl("winTargetUsd")?.let { updateWinTargetUsd(it) }
+        dbl("winTargetBankrollPct")?.let { updateWinTargetBankrollPct(it) }
+        if (o.has("winTargetAbsCapUsd")) {
+            updateWinTargetAbsCapUsd(dbl("winTargetAbsCapUsd"))
+        }
+        dbl("minProfitIfWinUsd")?.let { updateMinProfitIfWinUsd(it) }
+        int("streakPauseN")?.let { updateStreakPauseN(it) }
+        dbl("drawdownUsd")?.let { updateDrawdownUsd(it) }
+        bool("resumeOnNewSession")?.let { updateResumeOnNewSession(it) }
     }
 
     /**

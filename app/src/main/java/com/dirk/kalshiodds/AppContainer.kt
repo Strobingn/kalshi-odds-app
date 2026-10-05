@@ -104,7 +104,11 @@ class AppContainer(context: Context) {
         cancelOrder = { order ->
             runCatching { tradeClient.cancel(order) }
         },
-        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
+        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) },
+        findExisting = { ticket, clientOrderId ->
+            runCatching { tradeClient.findByClientOrderId(ticket, clientOrderId) }.getOrNull()
+        },
+        intentStore = com.dirk.kalshiodds.signal.trade.SharedPrefsOrderIntentStore(app)
     )
     val clock: Clock = Clock.System
     val repository = MarketRepository(

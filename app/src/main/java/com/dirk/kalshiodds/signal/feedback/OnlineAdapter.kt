@@ -31,9 +31,9 @@ import kotlinx.serialization.Serializable
  *        a ← a + η (y − p̂) logit(p)
  *        b ← b + η (y − p̂)
  *
- *    This is *in addition to* [Calibrator]'s temperature. Cold start
- *    (`sampleCount < MIN_ADAPTER_SAMPLES`) leaves weights at 1.0 and
- *    `(a, b) = (1, 0)` so the live blend is unchanged.
+ *    This is *in addition to* [Calibrator]'s temperature. Below
+ *    [SignalConstants.MIN_ADAPTER_SAMPLES] the update is recorded only:
+ *    [apply] and [scaleBlend] stay at identity so live prices do not move.
  *
  * Persistence: JSON in DataStore ([LearnedWeightsStore]). No network
  * training, no remote server.
@@ -114,6 +114,7 @@ object OnlineAdapter {
         lr: Double = SignalConstants.ADAPTER_LEARNING_RATE
     ): State {
         val fresh = entries
+            .filter { com.dirk.kalshiodds.domain.CryptoMarkets.isBtc15m(it.series, it.ticker) }
             .filter { e ->
                 val y = e.outcome?.lowercase()
                 (y == "yes" || y == "no") && (e.settledAtMs ?: e.timestampMs) > state.lastSettledAtMs

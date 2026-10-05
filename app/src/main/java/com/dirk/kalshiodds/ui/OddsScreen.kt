@@ -40,11 +40,14 @@ fun OddsScreen(
         onDismissTicket = { viewModel.dismissTicket(it) },
         onApproveTicket = { viewModel.approveTicket(it) },
         onApproveSellTicket = { id, count, price -> viewModel.approveSellTicket(id, count, price) },
+        onReviseBuy = { id, stake, price -> viewModel.reviseBuyTicket(id, stake, price) },
+        onApproveBuy = { id, stake, price -> viewModel.approveBuyTicket(id, stake, price) },
         onPaperTicket = { viewModel.paperTicket(it) },
         onPaperSellTicket = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
         onCancelApprove = { viewModel.cancelTicketApprove() },
         onCancelOrder = { viewModel.cancelWorkingOrder(it) },
-        onResumeAlerts = { viewModel.resumeAlerts() }
+        onResumeAlerts = { viewModel.resumeAlerts() },
+        onWatchBitcoin = { viewModel.watchBitcoin(true) }
     )
 }
 

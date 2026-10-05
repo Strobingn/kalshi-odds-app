@@ -59,6 +59,10 @@ import com.dirk.kalshiodds.signal.service.BatteryExemption
 import kotlinx.coroutines.launch
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldHero
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.fieldTextColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,6 +79,12 @@ fun SettingsScreen(
     val importKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let { viewModel.restoreCredentials(it) } }
+    val exportEverything = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri: Uri? -> uri?.let { viewModel.backupEverything(it) } }
+    val importEverything = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let { viewModel.restoreEverything(it) } }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
         viewModel.refreshLastOrderError()
@@ -86,7 +96,9 @@ fun SettingsScreen(
         onOpenData = onOpenData,
         scrollToApiKey = scrollToApiKey,
         onExportKeys = { exportKeys.launch("diphunter-kalshi-key.dhcred") },
-        onImportKeys = { importKeys.launch(arrayOf("*/*")) }
+        onImportKeys = { importKeys.launch(arrayOf("*/*")) },
+        onExportEverything = { exportEverything.launch("diphunter-backup.json") },
+        onImportEverything = { importEverything.launch(arrayOf("application/json", "*/*")) }
     )
 }
 
@@ -99,7 +111,9 @@ fun SettingsContent(
     scrollToApiKey: Boolean = false,
     viewModel: SettingsViewModel? = null,
     onExportKeys: () -> Unit = {},
-    onImportKeys: () -> Unit = {}
+    onImportKeys: () -> Unit = {},
+    onExportEverything: () -> Unit = {},
+    onImportEverything: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val s = state.settings
@@ -120,7 +134,13 @@ fun SettingsContent(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text("Signal settings") },
+                title = {
+                    Text(
+                        "Signal settings",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -142,12 +162,13 @@ fun SettingsContent(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text(
-                AppVersion.label,
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
+            FieldHero(
+                title = "DipHunter",
+                subtitle = "Signal settings",
+                version = AppVersion.label,
+                mark = "D"
             )
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 enabled = !updateBusy,
                 onClick = {
                     updateScope.launch {
@@ -155,6 +176,7 @@ fun SettingsContent(
                         updateMessage = "Checking branch release…"
                         updateMessage = when (val result = AppUpdater.checkAndDownload(context)) {
                             AppUpdater.Result.Current -> "This app is up to date."
+                            is AppUpdater.Result.Skipped -> result.message
                             is AppUpdater.Result.Failed -> result.reason
                             is AppUpdater.Result.Ready -> runCatching {
                                 AppUpdater.showInstaller(context, result.apk)
@@ -199,6 +221,8 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.keyIdDraft,
                 onValueChange = { viewModel?.setKeyIdDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
@@ -206,6 +230,8 @@ fun SettingsContent(
                 singleLine = true
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.pemDraft,
                 onValueChange = { viewModel?.setPemDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
@@ -219,10 +245,10 @@ fun SettingsContent(
                 }
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { viewModel?.saveCredentials() }) {
+                Button(shape = FieldShapes.button, onClick = { viewModel?.saveCredentials() }) {
                     Text(if (s.hasPrivateKey) "Update key" else "Save key")
                 }
-                OutlinedButton(onClick = { viewModel?.clearCredentials() }) { Text("Clear") }
+                OutlinedButton(shape = FieldShapes.button, onClick = { viewModel?.clearCredentials() }) { Text("Clear") }
             }
             if (state.keyIdDraft.isNotBlank() && !s.hasPrivateKey && state.pemDraft.isBlank()) {
                 Text(
@@ -239,7 +265,7 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = { viewModel?.testConnection() },
                 enabled = !state.connectionTestBusy,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
@@ -282,11 +308,11 @@ fun SettingsContent(
                     .padding(12.dp)
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
+                OutlinedButton(shape = FieldShapes.button,
                     onClick = { lastErr?.let { clipboard.setText(AnnotatedString(it)) } },
                     enabled = lastErr != null
                 ) { Text("Copy last error") }
-                OutlinedButton(onClick = { viewModel?.clearLastOrderError() }, enabled = lastErr != null) {
+                OutlinedButton(shape = FieldShapes.button, onClick = { viewModel?.clearLastOrderError() }, enabled = lastErr != null) {
                     Text("Clear")
                 }
             }
@@ -297,6 +323,8 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.credPassphrase,
                 onValueChange = { viewModel?.setCredPassphrase(it) },
                 modifier = Modifier.fillMaxWidth(),
@@ -304,10 +332,10 @@ fun SettingsContent(
                 singleLine = true
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = onExportKeys) {
+                Button(shape = FieldShapes.button, onClick = onExportKeys) {
                     Text("Export keys backup")
                 }
-                OutlinedButton(onClick = onImportKeys) {
+                OutlinedButton(shape = FieldShapes.button, onClick = onImportKeys) {
                     Text("Import keys backup")
                 }
             }
@@ -378,16 +406,25 @@ fun SettingsContent(
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (state.batteryUnrestricted) colors.textPrimary else colors.accentOrange
             )
-            OutlinedButton(onClick = { BatteryExemption.openPrompt(context) }) {
+            OutlinedButton(shape = FieldShapes.button, onClick = { BatteryExemption.openPrompt(context) }) {
                 Text(if (state.batteryUnrestricted) "Open battery settings" else "Allow background")
             }
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Bitcoin 15-minute markets (KXBTC15M). Turn this off to hide Bitcoin, and turn it back on here. Ethereum and Solana stay blocked: they are not polled, scored, or paper-traded. An empty or failed fetch does not erase the last good board.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
+            ToggleRow("Watch Bitcoin", s.watchBtc) { viewModel?.setWatchBtc(it) }
+            if (!s.watchBtc) {
+                Text(
+                    WatchBitcoinNotice.SETTINGS_WARNING,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.accentOrange,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
 
             Section("Edge threshold")
             if (s.isSittingOut()) {
@@ -487,6 +524,8 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.bankrollDraft,
                 onValueChange = { viewModel?.setBankrollDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
@@ -588,7 +627,7 @@ fun SettingsContent(
                     color = colors.accentOrange,
                     fontWeight = FontWeight.Bold
                 )
-                Button(onClick = { viewModel?.resumeAlerts() }) { Text("Resume alerts") }
+                Button(shape = FieldShapes.button, onClick = { viewModel?.resumeAlerts() }) { Text("Resume alerts") }
             }
             Text(
                 "Pause after ${s.streakPauseN} wrong in a row",
@@ -625,11 +664,23 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Button(onClick = onOpenData, modifier = Modifier.fillMaxWidth().height(52.dp)) {
+            Button(shape = FieldShapes.button, onClick = onOpenData, modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)) {
                 Text("Open Data (import / backfill)")
             }
-            Button(onClick = { viewModel?.exportResults() }, modifier = Modifier.fillMaxWidth()) {
+            Button(shape = FieldShapes.button, onClick = { viewModel?.exportResults() }, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
+            }
+            Section("Back up everything")
+            Text(
+                "One file restores settings, results, and history after a reinstall. " +
+                    "The API key is optional: type a passphrase of at least 6 characters and it is included, labelled, and encrypted. " +
+                    "Leave the passphrase blank to leave the key out. The key is never stored in plaintext in this file.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(shape = FieldShapes.button, onClick = onExportEverything) { Text("Back up everything") }
+                OutlinedButton(shape = FieldShapes.button, onClick = onImportEverything) { Text("Restore") }
             }
             state.exportMessage?.let {
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
@@ -714,7 +765,7 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
-            OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
+            OutlinedButton(shape = FieldShapes.button, onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(FieldMetrics.minTouch)) {
                 Text("Reset paper book to $100")
             }
 
@@ -854,6 +905,8 @@ fun SettingsContent(
                 )
             }
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.demoKeyIdDraft,
                 onValueChange = { viewModel?.setDemoKeyIdDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
@@ -861,6 +914,8 @@ fun SettingsContent(
                 singleLine = true
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.demoPemDraft,
                 onValueChange = { viewModel?.setDemoPemDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
@@ -868,10 +923,10 @@ fun SettingsContent(
                 minLines = 4
             )
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Button(onClick = { viewModel?.saveDemoCredentials() }) {
+                Button(shape = FieldShapes.button, onClick = { viewModel?.saveDemoCredentials() }) {
                     Text(if (s.demoCredentialsConfigured) "Update demo key" else "Save demo key")
                 }
-                OutlinedButton(onClick = { viewModel?.clearDemoCredentials() }) { Text("Clear demo") }
+                OutlinedButton(shape = FieldShapes.button, onClick = { viewModel?.clearDemoCredentials() }) { Text("Clear demo") }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -899,6 +954,8 @@ fun SettingsContent(
                         )
                     )
                     OutlinedTextField(
+                        shape = FieldShapes.search,
+                        colors = fieldTextColors(),
                         value = state.raiseDraft,
                         onValueChange = { viewModel?.setRaiseDraft(it) },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -911,7 +968,7 @@ fun SettingsContent(
                 }
             },
             confirmButton = {
-                Button(onClick = { viewModel?.confirmRaiseStake() }) { Text("Confirm raise") }
+                Button(shape = FieldShapes.button, onClick = { viewModel?.confirmRaiseStake() }) { Text("Confirm raise") }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel?.cancelRaiseStake() }) { Text("Keep $5 max") }

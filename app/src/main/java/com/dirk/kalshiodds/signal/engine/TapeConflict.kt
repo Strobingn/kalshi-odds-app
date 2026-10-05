@@ -124,7 +124,8 @@ object TapeConflict {
         priorStreak: Int = 0,
         yesBid: Double? = null,
         noBid: Double? = null,
-        modelYesPercent: Double? = null
+        modelYesPercent: Double? = null,
+        modelActive: Boolean = true
     ): Result {
         val stored = if (modelSide.equals("NO", ignoreCase = true)) DirectionSanity.SIDE_NO
         else DirectionSanity.SIDE_YES
@@ -145,9 +146,9 @@ object TapeConflict {
             yesBid = yesBid,
             noBid = noBid
         )
-        val disagree = side != primary
+        val disagree = modelActive && side != primary
         val streak = if (disagree) priorStreak + 1 else 0
-        val conflict = disagree && streak >= SUSTAINED_STREAK
+        val conflict = modelActive && disagree && streak >= SUSTAINED_STREAK
         val banner = if (conflict) {
             val ai = if (side == DirectionSanity.SIDE_YES) "UP" else "DOWN"
             val mkt = if (primary == DirectionSanity.SIDE_YES) "UP" else "DOWN"

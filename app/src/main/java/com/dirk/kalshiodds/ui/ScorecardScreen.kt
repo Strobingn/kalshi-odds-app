@@ -43,6 +43,8 @@ import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 import kotlin.math.roundToInt
+import com.dirk.kalshiodds.ui.theme.fieldCard
+import com.dirk.kalshiodds.ui.theme.FieldShapes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -77,7 +79,13 @@ fun ScorecardScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text(ScorecardCopy.TITLE) },
+                title = {
+                    Text(
+                        ScorecardCopy.TITLE,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -106,12 +114,12 @@ fun ScorecardScreen(
                 )
             }
             item {
-                Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
+                Button(shape = FieldShapes.button, onClick = onExport, modifier = Modifier.fillMaxWidth()) {
                     Text("Export results")
                 }
             }
             item {
-                Button(onClick = onGetLatestModel, modifier = Modifier.fillMaxWidth()) {
+                Button(shape = FieldShapes.button, onClick = onGetLatestModel, modifier = Modifier.fillMaxWidth()) {
                     Text("Get latest model")
                 }
             }
@@ -160,14 +168,12 @@ fun ScorecardScreen(
                 }
                 items(snap.perSeries, key = { "series-${it.series}" }) { SeriesRow(it) }
             }
-            if (snap != null) {
-                item {
-                    Text(
-                        "Open ${snap.openCount} · void ${snap.voidCount} · settled ${snap.sampleCount}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textSecondary
-                    )
-                }
+            item {
+                Text(
+                    ScorecardCopy.headerCounts(ledger),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
             }
             if (view.showsEmptyState) {
                 item {
@@ -203,6 +209,16 @@ fun ScorecardScreen(
                     SettledPickRow(pick)
                 }
             }
+            view.archive?.let { archived ->
+                item {
+                    Text(
+                        ScorecardCopy.ARCHIVE_NOTE,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary
+                    )
+                }
+                item { RecordCard(ScorecardCopy.ARCHIVE_TITLE, archived) }
+            }
             item { Spacer(Modifier.height(8.dp)) }
         }
     }
@@ -216,7 +232,7 @@ private fun ForwardTestCard(summary: com.dirk.kalshiodds.signal.feedback.Forward
         summary.modelBrier, summary.marketBrier
     )
     val proxy = summary.quotedProxyPnlUsd?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
-    Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(16.dp)) {
+    Column(Modifier.fillMaxWidth().fieldCard(colors.surface, colors.border).padding(16.dp)) {
         Text("Forward Test · current app forecast", style = MaterialTheme.typography.titleMedium,
             color = colors.textPrimary)
         Spacer(Modifier.height(6.dp))
@@ -229,7 +245,7 @@ private fun ForwardTestCard(summary: com.dirk.kalshiodds.signal.feedback.Forward
             "The research 128-tree model remains inactive.",
             style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export forward test CSV") }
+        Button(shape = FieldShapes.button, onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export forward test CSV") }
     }
 }
 
@@ -245,7 +261,7 @@ private fun TicketForwardCard(
     )
     val proxy = summary.quotedProxyPnlUsd?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
     val drawdown = summary.worstDrawdownUsd?.let { String.format(Locale.US, "%.2f", it) } ?: "—"
-    Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(16.dp)) {
+    Column(Modifier.fillMaxWidth().fieldCard(colors.surface, colors.border).padding(16.dp)) {
         Text("Ticket suggestion forward test", style = MaterialTheme.typography.titleMedium,
             color = colors.textPrimary)
         Spacer(Modifier.height(6.dp))
@@ -260,7 +276,7 @@ private fun TicketForwardCard(
             "Small samples are provisional; inspect the CSV before drawing conclusions.",
             style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export ticket test CSV") }
+        Button(shape = FieldShapes.button, onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export ticket test CSV") }
     }
 }
 
@@ -270,7 +286,7 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -314,7 +330,7 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -367,7 +383,7 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+            .fieldCard(colors.surfaceAlt, colors.border)
             .padding(12.dp)
     ) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -434,7 +450,11 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                         append(row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee —")
                     }
                     append(" · ")
-                    append(ScorecardLedger.signedUsd(row.pnlUsd))
+                    if (row.countsMoney) {
+                        append(ScorecardLedger.signedUsd(row.pnlUsd))
+                    } else {
+                        append(ScorecardCopy.WL_ONLY)
+                    }
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }
                     row.finalUsd?.let { append(String.format(Locale.US, " · final $%,.0f", it)) }
                     append(" · ${row.source}")
@@ -458,7 +478,7 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -597,7 +617,7 @@ private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -703,7 +723,7 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -738,7 +758,7 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -762,7 +782,7 @@ private fun ExtendedAiCard(line: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text("Extended AI (advisory)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -795,7 +815,7 @@ private fun SeriesRow(row: ScorecardMetrics.SeriesStats) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(12.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(12.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {

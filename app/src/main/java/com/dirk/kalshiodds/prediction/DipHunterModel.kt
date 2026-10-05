@@ -63,11 +63,18 @@ class DipHunterModel(
                 nowMs = nowMs,
                 openInterest = market.openInterest ?: 0.0
             )
+            val showAi = com.dirk.kalshiodds.signal.model.AiDisplay.visible(
+                com.dirk.kalshiodds.signal.engine.ScoringEngine.W_AI,
+                importedWeight = null,
+                trainedOnBtc = true
+            )
             market.copy(
-                aiYesPercent = pred.yes * 100.0,
-                aiNoPercent = pred.no * 100.0,
-                aiConfidence = pred.confidence,
-                aiNote = pred.note
+                aiYesPercent = if (showAi) pred.yes * 100.0 else null,
+                aiNoPercent = if (showAi) pred.no * 100.0 else null,
+                aiConfidence = if (showAi) pred.confidence else null,
+                aiNote = if (showAi) pred.note else null,
+                showAiPercent = showAi,
+                fairValuePp = market.fairValuePp ?: market.digitalFairPp
             ).withEdgeMetrics(edgeThresholdPp)
         }
 

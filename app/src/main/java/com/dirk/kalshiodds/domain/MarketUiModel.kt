@@ -105,7 +105,17 @@ data class MarketUiModel(
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
     val featureDevs: Map<String, Double> = emptyMap(),
     /** Kalshi `open_time`. When null, 15m windows infer close − [MarketLifecycle.WINDOW_MS]. */
-    val openTimeEpochMs: Long? = null
+    val openTimeEpochMs: Long? = null,
+    /**
+     * False when the AI channel weight is 0 and no BTC-trained imported model
+     * is in the blend. Cards then hide the AI percent and the AI banner.
+     */
+    val showAiPercent: Boolean = true,
+    /**
+     * Blend fair (0–100) shared by the card edge, the ticket, and the prediction log.
+     * Null until a score or the card's digital fair fills it. Not the hidden AI percent.
+     */
+    val fairValuePp: Double? = null
 )
 
 enum class SeriesKind(val ticker: String, val label: String) {
@@ -198,9 +208,9 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
     )
 }
 
-/** Attach edge / stance / alert after AI annotate. */
+/** Attach edge / stance / alert from the same fair the ticket and the log use. */
 fun MarketUiModel.withEdgeMetrics(thresholdPp: Double = EDGE_ALERT_THRESHOLD_PP): MarketUiModel {
-    val ai = aiYesPercent ?: return this
+    val ai = FairValue.yesPp(this) ?: return this
     val mkt = yesProbabilityPercent ?: return this
     val edge = ai - mkt
     val alert = abs(edge) >= thresholdPp
@@ -277,7 +287,9 @@ fun MarketUiModel.withSignalScore(
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
         spotVsTargetUsd = score.spotVsTargetUsd,
-        featureDevs = score.featureDevs
+        featureDevs = score.featureDevs,
+        showAiPercent = score.showAiPercent,
+        fairValuePp = score.fairValuePp
     )
 }
 

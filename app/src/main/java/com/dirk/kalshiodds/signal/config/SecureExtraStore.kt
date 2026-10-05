@@ -82,6 +82,13 @@ class SecureExtraStore(context: Context) {
         }
 
         private fun tryCreateEncrypted(context: Context): SharedPreferences? {
+            openEncrypted(context)?.let { return it }
+            if (!lastKeystoreInvalidated) return null
+            if (!KeystoreRecovery.wipeBrokenSecrets(context)) return null
+            return openEncrypted(context)?.also { lastKeystoreInvalidated = false }
+        }
+
+        private fun openEncrypted(context: Context): SharedPreferences? {
             return try {
                 val masterKey = MasterKeys.getOrCreate(MasterKeys.AES256_GCM_SPEC)
                 val prefs = EncryptedSharedPreferences.create(
@@ -93,24 +100,13 @@ class SecureExtraStore(context: Context) {
                 )
                 lastKeystoreInvalidated = false
                 prefs
-            } catch (e: javax.crypto.AEADBadTagException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Encrypted extra prefs Keystore tag invalid — using fallback")
-                null
-            } catch (e: java.security.KeyStoreException) {
-                lastKeystoreInvalidated = true
-                Log.w(TAG, "Keystore unavailable for extra prefs (${e.javaClass.simpleName})")
-                null
             } catch (e: Exception) {
-                val name = e.javaClass.simpleName
-                if (name.contains("AEAD", true) || name.contains("KeyStore", true) ||
-                    e.cause is javax.crypto.AEADBadTagException
-                ) {
+                if (KeystoreRecovery.isInvalidKey(e)) {
                     lastKeystoreInvalidated = true
-                    Log.w(TAG, "Encrypted extra prefs invalidated ($name) — using fallback")
+                    Log.w(TAG, "Encrypted extra prefs Keystore invalid (${e.javaClass.simpleName}) — resetting")
                     return null
                 }
-                Log.w(TAG, "Encrypted extra prefs unavailable ($name)")
+                Log.w(TAG, "Encrypted extra prefs unavailable (${e.javaClass.simpleName})")
                 null
             }
         }

@@ -153,8 +153,8 @@ object HomeCardDetails {
     ): Snapshot = Snapshot(
         aiYesLabel = aiYesLabel(market),
         aiNoLabel = aiNoLabel(market),
-        aiYes = percentLabel(market.aiYesPercent),
-        aiNo = percentLabel(market.aiNoPercent),
+        aiYes = if (market.showAiPercent) percentLabel(market.aiYesPercent) else "—",
+        aiNo = if (market.showAiPercent) percentLabel(market.aiNoPercent) else "—",
         mktYes = percentLabel(market.yesProbabilityPercent),
         mktNo = percentLabel(market.noProbabilityPercent),
         reasons = reasonsLine(market),
@@ -216,7 +216,7 @@ object HomeCardDetails {
     }
 
     fun modelYesPercent(market: MarketUiModel): Double? =
-        SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+        com.dirk.kalshiodds.domain.FairValue.yesPp(market)
 
     /** Side with more than 50% model probability. 50% is not a pick. */
     fun likelySide(market: MarketUiModel): String? =
@@ -314,6 +314,7 @@ object HomeCardDetails {
      * when it names the value side as what the AI "says".
      */
     fun conflictLine(market: MarketUiModel): String? {
+        if (!market.showAiPercent) return null
         val copy = DisagreementLabel.of(market) ?: return null
         return "${copy.title}. ${copy.detail}"
     }

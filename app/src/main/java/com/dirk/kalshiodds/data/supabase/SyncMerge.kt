@@ -88,4 +88,33 @@ object SyncMerge {
 
     fun outgoing(local: List<Record>, lastPushMs: Long): List<Record> =
         local.filter { it.updatedAtMs >= lastPushMs && !isForbiddenPayload(it.payload) }
+
+    /**
+     * Rows to upload. A key missing from [remote] is included even when it is
+     * older than the last attempt, so a failed sync cannot skip it.
+     * Equal timestamps upload only when the payload differs (local won the tie).
+     */
+    fun pendingUpload(local: List<Record>, remote: List<Record>): List<Record> {
+        val remoteByKey = HashMap<String, Record>(remote.size)
+        remote.forEach { remoteByKey[it.key] = it }
+        return local.filter { row ->
+            if (isForbiddenPayload(row.payload)) return@filter false
+            val existing = remoteByKey[row.key] ?: return@filter true
+            row.updatedAtMs > existing.updatedAtMs ||
+                (row.updatedAtMs == existing.updatedAtMs && row.payload != existing.payload)
+        }
+    }
+
+    /** Remote rows that should be written locally. Ties keep the local row. */
+    fun incomingWinners(local: List<Record>, remote: List<Record>): List<Record> {
+        val localByKey = HashMap<String, Record>(local.size)
+        local.forEach { localByKey[it.key] = it }
+        val out = ArrayList<Record>()
+        for (row in remote) {
+            if (!ownsNamespace(row.key) || isForbiddenPayload(row.payload)) continue
+            val mine = localByKey[row.key]
+            if (mine == null || row.updatedAtMs > mine.updatedAtMs) out.add(row)
+        }
+        return out
+    }
 }

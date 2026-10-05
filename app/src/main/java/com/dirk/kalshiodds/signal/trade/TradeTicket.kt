@@ -74,7 +74,11 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /** Recomputed when the limit is edited. Display only — typing stays enabled. */
+    val edgeCheckNote: String? = null,
+    /** Kalshi `close_time` for this contract. Null means the pending order must not expire. */
+    val closeTimeEpochMs: Long? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
@@ -140,7 +144,13 @@ sealed class TicketPhase {
 
     data class Submitted(val order: PlacedOrder, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
 
-    data class Failed(val ticket: TradeTicket, val error: String, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
+    data class Failed(
+        val ticket: TradeTicket,
+        val error: String,
+        val proposals: List<TradeTicket> = emptyList(),
+        /** Same client_order_id as the attempt that failed — retries must reuse it. */
+        val clientOrderId: String = ""
+    ) : TicketPhase()
 
     data class Cancelled(val order: PlacedOrder, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
 

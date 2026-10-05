@@ -37,7 +37,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
+import com.dirk.kalshiodds.data.supabase.SupabaseMirror
+import com.dirk.kalshiodds.data.supabase.SupabaseSync
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.fieldCard
+import com.dirk.kalshiodds.ui.theme.fieldTextColors
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,7 +67,9 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text("Data") },
+                title = {
+                    Text("Data", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -91,9 +99,9 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
             StatsCard(state)
 
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = onOpenHistory,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)
             ) { Text("History") }
 
             Section("Back up Kalshi credentials")
@@ -103,19 +111,21 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 color = colors.textSecondary
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.credPassphrase,
                 onValueChange = viewModel::setCredPassphrase,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Backup passphrase") },
                 singleLine = true
             )
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = { backupCreds.launch("diphunter-kalshi-key.dhcred") },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)
             ) { Text("Back up credentials") }
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 onClick = { restoreCreds.launch(arrayOf("*/*")) },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)
             ) { Text("Restore credentials") }
 
             Section("Import file")
@@ -124,9 +134,9 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = { importFile.launch(arrayOf("text/*", "application/json", "text/csv", "*/*")) },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)
             ) { Text("Import file") }
             state.importSummary?.let { s ->
                 Text(
@@ -156,15 +166,15 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 steps = 11
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(
+                Button(shape = FieldShapes.button,
                     onClick = viewModel::startBackfill,
                     enabled = !state.backfillRunning,
-                    modifier = Modifier.weight(1f).height(52.dp)
+                    modifier = Modifier.weight(1f).height(FieldMetrics.primaryAction)
                 ) { Text("Backfill Kalshi + spot") }
-                OutlinedButton(
+                OutlinedButton(shape = FieldShapes.button,
                     onClick = viewModel::cancelBackfill,
                     enabled = state.backfillRunning,
-                    modifier = Modifier.weight(1f).height(52.dp)
+                    modifier = Modifier.weight(1f).height(FieldMetrics.primaryAction)
                 ) { Text("Cancel") }
             }
             state.backfillMsg?.let {
@@ -182,6 +192,8 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 color = colors.textSecondary
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.supabaseUrlDraft,
                 onValueChange = { viewModel.setSupabaseDrafts(it, state.supabaseKeyDraft) },
                 label = { Text("Supabase URL") },
@@ -189,6 +201,8 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 singleLine = true
             )
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.supabaseKeyDraft,
                 onValueChange = { viewModel.setSupabaseDrafts(state.supabaseUrlDraft, it) },
                 label = { Text("Anon / publishable key") },
@@ -196,10 +210,10 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 singleLine = true
             )
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = viewModel::saveSupabase, modifier = Modifier.weight(1f).height(48.dp)) {
+                OutlinedButton(shape = FieldShapes.button, onClick = viewModel::saveSupabase, modifier = Modifier.weight(1f).height(48.dp)) {
                     Text("Save")
                 }
-                Button(
+                Button(shape = FieldShapes.button,
                     onClick = viewModel::restoreSupabase,
                     enabled = state.settings.supabaseConfigured,
                     modifier = Modifier.weight(1f).height(48.dp)
@@ -210,14 +224,14 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 onCheckedChange = viewModel::setSyncEnabled
             )
             Text(
-                "Live sync of History / bets / signals / settings (never the Kalshi key).",
+                "Live sync of History / bets / signals / settings for this install (grokbot: rows only). Never uploads the Kalshi key.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             state.syncLine?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentBlue)
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = statusColor(colors, it))
             }
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 onClick = viewModel::syncNow,
                 enabled = state.settings.supabaseConfigured && state.settings.syncEnabled,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
@@ -234,27 +248,29 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = viewModel::getLatestModel,
                 enabled = !state.modelBusy,
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)
             ) { Text(if (state.modelBusy) "Fetching…" else "Get latest model") }
             OutlinedTextField(
+                shape = FieldShapes.search,
+                colors = fieldTextColors(),
                 value = state.githubTokenDraft,
                 onValueChange = viewModel::setGithubTokenDraft,
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("GitHub token (private repo)") },
                 singleLine = true
             )
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 onClick = viewModel::saveGithubToken,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Save GitHub token") }
-            Button(
+            Button(shape = FieldShapes.button,
                 onClick = { importModel.launch(arrayOf("application/json", "text/*", "*/*")) },
-                modifier = Modifier.fillMaxWidth().height(52.dp)
+                modifier = Modifier.fillMaxWidth().height(FieldMetrics.primaryAction)
             ) { Text("Import model JSON") }
-            OutlinedButton(
+            OutlinedButton(shape = FieldShapes.button,
                 onClick = viewModel::rollbackModel,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Roll back previous model") }
@@ -263,11 +279,20 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             }
 
             state.message?.let {
-                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = statusColor(colors, it), style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+private fun statusColor(
+    colors: com.dirk.kalshiodds.ui.theme.DipPalette,
+    text: String
+) = if (SupabaseSync.isFailureMessage(text) || text.startsWith(SupabaseMirror.FAILURE_PREFIX)) {
+    colors.accentRed
+} else {
+    colors.accentBlue
 }
 
 @Composable
@@ -277,7 +302,7 @@ private fun StatsCard(state: DataUiState) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(16.dp)
     ) {
         Text("DATA STATS", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)

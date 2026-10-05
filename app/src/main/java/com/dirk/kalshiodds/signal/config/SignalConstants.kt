@@ -90,7 +90,8 @@ object SignalConstants {
     const val DEFAULT_DRAWDOWN_USD = 50.0
     const val DEFAULT_RESUME_ON_NEW_SESSION = true
 
-    const val MIN_ADAPTER_SAMPLES = 8
+    /** Live reweighting stays off until this many BTC settlements. Below it, log only. */
+    const val MIN_ADAPTER_SAMPLES = 100
     const val ADAPTER_LEARNING_RATE = 0.08
     const val ADAPTER_WEIGHT_EMA = 0.15
 

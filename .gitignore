@@ -37,10 +37,9 @@ captures/
 # NDK
 obj/
 
-# Keystores (never commit)
+# Keystores (never commit). Release signing uses GitHub Actions secrets.
 *.jks
 *.keystore
-!app/signing/diphunter-debug.jks
 
 # Google Services / secrets
 google-services.json

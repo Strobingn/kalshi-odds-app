@@ -21,6 +21,8 @@ import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.domain.MarketUiModel
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
 
 @Composable
 fun TargetNowLine(market: MarketUiModel, modifier: Modifier = Modifier) {
@@ -128,6 +130,7 @@ private fun AskHeroSide(
 
 @Composable
 fun AiFairLabel(market: MarketUiModel, modifier: Modifier = Modifier) {
+    if (!market.showAiPercent) return
     val colors = DipTheme.colors
     val ai = KalshiQuoteDisplay.aiLabel(
         (market.importedModelPp ?: market.aiYesPercent)?.div(100.0)
@@ -177,17 +180,17 @@ fun UpDownBuyButtons(
         modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Button(
+        Button(shape = FieldShapes.button,
             onClick = onBuyYes,
-            modifier = Modifier.weight(1f).height(52.dp),
+            modifier = Modifier.weight(1f).height(FieldMetrics.primaryAction),
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                 containerColor = if (tapeUp) colors.up else colors.up.copy(alpha = 0.75f),
                 contentColor = colors.onUp
             )
         ) { Text(quotes.upButton) }
-        Button(
+        Button(shape = FieldShapes.button,
             onClick = onBuyNo,
-            modifier = Modifier.weight(1f).height(52.dp),
+            modifier = Modifier.weight(1f).height(FieldMetrics.primaryAction),
             colors = androidx.compose.material3.ButtonDefaults.buttonColors(
                 containerColor = colors.down,
                 contentColor = colors.onDown

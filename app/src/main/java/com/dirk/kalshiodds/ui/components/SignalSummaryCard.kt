@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.ui.SideColor
 import com.dirk.kalshiodds.ui.SignalCopy
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.fieldCard
 
 @Composable
 fun SignalSummaryCard(
@@ -32,7 +33,7 @@ fun SignalSummaryCard(
     Column(
         modifier
             .fillMaxWidth()
-            .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+            .fieldCard(colors.surfaceAlt, colors.border)
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {

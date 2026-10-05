@@ -98,6 +98,33 @@ class PredictionLogStore(private val context: Context) {
 
     suspend fun readAll(): List<PredictionLogEntry> = entriesFlow.first()
 
+    suspend fun exportJson(): String = json.encodeToString(readAll())
+
+    suspend fun mergeJson(raw: String) {
+        if (raw.isBlank() || raw == "[]") return
+        val incoming = decode(raw)
+        if (incoming.isEmpty()) return
+        context.predictionLogStore.edit { prefs ->
+            val merged = mergeEntries(decode(prefs[key]), incoming)
+            prefs[key] = json.encodeToString(merged)
+        }
+    }
+
+    internal fun mergeEntries(
+        existing: List<PredictionLogEntry>,
+        incoming: List<PredictionLogEntry>
+    ): List<PredictionLogEntry> {
+        val list = existing.toMutableList()
+        for (entry in incoming) {
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isBtc15m(entry.series, entry.ticker)) continue
+            val dup = list.any { it.ticker == entry.ticker && it.timestampMs == entry.timestampMs }
+            if (!dup) list.add(entry)
+        }
+        list.sortBy { it.timestampMs }
+        while (list.size > maxEntries) list.removeAt(0)
+        return list
+    }
+
     suspend fun upsertOpenPrediction(
         ticker: String,
         series: String,
@@ -121,32 +148,14 @@ class PredictionLogStore(private val context: Context) {
                 if (frozen || (age < throttleMs && !moved)) {
                     return@edit
                 }
-                list[existingIdx] = prev.copy(
+                list[existingIdx] = lockOpenPrediction(
+                    prev = prev,
                     predictedYes = predictedYes,
                     predictedNo = predictedNo,
                     marketMid = marketMid,
                     timestampMs = timestampMs,
-                    closeTimeMs = closeTimeMs ?: prev.closeTimeMs,
-                    predictedSide = snapshot?.predictedSide ?: prev.predictedSide,
-                    edgePp = snapshot?.edgePp ?: prev.edgePp,
-                    confidence = snapshot?.confidence ?: prev.confidence,
-                    regime = snapshot?.regime ?: prev.regime,
-                    tteBucket = snapshot?.tteBucket ?: prev.tteBucket,
-                    fairValuePp = snapshot?.fairValuePp ?: prev.fairValuePp,
-                    calibrated = snapshot?.calibrated ?: prev.calibrated,
-                    featureDevs = snapshot?.featureDevs?.takeIf { it.isNotEmpty() } ?: prev.featureDevs,
-                    uncertainty = snapshot?.uncertainty ?: prev.uncertainty,
-                    timeToMoveSec = snapshot?.timeToMoveSec ?: prev.timeToMoveSec,
-                    midVolPp = snapshot?.midVolPp ?: prev.midVolPp,
-                    pFill = snapshot?.pFill ?: prev.pFill,
-                    wouldAlert = snapshot?.wouldAlert ?: prev.wouldAlert,
-                    mlpYes = snapshot?.mlpYes ?: prev.mlpYes,
-                    cnnYes = snapshot?.cnnYes ?: prev.cnnYes,
-                    gbmYes = snapshot?.gbmYes ?: prev.gbmYes,
-                    entryAsk = snapshot?.entryAsk ?: prev.entryAsk,
-                    contracts = snapshot?.contracts ?: prev.contracts,
-                    stakeUsd = snapshot?.stakeUsd ?: prev.stakeUsd,
-                    feeUsd = snapshot?.feeUsd ?: prev.feeUsd
+                    closeTimeMs = closeTimeMs,
+                    snapshot = snapshot
                 )
             } else {
                 list.add(
@@ -228,4 +237,50 @@ class PredictionLogStore(private val context: Context) {
         if (raw.isNullOrBlank()) return emptyList()
         return runCatching { json.decodeFromString<List<PredictionLogEntry>>(raw) }.getOrElse { emptyList() }
     }
+}
+
+/**
+ * Later ticks may refresh the forecast, but the first recorded side and
+ * entry price stay put. A side flip used to overwrite the row with the
+ * new side while keeping the losing side's penny ask, then score that
+ * penny as the winner.
+ */
+internal fun lockOpenPrediction(
+    prev: PredictionLogEntry,
+    predictedYes: Double,
+    predictedNo: Double,
+    marketMid: Double,
+    timestampMs: Long,
+    closeTimeMs: Long?,
+    snapshot: SignalSnapshot?
+): PredictionLogEntry {
+    val sideLocked = prev.predictedSide?.takeIf { it.isNotBlank() }
+    val askLocked = prev.entryAsk
+    return prev.copy(
+        predictedYes = predictedYes,
+        predictedNo = predictedNo,
+        marketMid = marketMid,
+        timestampMs = timestampMs,
+        closeTimeMs = closeTimeMs ?: prev.closeTimeMs,
+        predictedSide = sideLocked ?: snapshot?.predictedSide,
+        edgePp = snapshot?.edgePp ?: prev.edgePp,
+        confidence = snapshot?.confidence ?: prev.confidence,
+        regime = snapshot?.regime ?: prev.regime,
+        tteBucket = snapshot?.tteBucket ?: prev.tteBucket,
+        fairValuePp = snapshot?.fairValuePp ?: prev.fairValuePp,
+        calibrated = snapshot?.calibrated ?: prev.calibrated,
+        featureDevs = snapshot?.featureDevs?.takeIf { it.isNotEmpty() } ?: prev.featureDevs,
+        uncertainty = snapshot?.uncertainty ?: prev.uncertainty,
+        timeToMoveSec = snapshot?.timeToMoveSec ?: prev.timeToMoveSec,
+        midVolPp = snapshot?.midVolPp ?: prev.midVolPp,
+        pFill = snapshot?.pFill ?: prev.pFill,
+        wouldAlert = snapshot?.wouldAlert ?: prev.wouldAlert,
+        mlpYes = snapshot?.mlpYes ?: prev.mlpYes,
+        cnnYes = snapshot?.cnnYes ?: prev.cnnYes,
+        gbmYes = snapshot?.gbmYes ?: prev.gbmYes,
+        entryAsk = askLocked ?: snapshot?.entryAsk,
+        contracts = if (askLocked != null) prev.contracts else snapshot?.contracts ?: prev.contracts,
+        stakeUsd = if (askLocked != null) prev.stakeUsd else snapshot?.stakeUsd ?: prev.stakeUsd,
+        feeUsd = if (askLocked != null) prev.feeUsd else snapshot?.feeUsd ?: prev.feeUsd
+    )
 }

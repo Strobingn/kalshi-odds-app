@@ -237,6 +237,7 @@ object HomeCopy {
      * so the two always sum to 100. Missing model → [AI_EM_DASH].
      */
     fun tileAiPercents(market: MarketUiModel): TileAiPercents {
+        if (!market.showAiPercent) return TileAiPercents(AI_EM_DASH, AI_EM_DASH, null, null)
         val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
             ?: return TileAiPercents(AI_EM_DASH, AI_EM_DASH, null, null)
         val up = modelYes.roundToInt().coerceIn(0, 100)
@@ -249,7 +250,7 @@ object HomeCopy {
     fun tileAiDown(market: MarketUiModel): String = tileAiPercents(market).down
 
     fun modelVsMarket(market: MarketUiModel, decision: BetCall.Decision): String {
-        val modelYes = SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+        val modelYes = HomeCardDetails.modelYesPercent(market)
         val marketYes = market.yesProbabilityPercent
         val side = when (decision.headline) {
             BetCall.Headline.BET_DOWN -> "DOWN"

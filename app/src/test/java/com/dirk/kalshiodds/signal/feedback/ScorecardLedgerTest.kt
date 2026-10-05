@@ -221,18 +221,31 @@ class ScorecardLedgerTest {
     }
 
     @Test
-    fun derivesPaperStakeWhenAskStoredButSizeMissing() {
+    fun logPickWithAskCountsWinLossAndDoesNotInventDollars() {
         val ask = 0.34
-        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(ask, ScorecardLedger.PAPER_STAKE_USD)
-        val entry = pick("KXBTC15M-DERIVE", "YES", won = true, at = 1_000L, yes = 0.70, ask = ask)
+        val entry = pick(
+            "KXBTC15M-DERIVE",
+            "YES",
+            won = true,
+            at = 1_000L,
+            yes = 0.70,
+            ask = ask,
+            contracts = 9_346,
+            stake = 10.0,
+            fee = 0.07
+        )
         val snap = ScorecardLedger.of(listOf(entry), emptyList())
         val row = snap.picks.single()
+        assertEquals(1, snap.ai.wins)
+        assertEquals(0, snap.ai.losses)
         assertFalse(row.entryNotRecorded)
-        assertEquals(clip.count, row.contracts)
-        assertEquals(clip.allInUsd, row.stakeUsd!!, 1e-9)
-        assertEquals(clip.feeUsd, row.feeUsd!!, 1e-9)
-        assertEquals(clip.profitIfWinUsd, row.pnlUsd!!, 1e-9)
-        assertEquals(clip.profitIfWinUsd, snap.combined.money.pnlUsd, 1e-9)
+        assertFalse(row.countsMoney)
+        assertNull(row.contracts)
+        assertNull(row.stakeUsd)
+        assertNull(row.feeUsd)
+        assertEquals(0.0, row.pnlUsd!!, 1e-9)
+        assertEquals(0.0, snap.combined.money.pnlUsd, 1e-9)
+        assertEquals(0.0, snap.ai.money.pnlUsd, 1e-9)
         assertReconciles(snap.byPrice, snap.combined)
     }
 

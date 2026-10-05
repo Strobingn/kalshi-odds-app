@@ -26,6 +26,27 @@ import java.time.ZoneOffset
 
 class CalibratorTest {
     @Test
+    fun fitEntriesIgnoresEthAndSol() {
+        fun row(series: String, yes: Boolean) = PredictionLogEntry(
+            ticker = "$series-T",
+            series = series,
+            predictedYes = 0.8,
+            predictedNo = 0.2,
+            marketMid = 0.5,
+            timestampMs = 1L,
+            closeTimeMs = 1L,
+            outcome = if (yes) "yes" else "no"
+        )
+        val btc = List(20) { row("KXBTC15M", true) }
+        val mixed = btc + List(30) { row("KXETH15M", false) } + List(30) { row("KXSOL15M", false) }
+        val only = Calibrator.fitEntries(btc)
+        val withAlts = Calibrator.fitEntries(mixed)
+        assertEquals(only.sampleCount, withAlts.sampleCount)
+        assertEquals(only.temperature, withAlts.temperature, 1e-9)
+        assertEquals(0, Calibrator.fitEntries(List(40) { row("KXETH15M", false) }).sampleCount)
+    }
+
+    @Test
     fun coldStartIsIdentity() {
         val cold = Calibrator.fit(List(5) { Calibrator.Sample(0.7, true) })
         assertFalse(cold.ready)
@@ -134,8 +155,9 @@ class ScorecardMetricsTest {
         assertEquals(2, snap.sampleCount)
         assertEquals(1, snap.voidCount)
         assertEquals(0.5, snap.allTime.hitRate!!, 1e-9)
-        // Picked-side Brier: YES@0.70 hit → 0.09; NO@0.30 miss vs yes → (0.70−1)² = 0.09
-        assertEquals(0.09, snap.allTime.brier!!, 1e-9)
+        // Binary outcomes: picked-side Brier equals P(YES) Brier.
+        // YES@0.70 hit → 0.09; NO pick at P(YES)=0.30 vs yes → 0.49; mean 0.29.
+        assertEquals(0.29, snap.allTime.brier!!, 1e-9)
         assertEquals(0.29, snap.allTime.pUpBrier!!, 1e-9)
         assertEquals(8.0, snap.allTime.avgEdgeWhenRight!!, 1e-9)
         assertEquals(-6.0, snap.allTime.avgEdgeWhenWrong!!, 1e-9)
@@ -303,7 +325,9 @@ class ScoringPredictabilityTest {
             hasDepth = true,
             hasCancel = true
         )!!
-        assertTrue(late.ai < early.ai)
+        // The shipped MLP weight is pinned at 0 in every regime so it cannot tilt fair value.
+        assertEquals(0.0, early.ai, 1e-9)
+        assertEquals(0.0, late.ai, 1e-9)
         assertTrue(late.velocity > early.velocity)
         assertTrue(late.imbalance > early.imbalance)
         assertTrue(late.leadLag < early.leadLag)

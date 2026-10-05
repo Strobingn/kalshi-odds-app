@@ -10,11 +10,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Refresh
@@ -50,6 +50,8 @@ import com.dirk.kalshiodds.ui.components.ThisWindowCard
 import com.dirk.kalshiodds.ui.components.TradeModeChip
 import com.dirk.kalshiodds.ui.components.TradeTicketsSection
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.FieldShapes
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -72,11 +74,14 @@ fun HomeScreen(
     onDismissTicket: (String) -> Unit,
     onApproveTicket: (String) -> Unit,
     onApproveSellTicket: (String, Int, Double) -> Unit,
+    onReviseBuy: (String, Double, Double) -> Unit = { _, _, _ -> },
+    onApproveBuy: (String, Double, Double) -> Unit = { id, _, _ -> onApproveTicket(id) },
     onPaperTicket: (String) -> Unit,
     onPaperSellTicket: (String, Int, Double) -> Unit,
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit,
     onResumeAlerts: () -> Unit = {},
+    onWatchBitcoin: () -> Unit = {},
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
 ) {
@@ -89,6 +94,10 @@ fun HomeScreen(
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
     val best = HomeMarkets.best(ranked, decisions)
+    val watchBitcoinOff = WatchBitcoinNotice.boardHidden(
+        state.settings.watchBtc,
+        windowMarkets.size
+    )
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.userMessage) {
         val msg = state.userMessage ?: return@LaunchedEffect
@@ -105,7 +114,13 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(HomeCopy.TITLE, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            HomeCopy.TITLE,
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         TradeModeChip(mode)
                     }
                 },
@@ -142,7 +157,7 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp)
-                        .background(colors.accentOrange.copy(alpha = 0.12f), RoundedCornerShape(12.dp))
+                        .background(colors.accentOrange.copy(alpha = 0.15f), FieldShapes.card)
                         .padding(12.dp)
                         .clickable(onClick = onOpenApiKeySettings)
                 )
@@ -163,18 +178,24 @@ fun HomeScreen(
                             .fillMaxSize()
                             .background(colors.bg),
                         contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(FieldMetrics.listGap)
                     ) {
                         state.pauseBanner?.let { banner ->
                             item {
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .background(colors.accentOrange.copy(alpha = 0.16f), RoundedCornerShape(12.dp))
-                                        .padding(12.dp)
+                                        .background(colors.accentOrange.copy(alpha = 0.15f), FieldShapes.card)
+                                        .padding(16.dp)
                                 ) {
-                                    Text(banner, style = MaterialTheme.typography.bodyMedium, color = colors.accentOrange, fontWeight = FontWeight.Bold)
-                                    Button(onClick = onResumeAlerts, modifier = Modifier.padding(top = 8.dp)) {
+                                    Text(banner, style = MaterialTheme.typography.bodyMedium, color = colors.accentOrange, fontWeight = FontWeight.SemiBold)
+                                    Button(
+                                        shape = FieldShapes.button,
+                                        onClick = onResumeAlerts,
+                                        modifier = Modifier
+                                            .padding(top = 8.dp)
+                                            .height(FieldMetrics.primaryAction)
+                                    ) {
                                         Text("Resume alerts")
                                     }
                                 }
@@ -185,6 +206,33 @@ fun HomeScreen(
                                 Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                             }
                         }
+                        if (watchBitcoinOff) {
+                            item {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(colors.accentOrange.copy(alpha = 0.15f), FieldShapes.card)
+                                        .padding(16.dp),
+                                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    Text(
+                                        WatchBitcoinNotice.HOME_EMPTY,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = colors.accentOrange,
+                                        fontWeight = FontWeight.SemiBold
+                                    )
+                                    Button(
+                                        shape = FieldShapes.button,
+                                        onClick = onWatchBitcoin,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(FieldMetrics.primaryAction)
+                                    ) {
+                                        Text(WatchBitcoinNotice.TURN_ON, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        } else {
                         item {
                             ThisWindowCard(
                                 market = best?.first,
@@ -218,6 +266,7 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        }
                         item {
                             Text(
                                 HomeCopy.SIGNAL_HISTORY,
@@ -239,10 +288,13 @@ fun HomeScreen(
                         onDismiss = onDismissTicket,
                         onApprove = onApproveTicket,
                         onApproveSell = onApproveSellTicket,
+                        onReviseBuy = onReviseBuy,
+                        onApproveBuy = onApproveBuy,
                         onPaper = onPaperTicket,
                         onPaperSell = onPaperSellTicket,
                         onCancelApprove = onCancelApprove,
-                        onCancelOrder = onCancelOrder
+                        onCancelOrder = onCancelOrder,
+                        feeRate = state.settings.feeRate
                     )
                     }
                 }

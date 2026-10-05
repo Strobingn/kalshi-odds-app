@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.KalshiErrorEnvelope
 import com.dirk.kalshiodds.data.dto.MarketPositionDto
+import com.dirk.kalshiodds.data.dto.PortfolioOrderDto
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -64,6 +65,55 @@ class KalshiTradeClient(
         } catch (e: Exception) {
             throw softFailure(e)
         }
+    }
+
+    /**
+     * Orders already on Kalshi for [clientOrderId]. Empty when the lookup
+     * fails — the caller still retries with the same client id.
+     */
+    suspend fun findByClientOrderId(ticket: TradeTicket, clientOrderId: String): PlacedOrder? {
+        if (clientOrderId.isBlank()) return null
+        ensureKeys()
+        for (status in listOf(null, "resting", "executed")) {
+            val match = runCatching { findInPages(ticket.ticker, status, clientOrderId) }.getOrNull()
+            if (match != null) return AdoptedOrder.toPlaced(match, ticket, clientOrderId)
+        }
+        return null
+    }
+
+    /**
+     * Get Orders cannot filter by client_order_id. Page until that id appears,
+     * the cursor repeats, or [MAX_ORDER_PAGES] is reached.
+     */
+    private suspend fun findInPages(
+        ticker: String,
+        status: String?,
+        clientOrderId: String
+    ): PortfolioOrderDto? {
+        var cursor: String? = null
+        val seen = HashSet<String>()
+        repeat(MAX_ORDER_PAGES) {
+            val page = listOrderPage(ticker, status, cursor) ?: return null
+            val match = page.orders.firstOrNull { it.clientOrderId.equals(clientOrderId, ignoreCase = true) }
+            if (match != null) return match
+            val next = page.cursor?.takeIf { it.isNotBlank() } ?: return null
+            if (!seen.add(next)) return null
+            cursor = next
+        }
+        return null
+    }
+
+    private suspend fun listOrderPage(
+        ticker: String,
+        status: String?,
+        cursor: String?
+    ): com.dirk.kalshiodds.data.dto.OrdersListResponse? {
+        val first = activePrimary().listOrders(ticker = ticker, status = status, limit = PAGE_LIMIT, cursor = cursor)
+        val chosen = chooseHost(first) {
+            activeFallback()?.listOrders(ticker = ticker, status = status, limit = PAGE_LIMIT, cursor = cursor)
+        }
+        if (!chosen.isSuccessful) return null
+        return chosen.body()
     }
 
     suspend fun cancel(order: PlacedOrder): PlacedOrder {
@@ -334,6 +384,9 @@ class KalshiTradeClient(
 
     companion object {
         private const val TAG = "DipHunterTrade"
+        /** Get Orders max page size is 1000; 200 keeps each signed request small. */
+        private const val PAGE_LIMIT = 200
+        private const val MAX_ORDER_PAGES = 8
         private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
         /** Documented V2 write path — never POST `/portfolio/orders`. */

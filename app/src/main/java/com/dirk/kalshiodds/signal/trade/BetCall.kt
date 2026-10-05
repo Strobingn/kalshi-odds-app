@@ -48,9 +48,9 @@ object BetCall {
         val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
         val tickets = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
         val actionable = tickets.filter { qualifies(it, market, ctx) }
-        val preferred = TicketBuilder.resolveSide(market)
-        val chosen = actionable.firstOrNull { preferred != null && it.side.equals(preferred, true) }
-            ?: actionable.maxByOrNull { it.profitIfWinUsd ?: 0.0 }
+        val chosen = actionable.maxWithOrNull(
+            compareBy<TradeTicket> { TicketBuilder.edgeAfterFees(it, ctx.settings.feeRate) }
+        )
         if (chosen != null) {
             return Decision(
                 headline = if (chosen.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,

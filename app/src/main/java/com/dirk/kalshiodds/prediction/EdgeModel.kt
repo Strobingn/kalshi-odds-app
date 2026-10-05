@@ -59,8 +59,21 @@ data class EdgeModel(
     val metrics: Map<String, Double> = emptyMap(),
     val trees: List<EdgeTree> = emptyList(),
     val baseScore: Double = 0.0,
-    val learningRate: Double = 0.05
+    val learningRate: Double = 0.05,
+    val trainedSeries: List<String> = emptyList()
 ) {
+    /** False when the file lists series and Bitcoin is not one of them, or btc sample count is zero. */
+    fun countsOnBtc(): Boolean {
+        if (trainedSeries.isNotEmpty()) {
+            return trainedSeries.any { it.contains("BTC", ignoreCase = true) }
+        }
+        val n = metrics["n_btc"] ?: metrics["btc_n"] ?: metrics["btc_samples"]
+        if (n != null) return n > 0.0
+        return true
+    }
+
+    /** Weight 0, or a model that was not trained on BTC, is not a Bitcoin signal. */
+    fun usedForBtc(): Boolean = blendWeight > 1e-6f && countsOnBtc()
     init {
         require(kind == "logistic" || kind == "gbdt") { "unsupported model kind" }
         require(weights.size == featureNames.size) { "weights ${weights.size} != names ${featureNames.size}" }
@@ -173,6 +186,7 @@ data class EdgeModel(
                     metrics[k] = m.optDouble(k)
                 }
             }
+            val trainedSeries = if (o.has("trained_series")) stringList(o.getJSONArray("trained_series")) else emptyList()
             val kind = o.optString("kind", "logistic")
             val trees = if (kind == "gbdt") {
                 val arr = o.getJSONArray("trees")
@@ -206,7 +220,8 @@ data class EdgeModel(
                 metrics = metrics,
                 trees = trees,
                 baseScore = o.optDouble("base_score", 0.0),
-                learningRate = o.optDouble("learning_rate", 0.05)
+                learningRate = o.optDouble("learning_rate", 0.05),
+                trainedSeries = trainedSeries
             )
         }
 

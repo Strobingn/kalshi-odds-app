@@ -22,6 +22,9 @@ import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import com.dirk.kalshiodds.ui.theme.FieldShapes
+import com.dirk.kalshiodds.ui.theme.FieldMetrics
+import com.dirk.kalshiodds.ui.theme.fieldCard
 
 @Composable
 fun PaperBookCard(
@@ -37,8 +40,7 @@ fun PaperBookCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, colors.border, RoundedCornerShape(16.dp))
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .fieldCard(colors.surface, colors.border)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -96,11 +98,11 @@ fun PaperBookCard(
             Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
+            OutlinedButton(onClick = onReset, modifier = Modifier.height(FieldMetrics.minTouch)) {
                 Text("Reset paper to $100")
             }
             if (onViewHistory != null) {
-                OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
+                OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(FieldMetrics.minTouch)) {
                     Text("View all")
                 }
             }
@@ -192,8 +194,9 @@ private fun PaperLedgerRow(
         )
         if (onSell != null && !fill.settled) {
             OutlinedButton(
+                shape = FieldShapes.button,
                 onClick = { onSell(fill.ticker, fill.side) },
-                modifier = Modifier.padding(top = 6.dp).height(40.dp)
+                modifier = Modifier.padding(top = 6.dp).height(FieldMetrics.minTouch)
             ) { Text("Paper sell") }
         }
     }

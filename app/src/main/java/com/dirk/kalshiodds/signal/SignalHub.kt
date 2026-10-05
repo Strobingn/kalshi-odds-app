@@ -350,7 +350,11 @@ class SignalHub(
             val logged = runCatching {
                 val side = SignalStance.resolve(
                     storedSide = scored.predictedSide,
-                    modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                    modelYes = if (scored.showAiPercent) {
+                        scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp
+                    } else {
+                        scored.fairValuePp
+                    },
                     marketYes = scored.marketMidPp,
                     fairYes = scored.fairValuePp
                 ).storedSide
@@ -399,16 +403,21 @@ class SignalHub(
         persistScope.launch {
             try {
                 runCatching {
+                    val modelYes = if (scored.showAiPercent) {
+                        scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp
+                    } else {
+                        scored.fairValuePp
+                    }
                     val predictedSide = SignalStance.resolve(
                         storedSide = scored.predictedSide,
-                        modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                        modelYes = modelYes,
                         marketYes = scored.marketMidPp,
                         fairYes = scored.fairValuePp
                     ).storedSide
                     val sideYes = when (predictedSide?.trim()?.uppercase()) {
                         "YES" -> true
                         "NO" -> false
-                        else -> (scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp) > 50.0
+                        else -> modelYes > 50.0
                     }
                     val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
                         sideYes = sideYes,
@@ -439,7 +448,7 @@ class SignalHub(
                             pFill = scored.pFill,
                             wouldAlert = scored.passedFilter &&
                                 kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp(),
-                            mlpYes = scored.mlpPp?.div(100.0),
+                            mlpYes = if (scored.showAiPercent) scored.mlpPp?.div(100.0) else null,
                             cnnYes = scored.cnnPp?.div(100.0),
                             gbmYes = scored.gbmPp?.div(100.0),
                             entryAsk = sized.entryAsk,

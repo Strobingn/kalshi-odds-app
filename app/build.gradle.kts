@@ -6,47 +6,75 @@ plugins {
     id("app.cash.paparazzi")
 }
 
+// Single versionCode offset. AppUpdater reads BuildConfig.VERSION_CODE_BASE.
+// .github/workflows/build-apk.yml reads this same literal.
+val versionCodeBase = 1_100_000
+
 android {
     namespace = "com.dirk.kalshiodds"
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
+        // Independent install from the original DipHunter app. Keep this ID stable.
         applicationId = "com.dirk.kalshiodds.chatgtp"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a
         // new APK updates this separate installation without version downgrades.
-        versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.0"
+        versionCode = versionCodeBase + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
+        versionName = "1.3.4"
+        val updateBranch = System.getenv("GITHUB_REF_NAME")?.takeIf { it.isNotBlank() } ?: "grokbot"
+        val safeBranch = updateBranch.replace("\\", "").replace("\"", "").replace(" ", "")
+        val updateReleaseTag = System.getenv("UPDATE_RELEASE_TAG")?.takeIf { it.isNotBlank() }
+            ?: "$safeBranch-latest"
+        buildConfigField("int", "VERSION_CODE_BASE", versionCodeBase.toString())
+        buildConfigField(
+            "String",
+            "UPDATE_RELEASE_TAG",
+            "\"${updateReleaseTag.replace("\\", "").replace("\"", "")}\""
+        )
+        buildConfigField(
+            "String",
+            "UPDATE_ASSET_NAME",
+            "\"DipHunter-$safeBranch.apk\""
+        )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    val releaseStorePath = (findProperty("RELEASE_STORE_FILE") as String?)
+        ?: System.getenv("RELEASE_STORE_FILE")
+    val releaseStorePassword = (findProperty("RELEASE_KEYSTORE_PASSWORD") as String?)
+        ?: System.getenv("RELEASE_KEYSTORE_PASSWORD")
+    val releaseKeyAlias = (findProperty("RELEASE_KEY_ALIAS") as String?)
+        ?: System.getenv("RELEASE_KEY_ALIAS")
+    val releaseKeyPassword = (findProperty("RELEASE_KEY_PASSWORD") as String?)
+        ?: System.getenv("RELEASE_KEY_PASSWORD")
+    val releaseStoreFile = releaseStorePath?.takeIf { it.isNotBlank() }?.let { file(it) }?.takeIf { it.isFile }
+    val hasReleaseSigning = releaseStoreFile != null &&
+        !releaseStorePassword.isNullOrBlank() &&
+        !releaseKeyAlias.isNullOrBlank() &&
+        !releaseKeyPassword.isNullOrBlank()
+
     signingConfigs {
-        getByName("debug") {
-            val jks = file("signing/diphunter-debug.jks")
-            if (jks.isFile) {
-                storeFile = jks
-                storePassword = (findProperty("DIPHUNTER_DEBUG_STORE_PASSWORD") as String?)
-                    ?: System.getenv("DIPHUNTER_DEBUG_STORE_PASSWORD")
-                    ?: "diphunter-debug"
-                keyAlias = (findProperty("DIPHUNTER_DEBUG_KEY_ALIAS") as String?)
-                    ?: System.getenv("DIPHUNTER_DEBUG_KEY_ALIAS")
-                    ?: "diphunter-debug"
-                keyPassword = (findProperty("DIPHUNTER_DEBUG_KEY_PASSWORD") as String?)
-                    ?: System.getenv("DIPHUNTER_DEBUG_KEY_PASSWORD")
-                    ?: "diphunter-debug"
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = releaseStoreFile!!
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            // Standard Android debug keystore (~/.android/debug.keystore).
         }
         release {
             isMinifyEnabled = false
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -142,43 +170,3 @@ dependencies {
     androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
 
-val expectedDebugCertSha256 =
-    "64e2a43a6897c4556a36b82ea31dc89550c65e56b053658e1438bdf3c4cc4608"
-
-tasks.register("verifyDebugCert") {
-    dependsOn("assembleDebug")
-    doLast {
-        val apk = file("build/outputs/apk/debug/DipHunter-debug.apk")
-        require(apk.isFile) { "missing $apk" }
-        val apksigner = file("${System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")}/build-tools/35.0.0/apksigner")
-        val bin = if (apksigner.isFile) apksigner else file("${System.getenv("ANDROID_HOME")}/build-tools/34.0.0/apksigner")
-        val out = providers.exec {
-            commandLine(bin.absolutePath, "verify", "--print-certs", apk.absolutePath)
-        }.standardOutput.asText.get()
-        val digest = Regex("SHA-256 digest: ([0-9a-f]+)").find(out)?.groupValues?.get(1)
-            ?: error("no SHA-256 in apksigner output:\n$out")
-        check(digest.equals(expectedDebugCertSha256, ignoreCase = true)) {
-            "debug APK cert $digest != $expectedDebugCertSha256"
-        }
-    }
-}
-
-afterEvaluate {
-    tasks.named("assembleDebug") {
-        doLast {
-            val apk = file("build/outputs/apk/debug/DipHunter-debug.apk")
-            if (!apk.isFile) return@doLast
-            val home = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT") ?: return@doLast
-            val apksigner = listOf("35.0.0", "34.0.0").map { file("$home/build-tools/$it/apksigner") }.firstOrNull { it.isFile }
-                ?: return@doLast
-            val proc = ProcessBuilder(apksigner.absolutePath, "verify", "--print-certs", apk.absolutePath)
-                .redirectErrorStream(true).start()
-            val out = proc.inputStream.bufferedReader().readText()
-            proc.waitFor()
-            val digest = Regex("SHA-256 digest: ([0-9a-f]+)").find(out)?.groupValues?.get(1)
-            if (digest != null && !digest.equals(expectedDebugCertSha256, ignoreCase = true)) {
-                throw GradleException("debug APK cert $digest != $expectedDebugCertSha256\n$out")
-            }
-        }
-    }
-}
