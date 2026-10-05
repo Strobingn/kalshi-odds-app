@@ -13,13 +13,17 @@ import java.util.Locale
 
 /**
  * Full-scorecard presentation. Counts, empty state, and every section
- * line come from [ScorecardLedger] (settled prediction-log rows +
- * settled paper fills). Empty-state copy is shown only when that
- * combined settled list is empty.
+ * line come from [ScorecardLedger]. Dollar P&L is current paper fills
+ * only. Log picks are wins and losses. Fills from before the last
+ * bankroll reset are [View.archive], not mixed into the live cards.
+ * Empty-state copy is shown only when the combined settled list is empty.
  */
 object ScorecardCopy {
     const val TITLE = "Scorecard"
-    const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Missing entry ask counts in W-L at $0 (Unknown price)."
+    const val SUBTITLE = "Paper P&L is settled KXBTC15M fills since the last bankroll reset. Log picks count wins and losses only. Entry prices under 2¢ or over 98¢ are not scored. Voids are excluded."
+    const val ARCHIVE_TITLE = "Before bankroll reset"
+    const val ARCHIVE_NOTE = "Archived paper fills from before the last reset. Not part of the current bankroll."
+    const val WL_ONLY = "W-L only"
     const val NO_SETTLED = HomeScorecardSummary.NO_SETTLED
     const val TIME_TITLE = "By time of day"
     const val SIDE_TITLE = "By side"
@@ -64,7 +68,9 @@ object ScorecardCopy {
         val ledger: ScorecardLedger.Snapshot,
         val bySide: List<Bucket>,
         val byPrice: List<Bucket>,
-        val byConfidence: List<Bucket>
+        val byConfidence: List<Bucket>,
+        /** Paper fills archived by a bankroll reset. Null when nothing was archived. */
+        val archive: ScorecardLedger.Record? = null
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
         val showsEmptyState: Boolean get() = showsEmptyState(settledCount)
@@ -96,6 +102,11 @@ object ScorecardCopy {
             if (recent.isNotEmpty()) {
                 lines += PICKS_TITLE
                 if (recentExpanded) lines += recent.map { it.line }
+            }
+            archive?.let {
+                lines += ARCHIVE_TITLE
+                lines += ARCHIVE_NOTE
+                lines += recordLine(it)
             }
             return lines
         }
@@ -129,13 +140,23 @@ object ScorecardCopy {
         paper: PaperBookState,
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE
-    ): View = of(
-        entries = entries,
-        fills = paper.fills + paper.archived.flatMap { it.fills },
-        paperPnlUsd = paper.realizedPnlUsd,
-        windows = windows,
-        zoneId = zoneId
-    )
+    ): View {
+        val current = of(
+            entries = entries,
+            fills = paper.fills,
+            paperPnlUsd = paper.realizedPnlUsd,
+            windows = windows,
+            zoneId = zoneId
+        )
+        if (paper.archived.isEmpty()) return current
+        val archivedFills = paper.archived.flatMap { it.fills }
+        val archive = ScorecardLedger.of(emptyList(), archivedFills, windows, zoneId).combined
+        return current.copy(archive = archive)
+    }
+
+    /** Header open / void / settled line. Same ledger the cards use. */
+    fun headerCounts(ledger: ScorecardLedger.Snapshot): String =
+        "Open ${ledger.openCount} · void ${ledger.voidCount} · settled ${ledger.combined.settledCount}"
 
     fun of(
         entries: List<PredictionLogEntry>,
@@ -246,6 +267,14 @@ object ScorecardCopy {
         val pnl = ScorecardLedger.signedUsd(row.pnlUsd)
         val strike = row.strikeUsd?.let { String.format(Locale.US, "strike $%,.0f", it) } ?: "strike $EM_DASH"
         val fin = row.finalUsd?.let { String.format(Locale.US, "final $%,.0f", it) } ?: "final $EM_DASH"
+        if (!row.countsMoney) {
+            val askPart = if (row.entryNotRecorded) {
+                ScorecardLedger.ENTRY_NOT_RECORDED
+            } else {
+                row.entryAsk?.let { String.format(Locale.US, "%.0f¢", it * 100.0) } ?: EM_DASH
+            }
+            return "${row.windowEt}  ${row.displaySide}  $askPart  $ai  $mkt  $result  $WL_ONLY  $strike  $fin  ${row.ticker}"
+        }
         if (row.entryNotRecorded) {
             return "${row.windowEt}  ${row.displaySide}  ${ScorecardLedger.ENTRY_NOT_RECORDED}  $ai  $mkt  $result  $pnl  $strike  $fin  ${row.ticker}"
         }

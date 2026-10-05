@@ -168,14 +168,12 @@ fun ScorecardScreen(
                 }
                 items(snap.perSeries, key = { "series-${it.series}" }) { SeriesRow(it) }
             }
-            if (snap != null) {
-                item {
-                    Text(
-                        "Open ${snap.openCount} · void ${snap.voidCount} · settled ${snap.sampleCount}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textSecondary
-                    )
-                }
+            item {
+                Text(
+                    ScorecardCopy.headerCounts(ledger),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
             }
             if (view.showsEmptyState) {
                 item {
@@ -210,6 +208,16 @@ fun ScorecardScreen(
                 items(view.recent, key = { "${it.ticker}-${it.settledAtMs}-${it.line}" }) { pick ->
                     SettledPickRow(pick)
                 }
+            }
+            view.archive?.let { archived ->
+                item {
+                    Text(
+                        ScorecardCopy.ARCHIVE_NOTE,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = colors.textSecondary
+                    )
+                }
+                item { RecordCard(ScorecardCopy.ARCHIVE_TITLE, archived) }
             }
             item { Spacer(Modifier.height(8.dp)) }
         }
@@ -442,7 +450,11 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                         append(row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee —")
                     }
                     append(" · ")
-                    append(ScorecardLedger.signedUsd(row.pnlUsd))
+                    if (row.countsMoney) {
+                        append(ScorecardLedger.signedUsd(row.pnlUsd))
+                    } else {
+                        append(ScorecardCopy.WL_ONLY)
+                    }
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }
                     row.finalUsd?.let { append(String.format(Locale.US, " · final $%,.0f", it)) }
                     append(" · ${row.source}")
