@@ -134,10 +134,15 @@ object ModelActivation {
             )
         }
         if (manifest.dataSource != "kalshi_settled_coinbase_spot_v1") {
+            val provenance = when (manifest.dataSource) {
+                "unknown" -> "The release manifest omits data_source provenance"
+                "synthetic_fixture" -> "The release is a synthetic fixture"
+                else -> "The release uses unsupported provenance `${manifest.dataSource}`"
+            }
             return ModelActivationDecision(
                 activate = false,
                 manifest = manifest,
-                reason = "Model provenance is missing or synthetic — previous model stays active."
+                reason = "$provenance — previous model stays active."
             )
         }
         if (!manifest.beatsMarket) {
