@@ -1,8 +1,9 @@
-name: Build Bitcoin Kimi APK
+name: Build APK
 
 on:
   push:
-    branches: [KIMI-Bitcoin]
+    branches:
+      - "**"
   workflow_dispatch:
 
 permissions:
@@ -29,24 +30,29 @@ jobs:
       - name: Trainer tests (no look-ahead)
         run: |
           pip install 'numpy>=2,<3' 'scikit-learn>=1.7,<2'
-          python3 ml/test_train_edge.py
-          python3 ml/test_train_big_edge.py
+          # Optional on branches that lack these scripts.
+          if [ -f ml/test_train_edge.py ]; then python3 ml/test_train_edge.py; fi
+          if [ -f ml/test_train_big_edge.py ]; then python3 ml/test_train_big_edge.py; fi
 
       - name: Read version
         id: ver
         run: |
-          name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts)
+          name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)
+          # Sanitize branch for artifact/tag names (slashes → hyphens).
+          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
           code=$((1000000 + GITHUB_RUN_NUMBER))
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
 
-      # Debug build: signed with the committed app/signing/diphunter-debug.jks,
-      # so every CI APK installs over the previous one.
+      # Debug build: signed with the committed app/signing debug keystore when present,
+      # so each branch's APK installs over its own prior build.
       - name: Build debug APK
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
 
       - name: Trading and update regressions
         run: |
+          # Skip if this branch has no matching test classes.
           ./gradlew :app:testDebugUnitTest \
             --tests 'com.dirk.kalshiodds.signal.AllowlistTest' \
             --tests 'com.dirk.kalshiodds.signal.TicketBuilderGateTest' \
@@ -61,20 +67,23 @@ jobs:
             --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardSqliteTest' \
             --tests 'com.dirk.kalshiodds.signal.ResultsPersistenceTest' \
             --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
-            --no-daemon --stacktrace
+            --no-daemon --stacktrace || {
+              echo "Selected regression tests missing or failed on this branch — falling back to full unit suite"
+              ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+            }
 
       - name: Rename APK
         id: apk
         run: |
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          out="BitcoinKimi-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
+          out="DipHunter-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: BitcoinKimi-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
+          name: DipHunter-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
@@ -83,17 +92,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="kimi-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
-          notes="Bitcoin Kimi v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+          tag="apk-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}"
+          notes="APK v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
           # Rolling release per version + branch: move the tag to this commit.
           gh release delete "$tag" --yes --cleanup-tag || true
           gh release create "$tag" "${{ steps.apk.outputs.path }}" \
             --target "$GITHUB_SHA" \
-            --title "Bitcoin Kimi v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
+            --title "APK v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
             --notes "$notes" \
             --prerelease
-          # GitHub can leave a freshly uploaded prerelease as a draft even
-          # when `release create` exits successfully. The in-app updater needs
-          # the public release-by-tag endpoint, so verify it before success.
           gh release edit "$tag" --draft=false --prerelease
           gh release view "$tag" --json isDraft --jq '.isDraft' | grep -qx false
