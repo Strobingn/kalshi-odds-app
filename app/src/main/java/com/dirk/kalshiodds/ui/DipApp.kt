@@ -13,7 +13,9 @@ import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Icon
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -114,7 +116,17 @@ private fun AppBottomNavigation(
                 selected = item.route == selectedRoute,
                 onClick = { onSelect(item.route) },
                 icon = { Icon(item.icon, contentDescription = item.label) },
-                label = { Text(item.label) },
+                // Six destinations share the phone width. Keep "Scorecard"
+                // on one compact line instead of wrapping a final "d" below it.
+                label = {
+                    Text(
+                        text = item.label,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip
+                    )
+                },
                 alwaysShowLabel = true,
                 colors = NavigationBarItemDefaults.colors(
                     selectedIconColor = palette.accentBlue,
