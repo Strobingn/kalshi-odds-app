@@ -335,9 +335,11 @@ class KashiReleasePolicyTest {
         return out.toByteArray()
     }
 
-    private fun resource(path: String): ByteArray =
-        javaClass.classLoader.getResourceAsStream(path)?.use { it.readBytes() }
+    private fun resource(path: String): ByteArray {
+        val stream = javaClass.classLoader?.getResourceAsStream(path)
             ?: error("missing test resource $path")
+        return stream.use { it.readBytes() }
+    }
 
     /** UTF-16 binary XML string pool, the same encoding as aapt manifests. */
     private fun axmlPool(vararg strings: String): ByteArray {
