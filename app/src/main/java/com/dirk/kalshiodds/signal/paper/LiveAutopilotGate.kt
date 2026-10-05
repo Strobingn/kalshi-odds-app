@@ -1,7 +1,5 @@
 package com.dirk.kalshiodds.signal.paper
 
-import com.dirk.kalshiodds.signal.config.SignalConstants
-import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import java.time.Instant
 import java.time.ZoneId
 import kotlin.math.abs
@@ -45,8 +43,6 @@ object LiveAutopilotGate {
         shadowPrice: Double?,
         shadowDepthFill: Boolean,
         shadowAllInUsd: Double,
-        spentTodayUsd: Double,
-        dailyCapUsd: Double,
         alreadyAttempted: Boolean
     ): Verdict {
         if (mode != AutopilotMode.LIVE) {
@@ -76,20 +72,12 @@ object LiveAutopilotGate {
         if (!shadowAllInUsd.isFinite() || shadowAllInUsd <= 0.0) {
             return Verdict(false, "Live order has no all-in cost")
         }
-        if (shadowAllInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-6) {
-            return Verdict(
-                false,
-                "Live order all-in exceeds the $${LiveOrderSizer.LIVE_ALL_IN_CAP_USD.toInt()} cap"
-            )
+        val note = AutopilotOrderSize.largeClipWarning(shadowAllInUsd)
+        val reason = if (note == null) {
+            "Paper and shadow agree"
+        } else {
+            "Paper and shadow agree. $note"
         }
-        val cap = dailyCapUsd.coerceIn(
-            SignalConstants.LIVE_AUTOPILOT_DAILY_CAP_MIN_USD,
-            SignalConstants.LIVE_AUTOPILOT_DAILY_CAP_MAX_USD
-        )
-        val spent = spentTodayUsd.coerceAtLeast(0.0)
-        if (spent + shadowAllInUsd > cap + 1e-6) {
-            return Verdict(false, "Daily live Autopilot cap reached", shadowAllInUsd)
-        }
-        return Verdict(true, "Paper and shadow agree · under $10 and the daily cap", shadowAllInUsd)
+        return Verdict(true, reason, shadowAllInUsd)
     }
 }

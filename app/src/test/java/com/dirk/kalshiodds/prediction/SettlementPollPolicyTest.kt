@@ -17,7 +17,9 @@ class SettlementPollPolicyTest {
         assertFalse(SettlementPollPolicy.isPollableTicker("KXBTCY-27SEP16"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXGRAMMY-BESTSONG"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXCRYPTOLEAD15M-27SEP16"))
-        assertFalse(SettlementPollPolicy.isPollableTicker("KXETH15M-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXETH15M-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXSOL15M-27SEP16"))
+        assertFalse(SettlementPollPolicy.isPollableTicker("KXXRP15M-27SEP16"))
         assertFalse(SettlementPollPolicy.afterClose(close, close - 1))
         assertTrue(SettlementPollPolicy.afterClose(close, close))
         assertFalse(

@@ -41,15 +41,17 @@ class AutopilotModesTest {
             )
             if (!tick.decision.ok) return@repeat
             val picked = tick.decision.side!!
-            val draft = ShadowOrderPayload.draft(
+            val sized = AutopilotOrderSize.quote(
+                tick.decision, null, 100_000, settings.paperKellyFraction, settings.feeRate, book.snapshot().cashUsd
+            )
+            val draft = ShadowOrderPayload.fromKelly(
                 ticker = market.ticker,
                 side = picked.side,
-                ask = picked.ask,
+                sized = sized,
                 depth = 100_000,
                 reason = "edge",
                 nowMs = nowMs,
                 clientOrderId = "shadow-1",
-                capUsd = 10.0,
                 regimeKey = "test"
             )
             shadow.record(draft)
@@ -92,51 +94,95 @@ class AutopilotModesTest {
     }
 
     @Test
-    fun liveRespectsTenDollarsAndDailyCap() {
-        val wide = ShadowOrderPayload.draft(
-            ticker = "KXBTC15M-CAP",
+    fun liveKellyIsNotCappedAtTenOrFifty() {
+        val sized = PaperKellySizer.size(0.70, 0.20, 5_000.0, 0.5, depthContracts = 100_000)
+        assertTrue(sized.ok)
+        assertTrue(sized.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1.0)
+        val shadow = ShadowOrderPayload.fromKelly(
+            ticker = "KXBTC15M-KELLY",
             side = "YES",
-            ask = 0.20,
+            sized = sized,
             depth = 100_000,
             reason = "edge",
             nowMs = nowMs,
-            clientOrderId = "cap-1",
-            capUsd = 80.0
+            clientOrderId = "kelly-1"
         )
-        assertTrue(wide.stakeUsd <= LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-6)
-        assertTrue(wide.stakeUsd > 0.0)
-        val tight = ShadowOrderPayload.draft(
-            ticker = "KXBTC15M-CAP",
-            side = "YES",
-            ask = 0.20,
-            depth = 100_000,
-            reason = "edge",
-            nowMs = nowMs,
-            clientOrderId = "cap-2",
-            capUsd = 6.0
-        )
-        assertTrue(tight.stakeUsd <= 6.0 + 1e-6)
-        val overTicket = live(
-            allIn = 10.01,
-            spent = 0.0,
-            cap = 50.0
-        )
-        assertFalse(overTicket.shouldPlace)
-        assertTrue(overTicket.reason.contains("10") || overTicket.reason.contains("cap"))
-        val underDaily = live(allIn = 10.0, spent = 40.0, cap = 50.0)
-        assertTrue(underDaily.shouldPlace)
-        val overDaily = live(allIn = 10.0, spent = 45.0, cap = 50.0)
-        assertFalse(overDaily.shouldPlace)
-        assertTrue(overDaily.reason.contains("Daily"))
+        assertEquals(sized.contracts, shadow.count)
+        assertEquals(sized.allInUsd, shadow.stakeUsd, 1e-6)
+        assertTrue(shadow.depthFill)
+        val ticket = ShadowOrderPayload.toTradeTicket(shadow)
+        assertTrue(ticket.kellyAutopilot)
+        assertEquals(sized.contracts, ticket.contracts)
+        val large = AutopilotDispatch.decide(request(AutopilotMode.LIVE, armed = true, allIn = sized.allInUsd))
+        assertTrue(large.shouldPlace)
+        assertTrue(large.reason.contains("agree"))
+        assertNotNull(AutopilotOrderSize.largeClipWarning(sized.allInUsd))
         val book = ShadowBook()
-        assertTrue(book.claimLive("a", "2026-10-05", 10.0, 50.0))
-        assertTrue(book.claimLive("b", "2026-10-05", 10.0, 50.0))
-        assertTrue(book.claimLive("c", "2026-10-05", 10.0, 50.0))
-        assertTrue(book.claimLive("d", "2026-10-05", 10.0, 50.0))
-        assertTrue(book.claimLive("e", "2026-10-05", 10.0, 50.0))
-        assertFalse(book.claimLive("f", "2026-10-05", 10.0, 50.0))
-        assertEquals(50.0, book.snapshot().spentOn("2026-10-05"), 1e-6)
-        assertFalse(book.claimLive("a", "2026-10-05", 10.0, 200.0))
+        repeat(8) { i ->
+            assertTrue(book.claimLive("id-$i", "2026-10-05", 40.0))
+        }
+        assertTrue(book.snapshot().spentOn("2026-10-05") > 50.0)
+        assertFalse(book.claimLive("id-0", "2026-10-05", 40.0))
+    }
+
+    @Test
+    fun btcEthAndSolDispatchTheSameWay() {
+        listOf(
+            "KXBTC15M-25SEP181700-50",
+            "KXETH15M-25SEP181700-40",
+            "KXSOL15M-25SEP181700-30"
+        ).forEach { ticker ->
+            PaperAutopilot.resetSession()
+            val book = PaperBook(idFactory = { "id-$ticker" }, nowMs = { nowMs })
+            val market = taggedMarket().copy(ticker = ticker)
+            PaperAutopilot.consider(book, market, settings, nowMs, yesDepth = 100_000, noDepth = 100_000)
+            val fill = PaperAutopilot.consider(book, market, settings, nowMs, yesDepth = 100_000, noDepth = 100_000)
+            assertNotNull(ticker, fill)
+            assertEquals(ticker, fill!!.ticker)
+            val sized = AutopilotOrderSize.quote(
+                PaperAutopilot.evaluate(market, settings, book.snapshot(), nowMs, yesDepth = 100_000, noDepth = 100_000),
+                fill,
+                100_000,
+                settings.paperKellyFraction,
+                settings.feeRate,
+                book.snapshot().cashUsd
+            )
+            assertEquals(fill.contracts, sized.contracts)
+            assertTrue(sized.allInUsd > 0.0)
+            val shadow = ShadowOrderPayload.fromKelly(ticker, fill.side, sized, 100_000, "edge", nowMs, "c-$ticker")
+            assertEquals(fill.contracts, shadow.count)
+            assertEquals(fill.limitPrice, shadow.limitPrice, 1e-9)
+            val send = AutopilotDispatch.decide(
+                request(
+                    AutopilotMode.LIVE,
+                    armed = true,
+                    paperSide = fill.side,
+                    paperPrice = fill.limitPrice,
+                    shadowSide = shadow.side,
+                    shadowPrice = shadow.limitPrice,
+                    allIn = shadow.stakeUsd
+                )
+            )
+            var placed = 0
+            AutopilotDispatch.run(send) { placed++ }
+            assertTrue(send.shouldPlace)
+            assertEquals(1, placed)
+            val shadowOnly = AutopilotDispatch.decide(
+                request(AutopilotMode.SHADOW, armed = true, paperFilled = false, allIn = shadow.stakeUsd)
+            )
+            var shadowPlaced = 0
+            AutopilotDispatch.run(shadowOnly) { shadowPlaced++ }
+            assertEquals(0, shadowPlaced)
+        }
+        PaperAutopilot.resetSession()
+        val book = PaperBook()
+        val xrp = taggedMarket().copy(ticker = "KXXRP15M-NO")
+        assertNull(PaperAutopilot.consider(book, xrp, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
+        assertTrue(book.snapshot().lastMessage!!.contains("15m"))
+        val hype = taggedMarket().copy(ticker = "KXHYPE15M-NO")
+        assertNull(PaperAutopilot.consider(book, hype, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
+        val sport = taggedMarket().copy(ticker = "KXGRAMMY-BESTSONG")
+        assertNull(PaperAutopilot.consider(book, sport, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
     }
 
     @Test
@@ -217,15 +263,10 @@ class AutopilotModesTest {
         assertFalse(view.autopilot.favoriteLogLine.contains("Autopilot edge"))
         assertTrue(view.autopilot.edgeFillLine.contains("P&L"))
         val shadow = ShadowBook(nowMs = { nowMs })
-        val missed = ShadowOrderPayload.draft(
+        val missed = shadowOf(
             ticker = "KXBTC15M-MISS",
-            side = "YES",
-            ask = 0.20,
             depth = 0,
-            reason = "thin book",
-            nowMs = nowMs,
-            clientOrderId = "miss",
-            capUsd = 10.0
+            clientOrderId = "miss"
         )
         assertFalse(missed.depthFill)
         shadow.record(missed)
@@ -235,19 +276,13 @@ class AutopilotModesTest {
         assertNull(row.pnlUsd)
         assertNull(row.won)
         assertEquals(0.0, shadow.snapshot().lifetimeRealizedPnlUsd, 1e-9)
-        val filled = ShadowOrderPayload.draft(
+        val filled = shadowOf(
             ticker = "KXBTC15M-HIT",
-            side = "YES",
-            ask = 0.20,
             depth = 100_000,
-            reason = "edge",
-            nowMs = nowMs,
-            clientOrderId = "hit",
-            capUsd = 10.0,
-            cashUsd = shadow.snapshot().cashUsd
+            clientOrderId = "hit"
         )
         assertTrue(filled.booked)
-        assertTrue(filled.stakeUsd <= SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-6)
+        assertTrue(filled.stakeUsd > 0.0)
         shadow.record(filled)
         shadow.settle("KXBTC15M-HIT", "yes")
         val won = shadow.snapshot().tickets.first { it.clientOrderId == "hit" }
@@ -256,9 +291,25 @@ class AutopilotModesTest {
         assertTrue(won.pnlUsd!! > 0.0)
     }
 
-    private fun live(allIn: Double, spent: Double, cap: Double) = AutopilotDispatch.decide(
-        request(AutopilotMode.LIVE, armed = true, allIn = allIn, spent = spent, cap = cap)
-    )
+    private fun shadowOf(ticker: String, depth: Int, clientOrderId: String): ShadowTicket {
+        val sized = PaperKellySizer.size(
+            winProb = 0.55,
+            ask = 0.20,
+            bankrollUsd = 1_000.0,
+            kellyFraction = 0.5,
+            depthContracts = depth.coerceAtLeast(0)
+        )
+        val use = if (depth <= 0) sized.copy(skip = true, contracts = 0, allInUsd = 0.0) else sized
+        return ShadowOrderPayload.fromKelly(
+            ticker = ticker,
+            side = "YES",
+            sized = use,
+            depth = depth,
+            reason = "edge",
+            nowMs = nowMs,
+            clientOrderId = clientOrderId
+        )
+    }
 
     private fun request(
         mode: AutopilotMode,
@@ -270,8 +321,6 @@ class AutopilotModesTest {
         shadowPrice: Double? = 0.20,
         depthFill: Boolean = true,
         allIn: Double = 8.0,
-        spent: Double = 0.0,
-        cap: Double = 50.0,
         attempted: Boolean = false,
         credentials: Boolean = true,
         failClosed: Boolean = false,
@@ -290,8 +339,6 @@ class AutopilotModesTest {
         shadowPrice = shadowPrice,
         shadowDepthFill = depthFill,
         shadowAllInUsd = allIn,
-        spentTodayUsd = spent,
-        dailyCapUsd = cap,
         alreadyAttempted = attempted
     )
 

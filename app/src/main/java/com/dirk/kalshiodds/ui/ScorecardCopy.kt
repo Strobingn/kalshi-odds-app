@@ -426,12 +426,12 @@ object ScorecardCopy {
     ): AutopilotSection {
         val report = com.dirk.kalshiodds.signal.paper.AutopilotScorecard.of(fills, entries, bankrollUsd)
         val bets = fills
-            .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
+            .filter { com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(it.ticker) }
             .filter { com.dirk.kalshiodds.signal.paper.AutopilotScorecard.isAutopilotEdge(it) }
             .sortedByDescending { it.createdAtMs }
             .map { autopilotBet(it) }
         val settled = fills.filter {
-            ScorecardLedger.isScorecardTicker(it.ticker) &&
+            com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(it.ticker) &&
                 it.settled &&
                 it.won != null &&
                 com.dirk.kalshiodds.signal.paper.AutopilotScorecard.isAutopilotEdge(it)
