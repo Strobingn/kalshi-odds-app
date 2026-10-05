@@ -5,6 +5,7 @@ name: WebSocket lead-lag (Claude)
 # milliseconds Kalshi trails Coinbase (tools/research/ws_lag.py). Read-only: the
 # Kalshi key only signs the WebSocket handshake. The key is a repository secret and
 # is never printed. Needs the secrets named below (any one name per item works).
+# Secrets: KALSHI_API_KEY_ID (key id) and KALSHI_PRIVATE_KEY (the PEM text).
 
 on:
   workflow_dispatch:
