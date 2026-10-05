@@ -812,7 +812,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            paperTickets.filter { it.canApprove }.forEach {
+                paperBook.considerUnboundedTicket(it, enabled = true)
+            }
         }
         refreshPositionMarks()
     }
@@ -998,10 +1000,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
             val market = markets[alert.ticker]
             if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
+            val context = ticketContext(s = _state.value, nowMs = now)
             val ask = market?.let {
-                TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
+                TicketBuilder.bestAsk(it, alert.predictedSide, context)
             }
-            paperBook.considerAlert(alert, ask, enabled = true)
+            val visibleContracts = market?.let {
+                TicketBuilder.quotedSize(it, alert.predictedSide, context.books[it.ticker])
+            }?.toInt()
+            paperBook.considerUnboundedAlert(
+                alert = alert,
+                ask = ask,
+                visibleContracts = visibleContracts,
+                enabled = true
+            )
         }
     }
 
