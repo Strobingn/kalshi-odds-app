@@ -35,30 +35,63 @@ Working branch created from `main` for review findings and improvements.
   (1,000,000 + CI run number), so each new CI build offers itself as an
   in-app update over the previous install.
 
-### CI (IMPORTANT — not yet committed)
+### Branch-scoped edge model
 
-The GitHub token available to the assistant lacks the `workflow` scope, so
-changes under `.github/workflows/` were rejected with 403. To make CI
-fire and produce the APK + release that the in-app updater reads, apply
-this one-file change manually (web editor works):
+- `signal/config/SignalConstants.kt`: `EDGE_MODEL_RELEASE_TAG` is now
+  `edge-model-KIMI-Bitcoin`, so **Data → Get latest model** reads this
+  branch's model release, not chat-GTP's.
+- `ml/train_edge.py`:
+  - **BTC-only training.** The app trades `KXBTC15M` exclusively
+    (`CryptoMarkets.DEFAULT_SERIES`), but the trainer used to dilute its
+    sample budget across ETH/SOL. All 180 default markets are now BTC.
+  - **Honest ask-fill simulation.** The trainer's diagnostic P&L used to
+    fill at the YES *midpoint*. The 2026-09-25 backtest proved midpoint
+    fills flatter every strategy (app picks: −$226 at close-ask fills vs
+    −$843 at worse fills). The sim now fills at the candle's `yes_ask`
+    (or mid + a fixed 0.5¢ half-spread when the ask print is missing) and
+    prices NO at the derived NO ask.
+  - Manifest tag `edge-model-KIMI-Bitcoin`; trainer UA `BitcoinKimiTrainer`.
+- `ml/test_train_edge.py`: 8 tests, all passing — including new checks
+  that the sim never fills at the bare midpoint, BTC-only series, and the
+  new manifest tag. (Verified by executing the suite locally.)
+- `ml/README.md`, `ui/DataScreen.kt`: copy updated to the new release.
+- **The activation gate is unchanged on purpose**: `ModelActivation` still
+  refuses to activate any model whose verified holdout doesn't beat the
+  market mid on Brier + log-loss. If a trained model doesn't beat the
+  market, the app keeps the previous one. That's the correct behavior —
+  do not weaken it to force a model live.
 
-In `.github/workflows/build-apk.yml` **on the KIMI-Bitcoin branch**:
+## Two workflow edits still needed (token lacks `workflow` scope)
+
+The GitHub token available to the assistant gets a 403 on anything under
+`.github/workflows/`. Apply these two edits manually (web editor works)
+**on the KIMI-Bitcoin branch**:
+
+### 1. `.github/workflows/build-apk.yml` — build + publish the APK
 
 1. Trigger list: `branches: [Claude, main, chat-GTP]` →
-   `branches: [KIMI-Bitcoin]` (or just add `KIMI-Bitcoin` to the list).
+   `branches: [KIMI-Bitcoin]`.
 2. Rename APK step: `DipHunter-GTP-v...` → `BitcoinKimi-v...`.
 3. Upload artifact name: `DipHunter-GTP-v...` → `BitcoinKimi-v...`.
-4. Publish step: `tag="gtp-v..."` → `tag="kimi-v..."`, and the release
+4. Publish step: `tag="gtp-v..."` → `tag="kimi-v..."`, and release
    title/notes "DipHunter GTP" → "Bitcoin Kimi".
 
-After that, every push to `KIMI-Bitcoin` builds a signed APK, publishes
-the rolling `kimi-v1.0-KIMI-Bitcoin` prerelease, and installed apps pick
-it up via the in-app "Check for app update" flow.
+After that, every push builds a signed APK and publishes the rolling
+`kimi-v1.0-KIMI-Bitcoin` prerelease that the in-app updater reads.
 
-Also recommended: add a `unit-tests.yml` running the **full**
-`:app:testDebugUnitTest` suite (the APK workflow only runs ~13
-cherry-picked test classes; most of the suite, including
-`KnownIssuesRegressionTest`, never runs in CI):
+### 2. `.github/workflows/train-edge-model.yml` — train + publish the model
+
+1. The three `edge-model-chat-GTP` strings → `edge-model-KIMI-Bitcoin`
+   (the `gh release delete`, `gh release create` lines).
+2. Optional: update the comment mentioning chat-GTP.
+
+Then: **Actions → Train edge model → Run workflow → KIMI-Bitcoin**.
+The trainer pulls settled KXBTC15M markets + Coinbase spot, validates
+walk-forward, and publishes the model + manifest to the release the app
+fetches. If the holdout doesn't beat the market, the manifest says so and
+the app won't activate it.
+
+### Also recommended: full unit-test workflow
 
 ```yaml
 name: Unit tests
