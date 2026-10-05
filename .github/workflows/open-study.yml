@@ -1,0 +1,51 @@
+name: Open study (Claude)
+
+# tools/research/open_study.py on the cloud recordings (key claude-recordings-*,
+# written by record.yml). The cache is restored READ-ONLY here and never saved.
+# Report printed to the job log between the OPEN STUDY markers.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/open_study.py"
+      - ".github/workflows/open-study.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: open-study-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: python3 tools/research/test_open_study.py
+
+      - name: Restore recordings (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings
+        run: mkdir -p rec && ls -la rec | tail -n 20
+
+      - name: Open study
+        run: |
+          echo "===== OPEN STUDY ====="
+          status=0
+          python3 tools/research/open_study.py --dir rec --iters 2000 || status=$?
+          echo "===== END OPEN STUDY ====="
+          exit $status
