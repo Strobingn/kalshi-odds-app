@@ -1,0 +1,77 @@
+name: Cross-venue scan (Claude)
+
+# Same question priced differently on Kalshi and Polymarket (tools/research/xvenue_scan.py).
+# Read-only public APIs; no orders, nothing committed. Every gap in the report is labelled
+# VERIFY RULES -- it only locks in if both venues' rules resolve identically.
+# The report is printed to the log between the ===== XVENUE SCAN ===== markers and added to
+# the run summary; JSON (matches with full rule texts, all snapshots) is uploaded as an artifact.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/xvenue_scan.py"
+      - "tools/research/test_xvenue.py"
+      - "tools/research/fixtures/xvenue/**"
+      - "tools/research/arb_scan.py"
+      - "tools/backtest/pipeline.py"
+      - ".github/workflows/xvenue.yml"
+  workflow_dispatch:
+    inputs:
+      repeat:
+        description: Number of snapshots
+        required: false
+        default: "6"
+      interval:
+        description: Seconds between snapshot starts
+        required: false
+        default: "120"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: xvenue-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: python3 tools/research/test_xvenue.py
+
+      - name: Scan
+        id: scan
+        continue-on-error: true
+        run: |
+          python3 tools/research/xvenue_scan.py \
+            --repeat "${{ github.event.inputs.repeat || '6' }}" \
+            --interval "${{ github.event.inputs.interval || '120' }}" \
+            --out xvenue_scan.md --json xvenue_scan.json > /dev/null
+
+      - name: Print report
+        if: always()
+        run: |
+          echo "===== XVENUE SCAN ====="
+          cat xvenue_scan.md 2>/dev/null || echo "(no report written -- scan failed before the first snapshot; see the Scan step log)"
+          echo "scan step outcome: ${{ steps.scan.outcome }}"
+          echo "===== END XVENUE SCAN ====="
+          if [ -f xvenue_scan.md ]; then cat xvenue_scan.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Upload JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xvenue-scan-${{ github.run_number }}
+          path: |
+            xvenue_scan.json
+            xvenue_scan.md
+          if-no-files-found: ignore
