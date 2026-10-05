@@ -37,6 +37,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import java.util.Locale
+import com.dirk.kalshiodds.data.supabase.SupabaseMirror
+import com.dirk.kalshiodds.data.supabase.SupabaseSync
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.ui.theme.FieldShapes
 import com.dirk.kalshiodds.ui.theme.FieldMetrics
@@ -222,12 +224,12 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 onCheckedChange = viewModel::setSyncEnabled
             )
             Text(
-                "Live sync of History / bets / signals / settings (never the Kalshi key).",
+                "Live sync of History / bets / signals / settings for this install (grokbot: rows only). Never uploads the Kalshi key.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             state.syncLine?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentBlue)
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = statusColor(colors, it))
             }
             OutlinedButton(shape = FieldShapes.button,
                 onClick = viewModel::syncNow,
@@ -277,11 +279,20 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
             }
 
             state.message?.let {
-                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
+                Text(it, color = statusColor(colors, it), style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(24.dp))
         }
     }
+}
+
+private fun statusColor(
+    colors: com.dirk.kalshiodds.ui.theme.DipPalette,
+    text: String
+) = if (SupabaseSync.isFailureMessage(text) || text.startsWith(SupabaseMirror.FAILURE_PREFIX)) {
+    colors.accentRed
+} else {
+    colors.accentBlue
 }
 
 @Composable

@@ -1,6 +1,9 @@
 -- DipHunter 0.3.8 cloud sync table.
 -- Run in the Supabase SQL editor. Enable RLS. The Android app uses the
 -- publishable/anon key only and never uploads the Kalshi private key.
+--
+-- Keys are namespaced per app (`grokbot:`, `kashi:`). Each app reads and
+-- upserts only its own prefix. Do not update or delete another prefix.
 
 create table if not exists public.diphunter_sync (
   key text primary key,

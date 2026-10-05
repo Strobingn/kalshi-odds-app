@@ -1,6 +1,6 @@
 package com.dirk.kalshiodds.data.supabase
 
-import com.dirk.kalshiodds.data.api.NetworkModule
+import android.util.Log
 import com.dirk.kalshiodds.data.local.history.SettingsChange
 import com.dirk.kalshiodds.data.local.history.SettingsRestore
 import com.dirk.kalshiodds.data.local.results.AlertRow
@@ -10,10 +10,7 @@ import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
 import com.dirk.kalshiodds.data.prefs.DataHubSettings
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.paper.PaperFill
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
-import okhttp3.Request
-import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
@@ -21,12 +18,14 @@ import java.util.concurrent.TimeUnit
 /**
  * Incremental History / bets / signals / settings sync.
  * Never uploads the Kalshi private key or API secret.
+ * Writes and reads only [SYNC_NAMESPACE] rows.
  */
 class SupabaseSync(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(25, TimeUnit.SECONDS)
-        .build()
+        .build(),
+    private val pageSize: Int = SYNC_PAGE_SIZE
 ) {
     data class Status(
         val ok: Boolean,
@@ -47,15 +46,21 @@ class SupabaseSync(
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
         if (!settings.supabaseConfigured) return emptyList()
-        val raw = restGet(settings, TABLE) ?: return emptyList()
-        val arr = runCatching { JSONArray(raw) }.getOrNull() ?: return emptyList()
+        val raw = rest().downloadObjectArray(
+            settings = settings,
+            table = TABLE,
+            keyPrefix = SYNC_NAMESPACE,
+            orders = listOf("key.asc"),
+            optional = false
+        ) ?: throw SupabaseHttpException("diphunter_sync is missing")
+        val arr = JSONArray(raw)
         val out = ArrayList<SyncMerge.Record>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
             val key = o.optString("key")
             val kind = o.optString("kind")
             val payload = o.opt("payload")?.toString() ?: continue
-            if (key.isBlank() || SyncMerge.isForbiddenPayload(payload)) continue
+            if (!ownsNamespace(key) || SyncMerge.isForbiddenPayload(payload)) continue
             out.add(
                 SyncMerge.Record(
                     key = key,
@@ -70,19 +75,19 @@ class SupabaseSync(
 
     fun push(settings: DataHubSettings, rows: List<SyncMerge.Record>): Int {
         if (!settings.supabaseConfigured || rows.isEmpty()) return 0
-        val safe = rows.filter { !SyncMerge.isForbiddenPayload(it.payload) }
-        if (safe.isEmpty()) return 0
-        val arr = JSONArray()
-        for (r in safe) {
-            val o = JSONObject()
-            o.put("key", r.key)
-            o.put("kind", r.kind)
-            o.put("updated_at", r.updatedAtMs)
-            o.put("payload", JSONObject(r.payload))
-            arr.put(o)
+        val prepared = dedupeUpsertBatch(
+            rows.map { row ->
+                if (ownsNamespace(row.key)) row else row.copy(key = namespacedKey(row.key))
+            }.filter { !SyncMerge.isForbiddenPayload(it.payload) }
+        )
+        if (prepared.isEmpty()) return 0
+        val client = rest()
+        var sent = 0
+        for (chunk in prepared.chunked(UPSERT_CHUNK)) {
+            client.upsert(settings, TABLE, upsertBody(chunk))
+            sent += chunk.size
         }
-        val ok = restUpsert(settings, arr.toString())
-        return if (ok) safe.size else 0
+        return sent
     }
 
     fun pack(bundle: LocalBundle): List<SyncMerge.Record> {
@@ -97,7 +102,8 @@ class SupabaseSync(
                 .put("marketPp", s.marketPp)
                 .put("createdAtMs", s.createdAtMs)
                 .put("note", s.note)
-            out.add(rec("snapshot:${s.ticker}:${s.createdAtMs}", "snapshot", s.createdAtMs, payload))
+            val side = s.side.ifBlank { "_" }
+            out.add(rec("snapshot:${s.ticker}:$side:${s.createdAtMs}", "snapshot", s.createdAtMs, payload))
         }
         bundle.alerts.forEach { a ->
             val payload = JSONObject()
@@ -157,7 +163,7 @@ class SupabaseSync(
                 )
             )
         }
-        return out.filter { !SyncMerge.isForbiddenPayload(it.payload) }
+        return out.filter { !SyncMerge.isForbiddenPayload(it.payload) && ownsNamespace(it.key) }
     }
 
     fun apply(
@@ -168,6 +174,7 @@ class SupabaseSync(
     ) {
         val snapshots = ArrayList<ScoredSnapshotRow>()
         for (rec in merged) {
+            if (!ownsNamespace(rec.key)) continue
             val o = runCatching { JSONObject(rec.payload) }.getOrNull() ?: continue
             when (rec.kind) {
                 "snapshot" -> snapshots.add(
@@ -253,67 +260,71 @@ class SupabaseSync(
         return try {
             val packed = pack(local)
             val remote = pull(settings)
-            val merged = SyncMerge.merge(packed, remote)
-            apply(merged.upserts, store, onSettings, onPaper)
-            val outgoing = SyncMerge.outgoing(packed, lastPushMs)
+            val incoming = SyncMerge.incomingWinners(packed, remote)
+            apply(incoming, store, onSettings, onPaper)
+            // Rows missing from this namespace still upload after a failed run
+            // moved [lastPushMs] forward. Presence on the server decides.
+            val outgoing = SyncMerge.pendingUpload(packed, remote)
             val pushed = push(settings, outgoing)
+            runCatching {
+                Log.i(TAG, "sync ok cursor=$lastPushMs pulled=${remote.size} pushed=$pushed")
+            }
             Status(
                 ok = true,
-                message = "Synced · pulled ${remote.size} · merged ${merged.upserts.size} · pushed $pushed",
+                message = "Synced · pulled ${remote.size} · merged ${incoming.size} · pushed $pushed",
                 pulled = remote.size,
                 pushed = pushed
             )
         } catch (t: Throwable) {
-            Status(ok = false, message = t.message ?: "Sync failed")
+            failure(t)
         }
     }
+
+    private fun rest() = SupabaseRest(http, pageSize)
 
     private fun rec(key: String, kind: String, at: Long, payload: JSONObject) =
-        SyncMerge.Record(key, kind, at, payload.toString())
+        SyncMerge.Record(namespacedKey(key), kind, at, payload.toString())
 
-    private fun restGet(settings: DataHubSettings, table: String): String? {
-        val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$table?select=*&limit=2000"
-        val req = Request.Builder()
-            .url(url)
-            .header("apikey", settings.supabaseAnonKey)
-            .header("Authorization", "Bearer ${settings.supabaseAnonKey}")
-            .header("Accept", "application/json")
-            .header("User-Agent", NetworkModule.USER_AGENT)
-            .get()
-            .build()
-        return try {
-            http.newCall(req).execute().use { resp ->
-                if (!resp.isSuccessful) return null
-                resp.body?.string()
-            }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    private fun restUpsert(settings: DataHubSettings, body: String): Boolean {
-        val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$TABLE"
-        val req = Request.Builder()
-            .url(url)
-            .header("apikey", settings.supabaseAnonKey)
-            .header("Authorization", "Bearer ${settings.supabaseAnonKey}")
-            .header("Accept", "application/json")
-            .header("Prefer", "resolution=merge-duplicates,return=minimal")
-            .header("User-Agent", NetworkModule.USER_AGENT)
-            .post(body.toRequestBody(JSON))
-            .build()
-        return try {
-            http.newCall(req).execute().use { it.isSuccessful }
-        } catch (_: Exception) {
-            false
-        }
+    private fun failure(t: Throwable): Status {
+        val detail = (t.message ?: "unknown error").replace(Regex("\\s+"), " ").take(280)
+        val message = if (detail.startsWith(FAILURE_PREFIX)) detail else "$FAILURE_PREFIX$detail"
+        runCatching { Log.e(TAG, message, t) }
+        return Status(ok = false, message = message)
     }
 
     companion object {
         const val TABLE = "diphunter_sync"
-        private val JSON = "application/json; charset=utf-8".toMediaType()
+        const val FAILURE_PREFIX = "Sync failed: "
+        private const val TAG = "SupabaseSync"
+        private const val UPSERT_CHUNK = 400
         val FORBIDDEN_SETTING_KEYS = setOf(
             "api_key_id", "apikeyid", "private_key_pem", "pem", "github_token", "githubtoken"
         )
+
+        fun isFailureMessage(message: String): Boolean = message.startsWith(FAILURE_PREFIX)
+
+        /** A failed sync must not move the cursor, or the next run skips the same rows. */
+        fun nextSyncCursor(ok: Boolean, statusAtMs: Long, previousAtMs: Long): Long =
+            if (ok) statusAtMs else previousAtMs
+
+        internal fun upsertBody(rows: List<SyncMerge.Record>): String {
+            val arr = JSONArray()
+            val seen = HashSet<String>(rows.size)
+            for (r in rows) {
+                if (!ownsNamespace(r.key)) {
+                    throw SupabaseHttpException("refusing to upload a key outside $SYNC_NAMESPACE")
+                }
+                if (!seen.add(r.key)) {
+                    throw SupabaseHttpException("refusing to upload duplicate key ${r.key}")
+                }
+                val o = JSONObject()
+                o.put("key", r.key)
+                o.put("kind", r.kind)
+                o.put("updated_at", r.updatedAtMs)
+                o.put("payload", JSONObject(r.payload))
+                arr.put(o)
+            }
+            return arr.toString()
+        }
     }
 }

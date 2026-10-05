@@ -17,13 +17,18 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds.chatgtp` · version **1.3.3 (grokbot)**
+Package: `com.dirk.kalshiodds.chatgtp` · version **1.3.4 (grokbot)**
 
 ## 1.3 (grokbot)
 
 - In-app updates read the rolling tag `grokbot-latest` (stable asset `DipHunter-grokbot.apk`) and the same versionCode base as the build. A downloaded APK is offered only when its package is `com.dirk.kalshiodds.chatgtp` and its signing certificate SHA-256 matches this install.
 - The old debug certificate from `app/signing/diphunter-debug.jks` (commits `271856d`, `a558f6c`) is **public**. v1.2+ is signed with the private release key. Installs still on that old certificate must uninstall once before this build will update in place.
 - Pushes to `grokbot` fail the release job when `RELEASE_KEYSTORE_*` secrets are missing. Pull-request builds may compile unsigned and never publish.
+- From 1.2, install 1.3 once by hand from the grokbot-latest release; later updates arrive in-app.
+
+## 1.3.4
+
+- Cloud sync reports the real Supabase error (`Sync failed: …`) instead of a successful "pushed 0". Snapshot keys include the side and a `grokbot:` prefix, and each upsert batch is de-duplicated without dropping a distinct payload. Downloads and restore page with `order=key.asc` past the 1000-row cap and only read this install's `grokbot:` rows. The Supabase User-Agent is the installed BuildConfig version.
 - From 1.2, install 1.3 once by hand from the grokbot-latest release; later updates arrive in-app.
 
 ## 1.3.3

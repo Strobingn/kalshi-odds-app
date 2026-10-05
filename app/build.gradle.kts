@@ -22,7 +22,7 @@ android {
         // GitHub Actions run numbers increase with each branch push, so a
         // new APK updates this separate installation without version downgrades.
         versionCode = versionCodeBase + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.3.3"
+        versionName = "1.3.4"
         val updateBranch = System.getenv("GITHUB_REF_NAME")?.takeIf { it.isNotBlank() } ?: "grokbot"
         val safeBranch = updateBranch.replace("\\", "").replace("\"", "").replace(" ", "")
         val updateReleaseTag = System.getenv("UPDATE_RELEASE_TAG")?.takeIf { it.isNotBlank() }

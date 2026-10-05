@@ -57,6 +57,32 @@ class SyncMergeTest {
         assertEquals("new", out.single().key)
     }
 
+    @Test
+    fun pendingUploadKeepsRowsMissingFromThisNamespace() {
+        val local = listOf(rec("grokbot:snapshot:T:YES:1", 10, """{"side":"YES"}"""))
+        val remote = listOf(rec("kashi:snapshot:T:NO:1", 999, """{"side":"NO"}"""))
+        val out = SyncMerge.pendingUpload(local, remote)
+        assertEquals("grokbot:snapshot:T:YES:1", out.single().key)
+    }
+
+    @Test
+    fun pendingUploadSkipsAnUnchangedRemoteRow() {
+        val row = rec("grokbot:paper:1", 40, """{"id":"1"}""")
+        assertTrue(SyncMerge.pendingUpload(listOf(row), listOf(row)).isEmpty())
+    }
+
+    @Test
+    fun incomingWinnersIgnoreOtherNamespacesAndLocalTies() {
+        val local = listOf(rec("grokbot:snapshot:T:YES:1", 50, """{"v":1}"""))
+        val remote = listOf(
+            rec("grokbot:snapshot:T:YES:1", 50, """{"v":2}"""),
+            rec("grokbot:snapshot:T:NO:1", 80, """{"v":3}"""),
+            rec("kashi:snapshot:T:NO:1", 90, """{"v":4}""")
+        )
+        val winners = SyncMerge.incomingWinners(local, remote)
+        assertEquals("grokbot:snapshot:T:NO:1", winners.single().key)
+    }
+
     private fun rec(key: String, at: Long, payload: String) =
         SyncMerge.Record(key = key, kind = "ticket", updatedAtMs = at, payload = payload)
 }
