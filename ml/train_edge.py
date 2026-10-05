@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """
-Offline edge trainer for DipHunter 0.3.7.
+Offline edge trainer for DipHunter (KIMI-Bitcoin branch).
 
-Walk-forward logistic on settled Kalshi BTC/ETH/SOL 15m markets + Coinbase
-spot candles. Calibrates (Platt), reports Brier / log-loss vs the market
-price, and a simulated net P&L after Kalshi-style fees.
+Walk-forward logistic on settled Kalshi BTC 15m markets + Coinbase spot
+candles. Calibrates (Platt), reports Brier / log-loss vs the market price,
+and a simulated net P&L after Kalshi-style fees — filled at the ASK, not
+the midpoint, so the diagnostic cannot overstate results the way a
+midpoint fill did in the 2026-09-25 backtest.
 
 Exports a compact JSON the Android app can import (Data → Import model).
 
@@ -32,7 +34,9 @@ REPO = Path(__file__).resolve().parents[1]
 ML_DIR = REPO / "ml"
 KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 COINBASE = "https://api.exchange.coinbase.com"
-SERIES = ["KXBTC15M", "KXETH15M", "KXSOL15M"]
+# KIMI-Bitcoin: BTC-only. The app trades KXBTC15M exclusively
+# (CryptoMarkets.DEFAULT_SERIES), so ETH/SOL rows only diluted training.
+SERIES = ["KXBTC15M"]
 PRODUCT = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
 FEATURE_NAMES = [
     "dist_to_strike_vol",
@@ -49,9 +53,12 @@ FEATURE_NAMES = [
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
-UA = "DipHunterTrainer/0.3.8"
+UA = "BitcoinKimiTrainer/1.0"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
 SPOT_LOOKBACK_BARS = 16
+# Simulated taker fills cross this fixed half-spread on top of the mid,
+# matching the ~1¢ median spread seen in the 2026-09-25 candle backtest.
+SIM_HALF_SPREAD = 0.005
 
 
 def http_get(url: str, retries: int = 5) -> Any:
@@ -259,10 +266,11 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     ]
 
 
-def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[int]]:
+def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[float], list[int]]:
     X: list[list[float]] = []
     y: list[int] = []
     mids: list[float] = []
+    asks: list[float] = []
     times: list[int] = []
     per = max(8, max_markets // len(SERIES))
     for series in SERIES:
@@ -292,11 +300,19 @@ def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], 
                 feats = features_for(m, candles, spot, idx)
                 if not feats:
                     continue
+                c = candles[idx]
+                ya = c.get("yes_ask") or {}
+                yes_ask = _f(ya.get("close_dollars") if "close_dollars" in ya else ya.get("close"))
+                mid = feats[2]
+                # Fall back to mid + fixed half-spread when the ask print is
+                # missing/unusable; never fill at the bare midpoint.
+                ask = yes_ask if yes_ask and 0.001 <= yes_ask <= 0.999 else min(0.999, mid + SIM_HALF_SPREAD)
                 X.append(feats)
                 y.append(label)
-                mids.append(feats[2])
-                times.append(int(candles[idx].get("end_period_ts") or close_ts))
-    return X, y, mids, times
+                mids.append(mid)
+                asks.append(ask)
+                times.append(int(c.get("end_period_ts") or close_ts))
+    return X, y, mids, asks, times
 
 
 def standardize(X: list[list[float]]) -> tuple[list[list[float]], list[float], list[float]]:
@@ -365,19 +381,27 @@ def logloss(p: list[float], y: list[int]) -> float:
     return s / len(y)
 
 
-def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, float]:
+def simulated_pnl(p: list[float], mids: list[float], y: list[int], asks: list[float] | None = None) -> dict[str, float]:
+    """Net P&L with taker fills at the ASK.
+
+    YES costs yes_ask; NO costs 1 − yes_bid ≈ (1 − mid) + half-spread.
+    The 2026-09-25 backtest showed midpoint fills flatter every strategy
+    (~25¢/contract vs worse-of-close/high), so this diagnostic never fills
+    at the bare mid.
+    """
     pnl = 0.0
     n = 0
     hits = 0
-    for pi, m, yi in zip(p, mids, y):
+    for i, (pi, m, yi) in enumerate(zip(p, mids, y)):
+        yes_ask = asks[i] if asks is not None else min(0.999, m + SIM_HALF_SPREAD)
+        no_ask = 1.0 - (yes_ask - 2.0 * SIM_HALF_SPREAD) if asks is not None else 1.0 - m + SIM_HALF_SPREAD
+        no_ask = min(0.999, max(0.001, no_ask))
         gap = abs(pi - m)
-        fee = FEE_RATE * m * (1 - m)
-        if gap <= fee + CONF_MARGIN:
+        fee_at_mid = FEE_RATE * m * (1 - m)
+        if gap <= fee_at_mid + CONF_MARGIN:
             continue
         side_yes = pi > m
-        # The input is the YES midpoint. A NO contract costs 1 - YES mid,
-        # even before the executable ask and spread are accounted for.
-        price = m if side_yes else 1.0 - m
+        price = yes_ask if side_yes else no_ask
         fee_c = FEE_RATE * price * (1 - price)
         win = (yi == 1) if side_yes else (yi == 0)
         pnl += (1.0 - price - fee_c) if win else (-price - fee_c)
@@ -386,11 +410,12 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, 
     return {"n": n, "pnl": pnl, "hit_rate": (hits / n) if n else 0.0}
 
 
-def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: list[int], folds: int = 4) -> dict[str, Any]:
+def walk_forward(X: list[list[float]], y: list[int], mids: list[float], asks: list[float], times: list[int], folds: int = 4) -> dict[str, Any]:
     order = sorted(range(len(X)), key=lambda i: times[i])
     X = [X[i] for i in order]
     y = [y[i] for i in order]
     mids = [mids[i] for i in order]
+    asks = [asks[i] for i in order]
     fold = max(1, len(X) // folds)
     preds = [0.0] * len(X)
     for k in range(1, folds):
@@ -410,14 +435,14 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
     for i, p in enumerate(preds):
         if p == 0.0:
             preds[i] = mids[i]
-    hold = [i for i, p in enumerate(preds) if p != mids[i] or True]
     hold = list(range(fold, len(X)))  # first fold is train-only
     if not hold:
         hold = list(range(len(X)))
     ph = [preds[i] for i in hold]
     yh = [y[i] for i in hold]
     mh = [mids[i] for i in hold]
-    pnl = simulated_pnl(ph, mh, yh)
+    ah = [asks[i] for i in hold]
+    pnl = simulated_pnl(ph, mh, yh, ah)
     return {
         "n_holdout": len(hold),
         "model_brier": brier(ph, yh),
@@ -438,8 +463,8 @@ def fit_final(X: list[list[float]], y: list[int]) -> dict[str, Any]:
     return {"weights": w, "bias": b, "mean": mean, "std": std, "platt_a": a, "platt_b": pb}
 
 
-def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[int]]:
-    X, y, mids, times = [], [], [], []
+def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[float], list[int]]:
+    X, y, mids, asks, times = [], [], [], [], []
     t0 = 1_700_000_000
     for i in range(n):
         mid = 0.35 + 0.3 * ((i % 40) / 40.0)
@@ -450,8 +475,9 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
         X.append(row)
         y.append(label)
         mids.append(mid)
+        asks.append(min(0.999, mid + SIM_HALF_SPREAD))
         times.append(t0 + i * 900)
-    return X, y, mids, times
+    return X, y, mids, asks, times
 
 
 def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, fixture: bool = False) -> None:
@@ -473,7 +499,7 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "sim_pnl": metrics.get("sim_pnl"),
         "sim_hit_rate": metrics.get("sim_hit_rate"),
         "model_asset": "edge_model.json",
-        "tag": "edge-model-chat-GTP",
+        "tag": "edge-model-KIMI-Bitcoin",
         "data_source": "synthetic_fixture" if fixture else "kalshi_settled_coinbase_spot_v1",
         "beats_market": not fixture and n > 0 and model_brier < market_brier and model_ll < market_ll,
     }
@@ -512,10 +538,10 @@ def main() -> int:
     ap.add_argument("--fixture", action="store_true")
     args = ap.parse_args()
     if args.fixture:
-        X, y, mids, times = fixture_dataset()
+        X, y, mids, asks, times = fixture_dataset()
     else:
         try:
-            X, y, mids, times = collect(args.days, args.max_markets)
+            X, y, mids, asks, times = collect(args.days, args.max_markets)
         except Exception as e:
             print(f"live collect failed ({e}); refusing to publish a fixture model", file=sys.stderr, flush=True)
             return 1
@@ -523,7 +549,7 @@ def main() -> int:
         print(f"only {len(X)} rows — refusing to publish an unvalidated model", file=sys.stderr, flush=True)
         return 1
     print(f"samples {len(X)} yes={sum(y)} no={len(y) - sum(y)}", flush=True)
-    metrics = walk_forward(X, y, mids, times)
+    metrics = walk_forward(X, y, mids, asks, times)
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y)
     export(model, metrics, Path(args.out))

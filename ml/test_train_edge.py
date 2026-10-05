@@ -71,10 +71,21 @@ class NoLookAheadTest(unittest.TestCase):
         self.assertAlmostEqual(te.spot_return(closes, 5), 0.10)
         self.assertEqual(te.spot_return(closes[:3], 5), 0.0)
 
-    def test_no_profit_uses_no_midpoint(self) -> None:
-        pnl = te.simulated_pnl([0.10], [0.30], [0])
+    def test_no_profit_fills_at_no_ask(self) -> None:
+        # mid 0.30 → NO ask ≈ 0.70 + half-spread (explicit ask list keeps
+        # parity with the old contract: pass the YES ask column).
+        pnl = te.simulated_pnl([0.10], [0.30], [0], asks=[0.30])
         self.assertEqual(pnl["n"], 1)
-        self.assertAlmostEqual(pnl["pnl"], 1.0 - 0.70 - 0.07 * 0.70 * 0.30)
+        no_ask = 1.0 - (0.30 - 2.0 * te.SIM_HALF_SPREAD)
+        self.assertAlmostEqual(pnl["pnl"], 1.0 - no_ask - 0.07 * no_ask * (1 - no_ask))
+
+    def test_default_fill_never_at_midpoint(self) -> None:
+        # Without an ask column the sim must charge the half-spread, not
+        # fill at the bare mid (the 2026-09-25 midpoint-fill bug).
+        pnl = te.simulated_pnl([0.90], [0.70], [1])
+        self.assertEqual(pnl["n"], 1)
+        price = 0.70 + te.SIM_HALF_SPREAD
+        self.assertAlmostEqual(pnl["pnl"], 1.0 - price - 0.07 * price * (1 - price))
 
     def test_fixture_manifest_cannot_claim_edge(self) -> None:
         from tempfile import TemporaryDirectory
@@ -91,6 +102,10 @@ class NoLookAheadTest(unittest.TestCase):
             manifest = json.loads(path.read_text(encoding="utf-8"))
             self.assertEqual(manifest["data_source"], "synthetic_fixture")
             self.assertFalse(manifest["beats_market"])
+            self.assertEqual(manifest["tag"], "edge-model-KIMI-Bitcoin")
+
+    def test_live_series_is_btc_only(self) -> None:
+        self.assertEqual(te.SERIES, ["KXBTC15M"])
 
     def test_time_of_day_matches_new_york_minutes(self) -> None:
         market = _market()
