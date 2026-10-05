@@ -55,7 +55,7 @@ FEATURE_NAMES = [
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
-UA = "DipHunterTrainer/0.3.33"
+UA = "DipHunterTrainer/0.3.34"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
 SPOT_LOOKBACK_BARS = 16
 # Edge momentum / realized_vol: last 8 one-minute Coinbase closes.

@@ -82,8 +82,13 @@ class KalshiOddsApp : Application() {
         appScope.launch {
             runCatching { checkKashiUpdateIfDue() }
         }
-        appScope.launch(Dispatchers.IO) {
-            runCatching { refreshPublishedEdgeModel() }
+        // Real installs pull the published model after startup. Robolectric
+        // unit tests share this process with certificate loading; starting
+        // TLS there deadlocks the class loader, so tests use the button path.
+        if (!isRobolectric()) {
+            appScope.launch(Dispatchers.IO) {
+                runCatching { refreshPublishedEdgeModel() }
+            }
         }
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
@@ -107,6 +112,9 @@ class KalshiOddsApp : Application() {
             }
         }
     }
+
+    private fun isRobolectric(): Boolean =
+        android.os.Build.FINGERPRINT.equals("robolectric", ignoreCase = true)
 
     private fun refreshPublishedEdgeModel() {
         val token = runCatching { container.extraSecrets.githubToken }.getOrNull()
