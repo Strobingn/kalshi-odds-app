@@ -72,7 +72,13 @@ class ModelActivationTest {
                 modelLogLoss = 0.10, marketLogLoss = 0.50, dataSource = source
             )
             assertFalse(m.beatsMarket)
-            assertFalse(ModelActivation.decide(m, modelValid = true).activate)
+            val decision = ModelActivation.decide(m, modelValid = true)
+            assertFalse(decision.activate)
+            assertTrue(
+                decision.reason.contains(
+                    if (source == "unknown") "omits data_source" else "synthetic fixture"
+                )
+            )
         }
     }
 
