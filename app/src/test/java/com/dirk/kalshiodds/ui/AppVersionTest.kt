@@ -1,7 +1,9 @@
 package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.BuildConfig
+import com.dirk.kalshiodds.data.api.NetworkModule
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -21,5 +23,14 @@ class AppVersionTest {
         )
         assertTrue(AppVersion.label.startsWith("Bitcoin Kalshi v"))
         assertTrue(AppVersion.label.endsWith("(${BuildConfig.VERSION_CODE})"))
+    }
+
+    @Test
+    fun userAgentUsesTheInstalledVersionName() {
+        val ua = NetworkModule.USER_AGENT
+        assertEquals(BuildConfig.VERSION_NAME, AppVersion.versionName)
+        assertTrue(ua.startsWith("DipHunter/${AppVersion.versionName}"))
+        assertTrue(ua.contains("Bitcoin Kalshi"))
+        assertFalse(ua.contains("DipHunter/0.3.11"))
     }
 }

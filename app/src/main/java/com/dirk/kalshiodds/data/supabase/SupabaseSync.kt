@@ -61,28 +61,7 @@ class SupabaseSync(
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
         if (!settings.supabaseConfigured) return emptyList()
-        val raw = restGet(settings, TABLE)
-        val arr = runCatching { JSONArray(raw) }.getOrElse {
-            throw SyncHttpException("Sync failed — response was not JSON")
-        }
-        val out = ArrayList<SyncMerge.Record>(arr.length())
-        for (i in 0 until arr.length()) {
-            val o = arr.optJSONObject(i) ?: continue
-            val key = o.optString("key")
-            val kind = o.optString("kind")
-            val payload = o.opt("payload")?.toString() ?: continue
-            if (!acceptsPulledRow(key, kind)) continue
-            if (SyncMerge.isForbiddenPayload(payload)) continue
-            out.add(
-                SyncMerge.Record(
-                    key = key,
-                    kind = kind.ifBlank { "unknown" },
-                    updatedAtMs = o.optLong("updated_at", o.optLong("updated_at_ms")),
-                    payload = payload
-                )
-            )
-        }
-        return out
+        return parseRows(restGet(settings, TABLE))
     }
 
     fun push(settings: DataHubSettings, rows: List<SyncMerge.Record>): Int =
@@ -136,7 +115,7 @@ class SupabaseSync(
                 .put("marketPp", s.marketPp)
                 .put("createdAtMs", s.createdAtMs)
                 .put("note", s.note)
-            out.add(rec("snapshot:${s.ticker}:${s.createdAtMs}", "snapshot", s.createdAtMs, payload))
+            out.add(rec("snapshot:${s.ticker}:${s.createdAtMs}:${s.side}", "snapshot", s.createdAtMs, payload))
         }
         bundle.alerts.forEach { a ->
             val payload = JSONObject()
@@ -220,79 +199,11 @@ class SupabaseSync(
         for (rec in merged) {
             val o = runCatching { JSONObject(rec.payload) }.getOrNull() ?: continue
             when (rec.kind) {
-                "snapshot" -> snapshots.add(
-                    ScoredSnapshotRow(
-                        ticker = o.optString("ticker"),
-                        series = o.optString("series"),
-                        side = o.optString("side"),
-                        edgePp = o.optDouble("edgePp"),
-                        fairPp = o.optDouble("fairPp"),
-                        marketPp = o.optDouble("marketPp"),
-                        regime = o.optString("regime").takeIf { it.isNotBlank() },
-                        uncertainty = null,
-                        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
-                        note = o.optString("note").takeIf { it.isNotBlank() }
-                    )
-                )
-                "alert" -> store.insertAlert(
-                    AlertRow(
-                        alertId = o.optString("alertId").ifBlank { rec.key },
-                        ticker = o.optString("ticker"),
-                        series = o.optString("series"),
-                        side = o.optString("side"),
-                        edgePp = o.optDouble("edgePp"),
-                        fairPp = o.optDouble("fairPp"),
-                        marketPp = o.optDouble("marketPp"),
-                        reason = o.optString("reason"),
-                        regime = null,
-                        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs)
-                    )
-                )
-                "ticket" -> store.insertTicket(
-                    TicketAttemptRow(
-                        ticker = o.optString("ticker"),
-                        side = o.optString("side"),
-                        stakeUsd = o.optDouble("stakeUsd"),
-                        approved = o.optBoolean("approved"),
-                        result = o.optString("result"),
-                        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
-                        note = o.optString("note").takeIf { it.isNotBlank() }
-                    )
-                )
-                "settings", "settings_snapshot" -> {
-                    val snap = o.optString("snapshotJson").ifBlank { rec.payload }
-                    if (!SyncMerge.isForbiddenPayload(snap)) onSettings(snap)
-                }
-                "paper" -> {
-                    val fill = PaperFill(
-                        id = o.optString("id").ifBlank { rec.key },
-                        ticker = o.optString("ticker"),
-                        side = o.optString("side"),
-                        stakeUsd = o.optDouble("stakeUsd"),
-                        contracts = o.optInt("contracts"),
-                        limitPrice = o.optDouble("limitPrice"),
-                        source = o.optString("source").ifBlank { "supabase" },
-                        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
-                        settled = o.optBoolean("settled"),
-                        outcome = o.optString("outcome").takeIf { it.isNotBlank() },
-                        won = if (o.has("won") && !o.isNull("won")) o.optBoolean("won") else null,
-                        pnlUsd = o.optDouble("pnlUsd").takeIf { o.has("pnlUsd") && !o.isNull("pnlUsd") },
-                        note = o.optString("note"),
-                        aiPct = o.optDouble("aiPct").takeIf { o.has("aiPct") && !o.isNull("aiPct") },
-                        updatedAtMs = o.optLong("updatedAtMs", rec.updatedAtMs),
-                        aiConfidence = o.optDouble("aiConfidence").takeIf { o.has("aiConfidence") },
-                        marketPct = o.optDouble("marketPct").takeIf { o.has("marketPct") },
-                        pickSource = o.optString("pickSource").takeIf { it.isNotBlank() },
-                        kellyF = o.optDouble("kellyF").takeIf { o.has("kellyF") && !o.isNull("kellyF") },
-                        kellyFraction = o.optDouble("kellyFraction").takeIf {
-                            o.has("kellyFraction") && !o.isNull("kellyFraction")
-                        },
-                        bankrollAfterUsd = o.optDouble("bankrollAfterUsd").takeIf {
-                            o.has("bankrollAfterUsd") && !o.isNull("bankrollAfterUsd")
-                        }
-                    )
-                    onPaper(fill)
-                }
+                "snapshot" -> snapshots.add(SyncRows.snapshot(o, rec.updatedAtMs))
+                "alert" -> store.insertAlert(SyncRows.alert(o, rec))
+                "ticket" -> store.insertTicket(SyncRows.ticket(o, rec))
+                "settings", "settings_snapshot" -> SyncRows.settingsPayload(o, rec)?.let(onSettings)
+                "paper" -> onPaper(SyncRows.paper(o, rec))
             }
         }
         if (snapshots.isNotEmpty()) store.insertSnapshots(snapshots)
@@ -345,6 +256,8 @@ class SupabaseSync(
             .addEncodedQueryParameter("select", "*")
             .addEncodedQueryParameter("limit", "2000")
             .addEncodedQueryParameter("key", "like.kashi:*")
+            // One page. Newest first; key breaks timestamp ties so the page is stable.
+            .addEncodedQueryParameter("order", "updated_at.desc,key.asc")
             .build()
         val req = Request.Builder()
             .url(url)
@@ -424,6 +337,30 @@ class SupabaseSync(
             return byKey.values.toList()
         }
 
+        fun parseRows(raw: String): List<SyncMerge.Record> {
+            val arr = runCatching { JSONArray(raw) }.getOrElse {
+                throw SyncHttpException("Sync failed — response was not JSON")
+            }
+            val out = ArrayList<SyncMerge.Record>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val key = o.optString("key")
+                val kind = o.optString("kind")
+                val payload = o.opt("payload")?.toString() ?: continue
+                if (!acceptsPulledRow(key, kind)) continue
+                if (SyncMerge.isForbiddenPayload(payload)) continue
+                out.add(
+                    SyncMerge.Record(
+                        key = key,
+                        kind = kind.ifBlank { "unknown" },
+                        updatedAtMs = o.optLong("updated_at", o.optLong("updated_at_ms")),
+                        payload = payload
+                    )
+                )
+            }
+            return out
+        }
+
         /** Only this app's rows. Other DipHunter builds share the table. */
         fun acceptsPulledRow(key: String, kind: String): Boolean {
             if (!key.startsWith(KEY_PREFIX)) return false
@@ -449,3 +386,90 @@ class SupabaseSync(
 }
 
 class SyncHttpException(message: String) : Exception(message)
+
+/** Maps a `diphunter_sync` payload into local rows. Shared by sync apply and restore. */
+internal object SyncRows {
+    fun snapshot(o: JSONObject, fallbackAt: Long) = ScoredSnapshotRow(
+        ticker = o.optString("ticker"),
+        series = o.optString("series"),
+        side = o.optString("side"),
+        edgePp = o.optDouble("edgePp"),
+        fairPp = o.optDouble("fairPp"),
+        marketPp = o.optDouble("marketPp"),
+        regime = o.optString("regime").takeIf { it.isNotBlank() },
+        uncertainty = null,
+        createdAtMs = o.optLong("createdAtMs", fallbackAt),
+        note = o.optString("note").takeIf { it.isNotBlank() }
+    )
+
+    fun alert(o: JSONObject, rec: SyncMerge.Record) = AlertRow(
+        alertId = o.optString("alertId").ifBlank { rec.key },
+        ticker = o.optString("ticker"),
+        series = o.optString("series"),
+        side = o.optString("side"),
+        edgePp = o.optDouble("edgePp"),
+        fairPp = o.optDouble("fairPp"),
+        marketPp = o.optDouble("marketPp"),
+        reason = o.optString("reason"),
+        regime = null,
+        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs)
+    )
+
+    fun ticket(o: JSONObject, rec: SyncMerge.Record) = TicketAttemptRow(
+        ticker = o.optString("ticker"),
+        side = o.optString("side"),
+        stakeUsd = o.optDouble("stakeUsd"),
+        approved = o.optBoolean("approved"),
+        result = o.optString("result"),
+        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
+        note = o.optString("note").takeIf { it.isNotBlank() }
+    )
+
+    fun settingsChange(o: JSONObject, fallbackAt: Long): com.dirk.kalshiodds.data.local.history.SettingsChange? {
+        val key = o.optString("key")
+        if (key.isBlank()) return null
+        if (SupabaseSync.FORBIDDEN_SETTING_KEYS.contains(key.lowercase())) return null
+        val snap = o.optString("snapshotJson").takeIf { it.isNotBlank() && !SyncMerge.isForbiddenPayload(it) }
+        return com.dirk.kalshiodds.data.local.history.SettingsChange(
+            createdAtMs = o.optLong("createdAtMs", fallbackAt),
+            key = key,
+            oldValue = o.optString("oldValue"),
+            newValue = o.optString("newValue"),
+            snapshotJson = snap
+        )
+    }
+
+    fun settingsPayload(o: JSONObject, rec: SyncMerge.Record): String? {
+        val snap = o.optString("snapshotJson").ifBlank { rec.payload }
+        if (SyncMerge.isForbiddenPayload(snap)) return null
+        return snap
+    }
+
+    fun paper(o: JSONObject, rec: SyncMerge.Record) = PaperFill(
+        id = o.optString("id").ifBlank { rec.key },
+        ticker = o.optString("ticker"),
+        side = o.optString("side"),
+        stakeUsd = o.optDouble("stakeUsd"),
+        contracts = o.optInt("contracts"),
+        limitPrice = o.optDouble("limitPrice"),
+        source = o.optString("source").ifBlank { "supabase" },
+        createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
+        settled = o.optBoolean("settled"),
+        outcome = o.optString("outcome").takeIf { it.isNotBlank() },
+        won = if (o.has("won") && !o.isNull("won")) o.optBoolean("won") else null,
+        pnlUsd = o.optDouble("pnlUsd").takeIf { o.has("pnlUsd") && !o.isNull("pnlUsd") },
+        note = o.optString("note"),
+        aiPct = o.optDouble("aiPct").takeIf { o.has("aiPct") && !o.isNull("aiPct") },
+        updatedAtMs = o.optLong("updatedAtMs", rec.updatedAtMs),
+        aiConfidence = o.optDouble("aiConfidence").takeIf { o.has("aiConfidence") },
+        marketPct = o.optDouble("marketPct").takeIf { o.has("marketPct") },
+        pickSource = o.optString("pickSource").takeIf { it.isNotBlank() },
+        kellyF = o.optDouble("kellyF").takeIf { o.has("kellyF") && !o.isNull("kellyF") },
+        kellyFraction = o.optDouble("kellyFraction").takeIf {
+            o.has("kellyFraction") && !o.isNull("kellyFraction")
+        },
+        bankrollAfterUsd = o.optDouble("bankrollAfterUsd").takeIf {
+            o.has("bankrollAfterUsd") && !o.isNull("bankrollAfterUsd")
+        }
+    )
+}

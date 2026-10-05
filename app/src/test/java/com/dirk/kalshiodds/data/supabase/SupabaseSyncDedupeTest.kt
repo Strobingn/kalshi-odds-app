@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.data.supabase
 
+import com.dirk.kalshiodds.data.importing.SeenKeys
 import com.dirk.kalshiodds.data.local.results.InMemoryResultsStore
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.data.prefs.DataHubSettings
@@ -22,6 +23,31 @@ class SupabaseSyncDedupeTest {
         supabaseAnonKey = "a".repeat(32),
         syncEnabled = true
     )
+
+    @Test
+    fun yesAndNoSnapshotsAtTheSameMillisecondBothSurviveDedupe() {
+        val yes = snap("YES")
+        val no = snap("NO")
+        val packed = SupabaseSync().pack(SupabaseSync.LocalBundle(snapshots = listOf(yes, no)))
+        val kept = SupabaseSync.dedupeBatch(packed)
+        assertEquals(2, kept.size)
+        assertEquals(
+            setOf(
+                "kashi:snapshot:KXBTC15M-A:42:YES",
+                "kashi:snapshot:KXBTC15M-A:42:NO"
+            ),
+            kept.map { it.key }.toSet()
+        )
+        val seen = SeenKeys()
+        assertTrue(seen.snapshots.add(seen.snapshotKey(yes.ticker, yes.createdAtMs, yes.side)))
+        assertTrue(seen.snapshots.add(seen.snapshotKey(no.ticker, no.createdAtMs, no.side)))
+        val store = InMemoryResultsStore()
+        store.insertSnapshots(listOf(yes, no))
+        assertEquals(
+            setOf("KXBTC15M-A|42|YES", "KXBTC15M-A|42|NO"),
+            store.existingSnapshotKeys()
+        )
+    }
 
     @Test
     fun dedupeKeepsNewestRowForARepeatedConflictKey() {
@@ -76,6 +102,18 @@ class SupabaseSyncDedupeTest {
         assertTrue(status.message.contains("500") || status.message.contains("21000"))
         assertTrue(status.pushed >= 1)
     }
+
+    private fun snap(side: String) = ScoredSnapshotRow(
+        ticker = "KXBTC15M-A",
+        series = "KXBTC15M",
+        side = side,
+        edgePp = 1.0,
+        fairPp = 60.0,
+        marketPp = 50.0,
+        regime = null,
+        uncertainty = null,
+        createdAtMs = 42L
+    )
 
     private fun paper(id: String, at: Long, pnl: Double) = PaperFill(
         id = id,

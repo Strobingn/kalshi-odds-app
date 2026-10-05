@@ -37,6 +37,8 @@ class SupabaseSyncNamespaceTest {
         val fake = ScriptedHttp(code = 200, body = body)
         val rows = SupabaseSync(client(fake)).pull(hub)
         assertTrue(fake.url.contains("key=like.kashi"))
+        assertTrue(fake.url.contains("order=updated_at.desc"))
+        assertTrue(fake.url.contains("key.asc"))
         assertEquals(listOf("kashi:paper:p1"), rows.map { it.key })
         assertEquals("paper", rows.single().kind)
     }

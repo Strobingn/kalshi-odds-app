@@ -185,7 +185,7 @@ fun DataScreen(
 
             Section("Restore from Supabase")
             Text(
-                "Optional mirror. Paste the project URL and the publishable/anon key — never a service_role key. Reads diphunter_snapshots / diphunter_results / diphunter_settled.",
+                "Optional mirror. Paste the project URL and the publishable/anon key — never a service_role key. Restore reads kashi rows from diphunter_sync.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -236,7 +236,7 @@ fun DataScreen(
                 color = colors.textSecondary
             )
             Text(
-                "Weekly GitHub Action publishes edge-model-latest. Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Get latest model downloads the edge-model-latest release when one has been published. It shows holdout Brier and log-loss, and activates the model only if it beats the market. A model that does not beat the market is rejected. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

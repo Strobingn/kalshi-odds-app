@@ -98,5 +98,10 @@ object NetworkModule {
             .create(KalshiTradeApi::class.java)
     }
 
-    const val USER_AGENT = "DipHunter/0.3.11 (Android; Dirk Diggler)"
+    /**
+     * Product name plus the installed versionName. [com.dirk.kalshiodds.ui.AppVersion.versionName]
+     * is [com.dirk.kalshiodds.BuildConfig.VERSION_NAME].
+     */
+    val USER_AGENT: String
+        get() = "DipHunter/${com.dirk.kalshiodds.ui.AppVersion.versionName} (Android; ${com.dirk.kalshiodds.AppIdentity.LABEL})"
 }

@@ -304,8 +304,12 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     fun restoreSupabase() {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val seen = SeenKeys()
+                try {
+                    val seen = SeenKeys().apply {
+                        archive.existingSnapshotKeys().forEach { snapshots.add(it) }
+                        archive.existingAlertIds().forEach { alerts.add(it) }
+                        archive.existingTicketKeys().forEach { tickets.add(it) }
+                    }
                     val restore = SupabaseMirror().restore(_state.value.settings, seen)
                     val store = container.resultsStore
                     if (restore.batch.snapshots.isNotEmpty()) store.insertSnapshots(restore.batch.snapshots)
@@ -315,8 +319,12 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     restore.batch.settingsChanges.forEach { archive.insertSettingsChange(it) }
                     restore.batch.sessions.forEach { archive.insertSession(it) }
                     archive.upsertSettled(restore.settled)
+                    restore.paper.forEach { container.paper.book.upsertFromSync(it) }
+                    restore.settingsSnapshot?.let { container.preferences.restoreSnapshot(it) }
                     restore.message
-                }.getOrElse { it.message ?: "Supabase restore failed" }
+                } catch (t: Throwable) {
+                    t.message ?: "Supabase restore failed"
+                }
             }
             _state.update { it.copy(message = result) }
             refreshStats()

@@ -3,6 +3,9 @@ name: Train edge model
 on:
   schedule:
     # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
+    # GitHub Actions schedules fire only from the repository default branch.
+    # This file is on kashi, so the cron does not run while the default
+    # branch is main. workflow_dispatch on this branch still works.
     - cron: "17 8 * * 1"
   workflow_dispatch:
     inputs:
