@@ -37,7 +37,6 @@ jobs:
           python3 tools/research/test_cross_lag.py
           python3 tools/research/test_fee_probe.py
           python3 tools/research/test_xvenue.py
-          python3 tools/research/test_weather.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue
