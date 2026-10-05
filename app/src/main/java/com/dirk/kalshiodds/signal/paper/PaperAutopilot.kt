@@ -198,8 +198,8 @@ object PaperAutopilot {
         if (!settings.aiPaperAutopilotEnabled) {
             return Decision(skip = true, reason = "AI paper autopilot off")
         }
-        if (!CryptoMarkets.isLiveTicker(market.ticker)) {
-            return Decision(skip = true, reason = "Paper skip — Bitcoin-only")
+        if (!CryptoMarkets.isAutopilotTicker(market.ticker)) {
+            return Decision(skip = true, reason = "Paper skip — not BTC, ETH, or SOL 15m")
         }
         if (!MarketLifecycle.isTradable(market, nowMs)) {
             return Decision(skip = true, reason = "Paper skip — window closed")

@@ -116,7 +116,7 @@ data class SignalSettings(
     fun keyIdWithoutPem(): Boolean = apiKeyId.isNotBlank() && !hasPrivateKey
 
     val watchedSeries: Set<String>
-        get() = CryptoMarkets.DEFAULT_SERIES.toSet()
+        get() = CryptoMarkets.AUTOPILOT_SERIES.toSet()
 
     fun isWatchedTicker(ticker: String): Boolean = CryptoMarkets.isLiveTicker(ticker)
 

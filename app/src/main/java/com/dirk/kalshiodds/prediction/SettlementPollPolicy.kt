@@ -46,6 +46,7 @@ object SettlementPollPolicy {
     fun isPollableTicker(ticker: String, heldD3: Set<String> = emptySet()): Boolean {
         val u = ticker.trim().uppercase()
         if (u.isEmpty()) return false
+        if (CryptoMarkets.isAutopilotTicker(u)) return true
         if (u.startsWith(SERIES)) return CryptoMarkets.isLiveTicker(u)
         if (!isD3Ticker(u)) return false
         return heldD3.any { it.equals(u, ignoreCase = true) }

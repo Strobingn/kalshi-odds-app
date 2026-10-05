@@ -150,8 +150,8 @@ class MarketRepository(
     ): MarketsSnapshot = refreshMutex.withLock {
         refreshOnce(
             watchBtc = true,
-            watchEth = false,
-            watchSol = false,
+            watchEth = true,
+            watchSol = true,
             extraTickers = CryptoMarkets.liveTickers(extraTickers),
             edgeThresholdPp = edgeThresholdPp
         )
@@ -247,7 +247,7 @@ class MarketRepository(
             logPredictions(ethUi, SeriesKind.ETH, now)
             logPredictions(solUi, SeriesKind.SOL, now)
             logPredictions(extraUi, SeriesKind.CRYPTO, now)
-            (btcUi + extraUi).forEach { m ->
+            (btcUi + ethUi + solUi + extraUi).forEach { m ->
                 m.closeTimeEpochMs?.let { scorer.noteCloseTime(m.ticker, it) }
             }
             runCatching { scorer.maybeScore(now) }

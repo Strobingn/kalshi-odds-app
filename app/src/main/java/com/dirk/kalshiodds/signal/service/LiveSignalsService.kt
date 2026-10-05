@@ -309,8 +309,8 @@ class LiveSignalsService : Service() {
                     }
                     val snap = container.repository.refresh(
                         watchBtc = true,
-                        watchEth = false,
-                        watchSol = false,
+                        watchEth = true,
+                        watchSol = true,
                         extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(settings.extraTickerList()),
                         edgeThresholdPp = settings.effectiveEdgeThresholdPp()
                     )

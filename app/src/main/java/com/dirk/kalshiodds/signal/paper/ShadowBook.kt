@@ -110,15 +110,12 @@ class ShadowBook(
                 abs(it.limitPrice - incoming.limitPrice) < PaperAutopilot.PRICE_DELTA
         }
         if (hit != null) return Recorded(hit, false)
-        val booked = incoming.booked && incoming.depthFill &&
-            incoming.stakeUsd > 0.0 && cur.cashUsd + 1e-9 >= incoming.stakeUsd
+        val booked = incoming.booked && incoming.depthFill && incoming.stakeUsd > 0.0
         val row = incoming.copy(
             id = incoming.id.ifBlank { idFactory() },
             booked = booked,
             unfilledReason = when {
                 booked -> null
-                incoming.depthFill && cur.cashUsd + 1e-9 < incoming.stakeUsd ->
-                    "Shadow bankroll cannot cover the exact order — not marked as a fill"
                 else -> incoming.unfilledReason ?: "Would not fill at the intended limit"
             },
             createdAtMs = if (incoming.createdAtMs > 0L) incoming.createdAtMs else nowMs()
@@ -190,14 +187,16 @@ class ShadowBook(
      * Reserve today's spend and the client_order_id before HTTP.
      * False means do not send. The id stays attempted even if the call fails.
      */
-    fun claimLive(clientOrderId: String, dayKey: String, reserveUsd: Double, dailyCapUsd: Double): Boolean =
+    /**
+     * Remember the client_order_id before HTTP so a failure is not retried.
+     * Spend is recorded for the session display. It does not block a later clip.
+     */
+    fun claimLive(clientOrderId: String, dayKey: String, reserveUsd: Double): Boolean =
         synchronized(lock) {
             val cur = _state.value
             if (clientOrderId.isBlank() || cur.liveAttemptedIds.contains(clientOrderId)) return false
             val spent = if (cur.liveDayKey == dayKey) cur.liveSpentUsd else 0.0
             val reserve = reserveUsd.coerceAtLeast(0.0)
-            if (spent + reserve > dailyCapUsd + 1e-6) return false
-            if (reserve > com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-6) return false
             publish(
                 cur.copy(
                     liveDayKey = dayKey,

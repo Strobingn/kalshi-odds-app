@@ -20,8 +20,6 @@ object AutopilotDispatch {
         val shadowPrice: Double?,
         val shadowDepthFill: Boolean,
         val shadowAllInUsd: Double,
-        val spentTodayUsd: Double,
-        val dailyCapUsd: Double,
         val alreadyAttempted: Boolean
     )
 
@@ -58,8 +56,6 @@ object AutopilotDispatch {
             shadowPrice = request.shadowPrice,
             shadowDepthFill = request.shadowDepthFill,
             shadowAllInUsd = request.shadowAllInUsd,
-            spentTodayUsd = request.spentTodayUsd,
-            dailyCapUsd = request.dailyCapUsd,
             alreadyAttempted = request.alreadyAttempted
         )
         return Result(
