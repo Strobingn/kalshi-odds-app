@@ -107,7 +107,11 @@ class PublishSafetyTest(unittest.TestCase):
             self.assertTrue(payload["synthetic"])
             self.assertEqual(payload["data_source"], "synthetic_fixture")
             self.assertFalse(payload["beats_market"])
+            self.assertFalse(payload["beat_market"])
             self.assertFalse(payload["publishable"])
+            self.assertEqual(payload["package"], "com.dirk.kalshiodds.kashi")
+            self.assertEqual(len(payload["sha256"]), 64)
+            self.assertTrue(str(payload["tag"]).startswith("model-"))
             self.assertGreaterEqual(payload["n_markets"], 1)
 
     def test_synthetic_never_beats_market(self) -> None:
@@ -124,6 +128,7 @@ class PublishSafetyTest(unittest.TestCase):
             }
         )
         self.assertFalse(d["beats_market"])
+        self.assertFalse(d["beat_market"])
         self.assertFalse(d["publishable"])
 
     def test_tiny_margin_does_not_beat_market(self) -> None:
@@ -163,10 +168,60 @@ class PublishSafetyTest(unittest.TestCase):
                 "market_brier": 0.186,
                 "model_logloss": 0.480,
                 "market_logloss": 0.520,
+                "sim_pnl": 25.0,
+                "sim_trades": 40,
+                "market_pnl": -10.0,
             }
         )
         self.assertTrue(d["beats_market"])
+        self.assertTrue(d["beat_market"])
         self.assertTrue(d["publishable"])
+
+    def test_negative_fee_pnl_does_not_beat_market(self) -> None:
+        d = gates.publish_decision(
+            {
+                "synthetic": False,
+                "n_markets": 2500,
+                "n_rows": 12000,
+                "n_holdout": 800,
+                "model_brier": 0.160,
+                "market_brier": 0.186,
+                "model_logloss": 0.480,
+                "market_logloss": 0.520,
+                "sim_pnl": -4.0,
+                "sim_trades": 80,
+                "market_pnl": -10.0,
+            }
+        )
+        self.assertFalse(d["beat_market"])
+        self.assertFalse(d["publishable"])
+        self.assertTrue(any("fee-aware" in r for r in d["reasons"]))
+
+    def test_positive_pnl_that_loses_to_market_follow_is_not_publishable(self) -> None:
+        d = gates.publish_decision(
+            {
+                "synthetic": False,
+                "n_markets": 2500,
+                "n_rows": 12000,
+                "n_holdout": 800,
+                "model_brier": 0.160,
+                "market_brier": 0.186,
+                "model_logloss": 0.480,
+                "market_logloss": 0.520,
+                "sim_pnl": 5.0,
+                "sim_trades": 80,
+                "market_pnl": 9.0,
+            }
+        )
+        self.assertFalse(d["beat_market"])
+        self.assertFalse(d["publishable"])
+
+    def test_no_side_fee_uses_complement_price(self) -> None:
+        # YES mid 0.20, model buys NO, NO wins.
+        # NO price 0.80, fee 0.07*0.8*0.2 = 0.0112, profit 1-0.80-0.0112.
+        pnl = te.simulated_pnl([0.05], [0.20], [0])
+        self.assertEqual(pnl["n"], 1)
+        self.assertAlmostEqual(pnl["pnl"], 0.1888, places=4)
 
 
 class GoldenFeatureTest(unittest.TestCase):

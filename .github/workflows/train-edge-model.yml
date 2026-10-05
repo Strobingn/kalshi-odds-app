@@ -2,11 +2,12 @@ name: Train edge model
 
 on:
   schedule:
-    # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
+    # Daily 08:17 UTC — retrain on fresh settled Kalshi BTC/ETH/SOL 15m data.
     # GitHub Actions schedules fire only from the repository default branch.
     # This file is on kashi, so the cron does not run while the default
     # branch is main. workflow_dispatch on this branch still works.
-    - cron: "17 8 * * 1"
+    # Until then, run `python3 ml/publish_daily.py --github` locally.
+    - cron: "17 8 * * *"
   workflow_dispatch:
     inputs:
       days:
@@ -30,10 +31,10 @@ jobs:
         with:
           python-version: "3.12"
       - name: Trainer tests (no look-ahead + publish safety)
-        run: python3 ml/test_train_edge.py
+        run: python3 ml/test_train_edge.py && python3 ml/test_publish_model.py
       - name: Train
         id: train
-        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '3650' }} --series KXBTC15M --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '3650' }} --series KXBTC15M,KXETH15M,KXSOL15M --out ml/edge_model.json --manifest ml/edge_model_manifest.json
       - name: Refuse publish unless gates pass
         run: |
           python3 - <<'PY'
@@ -61,43 +62,8 @@ jobs:
             ml/edge_model_manifest.json
             ml/fixtures/parity_sample.json
           if-no-files-found: error
-      - name: Publish rolling release
+      - name: Publish model-YYYYMMDD only if beat_market
         if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          python3 - <<'PY'
-          import json, pathlib, sys
-          sys.path.insert(0, "ml")
-          import publish_gates as gates
-          m = json.loads(pathlib.Path("ml/edge_model_manifest.json").read_text())
-          d = gates.publish_decision(m)
-          if not d["publishable"]:
-              raise SystemExit("refusing to create edge-model-latest: gates failed")
-          PY
-          gh release delete edge-model-latest --yes || true
-          NOTES=$(python3 - <<'PY'
-          import json, pathlib
-          p = pathlib.Path("ml/edge_model_manifest.json")
-          m = json.loads(p.read_text()) if p.is_file() else {}
-          print(
-              "Weekly edge model\\n\\n"
-              f"- version: {m.get('version')}\\n"
-              f"- trained_at: {m.get('trained_at')}\\n"
-              f"- n_markets: {m.get('n_markets')}\\n"
-              f"- n_rows: {m.get('n_rows') or m.get('n_samples')}\\n"
-              f"- n_holdout: {m.get('n_holdout')}\\n"
-              f"- synthetic: {m.get('synthetic')}\\n"
-              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
-              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
-              f"- beats_market: {m.get('beats_market')}\\n"
-              f"- publishable: {m.get('publishable')}"
-          )
-          PY
-          )
-          gh release create edge-model-latest \
-            ml/edge_model.json \
-            ml/edge_model_manifest.json \
-            --title "Edge model (latest)" \
-            --notes "$NOTES"
+        run: python3 ml/publish_model.py --github --model ml/edge_model.json --manifest ml/edge_model_manifest.json

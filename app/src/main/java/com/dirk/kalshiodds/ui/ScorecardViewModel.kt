@@ -48,13 +48,11 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
                 runCatching {
                     val token = container.extraSecrets.githubToken
                     when (val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)) {
-                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready -> {
-                            if (out.fetch.decision.activate) {
-                                container.importedModel.activate(out.fetch.model, out.fetch.manifest)
-                                container.scoring.edgeModel = out.fetch.model
-                            }
-                            out.fetch.decision.reason
-                        }
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready ->
+                            com.dirk.kalshiodds.prediction.PublishedModelInstaller.apply(
+                                container.importedModel,
+                                out
+                            ) { model -> container.scoring.edgeModel = model }
                         is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.NeedsAuth -> out.message
                         is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Failed -> out.message
                     }

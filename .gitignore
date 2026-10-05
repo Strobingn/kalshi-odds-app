@@ -60,6 +60,8 @@ Thumbs.db
 *~
 ml/train_log.txt
 ml/edge_model.json
+ml/edge_model_manifest.json
+ml/__pycache__/
 ml/parity_sample.last.json
 
 # Backtest raw cache (re-fetch; only fixtures/ are committed)

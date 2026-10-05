@@ -82,6 +82,9 @@ class KalshiOddsApp : Application() {
         appScope.launch {
             runCatching { checkKashiUpdateIfDue() }
         }
+        appScope.launch(Dispatchers.IO) {
+            runCatching { refreshPublishedEdgeModel() }
+        }
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
             runCatching { container.preferences.applyPaperBankrollReset0328IfNeeded(container.paper.book) }
@@ -102,6 +105,17 @@ class KalshiOddsApp : Application() {
                         // Off: the running service observes DataStore and stopSelfs.
                     }
             }
+        }
+    }
+
+    private fun refreshPublishedEdgeModel() {
+        val token = runCatching { container.extraSecrets.githubToken }.getOrNull()
+        val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)
+        com.dirk.kalshiodds.prediction.PublishedModelInstaller.apply(
+            container.importedModel,
+            out
+        ) { model ->
+            container.scoring.edgeModel = model
         }
     }
 

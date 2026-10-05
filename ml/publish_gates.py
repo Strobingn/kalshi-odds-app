@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
+# Android applicationId this model is allowed to activate.
+PACKAGE_ID = "com.dirk.kalshiodds.kashi"
 # Distinct settled markets required before a model may be published.
 MIN_PUBLISH_MARKETS = 2000
 # Feature rows required (one decision minute is one row).
@@ -17,6 +19,8 @@ MIN_HOLDOUT_ROWS = 400
 # Brier / log-loss must beat the market by at least this much on holdout.
 MIN_BRIER_MARGIN = 0.010
 MIN_LOGLOSS_MARGIN = 0.010
+# Fee-aware holdout trades required. A lucky handful must not publish.
+MIN_SIM_TRADES = 30
 
 
 def publish_decision(metrics: dict[str, Any]) -> dict[str, Any]:
@@ -31,6 +35,11 @@ def publish_decision(metrics: dict[str, Any]) -> dict[str, Any]:
     market_ll = float(metrics.get("market_logloss", 1.0))
     brier_margin = market_brier - model_brier
     ll_margin = market_ll - model_ll
+    sim_trades = int(metrics.get("sim_trades") or 0)
+    sim_pnl_raw = metrics.get("sim_pnl")
+    market_pnl_raw = metrics.get("market_pnl")
+    sim_pnl = float(sim_pnl_raw) if sim_pnl_raw is not None else None
+    market_pnl = float(market_pnl_raw) if market_pnl_raw is not None else None
     reasons: list[str] = []
     if synthetic:
         reasons.append("synthetic=true — test/fixture data is not publishable")
@@ -50,13 +59,31 @@ def publish_decision(metrics: dict[str, Any]) -> dict[str, Any]:
         reasons.append(
             f"holdout log-loss margin {ll_margin:.4f} < {MIN_LOGLOSS_MARGIN:.3f}"
         )
+    if sim_pnl is None:
+        reasons.append("sim_pnl missing — fee-aware holdout P&L is required")
+    elif sim_pnl <= 0.0:
+        reasons.append(
+            f"fee-aware holdout P&L {sim_pnl:.4f} <= 0 (loses to the market after fees)"
+        )
+    if sim_trades < MIN_SIM_TRADES:
+        reasons.append(f"sim_trades {sim_trades} < {MIN_SIM_TRADES}")
+    if market_pnl is None:
+        reasons.append("market_pnl missing — fee-aware market-follow baseline is required")
+    elif sim_pnl is not None and sim_pnl <= market_pnl:
+        reasons.append(
+            f"fee-aware P&L {sim_pnl:.4f} does not beat market-follow {market_pnl:.4f}"
+        )
     beats = not reasons
     return {
         "beats_market": beats,
+        "beat_market": beats,
         "publishable": beats and not synthetic,
         "reasons": reasons,
         "brier_margin": brier_margin,
         "logloss_margin": ll_margin,
+        "sim_pnl": sim_pnl,
+        "sim_trades": sim_trades,
+        "market_pnl": market_pnl,
         "n_markets": n_markets,
         "n_rows": n_rows,
         "n_holdout": n_holdout,
@@ -66,4 +93,6 @@ def publish_decision(metrics: dict[str, Any]) -> dict[str, Any]:
         "min_holdout": MIN_HOLDOUT_ROWS,
         "min_brier_margin": MIN_BRIER_MARGIN,
         "min_logloss_margin": MIN_LOGLOSS_MARGIN,
+        "min_sim_trades": MIN_SIM_TRADES,
+        "package": PACKAGE_ID,
     }
