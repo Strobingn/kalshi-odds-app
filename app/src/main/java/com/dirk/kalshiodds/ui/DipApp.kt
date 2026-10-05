@@ -4,12 +4,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AccountBalance
 import androidx.compose.material.icons.filled.Assessment
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
-import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.ReceiptLong
+import androidx.compose.material.icons.filled.FormatListBulleted
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -86,16 +86,15 @@ private data class BottomDestination(
 
 /**
  * Mirrors the compact, always-visible six-tab layout in the supplied design.
- * "Signals" and "History" name the actual screens; calling either "Live" or
- * "Real" would imply real-money order execution, which this navigation does
- * not do.
+ * "Live" is the signal feed and "Real" opens the recorded-history screen;
+ * neither tab places an order by itself.
  */
 private val bottomDestinations = listOf(
     BottomDestination(AppRoutes.HOME, "Home", Icons.Default.Home),
     BottomDestination(AppRoutes.SCORECARD, "Scorecard", Icons.Default.Assessment),
-    BottomDestination(AppRoutes.SIGNAL_HISTORY, "Signals", Icons.Default.Notifications),
-    BottomDestination(AppRoutes.HISTORY, "History", Icons.Default.History),
-    BottomDestination(AppRoutes.DATA, "Data", Icons.Default.Storage),
+    BottomDestination(AppRoutes.SIGNAL_HISTORY, "Live", Icons.Default.ReceiptLong),
+    BottomDestination(AppRoutes.HISTORY, "Real", Icons.Default.AccountBalance),
+    BottomDestination(AppRoutes.DATA, "Data", Icons.Default.FormatListBulleted),
     BottomDestination(AppRoutes.SETTINGS, "More", Icons.Default.MoreHoriz)
 )
 
