@@ -125,7 +125,8 @@ class PaperBook(
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
             stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
-            winTargetUsd = ticket.winTargetUsd
+            winTargetUsd = ticket.winTargetUsd,
+            winProb = ticket.modelChance
         )
     }
 
@@ -138,7 +139,10 @@ class PaperBook(
             side = alert.predictedSide,
             limitPrice = px,
             source = "AI signal",
-            note = alert.reason.ifBlank { "LiveCall / Bitcoin Claude signal" }
+            note = alert.reason.ifBlank { "LiveCall / Bitcoin Claude signal" },
+            winProb = alert.fairValuePp.takeIf { it.isFinite() }?.div(100.0)?.let {
+                if (alert.predictedSide.equals("NO", true)) 1.0 - it else it
+            }
         )
     }
 
@@ -542,7 +546,8 @@ class PaperBook(
         note: String,
         contracts: Int? = null,
         stakeUsd: Double? = null,
-        winTargetUsd: Double? = null
+        winTargetUsd: Double? = null,
+        winProb: Double? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -550,7 +555,19 @@ class PaperBook(
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null
-            val qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            val clip = floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            // The AI sizes by its edge (Kelly, up to all paper cash); without one it keeps the $5 clip.
+            val edgeQty = if (contracts == null) PaperSizer.contracts(cur.cashUsd, px, winProb) else 0
+            val qty = contracts?.takeIf { it > 0 } ?: maxOf(clip, edgeQty)
+            val sizedNote = if (edgeQty > clip && cur.cashUsd > 0.0) {
+                String.format(
+                    java.util.Locale.US,
+                    " · sized by edge: %.0f%% of paper cash",
+                    edgeQty * px / cur.cashUsd * 100.0
+                )
+            } else {
+                ""
+            }
             if (qty < 1) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
                 return null
@@ -576,7 +593,7 @@ class PaperBook(
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),
-                note = note,
+                note = note + sizedNote,
                 winTargetUsd = winTargetUsd
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
