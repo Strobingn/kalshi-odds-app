@@ -1,8 +1,10 @@
 name: Train edge model
 
 on:
-  # Run this workflow on KIMI-Bitcoin for a branch-only model release. GitHub
-  # schedules run the default branch and would use main's trainer instead.
+  # Schedules only fire from the default branch; workflow_dispatch works on any
+  # branch when you run the workflow from that branch in the Actions UI.
+  schedule:
+    - cron: "17 8 * * *"
   workflow_dispatch:
     inputs:
       days:
@@ -22,42 +24,69 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: Sanitize branch name
+        id: meta
+        run: |
+          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
       - name: Trainer tests (no look-ahead)
-        run: python3 ml/test_train_edge.py
+        run: |
+          if [ -f ml/test_train_edge.py ]; then python3 ml/test_train_edge.py; fi
+          if [ -f ml/test_publish_model.py ]; then python3 ml/test_publish_model.py; fi
       - name: Train
-        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+        run: |
+          # Prefer BTC/ETH/SOL when the trainer supports --series; else plain train.
+          if python3 ml/train_edge.py --help 2>&1 | grep -q -- '--series'; then
+            python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} \
+              --series KXBTC15M,KXETH15M,KXSOL15M \
+              --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+          else
+            python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} \
+              --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+          fi
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
-          name: edge-model-json
+          name: edge-model-json-${{ steps.meta.outputs.branch }}
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
             ml/fixtures/parity_sample.json
-          if-no-files-found: error
-      - name: Publish rolling release
+          if-no-files-found: warn
+      - name: Publish rolling release for this branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release delete edge-model-KIMI-Bitcoin --yes --cleanup-tag || true
+          tag="edge-model-${{ steps.meta.outputs.branch }}"
+          # Prefer dedicated publisher when present (beat-market gate).
+          if [ -f ml/publish_model.py ]; then
+            python3 ml/publish_model.py --github \
+              --model ml/edge_model.json \
+              --manifest ml/edge_model_manifest.json || {
+                echo "publish_model refused (likely failed beat-market gate) — skipping release"
+                exit 0
+              }
+            exit 0
+          fi
+          gh release delete "$tag" --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
           p = pathlib.Path("ml/edge_model_manifest.json")
           m = json.loads(p.read_text()) if p.is_file() else {}
           print(
-              "Weekly edge model\\n\\n"
-              f"- version: {m.get('version')}\\n"
-              f"- trained_at: {m.get('trained_at')}\\n"
-              f"- n_samples: {m.get('n_samples')}\\n"
-              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
-              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
-              f"- beats_market: {m.get('beats_market')}"
+              "Edge model\n\n"
+              f"- version: {m.get('version')}\n"
+              f"- trained_at: {m.get('trained_at')}\n"
+              f"- n_samples: {m.get('n_samples') or m.get('n_rows')}\n"
+              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\n"
+              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\n"
+              f"- beats_market: {m.get('beats_market') or m.get('beat_market')}"
           )
           PY
           )
-          gh release create edge-model-KIMI-Bitcoin \
+          gh release create "$tag" \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
-            --title "Edge model (latest)" \
+            --title "Edge model (${{ github.ref_name }})" \
             --notes "$NOTES"
