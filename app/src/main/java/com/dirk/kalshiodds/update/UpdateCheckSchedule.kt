@@ -24,7 +24,7 @@ object UpdateAvailability {
 
 object InstallUnknownApps {
     const val GUIDE =
-        "Allow Install unknown apps for Bitcoin Kalshi, then tap Check for updates again."
+        "Allow Install unknown apps for Kalshi Trader, then tap Check for updates again."
 
     fun settingsAction(): String = "android.settings.MANAGE_UNKNOWN_APP_SOURCES"
 

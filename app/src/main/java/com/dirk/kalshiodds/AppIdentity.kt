@@ -11,7 +11,7 @@ package com.dirk.kalshiodds
 object AppIdentity {
     const val APPLICATION_ID = "com.dirk.kalshiodds.kashi"
     const val NAMESPACE = "com.dirk.kalshiodds"
-    const val LABEL = "Bitcoin Kalshi"
+    const val LABEL = "Kalshi Trader"
 
     /** FileProvider for the in-app debug APK. Authority stays on this applicationId. */
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"

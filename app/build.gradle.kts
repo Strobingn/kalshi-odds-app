@@ -14,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds.kashi"
         minSdk = 26
         targetSdk = 35
-        versionCode = 49
-        versionName = "0.3.34"
+        versionCode = 50
+        versionName = "0.3.35"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
