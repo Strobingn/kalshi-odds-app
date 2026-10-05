@@ -56,6 +56,23 @@ class KalshiTradeClientTest {
     }
 
     @Test
+    fun restingTicketSendsPostOnlyGtcAndOrdinaryTicketDoesNot() = runBlocking {
+        val api = RecordingTradeApi(
+            create = Response.success(
+                201,
+                CreateOrderV2Response(orderId = "o", clientOrderId = "c", fillCount = "0.00", remainingCount = "9.00", tsMs = 1L)
+            )
+        )
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+        client.createLimit(sampleTicket().copy(postOnly = true), "c1")
+        client.createLimit(sampleTicket(), "c2")
+        assertTrue(api.creates[0].postOnly)
+        assertEquals("good_till_canceled", api.creates[0].timeInForce)
+        assertFalse(api.creates[0].reduceOnly)
+        assertFalse(api.creates[1].postOnly)
+    }
+
+    @Test
     fun http404DoesNotFallBackToLegacyPortfolioOrders() = runBlocking {
         val primary = RecordingTradeApi(create = error(404, """{"error":{"code":"not_found","message":"nope"}}"""))
         val client = KalshiTradeClient(primary = primary, credentials = { "key" to fakePem })

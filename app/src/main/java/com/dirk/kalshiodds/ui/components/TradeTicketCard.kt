@@ -51,6 +51,7 @@ fun TradeTicketsSection(
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
+    onRest: (String) -> Unit = {},
     onApproveSell: (String, Int, Double) -> Unit = { id, _, _ -> onApprove(id) },
     onPaper: (String) -> Unit,
     onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
@@ -163,6 +164,7 @@ fun TradeTicketsSection(
             credentialsConfigured = credentialsConfigured,
             paperTradingEnabled = paperTradingEnabled,
             onApprove = { onApprove(awaiting.ticket.id) },
+            onRest = { onRest(awaiting.ticket.id) },
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
             onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
@@ -463,6 +465,7 @@ internal fun ApproveTicketDialog(
     paperTradingEnabled: Boolean = false,
     onApprove: () -> Unit,
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
+    onRest: (() -> Unit)? = null,
     onPaper: () -> Unit,
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
     onDismiss: () -> Unit
@@ -632,6 +635,12 @@ internal fun ApproveTicketDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (!ticket.isSell && !ticket.postOnly && !paperBuy && !paperTradingEnabled && credentialsConfigured && onRest != null) {
+                    TextButton(
+                        onClick = onRest,
+                        enabled = ticket.canApprove
+                    ) { Text("REST 1¢ BETTER") }
+                }
                 if (!ticket.isSell) {
                     TextButton(
                         onClick = onPaper,

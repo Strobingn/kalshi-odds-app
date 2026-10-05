@@ -74,7 +74,11 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /** Kalshi `post_only`: rejected instead of crossing the book, so never a taker order. */
+    val postOnly: Boolean = false,
+    /** Resting buys are cancelled this long after they are accepted, if unfilled. */
+    val restingCancelAfterMs: Long? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

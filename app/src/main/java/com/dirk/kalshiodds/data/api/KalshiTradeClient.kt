@@ -217,6 +217,7 @@ class KalshiTradeClient(
                 ?: String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
             timeInForce = timeInForce,
             clientOrderId = clientOrderId,
+            postOnly = ticket.postOnly && !reduceOnly,
             reduceOnly = reduceOnly
         )
     }

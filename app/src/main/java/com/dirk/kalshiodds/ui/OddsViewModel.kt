@@ -607,6 +607,35 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val placed = (next.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted)?.order?.ticket
             liveCap.record(com.dirk.kalshiodds.signal.trade.LiveDailyCap.costOf(placed ?: ticket!!))
         }
+        // A resting bid that is still open after its time is cancelled: it must not sit through the window.
+        val order = (next.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted)?.order
+        val cancelAfter = order?.ticket?.restingCancelAfterMs
+        val orderId = order?.orderId
+        if (order != null && cancelAfter != null && orderId != null && order.isResting) {
+            viewModelScope.launch {
+                kotlinx.coroutines.delay(cancelAfter)
+                val stillOpen = ticketSession.snapshot().working.any { it.orderId == orderId && it.isResting }
+                if (stillOpen) cancelWorkingOrder(orderId)
+            }
+        }
+    }
+
+    /**
+     * Turn the ticket awaiting Approve into a post-only resting bid one cent
+     * above the best bid ([com.dirk.kalshiodds.signal.trade.RestingBid]).
+     * Changes nothing at Kalshi; the user still has to Approve.
+     */
+    fun restTicket(ticketId: String) {
+        val snap = _state.value
+        val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId } ?: return
+        val market = snap.snapshot?.allMarkets?.firstOrNull { it.ticker == ticket.ticker }
+        val ctx = ticketContext(snap, container.clock.nowMs())
+        val bid = market?.let { TicketBuilder.freshBestBid(it, ticket.side, ctx) }
+        val ask = market?.let { TicketBuilder.bestAsk(it, ticket.side, ctx) }
+        com.dirk.kalshiodds.signal.trade.RestingBid.build(ticket, bid, ask).fold(
+            onSuccess = { rested -> ticketSession.revise(ticketId) { rested } },
+            onFailure = { ticketSession.failSoft(it.message ?: "Cannot rest this order") }
+        )
     }
 
     fun approveSellTicket(ticketId: String, count: Int, price: Double) {
