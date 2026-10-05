@@ -55,12 +55,14 @@ jobs:
             --tests 'com.dirk.kalshiodds.signal.feedback.ForecastUnitsTest' \
             --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
             --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
+            --tests 'com.dirk.kalshiodds.signal.PaperBookTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestSqliteTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardTestTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardSqliteTest' \
             --tests 'com.dirk.kalshiodds.signal.ResultsPersistenceTest' \
             --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
+            --tests 'com.dirk.kalshiodds.ui.BackNavigationTest' \
             --no-daemon --stacktrace
 
       - name: Rename APK
