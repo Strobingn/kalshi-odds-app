@@ -35,8 +35,10 @@ object ForecastUnits {
      * P(YES) < 50%. Null when the 2–98% clamp is binding, or at exactly 50%.
      * This is not the EV side (model versus market).
      */
-    fun modelWinnerSide(e: PredictionLogEntry): String? {
-        val p = probability01(e.predictedYes)
+    fun modelWinnerSide(e: PredictionLogEntry): String? = modelWinnerSide(e.predictedYes)
+
+    fun modelWinnerSide(predictedYes: Double): String? {
+        val p = probability01(predictedYes)
         if (!p.isFinite()) return null
         if (ProbabilityClamp.binding(p)) return null
         return when {
@@ -45,6 +47,14 @@ object ForecastUnits {
             else -> null
         }
     }
+
+    /**
+     * Side both prediction-log writers store. Model winner (P(YES) vs 50%),
+     * not the edge-versus-market side. Clamp-bound or 50/50 is NO BET so
+     * the row is not scored as a directional pick.
+     */
+    fun loggedModelSide(predictedYes: Double): String =
+        modelWinnerSide(predictedYes) ?: SignalStance.NO_BET
 
     /** YES if the app picked YES / UP; NO otherwise. Null side → P(YES) > 0.5. */
     fun pickedSideIsYes(e: PredictionLogEntry): Boolean {

@@ -268,7 +268,7 @@ fun DataScreen(
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
-            state.message?.let {
+            state.message?.takeIf { it != state.modelNote }?.let {
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(24.dp))

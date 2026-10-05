@@ -139,7 +139,18 @@ data class PaperBookState(
      * Fills evicted from the 80-row ledger, kept so cloud sync still
      * upserts them. Cleared after a successful push of those rows.
      */
-    val syncTail: List<PaperFill> = emptyList()
+    val syncTail: List<PaperFill> = emptyList(),
+    /**
+     * Every fill in the current book, including rows already pushed
+     * and dropped from [syncTail]. The 80-row ledger is a window;
+     * this list is the post-reset history the scorecard sums.
+     * Cleared only by [PaperBook.reset], which moves it into [archived].
+     *
+     * 0.3.29 does not wipe on-device data. Scorecard dollars recompute
+     * from this history (and ignore pre-reset [archived] ids that sync
+     * tried to put back into [fills]).
+     */
+    val postResetFills: List<PaperFill> = emptyList()
 ) {
     val openStakeUsd: Double get() = fills.filter { !it.settled }.sumOf { it.stakeUsd }
     val realizedPnlUsd: Double get() = lifetimeRealizedPnlUsd ?: fills.mapNotNull { it.pnlUsd }.sum()
@@ -153,11 +164,43 @@ data class PaperBookState(
 
     /** Live ledger + trimmed tail + reset archives, newest status per id. */
     fun fillsForSync(): List<PaperFill> {
-        val all = fills + syncTail + archived.flatMap { it.fills }
+        val all = fills + syncTail + postResetFills + archived.flatMap { it.fills }
         return all.groupBy { it.id }.map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
     }
 
+    /** Ids sitting in a reset archive. Sync must not put these back into the live book. */
+    fun archivedFillIds(): Set<String> = archived.flatMap { it.fills }.map { it.id }.toSet()
+
+    /**
+     * Settled-and-open fills that belong to the current book: live
+     * ledger, sync tail, and retained post-reset history, deduped by
+     * id. Pre-reset archive ids are excluded even if a bad sync copied
+     * them back into [fills].
+     */
+    fun scorecardFills(): List<PaperFill> = rememberFills(this)
+
+    /** Pre-reset archive, deduped. Not part of [scorecardFills]. */
+    fun archivedFills(): List<PaperFill> =
+        archived.flatMap { it.fills }
+            .groupBy { it.id }
+            .map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
+
     companion object {
+
+        /**
+         * Current-book fills, newest copy per id, minus anything that
+         * already lives in a reset archive.
+         */
+        @JvmStatic
+        fun rememberFills(state: PaperBookState): List<PaperFill> {
+            val archivedIds = state.archivedFillIds()
+            val pool = state.postResetFills + state.fills + state.syncTail
+            return pool
+                .filter { it.id !in archivedIds }
+                .groupBy { it.id }
+                .map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
+        }
+
         /** 0.3.19: $100 start → $1,000, preserving realized P&L. */
         @JvmStatic
         fun migrateStartUsd(state: PaperBookState): PaperBookState {
@@ -216,11 +259,12 @@ class PaperBook(
         synchronized(lock) {
             val cur = _state.value
             val start = toUsd.takeIf { it.isFinite() && it > 0.0 } ?: SignalConstants.PAPER_START_USD
+            val prior = PaperBookState.rememberFills(cur)
             val archive = PaperArchive(
                 archivedAtMs = nowMs(),
                 startingUsd = cur.startingUsd,
                 cashUsd = cur.cashUsd,
-                fills = (cur.fills + cur.syncTail).map { it.copy(updatedAtMs = nowMs()) },
+                fills = prior.map { it.copy(updatedAtMs = nowMs()) },
                 note = "Paper book reset — ledger archived"
             )
             publish(
@@ -413,6 +457,7 @@ class PaperBook(
     fun upsertFromSync(incoming: PaperFill) {
         synchronized(lock) {
             val cur = _state.value
+            if (incoming.id in cur.archivedFillIds()) return
             val idx = cur.fills.indexOfFirst { it.id == incoming.id }
             if (idx >= 0) {
                 val merged = mergeSyncFill(cur.fills[idx], incoming)
@@ -431,6 +476,15 @@ class PaperBook(
                 publish(cur.copy(syncTail = next))
                 return
             }
+            val keptIdx = cur.postResetFills.indexOfFirst { it.id == incoming.id }
+            if (keptIdx >= 0) {
+                val merged = mergeSyncFill(cur.postResetFills[keptIdx], incoming)
+                if (merged == cur.postResetFills[keptIdx]) return
+                val next = cur.postResetFills.toMutableList()
+                next[keptIdx] = merged
+                publish(cur.copy(postResetFills = next))
+                return
+            }
             val (kept, tail) = retainLedger(cur, listOf(incoming) + cur.fills)
             publish(cur.copy(fills = kept, syncTail = tail))
         }
@@ -440,9 +494,10 @@ class PaperBook(
     fun acknowledgePaperSync(beforeMs: Long) {
         synchronized(lock) {
             val cur = _state.value
+            val remembered = PaperBookState.rememberFills(cur)
             val next = cur.syncTail.filter { it.syncAtMs() > beforeMs }
-            if (next.size == cur.syncTail.size) return
-            publish(cur.copy(syncTail = next))
+            if (next.size == cur.syncTail.size && remembered == cur.postResetFills) return
+            publish(cur.copy(postResetFills = remembered, syncTail = next))
         }
     }
 
@@ -1047,8 +1102,10 @@ class PaperBook(
     }
 
     private fun publish(next: PaperBookState) {
-        _state.value = next
-        runCatching { persist(next) }
+        val remembered = PaperBookState.rememberFills(next)
+        val stamped = if (remembered == next.postResetFills) next else next.copy(postResetFills = remembered)
+        _state.value = stamped
+        runCatching { persist(stamped) }
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "$%.2f", v)

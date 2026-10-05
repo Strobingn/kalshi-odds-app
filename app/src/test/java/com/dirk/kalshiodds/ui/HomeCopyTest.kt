@@ -146,6 +146,11 @@ class HomeCopyTest {
 
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(null).line)
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.0).line)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.001).line)
+        assertEquals(0, HomeCopy.tenDollarWins(0.001).contracts)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.99).line)
+        assertTrue(HomeCopy.tenDollarWins(0.02).line.startsWith("\$10 wins"))
+        assertTrue(HomeCopy.tenDollarWins(0.98).line.startsWith("\$10 wins"))
         assertEquals(10.0, HomeCopy.TILE_STAKE_USD, 1e-9)
         assertEquals(10.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
         assertEquals(10.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)

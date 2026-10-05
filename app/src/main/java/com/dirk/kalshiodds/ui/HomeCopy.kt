@@ -194,7 +194,7 @@ object HomeCopy {
      * `C×P + fee ≤ $10`. Display only — never sizes a ticket.
      */
     fun tenDollarWins(ask: Double?): TenDollarWins {
-        val px = KalshiPrice.usable(ask)
+        val px = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.scoreAsk(ask)
         if (px == null) {
             return TenDollarWins(null, 0, 0.0, 0.0, null, TEN_WINS_DASH)
         }

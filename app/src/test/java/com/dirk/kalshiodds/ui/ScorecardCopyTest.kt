@@ -220,14 +220,14 @@ class ScorecardCopyTest {
         assertEquals(40, stats.hits)
         assertEquals(48, stats.total)
         assertEquals("Picked side: 40/48 correct (83%)", HomeCopy.pickedSideLine(stats.hits, stats.total))
-        assertEquals(-0.80, stats.pnlUsd!!, 1e-9)
-        assertTrue(stats.pnlUsd!! < 0.0)
+        assertEquals(0.0, stats.pnlUsd!!, 1e-9)
         val view = ScorecardCopy.of(entries, 0.0)
-        assertEquals(
-            "Break-even win rate at your avg win/loss: 85%",
-            ScorecardCopy.breakEvenWinRateLine(view.ledger.ai.money)
-        )
-        assertTrue(view.allLines().contains("Break-even win rate at your avg win/loss: 85%"))
+        assertEquals(0.0, view.ledger.ai.money.pnlUsd, 1e-9)
+        assertNull(ScorecardCopy.breakEvenWinRateLine(view.ledger.ai.money))
+        assertEquals(48, view.ledger.hypotheticalPicks)
+        assertEquals(-0.80, view.ledger.hypotheticalPerContractUsd, 1e-9)
+        assertTrue(view.hypotheticalLine!!.contains(ScorecardCopy.HYPOTHETICAL_LABEL))
+        assertTrue(view.allLines().contains(view.hypotheticalLine))
     }
 
     @Test

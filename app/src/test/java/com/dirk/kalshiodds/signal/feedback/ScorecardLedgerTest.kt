@@ -7,6 +7,7 @@ import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.ui.HomeFixtures
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -222,19 +223,26 @@ class ScorecardLedgerTest {
     }
 
     @Test
-    fun derivesPaperStakeWhenAskStoredButSizeMissing() {
+    fun logRowWithoutFillCountsInWinLossAtZeroDollars() {
         val ask = 0.34
-        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(ask, ScorecardLedger.PAPER_STAKE_USD)
         val entry = pick("KXBTC15M-DERIVE", "YES", won = true, at = 1_000L, yes = 0.70, ask = ask)
         val snap = ScorecardLedger.of(listOf(entry), emptyList())
         val row = snap.picks.single()
         assertFalse(row.entryNotRecorded)
-        assertEquals(clip.count, row.contracts)
-        assertEquals(clip.allInUsd, row.stakeUsd!!, 1e-9)
-        assertEquals(clip.feeUsd, row.feeUsd!!, 1e-9)
-        assertEquals(clip.profitIfWinUsd, row.pnlUsd!!, 1e-9)
-        assertEquals(clip.profitIfWinUsd, snap.combined.money.pnlUsd, 1e-9)
+        assertNull(row.contracts)
+        assertNull(row.stakeUsd)
+        assertEquals(0.0, row.pnlUsd!!, 1e-9)
+        assertEquals(1, snap.combined.wins)
+        assertEquals(0.0, snap.combined.money.pnlUsd, 1e-9)
+        assertEquals(0.0, snap.ai.money.pnlUsd, 1e-9)
+        assertEquals(1, snap.hypotheticalPicks)
+        assertEquals(1.0 - ask, snap.hypotheticalPerContractUsd, 1e-9)
         assertReconciles(snap.byPrice, snap.combined)
+        val penny = pick("KXBTC15M-PENNY", "YES", won = true, at = 2_000L, yes = 0.70, ask = 0.001)
+        val cheap = ScorecardLedger.of(listOf(penny), emptyList())
+        assertEquals(0.0, cheap.combined.money.pnlUsd, 1e-9)
+        assertEquals(0, cheap.hypotheticalPicks)
+        assertTrue(cheap.picks.single().entryNotRecorded)
     }
 
     @Test
@@ -250,6 +258,12 @@ class ScorecardLedgerTest {
         assertEquals(clip.count, sized.contracts)
         assertEquals(clip.allInUsd, sized.stakeUsd!!, 1e-9)
         assertEquals(clip.feeUsd, sized.feeUsd!!, 1e-9)
+        assertNull(ScorecardLedger.paperClipFromAsk(0.001))
+        assertNull(ScorecardLedger.paperClipFromAsk(0.99))
+        assertNull(ScorecardLedger.captureEntryFromBook(sideYes = true, yesAsk = 0.001, noAsk = 0.50).entryAsk)
+        assertNull(ScorecardLedger.captureEntryFromBook(sideYes = false, yesAsk = 0.40, noAsk = 0.995, yesBid = 0.001).entryAsk)
+        assertNotNull(ScorecardLedger.paperClipFromAsk(0.02))
+        assertNotNull(ScorecardLedger.paperClipFromAsk(0.98))
         val hub = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/SignalHub.kt").let { f ->
             if (f.isFile) f.readText() else java.io.File("src/main/java/com/dirk/kalshiodds/signal/SignalHub.kt").readText()
         }

@@ -34,7 +34,10 @@ class PaperBookStore(
             prefs.edit().putString(KEY, json.encodeToString(PaperBookState.serializer(), state)).apply()
         }
         runCatching {
-            sqlPersist?.invoke(state.fills + state.archived.flatMap { it.fills })
+            val mirror = (state.scorecardFills() + state.archivedFills())
+                .groupBy { it.id }
+                .map { (_, rows) -> rows.maxBy { it.syncAtMs() } }
+            sqlPersist?.invoke(mirror)
         }
     }
 

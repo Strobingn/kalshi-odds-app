@@ -286,9 +286,10 @@ object ScorecardMetrics {
     }
 
     /**
-     * Real paper P&L for [entries] when at least one pick has a recorded
-     * $ outcome (fill, stored size, or $10 paper clip from a known ask).
-     * Null when every pick is "entry not recorded".
+     * Paper P&L for [entries]. A log row with no fill contributes $0.
+     * Null when every pick is "entry not recorded" (no ask inside 2–98¢
+     * and no fill). 0.3.29 recomputes this on update; it does not wipe
+     * the prediction log.
      */
     fun windowPnlUsd(
         entries: List<PredictionLogEntry>,

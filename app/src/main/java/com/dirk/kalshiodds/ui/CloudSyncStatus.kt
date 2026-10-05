@@ -27,7 +27,12 @@ object CloudSyncStatus {
     }
 
     fun isError(message: String): Boolean {
-        val m = message.trim().lowercase()
+        if (message.lineSequence().any { line -> lineIsError(line) }) return true
+        return false
+    }
+
+    private fun lineIsError(line: String): Boolean {
+        val m = line.trim().lowercase()
         if (m.isBlank() || m.startsWith("synced")) return false
         if (m == "cloud sync off" || m.startsWith("cloud sync ready") || m.startsWith("cloud sync is off")) {
             return false
@@ -37,11 +42,13 @@ object CloudSyncStatus {
             m.startsWith("403") ||
             m.startsWith("404") ||
             m.startsWith("5") ||
+            m.contains("21000") ||
             m.contains("rls") ||
             m.contains("bad key") ||
             m.contains("table missing") ||
             m.contains("sync failed") ||
-            m.contains("not configured")
+            m.contains("not configured") ||
+            m.contains("diphunter_sync ") && (m.contains("500") || m.contains("failed"))
     }
 
     fun line(settings: DataHubSettings, zone: ZoneId = ZoneId.systemDefault()): String {

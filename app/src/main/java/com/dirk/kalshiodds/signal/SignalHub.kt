@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
-import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.TickSource
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -359,23 +358,18 @@ class SignalHub(
         persistScope.launch {
             try {
                 runCatching {
-                    val predictedSide = SignalStance.resolve(
-                        storedSide = scored.predictedSide,
-                        modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
-                        marketYes = scored.marketMidPp,
-                        fairYes = scored.fairValuePp
-                    ).storedSide
-                    val sideYes = when (predictedSide?.trim()?.uppercase()) {
-                        "YES" -> true
-                        "NO" -> false
-                        else -> (scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp) > 50.0
+                    val modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp
+                    val predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.loggedModelSide(modelYes)
+                    val sized = if (predictedSide == "YES" || predictedSide == "NO") {
+                        com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
+                            sideYes = predictedSide == "YES",
+                            yesAsk = tick.yesAsk,
+                            noAsk = tick.noAsk,
+                            yesBid = tick.yesBid
+                        )
+                    } else {
+                        com.dirk.kalshiodds.signal.feedback.ScorecardLedger.StoredEntry(null, null, null, null)
                     }
-                    val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
-                        sideYes = sideYes,
-                        yesAsk = tick.yesAsk,
-                        noAsk = tick.noAsk,
-                        yesBid = tick.yesBid
-                    )
                     store.upsertOpenPrediction(
                         ticker = tick.ticker,
                         series = tick.series,

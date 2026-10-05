@@ -34,7 +34,20 @@ class SupabaseSync(
         val message: String,
         val pulled: Int = 0,
         val pushed: Int = 0,
-        val atMs: Long = System.currentTimeMillis()
+        val atMs: Long = System.currentTimeMillis(),
+        /**
+         * At least one upsert batch landed (or there was nothing to push).
+         * Last synced may move forward even when another batch failed.
+         */
+        val advanced: Boolean = false,
+        /** Safe to drop the paper sync tail. False when the paper batch failed. */
+        val acknowledgePaper: Boolean = false
+    )
+
+    data class PushOutcome(
+        val pushed: Int,
+        val errors: List<String>,
+        val paperOk: Boolean
     )
 
     data class LocalBundle(
@@ -72,23 +85,43 @@ class SupabaseSync(
         return out
     }
 
-    fun push(settings: DataHubSettings, rows: List<SyncMerge.Record>): Int {
-        if (!settings.supabaseConfigured || rows.isEmpty()) return 0
+    fun push(settings: DataHubSettings, rows: List<SyncMerge.Record>): Int =
+        pushBatches(settings, rows).pushed
+
+    /**
+     * Upsert [rows] to [TABLE] (`diphunter_sync`). Each kind is its own
+     * batch so one failure does not roll back the others. Every batch is
+     * deduped on the conflict key (`key`, already `kashi:`-prefixed)
+     * before POST — Postgres error 21000 is "ON CONFLICT DO UPDATE
+     * cannot affect row a second time" when one command repeats a key.
+     * Newest [SyncMerge.Record.updatedAtMs] wins; a tie keeps the last row.
+     */
+    fun pushBatches(settings: DataHubSettings, rows: List<SyncMerge.Record>): PushOutcome {
+        if (!settings.supabaseConfigured || rows.isEmpty()) {
+            return PushOutcome(pushed = 0, errors = emptyList(), paperOk = true)
+        }
         val safe = rows
             .filter { !SyncMerge.isForbiddenPayload(it.payload) }
             .map { it.copy(key = namespaceKey(it.key)) }
-        if (safe.isEmpty()) return 0
-        val arr = JSONArray()
-        for (r in safe) {
-            val o = JSONObject()
-            o.put("key", r.key)
-            o.put("kind", r.kind)
-            o.put("updated_at", r.updatedAtMs)
-            o.put("payload", JSONObject(r.payload))
-            arr.put(o)
+        if (safe.isEmpty()) return PushOutcome(0, emptyList(), paperOk = true)
+        val deduped = dedupeBatch(safe)
+        var pushed = 0
+        val errors = ArrayList<String>()
+        var sawPaper = false
+        var paperOk = true
+        for ((kind, batch) in deduped.groupBy { it.kind }) {
+            if (kind == "paper") sawPaper = true
+            try {
+                restUpsert(settings, TABLE, batchBody(batch))
+                pushed += batch.size
+            } catch (t: Throwable) {
+                val reason = t.message?.takeIf { it.isNotBlank() } ?: "sync failed"
+                errors += "$TABLE $kind: $reason"
+                if (kind == "paper") paperOk = false
+            }
         }
-        restUpsert(settings, arr.toString())
-        return safe.size
+        if (!sawPaper) paperOk = true
+        return PushOutcome(pushed, errors, paperOk)
     }
 
     fun pack(bundle: LocalBundle): List<SyncMerge.Record> {
@@ -287,12 +320,16 @@ class SupabaseSync(
             val merged = SyncMerge.merge(packed, remote)
             apply(merged.upserts, store, onSettings, onPaper)
             val outgoing = SyncMerge.outgoing(packed, lastPushMs)
-            val pushed = push(settings, outgoing)
+            val pushed = pushBatches(settings, outgoing)
+            val head = "Synced · pulled ${remote.size} · merged ${merged.upserts.size} · pushed ${pushed.pushed}"
+            val message = if (pushed.errors.isEmpty()) head else (listOf(head) + pushed.errors).joinToString("\n")
             Status(
-                ok = true,
-                message = "Synced · pulled ${remote.size} · merged ${merged.upserts.size} · pushed $pushed",
+                ok = pushed.errors.isEmpty(),
+                message = message,
                 pulled = remote.size,
-                pushed = pushed
+                pushed = pushed.pushed,
+                advanced = pushed.errors.isEmpty() || pushed.pushed > 0,
+                acknowledgePaper = pushed.paperOk
             )
         } catch (t: Throwable) {
             Status(ok = false, message = t.message?.takeIf { it.isNotBlank() } ?: "Sync failed")
@@ -320,8 +357,21 @@ class SupabaseSync(
         return execute(req)
     }
 
-    private fun restUpsert(settings: DataHubSettings, body: String) {
-        val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$TABLE"
+    private fun batchBody(rows: List<SyncMerge.Record>): String {
+        val arr = JSONArray()
+        for (r in rows) {
+            val o = JSONObject()
+            o.put("key", r.key)
+            o.put("kind", r.kind)
+            o.put("updated_at", r.updatedAtMs)
+            o.put("payload", JSONObject(r.payload))
+            arr.put(o)
+        }
+        return arr.toString()
+    }
+
+    private fun restUpsert(settings: DataHubSettings, table: String, body: String) {
+        val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$table"
         val req = Request.Builder()
             .url(url)
             .header("apikey", settings.supabaseAnonKey)
@@ -360,6 +410,19 @@ class SupabaseSync(
 
         fun namespaceKey(key: String): String =
             if (key.startsWith(KEY_PREFIX)) key else KEY_PREFIX + key
+
+        /**
+         * One row per conflict key. Newest [SyncMerge.Record.updatedAtMs]
+         * wins. Equal timestamps keep the last occurrence.
+         */
+        fun dedupeBatch(rows: List<SyncMerge.Record>): List<SyncMerge.Record> {
+            val byKey = LinkedHashMap<String, SyncMerge.Record>()
+            for (row in rows) {
+                val prev = byKey[row.key]
+                if (prev == null || row.updatedAtMs >= prev.updatedAtMs) byKey[row.key] = row
+            }
+            return byKey.values.toList()
+        }
 
         /** Only this app's rows. Other DipHunter builds share the table. */
         fun acceptsPulledRow(key: String, kind: String): Boolean {
