@@ -1,0 +1,220 @@
+{
+ "events": [
+  {
+   "event_ticker": "KXFEDDECISION-26OCT",
+   "series_ticker": "KXFEDDECISION",
+   "title": "Fed decision in October 2026?",
+   "category": "Economics",
+   "mutually_exclusive": true,
+   "markets": [
+    {
+     "ticker": "KXFEDDECISION-26OCT-C25",
+     "status": "active",
+     "title": "Will the Fed cut rates by 25bps at the October 2026 meeting?",
+     "yes_sub_title": "Cut 25bps",
+     "no_sub_title": "Cut 25bps",
+     "expected_expiration_time": "2026-10-28T18:00:00Z",
+     "close_time": "2026-10-28T17:55:00Z",
+     "rules_primary": "If the Federal Reserve cuts the upper bound of the federal funds target range by exactly 25 bps at its meeting concluding Oct 28, 2026, then the market resolves to Yes.",
+     "rules_secondary": "Source: Federal Reserve FOMC statement. If the meeting is postponed beyond Nov 15, 2026, the market resolves based on the next scheduled meeting.",
+     "yes_bid_dollars": "0.5800",
+     "yes_ask_dollars": "0.6000"
+    },
+    {
+     "ticker": "KXFEDDECISION-26OCT-C50",
+     "status": "active",
+     "title": "Will the Fed cut rates by 50bps at the October 2026 meeting?",
+     "yes_sub_title": "Cut 50bps",
+     "no_sub_title": "Cut 50bps",
+     "expected_expiration_time": "2026-10-28T18:00:00Z",
+     "close_time": "2026-10-28T17:55:00Z",
+     "rules_primary": "If the Federal Reserve cuts by exactly 50 bps at its meeting concluding Oct 28, 2026, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "yes_bid_dollars": "0.1000",
+     "yes_ask_dollars": "0.1200"
+    },
+    {
+     "ticker": "KXFEDDECISION-26OCT-H0",
+     "status": "active",
+     "title": "Will the Fed hold rates at the October 2026 meeting?",
+     "yes_sub_title": "Hold",
+     "no_sub_title": "Hold",
+     "expected_expiration_time": "2026-10-28T18:00:00Z",
+     "close_time": "2026-10-28T17:55:00Z",
+     "rules_primary": "If the Federal Reserve leaves the target range unchanged at its meeting concluding Oct 28, 2026, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "yes_bid_dollars": "0.2800",
+     "yes_ask_dollars": "0.3000"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXNFLGAME-26OCT12KCBUF",
+   "series_ticker": "KXNFLGAME",
+   "title": "Kansas City at Buffalo",
+   "category": "Sports",
+   "mutually_exclusive": true,
+   "markets": [
+    {
+     "ticker": "KXNFLGAME-26OCT12KCBUF-KC",
+     "status": "active",
+     "title": "Kansas City at Buffalo Winner?",
+     "yes_sub_title": "Kansas City",
+     "no_sub_title": "Kansas City",
+     "expected_expiration_time": "2026-10-13T03:00:00Z",
+     "close_time": "2026-10-27T00:00:00Z",
+     "rules_primary": "If Kansas City wins the Kansas City at Buffalo professional football game originally scheduled for Oct 12, 2026, then the market resolves to Yes.",
+     "rules_secondary": "The outcome includes overtime. If the game ends in a tie, the market resolves to the last traded price. If the game is postponed and not played within two weeks, the market resolves to No.",
+     "yes_bid_dollars": "0.5300",
+     "yes_ask_dollars": "0.5500"
+    },
+    {
+     "ticker": "KXNFLGAME-26OCT12KCBUF-BUF",
+     "status": "active",
+     "title": "Kansas City at Buffalo Winner?",
+     "yes_sub_title": "Buffalo",
+     "no_sub_title": "Buffalo",
+     "expected_expiration_time": "2026-10-13T03:00:00Z",
+     "close_time": "2026-10-27T00:00:00Z",
+     "rules_primary": "If Buffalo wins the Kansas City at Buffalo professional football game originally scheduled for Oct 12, 2026, then the market resolves to Yes.",
+     "rules_secondary": "The outcome includes overtime. If the game ends in a tie, the market resolves to the last traded price.",
+     "yes_bid_dollars": "0.4500",
+     "yes_ask_dollars": "0.4700"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXSENATEOH-26",
+   "series_ticker": "KXSENATEOH",
+   "title": "Who will win the Ohio Senate race in 2026?",
+   "category": "Elections",
+   "mutually_exclusive": true,
+   "markets": [
+    {
+     "ticker": "KXSENATEOH-26-JDOE",
+     "status": "active",
+     "title": "Will Jane Doe win the Ohio Senate race in 2026?",
+     "yes_sub_title": "Jane Doe",
+     "no_sub_title": "Jane Doe",
+     "expected_expiration_time": "2026-11-04T15:00:00Z",
+     "close_time": "2026-11-03T23:00:00Z",
+     "rules_primary": "If Jane Doe is certified as the winner of the 2026 Ohio Senate election, then the market resolves to Yes. Source: Associated Press call, confirmed by certification.",
+     "rules_secondary": "",
+     "yes_bid_dollars": "0.6000",
+     "yes_ask_dollars": "0.6200"
+    },
+    {
+     "ticker": "KXSENATEOH-26-JROE",
+     "status": "active",
+     "title": "Will John Roe win the Ohio Senate race in 2026?",
+     "yes_sub_title": "John Roe",
+     "no_sub_title": "John Roe",
+     "expected_expiration_time": "2026-11-04T15:00:00Z",
+     "close_time": "2026-11-03T23:00:00Z",
+     "rules_primary": "If John Roe is certified as the winner of the 2026 Ohio Senate election, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "yes_bid_dollars": "0.3700",
+     "yes_ask_dollars": "0.3900"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXCPIYOY-26SEP",
+   "series_ticker": "KXCPIYOY",
+   "title": "CPI year-over-year in September 2026",
+   "category": "Economics",
+   "mutually_exclusive": false,
+   "markets": [
+    {
+     "ticker": "KXCPIYOY-26SEP-T3.0",
+     "status": "active",
+     "title": "Will CPI be above 3.0% in September 2026?",
+     "yes_sub_title": "Above 3.0%",
+     "no_sub_title": "Above 3.0%",
+     "expected_expiration_time": "2026-10-14T12:30:00Z",
+     "close_time": "2026-10-14T12:25:00Z",
+     "rules_primary": "If the year-over-year change in CPI-U for September 2026, as first released by the Bureau of Labor Statistics, is above 3.0%, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "strike_type": "greater",
+     "floor_strike": 3.0,
+     "yes_bid_dollars": "0.6200",
+     "yes_ask_dollars": "0.6400"
+    },
+    {
+     "ticker": "KXCPIYOY-26SEP-T3.5",
+     "status": "active",
+     "title": "Will CPI be above 3.5% in September 2026?",
+     "yes_sub_title": "Above 3.5%",
+     "no_sub_title": "Above 3.5%",
+     "expected_expiration_time": "2026-10-14T12:30:00Z",
+     "close_time": "2026-10-14T12:25:00Z",
+     "rules_primary": "If the year-over-year change in CPI-U for September 2026 is above 3.5%, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "strike_type": "greater",
+     "floor_strike": 3.5,
+     "yes_bid_dollars": "0.1000",
+     "yes_ask_dollars": "0.1200"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXBTCD-26OCT31",
+   "series_ticker": "KXBTCD",
+   "title": "Bitcoin price on Oct 31, 2026?",
+   "category": "Crypto",
+   "mutually_exclusive": false,
+   "markets": [
+    {
+     "ticker": "KXBTCD-26OCT31-T120000",
+     "status": "active",
+     "title": "Will Bitcoin be above $120,000 on Oct 31, 2026?",
+     "yes_sub_title": "$120,000 or above",
+     "no_sub_title": "$120,000 or above",
+     "expected_expiration_time": "2026-10-31T21:00:00Z",
+     "close_time": "2026-10-31T21:00:00Z",
+     "rules_primary": "If the CF Benchmarks Bitcoin Real Time Index (BRTI) 60-second average before 5 PM ET on Oct 31, 2026 is above $120,000, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "strike_type": "greater",
+     "floor_strike": 120000,
+     "yes_bid_dollars": "0.2800",
+     "yes_ask_dollars": "0.3000"
+    },
+    {
+     "ticker": "KXBTCD-26OCT31-T130000",
+     "status": "active",
+     "title": "Will Bitcoin be above $130,000 on Oct 31, 2026?",
+     "yes_sub_title": "$130,000 or above",
+     "no_sub_title": "$130,000 or above",
+     "expected_expiration_time": "2026-10-31T21:00:00Z",
+     "close_time": "2026-10-31T21:00:00Z",
+     "rules_primary": "If BRTI is above $130,000, then the market resolves to Yes.",
+     "rules_secondary": "",
+     "strike_type": "greater",
+     "floor_strike": 130000,
+     "yes_bid_dollars": "0.0800",
+     "yes_ask_dollars": "0.1000"
+    }
+   ]
+  },
+  {
+   "event_ticker": "KXMVESPORTS-PARLAY1",
+   "series_ticker": "KXMVESPORTS",
+   "title": "Chiefs and Bills parlay",
+   "category": "Sports",
+   "mutually_exclusive": false,
+   "markets": [
+    {
+     "ticker": "KXMVESPORTS-PARLAY1-A",
+     "status": "active",
+     "title": "Kansas City and Buffalo",
+     "yes_sub_title": "yes",
+     "no_sub_title": "yes",
+     "expected_expiration_time": "2026-10-13T03:00:00Z",
+     "close_time": "2026-10-13T03:00:00Z",
+     "rules_primary": "parlay",
+     "rules_secondary": ""
+    }
+   ]
+  }
+ ]
+}

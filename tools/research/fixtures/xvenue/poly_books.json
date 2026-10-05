@@ -1,0 +1,160 @@
+{
+ "fed25-yes": {
+  "asks": [
+   {
+    "price": "0.66",
+    "size": "80"
+   }
+  ],
+  "bids": [
+   {
+    "price": "0.64",
+    "size": "80"
+   }
+  ]
+ },
+ "fed25-no": {
+  "asks": [
+   {
+    "price": "0.37",
+    "size": "500"
+   },
+   {
+    "price": "0.35",
+    "size": "50"
+   }
+  ],
+  "bids": [
+   {
+    "price": "0.34",
+    "size": "50"
+   }
+  ]
+ },
+ "fed50-yes": {
+  "asks": [
+   {
+    "price": "0.13",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "fed50-no": {
+  "asks": [
+   {
+    "price": "0.89",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "chiefs-1012": {
+  "asks": [
+   {
+    "price": "0.58",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "bills-1012": {
+  "asks": [
+   {
+    "price": "0.4",
+    "size": "60"
+   }
+  ],
+  "bids": []
+ },
+ "chiefs-1220": {
+  "asks": [
+   {
+    "price": "0.52",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "bills-1220": {
+  "asks": [
+   {
+    "price": "0.5",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "jdoe-yes": {
+  "asks": [
+   {
+    "price": "0.63",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "jdoe-no": {
+  "asks": [
+   {
+    "price": "0.38",
+    "size": "100"
+   }
+  ],
+  "bids": []
+ },
+ "cpi30-yes": {
+  "asks": [
+   {
+    "price": "0.55",
+    "size": "40"
+   }
+  ],
+  "bids": []
+ },
+ "cpi30-no": {
+  "asks": [
+   {
+    "price": "0.47",
+    "size": "40"
+   }
+  ],
+  "bids": []
+ },
+ "cpi30b-yes": {
+  "asks": [
+   {
+    "price": "0.42",
+    "size": "40"
+   }
+  ],
+  "bids": []
+ },
+ "cpi30b-no": {
+  "asks": [
+   {
+    "price": "0.6",
+    "size": "40"
+   }
+  ],
+  "bids": []
+ },
+ "btc120-yes": {
+  "asks": [
+   {
+    "price": "0.31",
+    "size": "300"
+   }
+  ],
+  "bids": []
+ },
+ "btc120-no": {
+  "asks": [
+   {
+    "price": "0.71",
+    "size": "300"
+   }
+  ],
+  "bids": []
+ }
+}

@@ -1,0 +1,182 @@
+{
+ "KXFEDDECISION-26OCT-C25": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.5800",
+     "150.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.4000",
+     "100.00"
+    ],
+    [
+     "0.3800",
+     "200.00"
+    ]
+   ]
+  }
+ },
+ "KXFEDDECISION-26OCT-C50": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.1000",
+     "100.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.8800",
+     "100.00"
+    ]
+   ]
+  }
+ },
+ "KXFEDDECISION-26OCT-H0": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.2800",
+     "100.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.7000",
+     "100.00"
+    ]
+   ]
+  }
+ },
+ "KXNFLGAME-26OCT12KCBUF-KC": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.5300",
+     "40.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.4500",
+     "40.00"
+    ]
+   ]
+  }
+ },
+ "KXNFLGAME-26OCT12KCBUF-BUF": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.4500",
+     "30.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.5300",
+     "30.00"
+    ]
+   ]
+  }
+ },
+ "KXSENATEOH-26-JDOE": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.6000",
+     "100.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.3800",
+     "100.00"
+    ]
+   ]
+  }
+ },
+ "KXSENATEOH-26-JROE": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.3700",
+     "100.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.6100",
+     "100.00"
+    ]
+   ]
+  }
+ },
+ "KXCPIYOY-26SEP-T3.0": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.6200",
+     "70.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.3600",
+     "70.00"
+    ]
+   ]
+  }
+ },
+ "KXCPIYOY-26SEP-T3.5": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.1000",
+     "70.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.8800",
+     "70.00"
+    ]
+   ]
+  }
+ },
+ "KXBTCD-26OCT31-T120000": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.2800",
+     "500.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.7000",
+     "500.00"
+    ]
+   ]
+  }
+ },
+ "KXBTCD-26OCT31-T130000": {
+  "orderbook_fp": {
+   "yes_dollars": [
+    [
+     "0.0800",
+     "500.00"
+    ]
+   ],
+   "no_dollars": [
+    [
+     "0.9000",
+     "500.00"
+    ]
+   ]
+  }
+ }
+}

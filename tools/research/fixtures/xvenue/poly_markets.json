@@ -1,0 +1,266 @@
+[
+ {
+  "id": "101",
+  "question": "Fed decreases interest rates by 25 bps after October 2026 meeting?",
+  "slug": "fixture-101",
+  "endDate": "2026-10-28T00:00:00Z",
+  "category": "",
+  "description": "This market will resolve to \"Yes\" if the upper bound of the target federal funds rate is decreased by 25 bps at the October 2026 FOMC meeting. The resolution source is the FOMC statement. If no statement is released by November 15, 2026, this market resolves to \"No\".",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"fed25-yes\", \"fed25-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "25 bps decrease",
+  "resolutionSource": "",
+  "bestBid": 0.64,
+  "bestAsk": 0.66,
+  "events": [
+   {
+    "id": "e101",
+    "title": "Fed decreases interest rates by 25 bps after October 2026 meeting?"
+   }
+  ]
+ },
+ {
+  "id": "102",
+  "question": "Fed decreases interest rates by 50+ bps after October 2026 meeting?",
+  "slug": "fixture-102",
+  "endDate": "2026-10-28T00:00:00Z",
+  "category": "",
+  "description": "Resolves Yes if rates are decreased by 50 or more bps at the October 2026 FOMC meeting.",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"fed50-yes\", \"fed50-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "50+ bps decrease",
+  "resolutionSource": "",
+  "bestBid": 0.11,
+  "bestAsk": 0.13,
+  "events": [
+   {
+    "id": "e102",
+    "title": "Fed decreases interest rates by 50+ bps after October 2026 meeting?"
+   }
+  ]
+ },
+ {
+  "id": "201",
+  "question": "Chiefs vs. Bills",
+  "slug": "fixture-201",
+  "endDate": "2026-10-12T20:25:00Z",
+  "category": "Sports",
+  "description": "In the upcoming NFL game scheduled for October 12, 2026, if the Kansas City Chiefs win, this market resolves to \"Chiefs\". If the game is postponed past October 19, 2026 or ends in a tie, this market resolves 50-50.",
+  "outcomes": "[\"Chiefs\", \"Bills\"]",
+  "clobTokenIds": "[\"chiefs-1012\", \"bills-1012\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": 0.57,
+  "bestAsk": 0.58,
+  "events": [
+   {
+    "id": "e201",
+    "title": "Chiefs vs. Bills"
+   }
+  ]
+ },
+ {
+  "id": "202",
+  "question": "Chiefs vs. Bills",
+  "slug": "fixture-202",
+  "endDate": "2026-12-20T18:00:00Z",
+  "category": "Sports",
+  "description": "Rematch scheduled for December 20, 2026.",
+  "outcomes": "[\"Chiefs\", \"Bills\"]",
+  "clobTokenIds": "[\"chiefs-1220\", \"bills-1220\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": 0.5,
+  "bestAsk": 0.52,
+  "events": [
+   {
+    "id": "e202",
+    "title": "Chiefs vs. Bills"
+   }
+  ]
+ },
+ {
+  "id": "301",
+  "question": "Will Jane Doe win the 2026 Ohio Senate election?",
+  "slug": "fixture-301",
+  "endDate": "2026-11-03T12:00:00Z",
+  "category": "Politics",
+  "description": "This market will resolve to \"Yes\" if Jane Doe wins the 2026 US Senate election in Ohio, per Associated Press, Fox News and NBC calls. Otherwise \"No\".",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"jdoe-yes\", \"jdoe-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "Jane Doe",
+  "resolutionSource": "",
+  "bestBid": 0.62,
+  "bestAsk": 0.63,
+  "events": [
+   {
+    "id": "e301",
+    "title": "Will Jane Doe win the 2026 Ohio Senate election?"
+   }
+  ]
+ },
+ {
+  "id": "401",
+  "question": "Will September 2026 CPI be above 3.0%?",
+  "slug": "fixture-401",
+  "endDate": "2026-10-14T12:00:00Z",
+  "category": "",
+  "description": "Resolves Yes if the annual CPI inflation for September 2026 published by the Bureau of Labor Statistics (https://www.bls.gov/cpi/) is above 3.0%.",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"cpi30-yes\", \"cpi30-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": 0.53,
+  "bestAsk": 0.55,
+  "events": [
+   {
+    "id": "e401",
+    "title": "Will September 2026 CPI be above 3.0%?"
+   }
+  ]
+ },
+ {
+  "id": "402",
+  "question": "Will September 2026 CPI be below 3.0%?",
+  "slug": "fixture-402",
+  "endDate": "2026-10-14T12:00:00Z",
+  "category": "",
+  "description": "Resolves Yes if annual CPI for September 2026 is below 3.0%.",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"cpi30b-yes\", \"cpi30b-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": 0.4,
+  "bestAsk": 0.42,
+  "events": [
+   {
+    "id": "e402",
+    "title": "Will September 2026 CPI be below 3.0%?"
+   }
+  ]
+ },
+ {
+  "id": "501",
+  "question": "Will Bitcoin be above $120k on October 31?",
+  "slug": "fixture-501",
+  "endDate": "2026-10-31T16:00:00Z",
+  "category": "Crypto",
+  "description": "Resolves Yes if the Binance BTC/USDT 1 minute candle for 12:00 ET on October 31 has a final close above $120,000.",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"btc120-yes\", \"btc120-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": 0.29,
+  "bestAsk": 0.31,
+  "events": [
+   {
+    "id": "e501",
+    "title": "Will Bitcoin be above $120k on October 31?"
+   }
+  ]
+ },
+ {
+  "id": "502",
+  "question": "Will Bitcoin be above $120k on November 30?",
+  "slug": "fixture-502",
+  "endDate": "2026-11-30T17:00:00Z",
+  "category": "Crypto",
+  "description": "Binance BTC/USDT 12:00 ET November 30 close above $120,000.",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"btc120n-yes\", \"btc120n-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": 0.4,
+  "bestAsk": 0.42,
+  "events": [
+   {
+    "id": "e502",
+    "title": "Will Bitcoin be above $120k on November 30?"
+   }
+  ]
+ },
+ {
+  "id": "601",
+  "question": "Who will win the Ohio Senate election?",
+  "slug": "fixture-601",
+  "endDate": "2026-11-03T12:00:00Z",
+  "category": "Politics",
+  "description": "",
+  "outcomes": "[\"Doe\", \"Roe\", \"Other\"]",
+  "clobTokenIds": "[\"x1\", \"x2\", \"x3\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": true,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": null,
+  "bestAsk": null,
+  "events": [
+   {
+    "id": "e601",
+    "title": "Who will win the Ohio Senate election?"
+   }
+  ]
+ },
+ {
+  "id": "701",
+  "question": "Will Jane Doe win the 2026 Ohio Senate election?",
+  "slug": "fixture-701",
+  "endDate": "2026-11-03T12:00:00Z",
+  "category": "Politics",
+  "description": "",
+  "outcomes": "[\"Yes\", \"No\"]",
+  "clobTokenIds": "[\"old-yes\", \"old-no\"]",
+  "active": true,
+  "closed": false,
+  "enableOrderBook": false,
+  "acceptingOrders": true,
+  "groupItemTitle": "",
+  "resolutionSource": "",
+  "bestBid": null,
+  "bestAsk": null,
+  "events": [
+   {
+    "id": "e701",
+    "title": "Will Jane Doe win the 2026 Ohio Senate election?"
+   }
+  ]
+ }
+]
