@@ -9,10 +9,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 data class ScanBudget(
-    /** 200 events per page. */
-    val maxEventPages: Int = 40,
-    /** Order books fetched per scan (~8/s → under 20 s). */
-    val maxBooks: Int = 150
+    /** 200 events per page; Kalshi lists ~12,000+ open events, so 40 pages missed a third. */
+    val maxEventPages: Int = 80,
+    /** Order books fetched per scan (~8/s → about 30 s). Best pre-fee edge first. */
+    val maxBooks: Int = 250
 )
 
 data class ScanReport(
