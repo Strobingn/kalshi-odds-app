@@ -1,0 +1,66 @@
+{
+  "_comment": "Hand-written fixtures shaped like Kalshi Trade API v2 responses (field names from the kalshi_python_sync 3.31.0 models). Values are invented for tests, NOT real Kalshi data.",
+  "/series/KXBTC15M": {
+    "series": {
+      "ticker": "KXBTC15M",
+      "title": "Bitcoin price up or down in 15 minutes",
+      "frequency": "fifteen_min",
+      "category": "Crypto",
+      "fee_type": "quadratic",
+      "fee_multiplier": 1,
+      "contract_url": "",
+      "contract_terms_url": ""
+    }
+  },
+  "/series/KXETH15M": {
+    "series": {
+      "ticker": "KXETH15M",
+      "title": "Ethereum price up or down in 15 minutes",
+      "fee_type": "quadratic_with_maker_fees",
+      "fee_multiplier": 1
+    }
+  },
+  "/series/KXSOL15M": {
+    "series": {
+      "ticker": "KXSOL15M",
+      "title": "Solana price up or down in 15 minutes",
+      "fee_type": "flat",
+      "fee_multiplier": 1
+    }
+  },
+  "/series/fee_changes?series_ticker=KXBTC15M&show_historical=true": {
+    "series_fee_change_arr": [
+      {"id": "c1", "series_ticker": "KXBTC15M", "fee_type": "quadratic", "fee_multiplier": 1, "scheduled_ts": "2026-01-01T00:00:00Z"},
+      {"id": "c2", "series_ticker": "KXBTC15M", "fee_type": "quadratic_with_maker_fees", "fee_multiplier": 1, "scheduled_ts": "2026-12-01T00:00:00Z"}
+    ]
+  },
+  "/series/fee_changes?series_ticker=KXETH15M&show_historical=true": {"series_fee_change_arr": []},
+  "/markets?series_ticker=KXBTC15M&status=open&limit=3": {
+    "markets": [{"ticker": "KXBTC15M-26OCT051215-15", "fee_waiver_expiration_time": null, "yes_bid_dollars": "0.4800"}]
+  },
+  "/markets?series_ticker=KXETH15M&status=open&limit=3": {"markets": []},
+  "/events/fee_changes?limit=200": {
+    "event_fee_changes": [
+      {"id": "e1", "event_ticker": "KXETH15M-26OCT051215", "series_ticker": "KXETH15M", "fee_type_override": "quadratic", "fee_multiplier_override": 0.5, "scheduled_ts": "2026-10-05T12:00:00Z"},
+      {"id": "e2", "event_ticker": "KXNFLGAME-26OCT05", "series_ticker": "KXNFLGAME", "fee_type_override": null, "fee_multiplier_override": null, "scheduled_ts": "2026-10-05T12:00:00Z"}
+    ],
+    "cursor": "page2"
+  },
+  "/events/fee_changes?limit=200&cursor=page2": {
+    "event_fee_changes": [
+      {"id": "e3", "event_ticker": "KXBTC15M-26OCT051230", "series_ticker": "KXBTC15M", "fee_type_override": null, "fee_multiplier_override": null, "scheduled_ts": "2026-10-05T12:30:00Z"}
+    ],
+    "cursor": ""
+  },
+  "/incentive_programs?status=active&type=liquidity&limit=1000": {
+    "incentive_programs": [
+      {"id": "i1", "market_id": "m1", "market_ticker": "KXBTC15M-26OCT051215-15", "incentive_type": "liquidity", "incentive_description": "test",
+       "start_date": "2026-10-05T00:00:00Z", "end_date": "2026-10-07T00:00:00Z", "period_reward": 200000, "paid_out": false,
+       "discount_factor_bps": 5000, "target_size_fp": "500.00", "max_reward_per_account": null},
+      {"id": "i2", "market_id": "m2", "market_ticker": "KXNFLGAME-26OCT05BUFNYJ-BUF", "incentive_type": "liquidity", "incentive_description": "test",
+       "start_date": "2026-10-05T00:00:00Z", "end_date": "2026-10-06T00:00:00Z", "period_reward": 10000000, "paid_out": false}
+    ],
+    "next_cursor": ""
+  },
+  "/incentive_programs?status=upcoming&type=liquidity&limit=1000": {"incentive_programs": [], "next_cursor": null}
+}
