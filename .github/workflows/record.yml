@@ -76,6 +76,11 @@ jobs:
           echo "===== MAKER SIM ====="
           python3 tools/research/maker_sim.py --dir rec --series BTC --iters 1000 || echo "(maker sim failed)"
           echo "===== END MAKER SIM ====="
+          for coin in ETH SOL; do
+            echo "===== MAKER SIM $coin ====="
+            python3 tools/research/maker_sim.py --dir rec --series "$coin" --iters 1000 || echo "(maker sim $coin failed)"
+            echo "===== END MAKER SIM $coin ====="
+          done
 
       - name: Start the next run
         if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' }}
