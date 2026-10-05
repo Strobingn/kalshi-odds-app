@@ -78,14 +78,29 @@ the next APK. Android asks for approval to install an update from this app;
 confirm it to update in place without removing local data. Never switch APKs
 signed with another certificate or a different application ID.
 
-The branch-only model workflow publishes `edge-model-chat-GTP` when manually
-dispatched on `chat-GTP`. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)
-for the current evidence and unresolved trading risks.
+### Edge-model refresh (`chat-GTP` only)
+
+**Train edge model** is a manual, branch-only workflow. Run it from GitHub
+Actions with the `chat-GTP` ref; its default is a four-day lookback. A
+successful run publishes exactly two assets — `edge_model.json` and
+`edge_model_manifest.json` — to the rolling `edge-model-chat-GTP` release.
+**Get latest model** downloads that release and activates it only when the
+model validates, has verified provenance, and beats the market on its holdout
+metrics; otherwise the currently active model remains in place.
+
+GitHub-hosted scheduled workflows run from the repository's default branch.
+Because this branch intentionally does not change `main`, the model workflow
+cannot reliably run itself at 6 AM from `chat-GTP`; use **Run workflow** when a
+refresh is wanted. It does not create a reliable profit guarantee. See [the
+audit](docs/ml-audit-chat-GTP-2026-09-27.md) for the current evidence and
+unresolved trading risks.
 
 ## 0.3.8
 
 - **Paper Buy fix:** Paper mode Approve / Paper tap fills the paper book with no Kalshi key. Win-target size above paper cash is capped, not blocked. Failures show a reason on the card.
-- Weekly edge-model retrain (`edge-model-latest`) + one-tap **Get latest model** (activate only if holdout beats the market; rollback kept).
+- Offline edge-model training + one-tap **Get latest model** (the active
+  `chat-GTP` workflow is manual and publishes `edge-model-chat-GTP`; activation
+  requires a validated holdout win over the market and keeps rollback data).
 - Auto-tune edge threshold from settled history; sit out when the model loses to the market (manual override in Settings).
 - Optional Supabase sync of History / bets / signals / settings (never the Kalshi key).
 - Notifications when a Long-shot or $50 win-target card appears (Approve still required).
