@@ -101,7 +101,13 @@ class BackfillWorker(
         } catch (e: HistoryTransport.Cancelled) {
             cancelResult("cancelled")
         } catch (e: Exception) {
-            Result.retry()
+            // Retry transient failures, but stop after MAX_RUN_ATTEMPTS so a
+            // permanent error fails visibly instead of looping forever.
+            if (runAttemptCount + 1 >= MAX_RUN_ATTEMPTS) {
+                Result.failure(workDataOf(KEY_MSG to (e.message ?: "backfill failed")))
+            } else {
+                Result.retry()
+            }
         }
     }
 
@@ -116,6 +122,7 @@ class BackfillWorker(
         const val KEY_PROCESSED = "processed"
         const val KEY_SERIES = "series"
         const val KEY_CANCELLED = "cancelled"
+        const val MAX_RUN_ATTEMPTS = 3
 
         fun enqueue(context: Context, days: Int, includeSpot: Boolean = true) {
             val req = OneTimeWorkRequestBuilder<BackfillWorker>()

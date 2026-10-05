@@ -30,17 +30,26 @@ class MarketRefreshWorker(
                 api = NetworkModule.publicApi(settings.kalshiDemoEnabled)
             ).refresh()
             if (snapshot.errorMessage != null && !snapshot.fromCache && snapshot.allMarkets.isEmpty()) {
-                Result.retry()
+                retryOrFail()
             } else {
                 Result.success()
             }
         } catch (_: Exception) {
-            Result.retry()
+            retryOrFail()
         }
     }
 
+    /**
+     * Retry transient failures, but stop after [MAX_RUN_ATTEMPTS] so a
+     * permanent error (bad config, API change) fails visibly instead of
+     * looping with backoff forever.
+     */
+    private fun retryOrFail(): Result =
+        if (runAttemptCount + 1 >= MAX_RUN_ATTEMPTS) Result.failure() else Result.retry()
+
     companion object {
         const val UNIQUE_NAME = "kalshi_market_refresh_15m"
+        const val MAX_RUN_ATTEMPTS = 3
     }
 }
 

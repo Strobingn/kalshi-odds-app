@@ -59,12 +59,21 @@ class SyncWorker(
             result
         }.getOrElse { SupabaseSync.Status(ok = false, message = it.message ?: "sync failed") }
         runCatching { container.dataPrefs.updateSyncStatus(status.message, status.atMs) }
-        if (status.ok) Result.success() else Result.retry()
+        if (status.ok) {
+            Result.success()
+        } else if (runAttemptCount + 1 >= MAX_RUN_ATTEMPTS) {
+            // Permanent failure (bad keys, revoked project): fail visibly
+            // instead of retrying with backoff forever.
+            Result.failure()
+        } else {
+            Result.retry()
+        }
     }
 
     companion object {
         const val UNIQUE = "diphunter_cloud_sync"
         const val ONCE = "diphunter_cloud_sync_once"
+        const val MAX_RUN_ATTEMPTS = 3
 
         fun enqueuePeriodic(context: Context) {
             val req = PeriodicWorkRequestBuilder<SyncWorker>(15, TimeUnit.MINUTES)
