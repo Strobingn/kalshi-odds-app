@@ -75,13 +75,16 @@ class AppContainer(context: Context) {
     val lateFavorite = com.dirk.kalshiodds.signal.latefav.LateFavoriteStore(app)
     /** Paper-only flow-fade tracker (docs/flow-fade-2026-10-04.md). Never orders. */
     val flowFade = com.dirk.kalshiodds.signal.flowfade.FlowFadeStore(app)
+    /** Paper-only 1¢-better resting bid (maker_sim improve rule). Never orders. */
+    val centBetter = com.dirk.kalshiodds.signal.centbetter.CentBetterStore(app)
     val hub = SignalHub(
         scoring = scoring,
         notifier = notifier,
         logStore = logStore,
         results = resultsWriter,
         lateFavorite = lateFavorite.ledger,
-        flowFade = flowFade.ledger
+        flowFade = flowFade.ledger,
+        centBetter = centBetter.ledger
     )
 
     /**
@@ -160,12 +163,14 @@ class AppContainer(context: Context) {
         logStore = logStore,
         extraOpenTickers = {
             paper.book.openTickers() + lateFavorite.ledger.openTickers() + flowFade.ledger.openTickers() +
+                centBetter.ledger.openTickers() +
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
             lateFavorite.ledger.settle(ticker, result)
             flowFade.ledger.settle(ticker, result)
+            centBetter.ledger.settle(ticker, result)
             recorder.onSettled(ticker, result)
         },
         onCalibration = { hub.applyCalibration(it) },
@@ -174,6 +179,7 @@ class AppContainer(context: Context) {
             paper.book.settleFromLog(logStore.readAll())
             lateFavorite.ledger.settleFromLog(logStore.readAll())
             flowFade.ledger.settleFromLog(logStore.readAll())
+            centBetter.ledger.settleFromLog(logStore.readAll())
             val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
                 logStore.readAll(),
                 feeRate = hub.settings.feeRate

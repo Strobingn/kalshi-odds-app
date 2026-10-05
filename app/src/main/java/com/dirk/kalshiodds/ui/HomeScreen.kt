@@ -229,6 +229,12 @@ fun HomeScreen(
                             item(key = "flow_fade") {
                                 com.dirk.kalshiodds.ui.components.FlowFadeCard(state.flowFade)
                             }
+                            item(key = "cent_better") {
+                                com.dirk.kalshiodds.ui.components.FlowFadeCard(
+                                    state.centBetter,
+                                    summary = com.dirk.kalshiodds.signal.centbetter.CentBetterSummary.of(state.centBetter)
+                                )
+                            }
                         }
                         item {
                             Text(

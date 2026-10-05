@@ -76,6 +76,9 @@ data class OddsUiState(
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
     /** Paper-only flow-fade tracker (same ledger type as the late favorite). */
     val flowFade: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
+    /** Paper-only 1¢-better resting bid tracker. */
+    val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState()
 )
 
@@ -173,6 +176,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 container.flowFade.ledger.state.collect { ff ->
                     _state.update { it.copy(flowFade = ff) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.centBetter.ledger.state.collect { cb ->
+                    _state.update { it.copy(centBetter = cb) }
                 }
             }
         }

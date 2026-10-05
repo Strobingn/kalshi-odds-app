@@ -16,8 +16,8 @@ android {
         applicationId = "com.dirk.kalshiodds.claude"
         minSdk = 26
         targetSdk = 35
-        versionCode = 34
-        versionName = "1.3"
+        versionCode = 35
+        versionName = "1.4"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(

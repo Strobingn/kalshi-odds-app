@@ -22,9 +22,9 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
  * nothing here can place an order.
  */
 @Composable
-fun FlowFadeCard(state: LateFavoriteState) {
+fun FlowFadeCard(state: LateFavoriteState, summary: FlowFadeSummary = FlowFadeSummary.of(state)) {
     val colors = DipTheme.colors
-    val s = FlowFadeSummary.of(state)
+    val s = summary
     Column(
         modifier = Modifier
             .fillMaxWidth()

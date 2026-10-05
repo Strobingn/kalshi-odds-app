@@ -55,6 +55,8 @@ class SignalHub(
     private val lateFavorite: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     /** Paper-only flow-fade tracker (docs/flow-fade-2026-10-04.md); logs, never orders. */
     private val flowFade: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
+    /** Paper-only "1¢ better" resting bid (maker_sim improve rule); logs, never orders. */
+    private val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     tickDispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
         Thread(r, "diphunter-ticks").apply { priority = Thread.NORM_PRIORITY + 1; isDaemon = true }
     }.asCoroutineDispatcher()
@@ -127,6 +129,7 @@ class SignalHub(
             runCatching { scoring.book.pruneTo(tickers) }
             runCatching { flowWindow.retain(tickers) }
             runCatching { flowMaker.retain(tickers) }
+            runCatching { centMaker.retain(tickers) }
             lastSpotRescoreMs.keys.retainAll(tickers)
             _scores.update { cur -> cur.filterKeys { it in tickers } }
         }
@@ -179,6 +182,11 @@ class SignalHub(
     /** Resting paper orders for the flow-fade tracker. Paper only. */
     val flowMaker = com.dirk.kalshiodds.signal.flowfade.MakerPaperBook()
 
+    /** Resting paper bids for the 1¢-better tracker. Paper only. */
+    val centMaker = com.dirk.kalshiodds.signal.flowfade.MakerPaperBook(
+        cancelMs = com.dirk.kalshiodds.signal.centbetter.CentBetterRule.CANCEL_MS
+    )
+
     fun ingestTick(tick: MarketTick) {
         // Every trade counts toward the flow window; the mailbox below is latest-wins.
         val fadeLedger = flowFade
@@ -192,6 +200,17 @@ class SignalHub(
                     }
                 }
                 flowWindow.onTrade(tick.ticker, tick.takerSide, tick.tradeSize, now)
+            }
+        }
+        val centLedger = centBetter
+        if (tick.source == TickSource.WS_TRADE && centLedger != null) {
+            runCatching {
+                val now = System.currentTimeMillis()
+                centMaker.onTrade(tick.ticker, tick.takerSide, tick.lastPrice, tick.tradeSize, now)?.let { order ->
+                    if (!centLedger.hasEntry(order.ticker)) {
+                        com.dirk.kalshiodds.signal.flowfade.FlowFadeRule.filled(order, now)?.let { centLedger.record(it) }
+                    }
+                }
             }
         }
         if (tickMailbox.offer(tick.ticker, tick)) {
@@ -335,6 +354,7 @@ class SignalHub(
             persistOddsMid(tick.ticker, scored.marketMidPp)
             maybeLateFavorite(tick, scored)
             maybeFlowFade(tick, scored)
+            maybeCentBetter(tick, scored)
         }
         persistChartTick(tick)
         val alert = if (notify && scored != null) {
@@ -365,6 +385,7 @@ class SignalHub(
         persistChartTick(tick)
         maybeLateFavorite(tick, scored)
         maybeFlowFade(tick, scored)
+        maybeCentBetter(tick, scored)
     }
 
     /**
@@ -374,6 +395,46 @@ class SignalHub(
      * outside the time band, already filled this market, or an order is
      * still resting. There is no path from here to a real order.
      */
+    /**
+     * Paper-only 1¢-better tracker: rests a paper bid 1¢ above the best bid
+     * on the side the digital fair favors ([centMaker]); [ingestTick] records
+     * it in [centBetter] when a later print fills it. No path to a real order.
+     */
+    private fun maybeCentBetter(tick: MarketTick, scored: ScoringEngine.Score) {
+        val ledger = centBetter ?: return
+        val tte = scored.tteSeconds ?: return
+        if (tte < com.dirk.kalshiodds.signal.centbetter.CentBetterRule.MIN_TTE_SECONDS ||
+            tte > com.dirk.kalshiodds.signal.centbetter.CentBetterRule.MAX_TTE_SECONDS
+        ) {
+            return
+        }
+        if (!CryptoMarkets.isLiveTicker(tick.ticker) || ledger.hasEntry(tick.ticker)) return
+        val fairPp = scored.digitalFairPp ?: return
+        runCatching {
+            val now = System.currentTimeMillis()
+            centMaker.expire(tick.ticker, now)
+            if (centMaker.pending(tick.ticker) != null) return
+            val top = scoring.book.topOfBook(tick.ticker)
+            val quoted = tick.source != TickSource.WS_TRADE
+            val order = com.dirk.kalshiodds.signal.centbetter.CentBetterRule.order(
+                com.dirk.kalshiodds.signal.centbetter.CentBetterRule.Inputs(
+                    ticker = tick.ticker,
+                    nowMs = now,
+                    tteSeconds = tte,
+                    fairYes = fairPp / 100.0,
+                    yesBid = top?.yesBid ?: tick.yesBid.takeIf { quoted },
+                    yesAsk = top?.yesAsk ?: tick.yesAsk.takeIf { quoted },
+                    noBid = top?.noBid ?: tick.noBid.takeIf { quoted },
+                    noAsk = top?.noAsk ?: tick.noAsk.takeIf { quoted }
+                ),
+                alreadyEntered = false
+            ) ?: return
+            if (centMaker.post(order)) {
+                Log.d(TAG, "centbetter resting ${order.ticker} ${order.side} @ ${order.price} edge=${order.imbalance}")
+            }
+        }.onFailure { CrashBreadcrumb.record("centbetter ${tick.ticker}", it) }
+    }
+
     private fun maybeFlowFade(tick: MarketTick, scored: ScoringEngine.Score) {
         val ledger = flowFade ?: return
         val tte = scored.tteSeconds ?: return
