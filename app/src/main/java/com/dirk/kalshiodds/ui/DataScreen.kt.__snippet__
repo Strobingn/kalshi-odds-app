@@ -1,1 +1,0 @@
-                "Run Train edge model on KIMI-Bitcoin to publish edge-model-KIMI-Bitcoin. Get latest model checks the source and holdout Brier/log-loss before activation; that does not prove trading profit. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
