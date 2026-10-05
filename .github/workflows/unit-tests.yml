@@ -37,6 +37,8 @@ jobs:
           python3 tools/research/test_cross_lag.py
           python3 tools/research/test_fee_probe.py
           python3 tools/research/test_xvenue.py
+          pip install -q cryptography "websockets>=14"
+          python3 tools/research/test_ws.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue
