@@ -1,0 +1,21 @@
+{
+ "events": [
+  {
+   "event_ticker": "KXHIGHDEN-25OCT05",
+   "markets": [
+    {
+     "cap_strike": 61,
+     "event_ticker": "KXHIGHDEN-25OCT05",
+     "floor_strike": 60,
+     "rules_primary": "If the highest temperature in Denver for Oct 5, 2025 is 60-61\u00b0, Yes.",
+     "status": "active",
+     "strike_type": "between",
+     "ticker": "KXHIGHDEN-25OCT05-B60.5",
+     "yes_ask_dollars": "0.3000",
+     "yes_bid_dollars": "0.2000",
+     "yes_sub_title": "60\u00b0 to 61\u00b0"
+    }
+   ]
+  }
+ ]
+}
