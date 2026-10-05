@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Orange coin disc, sized to the adaptive-icon safe zone. -->
+    <path
+        android:fillColor="#F7931A"
+        android:pathData="M54,24 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" />
+    <!-- Stylized bitcoin mark: double top/bottom ticks, stem, two bumps. -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.5,36 h3.4 v7 h-3.4 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M53.5,36 h3.4 v7 h-3.4 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46,42 h4.6 v27 h-4.6 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50.6,42 h9 a8,7.5 0 0 1 0,15 h-9 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M50.6,54 h10.5 a8.5,7.5 0 0 1 0,15 h-10.5 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.5,69 h3.4 v7 h-3.4 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M53.5,69 h3.4 v7 h-3.4 z" />
+</vector>
