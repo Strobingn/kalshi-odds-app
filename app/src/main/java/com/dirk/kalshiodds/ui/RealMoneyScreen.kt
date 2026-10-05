@@ -43,6 +43,8 @@ fun RealMoneyScreen(
         (state.tickets.phase as? TicketPhase.AwaitingApprove)?.let { listOf(it.ticket) + it.others }
             ?: emptyList()
     }
+    val mode = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(state.settings.autopilotMode)
+    val day = com.dirk.kalshiodds.signal.paper.LiveAutopilotGate.dayKey(System.currentTimeMillis())
     val page = RealMoneyTab.of(
         liveKeySaved = liveKey,
         demoEnvironment = demo,
@@ -52,7 +54,16 @@ fun RealMoneyScreen(
         d3 = state.d3,
         working = state.tickets.working,
         resting = state.restingOrders,
-        positions = state.positions
+        positions = state.positions,
+        autopilotMode = mode,
+        liveArmed = state.liveAutopilotArmed,
+        liveApproveTapped = state.liveAutopilotApproveTapped,
+        dailyCapUsd = state.settings.liveAutopilotDailyCapUsd,
+        dailySpentUsd = state.shadow.spentOn(day),
+        shadowTickets = state.shadow.tickets,
+        shadowBankrollUsd = state.shadow.bankrollUsd,
+        shadowPnlUsd = state.shadow.lifetimeRealizedPnlUsd,
+        liveError = state.shadow.liveLastError
     )
     val colors = DipTheme.colors
     Scaffold(
@@ -86,6 +97,44 @@ fun RealMoneyScreen(
                 if (page.account.showAddKey) {
                     Button(onClick = onOpenApiKey, modifier = Modifier.fillMaxWidth()) {
                         Text(RealMoneyTab.ADD_KEY)
+                    }
+                }
+            }
+            FieldCard {
+                Text("Autopilot", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Mode: ${page.autopilotModeLabel}. ${page.autopilotDetail}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textSecondary
+                )
+                AutopilotModeSelector(mode, onSelect = { settings.setAutopilotMode(it) })
+                Text(page.liveStatus, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                if (page.showLiveApprove) {
+                    Button(onClick = { odds.tapLiveAutopilotApprove() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Approve live Autopilot")
+                    }
+                }
+                if (page.showLiveConfirm) {
+                    Text(RealMoneyTab.LIVE_BLURB, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                    Button(onClick = { odds.confirmLiveAutopilotRealMoney() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Confirm REAL MONEY")
+                    }
+                }
+                page.liveError?.let { err ->
+                    Text(err, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                    Button(onClick = { odds.clearLiveAutopilotError() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Clear live error")
+                    }
+                }
+            }
+            FieldCard {
+                Text("SHADOW — not submitted", style = MaterialTheme.typography.titleMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
+                Text(page.shadowBankrollLabel, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                if (page.shadowLines.isEmpty()) {
+                    Text("No shadow orders yet.", color = colors.textSecondary, style = MaterialTheme.typography.bodyMedium)
+                } else {
+                    page.shadowLines.forEach { line ->
+                        Text(line, color = colors.textPrimary, style = MaterialTheme.typography.bodySmall)
                     }
                 }
             }

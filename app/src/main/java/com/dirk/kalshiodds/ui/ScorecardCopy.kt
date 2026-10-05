@@ -35,7 +35,9 @@ object ScorecardCopy {
     const val MANUAL_TITLE = "Manual Paper UP/DOWN"
     const val AUTOPILOT_TITLE = "AI paper autopilot"
     const val AUTOPILOT_SUBTITLE =
-        "Every AI paper bet — time, side, entry, AI %, EV, stake, fee, result. Separate from manual Paper UP/DOWN."
+        "Paper bankroll and settled P&L are the score. Hit rate is secondary. " +
+            "Autopilot edge fills are separate from prediction-log favorites. " +
+            "Regime slices use tags stored on each fill. No fitted holdout is stored."
     const val LAST_MINUTE_TITLE = "Last-minute strategy"
     const val LAST_MINUTE_SUBTITLE =
         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE
@@ -117,7 +119,15 @@ object ScorecardCopy {
         val wins: Int = 0,
         val losses: Int = 0,
         val pnlUsd: Double = 0.0,
-        val record: String = EM_DASH
+        val record: String = EM_DASH,
+        val bankrollLabel: String = EM_DASH,
+        val pnlLabel: String = EM_DASH,
+        val credibility: String = "",
+        val favoriteLogLine: String = "",
+        val edgeFillLine: String = "",
+        val laterSliceLine: String = "",
+        val regimeLines: List<String> = emptyList(),
+        val shadowLine: String = ""
     )
 
     data class LastMinuteSection(
@@ -189,7 +199,15 @@ object ScorecardCopy {
             }
             lines += AUTOPILOT_TITLE
             lines += AUTOPILOT_SUBTITLE
+            lines += autopilot.bankrollLabel
+            lines += autopilot.pnlLabel
             lines += autopilot.record
+            if (autopilot.credibility.isNotBlank()) lines += autopilot.credibility
+            if (autopilot.favoriteLogLine.isNotBlank()) lines += autopilot.favoriteLogLine
+            if (autopilot.edgeFillLine.isNotBlank()) lines += autopilot.edgeFillLine
+            if (autopilot.laterSliceLine.isNotBlank()) lines += autopilot.laterSliceLine
+            if (autopilot.regimeLines.isNotEmpty()) lines += autopilot.regimeLines
+            if (autopilot.shadowLine.isNotBlank()) lines += autopilot.shadowLine
             if (autopilot.bets.isNotEmpty()) {
                 lines += autopilot.bets.map { it.line }
             }
@@ -261,7 +279,8 @@ object ScorecardCopy {
         windows: List<SettledWindowRow> = emptyList(),
         zoneId: ZoneId = ET_ZONE,
         lastMinutePicks: List<com.dirk.kalshiodds.signal.lastminute.LastMinutePick> = emptyList(),
-        d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList()
+        d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList(),
+        shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState? = null
     ): View = of(
         entries = entries,
         fills = paper.scorecardFills(),
@@ -272,7 +291,8 @@ object ScorecardCopy {
         d3Picks = d3Picks,
         paperBankrollUsd = paper.paperBankrollUsd,
         startingUsd = paper.startingUsd,
-        archivedFills = paper.archivedFills()
+        archivedFills = paper.archivedFills(),
+        shadow = shadow
     )
 
     fun of(
@@ -285,7 +305,8 @@ object ScorecardCopy {
         d3Picks: List<com.dirk.kalshiodds.signal.d3.D3Pick> = emptyList(),
         paperBankrollUsd: Double? = null,
         startingUsd: Double? = null,
-        archivedFills: List<PaperFill> = emptyList()
+        archivedFills: List<PaperFill> = emptyList(),
+        shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState? = null
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
         val lastMinute = lastMinuteSection(lastMinutePicks)
@@ -308,7 +329,7 @@ object ScorecardCopy {
             bySource = mergeSourceBuckets(ledger.bySource.map { toBucket(it) }, lastMinute),
             lastMinute = lastMinute,
             d3 = d3,
-            autopilot = autopilotSection(fills),
+            autopilot = autopilotSection(fills, entries, paperBankrollUsd, shadow),
             paperBankrollUsd = paperBankrollUsd,
             reconcileWarning = reconcileWarning(ledger.combined.money.pnlUsd, paperBankrollUsd, startingUsd),
             hypotheticalLine = hypotheticalLine(ledger.hypotheticalPerContractUsd, ledger.hypotheticalPicks),
@@ -397,22 +418,40 @@ object ScorecardCopy {
         )
     }
 
-    fun autopilotSection(fills: List<PaperFill>): AutopilotSection {
+    fun autopilotSection(
+        fills: List<PaperFill>,
+        entries: List<PredictionLogEntry> = emptyList(),
+        bankrollUsd: Double? = null,
+        shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState? = null
+    ): AutopilotSection {
+        val report = com.dirk.kalshiodds.signal.paper.AutopilotScorecard.of(fills, entries, bankrollUsd)
         val bets = fills
             .filter { ScorecardLedger.isScorecardTicker(it.ticker) }
-            .filter { ScorecardLedger.isAiSource(it.source) || ScorecardLedger.isAiSource(it.pickSource) }
+            .filter { com.dirk.kalshiodds.signal.paper.AutopilotScorecard.isAutopilotEdge(it) }
             .sortedByDescending { it.createdAtMs }
             .map { autopilotBet(it) }
         val settled = fills.filter {
             ScorecardLedger.isScorecardTicker(it.ticker) &&
                 it.settled &&
                 it.won != null &&
-                (ScorecardLedger.isAiSource(it.source) || ScorecardLedger.isAiSource(it.pickSource))
+                com.dirk.kalshiodds.signal.paper.AutopilotScorecard.isAutopilotEdge(it)
         }
         val wins = settled.count { it.won == true }
         val losses = settled.count { it.won == false }
         val pnl = settled.sumOf { it.pnlUsd ?: 0.0 }
         val rate = if (settled.isEmpty()) null else wins.toDouble() / settled.size
+        val shadowLine = shadow?.let { book ->
+            val booked = book.tickets.count { it.booked }
+            val unfilled = book.tickets.count { !it.booked }
+            String.format(
+                Locale.US,
+                "Shadow bankroll $%.2f · shadow P&L %s · %d would-fill · %d unfilled · SHADOW — not submitted",
+                book.bankrollUsd,
+                ScorecardLedger.signedUsd(book.lifetimeRealizedPnlUsd),
+                booked,
+                unfilled
+            )
+        }.orEmpty()
         return AutopilotSection(
             bets = bets,
             openCount = bets.count { it.result == "OPEN" },
@@ -420,11 +459,19 @@ object ScorecardCopy {
             wins = wins,
             losses = losses,
             pnlUsd = pnl,
-            record = if (bets.isEmpty()) {
+            record = if (settled.isEmpty()) {
                 EM_DASH
             } else {
-                "${wins}-${losses} · ${percentOrDash(rate)} · ${settled.size} settled · ${bets.size} logged"
-            }
+                "${report.pnlLabel} · ${wins}-${losses} · ${percentOrDash(rate)} · ${settled.size} settled"
+            },
+            bankrollLabel = report.bankrollLabel,
+            pnlLabel = report.pnlLabel,
+            credibility = report.credibility,
+            favoriteLogLine = report.favoriteLogLine,
+            edgeFillLine = report.edgeFillLine,
+            laterSliceLine = report.laterSliceLine,
+            regimeLines = report.regimeLines,
+            shadowLine = shadowLine
         )
     }
 
@@ -446,6 +493,9 @@ object ScorecardCopy {
         val stake = String.format(Locale.US, "stake $%.2f", fill.stakeUsd)
         val feeLine = fee?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee $EM_DASH"
         val pnl = fill.pnlUsd?.let { ScorecardLedger.signedUsd(it) } ?: EM_DASH
+        val regime = listOfNotNull(fill.regimePath, fill.regimeRole, fill.regimeVol, fill.regimeSession, fill.regimeStrike)
+            .joinToString(" · ")
+        val regimeBit = if (regime.isBlank()) "" else "  $regime"
         return AutopilotBet(
             ticker = fill.ticker,
             side = fill.side,
@@ -457,7 +507,7 @@ object ScorecardCopy {
             stakeUsd = fill.stakeUsd,
             feeUsd = fee,
             result = result,
-            line = "$time  $side  $ask  $ai  $ev  $stake  $feeLine  $result  $pnl  ${fill.ticker}"
+            line = "$time  $side  $ask  $ai  $ev  $stake  $feeLine  $result  $pnl  ${fill.ticker}$regimeBit"
         )
     }
 

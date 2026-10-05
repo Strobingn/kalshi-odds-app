@@ -304,11 +304,14 @@ object PaperAutopilot {
         return count
     }
 
+    data class Tick(val decision: Decision, val fill: PaperFill?)
+
     /**
-     * Evaluate and, if the EV rule fires, book a Kelly paper fill.
+     * Evaluate and, if the EV rule fires, optionally book a Kelly paper fill.
      * Pure paper path — never calls Kalshi and never places a live order.
+     * [bookPaper] false still runs the gates (shadow mode) and stamps no fill.
      */
-    fun consider(
+    fun tick(
         paperBook: PaperBook,
         market: MarketUiModel,
         settings: SignalSettings,
@@ -317,8 +320,9 @@ object PaperAutopilot {
         noAsk: Double? = market.noAsk,
         yesDepth: Int? = null,
         noDepth: Int? = null,
-        book: BookLevelSnapshot? = null
-    ): PaperFill? {
+        book: BookLevelSnapshot? = null,
+        bookPaper: Boolean = true
+    ): Tick {
         val liveYes = if (book != null && !book.isEmpty()) {
             TicketBuilder.bookAskOrNull("YES", book)
         } else {
@@ -341,11 +345,13 @@ object PaperAutopilot {
         )
         if (!decision.ok) {
             decision.reason?.let { paperBook.rememberMessage(it) }
-            return null
+            return Tick(decision, null)
         }
-        val picked = decision.side ?: return null
+        if (!bookPaper) return Tick(decision, null)
+        val picked = decision.side ?: return Tick(decision, null)
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
-        return paperBook.considerAutopilot(
+        val tags = AutopilotRegime.tags(market, picked.side, picked.ask, nowMs)
+        val fill = paperBook.considerAutopilot(
             ticker = market.ticker,
             side = picked.side,
             ask = picked.ask,
@@ -354,9 +360,29 @@ object PaperAutopilot {
             evPerContract = picked.evPerContract,
             enabled = true,
             bankrollUsd = decision.freeBankrollUsd,
-            maxStakeUsd = decision.maxStakeUsd
+            maxStakeUsd = decision.maxStakeUsd,
+            regime = tags
         )
+        return Tick(decision, fill)
     }
+
+    /**
+     * Evaluate and, if the EV rule fires, book a Kelly paper fill.
+     * Pure paper path — never calls Kalshi and never places a live order.
+     */
+    fun consider(
+        paperBook: PaperBook,
+        market: MarketUiModel,
+        settings: SignalSettings,
+        nowMs: Long,
+        yesAsk: Double? = market.yesAsk,
+        noAsk: Double? = market.noAsk,
+        yesDepth: Int? = null,
+        noDepth: Int? = null,
+        book: BookLevelSnapshot? = null
+    ): PaperFill? = tick(
+        paperBook, market, settings, nowMs, yesAsk, noAsk, yesDepth, noDepth, book, bookPaper = true
+    ).fill
 
     private fun sideEv(
         side: String,

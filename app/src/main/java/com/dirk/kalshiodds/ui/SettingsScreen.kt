@@ -754,12 +754,39 @@ fun SettingsContent(
             ToggleRow("Paper trading (AI Kelly auto-fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             ToggleRow("AI paper autopilot", s.aiPaperAutopilotEnabled, { viewModel?.setAiPaperAutopilot(it) })
             Text(
-                "When on (default), the AI places paper bets at any time in the window, on either side, " +
-                    "as often as +EV after fees says. Sized by half-Kelly on the paper bankroll (no dollar cap; " +
-                    "book-depth cap still applies). Flip-chance still blocks lottery prints. Off = no AI paper bets; " +
-                    "manual Paper UP/DOWN still works. Never places a real order.",
+                "When on (default), Autopilot looks for +EV after fees on either side, sized by half-Kelly " +
+                    "on the paper bankroll (no dollar cap; book-depth cap still applies). Flip-chance still blocks " +
+                    "lottery prints. Off = no AI paper, shadow, or live autopilot bets. Manual Paper UP/DOWN still works.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
+            )
+            Text(
+                "Autopilot mode. Paper books simulated fills. Shadow builds the exact Kalshi order and never submits it. " +
+                    "Limited live stays off until you arm it on the Real Money tab with Approve, then REAL MONEY. " +
+                    "Live sends only when paper and shadow agree, at most $10 a ticket, and only up to the daily cap. " +
+                    "A missing key or an order error stops it. No retry.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            AutopilotModeSelector(
+                mode = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(s.autopilotMode),
+                onSelect = { picked -> viewModel?.setAutopilotMode(picked) }
+            )
+            Text(
+                String.format(
+                    Locale.US,
+                    "Live Autopilot daily cap  $%.0f  (default $50)",
+                    s.liveAutopilotDailyCapUsd
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.liveAutopilotDailyCapUsd.toFloat().coerceIn(10f, 200f),
+                onValueChange = { viewModel?.setLiveAutopilotDailyCap(it.toDouble()) },
+                valueRange = 10f..200f,
+                steps = 18
             )
             Text(
                 String.format(

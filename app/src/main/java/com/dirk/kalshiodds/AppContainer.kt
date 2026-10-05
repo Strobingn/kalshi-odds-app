@@ -88,6 +88,7 @@ class AppContainer(context: Context) {
     val paper = PaperBookStore(app) { fills ->
         runCatching { archive.upsertPaperFills(fills) }
     }
+    val shadow = com.dirk.kalshiodds.signal.paper.ShadowBookStore(app)
     val lastMinuteStore = com.dirk.kalshiodds.signal.lastminute.LastMinuteStore(app)
     val lastMinuteEngine = com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine(nowMs = { clock.nowMs() })
     val brti = com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient()
@@ -152,9 +153,12 @@ class AppContainer(context: Context) {
         },
         model = model,
         logStore = logStore,
-        extraOpenTickers = { paper.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers() },
+        extraOpenTickers = {
+            paper.book.openTickers() + shadow.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers()
+        },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
+            shadow.book.settle(ticker, result)
             lastMinuteStore.settle(ticker, result)
             d3Store.settle(ticker, result)
         },

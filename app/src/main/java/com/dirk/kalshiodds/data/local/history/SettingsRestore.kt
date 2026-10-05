@@ -22,6 +22,8 @@ object SettingsRestore {
         o.put("edgeThresholdPp", s.edgeThresholdPp)
         o.put("paperTradingEnabled", s.paperTradingEnabled)
         o.put("aiPaperAutopilotEnabled", s.aiPaperAutopilotEnabled)
+        o.put("autopilotMode", s.autopilotMode)
+        o.put("liveAutopilotDailyCapUsd", s.liveAutopilotDailyCapUsd)
         o.put("paperBankrollStartUsd", s.paperBankrollStartUsd)
         o.put("kellyFraction", s.kellyFraction)
         o.put("paperKellyFraction", s.paperKellyFraction)
@@ -51,6 +53,8 @@ object SettingsRestore {
             edgeThresholdPp = o.optDoubleOrNull("edgeThresholdPp"),
             paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
             aiPaperAutopilotEnabled = if (o.has("aiPaperAutopilotEnabled")) o.optBoolean("aiPaperAutopilotEnabled") else null,
+            autopilotMode = o.optString("autopilotMode").takeIf { o.has("autopilotMode") && it.isNotBlank() },
+            liveAutopilotDailyCapUsd = o.optDoubleOrNull("liveAutopilotDailyCapUsd"),
             paperBankrollStartUsd = o.optDoubleOrNull("paperBankrollStartUsd"),
             kellyFraction = o.optDoubleOrNull("kellyFraction"),
             paperKellyFraction = o.optDoubleOrNull("paperKellyFraction"),
@@ -84,6 +88,8 @@ data class RestoredSettings(
     val edgeThresholdPp: Double? = null,
     val paperTradingEnabled: Boolean? = null,
     val aiPaperAutopilotEnabled: Boolean? = null,
+    val autopilotMode: String? = null,
+    val liveAutopilotDailyCapUsd: Double? = null,
     val paperBankrollStartUsd: Double? = null,
     val kellyFraction: Double? = null,
     val paperKellyFraction: Double? = null,
