@@ -22,6 +22,11 @@ object AppRoutes {
     val ALL: List<String> = listOf(
         HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, ARB
     )
+
+    /** Destinations deliberately exposed in the persistent bottom navigation. */
+    val PRIMARY: List<String> = listOf(
+        HOME, SCORECARD, SIGNAL_HISTORY, HISTORY, DATA, SETTINGS
+    )
 }
 
 class AppNavigator(initial: List<String> = listOf(AppRoutes.HOME)) {
@@ -37,6 +42,17 @@ class AppNavigator(initial: List<String> = listOf(AppRoutes.HOME)) {
     fun open(route: String) {
         require(route in AppRoutes.ALL) { "unknown route $route" }
         if (_stack.last() == route) return
+        _stack.add(route)
+    }
+
+    /**
+     * Switches a bottom-tab destination instead of piling tabs into the Back
+     * stack. Detail screens still use [open] and retain normal system Back.
+     */
+    fun selectPrimary(route: String) {
+        require(route in AppRoutes.PRIMARY) { "unknown primary route $route" }
+        if (_stack.size == 1 && _stack.last() == route) return
+        _stack.clear()
         _stack.add(route)
     }
 

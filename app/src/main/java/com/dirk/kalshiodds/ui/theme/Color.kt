@@ -33,10 +33,13 @@ val LightBorder = Color(0xFFD0D7DE)
 val LightTextPrimary = Color(0xFF1F2328)
 val LightTextSecondary = Color(0xFF57606A)
 val LightAccentBlue = Color(0xFF0550AE)
-val LightUpColor = Color(0xFF116329)
-val LightUpContainer = Color(0xFFDCEFE3)
-val LightDownColor = Color(0xFFA0111F)
-val LightDownContainer = Color(0xFFF8D6D9)
+// Deep UP/DOWN cards for light mode (darker than the chat-GTP build's
+// 075E2A/C2E5CF and 8D0D19/F2BEC4, as asked). Text on its container stays
+// above 6:1 contrast.
+val LightUpColor = Color(0xFF044A1E)
+val LightUpContainer = Color(0xFFA8D5B9)
+val LightDownColor = Color(0xFF730812)
+val LightDownContainer = Color(0xFFE9A5AD)
 val LightAccentOrange = Color(0xFF7D4E00)
 val LightAccentRed = LightDownColor
 val OnAccentLight = Color(0xFFFFFFFF)
