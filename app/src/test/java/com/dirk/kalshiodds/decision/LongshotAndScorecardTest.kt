@@ -8,6 +8,19 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class LongshotAndScorecardTest {
+    @Test
+    fun bundledLongshotAssetIsSchemaOneAndValidatesNoLongshot() {
+        val f = listOf("src/main/assets/longshot_residual.json", "app/src/main/assets/longshot_residual.json")
+            .map { java.io.File(it) }.first { it.isFile }
+        val m = LongshotResidual.parse(f.readText())
+        assertNotNull(m)
+        assertEquals(1, m!!.schemaVersion)
+        assertFalse(m.synthetic)
+        assertTrue(m.buckets.size >= 3)
+        // Real-data export (2026-10-06): no sub-15c bucket clears net_ci_lo > 0 after fees.
+        listOf(0.02, 0.07, 0.12).forEach { assertFalse("price $it", m.validated(it)) }
+    }
+
     private val json = """
         {"schema_version":1,"version":"flb-test","min_n":300,"synthetic":false,
          "buckets":[
