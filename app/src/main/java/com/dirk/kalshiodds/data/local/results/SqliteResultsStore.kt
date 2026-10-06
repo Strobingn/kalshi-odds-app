@@ -895,6 +895,145 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
         note = c.strOrNull("note")
     )
 
+    fun insertLedger(row: com.dirk.kalshiodds.data.local.ledger.LedgerRow): Long {
+        val values = ContentValues().apply {
+            put("timestamp_ms", row.timestampMs)
+            put("model_version", row.modelVersion)
+            put("ticker", row.ticker)
+            put("series", row.series)
+            put("settlement_rule", row.settlementRule)
+            put("settlement_source", row.settlementSource)
+            put("seconds_remaining", row.secondsRemaining)
+            put("spot", row.spot)
+            put("target_strike", row.targetStrike)
+            put("z_distance", row.zDistance)
+            put("raw_model_prob", row.rawModelProb)
+            put("calibrated_prob", row.calibratedProb)
+            put("market_mid", row.marketMid)
+            put("bid", row.bid)
+            put("ask", row.ask)
+            put("spread", row.spread)
+            put("depth_at_best", row.depthAtBest)
+            put("imbalance", row.imbalance)
+            put("book_age_ms", row.bookAgeMs)
+            put("decision", row.decision)
+            put("size_contracts", row.sizeContracts)
+            put("reason_codes", row.reasonCodes)
+            put("settlement_result", row.settlementResult)
+            put("settled_at_ms", row.settledAtMs)
+            put("passive", row.passive?.let { if (it) 1 else 0 })
+            put("order_price", row.orderPrice)
+            put("depth_ahead", row.depthAhead)
+            put("quote_churn", row.quoteChurn)
+            put("p_fill", row.pFill)
+            put("expected_filled", row.expectedFilled)
+            put("expected_net", row.expectedNet)
+            put("fill_would", row.fillWould?.let { if (it) 1 else 0 })
+            put("fill_size", row.fillSize)
+            put("time_to_fill_ms", row.timeToFillMs)
+            put("adverse_move", row.adverseMove)
+            put("raw_pnl", row.rawPnl)
+            put("executable_pnl", row.executablePnl)
+            put("replay_executable", row.replayExecutable?.let { if (it) 1 else 0 })
+            put("cf_index_id", row.cfIndexId)
+            put("cf_value", row.cfValue)
+            put("cf_avg_60s", row.cfAvg60s)
+            put("cf_final_minute_avg", row.cfFinalMinuteAvg)
+        }
+        return db.writableDatabase.insert(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            null,
+            values
+        )
+    }
+
+    fun settleLedger(ticker: String, result: String, atMs: Long) {
+        val values = ContentValues().apply {
+            put("settlement_result", result)
+            put("settled_at_ms", atMs)
+        }
+        db.writableDatabase.update(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            values,
+            "ticker = ? AND settlement_result IS NULL",
+            arrayOf(ticker)
+        )
+    }
+
+    fun recentLedger(limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+        db.readableDatabase.query(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "timestamp_ms DESC",
+            limit.coerceIn(1, 20_000).toString()
+        ).use { c ->
+            while (c.moveToNext()) out.add(cursorToLedger(c))
+        }
+        return out
+    }
+
+    fun ledgerCsv(limit: Int = 5_000): String =
+        com.dirk.kalshiodds.data.local.ledger.LedgerCsv.render(recentLedger(limit))
+
+    private fun cursorToLedger(c: Cursor): com.dirk.kalshiodds.data.local.ledger.LedgerRow {
+        fun d(name: String): Double? = c.dblOrNull(name)
+        fun b(name: String): Boolean? {
+            val i = c.getColumnIndex(name)
+            if (i < 0 || c.isNull(i)) return null
+            return c.getInt(i) != 0
+        }
+        return com.dirk.kalshiodds.data.local.ledger.LedgerRow(
+            id = c.long("id"),
+            timestampMs = c.long("timestamp_ms"),
+            modelVersion = c.strOrNull("model_version"),
+            ticker = c.str("ticker"),
+            series = c.strOrNull("series"),
+            settlementRule = c.strOrNull("settlement_rule"),
+            settlementSource = c.strOrNull("settlement_source"),
+            secondsRemaining = d("seconds_remaining"),
+            spot = d("spot"),
+            targetStrike = d("target_strike"),
+            zDistance = d("z_distance"),
+            rawModelProb = d("raw_model_prob"),
+            calibratedProb = d("calibrated_prob"),
+            marketMid = d("market_mid"),
+            bid = d("bid"),
+            ask = d("ask"),
+            spread = d("spread"),
+            depthAtBest = d("depth_at_best"),
+            imbalance = d("imbalance"),
+            bookAgeMs = c.long("book_age_ms").takeIf { c.getColumnIndex("book_age_ms") >= 0 && !c.isNull(c.getColumnIndex("book_age_ms")) },
+            decision = c.strOrNull("decision"),
+            sizeContracts = d("size_contracts"),
+            reasonCodes = c.strOrNull("reason_codes"),
+            settlementResult = c.strOrNull("settlement_result"),
+            settledAtMs = c.long("settled_at_ms").takeIf { c.getColumnIndex("settled_at_ms") >= 0 && !c.isNull(c.getColumnIndex("settled_at_ms")) },
+            passive = b("passive"),
+            orderPrice = d("order_price"),
+            depthAhead = d("depth_ahead"),
+            quoteChurn = d("quote_churn"),
+            pFill = d("p_fill"),
+            expectedFilled = d("expected_filled"),
+            expectedNet = d("expected_net"),
+            fillWould = b("fill_would"),
+            fillSize = d("fill_size"),
+            timeToFillMs = c.long("time_to_fill_ms").takeIf { c.getColumnIndex("time_to_fill_ms") >= 0 && !c.isNull(c.getColumnIndex("time_to_fill_ms")) },
+            adverseMove = d("adverse_move"),
+            rawPnl = d("raw_pnl"),
+            executablePnl = d("executable_pnl"),
+            replayExecutable = b("replay_executable"),
+            cfIndexId = c.strOrNull("cf_index_id"),
+            cfValue = d("cf_value"),
+            cfAvg60s = d("cf_avg_60s"),
+            cfFinalMinuteAvg = d("cf_final_minute_avg")
+        )
+    }
+
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
@@ -973,6 +1112,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
             createChartTickTable(db)
             createPaperFillTable(db)
             createPendingOrdersTable(db)
+            createLedgerTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -984,6 +1124,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
             if (oldVersion < 6) createPaperFillTable(db)
+            if (oldVersion < 7) createLedgerTable(db)
             applyPaperFillColumns(db)
         }
 
@@ -1007,6 +1148,12 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
                 )
                 """.trimIndent()
             )
+        }
+
+        private fun createLedgerTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.upgradeSql(6)) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createPaperFillTable(db: SQLiteDatabase) {
@@ -1130,7 +1277,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 6
+        const val DB_VERSION = 7
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

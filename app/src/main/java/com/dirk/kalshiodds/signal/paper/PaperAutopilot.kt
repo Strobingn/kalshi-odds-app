@@ -254,6 +254,25 @@ object PaperAutopilot {
         val budget = windowBudgetUsd(free, rawF)
         val room = budget - spentInWindow(paper.fills, market.ticker)
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
+        val kellyQuote = PaperKellySizer.size(
+            winProb = picked.winProb,
+            ask = picked.ask,
+            bankrollUsd = free,
+            kellyFraction = settings.paperKellyFraction,
+            feeRate = settings.feeRate,
+            depthContracts = null,
+            maxStakeUsd = room
+        )
+        if (kellyQuote.ok && com.dirk.kalshiodds.decision.AutopilotMinStake.below(kellyQuote.allInUsd)) {
+            return Decision(
+                skip = true,
+                reason = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON,
+                side = picked,
+                kellyF = kellyQuote.kellyF,
+                freeBankrollUsd = free,
+                maxStakeUsd = room
+            )
+        }
         val sized = PaperKellySizer.size(
             winProb = picked.winProb,
             ask = picked.ask,

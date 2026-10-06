@@ -226,6 +226,18 @@ class ModelActivationTest {
     }
 
     @Test
+    fun rejectsFixtureSizedAndEdgeModelMain() {
+        val tiny = honestPass().copy(nRows = 270, nSamples = 270, nHoldout = 50, nMarkets = 40, tag = "edge-model-main")
+        val d = ModelActivation.decide(tiny, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("5,000") || d.reason.contains("edge-model-main") || d.reason.contains("too small"))
+        val legacy = honestPass().copy(tag = "edge-model-latest")
+        assertFalse(ModelActivation.decide(legacy, modelValid = true).activate)
+        assertFalse(ModelActivation.acceptableTag("edge-model-main"))
+        assertTrue(ModelActivation.acceptableTag("model-20261005"))
+    }
+
+    @Test
     fun missingManifestFallsBackToMarketOnly() {
         val d = ModelActivation.decideMissingManifest()
         assertFalse(d.activate)

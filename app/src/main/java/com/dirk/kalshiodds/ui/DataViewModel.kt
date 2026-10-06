@@ -39,7 +39,10 @@ data class DataUiState(
     val credPassphrase: String = "",
     val githubTokenDraft: String = "",
     val syncLine: String? = null,
-    val modelBusy: Boolean = false
+    val modelBusy: Boolean = false,
+    val ledgerNote: String? = null,
+    val championReport: String? = null,
+    val cfFeedLine: String? = null
 )
 
 class DataViewModel(application: Application) : AndroidViewModel(application) {
@@ -62,6 +65,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                         supabaseUrlDraft = s.supabaseUrl,
                         supabaseKeyDraft = s.supabaseAnonKey,
                         modelNote = modelLabel(),
+                        championReport = championLine(),
+                        cfFeedLine = cfLine(),
                         syncLine = syncLine(s)
                     )
                 }
@@ -329,6 +334,36 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
             refreshStats()
         }
     }
+
+    fun exportLedger() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val store = container.predictionLedger
+                if (store == null) {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, "Ledger database is unavailable")
+                } else {
+                    com.dirk.kalshiodds.data.local.results.ResultsFileExport.write(
+                        getApplication(),
+                        store.ledgerCsv(),
+                        namePrefix = "prediction-ledger"
+                    )
+                }
+            }
+            _state.update { it.copy(ledgerNote = result.message) }
+        }
+    }
+
+    private fun championLine(): String? {
+        val man = modelStore.currentManifest() ?: return "No champion report installed."
+        return "Champion ${man.tag.ifBlank { "untagged" }} · rows ${man.nRows} · Brier ${"%.4f".format(man.modelBrier)} vs market ${"%.4f".format(man.marketBrier)} · beat=${man.beatsMarket}"
+    }
+
+    private fun cfLine(): String =
+        container.cfFeed.status(
+            com.dirk.kalshiodds.signal.ws.CfBenchmarks.BTC,
+            System.currentTimeMillis(),
+            coinbaseAvailable = true
+        ).detail
 
     private fun modelLabel(): String? {
         val m: EdgeModel = modelStore.current() ?: return "No imported model yet"

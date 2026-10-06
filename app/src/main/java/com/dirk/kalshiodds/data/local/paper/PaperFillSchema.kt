@@ -8,7 +8,7 @@ package com.dirk.kalshiodds.data.local.paper
 object PaperFillSchema {
     const val TABLE = "paper_fills"
     const val FROM_VERSION = 5
-    const val VERSION = 6
+    const val VERSION = 7
 
     val CREATE = """
         CREATE TABLE IF NOT EXISTS $TABLE (
@@ -48,7 +48,8 @@ object PaperFillSchema {
     val ADD_BANKROLL_AFTER = "ALTER TABLE $TABLE ADD COLUMN bankroll_after_usd REAL"
 
     fun upgradeSql(fromVersion: Int): List<String> {
-        if (fromVersion >= VERSION) return emptyList()
+        // Paper fills landed at v6. v7 only adds prediction_ledger elsewhere.
+        if (fromVersion >= 6) return emptyList()
         return listOf(CREATE, INDEX)
     }
 

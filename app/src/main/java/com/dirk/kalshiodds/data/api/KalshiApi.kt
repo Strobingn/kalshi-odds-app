@@ -61,7 +61,9 @@ interface KalshiApi {
         const val SERIES_BTC = "KXBTC15M"
         const val SERIES_BTCD = "KXBTCD"
         const val SERIES_ETH = "KXETH15M"
+        const val SERIES_ETHD = "KXETHD"
         const val SERIES_SOL = "KXSOL15M"
+        const val SERIES_SOLD = "KXSOLD"
         /** @deprecated Removed from the live watchlist — crypto-only app. Kept so old cache/tests compile. */
         @Deprecated("WTI dropped — Dip Hunter is crypto-only")
         const val SERIES_WTI = "KXWTI15M"

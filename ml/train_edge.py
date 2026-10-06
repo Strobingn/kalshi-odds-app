@@ -21,6 +21,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import sys
 import time
 import urllib.error
@@ -68,17 +69,40 @@ LIVE_PAGE = 200
 CB_CANDLE_MAX = 300
 
 
+def scrub_kalshi_env() -> None:
+    for key in list(os.environ):
+        if key.upper().startswith("KALSHI"):
+            os.environ.pop(key, None)
+
+
+_last_http = 0.0
+
+
 def http_get(url: str, retries: int = 5) -> Any:
+    global _last_http
+    scrub_kalshi_env()
     last: Exception | None = None
     for attempt in range(retries):
+        wait = 0.12 - (time.time() - _last_http)
+        if wait > 0:
+            time.sleep(wait)
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": UA})
             with urllib.request.urlopen(req, timeout=45) as resp:
+                _last_http = time.time()
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             last = e
+            _last_http = time.time()
             if e.code in (429, 502, 503):
-                time.sleep(min(2 ** attempt, 20))
+                retry_after = 0.0
+                try:
+                    raw = e.headers.get("Retry-After") if e.headers else None
+                    if raw:
+                        retry_after = float(raw)
+                except (TypeError, ValueError):
+                    retry_after = 0.0
+                time.sleep(max(retry_after, min(2 ** attempt, 20)))
                 continue
             if e.code == 404:
                 return {}
@@ -772,6 +796,7 @@ def _unlink_outputs(out: Path, manifest: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    scrub_kalshi_env()
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=3650, help="Lookback; 0 = no time cutoff (full history)")
     ap.add_argument("--max-markets", type=int, default=50_000)

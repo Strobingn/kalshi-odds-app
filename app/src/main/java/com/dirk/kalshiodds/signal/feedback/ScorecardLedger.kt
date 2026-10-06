@@ -336,11 +336,12 @@ object ScorecardLedger {
         return px
     }
 
-    fun paperClipFromAsk(ask: Double?): LiveOrderSizer.Clip? {
-        val px = scoreAsk(ask) ?: return null
-        val clip = LiveOrderSizer.size(px, PAPER_STAKE_USD)
-        return clip.takeIf { it.ok }
-    }
+    /**
+     * Unmatched log rows are not given a synthetic $10 clip. A 0.1¢ ask
+     * used to size thousands of contracts. Money totals use a recorded fill
+     * or they stay at $0.
+     */
+    fun paperClipFromAsk(@Suppress("UNUSED_PARAMETER") ask: Double?): LiveOrderSizer.Clip? = null
 
     /** Per-contract hypothetical: won ? (1 − ask) : −ask. Not a paper fill. */
     fun hypotheticalPerContract(won: Boolean, ask: Double): Double =
@@ -357,14 +358,8 @@ object ScorecardLedger {
         } else {
             scoreAsk(noAsk) ?: yesBid?.let { scoreAsk(1.0 - it) }
         }
-        val clip = paperClipFromAsk(ask)
-        if (clip == null) return StoredEntry(null, null, null, null)
-        return StoredEntry(
-            entryAsk = clip.price,
-            contracts = clip.count,
-            stakeUsd = clip.allInUsd,
-            feeUsd = clip.feeUsd
-        )
+        if (ask == null) return StoredEntry(null, null, null, null)
+        return StoredEntry(entryAsk = ask, contracts = null, stakeUsd = null, feeUsd = null)
     }
 
     fun moneyOf(fills: List<PaperFill>): Money {

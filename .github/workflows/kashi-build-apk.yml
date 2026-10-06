@@ -1,0 +1,59 @@
+name: Kashi build APK
+
+# Builds the Kashi debug APK (artifact only, never a GitHub release) for
+# kashi-* work branches and PRs into kashi. Signed with the committed debug
+# key; assembleDebug fails if the cert SHA-256 drifts.
+on:
+  push:
+    branches: ["kashi-*"]
+  pull_request:
+    branches: [kashi]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kashi-build-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: ML trainer tests (no look-ahead, publish safety)
+        run: |
+          python3 ml/test_train_edge.py
+          python3 ml/test_publish_model.py
+          if [ -f ml/test_eval_extra.py ]; then python3 ml/test_eval_extra.py; fi
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+      - name: Assemble debug APK + verify debug cert
+        run: ./gradlew assembleDebug verifyDebugCert --stacktrace
+      - name: Rename APK
+        id: apk
+        run: |
+          name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)
+          out="KalshiTrader-kashi-v${name}-${GITHUB_SHA::7}.apk"
+          cp app/build/outputs/apk/debug/DipHunter-debug.apk "$out"
+          sha256sum "$out"
+          echo "path=$out" >> "$GITHUB_OUTPUT"
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: KalshiTrader-kashi-apk
+          path: ${{ steps.apk.outputs.path }}
+          if-no-files-found: error

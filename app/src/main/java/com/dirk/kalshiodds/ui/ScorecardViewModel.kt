@@ -29,7 +29,9 @@ data class ScorecardUi(
     val exportMessage: String? = null,
     val sitOut: Boolean = false,
     val autoTuneNote: String = "",
-    val modelNote: String? = null
+    val modelNote: String? = null,
+    val honestLines: List<String> = emptyList(),
+    val ladderLine: String = com.dirk.kalshiodds.decision.StrategyLadder.rulesText()
 ) {
     companion object {
         val EMPTY = ScorecardUi(ScorecardCopy.EMPTY)
@@ -119,7 +121,10 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             exportMessage = notes.first,
             sitOut = settings.isSittingOut(),
             autoTuneNote = settings.autoTuneNote,
-            modelNote = notes.second
+            modelNote = notes.second,
+            honestLines = com.dirk.kalshiodds.decision.HonestScorecard.lines(
+                com.dirk.kalshiodds.decision.HonestScorecard.fromFills(paper.scorecardFills())
+            )
         )
     }.stateIn(
         viewModelScope,

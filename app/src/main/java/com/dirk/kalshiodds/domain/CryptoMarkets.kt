@@ -11,12 +11,22 @@ object CryptoMarkets {
     /** Home card. Not the Autopilot watchlist. */
     val DEFAULT_SERIES: List<String> = listOf(KalshiApi.SERIES_BTC)
 
-    /** BTC, ETH, and SOL 15-minute markets. No other series. */
-    val AUTOPILOT_SERIES: List<String> = listOf(
+    /** BTC, ETH, and SOL 15-minute markets. */
+    val FIFTEEN_SERIES: List<String> = listOf(
         KalshiApi.SERIES_BTC,
         KalshiApi.SERIES_ETH,
         KalshiApi.SERIES_SOL
     )
+
+    /** Daily 5 PM ET above/below: BTC, ETH, SOL. */
+    val DAILY_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTCD,
+        KalshiApi.SERIES_ETHD,
+        KalshiApi.SERIES_SOLD
+    )
+
+    /** 15-minute plus daily. Home card stays Bitcoin 15m. */
+    val AUTOPILOT_SERIES: List<String> = FIFTEEN_SERIES + DAILY_SERIES
 
     fun isLiveSeries(series: String): Boolean =
         DEFAULT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
@@ -30,7 +40,15 @@ object CryptoMarkets {
     fun isAutopilotSeries(series: String): Boolean =
         AUTOPILOT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
 
-    /** KXBTC15M, KXETH15M, KXSOL15M only. Daily, yearly, XRP, HYPE, and sports are not included. */
+    fun isDailySeries(series: String): Boolean =
+        DAILY_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
+
+    fun isDailyTicker(ticker: String): Boolean {
+        val u = ticker.trim().uppercase()
+        return DAILY_SERIES.any { u.startsWith(it) }
+    }
+
+    /** 15-minute BTC/ETH/SOL and the daily 5 PM ET series. */
     fun isAutopilotTicker(ticker: String): Boolean {
         val u = ticker.trim().uppercase()
         if (u.isEmpty()) return false
@@ -64,6 +82,8 @@ object CryptoMarkets {
         val u = ticker.uppercase()
         return when {
             u.startsWith(KalshiApi.SERIES_BTCD) -> KalshiApi.SERIES_BTCD
+            u.startsWith(KalshiApi.SERIES_ETHD) -> KalshiApi.SERIES_ETHD
+            u.startsWith(KalshiApi.SERIES_SOLD) -> KalshiApi.SERIES_SOLD
             u.startsWith(KalshiApi.SERIES_ETH) || (u.contains("ETH") && !u.contains("BTC")) -> KalshiApi.SERIES_ETH
             u.startsWith(KalshiApi.SERIES_SOL) || u.contains("SOL") -> KalshiApi.SERIES_SOL
             u.startsWith(KalshiApi.SERIES_BTC) || u.contains("BTC") -> KalshiApi.SERIES_BTC

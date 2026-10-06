@@ -253,17 +253,16 @@ class ScorecardLedgerTest {
             noAsk = 0.67,
             yesBid = 0.33
         )
-        val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(0.34, ScorecardLedger.PAPER_STAKE_USD)
         assertEquals(0.34, sized.entryAsk!!, 1e-9)
-        assertEquals(clip.count, sized.contracts)
-        assertEquals(clip.allInUsd, sized.stakeUsd!!, 1e-9)
-        assertEquals(clip.feeUsd, sized.feeUsd!!, 1e-9)
+        assertNull(sized.contracts)
+        assertNull(sized.stakeUsd)
+        assertNull(sized.feeUsd)
         assertNull(ScorecardLedger.paperClipFromAsk(0.001))
         assertNull(ScorecardLedger.paperClipFromAsk(0.99))
         assertNull(ScorecardLedger.captureEntryFromBook(sideYes = true, yesAsk = 0.001, noAsk = 0.50).entryAsk)
         assertNull(ScorecardLedger.captureEntryFromBook(sideYes = false, yesAsk = 0.40, noAsk = 0.995, yesBid = 0.001).entryAsk)
-        assertNotNull(ScorecardLedger.paperClipFromAsk(0.02))
-        assertNotNull(ScorecardLedger.paperClipFromAsk(0.98))
+        assertNull(ScorecardLedger.paperClipFromAsk(0.02))
+        assertNull(ScorecardLedger.paperClipFromAsk(0.98))
         val hub = java.io.File("app/src/main/java/com/dirk/kalshiodds/signal/SignalHub.kt").let { f ->
             if (f.isFile) f.readText() else java.io.File("src/main/java/com/dirk/kalshiodds/signal/SignalHub.kt").readText()
         }

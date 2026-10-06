@@ -315,6 +315,7 @@ class PaperBook(
         ) return null
         val model = ticket.modelChance
         val ask = KalshiPrice.usable(ticket.limitPrice)
+        if (ask != null && ask + 1e-12 < com.dirk.kalshiodds.decision.TradeEligibility.LOTTERY_ASK) return null
         if (ask != null && ask + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
             (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
         ) {
@@ -350,6 +351,7 @@ class PaperBook(
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        if (px + 1e-12 < com.dirk.kalshiodds.decision.TradeEligibility.LOTTERY_ASK) return null
         val model = PaperFill.metaFromAlert(alert).aiPct?.div(100.0)
         if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
             (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
@@ -877,7 +879,14 @@ class PaperBook(
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                val pnl = payout - fill.stakeUsd
+                val pnl = com.dirk.kalshiodds.decision.HonestScorecard.pnlAfterFee(
+                    contracts = fill.contracts,
+                    price = fill.limitPrice,
+                    stakeUsd = fill.stakeUsd,
+                    won = won,
+                    voided = outcome == "void",
+                    feeRate = feeRate
+                )
                 cash += payout
                 fill.copy(
                     settled = true,

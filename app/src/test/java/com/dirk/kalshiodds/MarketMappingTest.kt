@@ -46,7 +46,11 @@ class CryptoMarketsTest {
     @Test
     fun liveUniverseIsBitcoinOnly() {
         assertEquals(listOf("KXBTC15M"), CryptoMarkets.DEFAULT_SERIES)
-        assertEquals(listOf("KXBTC15M", "KXETH15M", "KXSOL15M"), CryptoMarkets.AUTOPILOT_SERIES)
+        assertEquals(listOf("KXBTC15M", "KXETH15M", "KXSOL15M"), CryptoMarkets.FIFTEEN_SERIES)
+        assertEquals(
+            listOf("KXBTC15M", "KXETH15M", "KXSOL15M", "KXBTCD", "KXETHD", "KXSOLD"),
+            CryptoMarkets.AUTOPILOT_SERIES
+        )
         assertTrue(CryptoMarkets.isLiveSeries("KXBTC15M"))
         assertTrue(CryptoMarkets.isLiveTicker("KXBTC15M-26SEP231600-00"))
         assertFalse(CryptoMarkets.isLiveTicker("KXETH15M-26SEP231645-45"))
@@ -55,7 +59,11 @@ class CryptoMarketsTest {
         assertTrue(CryptoMarkets.isAutopilotTicker("KXETH15M-26SEP231645-45"))
         assertTrue(CryptoMarkets.isAutopilotTicker("KXSOL15M-26SEP231645-45"))
         assertFalse(CryptoMarkets.isAutopilotTicker("KXXRP15M-FOO"))
-        assertFalse(CryptoMarkets.isAutopilotTicker("KXBTCD-26SEP3017-T90000"))
+        assertTrue(CryptoMarkets.isAutopilotTicker("KXBTCD-26SEP3017-T90000"))
+        assertTrue(CryptoMarkets.isDailyTicker("KXETHD-26SEP3017-T3000"))
+        assertTrue(CryptoMarkets.isDailyTicker("KXSOLD-26SEP3017-T150"))
+        assertEquals("KXETHD", CryptoMarkets.inferSeries("KXETHD-26SEP3017-T3000"))
+        assertEquals("KXSOLD", CryptoMarkets.inferSeries("KXSOLD-26SEP3017-T150"))
         assertFalse(CryptoMarkets.isRetiredTicker("KXETH15M-X"))
         assertFalse(CryptoMarkets.isRetiredTicker("KXSOL15M-X"))
         assertFalse(CryptoMarkets.isRetiredTicker("KXBTC15M-X"))

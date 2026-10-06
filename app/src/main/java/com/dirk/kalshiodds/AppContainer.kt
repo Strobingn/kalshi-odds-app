@@ -49,6 +49,9 @@ class AppContainer(context: Context) {
         runCatching { SqliteResultsStore(app) }
             .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
     val resultsStore: ResultsStore = resultsImpl
+    val cfFeed = com.dirk.kalshiodds.signal.ws.CfBenchmarkStore()
+    val predictionLedger: com.dirk.kalshiodds.data.local.results.SqliteResultsStore? =
+        resultsImpl as? com.dirk.kalshiodds.data.local.results.SqliteResultsStore
     val archive: com.dirk.kalshiodds.data.local.archive.DataArchive = resultsImpl
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
@@ -154,6 +157,7 @@ class AppContainer(context: Context) {
             shadow.book.settle(ticker, result)
             lastMinuteStore.settle(ticker, result)
             d3Store.settle(ticker, result)
+            runCatching { predictionLedger?.settleLedger(ticker, result, System.currentTimeMillis()) }
         },
         onCalibration = { hub.applyCalibration(it) },
         rateLimiter = kalshiTraffic.limiter,

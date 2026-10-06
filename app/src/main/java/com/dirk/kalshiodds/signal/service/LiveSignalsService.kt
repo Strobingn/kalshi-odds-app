@@ -275,6 +275,7 @@ class LiveSignalsService : Service() {
                         )
                     }
                 },
+                onCf = { tick -> runCatching { container.cfFeed.accept(tick) } },
                 onLog = { msg -> Log.d(TAG, msg) },
                 urls = com.dirk.kalshiodds.signal.ws.KalshiWsAuth.wsUrls(demo)
             )

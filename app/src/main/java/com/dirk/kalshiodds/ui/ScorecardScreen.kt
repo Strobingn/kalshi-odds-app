@@ -148,6 +148,15 @@ fun ScorecardScreen(
             item { LastMinuteScorecardCard(view.lastMinute) }
             item { D3ScorecardCard(view.d3) }
             item { AutopilotScorecardCard(view.autopilot) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Scored paper P&L", fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                    ui.honestLines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                    }
+                    Text(ui.ladderLine, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                }
+            }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }

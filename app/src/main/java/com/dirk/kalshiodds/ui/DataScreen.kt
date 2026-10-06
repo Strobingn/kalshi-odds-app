@@ -229,6 +229,23 @@ fun DataScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Sync now") }
 
+            Section("Prediction ledger")
+            Text(
+                state.cfFeedLine ?: "CF Benchmarks feed is off until Live signals connect with your Kalshi key. Coinbase is the fallback and is marked in the ledger.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Button(
+                onClick = viewModel::exportLedger,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text("Export prediction ledger CSV") }
+            state.ledgerNote?.let {
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
+            state.championReport?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+            }
+
             Section("Import model")
             Text(
                 "Load the JSON weights from `python3 ml/train_edge.py`. On-device inference is this file plus the existing light online learner — no extra heavy nets.",
@@ -236,7 +253,7 @@ fun DataScreen(
                 color = colors.textSecondary
             )
             Text(
-                "Get latest model checks the newest model-YYYYMMDD release (legacy edge-model-latest is accepted only when it matches this package). It checks sha256 and activates the model only if it beats the market after fees. A model that does not beat the market is rejected and the bundled DipHunter model stays active. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Get latest model checks the newest model-YYYYMMDD release, or ml/published/latest.json on kashi. edge-model-latest and edge-model-main are rejected. It checks package com.dirk.kalshiodds.kashi, sha256, non-synthetic, at least 5,000 rows, and activates only if beat_market is true. A model that does not beat the market is rejected and the bundled DipHunter model stays active. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

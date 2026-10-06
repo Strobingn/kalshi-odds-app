@@ -21,9 +21,14 @@ data class ExportResult(
  * user can open it after a crash. Never throws.
  */
 object ResultsFileExport {
-    fun write(context: Context, csv: String, nowMs: Long = System.currentTimeMillis()): ExportResult {
+    fun write(
+        context: Context,
+        csv: String,
+        nowMs: Long = System.currentTimeMillis(),
+        namePrefix: String = "diphunter-results"
+    ): ExportResult {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(nowMs))
-        val name = "diphunter-results-$stamp.csv"
+        val name = "$namePrefix-$stamp.csv"
         val local = runCatching {
             val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: File(context.filesDir, "export")

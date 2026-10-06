@@ -80,6 +80,8 @@ data class OddsUiState(
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
     val liveCashUsd: Double? = null,
+    val liveCashAtMs: Long? = null,
+    val cfFeedLine: String? = null,
     val restingOrders: List<com.dirk.kalshiodds.signal.trade.RestingOrder> = emptyList(),
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
@@ -561,6 +563,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 },
                 pollLabel = pollLabel,
                 modelScoreLabel = scoreLabel(overlaid),
+                cfFeedLine = container.cfFeed.status(
+                    com.dirk.kalshiodds.signal.ws.CfBenchmarks.BTC,
+                    container.clock.nowMs(),
+                    coinbaseAvailable = true
+                ).detail,
                 avgEdgeWhenRight = overlaid.avgEdgeWhenRight,
                 avgEdgeWhenWrong = overlaid.avgEdgeWhenWrong
             )
@@ -1189,6 +1196,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { cur ->
                 cur.copy(
                     liveCashUsd = cash ?: cur.liveCashUsd,
+                    liveCashAtMs = if (cash != null) System.currentTimeMillis() else cur.liveCashAtMs,
                     restingOrders = orders.getOrElse { cur.restingOrders }
                 )
             }
@@ -1325,14 +1333,41 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             if (!tick.decision.ok || picked == null) return@forEach
             if (mode == com.dirk.kalshiodds.signal.paper.AutopilotMode.PAPER) return@forEach
             val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
-            val sized = com.dirk.kalshiodds.signal.paper.AutopilotOrderSize.quote(
-                decision = tick.decision,
-                fill = tick.fill,
-                depth = depth,
-                kellyFraction = s.paperKellyFraction,
-                feeRate = s.feeRate,
-                cashUsd = paperBook.snapshot().cashUsd
-            )
+            val sized = if (mode == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE) {
+                val snap = _state.value
+                if (!com.dirk.kalshiodds.decision.LiveBalancePolicy.fresh(snap.liveCashUsd, snap.liveCashAtMs, now)) {
+                    paperBook.rememberMessage(com.dirk.kalshiodds.decision.LiveBalancePolicy.REASON)
+                    return@forEach
+                }
+                val live = com.dirk.kalshiodds.signal.paper.PaperKellySizer.size(
+                    winProb = picked.winProb,
+                    ask = picked.ask,
+                    bankrollUsd = snap.liveCashUsd ?: 0.0,
+                    kellyFraction = s.paperKellyFraction,
+                    feeRate = s.feeRate,
+                    depthContracts = depth
+                )
+                if (!live.ok || com.dirk.kalshiodds.decision.AutopilotMinStake.below(live.allInUsd)) {
+                    paperBook.rememberMessage(
+                        if (com.dirk.kalshiodds.decision.AutopilotMinStake.below(live.allInUsd)) {
+                            com.dirk.kalshiodds.decision.AutopilotMinStake.REASON
+                        } else {
+                            live.reason ?: "NO BET — balance unavailable"
+                        }
+                    )
+                    return@forEach
+                }
+                live
+            } else {
+                com.dirk.kalshiodds.signal.paper.AutopilotOrderSize.quote(
+                    decision = tick.decision,
+                    fill = tick.fill,
+                    depth = depth,
+                    kellyFraction = s.paperKellyFraction,
+                    feeRate = s.feeRate,
+                    cashUsd = paperBook.snapshot().cashUsd
+                )
+            }
             val tags = com.dirk.kalshiodds.signal.paper.AutopilotRegime.tags(market, picked.side, picked.ask, now)
             val draft = com.dirk.kalshiodds.signal.paper.ShadowOrderPayload.fromKelly(
                 ticker = market.ticker,

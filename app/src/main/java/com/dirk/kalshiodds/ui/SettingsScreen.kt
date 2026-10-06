@@ -764,8 +764,10 @@ fun SettingsContent(
                 "Autopilot covers BTC, ETH, and SOL 15-minute markets. Paper books simulated fills. " +
                     "Shadow builds the same Kelly order and never submits it. " +
                     "Limited live stays off until you arm it on the Real Money tab with Approve, then REAL MONEY. " +
-                    "Live sends only when paper and shadow agree, sized by the same fee-aware Kelly as paper. " +
-                    "There is no $10 or daily dollar cap on Autopilot. Manual Approve stays $10. " +
+                    "Live sends only when paper and shadow agree. Paper and shadow size from the paper bankroll. " +
+                    "Limited live sizes from your Kalshi available balance (cached, not a new poll). " +
+                    "If that balance is missing or older than 15 minutes, live places nothing. " +
+                    "Kelly clips under \$5 are skipped, not rounded up. There is no daily dollar cap. Manual Approve stays \$10. " +
                     "A missing key or an order error stops it. No retry.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary

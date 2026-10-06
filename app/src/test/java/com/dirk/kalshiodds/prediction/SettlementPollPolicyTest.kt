@@ -12,8 +12,9 @@ class SettlementPollPolicyTest {
     @Test
     fun filtersToTrackedKxbtc15mAfterClose() {
         assertTrue(SettlementPollPolicy.isPollableTicker("KXBTC15M-27SEP161500-00"))
-        assertFalse(SettlementPollPolicy.isPollableTicker("KXBTCD-27SEP16"))
-        assertTrue(SettlementPollPolicy.isPollableTicker("KXBTCD-27SEP16", setOf("KXBTCD-27SEP16")))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXBTCD-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXETHD-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXSOLD-27SEP16"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXBTCY-27SEP16"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXGRAMMY-BESTSONG"))
         assertFalse(SettlementPollPolicy.isPollableTicker("KXCRYPTOLEAD15M-27SEP16"))
