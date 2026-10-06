@@ -194,7 +194,7 @@ fun ScorecardScreen(
                         color = colors.textPrimary
                     )
                 }
-                items(view.recent, key = { "${it.ticker}-${it.settledAtMs}-${it.line}" }) { pick ->
+                items(view.recent) { pick ->
                     SettledPickRow(pick)
                 }
             }

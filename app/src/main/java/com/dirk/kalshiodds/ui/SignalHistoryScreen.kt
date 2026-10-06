@@ -66,7 +66,9 @@ fun SignalHistoryScreen(
                     )
                 }
             } else {
-                items(cards, key = { "${it.title}-${it.call}-${it.modelLine}" }) { card ->
+                // No text-based keys: two alerts with identical text gave the
+                // same key, and LazyColumn crashes on duplicate keys.
+                items(cards) { card ->
                     SignalSummaryCard(card)
                 }
             }
