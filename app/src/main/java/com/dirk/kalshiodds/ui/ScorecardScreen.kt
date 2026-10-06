@@ -131,6 +131,7 @@ fun ScorecardScreen(
                     )
                 }
             }
+            item { LedgerCard(ui.ledger, ui.ledgerRows) }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }
@@ -787,5 +788,81 @@ private fun LossStat(label: String, value: String) {
     Column {
         Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.bodyMedium, color = colors.down, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/**
+ * Prediction ledger: every settled call scored against Kalshi's own price
+ * on the same windows, with a day-resampled 95% range on the difference.
+ */
+@Composable
+private fun LedgerCard(
+    report: com.dirk.kalshiodds.prediction.ledger.LedgerReport.Result?,
+    rows: Int
+) {
+    val colors = DipTheme.colors
+    SectionCard("Prediction ledger · model vs Kalshi price") {
+        if (report == null) {
+            Text(
+                "No settled calls in the ledger yet. Every call is saved here when its window settles, and kept.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+            return@SectionCard
+        }
+        val verdictColor = when (report.verdict) {
+            com.dirk.kalshiodds.prediction.ledger.LedgerReport.Verdict.MODEL_BETTER -> colors.up
+            com.dirk.kalshiodds.prediction.ledger.LedgerReport.Verdict.MARKET_BETTER -> colors.down
+            else -> colors.textPrimary
+        }
+        Text(report.headline, style = MaterialTheme.typography.bodyMedium, color = verdictColor, fontWeight = FontWeight.SemiBold)
+        Spacer(Modifier.height(8.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            NeutralStat("Model Brier", String.format(Locale.US, "%.4f", report.modelBrier))
+            NeutralStat("Kalshi Brier", String.format(Locale.US, "%.4f", report.marketBrier))
+            NeutralStat("Calls · days", "${report.n} · ${report.days}")
+        }
+        Spacer(Modifier.height(6.dp))
+        val range = if (report.diffLow != null && report.diffHigh != null) {
+            String.format(Locale.US, " (95%% range %+.4f to %+.4f)", report.diffLow, report.diffHigh)
+        } else ""
+        Text(
+            String.format(Locale.US, "Model − Kalshi: %+.4f%s. Below zero means the model was better.", report.diff, range),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary
+        )
+        if (report.betN > 0 && report.betModelBrier != null && report.betMarketBrier != null) {
+            Text(
+                String.format(
+                    Locale.US,
+                    "Calls the app would have bet (%d): model %.4f vs Kalshi %.4f",
+                    report.betN, report.betModelBrier, report.betMarketBrier
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Text("Calibration: said → happened (calls)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        val market = report.marketBuckets.associateBy { it.lowPct }
+        report.modelBuckets.forEach { b ->
+            val m = market[b.lowPct]
+            Text(
+                String.format(
+                    Locale.US,
+                    "%d–%d%%  model %.0f%% → %.0f%% (%d)%s",
+                    b.lowPct, b.highPct, b.meanForecast * 100, b.actualYes * 100, b.n,
+                    m?.let { String.format(Locale.US, " · Kalshi %.0f%% → %.0f%% (%d)", it.meanForecast * 100, it.actualYes * 100, it.n) } ?: ""
+                ),
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textPrimary
+            )
+        }
+        Spacer(Modifier.height(6.dp))
+        Text(
+            "$rows windows saved · ${report.versions} model version(s). Needs ${com.dirk.kalshiodds.prediction.ledger.LedgerReport.MIN_DAYS}+ days before any verdict.",
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.textSecondary
+        )
     }
 }

@@ -33,6 +33,7 @@ import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.market.MarketRollover
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import java.io.File
+import kotlinx.coroutines.launch
 
 class AppContainer(context: Context) {
     private val app = context.applicationContext
@@ -40,6 +41,34 @@ class AppContainer(context: Context) {
     val preferences = SignalPreferences(app, extras = extraSecrets)
     val model = DipHunterModel(app)
     val logStore = PredictionLogStore(app)
+    val ledger: com.dirk.kalshiodds.prediction.ledger.LedgerStore? =
+        runCatching { com.dirk.kalshiodds.prediction.ledger.LedgerStore(app) }.getOrNull()
+    private val ledgerScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO
+    )
+
+    /** App build + edge model, stamped on each ledger row. */
+    fun ledgerModelVersion(): String {
+        val edge = runCatching { importedModel.currentManifest()?.version }.getOrNull() ?: "built-in"
+        return "app ${BuildConfig.VERSION_NAME}#${BuildConfig.CI_RUN_NUMBER} · edge $edge"
+    }
+
+    /** Copies settled yes/no calls from the prediction log into the permanent ledger. */
+    fun syncLedger(ticker: String? = null) {
+        val store = ledger ?: return
+        ledgerScope.launch {
+            runCatching {
+                val version = ledgerModelVersion()
+                val rows = logStore.readAll()
+                    .filter { ticker == null || it.ticker == ticker }
+                    .mapNotNull { com.dirk.kalshiodds.prediction.ledger.LedgerRow.from(it, version) }
+                    // One row per window: the last call logged for it.
+                    .groupBy { it.ticker }
+                    .map { (_, rs) -> rs.maxBy { it.calledAtMs } }
+                store.upsert(rows)
+            }
+        }
+    }
     val adapterStore = LearnedWeightsStore(app)
     val guardrailStore = GuardrailStore(app)
     val heavyStore = HeavyMlStore(app)
@@ -167,6 +196,7 @@ class AppContainer(context: Context) {
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
+            syncLedger(ticker)
             paper.book.settle(ticker, result)
             lateFavorite.ledger.settle(ticker, result)
             flowFade.ledger.settle(ticker, result)
@@ -205,6 +235,8 @@ class AppContainer(context: Context) {
     )
 
     init {
+        // Backfill: settled calls already in the 400-entry prediction log.
+        syncLedger()
         runCatching {
             archive.insertSession(
                 com.dirk.kalshiodds.data.local.history.HistorySession(

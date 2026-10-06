@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,7 +30,9 @@ data class ScorecardUi(
     val exportMessage: String? = null,
     val sitOut: Boolean = false,
     val autoTuneNote: String = "",
-    val modelNote: String? = null
+    val modelNote: String? = null,
+    val ledger: com.dirk.kalshiodds.prediction.ledger.LedgerReport.Result? = null,
+    val ledgerRows: Int = 0
 ) {
     companion object {
         val EMPTY = ScorecardUi(ScorecardCopy.EMPTY)
@@ -87,6 +90,7 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
     ) { entries, paper, adapter, guard, notes ->
         val settings = container.hub.settings
         val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
+        val ledgerRows = runCatching { container.ledger?.all().orEmpty() }.getOrElse { emptyList() }
         ScorecardUi(
             view = ScorecardCopy.of(entries, paper, windows),
             metrics = ScorecardMetrics.compute(
@@ -105,9 +109,11 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             exportMessage = notes.first,
             sitOut = settings.isSittingOut(),
             autoTuneNote = settings.autoTuneNote,
-            modelNote = notes.second
+            modelNote = notes.second,
+            ledger = runCatching { com.dirk.kalshiodds.prediction.ledger.LedgerReport.compute(ledgerRows) }.getOrNull(),
+            ledgerRows = ledgerRows.size
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.IO).stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         ScorecardUi.EMPTY
