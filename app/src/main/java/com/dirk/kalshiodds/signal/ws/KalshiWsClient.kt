@@ -32,6 +32,9 @@ class KalshiWsClient(
     private val onBookSnapshot: (KalshiWsMessages.Parsed.OrderbookSnapshot) -> Unit = {},
     private val onBookDelta: (KalshiWsMessages.Parsed.OrderbookDelta) -> Unit = {},
     private val onLifecycle: (ticker: String, eventType: String) -> Unit = { _, _ -> },
+    /** CF Benchmarks settlement index updates (authenticated channel). */
+    private val onIndex: (KalshiWsMessages.Parsed.IndexValue) -> Unit = {},
+    private val indexIds: List<String> = com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_IDS,
     private val httpClient: OkHttpClient = defaultClient(),
     private val urls: List<String> = KalshiWsAuth.WS_URLS
 ) {
@@ -129,6 +132,11 @@ class KalshiWsClient(
         val payload = KalshiWsMessages.subscribe(id, channels, marketTickers.takeIf { it.isNotEmpty() })
         ws.send(payload)
         onLog("subscribe id=$id channels=$channels tickers=${marketTickers.size}")
+        if (indexIds.isNotEmpty()) {
+            val indexId = msgId.getAndIncrement()
+            ws.send(KalshiWsMessages.subscribeIndices(indexId, indexIds))
+            onLog("subscribe id=$indexId cfbenchmarks_value $indexIds")
+        }
     }
 
     private fun scheduleReconnect() {
@@ -191,12 +199,19 @@ class KalshiWsClient(
                     runCatching { onBookDelta(parsed) }
                 }
                 is KalshiWsMessages.Parsed.Subscribed -> {
-                    parsed.sid?.let { subscribedSids += it }
+                    // The index subscription is kept out of the market sids so a
+                    // ticker switch (which unsubscribes those) never drops it.
+                    if (parsed.channel?.startsWith("cfbenchmarks") != true) {
+                        parsed.sid?.let { subscribedSids += it }
+                    }
                     onLog("subscribed sid=${parsed.sid}")
                 }
                 is KalshiWsMessages.Parsed.Unsubscribed -> {
                     subscribedSids.removeAll(parsed.sids.toSet())
                     onLog("unsubscribed sids=${parsed.sids}")
+                }
+                is KalshiWsMessages.Parsed.IndexValue -> {
+                    runCatching { onIndex(parsed) }
                 }
                 is KalshiWsMessages.Parsed.Lifecycle -> {
                     onLog("lifecycle ${parsed.eventType} ${parsed.ticker}")

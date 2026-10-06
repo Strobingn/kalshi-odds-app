@@ -56,7 +56,22 @@ object KalshiWsMessages {
             val seq: Int?,
             val receiveElapsedNanos: Long
         ) : Parsed()
-        data class Subscribed(val sid: Int?, val raw: String) : Parsed()
+        data class Subscribed(val sid: Int?, val raw: String, val channel: String? = null) : Parsed()
+        /**
+         * `cfbenchmarks_value`: the CF Benchmarks index Kalshi settles the
+         * crypto markets on. [finalMinuteAvg] is the running average of the
+         * final minute before a quarter-hour close (only sent then).
+         */
+        data class IndexValue(
+            val indexId: String,
+            val value: Double,
+            val sourceTsMs: Long?,
+            val receivedAtMs: Long?,
+            val avg60: Double?,
+            val avg60Ticks: Int?,
+            val finalMinuteAvg: Double?,
+            val finalMinuteTicks: Int?
+        ) : Parsed()
         data class Unsubscribed(val sids: List<Int>, val raw: String) : Parsed()
         data class Lifecycle(
             val ticker: String,
@@ -75,6 +90,43 @@ object KalshiWsMessages {
             params["market_tickers"] = json.parseToJsonElement(json.encodeToString(marketTickers))
         }
         return json.encodeToString(Command(id = id, cmd = "subscribe", params = params))
+    }
+
+    /** Subscribe to the authenticated CF Benchmarks index channel. */
+    fun subscribeIndices(id: Int, indexIds: List<String>, channel: String = INDEX_CHANNEL): String {
+        val params = mapOf<String, JsonElement>(
+            "channels" to json.parseToJsonElement(json.encodeToString(listOf(channel))),
+            "index_ids" to json.parseToJsonElement(json.encodeToString(indexIds))
+        )
+        return json.encodeToString(Command(id = id, cmd = "subscribe", params = params))
+    }
+
+    const val INDEX_CHANNEL = "cfbenchmarks_value"
+
+    fun parseIndex(msg: JsonObject?): Parsed.IndexValue? {
+        msg ?: return null
+        val indexId = msg.stringField("index_id", "id") ?: return null
+        val data: JsonObject? = when (val d = msg["data"]) {
+            is JsonObject -> d
+            is JsonPrimitive -> d.contentOrNull?.let { runCatching { json.parseToJsonElement(it) as? JsonObject }.getOrNull() }
+            else -> null
+        }
+        val avg = msg["avg_60s_data"] as? JsonObject
+        val fin = msg["last_60s_windowed_average_15min"] as? JsonObject
+        val value = data?.rawDouble("value", "v", "price")
+            ?: avg?.rawDouble("value")
+            ?: return null
+        if (!value.isFinite() || value <= 0.0) return null
+        return Parsed.IndexValue(
+            indexId = indexId,
+            value = value,
+            sourceTsMs = data?.longField("time", "ts", "timestamp", "source_ts_ms"),
+            receivedAtMs = msg.longField("received_at"),
+            avg60 = avg?.rawDouble("value")?.takeIf { it.isFinite() && it > 0.0 },
+            avg60Ticks = avg?.intField("window_size"),
+            finalMinuteAvg = fin?.rawDouble("value", "average", "avg")?.takeIf { it.isFinite() && it > 0.0 },
+            finalMinuteTicks = fin?.intField("window_size") ?: fin?.intField("count")
+        )
     }
 
     fun unsubscribe(id: Int, sids: List<Int>): String {
@@ -125,7 +177,12 @@ object KalshiWsMessages {
             "orderbook_delta" -> {
                 parseDelta(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
             }
-            "subscribed" -> Parsed.Subscribed(env.sid ?: env.msg?.intField("sid"), raw)
+            "subscribed" -> Parsed.Subscribed(
+                env.sid ?: env.msg?.intField("sid"),
+                raw,
+                env.msg?.stringField("channel")
+            )
+            INDEX_CHANNEL, "cfbenchmarks_value_5hz" -> parseIndex(env.msg) ?: Parsed.Other(env.type, raw)
             "unsubscribed" -> Parsed.Unsubscribed(
                 sids = env.msg?.intList("sids").orEmpty().ifEmpty {
                     listOfNotNull(env.sid)

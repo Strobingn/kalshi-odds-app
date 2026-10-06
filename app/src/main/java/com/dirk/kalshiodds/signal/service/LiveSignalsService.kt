@@ -231,6 +231,9 @@ class LiveSignalsService : Service() {
                     runCatching { container.recorder.onTick(tick) }
                     runCatching { hub.ingestTick(tick) }
                 },
+                onIndex = { v ->
+                    runCatching { container.cfIndex.onUpdate(v, System.currentTimeMillis()) }
+                },
                 onLifecycle = { ticker, eventType ->
                     scope.launch {
                         runCatching {

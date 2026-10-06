@@ -182,6 +182,8 @@ class ScoringEngine(
      */
     @Volatile
     var spotStream: com.dirk.kalshiodds.signal.external.SpotStreamBook? = null
+    /** Kalshi's CF Benchmarks settlement index; preferred over Coinbase when fresh. */
+    var cfIndex: com.dirk.kalshiodds.signal.external.CfIndexBook? = null
 
     private val lastAlertMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastBookScoreMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
@@ -582,7 +584,21 @@ class ScoringEngine(
                 netEvPositive = ev.netEv > 0.0
             )
         }
-        val combinedSpotLabel = listOfNotNull(spotLabel, dir.note).joinToString(" · ").ifBlank { null }
+        // CF Benchmarks index (what Kalshi settles on), when the Live signals
+        // WebSocket is delivering it; inside the final minute also the running
+        // settlement average Kalshi publishes.
+        val cfAsset = com.dirk.kalshiodds.signal.external.ExternalSnapshot.assetOf(tick.series)
+        val cf = cfAsset?.let { a -> runCatching { cfIndex?.fresh(a, nowMs) }.getOrNull() }
+        val cfFinalAvg = if (cf != null && cfAsset != null && close != null) {
+            runCatching { cfIndex?.finalMinuteAverage(cfAsset, close, nowMs) }.getOrNull()
+        } else {
+            null
+        }
+        val cfLabel = cf?.let {
+            String.format(java.util.Locale.US, "CF index $%,.2f", it.value) +
+                (cfFinalAvg?.let { a -> String.format(java.util.Locale.US, " · settle avg so far $%,.2f", a) } ?: "")
+        }
+        val combinedSpotLabel = listOfNotNull(spotLabel, dir.note, cfLabel).joinToString(" · ").ifBlank { null }
         val filter = SkipFilter.evaluate(
             confidence = confidence,
             spreadDollars = spread,
@@ -605,21 +621,31 @@ class ScoringEngine(
         // the last minute, the part of that average already printed comes
         // from the streamed tape.
         val settleAsset = com.dirk.kalshiodds.signal.external.ExternalSnapshot.assetOf(tick.series)
-        val observedMeanLog = if (close != null && settleAsset != null &&
-            nowMs > close - SETTLE_WINDOW_MS && nowMs < close
-        ) {
+        val inFinalMinute = close != null && nowMs > close - SETTLE_WINDOW_MS && nowMs < close
+        val observedMeanLog = if (inFinalMinute && cfFinalAvg != null) {
+            kotlin.math.ln(cfFinalAvg)
+        } else if (close != null && settleAsset != null && inFinalMinute) {
             runCatching { spotStream?.meanLogPrice(settleAsset, close - SETTLE_WINDOW_MS, nowMs) }.getOrNull()
         } else {
             null
         }
-        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
+        // The CF index is the settlement index itself: use it as spot, and drop
+        // the Coinbase-vs-index noise unless the final-minute average still
+        // had to come from the Coinbase tape.
+        val fairSpot = cf?.value ?: spotFeat?.lastPrice
+        val cfExact = cf != null && (!inFinalMinute || cfFinalAvg != null)
+        val digitalFairPp = if (fairSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
-                spot = spotFeat.lastPrice!!,
+                spot = fairSpot,
                 strike = strikeUsd,
                 tteSeconds = (tteSec ?: 900L).toDouble(),
                 sigmaAnnual = sigmaAnnual,
                 observedMeanLog = observedMeanLog,
-                indexNoise = com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.indexNoiseLog(settleAsset)
+                indexNoise = if (cfExact) {
+                    com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_NOISE_LOG
+                } else {
+                    com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.indexNoiseLog(settleAsset)
+                }
             )?.times(100.0)
         } else {
             null

@@ -123,6 +123,8 @@ class AppContainer(context: Context) {
      * app is visible or Live signals is on, and the Settings toggle allows it.
      */
     val spotBook = SpotStreamBook().also { scoring.spotStream = it }
+    /** Kalshi's CF Benchmarks settlement index (Live signals WebSocket). */
+    val cfIndex = com.dirk.kalshiodds.signal.external.CfIndexBook().also { scoring.cfIndex = it }
 
     /**
      * Research recorder (spot / top of book / trades / settlements as daily
