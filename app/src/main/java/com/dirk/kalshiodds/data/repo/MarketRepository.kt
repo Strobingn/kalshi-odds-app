@@ -212,15 +212,8 @@ class MarketRepository(
             val btcMarkets = btcDeferred.await()?.markets.orEmpty().cryptoOnly()
             val ethMarkets = ethDeferred.await()?.markets.orEmpty().cryptoOnly()
             val solMarkets = solDeferred.await()?.markets.orEmpty().cryptoOnly()
-            val dailyMarkets = ArrayList<com.dirk.kalshiodds.data.dto.MarketDto>()
-            for (series in com.dirk.kalshiodds.domain.CryptoMarkets.DAILY_SERIES) {
-                val gap = rateLimiter?.reserve(com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane.TICKER) ?: 0L
-                if (gap > 0L) kotlinx.coroutines.delay(gap)
-                val page = runCatching { client.getMarkets(series, status = "open", limit = 100) }.getOrNull()
-                dailyMarkets += page?.markets.orEmpty()
-            }
             val seen = (btcMarkets + ethMarkets + solMarkets).map { it.ticker }.toSet()
-            val extraMarkets = (extrasDeferred.mapNotNull { it.await() } + dailyMarkets)
+            val extraMarkets = extrasDeferred.mapNotNull { it.await() }
                 .cryptoOnly()
                 .filter { it.ticker !in seen }
             val now = System.currentTimeMillis()

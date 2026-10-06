@@ -309,7 +309,7 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
         )
         if (section.picks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            section.picks.take(40).forEach { pick ->
+            section.picks.forEach { pick ->
                 Text(
                     com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
                     style = MaterialTheme.typography.labelMedium,
@@ -437,7 +437,7 @@ internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
         )
         if (section.bets.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            section.bets.take(40).forEach { bet ->
+            section.bets.forEach { bet ->
                 Text(
                     bet.line,
                     style = MaterialTheme.typography.labelMedium,

@@ -1,228 +1,225 @@
 package com.dirk.kalshiodds.decision
 
+import kotlin.math.abs
+
 /**
- * Out-of-fold isotonic calibration by regime.
+ * Regime isotonic (PAV) calibration with a three-level hierarchical fallback:
  *
- * A bucket is usable at [MIN_SAMPLES] settled rows. Smaller buckets fall
- * back by dropping vol, then liquidity, then distance, then price, hours,
- * coin, and series. The final 60 seconds may not fall back to a wider
- * time bucket. If nothing qualifies, calibrated probability is unavailable.
+ *   regime (coin | horizon | time-left | z-distance)  →  coin  →  global
  *
- * The map applied to a new quote is the full-bucket PAV. Brier, log loss,
- * and the reliability chart are 5-fold out of fold so they are not
- * in-sample.
+ * A level is usable once it has [minSamples] settled predictions. The final
+ * 60 seconds never fall back: that regime must be calibrated on its own
+ * rows (and not be worse than the market there) before the gate lets a bet
+ * through. Brier, log loss, and the reliability buckets are out-of-fold
+ * (k-fold, time-ordered folds), so the report is not in-sample.
+ *
+ * Deterministic: the same rows always produce the same maps. No LLM.
  */
 object RegimeCalibration {
-    const val MIN_SAMPLES = 200
+    const val VERSION = "regime-pav-v2"
+    const val MIN_REGIME = 150
+    const val MIN_COIN = 200
+    const val MIN_GLOBAL = 300
     const val NEAR_Z = 0.5
-    const val LIQUID_SPREAD = 0.04
-    const val LIQUID_DEPTH = 20.0
-    const val HIGH_VOL = 0.80
+    const val FAR_Z = 1.5
     const val FOLDS = 5
+    const val RELIABILITY_BINS = 10
 
-    enum class TimeLeft { S0_30, S30_60, M1_3, M3_PLUS }
-    enum class Distance { FAR_BELOW, NEAR, FAR_ABOVE }
-    enum class Liquidity { THIN, LIQUID }
-    enum class Vol { CALM, HIGH }
+    enum class TimeLeft(val label: String) {
+        S0_30("0–30s"), S30_60("30–60s"), M1_3("1–3m"), M3_15("3–15m"), H_PLUS(">15m");
+
+        val finalWindow: Boolean get() = this == S0_30 || this == S30_60
+    }
+
+    enum class Distance(val label: String) { DEEP_BELOW("z<-1.5"), BELOW("-1.5..-0.5"), NEAR("|z|≤0.5"), ABOVE("0.5..1.5"), DEEP_ABOVE("z>1.5"), UNKNOWN("z?") }
+
+    enum class Level { REGIME, COIN, GLOBAL }
 
     data class Key(
-        val time: TimeLeft? = null,
-        val distance: Distance? = null,
-        val liquidity: Liquidity? = null,
-        val vol: Vol? = null,
-        val priceLevel: String? = null,
-        val hoursToClose: String? = null,
-        val coin: String? = null,
-        val series: String? = null
+        val coin: String,
+        val horizon: String,
+        val time: TimeLeft,
+        val distance: Distance
     ) {
-        fun lockTime(): Boolean = time == TimeLeft.S0_30 || time == TimeLeft.S30_60
-
-        fun broader(lockTime: Boolean = false): Key? = when {
-            vol != null -> copy(vol = null)
-            liquidity != null -> copy(liquidity = null)
-            distance != null -> copy(distance = null)
-            priceLevel != null -> copy(priceLevel = null)
-            hoursToClose != null -> copy(hoursToClose = null)
-            coin != null -> copy(coin = null)
-            series != null -> copy(series = null)
-            time != null && !lockTime -> copy(time = null)
-            else -> null
+        val regimeId: String get() = "${coin.uppercase()}|$horizon|${time.name}|${distance.name}"
+        val coinId: String get() = "${coin.uppercase()}|*"
+        val finalWindow: Boolean get() = time.finalWindow
+        fun idAt(level: Level): String = when (level) {
+            Level.REGIME -> regimeId
+            Level.COIN -> coinId
+            Level.GLOBAL -> GLOBAL_ID
         }
     }
 
+    const val GLOBAL_ID = "*"
+
     data class Sample(
-        val probability: Double,
+        val rawProbability: Double,
         val marketProbability: Double,
         val outcomeYes: Boolean,
-        val key: Key
+        val key: Key,
+        val timestampMs: Long = 0L,
+        /** Market (ticker) id for clustered statistics. */
+        val cluster: String = ""
     )
 
+    data class Bucket(val lo: Double, val hi: Double, val n: Int, val meanPredicted: Double, val observedRate: Double)
+
     data class BucketReport(
-        val key: String,
+        val id: String,
+        val level: Level,
         val n: Int,
         val modelBrier: Double?,
         val marketBrier: Double?,
+        val rawBrier: Double?,
         val modelLogLoss: Double?,
         val marketLogLoss: Double?,
-        val brierCi95: Pair<Double, Double>?,
-        val reliability: List<PavIsotonic.Knot>,
+        val reliability: List<Bucket>,
         val ready: Boolean,
         val notWorseThanMarket: Boolean
-    )
+    ) {
+        val approved: Boolean get() = ready && notWorseThanMarket
+    }
+
+    data class Applied(val probability: Double, val level: Level, val n: Int, val approved: Boolean)
 
     data class Model(
         val maps: Map<String, List<PavIsotonic.Knot>> = emptyMap(),
-        val counts: Map<String, Int> = emptyMap(),
-        val reports: List<BucketReport> = emptyList()
+        val reports: Map<String, BucketReport> = emptyMap(),
+        val fittedAtMs: Long = 0L,
+        val rows: Int = 0
     ) {
-        fun apply(probability: Double, key: Key): Double? {
-            var cursor: Key? = key
-            val lock = key.lockTime()
-            while (cursor != null) {
-                val id = idOf(cursor)
-                val n = counts[id] ?: 0
+        /** regime → coin → global. Final window: regime only. Null when nothing qualifies. */
+        fun apply(rawProbability: Double, key: Key): Applied? {
+            if (!rawProbability.isFinite()) return null
+            val levels = if (key.finalWindow) listOf(Level.REGIME) else Level.values().toList()
+            for (level in levels) {
+                val id = key.idAt(level)
+                val report = reports[id] ?: continue
                 val knots = maps[id]
-                if (n >= MIN_SAMPLES && !knots.isNullOrEmpty()) {
-                    return PavIsotonic.apply(probability, knots)
-                }
-                cursor = cursor.broader(lock)
+                if (!report.ready || knots.isNullOrEmpty()) continue
+                return Applied(PavIsotonic.apply(rawProbability, knots), level, report.n, report.approved)
             }
             return null
         }
 
-        fun regimeApproved(key: Key): Boolean {
-            val report = reportFor(key) ?: return false
-            return report.ready && report.notWorseThanMarket
-        }
-
+        /** The final 60 seconds are NO BET until that exact regime is calibrated and not worse than the market. */
         fun finalWindowReady(key: Key): Boolean {
-            if (!key.lockTime()) return true
-            return regimeApproved(key)
+            if (!key.finalWindow) return true
+            return reports[key.regimeId]?.approved == true
         }
 
-        private fun reportFor(key: Key): BucketReport? {
-            var cursor: Key? = key
-            val lock = key.lockTime()
-            while (cursor != null) {
-                val id = idOf(cursor)
-                reports.firstOrNull { it.key == id && it.ready }?.let { return it }
-                cursor = cursor.broader(lock)
-            }
-            return null
-        }
+        fun report(id: String): BucketReport? = reports[id]
+
+        val global: BucketReport? get() = reports[GLOBAL_ID]
+
+        fun sortedReports(): List<BucketReport> =
+            reports.values.sortedWith(compareBy<BucketReport>({ it.level.ordinal }, { -it.n }, { it.id }))
     }
 
-    fun timeOf(seconds: Double?): TimeLeft = when {
-        seconds == null || seconds <= 30.0 -> TimeLeft.S0_30
-        seconds <= 60.0 -> TimeLeft.S30_60
-        seconds <= 180.0 -> TimeLeft.M1_3
-        else -> TimeLeft.M3_PLUS
+    fun timeOf(secondsRemaining: Double?): TimeLeft = when {
+        secondsRemaining == null -> TimeLeft.H_PLUS
+        secondsRemaining <= 30.0 -> TimeLeft.S0_30
+        secondsRemaining <= 60.0 -> TimeLeft.S30_60
+        secondsRemaining <= 180.0 -> TimeLeft.M1_3
+        secondsRemaining <= 900.0 -> TimeLeft.M3_15
+        else -> TimeLeft.H_PLUS
     }
 
     fun distanceOf(z: Double?): Distance = when {
-        z == null || kotlin.math.abs(z) <= NEAR_Z -> Distance.NEAR
-        z > 0.0 -> Distance.FAR_ABOVE
-        else -> Distance.FAR_BELOW
+        z == null || !z.isFinite() -> Distance.UNKNOWN
+        z < -FAR_Z -> Distance.DEEP_BELOW
+        z < -NEAR_Z -> Distance.BELOW
+        abs(z) <= NEAR_Z -> Distance.NEAR
+        z <= FAR_Z -> Distance.ABOVE
+        else -> Distance.DEEP_ABOVE
     }
 
-    fun liquidityOf(spread: Double?, depth: Double?): Liquidity {
-        if (spread == null || depth == null) return Liquidity.THIN
-        return if (spread <= LIQUID_SPREAD && depth >= LIQUID_DEPTH) Liquidity.LIQUID else Liquidity.THIN
-    }
-
-    fun volOf(realizedVolAnnual: Double?): Vol =
-        if (realizedVolAnnual != null && realizedVolAnnual >= HIGH_VOL) Vol.HIGH else Vol.CALM
-
-    fun priceLevel(prob: Double): String = when {
-        prob < 0.05 -> "lt5c"
-        prob < 0.25 -> "5-25c"
-        prob < 0.75 -> "25-75c"
-        prob < 0.95 -> "75-95c"
-        else -> "gt95c"
-    }
-
-    fun hoursToClose(seconds: Double?): String = when {
-        seconds == null -> "unknown"
-        seconds < 3600.0 -> "lt1h"
-        seconds < 3.0 * 3600.0 -> "1-3h"
-        seconds < 8.0 * 3600.0 -> "3-8h"
-        else -> "gt8h"
-    }
-
-    fun idOf(key: Key): String = listOf(
-        key.time?.name ?: "*",
-        key.distance?.name ?: "*",
-        key.liquidity?.name ?: "*",
-        key.vol?.name ?: "*",
-        key.priceLevel ?: "*",
-        key.hoursToClose ?: "*",
-        key.coin ?: "*",
-        key.series ?: "*"
-    ).joinToString("|")
-
-    fun fit(samples: List<Sample>): Model {
-        val grouped = samples.groupBy { idOf(it.key) }
-        val maps = HashMap<String, List<PavIsotonic.Knot>>()
-        val counts = HashMap<String, Int>()
-        val reports = ArrayList<BucketReport>()
-        for ((id, rows) in grouped) {
-            counts[id] = rows.size
-            val pairs = rows.map { it.probability to if (it.outcomeYes) 1.0 else 0.0 }
-            maps[id] = PavIsotonic.fit(pairs)
-            val oof = outOfFold(rows)
-            val modelPairs = oof.map { it.first to it.second }
-            val marketPairs = rows.map { it.marketProbability to it.outcomeYes }
-            val mb = DecisionMath.brier(modelPairs)
-            val kb = DecisionMath.brier(marketPairs)
-            val squared = oof.map { (p, y) ->
-                val t = if (y) 1.0 else 0.0
-                val d = p - t
-                d * d
-            }
-            val ready = rows.size >= MIN_SAMPLES
-            reports += BucketReport(
-                key = id,
-                n = rows.size,
-                modelBrier = mb,
-                marketBrier = kb,
-                modelLogLoss = DecisionMath.logLoss(modelPairs),
-                marketLogLoss = DecisionMath.logLoss(marketPairs),
-                brierCi95 = DecisionMath.meanCi95(squared),
-                reliability = reliability(oof),
-                ready = ready,
-                notWorseThanMarket = mb != null && kb != null && mb <= kb + 1e-12
-            )
+    fun keyOf(series: String?, secondsRemaining: Double?, z: Double?): Key {
+        val s = series?.uppercase().orEmpty()
+        val coin = when {
+            s.startsWith("KXBTC") -> "BTC"
+            s.startsWith("KXETH") -> "ETH"
+            s.startsWith("KXSOL") -> "SOL"
+            else -> "OTHER"
         }
-        return Model(maps, counts, reports.sortedBy { it.key })
+        val horizon = if (s.endsWith("15M")) "15m" else if (s.endsWith("D")) "daily" else "other"
+        return Key(coin, horizon, timeOf(secondsRemaining), distanceOf(z))
     }
 
+    fun minFor(level: Level): Int = when (level) {
+        Level.REGIME -> MIN_REGIME
+        Level.COIN -> MIN_COIN
+        Level.GLOBAL -> MIN_GLOBAL
+    }
+
+    fun fit(samples: List<Sample>, nowMs: Long = 0L): Model {
+        val clean = samples.filter {
+            it.rawProbability.isFinite() && it.marketProbability.isFinite()
+        }.sortedWith(compareBy({ it.timestampMs }, { it.cluster }, { it.rawProbability }))
+        val maps = LinkedHashMap<String, List<PavIsotonic.Knot>>()
+        val reports = LinkedHashMap<String, BucketReport>()
+        for (level in Level.values()) {
+            val grouped = clean.groupBy { it.key.idAt(level) }
+            for ((id, rows) in grouped) {
+                maps[id] = PavIsotonic.fit(rows.map { it.rawProbability to if (it.outcomeYes) 1.0 else 0.0 })
+                reports[id] = report(id, level, rows)
+            }
+        }
+        return Model(maps, reports, nowMs, clean.size)
+    }
+
+    private fun report(id: String, level: Level, rows: List<Sample>): BucketReport {
+        val oof = outOfFold(rows)
+        val modelPairs = oof
+        val marketPairs = rows.map { it.marketProbability to it.outcomeYes }
+        val rawPairs = rows.map { it.rawProbability to it.outcomeYes }
+        val mb = DecisionMath.brier(modelPairs)
+        val kb = DecisionMath.brier(marketPairs)
+        val ready = rows.size >= minFor(level)
+        return BucketReport(
+            id = id,
+            level = level,
+            n = rows.size,
+            modelBrier = mb,
+            marketBrier = kb,
+            rawBrier = DecisionMath.brier(rawPairs),
+            modelLogLoss = DecisionMath.logLoss(modelPairs),
+            marketLogLoss = DecisionMath.logLoss(marketPairs),
+            reliability = reliability(oof),
+            ready = ready,
+            notWorseThanMarket = mb != null && kb != null && mb <= kb + 1e-12
+        )
+    }
+
+    /** Time-ordered contiguous folds: each fold's map is fitted on the other folds only. */
     fun outOfFold(rows: List<Sample>): List<Pair<Double, Boolean>> {
-        if (rows.size < 2) return rows.map { it.probability to it.outcomeYes }
-        val k = FOLDS.coerceAtMost(rows.size)
-        val order = rows.indices.sortedBy { rows[it].probability }
-        val pred = DoubleArray(rows.size)
-        for (fold in 0 until k) {
-            val test = order.filterIndexed { i, _ -> i % k == fold }
-            val train = order.filterIndexed { i, _ -> i % k != fold }
-            val knots = PavIsotonic.fit(train.map { rows[it].probability to if (rows[it].outcomeYes) 1.0 else 0.0 })
-            for (i in test) pred[i] = PavIsotonic.apply(rows[i].probability, knots)
+        if (rows.size < FOLDS * 2) return rows.map { it.rawProbability to it.outcomeYes }
+        val n = rows.size
+        val pred = DoubleArray(n)
+        for (fold in 0 until FOLDS) {
+            val lo = fold * n / FOLDS
+            val hi = (fold + 1) * n / FOLDS
+            val train = rows.filterIndexed { i, _ -> i < lo || i >= hi }
+            val knots = PavIsotonic.fit(train.map { it.rawProbability to if (it.outcomeYes) 1.0 else 0.0 })
+            for (i in lo until hi) pred[i] = PavIsotonic.apply(rows[i].rawProbability, knots)
         }
         return rows.indices.map { pred[it] to rows[it].outcomeYes }
     }
 
-    private fun reliability(oof: List<Pair<Double, Boolean>>): List<PavIsotonic.Knot> {
-        if (oof.isEmpty()) return emptyList()
-        val bins = 8
+    fun reliability(pairs: List<Pair<Double, Boolean>>, bins: Int = RELIABILITY_BINS): List<Bucket> {
+        if (pairs.isEmpty()) return emptyList()
         return (0 until bins).mapNotNull { i ->
             val lo = i / bins.toDouble()
             val hi = (i + 1) / bins.toDouble()
-            val inBin = oof.filter { (p, _) ->
-                if (i == bins - 1) p >= lo else p >= lo && p < hi
-            }
+            val inBin = pairs.filter { (p, _) -> if (i == bins - 1) p >= lo else p >= lo && p < hi }
             if (inBin.isEmpty()) null
-            else PavIsotonic.Knot(
-                x = inBin.map { it.first }.average(),
-                y = inBin.count { it.second }.toDouble() / inBin.size
+            else Bucket(
+                lo = lo,
+                hi = hi,
+                n = inBin.size,
+                meanPredicted = inBin.map { it.first }.average(),
+                observedRate = inBin.count { it.second }.toDouble() / inBin.size
             )
         }
     }

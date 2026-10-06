@@ -23,14 +23,17 @@ class D3MarketClient(
         )
     } ?: D3Fees.fromSeries(null, null, null)
 
-    suspend fun loadFivePmQuotes(): List<D3Quote> = guarded(com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane.D3) {
+    suspend fun loadFivePmQuotes(): List<D3Quote> = loadFivePmQuotes(D3Constants.SERIES)
+
+    /** 5 PM ET daily above/below quotes for KXBTCD / KXETHD / KXSOLD (REST, rate-limited lane). */
+    suspend fun loadFivePmQuotes(seriesTicker: String): List<D3Quote> = guarded(com.dirk.kalshiodds.data.api.KalshiRateLimiter.Lane.D3) {
         val api = resolveApi()
         val out = ArrayList<D3Quote>()
         var cursor: String? = null
         var pages = 0
         do {
             val resp = api.getMarkets(
-                seriesTicker = D3Constants.SERIES,
+                seriesTicker = seriesTicker,
                 status = "open",
                 limit = 200,
                 cursor = cursor

@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -123,14 +124,28 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             autoTuneNote = settings.autoTuneNote,
             modelNote = notes.second,
             honestLines = com.dirk.kalshiodds.decision.HonestScorecard.lines(
-                com.dirk.kalshiodds.decision.HonestScorecard.fromFills(paper.scorecardFills())
+                com.dirk.kalshiodds.decision.HonestScorecard.fromHistory(
+                    persistedPaperRows(),
+                    paper.scorecardFills()
+                )
             )
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.IO).stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         ScorecardUi.EMPTY
     )
+
+    @Volatile private var paperRowsCache: Pair<Long, List<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>>>? = null
+
+    /** All settled paper fills from SQLite (cached 30 s); the in-memory book only keeps 80. */
+    private fun persistedPaperRows(): List<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>> {
+        val now = System.currentTimeMillis()
+        paperRowsCache?.let { (at, rows) -> if (now - at < 30_000L) return rows }
+        val rows = runCatching { container.predictionLedger?.settledPaperRows() }.getOrNull().orEmpty()
+        paperRowsCache = now to rows
+        return rows
+    }
 
     private fun extendedLine(): String {
         val ext = container.scoring.extended

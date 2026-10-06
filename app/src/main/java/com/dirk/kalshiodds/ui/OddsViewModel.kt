@@ -82,6 +82,10 @@ data class OddsUiState(
     val liveCashUsd: Double? = null,
     val liveCashAtMs: Long? = null,
     val cfFeedLine: String? = null,
+    /** CF Benchmarks feed status for BTC / ETH / SOL (primary settlement source). */
+    val cfFeedLines: List<String> = emptyList(),
+    /** Latest deterministic gate verdict per market ("BET …" or "NO BET — …"). */
+    val decisionLines: List<String> = emptyList(),
     val restingOrders: List<com.dirk.kalshiodds.signal.trade.RestingOrder> = emptyList(),
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
@@ -956,6 +960,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var positionJob: Job? = null
     private val lastD3TradeFetch = ConcurrentHashMap<String, Long>()
     @Volatile private var d3Quotes: List<com.dirk.kalshiodds.signal.d3.D3Quote> = emptyList()
+    @Volatile private var lastOtherDailyFetchMs = 0L
 
     private fun startD3Loop() {
         d3Job?.cancel()
@@ -1007,6 +1012,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val quotes = withContext(Dispatchers.IO) { container.d3Markets.loadFivePmQuotes() }
             if (quotes.isNotEmpty()) d3Quotes = quotes
             fetchedAt = now
+            val daily = HashMap<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>>()
+            daily[com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTCD] = quotes
+            if (now - lastOtherDailyFetchMs >= OTHER_DAILY_MS) {
+                for (series in listOf(com.dirk.kalshiodds.data.api.KalshiApi.SERIES_ETHD, com.dirk.kalshiodds.data.api.KalshiApi.SERIES_SOLD)) {
+                    daily[series] = withContext(Dispatchers.IO) {
+                        runCatching { container.d3Markets.loadFivePmQuotes(series) }.getOrDefault(emptyList())
+                    }
+                }
+                lastOtherDailyFetchMs = now
+            }
+            runCatching { runDailyDecisions(daily, now) }
         }
         val quotes = d3Quotes
         val settings = _state.value.settings
@@ -1068,6 +1084,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private suspend fun refreshBrtiSpot() {
+        // CF Benchmarks BRTI over the signed Kalshi WS is primary; the public composite is the fallback.
+        val now = container.clock.nowMs()
+        val cf = container.cfFeed.latest(com.dirk.kalshiodds.signal.ws.CfBenchmarks.BTC)?.takeIf { it.fresh(now) }
+        if (cf != null) {
+            container.lastMinuteEngine.noteSpot(
+                com.dirk.kalshiodds.signal.lastminute.BrtiQuote(
+                    price = cf.value,
+                    source = "CF BRTI",
+                    fallback = false,
+                    fetchedAtMs = cf.localReceivedAtMs.takeIf { it > 0L } ?: now
+                )
+            )
+            return
+        }
         val fallback = container.external.latest().btc
         val quote = withContext(Dispatchers.IO) {
             container.brti.fetchSpot(fallback?.lastPrice, fallback?.source)
@@ -1300,6 +1330,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun runPaperAutopilot(live: List<MarketUiModel>) {
         val s = _state.value.settings
+        val assessments = assessForLedger(live, s)
+        if (s.paperTradingEnabled) runFav15Ladder(live)
         if (!s.paperTradingEnabled || !s.aiPaperAutopilotEnabled) return
         val mode = s.autopilotModeEnum()
         paperBook.configure(
@@ -1327,7 +1359,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 yesDepth = yesDepth,
                 noDepth = noDepth,
                 book = book,
-                bookPaper = mode != com.dirk.kalshiodds.signal.paper.AutopilotMode.SHADOW
+                bookPaper = mode != com.dirk.kalshiodds.signal.paper.AutopilotMode.SHADOW,
+                assessment = assessments[market.ticker.uppercase()]
             )
             val picked = tick.decision.side
             if (!tick.decision.ok || picked == null) return@forEach
@@ -1420,6 +1453,195 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     publishLiveArm()
                 }
             }
+        }
+    }
+
+    /**
+     * 0.3.37: run the deterministic decision pipeline for every BTC/ETH/SOL
+     * 15m market and write the prediction ledger, whether or not Autopilot is
+     * on. Returns assessments keyed by upper-case ticker.
+     */
+    private fun assessForLedger(
+        live: List<MarketUiModel>,
+        s: com.dirk.kalshiodds.signal.config.SignalSettings
+    ): Map<String, com.dirk.kalshiodds.decision.DecisionPipeline.Assessment> {
+        val now = container.clock.nowMs()
+        val ctx = ticketContext(_state.value, now)
+        val out = HashMap<String, com.dirk.kalshiodds.decision.DecisionPipeline.Assessment>()
+        live.forEach { market ->
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(market.ticker)) return@forEach
+            runCatching {
+                val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
+                val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
+                val input = com.dirk.kalshiodds.decision.DecisionInputs.build(
+                    ticker = market.ticker,
+                    nowMs = now,
+                    closeTimeMs = market.closeTimeEpochMs,
+                    rawModelYes = PaperAutopilot.modelYes(market),
+                    marketYes = PaperAutopilot.marketYes(market, yesAsk, noAsk),
+                    yesAsk = yesAsk,
+                    noAsk = noAsk,
+                    yesBid = market.yesBid,
+                    noBid = market.noBid,
+                    yesDepth = paperAskDepth("YES", yesAsk, market.ticker, market),
+                    noDepth = paperAskDepth("NO", noAsk, market.ticker, market),
+                    bookAgeMs = bookAgeMs(market.ticker, now),
+                    strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker),
+                    volPerSec = volPerSecFor(market.ticker),
+                    settlement = settlementFor(market.ticker, now),
+                    feeRate = s.feeRate,
+                    modelVersion = "app-${com.dirk.kalshiodds.BuildConfig.VERSION_NAME}"
+                )
+                out[market.ticker.uppercase()] = container.decisions.assess(input)
+            }
+        }
+        publishDecisionLines(now)
+        return out
+    }
+
+    /** Freshest of the WS book and the last REST snapshot; null if neither. */
+    private fun bookAgeMs(ticker: String, now: Long): Long? {
+        val ws = hub.scoring.book.bookAgeMs(ticker, now)
+        val rest = _state.value.snapshot?.takeIf { !it.fromCache && it.fetchedAtEpochMs > 0L }
+            ?.let { (now - it.fetchedAtEpochMs).coerceAtLeast(0L) }
+        return listOfNotNull(ws, rest).minOrNull()
+    }
+
+    private fun volPerSecFor(ticker: String): Double? {
+        val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
+        return if (series.contains("BTC")) container.lastMinuteEngine.sigS()?.takeIf { it.isFinite() && it > 0.0 } else null
+    }
+
+    private fun settlementFor(ticker: String, now: Long): com.dirk.kalshiodds.decision.DecisionInputs.Settlement {
+        val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
+        val index = com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series)
+        val cf = index?.let { container.cfFeed.latest(it) }
+        val cb = container.external.latest().forSeries(series)
+        return com.dirk.kalshiodds.decision.DecisionInputs.settlement(
+            series = series,
+            nowMs = now,
+            cfTick = cf,
+            coinbaseSpot = cb?.lastPrice ?: hub.scoring.book.lastSpot(ticker),
+            coinbaseAtMs = cb?.fetchedAtMs?.takeIf { it > 0L }
+        )
+    }
+
+    private fun cfLines(now: Long): List<String> {
+        val ext = container.external.latest()
+        return com.dirk.kalshiodds.signal.ws.CfBenchmarks.INDEX_IDS.map { id ->
+            val coin = com.dirk.kalshiodds.signal.ws.CfBenchmarks.coinOf(id)
+            val cb = ext.forSeries(coin)?.lastPrice != null
+            val st = container.cfFeed.status(id, now, coinbaseAvailable = cb)
+            "$coin: ${st.detail}"
+        }
+    }
+
+    private fun publishDecisionLines(now: Long) {
+        val latest = container.decisions.latestAll()
+        val lines = latest.entries.sortedBy { it.key }.take(12).map { (t, a) -> "$t — ${a.verdict.headline}" }
+        val cf = cfLines(now)
+        val cur = _state.value
+        if (cur.decisionLines != lines || cur.cfFeedLines != cf) {
+            _state.update { it.copy(decisionLines = lines, cfFeedLines = cf) }
+        }
+    }
+
+    /** fav15 ladder (paper only): preregistered favourite rule on the 15m markets. */
+    private fun runFav15Ladder(live: List<MarketUiModel>) {
+        val now = container.clock.nowMs()
+        val ctx = ticketContext(_state.value, now)
+        live.forEach { market ->
+            val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
+            if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
+            if (container.ladder.hasEntry(com.dirk.kalshiodds.decision.Fav15Rule.ID, market.ticker)) return@forEach
+            val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
+            val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
+            val age = bookAgeMs(market.ticker, now)
+            val r = com.dirk.kalshiodds.decision.Fav15Rule.evaluate(
+                yesAsk = yesAsk,
+                noAsk = noAsk,
+                yesAskSize = paperAskDepth("YES", yesAsk, market.ticker, market)?.toDouble(),
+                noAskSize = paperAskDepth("NO", noAsk, market.ticker, market)?.toDouble(),
+                secondsRemaining = market.closeTimeEpochMs?.let { (it - now) / 1000.0 },
+                bookFresh = age != null && age <= com.dirk.kalshiodds.decision.FillModel.FRESH_BOOK_MS
+            )
+            if (r is com.dirk.kalshiodds.decision.Fav15Rule.Result.Enter) {
+                container.ladder.record(
+                    strategy = com.dirk.kalshiodds.decision.Fav15Rule.ID,
+                    ticker = market.ticker,
+                    event = market.ticker,
+                    side = r.signal.side,
+                    clip = r.signal.clip,
+                    price = r.signal.price,
+                    note = "fav15 ${r.signal.side} @ ${(r.signal.price * 100).toInt()}¢"
+                )
+            }
+        }
+    }
+
+    /** v060 ladder (paper only) + daily ledger rows for KXBTCD / KXETHD / KXSOLD 5 PM ET. */
+    private fun runDailyDecisions(quotesBySeries: Map<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>>, fetchedAtMs: Long) {
+        val s = _state.value.settings
+        val now = container.clock.nowMs()
+        val age = (now - fetchedAtMs).coerceAtLeast(0L)
+        quotesBySeries.forEach { (series, quotes) ->
+            quotes.forEach { q ->
+                val raw = com.dirk.kalshiodds.decision.DecisionInputs.dailyRaw(q.yesBid, q.yesAsk, q.closeTimeEpochMs, now)
+                    ?: return@forEach
+                if (raw.second < 0.03 || raw.second > 0.97) return@forEach
+                runCatching {
+                    container.decisions.assess(
+                        com.dirk.kalshiodds.decision.DecisionInputs.build(
+                            ticker = q.ticker,
+                            nowMs = now,
+                            closeTimeMs = q.closeTimeEpochMs,
+                            rawModelYes = raw.first,
+                            marketYes = raw.second,
+                            yesAsk = q.yesAsk,
+                            noAsk = q.noAsk,
+                            yesBid = q.yesBid,
+                            noBid = q.noBid,
+                            yesDepth = q.yesAskSize?.toInt(),
+                            noDepth = q.noAskSize?.toInt(),
+                            bookAgeMs = age,
+                            strike = q.strikeUsd,
+                            volPerSec = if (series.contains("BTC")) container.lastMinuteEngine.sigS() else null,
+                            settlement = settlementFor(q.ticker, now),
+                            feeRate = s.feeRate,
+                            modelVersion = com.dirk.kalshiodds.decision.V060Rule.VERSION
+                        )
+                    )
+                }
+            }
+        }
+        if (!s.paperTradingEnabled) return
+        val btc = quotesBySeries[com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTCD].orEmpty()
+        if (age > com.dirk.kalshiodds.decision.FillModel.FRESH_BOOK_MS) return
+        btc.groupBy { it.eventTicker ?: com.dirk.kalshiodds.decision.V060Rule.eventOf(it.ticker) }.forEach { (event, qs) ->
+            val close = qs.firstNotNullOfOrNull { it.closeTimeEpochMs } ?: return@forEach
+            val closeDay = java.time.Instant.ofEpochMilli(close).atZone(java.time.ZoneId.of("America/New_York")).dayOfWeek
+            if (closeDay == java.time.DayOfWeek.FRIDAY) return@forEach
+            val tau = (close - now) / 1000.0
+            if (com.dirk.kalshiodds.decision.V060Rule.checkpoint(tau) == null) return@forEach
+            if (container.ladder.hasEntry(com.dirk.kalshiodds.decision.V060Rule.ID, event)) return@forEach
+            val pick = com.dirk.kalshiodds.decision.V060Rule.bestPick(
+                qs.map {
+                    com.dirk.kalshiodds.decision.V060Rule.Quote(it.ticker, it.yesBid, it.yesAsk, it.noAsk, it.yesAskSize, it.noAskSize)
+                },
+                tau
+            ) ?: return@forEach
+            val q = qs.first { it.ticker == pick.ticker }
+            val visible = if (pick.side == "YES") q.yesAskSize else q.noAskSize
+            if (visible == null || visible + 1e-9 < pick.clip.contracts) return@forEach
+            container.ladder.record(
+                strategy = com.dirk.kalshiodds.decision.V060Rule.ID,
+                ticker = pick.ticker,
+                event = event,
+                side = pick.side,
+                clip = pick.clip,
+                price = pick.price,
+                note = String.format(java.util.Locale.US, "v060 %s @ %.0f¢ EV/$ %+.3f", pick.side, pick.price * 100, pick.evPerDollar)
+            )
         }
     }
 
@@ -1540,6 +1762,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        /** ETH/SOL daily quotes are ledger-only; refresh every 2 min on the rate-limited lane. */
+        private const val OTHER_DAILY_MS = 120_000L
         const val BASE_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val JITTER_MS = 250L
         const val MIN_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS

@@ -55,6 +55,13 @@ class AppContainer(context: Context) {
     val archive: com.dirk.kalshiodds.data.local.archive.DataArchive = resultsImpl
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
+    /** 0.3.37 deterministic decision layer: calibration + gate + prediction ledger. No LLM. */
+    val decisions = com.dirk.kalshiodds.decision.DecisionRuntime(
+        sink = predictionLedger,
+        scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO),
+        longshot = com.dirk.kalshiodds.decision.LongshotResidual.loadAsset(app)
+    ).also { it.refitIfDue() }
+    val ladder = com.dirk.kalshiodds.decision.LadderStore(app)
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
@@ -150,7 +157,8 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = {
-            paper.book.openTickers() + shadow.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers()
+            paper.book.openTickers() + shadow.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers() +
+                ladder.openTickers() + decisions.unsettledTickers()
         },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
@@ -158,6 +166,8 @@ class AppContainer(context: Context) {
             lastMinuteStore.settle(ticker, result)
             d3Store.settle(ticker, result)
             runCatching { predictionLedger?.settleLedger(ticker, result, System.currentTimeMillis()) }
+            runCatching { ladder.settle(ticker, result) }
+            decisions.onSettled()
         },
         onCalibration = { hub.applyCalibration(it) },
         rateLimiter = kalshiTraffic.limiter,
@@ -165,6 +175,7 @@ class AppContainer(context: Context) {
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
             paper.book.settleFromLog(logStore.readAll())
+            decisions.refitIfDue()
             val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
                 logStore.readAll(),
                 feeRate = hub.settings.feeRate

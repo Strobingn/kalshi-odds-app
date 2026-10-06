@@ -1,66 +1,88 @@
 package com.dirk.kalshiodds.decision
 
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import kotlin.math.exp
-import kotlin.math.ln
 import kotlin.math.min
+import kotlin.math.sqrt
 
 /**
- * Transparent fill heuristic (not a trained model) and a queue-aware replay.
+ * Transparent, deterministic fill model (a heuristic, not a trained model).
  *
- * expected_net = P(fill) * [P(win) * payout - entry cost - fees - adverse selection].
+ *   expected_net = P(fill) × [P(win) × payout − price − fee − adverse selection]
+ *
+ * P(fill) for a taker at the displayed ask depends on book freshness and
+ * whether the displayed size covers the order. For a resting bid it also
+ * depends on the queue ahead, spread, imbalance, and time left.
  */
 object FillModel {
+    const val VERSION = "fill-heuristic-v2"
     const val MIN_P_FILL = 0.35
+    /** A book older than this is stale: NO BET and no paper fill. */
+    const val FRESH_BOOK_MS = 60_000L
+    const val FRESHNESS_TAU_MS = 30_000.0
 
     data class Quote(
         val marketable: Boolean,
         val price: Double,
         val size: Double,
-        val depthAhead: Double,
+        /** Taker: displayed size at/through the price. Maker: queue ahead of us at our price. */
+        val depth: Double,
         val spread: Double,
-        val imbalance: Double,
-        val bookAgeSec: Double,
-        val quoteChurn: Double,
+        val imbalance: Double = 0.0,
+        val bookAgeMs: Long,
         val secondsRemaining: Double
     )
 
+    fun freshness(bookAgeMs: Long): Double {
+        if (bookAgeMs < 0L || bookAgeMs > FRESH_BOOK_MS) return 0.0
+        return exp(-bookAgeMs / FRESHNESS_TAU_MS)
+    }
+
     fun pFill(q: Quote): Double {
-        if (q.size <= 0.0 || !q.price.isFinite()) return 0.0
-        val freshness = exp(-q.bookAgeSec.coerceAtLeast(0.0) / 30.0)
-        val churn = (1.0 - q.quoteChurn.coerceIn(0.0, 1.0) * 0.5).coerceIn(0.0, 1.0)
+        if (q.size <= 0.0 || !q.price.isFinite() || q.price <= 0.0) return 0.0
+        val fresh = freshness(q.bookAgeMs)
+        if (fresh <= 0.0) return 0.0
         if (q.marketable) {
-            val ratio = if (q.depthAhead <= 0.0) 0.0 else min(1.0, q.depthAhead / q.size)
-            return (ratio * freshness * churn).coerceIn(0.0, 1.0)
+            val coverage = if (q.depth <= 0.0) 0.0 else min(1.0, q.depth / q.size)
+            return (coverage * fresh).coerceIn(0.0, 1.0)
         }
-        val queue = q.depthAhead / q.size
-        val x = 0.4 - 1.8 * queue - 6.0 * q.spread + 0.9 * q.imbalance -
-            0.04 * q.bookAgeSec - 1.2 * q.quoteChurn +
-            0.15 * ln(1.0 + q.secondsRemaining.coerceAtLeast(0.0))
-        return (DecisionMath.sigmoid(x) * freshness).coerceIn(0.0, 1.0)
+        val queue = q.depth.coerceAtLeast(0.0) / q.size
+        val x = 0.4 - 1.8 * queue - 6.0 * q.spread.coerceAtLeast(0.0) + 0.9 * q.imbalance.coerceIn(-1.0, 1.0) +
+            0.15 * kotlin.math.ln(1.0 + q.secondsRemaining.coerceAtLeast(0.0))
+        return (DecisionMath.sigmoid(x) * fresh).coerceIn(0.0, 1.0)
     }
 
-    fun expectedFilledSize(q: Quote): Double {
-        val p = pFill(q)
-        val cap = if (q.marketable) min(q.size, q.depthAhead.coerceAtLeast(0.0)) else q.size
-        return p * cap
+    /** Paper fills never exceed the displayed size. */
+    fun cappedContracts(want: Int, displayedDepth: Int?): Int {
+        if (want <= 0) return 0
+        val d = displayedDepth ?: return 0
+        return min(want, d.coerceAtLeast(0))
     }
 
-    fun feePerContract(price: Double, feeRate: Double = 0.07): Double {
-        val px = price.coerceIn(0.0, 1.0)
-        return feeRate * px * (1.0 - px)
+    /** Kalshi taker fee per contract, 7% × P × (1−P) with the order total rounded up to the cent. */
+    fun feePerContract(price: Double, contracts: Int, feeRate: Double = KalshiFee.TAKER_COEFFICIENT): Double {
+        val c = contracts.coerceAtLeast(1)
+        return KalshiFee.total(c, price.coerceIn(0.0, 1.0), feeRate) / c
     }
 
-    /**
-     * Adverse selection is half the spread when lifting the offer,
-     * a quarter of the spread when resting.
-     */
-    fun adversePerContract(q: Quote): Double {
-        val half = if (q.marketable) 0.5 else 0.25
-        return half * q.spread.coerceAtLeast(0.0)
+    /** Adverse selection: half the spread lifting the offer, a quarter resting. */
+    fun adversePerContract(marketable: Boolean, spread: Double): Double {
+        val k = if (marketable) 0.5 else 0.25
+        return k * spread.coerceAtLeast(0.0)
     }
 }
 
 object ExpectedNet {
+    /** Per contract: P(fill) × [P(win)×payout − price − fee − adverse]. */
+    fun perContract(
+        pFill: Double,
+        pWin: Double,
+        price: Double,
+        feePerContract: Double,
+        adversePerContract: Double,
+        payoutPerContract: Double = 1.0
+    ): Double = pFill * (pWin * payoutPerContract - price - feePerContract - adversePerContract)
+
     fun of(
         pFill: Double,
         pWin: Double,
@@ -69,28 +91,21 @@ object ExpectedNet {
         feePerContract: Double,
         adversePerContract: Double,
         payoutPerContract: Double = 1.0
-    ): Double {
-        val edge = pWin * payoutPerContract - price - feePerContract - adversePerContract
-        return pFill * filledSize * edge
-    }
+    ): Double = filledSize * perContract(pFill, pWin, price, feePerContract, adversePerContract, payoutPerContract)
 }
 
 /**
- * A resting order fills only after the queue ahead trades, or a print
- * trades through the price. Conservative requires the whole queue plus
- * our size. Optimistic fills on a through-trade alone.
+ * Queue-aware replay of a resting bid against later trade prints.
+ * CONSERVATIVE: the queue ahead plus our size must trade at our price, or a
+ * print must trade strictly through our price. OPTIMISTIC assumes half the
+ * queue ahead cancels.
  */
 object QueueReplay {
     enum class Mode { CONSERVATIVE, OPTIMISTIC }
 
     data class Print(val price: Double, val size: Double, val atMs: Long)
 
-    data class Result(
-        val filled: Boolean,
-        val fillSize: Double,
-        val timeToFillMs: Long?,
-        val adverseMove: Double?
-    )
+    data class Result(val filled: Boolean, val fillSize: Double, val timeToFillMs: Long?, val adverseMove: Double?)
 
     fun judge(
         limit: Double,
@@ -103,16 +118,16 @@ object QueueReplay {
         mode: Mode = Mode.CONSERVATIVE
     ): Result {
         if (size <= 0.0) return Result(false, 0.0, null, null)
-        var seen = 0.0
-        var through = false
+        val ahead = if (mode == Mode.OPTIMISTIC) depthAhead * 0.5 else depthAhead
+        var atPrice = 0.0
         var filledAt: Long? = null
-        for (p in prints.sortedBy { it.atMs }) {
-            if (p.price <= limit + 1e-12) seen += p.size
-            if (p.price + 1e-12 < limit) through = true
-            val queueCleared = seen + 1e-9 >= depthAhead + size
-            val optimistic = mode == Mode.OPTIMISTIC && (through || queueCleared)
-            val conservative = mode == Mode.CONSERVATIVE && queueCleared
-            if (optimistic || conservative) {
+        for (p in prints.filter { it.atMs >= decisionMs }.sortedBy { it.atMs }) {
+            if (p.price + 1e-12 < limit) {
+                filledAt = p.atMs
+                break
+            }
+            if (p.price <= limit + 1e-12) atPrice += p.size
+            if (atPrice + 1e-9 >= ahead + size) {
                 filledAt = p.atMs
                 break
             }
@@ -123,57 +138,74 @@ object QueueReplay {
     }
 }
 
-data class UncertaintyInterval(val lo: Double, val hi: Double, val ready: Boolean) {
-    fun supportsOneSide(): Boolean {
-        if (!ready) return false
-        return hi < 0.5 || lo > 0.5
-    }
-}
+/**
+ * Conformal-style abstention. The interval half-width combines the standard
+ * error of the calibrated bucket the prediction came from, the local
+ * calibration error in that reliability bin, and the model ensemble spread.
+ * No calibrated bucket → [COLD_START_HALF_WIDTH], which always abstains.
+ */
+object UncertaintyGate {
+    const val Z90 = 1.645
+    const val MAX_HALF_WIDTH = 0.08
+    const val COLD_START_HALF_WIDTH = 0.25
 
-object RollingBlockInterval {
-    const val MIN_SAMPLES = 30
-
-    fun fit(residualsAbs: List<Double>, probability: Double, alpha: Double = 0.10): UncertaintyInterval {
-        val recent = residualsAbs.takeLast(80).filter { it.isFinite() }.sorted()
-        if (recent.size < MIN_SAMPLES) return UncertaintyInterval(probability, probability, ready = false)
-        val idx = kotlin.math.ceil((1.0 - alpha) * (recent.size + 1)).toInt().coerceIn(1, recent.size) - 1
-        val q = recent[idx]
-        return UncertaintyInterval(
-            lo = (probability - q).coerceIn(0.0, 1.0),
-            hi = (probability + q).coerceIn(0.0, 1.0),
-            ready = true
-        )
+    fun halfWidth(
+        probability: Double,
+        calibrationN: Int,
+        localCalibrationError: Double? = null,
+        ensembleSpread: Double? = null
+    ): Double {
+        if (calibrationN <= 0 || !probability.isFinite()) return COLD_START_HALF_WIDTH
+        val p = probability.coerceIn(0.01, 0.99)
+        val se = Z90 * sqrt(p * (1.0 - p) / calibrationN)
+        val local = localCalibrationError?.takeIf { it.isFinite() }?.let { kotlin.math.abs(it) } ?: 0.0
+        val spread = ensembleSpread?.takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: 0.0
+        return maxOf(se + local, spread)
     }
+
+    fun tooUncertain(halfWidth: Double): Boolean = !halfWidth.isFinite() || halfWidth > MAX_HALF_WIDTH + 1e-12
 }
 
 /**
- * Separate from direction. Every failing condition is a NO BET with a reason.
- * Decision inputs are true probabilities — never a display floor.
+ * The NO BET gate. Separate from direction. Every failing condition is a
+ * NO BET with a reason the UI shows verbatim. Decisions use expected net
+ * and P(fill), never gross payout. Deterministic; no LLM.
  */
 object TradeEligibility {
+    /** A side at or under this ask is a longshot. */
     const val LONGSHOT_ASK = 0.15
-    const val TINY_LO = 0.02
-    const val TINY_HI = 0.98
+    /** Tiny-quote guard: no bet at ≤ 4¢ (and no hunter auto-fill there). */
     const val LOTTERY_ASK = 0.04
+    const val TINY_HI = 0.97
+
+    const val FINAL_WINDOW_REASON = "NO BET — model uncertainty too high for this final-window regime"
+    const val UNCALIBRATED_REASON = "NO BET — model uncertainty too high (regime not calibrated yet)"
+    const val UNCERTAIN_REASON = "NO BET — model uncertainty too high for this regime"
+    const val NOT_BETTER_REASON = "NO BET — model is not better than the market in this regime"
+    const val SETTLEMENT_STALE_REASON = "NO BET — settlement price feed is stale"
+    const val BOOK_REASON = "NO BET — order book stale or thinner than the order"
+    const val TINY_REASON = "NO BET — tiny quote (≤4¢ or ≥97¢)"
+    const val LONGSHOT_REASON = "NO BET — longshot not validated"
+    const val PFILL_REASON = "NO BET — fill probability too low"
+    const val NET_REASON = "NO BET — expected net ≤ 0 after fees, fill odds, and adverse selection"
+    const val BALANCE_REASON = "NO BET — Kalshi balance unavailable"
 
     data class Input(
         val calibratedProbability: Double?,
+        val calibrationLevel: RegimeCalibration.Level? = null,
+        val uncertaintyHalfWidth: Double,
+        val regimeApproved: Boolean,
+        val finalWindow: Boolean,
+        val finalWindowReady: Boolean,
         val settlementSourceFresh: Boolean,
         val bookFresh: Boolean,
-        val bookNonEmpty: Boolean,
         val visibleDepth: Double,
         val orderSize: Double,
+        val ask: Double?,
+        val longshotValidated: Boolean,
         val pFill: Double,
         val minPFill: Double = FillModel.MIN_P_FILL,
-        val uncertainty: UncertaintyInterval,
-        val regimeApproved: Boolean,
-        val expectedNet: Double,
-        val secondsRemaining: Double?,
-        val finalWindowReady: Boolean,
-        val ask: Double?,
-        val verifiedDepth: Boolean,
-        val validatedResidual: Boolean,
-        val longshotResidualPositive: Boolean = false,
+        val expectedNetPerContract: Double,
         val balanceRequired: Boolean = false,
         val balanceAvailable: Boolean = true,
         val stakeUsd: Double? = null,
@@ -182,45 +214,29 @@ object TradeEligibility {
 
     data class Verdict(val allow: Boolean, val reason: String?) {
         val headline: String get() = if (allow) "BET" else reason ?: "NO BET"
+        val decision: String get() = if (allow) "BET" else "NO BET"
     }
 
     fun evaluate(input: Input): Verdict {
+        if (input.finalWindow && !input.finalWindowReady) return no(FINAL_WINDOW_REASON)
         if (input.calibratedProbability == null || !input.calibratedProbability.isFinite()) {
-            return no("NO BET — calibrated probability unavailable")
+            return no(if (input.finalWindow) FINAL_WINDOW_REASON else UNCALIBRATED_REASON)
         }
-        if (!input.settlementSourceFresh) return no("NO BET — settlement source is stale")
-        if (!input.bookFresh || !input.bookNonEmpty || input.visibleDepth + 1e-9 < input.orderSize) {
-            return no("NO BET — order book is missing, stale, or smaller than the order")
+        if (UncertaintyGate.tooUncertain(input.uncertaintyHalfWidth)) {
+            return no(if (input.finalWindow) FINAL_WINDOW_REASON else UNCERTAIN_REASON)
         }
-        if (input.pFill + 1e-12 < input.minPFill) return no("NO BET — fill probability below the minimum")
-        val finalWindow = input.secondsRemaining != null && input.secondsRemaining <= 60.0
-        if (!input.uncertainty.supportsOneSide()) {
-            return if (finalWindow) {
-                no("NO BET — model uncertainty too high for this final-window regime")
-            } else {
-                no("NO BET — uncertainty interval covers both sides")
-            }
-        }
-        if (!input.regimeApproved) {
-            return no("NO BET — regime is not calibrated or the model is worse than the market there")
-        }
-        if (finalWindow && !input.finalWindowReady) {
-            return no("NO BET — final 60 seconds are not calibrated or the model is worse than the market there")
+        if (!input.regimeApproved) return no(NOT_BETTER_REASON)
+        if (!input.settlementSourceFresh) return no(SETTLEMENT_STALE_REASON)
+        if (!input.bookFresh || input.visibleDepth <= 0.0 || input.visibleDepth + 1e-9 < input.orderSize) {
+            return no(BOOK_REASON)
         }
         val ask = input.ask
-        if (ask != null && (ask <= TINY_LO + 1e-12 || ask >= TINY_HI - 1e-12)) {
-            if (!input.verifiedDepth || !input.validatedResidual) {
-                return no("NO BET — tiny quote needs verified depth and a validated residual")
-            }
-        }
-        if (ask != null && ask <= LONGSHOT_ASK + 1e-12) {
-            if (!input.longshotResidualPositive || !input.verifiedDepth) {
-                return no("NO BET — longshot not validated")
-            }
-        }
-        if (input.expectedNet <= 0.0) return no("NO BET — expected net is not positive after fees and spread")
-        if (input.balanceRequired && !input.balanceAvailable) return no("NO BET — balance unavailable")
-        if (input.enforceMinStake && input.stakeUsd != null && input.stakeUsd + 1e-9 < AutopilotMinStake.USD) {
+        if (ask == null || ask <= LOTTERY_ASK + 1e-12 || ask >= TINY_HI - 1e-12) return no(TINY_REASON)
+        if (ask <= LONGSHOT_ASK + 1e-12 && !input.longshotValidated) return no(LONGSHOT_REASON)
+        if (input.pFill + 1e-12 < input.minPFill) return no(PFILL_REASON)
+        if (!(input.expectedNetPerContract > 0.0)) return no(NET_REASON)
+        if (input.balanceRequired && !input.balanceAvailable) return no(BALANCE_REASON)
+        if (input.enforceMinStake && input.stakeUsd != null && AutopilotMinStake.below(input.stakeUsd)) {
             return no(AutopilotMinStake.REASON)
         }
         return Verdict(true, null)
@@ -231,44 +247,38 @@ object TradeEligibility {
 
 object AutopilotMinStake {
     const val USD = 5.0
-    const val REASON = "NO BET — below \$5 minimum"
+    const val REASON = "NO BET — Kelly stake under \$5 (skipped, not rounded up)"
     fun below(allInUsd: Double): Boolean = !allInUsd.isFinite() || allInUsd + 1e-9 < USD
 }
 
 /**
- * Live Autopilot sizes from the cached Kalshi available balance.
- * Paper keeps the paper bankroll. A missing or stale balance is not a guess.
+ * Live Autopilot sizes from the real Kalshi available balance. A missing or
+ * stale balance means no bet — never a guess, never the settings bankroll.
  */
 object LiveBalancePolicy {
     const val FRESH_MS = 15L * 60L * 1000L
-    const val REASON = "NO BET — balance unavailable"
+    const val REASON = TradeEligibility.BALANCE_REASON
 
     fun fresh(balanceUsd: Double?, fetchedAtMs: Long?, nowMs: Long): Boolean {
-        if (balanceUsd == null || !balanceUsd.isFinite() || balanceUsd < 0.0) return false
+        if (balanceUsd == null || !balanceUsd.isFinite() || balanceUsd <= 0.0) return false
         val at = fetchedAtMs ?: return false
         return nowMs >= at && nowMs - at <= FRESH_MS
     }
 }
 
-/** The stored daily-cap preference is ignored. It is not a safety limit. */
-object DailyCapPolicy {
-    const val BLOCKS_ORDERS = false
-    const val SHOWN_ON_SCREEN = false
-}
-
 /**
- * Favourite is the side priced above 50¢. A longshot (ask ≤ 15¢) needs a
- * validated positive residual and verified depth.
+ * Favourite-first. The favourite is the side priced higher (above 50¢).
+ * A longshot (ask ≤ 15¢) needs a validated favourite-longshot residual.
  */
 object FavouritePolicy {
     fun favouriteSide(yesAsk: Double?, noAsk: Double?): String? {
-        val y = yesAsk?.takeIf { it.isFinite() }
-        val n = noAsk?.takeIf { it.isFinite() }
+        val y = yesAsk?.takeIf { it.isFinite() && it > 0.0 }
+        val n = noAsk?.takeIf { it.isFinite() && it > 0.0 }
         return when {
             y == null && n == null -> null
-            y == null -> "NO"
-            n == null -> "YES"
-            y <= n -> "YES"
+            y == null -> if (n!! >= 0.5) "NO" else "YES"
+            n == null -> if (y >= 0.5) "YES" else "NO"
+            y >= n -> "YES"
             else -> "NO"
         }
     }
