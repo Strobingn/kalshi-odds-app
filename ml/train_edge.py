@@ -39,8 +39,18 @@ KALSHI = "https://api.elections.kalshi.com/trade-api/v2"
 COINBASE = "https://api.exchange.coinbase.com"
 # Public market data only. Never a Kalshi account key.
 DEFAULT_SERIES = ["KXBTC15M", "KXETH15M", "KXSOL15M"]
-ALL_SERIES = ["KXBTC15M", "KXETH15M", "KXSOL15M"]
-PRODUCT = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
+# 0.3.37: daily 5 PM ET above/below series alongside the 15-minute series.
+DAILY_SERIES = ["KXBTCD", "KXETHD", "KXSOLD"]
+ALL_SERIES = DEFAULT_SERIES + DAILY_SERIES
+PRODUCT = {
+    "KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD",
+    "KXBTCD": "BTC-USD", "KXETHD": "ETH-USD", "KXSOLD": "SOL-USD",
+}
+# Held-out evaluation window: the most recent 4 days, never trained on.
+HOLDOUT_DAYS = 4
+# Recency weighting half-life for training rows (full history is kept).
+HALF_LIFE_DAYS = 30.0
+EVAL_REPORT_DIR = ML_DIR / "reports"
 FEATURE_NAMES = [
     "dist_to_strike_vol",
     "tte_frac",
@@ -56,7 +66,7 @@ FEATURE_NAMES = [
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
-UA = "DipHunterTrainer/0.3.34"
+UA = "DipHunterTrainer/0.3.37"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
 SPOT_LOOKBACK_BARS = 16
 # Edge momentum / realized_vol: last 8 one-minute Coinbase closes.
@@ -75,42 +85,76 @@ def scrub_kalshi_env() -> None:
             os.environ.pop(key, None)
 
 
-_last_http = 0.0
+# Paced, 429-aware public fetch (ported from kashi-run/run_fresh.py).
+# Never authenticated: no Kalshi key is read, and KALSHI* env vars are scrubbed.
+_PACE: dict[str, float] = {
+    "interval": float(os.environ.get("KASHI_MIN_INTERVAL", "0.4")),
+    "n429": 0.0,
+    "calls": 0.0,
+    "skips": 0.0,
+}
+_PACE["base"] = _PACE["interval"]
+_LAST: dict[str, float] = {"kalshi": 0.0, "other": 0.0}
+MAX_INTERVAL = 3.0
 
 
-def http_get(url: str, retries: int = 5) -> Any:
-    global _last_http
+def _retry_after(e: urllib.error.HTTPError) -> float:
+    try:
+        raw = e.headers.get("Retry-After") if e.headers else None
+        return float(raw) if raw else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def http_get(url: str, retries: int = 6) -> Any:
+    """GET JSON with per-host pacing and adaptive 429 backoff.
+
+    Kalshi: start at KASHI_MIN_INTERVAL (0.4 s); each 429 widens the gap
+    ×1.1 (max 3 s); each success relaxes it ×0.98 toward the base. Honors
+    Retry-After; caps any single sleep so a run never stalls for minutes.
+    Candlestick calls give up after 3 tries (a skipped market, not a crash).
+    """
     scrub_kalshi_env()
+    host = "kalshi" if "kalshi.com" in url else "other"
+    is_candle = "candlestick" in url
+    tries = 3 if is_candle else retries
     last: Exception | None = None
-    for attempt in range(retries):
-        wait = 0.12 - (time.time() - _last_http)
+    for attempt in range(tries):
+        gap = _PACE["interval"] if host == "kalshi" else 0.08
+        wait = _LAST[host] + gap - time.time()
         if wait > 0:
             time.sleep(wait)
+        _LAST[host] = time.time()
         try:
             req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": UA})
             with urllib.request.urlopen(req, timeout=45) as resp:
-                _last_http = time.time()
+                _PACE["calls"] += 1
+                if host == "kalshi":
+                    _PACE["interval"] = max(_PACE["base"], _PACE["interval"] * 0.98)
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             last = e
-            _last_http = time.time()
-            if e.code in (429, 502, 503):
-                retry_after = 0.0
-                try:
-                    raw = e.headers.get("Retry-After") if e.headers else None
-                    if raw:
-                        retry_after = float(raw)
-                except (TypeError, ValueError):
-                    retry_after = 0.0
-                time.sleep(max(retry_after, min(2 ** attempt, 20)))
-                continue
             if e.code == 404:
                 return {}
+            if e.code in (429, 500, 502, 503, 504):
+                if e.code == 429:
+                    _PACE["n429"] += 1
+                    if host == "kalshi":
+                        _PACE["interval"] = min(MAX_INTERVAL, max(_PACE["interval"] * 1.1, 0.5))
+                if is_candle and attempt >= tries - 1:
+                    _PACE["skips"] += 1
+                    raise
+                time.sleep(max(min(_retry_after(e), 30.0), min(2 ** attempt, 12)))
+                continue
             raise
         except urllib.error.URLError as e:
             last = e
-            time.sleep(min(2 ** attempt, 12))
+            time.sleep(min(2 ** attempt, 8))
     raise RuntimeError(f"GET failed {url}: {last}")
+
+
+def pace_stats() -> dict[str, float]:
+    return dict(_PACE)
 
 
 def parse_iso(ts: str | None) -> datetime | None:
@@ -253,8 +297,14 @@ def fetch_settled(series: str, days: int, limit: int = 50_000) -> list[dict]:
     return out
 
 
+def is_daily(series: str) -> bool:
+    return series.upper() in DAILY_SERIES
+
+
 def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list[dict]:
-    q = {"start_ts": open_ts - 60, "end_ts": close_ts + 60, "period_interval": 1}
+    # 15m markets: 1-minute candles. Daily markets: hourly candles (one decision row per hour).
+    period = 60 if is_daily(series) else 1
+    q = {"start_ts": open_ts - 60 * period, "end_ts": close_ts + 60 * period, "period_interval": period}
     data = http_get(f"{KALSHI}/series/{series}/markets/{ticker}/candlesticks?{urllib.parse.urlencode(q)}")
     sticks = data.get("candlesticks") or []
     if sticks:
@@ -263,7 +313,20 @@ def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list
     return hist.get("candlesticks") or []
 
 
+_SPOT_CACHE: dict[tuple[str, int, int], list[tuple[int, float]]] = {}
+
+
 def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
+    """Cached: daily strikes of one event share the same spot window."""
+    key = (product, int(start), int(end))
+    if key not in _SPOT_CACHE:
+        if len(_SPOT_CACHE) > 256:
+            _SPOT_CACHE.clear()
+        _SPOT_CACHE[key] = _fetch_spot_uncached(product, start, end)
+    return _SPOT_CACHE[key]
+
+
+def _fetch_spot_uncached(product: str, start: int, end: int) -> list[tuple[int, float]]:
     """1-minute Coinbase closes as (bucket_start_ts, close), oldest first.
 
     Exchange REST: GET /products/{id}/candles — max 300 candles / request,
@@ -445,6 +508,12 @@ def collect(days: int, max_markets: int, series_list: list[str] | None = None) -
             if len(candles) < 3:
                 continue
             spot = fetch_spot(PRODUCT[series], open_ts - 900, close_ts)
+            if is_daily(series):
+                # One event = many strikes; keep only near-the-money strikes to bound the row count.
+                mids0 = [candle_mid(c) for c in candles]
+                mids0 = [x for x in mids0 if x is not None]
+                if not mids0 or all(x < 0.03 or x > 0.97 for x in mids0):
+                    continue
             # One row per completed decision minute (skip first warmup + last print).
             usable = list(range(1, max(2, len(candles) - 1)))
             for idx in usable:
@@ -488,6 +557,7 @@ def fit_logistic(
     y_val: list[int] | None = None,
     max_iters: int | None = None,
     patience: int = 25,
+    sw: list[float] | None = None,
 ) -> tuple[list[float], float]:
     """Gradient descent. When a val fold is given, train to convergence
     with early stopping. `iters` is the cap when no val fold is supplied
@@ -499,17 +569,19 @@ def fit_logistic(
     best_w, best_b = w[:], b
     best_val = float("inf")
     stale = 0
+    weights = sw if sw is not None and len(sw) == len(X) else [1.0] * len(X)
+    total_w = sum(weights) or float(len(X))
     for _ in range(cap):
         gw = [0.0] * n
         gb = 0.0
-        for row, yi in zip(X, y):
+        for row, yi, si in zip(X, y, weights):
             z = b + sum(wj * xj for wj, xj in zip(w, row))
             p = sigmoid(z)
-            err = p - yi
+            err = (p - yi) * si
             for i in range(n):
                 gw[i] += err * row[i]
             gb += err
-        scale = 1.0 / len(X)
+        scale = 1.0 / total_w
         for i in range(n):
             w[i] -= lr * (gw[i] * scale + 1e-4 * w[i])
         b -= lr * gb * scale
@@ -561,15 +633,21 @@ def logloss(p: list[float], y: list[int]) -> float:
     return s / len(y)
 
 
-def side_pnl(side_yes: bool, mid: float, yi: int) -> float:
-    """One-contract taker P&L after the quadratic fee.
+def kalshi_fee(price: float, contracts: int = 1, fee_rate: float = FEE_RATE) -> float:
+    """Kalshi taker fee: ceil to the cent of fee_rate × C × P × (1 − P)."""
+    raw = fee_rate * contracts * price * (1.0 - price)
+    return math.ceil(round(raw * 100.0, 6)) / 100.0
 
-    YES pays ``mid``. NO pays ``1 - mid``. Fee is ``feeRate × P × (1 − P)``
-    on the price of the side that is bought (not rounded to the cent).
+
+def side_pnl(side_yes: bool, mid: float, yi: int) -> float:
+    """One-contract taker P&L after the 7% fee rounded UP to the cent.
+
+    YES pays ``mid``. NO pays ``1 - mid``. Fee is ``ceil_cent(0.07 × P × (1 − P))``
+    on the price of the side that is bought.
     """
     raw = mid if side_yes else (1.0 - mid)
     price = min(0.99, max(0.01, raw))
-    fee = FEE_RATE * price * (1.0 - price)
+    fee = kalshi_fee(price)
     win = (yi == 1) if side_yes else (yi == 0)
     return (1.0 - price - fee) if win else (-price - fee)
 
@@ -581,7 +659,7 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, 
     hits = 0
     for pi, m, yi in zip(p, mids, y):
         gap = abs(pi - m)
-        fee = FEE_RATE * m * (1.0 - m)
+        fee = kalshi_fee(min(0.99, max(0.01, m if pi > m else 1.0 - m)))
         if gap <= fee + CONF_MARGIN:
             continue
         side_yes = pi > m
@@ -617,13 +695,157 @@ def time_split(n: int) -> tuple[int, int, int]:
     return tr, va, cal
 
 
-def evaluate_holdout(X: list[list[float]], y: list[int], mids: list[float], times: list[int]) -> dict[str, Any]:
-    X, y, mids, times = _order(X, y, mids, times)
+def recency_weights(times: list[int], ref_ts: int, half_life_days: float = HALF_LIFE_DAYS) -> list[float]:
+    """exp(-ln2 × age / half-life). Full history is kept; older rows just count less."""
+    lam = math.log(2.0) / (max(half_life_days, 1e-6) * 86400.0)
+    return [math.exp(-lam * max(0, ref_ts - t)) for t in times]
+
+
+def holdout_start(times_sorted: list[int], holdout_days: float = HOLDOUT_DAYS) -> tuple[int, int]:
+    """First index of the last ``holdout_days`` (times sorted ascending) and the cutoff ts."""
+    if not times_sorted:
+        return 0, 0
+    cutoff = int(times_sorted[-1] - holdout_days * 86400)
+    for i, t in enumerate(times_sorted):
+        if t >= cutoff:
+            return i, cutoff
+    return len(times_sorted), cutoff
+
+
+def _zrows(X: list[list[float]], mean: list[float], std: list[float]) -> list[list[float]]:
+    return [[(row[j] - mean[j]) / std[j] for j in range(len(mean))] for row in X]
+
+
+def fit_on(X: list[list[float]], y: list[int], times: list[int], half_life_days: float = HALF_LIFE_DAYS) -> dict[str, Any]:
+    """Recency-weighted logistic on time-ordered pre-holdout rows.
+
+    70% train (weighted), 15% validation (early stopping), 15% Platt.
+    """
     n = len(X)
-    tr, va, cal = time_split(n)
-    if cal >= n - 5:
-        # Too small for a real holdout — report identity (does not beat market).
+    tr = max(20, int(n * 0.70))
+    va = max(tr + 5, int(n * 0.85))
+    va = min(va, n - 5) if n - 5 > tr else n
+    ref = times[-1] if times else 0
+    Ztr, mean, std = standardize(X[:tr])
+    sw = recency_weights(times[:tr], ref, half_life_days)
+    Zva = _zrows(X[tr:va], mean, std) if va > tr else None
+    yva = y[tr:va] if va > tr else None
+    w, b = fit_logistic(Ztr, y[:tr], X_val=Zva, y_val=yva, max_iters=2000, patience=25, lr=0.12, sw=sw)
+    if n > va:
+        raw = predict_rows(_zrows(X[va:], mean, std), w, b)
+        a, pb = fit_platt(raw, y[va:])
+    else:
+        a, pb = 1.0, 0.0
+    return {"weights": w, "bias": b, "mean": mean, "std": std, "platt_a": a, "platt_b": pb}
+
+
+def predict_model(model: dict[str, Any], X: list[list[float]]) -> list[float]:
+    return predict_rows(
+        _zrows(X, model["mean"], model["std"]),
+        model["weights"],
+        model["bias"],
+        float(model.get("platt_a", 1.0)),
+        float(model.get("platt_b", 0.0)),
+    )
+
+
+def trade_pnls(p: list[float], mids: list[float], y: list[int], ids: list[str]) -> list[tuple[str, float]]:
+    """Per-trade fee-aware P&L (same selective policy as simulated_pnl) with its market id."""
+    out: list[tuple[str, float]] = []
+    for pi, m, yi, mid_id in zip(p, mids, y, ids):
+        side_yes = pi > m
+        fee = kalshi_fee(min(0.99, max(0.01, m if side_yes else 1.0 - m)))
+        if abs(pi - m) <= fee + CONF_MARGIN:
+            continue
+        out.append((mid_id, side_pnl(side_yes, m, yi)))
+    return out
+
+
+def clustered_bootstrap_ci(pairs: list[tuple[str, float]], resamples: int = 2000, seed: int = 0) -> dict[str, float] | None:
+    """Market-clustered bootstrap of mean P&L per trade (resample whole markets)."""
+    import random
+
+    if not pairs:
+        return None
+    groups: dict[str, list[float]] = {}
+    for k, v in pairs:
+        groups.setdefault(k, []).append(v)
+    clusters = [(sum(v), len(v)) for v in groups.values()]
+    mean = sum(v for _, v in pairs) / len(pairs)
+    if len(clusters) < 2:
+        return {"mean": mean, "lo": mean, "hi": mean, "clusters": len(clusters)}
+    rnd = random.Random(seed)
+    stats = []
+    for _ in range(resamples):
+        s = 0.0
+        n = 0
+        for _ in range(len(clusters)):
+            cs, cn = clusters[rnd.randrange(len(clusters))]
+            s += cs
+            n += cn
+        stats.append(s / n if n else 0.0)
+    stats.sort()
+    lo = stats[int(0.025 * resamples)]
+    hi = stats[min(resamples - 1, int(0.975 * resamples))]
+    return {"mean": mean, "lo": lo, "hi": hi, "clusters": len(clusters)}
+
+
+def sanity_reasons(metrics: dict[str, Any]) -> list[str]:
+    """Backtest sanity gates: catch leakage and broken splits before any publish."""
+    out: list[str] = []
+    tmax = metrics.get("train_max_ts")
+    hmin = metrics.get("holdout_min_ts")
+    if tmax is not None and hmin is not None and tmax >= hmin:
+        out.append("train rows overlap the holdout window (look-ahead)")
+    mb = float(metrics.get("model_brier", 1.0))
+    kb = float(metrics.get("market_brier", 1.0))
+    if kb > 0.26:
+        out.append(f"market Brier {kb:.3f} > 0.26 — holdout labels or mids look broken")
+    if kb > 0 and mb < 0.5 * kb:
+        out.append(f"model Brier {mb:.3f} < half the market's {kb:.3f} — suspiciously good, check for leakage")
+    if int(metrics.get("sim_trades") or 0) > int(metrics.get("n_holdout") or 0):
+        out.append("more trades than holdout rows")
+    return out
+
+
+def evaluate_and_fit(
+    X: list[list[float]],
+    y: list[int],
+    mids: list[float],
+    times: list[int],
+    market_ids: list[str] | None = None,
+    holdout_days: float = HOLDOUT_DAYS,
+    half_life_days: float = HALF_LIFE_DAYS,
+    champion: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Fit on full pre-holdout history (recency weighted), score the last 4 days.
+
+    The returned model is exactly the model that was scored — the holdout is
+    never trained on, so the eval report describes what ships.
+    """
+    ids = market_ids if market_ids and len(market_ids) == len(X) else [str(i) for i in range(len(X))]
+    order = sorted(range(len(X)), key=lambda i: times[i])
+    X = [X[i] for i in order]
+    y = [y[i] for i in order]
+    mids = [mids[i] for i in order]
+    times = [times[i] for i in order]
+    ids = [ids[i] for i in order]
+    n = len(X)
+    first, cutoff = holdout_start(times, holdout_days)
+    mode = f"last_{holdout_days:g}_days"
+    if first < 40 or n - first < 5:
+        _, _, cal = time_split(n)
+        first, cutoff, mode = cal, (times[cal] if cal < n else 0), "proportional_fallback_last_20pct"
+    base = {
+        "holdout_mode": mode,
+        "holdout_days": holdout_days,
+        "half_life_days": half_life_days,
+        "fee_rule": "7% taker, ceil to the cent per order",
+        "split": {"pre_holdout": first, "holdout": n - first, "n": n},
+    }
+    if first >= n - 5 or first < 25:
         return {
+            **base,
             "n_holdout": 0,
             "model_brier": 1.0,
             "market_brier": brier(mids, y) if y else 1.0,
@@ -633,21 +855,17 @@ def evaluate_holdout(X: list[list[float]], y: list[int], mids: list[float], time
             "sim_pnl": 0.0,
             "sim_hit_rate": 0.0,
             "market_pnl": market_follow_pnl(mids, y) if y else 0.0,
-            "split": {"train": tr, "val": va, "cal": cal, "n": n},
-        }
-    Ztr, mean, std = standardize(X[:tr])
-    Zva = [[(X[i][j] - mean[j]) / std[j] for j in range(len(mean))] for i in range(tr, va)]
-    w, b = fit_logistic(Ztr, y[:tr], X_val=Zva, y_val=y[tr:va], max_iters=2000, patience=25, lr=0.12)
-    Zcal = [[(X[i][j] - mean[j]) / std[j] for j in range(len(mean))] for i in range(va, cal)]
-    raw_cal = predict_rows(Zcal, w, b)
-    a, pb = fit_platt(raw_cal, y[va:cal])
-    Zho = [[(X[i][j] - mean[j]) / std[j] for j in range(len(mean))] for i in range(cal, n)]
-    ph = predict_rows(Zho, w, b, a, pb)
-    yh = y[cal:]
-    mh = mids[cal:]
+        }, None
+    model = fit_on(X[:first], y[:first], times[:first], half_life_days)
+    ph = predict_model(model, X[first:])
+    yh, mh, idh = y[first:], mids[first:], ids[first:]
     pnl = simulated_pnl(ph, mh, yh)
-    return {
+    metrics: dict[str, Any] = {
+        **base,
         "n_holdout": len(ph),
+        "holdout_start_ts": cutoff,
+        "train_max_ts": times[first - 1],
+        "holdout_min_ts": times[first],
         "model_brier": brier(ph, yh),
         "market_brier": brier(mh, yh),
         "model_logloss": logloss(ph, yh),
@@ -656,9 +874,94 @@ def evaluate_holdout(X: list[list[float]], y: list[int], mids: list[float], time
         "sim_pnl": pnl["pnl"],
         "sim_hit_rate": pnl["hit_rate"],
         "market_pnl": market_follow_pnl(mh, yh),
-        "split": {"train": tr, "val": va - tr, "cal": cal - va, "holdout": n - cal, "n": n},
-        "platt_fit_on": "calibration_fold",
+        "sim_pnl_per_trade_ci": clustered_bootstrap_ci(trade_pnls(ph, mh, yh, idh)),
+        "holdout_markets": len(set(idh)),
+        "platt_fit_on": "calibration_fold_pre_holdout",
     }
+    if champion is not None:
+        try:
+            pc = predict_model(champion, X[first:])
+            cp = simulated_pnl(pc, mh, yh)
+            metrics["champion"] = {
+                "tag": champion.get("_tag", ""),
+                "model_brier": brier(pc, yh),
+                "model_logloss": logloss(pc, yh),
+                "sim_pnl": cp["pnl"],
+                "sim_trades": cp["n"],
+            }
+        except Exception as e:  # incompatible champion → treated as absent, but recorded
+            metrics["champion_error"] = str(e)
+    metrics["sanity_reasons"] = sanity_reasons(metrics)
+    return metrics, model
+
+
+def champion_challenger(metrics: dict[str, Any]) -> dict[str, Any]:
+    """The challenger must beat the champion on Brier, log loss, and fee-aware P&L (OOS)."""
+    champ = metrics.get("champion")
+    if not champ:
+        return {"beats_champion": True, "reasons": ["no champion — market gate only"]}
+    reasons: list[str] = []
+    if float(metrics["model_brier"]) >= float(champ["model_brier"]):
+        reasons.append(f"Brier {metrics['model_brier']:.4f} not below champion {champ['model_brier']:.4f}")
+    if float(metrics["model_logloss"]) >= float(champ["model_logloss"]):
+        reasons.append(f"log loss {metrics['model_logloss']:.4f} not below champion {champ['model_logloss']:.4f}")
+    if float(metrics.get("sim_pnl") or 0.0) <= float(champ.get("sim_pnl") or 0.0):
+        reasons.append(f"fee-aware P&L {metrics.get('sim_pnl')} not above champion {champ.get('sim_pnl')}")
+    return {"beats_champion": not reasons, "reasons": reasons}
+
+
+def load_champion(model_path: Path | None, manifest_path: Path | None) -> dict[str, Any] | None:
+    """Current published champion; None when missing, synthetic, or feature-incompatible."""
+    if model_path is None or not model_path.is_file():
+        return None
+    try:
+        model = json.loads(model_path.read_text(encoding="utf-8"))
+        man = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path and manifest_path.is_file() else {}
+    except (OSError, ValueError):
+        return None
+    if man.get("synthetic") or man.get("data_source") == "synthetic_fixture":
+        return None
+    if list(model.get("feature_names") or []) != FEATURE_NAMES:
+        return None
+    if len(model.get("weights") or []) != len(FEATURE_NAMES):
+        return None
+    model["_tag"] = str(man.get("tag") or "")
+    return model
+
+
+def default_champion_paths() -> tuple[Path | None, Path | None]:
+    latest = ML_DIR / "published" / "latest.json"
+    if not latest.is_file():
+        return None, None
+    try:
+        data = json.loads(latest.read_text(encoding="utf-8"))
+    except ValueError:
+        return None, None
+    mp = data.get("model_path")
+    fp = data.get("manifest_path")
+    return (REPO / mp if mp else None), (REPO / fp if fp else None)
+
+
+def write_eval_report(report_dir: Path, payload: dict[str, Any], stamp: str) -> tuple[Path, str]:
+    """Immutable eval report: content-addressed name, created exclusively, then read-only."""
+    body = json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
+    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    report_dir.mkdir(parents=True, exist_ok=True)
+    compact = stamp.replace("-", "").replace(":", "")
+    path = report_dir / f"eval-{compact}-{digest[:12]}.json"
+    with open(path, "x", encoding="utf-8") as fh:  # never overwrite an existing report
+        fh.write(body)
+    try:
+        os.chmod(path, 0o444)
+    except OSError:
+        pass
+    print(f"wrote immutable eval report {path}", flush=True)
+    return path, digest
+
+
+def evaluate_holdout(X: list[list[float]], y: list[int], mids: list[float], times: list[int]) -> dict[str, Any]:
+    """Back-compat wrapper: metrics only."""
+    return evaluate_and_fit(X, y, mids, times)[0]
 
 
 def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: list[int], folds: int = 4) -> dict[str, Any]:
@@ -758,6 +1061,14 @@ def write_manifest(
         "min_rows": gates.MIN_PUBLISH_ROWS,
         "min_holdout": gates.MIN_HOLDOUT_ROWS,
         "min_sim_trades": gates.MIN_SIM_TRADES,
+        "beats_champion": metrics.get("beats_champion"),
+        "champion": (metrics.get("champion") or {}).get("tag") if metrics.get("champion") else None,
+        "holdout_mode": metrics.get("holdout_mode"),
+        "holdout_days": metrics.get("holdout_days"),
+        "half_life_days": metrics.get("half_life_days"),
+        "fee_rounding": "ceil_cent",
+        "eval_report": metrics.get("eval_report"),
+        "eval_report_sha256": metrics.get("eval_report_sha256"),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -779,7 +1090,10 @@ def export(model: dict[str, Any], metrics: dict[str, Any], path: Path) -> None:
         "blend_weight": 0.35 if gate["beats_market"] else 0.0,
         "fee_margin": FEE_RATE,
         "confidence_margin": CONF_MARGIN,
-        "metrics": {**metrics, **{k: gate[k] for k in ("beats_market", "publishable", "brier_margin", "logloss_margin", "synthetic")}},
+        "metrics": {
+            **{k: v for k, v in metrics.items() if k not in ("champion", "sim_pnl_per_trade_ci", "sanity_reasons", "champion_reasons", "split")},
+            **{k: gate[k] for k in ("beats_market", "publishable", "brier_margin", "logloss_margin", "synthetic")},
+        },
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -808,9 +1122,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
     ap.add_argument("--fixture", action="store_true", help="Explicit test mode: synthetic data, never publishable")
+    ap.add_argument("--holdout-days", type=float, default=HOLDOUT_DAYS)
+    ap.add_argument("--half-life-days", type=float, default=HALF_LIFE_DAYS)
+    ap.add_argument("--champion-model", default=None, help="Champion edge_model.json (default: ml/published/latest.json)")
+    ap.add_argument("--champion-manifest", default=None)
+    ap.add_argument("--report-dir", default=None, help="Immutable eval reports (default: <out dir>/reports)")
     args = ap.parse_args(argv)
     out_path = Path(args.out)
     man_path = Path(args.manifest)
+    report_dir = Path(args.report_dir) if args.report_dir else out_path.resolve().parent / "reports"
     synthetic = bool(args.fixture)
     series_list = [s.strip() for s in args.series.split(",") if s.strip()]
     for s in series_list:
@@ -818,6 +1138,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"unknown series {s}", flush=True)
             _unlink_outputs(out_path, man_path)
             return 2
+
+    # Champion is read BEFORE anything is written (the default out path may be the champion's file).
+    if args.champion_model:
+        champ_paths = (Path(args.champion_model), Path(args.champion_manifest) if args.champion_manifest else None)
+    elif args.fixture:
+        champ_paths = (None, None)
+    else:
+        champ_paths = default_champion_paths()
+    champion = load_champion(*champ_paths)
+    print(f"champion: {champion.get('_tag') if champion else 'none'}", flush=True)
 
     if args.fixture:
         X, y, mids, times, market_ids = fixture_dataset()
@@ -837,21 +1167,58 @@ def main(argv: list[str] | None = None) -> int:
         _unlink_outputs(out_path, man_path)
         return 2
 
-    metrics = evaluate_holdout(X, y, mids, times)
+    metrics, model = evaluate_and_fit(
+        X, y, mids, times, market_ids,
+        holdout_days=args.holdout_days,
+        half_life_days=args.half_life_days,
+        champion=champion,
+    )
     metrics["n_rows"] = len(X)
     metrics["n_samples"] = len(X)
     metrics["n_markets"] = n_markets
     metrics["synthetic"] = synthetic
-    print(json.dumps({k: metrics[k] for k in metrics if k != "split"}, indent=2), flush=True)
+    cc = champion_challenger(metrics)
+    metrics["beats_champion"] = cc["beats_champion"]
+    metrics["champion_reasons"] = cc["reasons"]
+    print(json.dumps({k: metrics[k] for k in metrics if k != "split"}, indent=2, default=str), flush=True)
     gate = gates.publish_decision(metrics)
     metrics["beats_market"] = gate["beats_market"]
     metrics["publishable"] = gate["publishable"]
     print("gate:", json.dumps(gate, indent=2), flush=True)
 
-    model = fit_final(X, y, times)
+    if model is None:
+        model = fit_final(X, y, times)
     export(model, metrics, out_path)
     digest = hashlib.sha256(out_path.read_bytes()).hexdigest()
     trained_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    report_path, report_sha = write_eval_report(
+        report_dir,
+        {
+            "kind": "kashi-edge-eval",
+            "schema_version": 1,
+            "trained_at": trained_at,
+            "tag": model_tag(trained_at),
+            "series": series_list,
+            "synthetic": synthetic,
+            "model_sha256": digest,
+            "metrics": metrics,
+            "gate": gate,
+            "champion_challenger": cc,
+            "config": {
+                "holdout_days": args.holdout_days,
+                "half_life_days": args.half_life_days,
+                "fee_rate": FEE_RATE,
+                "fee_rounding": "ceil_cent",
+                "conf_margin": CONF_MARGIN,
+                "days": args.days,
+                "max_markets": args.max_markets,
+            },
+            "fetch": {"authenticated": False, **pace_stats()},
+        },
+        trained_at,
+    )
+    metrics["eval_report"] = report_path.name
+    metrics["eval_report_sha256"] = report_sha
     write_manifest(
         metrics,
         man_path,

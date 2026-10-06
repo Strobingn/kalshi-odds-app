@@ -73,6 +73,10 @@ def publish_decision(metrics: dict[str, Any]) -> dict[str, Any]:
         reasons.append(
             f"fee-aware P&L {sim_pnl:.4f} does not beat market-follow {market_pnl:.4f}"
         )
+    if metrics.get("beats_champion") is False:
+        reasons.append("challenger does not beat the champion out of sample (Brier, log loss, fee-aware P&L)")
+    for r in metrics.get("sanity_reasons") or []:
+        reasons.append(f"sanity: {r}")
     beats = not reasons
     return {
         "beats_market": beats,

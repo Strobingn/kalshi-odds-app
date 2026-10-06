@@ -38,7 +38,8 @@ jobs:
         run: |
           python3 ml/test_train_edge.py
           python3 ml/test_publish_model.py
-          if [ -f ml/test_eval_extra.py ]; then python3 ml/test_eval_extra.py; fi
+          python3 ml/test_train_edge_0337.py
+          if [ -f ml/test_train_longshot.py ]; then python3 ml/test_train_longshot.py; fi
       - name: Unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
       - name: Assemble debug APK + verify debug cert
