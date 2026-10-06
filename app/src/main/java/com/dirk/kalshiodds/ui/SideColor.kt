@@ -21,9 +21,9 @@ object SideColor {
         BetCall.Headline.NO_BET -> colors.textPrimary
     }
 
-    /** Solid fill for a side button or card border. DOWN is deeper than the text red. */
+    /** Solid fill for a side button or card border. Fills are deeper than the text colors. */
     fun fill(headline: BetCall.Headline, colors: DipPalette): Color = when (headline) {
-        BetCall.Headline.BET_UP -> colors.up
+        BetCall.Headline.BET_UP -> colors.upButton
         BetCall.Headline.BET_DOWN -> colors.downButton
         BetCall.Headline.NO_BET -> colors.textSecondary
     }

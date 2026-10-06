@@ -38,28 +38,34 @@ object FieldSwatch {
         const val Outline: Long = 0xFF5A5A5A
         const val OutlineVariant: Long = 0xFF5A5A5A
         /**
-         * Light red on the lifted dark cards, a step darker than #FFB4B4.
-         * Still clears 4.5:1 on #404040, and a near-black label clears the fill.
+         * DOWN / error text on lifted dark cards. Deepest red that still
+         * clears 4.5:1 on #404040. Button fills use [ErrorFill].
          */
-        const val Error: Long = 0xFFFFA0A0
+        const val Error: Long = 0xFFFF8B8B
         const val OnError: Long = 0xFF3B0002
-        const val ErrorContainer: Long = 0xFF4A1212
-        const val OnErrorContainer: Long = 0xFFFFDAD6
+        /** DOWN button, chart line, and tile ink. Deeper than [Error]. */
+        const val ErrorFill: Long = 0xFFFF4D4D
+        const val ErrorContainer: Long = 0xFF3B0E0E
+        const val OnErrorContainer: Long = 0xFFFF8578
         const val StatusPending: Long = 0xFFD6D6D6
         const val StatusInProgress: Long = 0xFFC4C4C4
-        const val StatusCompleted: Long = 0xFFA5D6A7
-        const val StatusCancelled: Long = 0xFFFFA0A0
-        /** Light red for urgent text on dark cards, a step darker than #FFB0A8. Not yellow. */
-        const val StatusUrgent: Long = 0xFFFFA29A
+        const val StatusCompleted: Long = 0xFF71BE74
+        const val StatusCancelled: Long = 0xFFFF8B8B
+        /** Urgent text on dark cards. Wash at 15% still clears 4.5:1. Not yellow. */
+        const val StatusUrgent: Long = 0xFFFF9990
         /** Dark red for urgent text on the light Today hero. Not for dark cards. */
-        const val OnHeroWarning: Long = 0xFF3E0808
+        const val OnHeroWarning: Long = 0xFF320606
         const val AccentBlue: Long = 0xFFD0D0D0
         const val AccentPurple: Long = 0xFFC0C0C0
         const val AccentOrange: Long = 0xFFB8B8B8
         const val AccentCyan: Long = 0xFFE0E0E0
         const val AccentPink: Long = 0xFFA8A8A8
         const val AccentAmber: Long = 0xFFD0D0D0
-        const val Success: Long = 0xFF81C784
+        /** UP text. Deepest green that still clears 4.5:1 on #404040. */
+        const val Success: Long = 0xFF6EBF71
+        /** UP button and chart line. Deeper than [Success]. Near-black label stays AA. */
+        const val SuccessFill: Long = 0xFF54B358
+        const val SuccessContainer: Long = 0xFF0B2210
         const val GradientStart: Long = 0xFFD0D0D0
         const val GradientMid: Long = 0xFFC0C0C0
         const val GradientEnd: Long = 0xFFB0B0B0
@@ -84,19 +90,21 @@ object FieldSwatch {
         const val OnSurfaceMuted: Long = 0xFF575B63
         const val Outline: Long = 0xFF74777F
         const val OutlineVariant: Long = 0xFFC4C4C4
-        const val Error: Long = 0xFF8E1515
+        const val Error: Long = 0xFF721111
         const val OnError: Long = 0xFFFFFFFF
-        const val ErrorContainer: Long = 0xFFF6D0CC
-        const val OnErrorContainer: Long = 0xFF410002
+        /** Same depth as [Error]. White label still clears 4.5:1. */
+        const val ErrorFill: Long = 0xFF721111
+        const val ErrorContainer: Long = 0xFFE98980
+        const val OnErrorContainer: Long = 0xFF340002
         /** Dark enough that pending chips clear 4.5:1 on the light card wash. */
         const val StatusPending: Long = 0xFF585C61
         const val StatusInProgress: Long = 0xFF3A3A3A
-        const val StatusCompleted: Long = 0xFF1B5E20
-        const val StatusCancelled: Long = 0xFF8E1515
-        /** Dark red for urgent text on light cards, a step darker than #93000A. Not yellow or orange. */
-        const val StatusUrgent: Long = 0xFF820008
+        const val StatusCompleted: Long = 0xFF164B1A
+        const val StatusCancelled: Long = 0xFF721111
+        /** Dark red for urgent text on light cards. Not yellow or orange. */
+        const val StatusUrgent: Long = 0xFF680006
         /** Light red for urgent text on the dark Today hero. Not for light cards. */
-        const val OnHeroWarning: Long = 0xFFFFC2C9
+        const val OnHeroWarning: Long = 0xFFFF8A97
         /** Dictate FAB fill. Distinct from PrimaryContainer so the label stays AA. */
         const val SecondaryContainer: Long = 0xFFE0E0E0
         const val AccentBlue: Long = 0xFF3A3A3A
@@ -105,7 +113,9 @@ object FieldSwatch {
         const val AccentCyan: Long = 0xFF2E2E2E
         const val AccentPink: Long = 0xFF454545
         const val AccentAmber: Long = 0xFF3A3A3A
-        const val Success: Long = 0xFF1B5E20
+        const val Success: Long = 0xFF164B1A
+        const val SuccessFill: Long = 0xFF164B1A
+        const val SuccessContainer: Long = 0xFFA6D8A9
         const val GradientStart: Long = 0xFF3A3A3A
         const val GradientMid: Long = 0xFF2E2E2E
         const val GradientEnd: Long = 0xFF242424
