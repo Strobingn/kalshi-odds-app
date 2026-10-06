@@ -46,10 +46,16 @@ object SignalCopy {
         val model = sidePercent(modelYes, side)
         val market = sidePercent(marketYes, side)
         val edge = displayedEdgePts(modelYes, marketYes, side)
-        val modelTxt = model?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
-        val marketTxt = market?.let { String.format(Locale.US, "%.0f%%", it) } ?: "—"
+        val modelTxt = model?.let(::formatProbability) ?: "—"
+        val marketTxt = market?.let(::formatProbability) ?: "—"
         val edgeTxt = edge?.let { String.format(Locale.US, "%+.0f pts", it) } ?: "—"
         return "Model $modelTxt vs market $marketTxt · edge $edgeTxt"
+    }
+
+    /** Avoid presenting a valid 0.1% sub-cent quote as an impossible 0%. */
+    private fun formatProbability(percent: Double): String = when {
+        kotlin.math.abs(percent) in 0.000_001..0.999_999 -> String.format(Locale.US, "%.1f%%", percent)
+        else -> String.format(Locale.US, "%.0f%%", percent)
     }
 
     fun resolve(

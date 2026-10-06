@@ -643,6 +643,15 @@ class ScoringEngine(
             delta = fair - midPp
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
+        // The imported model is a probability input, not permission to undo a
+        // strong spot-vs-target semantic lock. Re-apply after the model blend;
+        // otherwise a late tail estimate can flip an established UP/YES or
+        // DOWN/NO direction immediately before close.
+        if (dir.applied) {
+            fair = dir.fairPp
+            predictedSide = dir.side
+            delta = fair - midPp
+        }
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
             spotReturn5m = spotFeat?.spotReturn5m,

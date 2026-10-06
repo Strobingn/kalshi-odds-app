@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.ui
 
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
+import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -48,7 +49,7 @@ class HomeCopyTest {
     @Test
     fun actionableDownFixtureIsBetDown() {
         val down = HomeFixtures.actionableDownBtc()
-        val call = BetCall.decide(down, SignalSettings(), nowMs)
+        val call = BetCall.decide(down, contextFor(down))
         assertEquals(BetCall.Headline.BET_DOWN, call.headline)
         assertTrue(call.isActionable)
     }
@@ -63,7 +64,7 @@ class HomeCopyTest {
             predicted = "YES",
             closeMs = nowMs + 372_000L
         )
-        val upCall = BetCall.decide(up, SignalSettings(), nowMs)
+        val upCall = BetCall.decide(up, contextFor(up))
         assertTrue(upCall.isActionable)
         val line = HomeCopy.thisWindowHeadline(upCall, up, nowMs)
         assertTrue(line.startsWith("BET UP  BTC"))
@@ -260,4 +261,12 @@ class HomeCopyTest {
             )
         )
     }
+
+    private fun contextFor(market: com.dirk.kalshiodds.domain.MarketUiModel): TicketBuilder.Context =
+        TicketBuilder.Context(
+            settings = SignalSettings(),
+            alertsPaused = false,
+            nowMs = nowMs,
+            books = mapOf(market.ticker to HomeFixtures.verifiedBookFor(market))
+        )
 }

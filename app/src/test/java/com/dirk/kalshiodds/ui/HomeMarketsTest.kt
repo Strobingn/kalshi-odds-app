@@ -25,7 +25,12 @@ class HomeMarketsTest {
         assertEquals("KXBTC15M-25SEP181700-50", cards.single().market!!.ticker)
         assertTrue(cards.none { it.series.contains("SOL") || it.series.contains("ETH") })
         val live = cards.mapNotNull { it.market }
-        val ctx = TicketBuilder.Context(settings = settings, alertsPaused = false, nowMs = HomeFixtures.NOW_MS)
+        val ctx = TicketBuilder.Context(
+            settings = settings,
+            alertsPaused = false,
+            nowMs = HomeFixtures.NOW_MS,
+            books = live.associate { it.ticker to HomeFixtures.verifiedBookFor(it) }
+        )
         val decisions = HomeMarkets.decisions(live, ctx)
         val ranked = HomeMarkets.ranked(live, decisions, settings)
         assertEquals("KXBTC15M-25SEP181700-50", ranked.single().ticker)

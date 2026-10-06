@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
@@ -64,6 +65,12 @@ object HomeFixtures {
             oddsHistory = listOf(48f, 50f, 51f, (yesAsk * 100.0).toFloat())
         )
     }
+
+    /** A current, deep snapshot whose derived asks match this fixture's quotes. */
+    fun verifiedBookFor(market: MarketUiModel, depth: Double = 1_000.0): BookLevelSnapshot = BookLevelSnapshot(
+        yes = market.noAsk?.let { listOf((1.0 - it) to depth) }.orEmpty(),
+        no = market.yesAsk?.let { listOf((1.0 - it) to depth) }.orEmpty()
+    )
 
     fun actionableDownBtc() = market(
         ticker = "KXBTC15M-25SEP181700-50",

@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.engine.DirectionSanity
 
 /**
  * Single source of truth for the card headline, the ticket side, and
@@ -44,9 +45,14 @@ object BetCall {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
             return none(TicketBuilder.MARKET_CLOSED)
         }
-        val proposed = TicketBuilder.proposeAll(listOf(market), ctx).filter { !it.isSell }
-        val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
-        val tickets = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
+        automaticBlockReason(market, ctx)?.let { return none(it) }
+
+        // A manual ticket is solely the result of an explicit user Buy tap.
+        // It may deliberately bypass automated filters, so it must never be
+        // promoted into the app's BET UP/BET DOWN recommendation.
+        val tickets = TicketBuilder.proposeAll(listOf(market), ctx)
+            .filter { !it.isSell && it.kind != TicketKind.MANUAL }
+            .distinctBy { "${it.side.uppercase()}|${it.kind}" }
         val actionable = tickets.filter { qualifies(it, market, ctx) }
         val preferred = TicketBuilder.resolveSide(market)
         val chosen = actionable.firstOrNull { preferred != null && it.side.equals(preferred, true) }
@@ -89,6 +95,43 @@ object BetCall {
         )
     }
 
+    /**
+     * Recommendation-only gates. They deliberately do not apply to a manual
+     * Buy tap or to paper-autopilot: a headline labelled BET must be a
+     * currently executable, model-qualified opportunity.
+     */
+    private fun automaticBlockReason(market: MarketUiModel, ctx: TicketBuilder.Context): String? = when {
+        finalWindowOpposesEstablishedDirection(market, ctx.nowMs) ->
+            "NO BET — final-window move is materially against the settled direction"
+        !market.passedFilter -> market.skipReason ?: "NO BET — market did not clear the signal filter"
+        market.muted -> market.muteReason ?: "NO BET — market is muted"
+        ctx.alertsPaused -> "NO BET — signal alerts are paused"
+        !market.uncertaintyPassed -> "NO BET — model uncertainty is too high"
+        market.tapeConflict -> market.tapeConflictNote ?: "NO BET — model and market direction disagree"
+        !market.modelEdgeQualified -> "NO BET — imported model did not clear fees and confidence margin"
+        ctx.books[market.ticker]?.isEmpty() != false ->
+            "NO BET — waiting for a verified live order-book snapshot"
+        else -> null
+    }
+
+    /**
+     * At the end of a crypto window, do not fade a spot price that is already
+     * far beyond the target. The same gap is used by [DirectionSanity] to
+     * establish the side; four gaps is its existing strong-confirmation bar.
+     */
+    private fun finalWindowOpposesEstablishedDirection(market: MarketUiModel, nowMs: Long): Boolean {
+        val closeMs = market.closeTimeEpochMs ?: return false
+        if (closeMs - nowMs !in 0L..FINAL_WINDOW_MS) return false
+        val distance = market.spotVsTargetUsd?.takeIf { it.isFinite() } ?: return false
+        val strike = market.floorStrike?.takeIf { it.isFinite() && it > 0.0 } ?: return false
+        if (kotlin.math.abs(distance) < DirectionSanity.gapUsd(strike) * STRONG_DIRECTION_GAP_MULTIPLIER) {
+            return false
+        }
+        val establishedSide = if (distance > 0.0) "YES" else "NO"
+        val modelSide = TicketBuilder.resolveSide(market) ?: return false
+        return !modelSide.equals(establishedSide, ignoreCase = true)
+    }
+
     private fun none(reason: String) = Decision(
         headline = Headline.NO_BET,
         side = null,
@@ -99,4 +142,7 @@ object BetCall {
         contracts = 0,
         noBetReason = reason
     )
+
+    private const val FINAL_WINDOW_MS = 60_000L
+    private const val STRONG_DIRECTION_GAP_MULTIPLIER = 4.0
 }

@@ -10,6 +10,15 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SignalCopyTest {
+
+    @Test
+    fun subPercentMarketProbabilityDoesNotRoundToImpossibleZero() {
+        assertEquals(
+            "Model 5% vs market 0.1% · edge +5 pts",
+            SignalCopy.modelVsMarketLine(modelYes = 95.0, marketYes = 99.9, side = "DOWN")
+        )
+    }
+
     @Test
     fun displayedEdgeIsModelMinusMarketForTheShownSide() {
         assertEquals(4.0, SignalCopy.displayedEdgePts(68.0, 64.0, "YES")!!, 1e-9)

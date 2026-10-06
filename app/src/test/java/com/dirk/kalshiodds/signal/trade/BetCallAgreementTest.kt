@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.trade
 
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -13,7 +14,7 @@ class BetCallAgreementTest {
     @Test
     fun betUpHeadlineMatchesTicketAndApproveSide() {
         val market = sample(yesAsk = 0.20, noAsk = 0.80, aiYes = 80.0, predicted = "YES")
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
+        val ctx = contextFor(market)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.BET_UP, decision.headline)
         assertEquals("YES", decision.side)
@@ -25,7 +26,7 @@ class BetCallAgreementTest {
     @Test
     fun betDownHeadlineMatchesTicketAndApproveSide() {
         val market = sample(yesAsk = 0.80, noAsk = 0.20, aiYes = 10.0, predicted = "NO")
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
+        val ctx = contextFor(market)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
         assertEquals("NO", decision.side)
@@ -37,7 +38,7 @@ class BetCallAgreementTest {
     @Test
     fun noBetWhenSixtyThreeCentsMissesMinProfit() {
         val market = sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 70.0, predicted = "YES")
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
+        val ctx = contextFor(market)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         assertNull(decision.side)
@@ -69,8 +70,10 @@ class BetCallAgreementTest {
 
     @Test
     fun sortPutsActionableFirst() {
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 70.0, "YES"), SignalSettings())) == 1)
+        val actionable = sample(0.20, 0.80, 80.0, "YES")
+        val blocked = sample(0.63, 0.37, 70.0, "YES")
+        assertTrue(BetCall.sortKey(BetCall.decide(actionable, contextFor(actionable))) == 0)
+        assertTrue(BetCall.sortKey(BetCall.decide(blocked, contextFor(blocked))) == 1)
     }
 
     private fun sample(yesAsk: Double, noAsk: Double, aiYes: Double, predicted: String) = MarketUiModel(
@@ -98,5 +101,16 @@ class BetCallAgreementTest {
         passedFilter = true,
         predictedSide = predicted,
         primaryHeroSide = predicted
+    )
+
+    private fun contextFor(market: MarketUiModel): TicketBuilder.Context = TicketBuilder.Context(
+        settings = SignalSettings(),
+        alertsPaused = false,
+        books = mapOf(
+            market.ticker to BookLevelSnapshot(
+                yes = listOf((1.0 - (market.noAsk ?: 1.0)) to 1_000.0),
+                no = listOf((1.0 - (market.yesAsk ?: 1.0)) to 1_000.0)
+            )
+        )
     )
 }

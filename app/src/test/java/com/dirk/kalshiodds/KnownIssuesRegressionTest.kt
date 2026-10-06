@@ -432,7 +432,7 @@ class KnownIssuesRegressionTest {
     }
 
     @Test
-    fun disagreementLabelNamesBothSidesUnderABetHeadlineAndIsNullOnAgreement() {
+    fun disagreementLabelBlocksBetHeadlineAndIsNullOnAgreement() {
         val disagree = sample(
             ticker = "KXETH15M-DISAGREE",
             yesAsk = 0.80,
@@ -452,8 +452,8 @@ class KnownIssuesRegressionTest {
         assertTrue(copy.detail.contains("UP"))
         assertTrue(copy.detail.contains("Market + spot"))
         val decision = BetCall.decide(disagree, SignalSettings(), nowMs)
-        assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
-        assertTrue(decision.isActionable)
+        assertEquals(BetCall.Headline.NO_BET, decision.headline)
+        assertFalse(decision.isActionable)
         assertNotNull(DisagreementLabel.of(disagree))
 
         assertNull(

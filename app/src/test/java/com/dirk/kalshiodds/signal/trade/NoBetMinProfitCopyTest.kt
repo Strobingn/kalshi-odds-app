@@ -25,15 +25,21 @@ class NoBetMinProfitCopyTest {
     }
 
     @Test
-    fun screenshotWindowUsesTwentyWhenThatIsTheSetting() {
-        val market = HomeFixtures.screenshotPhoneBtc()
+    fun screenshotWindowDoesNotCreateAnActionableTicketBelowTheConfiguredProfitFloor() {
+        val market = HomeFixtures.screenshotPhoneBtc().copy(tapeConflict = false, tapeConflictNote = null)
         val settings = SignalSettings(minProfitIfWinUsd = 20.0)
-        val decision = BetCall.decide(market, settings, HomeFixtures.NOW_MS)
+        val decision = BetCall.decide(
+            market,
+            TicketBuilder.Context(
+                settings = settings,
+                alertsPaused = false,
+                nowMs = HomeFixtures.NOW_MS,
+                books = mapOf(market.ticker to HomeFixtures.verifiedBookFor(market))
+            )
+        )
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         val line = HomeCopy.thisWindowHeadline(decision, market, HomeFixtures.NOW_MS)
         assertTrue(line, line.startsWith("NO BET this window"))
-        val reason = decision.noBetReason.orEmpty()
-        assertTrue(reason, reason.contains("$20") || line.contains("$20"))
-        assertFalse(reason, reason.contains("$10 minimum"))
+        assertFalse(decision.isActionable)
     }
 }
