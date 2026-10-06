@@ -202,6 +202,15 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        state.cfFeedLine?.let { line ->
+                            item {
+                                Text(
+                                    "CF Benchmarks · $line",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
                         state.userMessage?.takeIf { !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) }?.let { msg ->
                             item {
                                 val quiet = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isQuietStatus(msg)

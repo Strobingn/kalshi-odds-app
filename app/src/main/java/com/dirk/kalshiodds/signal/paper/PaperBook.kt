@@ -315,6 +315,7 @@ class PaperBook(
         ) return null
         val model = ticket.modelChance
         val ask = KalshiPrice.usable(ticket.limitPrice)
+        if (ask != null && ask + 1e-12 < com.dirk.kalshiodds.decision.TradeEligibility.LOTTERY_ASK) return null
         if (ask != null && ask + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
             (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
         ) {
@@ -350,6 +351,7 @@ class PaperBook(
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        if (px + 1e-12 < com.dirk.kalshiodds.decision.TradeEligibility.LOTTERY_ASK) return null
         val model = PaperFill.metaFromAlert(alert).aiPct?.div(100.0)
         if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
             (model == null || model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT)
@@ -550,7 +552,8 @@ class PaperBook(
             rememberMessage("Paper skip $ticker — 0 contracts")
             return null
         }
-        val stake = qty * px
+        // Fee on every paper fill: all-in cost = contracts × price + Kalshi fee rounded up.
+        val stake = com.dirk.kalshiodds.signal.trade.KalshiFee.totalCost(qty, px, feeRate)
         synchronized(lock) {
             val cur = _state.value
             if (cur.cashUsd + 1e-9 < stake) {
@@ -877,8 +880,17 @@ class PaperBook(
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                val pnl = payout - fill.stakeUsd
-                cash += payout
+                val pnl = com.dirk.kalshiodds.decision.HonestScorecard.pnlAfterFee(
+                    contracts = fill.contracts,
+                    price = fill.limitPrice,
+                    stakeUsd = fill.stakeUsd,
+                    won = won,
+                    voided = outcome == "void",
+                    feeRate = feeRate
+                )
+                // Legacy fills recorded without the fee pay it now so cash matches P&L.
+                val unpaidFee = if (outcome == "void") 0.0 else ((payout - pnl) - fill.stakeUsd).coerceAtLeast(0.0)
+                cash += payout - unpaidFee
                 fill.copy(
                     settled = true,
                     outcome = outcome,

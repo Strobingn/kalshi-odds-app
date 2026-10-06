@@ -32,6 +32,8 @@ class KalshiWsClient(
     private val onBookSnapshot: (KalshiWsMessages.Parsed.OrderbookSnapshot) -> Unit = {},
     private val onBookDelta: (KalshiWsMessages.Parsed.OrderbookDelta) -> Unit = {},
     private val onLifecycle: (ticker: String, eventType: String) -> Unit = { _, _ -> },
+    private val onCf: (CfBenchmarks.Tick) -> Unit = {},
+    private val jitter: () -> Long = { (0L..200L).random() },
     private val httpClient: OkHttpClient = defaultClient(),
     private val urls: List<String> = KalshiWsAuth.WS_URLS
 ) {
@@ -53,6 +55,8 @@ class KalshiWsClient(
     @Volatile private var channels: List<String> = listOf("ticker", "orderbook_delta")
     @Volatile private var marketTickers: List<String> = emptyList()
     private val subscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
+    private var cfCommandId: Int = -1
+    private var cfSid: Int? = null
 
     fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
         this.keyId = keyId
@@ -129,12 +133,16 @@ class KalshiWsClient(
         val payload = KalshiWsMessages.subscribe(id, channels, marketTickers.takeIf { it.isNotEmpty() })
         ws.send(payload)
         onLog("subscribe id=$id channels=$channels tickers=${marketTickers.size}")
+        val cfId = msgId.getAndIncrement()
+        cfCommandId = cfId
+        ws.send(CfBenchmarks.subscribeJson(cfId))
+        onLog("subscribe id=$cfId channel=${CfBenchmarks.CHANNEL} indexes=${CfBenchmarks.INDEX_IDS}")
     }
 
     private fun scheduleReconnect() {
         if (!running.get()) return
         reconnectJob?.cancel()
-        val delayMs = backoffMs
+        val delayMs = (backoffMs + jitter().coerceAtLeast(0L)).coerceAtMost(MAX_BACKOFF_MS)
         backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
         hostIndex += 1
         onState(
@@ -191,8 +199,12 @@ class KalshiWsClient(
                     runCatching { onBookDelta(parsed) }
                 }
                 is KalshiWsMessages.Parsed.Subscribed -> {
-                    parsed.sid?.let { subscribedSids += it }
-                    onLog("subscribed sid=${parsed.sid}")
+                    val cf = parsed.commandId == cfCommandId || parsed.channel == CfBenchmarks.CHANNEL
+                    if (cf) cfSid = parsed.sid else parsed.sid?.let { subscribedSids += it }
+                    onLog("subscribed sid=${parsed.sid} cf=$cf")
+                }
+                is KalshiWsMessages.Parsed.CfValue -> {
+                    runCatching { onCf(parsed.tick) }
                 }
                 is KalshiWsMessages.Parsed.Unsubscribed -> {
                     subscribedSids.removeAll(parsed.sids.toSet())

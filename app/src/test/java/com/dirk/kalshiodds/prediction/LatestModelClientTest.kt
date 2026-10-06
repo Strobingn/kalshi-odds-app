@@ -113,10 +113,9 @@ class LatestModelClientTest {
             )
         )
         val out = client(routes).download(null)
-        assertTrue(out is LatestModelClient.Outcome.Ready)
-        val ready = out as LatestModelClient.Outcome.Ready
-        assertFalse(ready.fetch.decision.activate)
-        assertTrue(ready.fetch.decision.reason.contains("does not beat"))
+        // 0.3.37 pull safety: beat_market must be true or the download is rejected outright.
+        assertTrue(out is LatestModelClient.Outcome.Failed)
+        assertTrue((out as LatestModelClient.Outcome.Failed).message.contains("beat_market"))
     }
 
     @Test

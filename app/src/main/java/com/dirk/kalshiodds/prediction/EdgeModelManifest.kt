@@ -19,7 +19,7 @@ data class EdgeModelManifest(
     val modelLogLoss: Double,
     val marketLogLoss: Double,
     val modelAsset: String = "edge_model.json",
-    val tag: String = "edge-model-latest",
+    val tag: String = "",
     val simPnl: Double? = null,
     val simHitRate: Double? = null,
     val simTrades: Int = 0,
@@ -108,7 +108,7 @@ data class EdgeModelManifest(
                 modelLogLoss = modelLl,
                 marketLogLoss = marketLl,
                 modelAsset = o.optString("model_asset").ifBlank { "edge_model.json" },
-                tag = o.optString("tag").ifBlank { "edge-model-latest" },
+                tag = o.optString("tag"),
                 simPnl = o.optDoubleOrNull("sim_pnl"),
                 simHitRate = o.optDoubleOrNull("sim_hit_rate"),
                 simTrades = if (o.has("sim_trades")) o.optInt("sim_trades") else 0,
@@ -200,7 +200,17 @@ object ModelActivation {
     const val MIN_BRIER_MARGIN = 0.010
     const val MIN_LOGLOSS_MARGIN = 0.010
     const val MIN_SIM_TRADES = 30
+    const val MIN_ACTIVATE_ROWS = 5_000
     const val PROVENANCE_LIVE = EdgeModelManifest.PROVENANCE_LIVE
+
+    private val DATED = Regex("^model-\\d{8}$")
+
+    fun acceptableTag(tag: String): Boolean {
+        val t = tag.trim()
+        if (t.isEmpty()) return false
+        if (t.equals("edge-model-main", true) || t.equals("edge-model-latest", true)) return false
+        return DATED.matches(t)
+    }
 
     fun beatsMarket(m: EdgeModelManifest): Boolean {
         if (m.beatMarketFlag == false) return false
@@ -249,6 +259,20 @@ object ModelActivation {
                 activate = false,
                 manifest = manifest,
                 reason = "Manifest lacks n_markets / n_rows / n_holdout — falling back to market-only."
+            )
+        }
+        if (manifest.nRows < MIN_ACTIVATE_ROWS && manifest.nSamples < MIN_ACTIVATE_ROWS) {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Sample too small: ${manifest.nRows} rows is below $MIN_ACTIVATE_ROWS — bundled model stays active."
+            )
+        }
+        if (manifest.tag.equals("edge-model-main", true) || manifest.tag.equals("edge-model-latest", true)) {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Release tag '${manifest.tag}' is not model-YYYYMMDD — bundled model stays active."
             )
         }
         if (manifest.nMarkets < MIN_PUBLISH_MARKETS ||

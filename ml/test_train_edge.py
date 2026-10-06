@@ -218,10 +218,10 @@ class PublishSafetyTest(unittest.TestCase):
 
     def test_no_side_fee_uses_complement_price(self) -> None:
         # YES mid 0.20, model buys NO, NO wins.
-        # NO price 0.80, fee 0.07*0.8*0.2 = 0.0112, profit 1-0.80-0.0112.
+        # NO price 0.80, fee ceil_cent(0.07*0.8*0.2 = 0.0112) = 0.02, profit 1-0.80-0.02.
         pnl = te.simulated_pnl([0.05], [0.20], [0])
         self.assertEqual(pnl["n"], 1)
-        self.assertAlmostEqual(pnl["pnl"], 0.1888, places=4)
+        self.assertAlmostEqual(pnl["pnl"], 0.18, places=6)
 
 
 class GoldenFeatureTest(unittest.TestCase):

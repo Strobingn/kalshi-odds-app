@@ -11,10 +11,9 @@ import java.util.concurrent.TimeUnit
  * Download the newest published edge model for this package.
  *
  * Looks for GitHub release tag `model-YYYYMMDD`, then
- * `ml/published/latest.json` on `kashi`, then the legacy `edge-model-latest`
- * tag. Activating is a separate gate: package, sha256, and beat-market must
- * all pass. Public repos work without a token. A private repo needs a GitHub
- * token (Contents: Read) — never the Kalshi key.
+ * `ml/published/latest.json` on `kashi`. `edge-model-latest` and
+ * `edge-model-main` are never activated. Package, sha256, beat-market,
+ * non-synthetic, and at least 5,000 rows must all pass.
  */
 data class ModelHttpResp(val code: Int, val body: String?)
 
@@ -57,20 +56,8 @@ class LatestModelClient(
         }
         val indexed = loadIndex(token)
         if (indexed != null) return indexed
-        val legacy = fetch(
-            PublishedRelease.tagUrl(SignalConstants.EDGE_MODEL_RELEASE_TAG, owner, repo),
-            token,
-            "application/vnd.github+json"
-        )
-        if (legacy.code == 401 || legacy.code == 403) {
-            return Outcome.NeedsAuth(authMessage(legacy.code))
-        }
-        if (legacy.code in 200..299 && !legacy.body.isNullOrBlank()) {
-            val release = PublishedRelease.parseOne(legacy.body!!)
-            if (release != null) return loadRelease(release, token)
-        }
         return Outcome.Failed(
-            "No published model-YYYYMMDD release. ${BundledEdge.NOTE}"
+            "No published model-YYYYMMDD release. edge-model-latest and edge-model-main are rejected. ${BundledEdge.NOTE}"
         )
     }
 
@@ -116,16 +103,24 @@ class LatestModelClient(
         if (manifestRaw.isNullOrBlank()) {
             return Outcome.Failed("Release ${release.tag} has no manifest. ${BundledEdge.NOTE}")
         }
-        return verify(modelRaw, manifestRaw)
+        return verify(modelRaw, manifestRaw, release.tag)
     }
 
-    private fun verify(modelRaw: String, manifestRaw: String): Outcome {
+    private fun verify(modelRaw: String, manifestRaw: String, releaseTag: String? = null): Outcome {
         val manifest = runCatching { EdgeModelManifest.parse(manifestRaw) }.getOrElse {
             return Outcome.Failed("Manifest failed validation: ${it.message}. ${BundledEdge.NOTE}")
+        }
+        ModelPullSafety.reject(manifest, modelRaw, packageId, releaseTag)?.let {
+            return Outcome.Failed("$it. ${BundledEdge.NOTE}")
         }
         if (manifest.packageId != packageId) {
             return Outcome.Failed(
                 "Model package is '${manifest.packageId}', expected $packageId. ${BundledEdge.NOTE}"
+            )
+        }
+        if (!ModelActivation.acceptableTag(manifest.tag)) {
+            return Outcome.Failed(
+                "Release tag '${manifest.tag}' is not model-YYYYMMDD. ${BundledEdge.NOTE}"
             )
         }
         if (manifest.sha256.isBlank() || !ModelDigest.matches(manifest.sha256, modelRaw)) {

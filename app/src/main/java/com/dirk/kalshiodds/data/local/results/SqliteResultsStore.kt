@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * a process kill. Writes are serialized by SQLite; callers should use
  * [AsyncResultsWriter] so scoring never blocks.
  */
-class SqliteResultsStore(context: Context) : ResultsDatabase {
+class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink {
     private val db = Helper(context.applicationContext)
 
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -378,6 +378,41 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
         } finally {
             w.endTransaction()
         }
+    }
+
+    /**
+     * Every settled paper fill ever written (no 80-row truncation): id to scorecard row.
+     * Paged by rowid so a large history never loads one giant cursor window.
+     */
+    fun settledPaperRows(): List<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>> {
+        val out = ArrayList<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>>()
+        val table = com.dirk.kalshiodds.data.local.paper.PaperFillSchema.TABLE
+        var last = -1L
+        while (true) {
+            var n = 0
+            db.readableDatabase.rawQuery(
+                "SELECT rowid, fill_id, ticker, limit_price, stake_usd, pnl_usd, outcome FROM $table " +
+                    "WHERE settled = 1 AND pnl_usd IS NOT NULL AND rowid > ? ORDER BY rowid LIMIT 2000",
+                arrayOf(last.toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    n += 1
+                    last = c.getLong(0)
+                    val outcome = if (c.isNull(6)) null else c.getString(6)
+                    if (outcome.equals("void", true)) continue
+                    val price = c.getDouble(3)
+                    if (price <= 0.0) continue
+                    out += c.getString(1) to com.dirk.kalshiodds.decision.HonestScorecard.Row(
+                        ask = price,
+                        pnlUsd = c.getDouble(5),
+                        stakeUsd = c.getDouble(4),
+                        market = c.getString(2).uppercase()
+                    )
+                }
+            }
+            if (n < 2000) break
+        }
+        return out
     }
 
     override fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>) {
@@ -895,6 +930,123 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
         note = c.strOrNull("note")
     )
 
+    override fun insertLedger(row: com.dirk.kalshiodds.data.local.ledger.LedgerRow): Long {
+        val values = ContentValues()
+        for ((k, v) in com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.values(row)) {
+            when (v) {
+                null -> values.putNull(k)
+                is Long -> values.put(k, v)
+                is Int -> values.put(k, v)
+                is Double -> if (v.isFinite()) values.put(k, v) else values.putNull(k)
+                is String -> values.put(k, v)
+                else -> values.put(k, v.toString())
+            }
+        }
+        return db.writableDatabase.insert(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            null,
+            values
+        )
+    }
+
+    /** Fill in the outcome on every unsettled prediction for [ticker]. Never deletes rows. */
+    fun settleLedger(ticker: String, result: String, atMs: Long): Int {
+        val values = ContentValues().apply {
+            put("settlement_result", result.lowercase())
+            put("settled_at_ms", atMs)
+        }
+        return db.writableDatabase.update(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            values,
+            "ticker = ? AND settlement_result IS NULL",
+            arrayOf(ticker.uppercase())
+        )
+    }
+
+    private fun queryLedger(
+        selection: String?,
+        args: Array<String>?,
+        order: String,
+        limit: Int
+    ): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+        db.readableDatabase.query(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            null,
+            selection,
+            args,
+            null,
+            null,
+            order,
+            limit.coerceAtLeast(1).toString()
+        ).use { c ->
+            while (c.moveToNext()) out.add(cursorToLedger(c))
+        }
+        return out
+    }
+
+    fun recentLedger(limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
+        queryLedger(null, null, "timestamp_ms DESC", limit)
+
+    /** Settled predictions newest first, for calibration. */
+    override fun settledLedger(sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
+        queryLedger(
+            "settlement_result IN ('yes','no') AND timestamp_ms >= ?",
+            arrayOf(sinceMs.toString()),
+            "timestamp_ms DESC",
+            limit
+        )
+
+    /** Tickers with an unsettled prediction whose window has closed — fed to the settlement poller. */
+    override fun unsettledLedgerTickers(nowMs: Long, sinceMs: Long, limit: Int): List<String> {
+        val out = ArrayList<String>()
+        db.readableDatabase.rawQuery(
+            "SELECT ticker, MAX(close_time_ms) AS c FROM ${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE} " +
+                "WHERE settlement_result IS NULL AND close_time_ms IS NOT NULL AND close_time_ms <= ? AND close_time_ms >= ? " +
+                "GROUP BY ticker ORDER BY c DESC LIMIT ?",
+            arrayOf(nowMs.toString(), sinceMs.toString(), limit.coerceAtLeast(1).toString())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    fun ledgerCount(): Long =
+        android.database.DatabaseUtils.queryNumEntries(
+            db.readableDatabase,
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE
+        )
+
+    /** Full export — no truncation (paged internally). */
+    fun ledgerCsv(): String {
+        val rows = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+        var lastId = 0L
+        while (true) {
+            val page = queryLedger("id > ?", arrayOf(lastId.toString()), "id ASC", 20_000)
+            if (page.isEmpty()) break
+            rows += page
+            lastId = page.last().id
+            if (page.size < 20_000) break
+        }
+        return com.dirk.kalshiodds.data.local.ledger.LedgerCsv.render(rows)
+    }
+
+    private fun cursorToLedger(c: Cursor): com.dirk.kalshiodds.data.local.ledger.LedgerRow {
+        val types = com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.COLUMNS.associate { it.name to it.type }
+        return com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.fromReader(c.long("id")) { name ->
+            val i = c.getColumnIndex(name)
+            if (i < 0 || c.isNull(i)) {
+                null
+            } else {
+                when (types[name]) {
+                    com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.Type.INT -> c.getLong(i)
+                    com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.Type.REAL -> c.getDouble(i)
+                    else -> c.getString(i)
+                }
+            }
+        }
+    }
+
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
             db.execSQL(
@@ -973,6 +1125,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
             createChartTickTable(db)
             createPaperFillTable(db)
             createPendingOrdersTable(db)
+            createLedgerTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -984,6 +1137,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
             if (oldVersion < 6) createPaperFillTable(db)
+            if (oldVersion < 7) createLedgerTable(db)
             applyPaperFillColumns(db)
         }
 
@@ -1007,6 +1161,14 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
                 )
                 """.trimIndent()
             )
+        }
+
+        private fun createLedgerTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.upgradeSql(
+                com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.FROM_VERSION
+            )) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createPaperFillTable(db: SQLiteDatabase) {
@@ -1130,7 +1292,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase {
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 6
+        const val DB_VERSION = 7
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

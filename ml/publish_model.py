@@ -17,6 +17,7 @@ import argparse
 import hashlib
 import json
 import re
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -55,6 +56,8 @@ def refusal_reasons(model_bytes: bytes, manifest: dict[str, Any]) -> list[str]:
         reasons.append("manifest beat_market is not true")
     if manifest.get("synthetic") is True:
         reasons.append("synthetic model")
+    if manifest.get("beats_champion") is False:
+        reasons.append("challenger does not beat the champion")
     package = manifest.get("package")
     if package != gates.PACKAGE_ID:
         reasons.append(f"package {package!r} != {gates.PACKAGE_ID}")
@@ -184,6 +187,12 @@ def main(argv: list[str] | None = None, runner: Runner | None = None) -> int:
             print(f"  - {r}", flush=True)
         return 3
     dest = stage_published(model_bytes, manifest, Path(args.published))
+    report = str(manifest.get("eval_report") or "")
+    if report:
+        src = model_path.resolve().parent / "reports" / report
+        if src.is_file() and not (dest / report).exists():
+            shutil.copyfile(src, dest / report)
+            print(f"staged eval report {dest / report}", flush=True)
     if args.github:
         return create_github_release(
             str(manifest["tag"]),

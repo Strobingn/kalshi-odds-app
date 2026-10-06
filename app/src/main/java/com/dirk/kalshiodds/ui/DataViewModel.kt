@@ -39,7 +39,10 @@ data class DataUiState(
     val credPassphrase: String = "",
     val githubTokenDraft: String = "",
     val syncLine: String? = null,
-    val modelBusy: Boolean = false
+    val modelBusy: Boolean = false,
+    val ledgerNote: String? = null,
+    val championReport: String? = null,
+    val cfFeedLine: String? = null
 )
 
 class DataViewModel(application: Application) : AndroidViewModel(application) {
@@ -62,6 +65,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                         supabaseUrlDraft = s.supabaseUrl,
                         supabaseKeyDraft = s.supabaseAnonKey,
                         modelNote = modelLabel(),
+                        championReport = championLine(),
+                        cfFeedLine = cfLine(),
                         syncLine = syncLine(s)
                     )
                 }
@@ -328,6 +333,40 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(message = result) }
             refreshStats()
         }
+    }
+
+    fun exportLedger() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val store = container.predictionLedger
+                if (store == null) {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, "Ledger database is unavailable")
+                } else {
+                    com.dirk.kalshiodds.data.local.results.ResultsFileExport.write(
+                        getApplication(),
+                        store.ledgerCsv(),
+                        namePrefix = "prediction-ledger"
+                    )
+                }
+            }
+            _state.update { it.copy(ledgerNote = result.message) }
+        }
+    }
+
+    private fun championLine(): String? {
+        val man = modelStore.currentManifest() ?: return "No champion report installed."
+        return "Champion ${man.tag.ifBlank { "untagged" }} · rows ${man.nRows} · Brier ${"%.4f".format(man.modelBrier)} vs market ${"%.4f".format(man.marketBrier)} · beat=${man.beatsMarket}"
+    }
+
+    private fun cfLine(): String {
+        val now = System.currentTimeMillis()
+        val ext = container.external.latest()
+        val feeds = com.dirk.kalshiodds.signal.ws.CfBenchmarks.INDEX_IDS.joinToString("\n") { id ->
+            val coin = com.dirk.kalshiodds.signal.ws.CfBenchmarks.coinOf(id)
+            "$coin: " + container.cfFeed.status(id, now, coinbaseAvailable = ext.forSeries(coin)?.lastPrice != null).detail
+        }
+        val ledger = runCatching { container.predictionLedger?.ledgerCount() }.getOrNull()
+        return feeds + (ledger?.let { "\nPrediction ledger: $it rows · settlement source recorded per row" } ?: "")
     }
 
     private fun modelLabel(): String? {

@@ -401,6 +401,13 @@ class TickBook(private val maxPoints: Int = 80) {
      * Immutable copy of the local book. UI / TicketBuilder must not iterate
      * the live TreeMap — WS deltas mutate it on the tick thread.
      */
+    private val bookAtMs = HashMap<String, Long>()
+
+    /** Milliseconds since the last WS book snapshot/delta for [ticker]; null if none yet. */
+    @Synchronized
+    fun bookAgeMs(ticker: String, nowMs: Long = System.currentTimeMillis()): Long? =
+        bookAtMs[ticker]?.let { (nowMs - it).coerceAtLeast(0L) }
+
     @Synchronized
     fun snapshotBook(ticker: String): BookLevelSnapshot? {
         val book = books[ticker] ?: return null
@@ -418,6 +425,7 @@ class TickBook(private val maxPoints: Int = 80) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val book = books.getOrPut(ticker) { LocalOrderBook() }
         book.replaceSnapshot(yesLevels, noLevels, seq)
+        bookAtMs[ticker] = System.currentTimeMillis()
         tickFromBook(ticker, 0L)?.let { fromBook ->
             lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
         }
@@ -445,8 +453,10 @@ class TickBook(private val maxPoints: Int = 80) {
         val book = books.getOrPut(ticker) { LocalOrderBook() }
         if (!book.applyDelta(price, delta, side, seq)) {
             book.clear()
+            bookAtMs.remove(ticker)
             return null
         }
+        bookAtMs[ticker] = System.currentTimeMillis()
         tickFromBook(ticker, 0L)?.let { fromBook ->
             lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
         }
@@ -602,6 +612,7 @@ class TickBook(private val maxPoints: Int = 80) {
         oiByTicker.drop()
         volumeByTicker.drop()
         books.drop()
+        bookAtMs.drop()
         strikeByTicker.drop()
         bidsByTicker.drop()
         spotsByTicker.drop()

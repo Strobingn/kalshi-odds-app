@@ -148,6 +148,15 @@ fun ScorecardScreen(
             item { LastMinuteScorecardCard(view.lastMinute) }
             item { D3ScorecardCard(view.d3) }
             item { AutopilotScorecardCard(view.autopilot) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Scored paper P&L", fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                    ui.honestLines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                    }
+                    Text(ui.ladderLine, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                }
+            }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }
@@ -300,7 +309,7 @@ internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
         )
         if (section.picks.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            section.picks.take(40).forEach { pick ->
+            section.picks.forEach { pick ->
                 Text(
                     com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
                     style = MaterialTheme.typography.labelMedium,
@@ -428,7 +437,7 @@ internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
         )
         if (section.bets.isNotEmpty()) {
             Spacer(Modifier.height(8.dp))
-            section.bets.take(40).forEach { bet ->
+            section.bets.forEach { bet ->
                 Text(
                     bet.line,
                     style = MaterialTheme.typography.labelMedium,

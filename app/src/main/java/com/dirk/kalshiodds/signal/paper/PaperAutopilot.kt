@@ -34,6 +34,8 @@ object PaperAutopilot {
 
     /** Minimum post-fee edge, in probability points (4¢ per $1 contract). */
     const val MIN_EDGE = 0.04
+    /** Gated path: minimum expected net per contract after fill odds, fees, and adverse selection. */
+    const val MIN_NET = 0.02
     const val EDGE_HOLDS = 2
     const val MIN_ASK = 0.10
     const val MAX_ASK = 0.90
@@ -190,7 +192,8 @@ object PaperAutopilot {
         yesAsk: Double? = market.yesAsk,
         noAsk: Double? = market.noAsk,
         yesDepth: Int? = null,
-        noDepth: Int? = null
+        noDepth: Int? = null,
+        assessment: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment? = null
     ): Decision {
         if (!settings.paperTradingEnabled) {
             return Decision(skip = true, reason = "Paper trading off")
@@ -199,10 +202,13 @@ object PaperAutopilot {
             return Decision(skip = true, reason = "AI paper autopilot off")
         }
         if (!CryptoMarkets.isAutopilotTicker(market.ticker)) {
-            return Decision(skip = true, reason = "Paper skip — not BTC, ETH, or SOL 15m")
+            return Decision(skip = true, reason = "Paper skip — not a BTC, ETH, or SOL 15m or daily market")
         }
         if (!MarketLifecycle.isTradable(market, nowMs)) {
             return Decision(skip = true, reason = "Paper skip — window closed")
+        }
+        if (assessment != null) {
+            return evaluateGated(market, settings, paper, nowMs, yesDepth, noDepth, assessment)
         }
         val left = secondsLeft(market, nowMs)
         if (left != null && left <= LAST_WINDOW_MS) {
@@ -224,13 +230,59 @@ object PaperAutopilot {
         if (picked.ask + 1e-12 < MIN_ASK || picked.ask - 1e-12 > MAX_ASK) {
             return Decision(skip = true, reason = "Paper skip — ask outside 10¢–90¢", side = picked)
         }
+        return guardAndSize(market, settings, paper, nowMs, picked, yesDepth, noDepth, MIN_EDGE)
+    }
+
+    /**
+     * 0.3.37 decision path: the side, win probability, and expected net come
+     * from [com.dirk.kalshiodds.decision.DecisionPipeline] (calibrated,
+     * market-as-prior, fill-aware). A NO BET verdict is final; its reason is
+     * shown verbatim. Final 60 s are allowed only when that regime is calibrated.
+     */
+    private fun evaluateGated(
+        market: MarketUiModel,
+        settings: SignalSettings,
+        paper: PaperBookState,
+        nowMs: Long,
+        yesDepth: Int?,
+        noDepth: Int?,
+        a: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment
+    ): Decision {
+        val c = a.chosen
+        val picked = c?.let {
+            SideEv(
+                side = it.side,
+                displaySide = if (it.side == "NO") "DOWN" else "UP",
+                winProb = it.pWin,
+                ask = it.ask,
+                evPerContract = it.expectedNetPerContract,
+                feePerContract = it.feePerContract
+            )
+        }
+        if (!a.allow || picked == null) {
+            edgeHolds.remove(market.ticker)
+            return Decision(skip = true, reason = a.reason ?: "NO BET", side = picked)
+        }
+        return guardAndSize(market, settings, paper, nowMs, picked, yesDepth, noDepth, MIN_NET)
+    }
+
+    private fun guardAndSize(
+        market: MarketUiModel,
+        settings: SignalSettings,
+        paper: PaperBookState,
+        nowMs: Long,
+        picked: SideEv,
+        yesDepth: Int?,
+        noDepth: Int?,
+        minEdge: Double
+    ): Decision {
         val locked = committedSide(paper.fills, market.ticker)
         if (locked != null && !locked.equals(picked.side, ignoreCase = true)) {
             return Decision(skip = true, reason = "Paper skip — opposite side already filled", side = picked)
         }
-        if (picked.evPerContract + 1e-12 < MIN_EDGE) {
+        if (picked.evPerContract + 1e-12 < minEdge) {
             edgeHolds.remove(market.ticker)
-            return Decision(skip = true, reason = "Paper skip — edge under 4pp after fees", side = picked)
+            return Decision(skip = true, reason = if (minEdge == MIN_EDGE) "Paper skip — edge under 4pp after fees" else "NO BET — expected net under 2¢ per contract", side = picked)
         }
         val held = noteEdge(market.ticker, picked.side)
         if (held < EDGE_HOLDS) {
@@ -254,6 +306,25 @@ object PaperAutopilot {
         val budget = windowBudgetUsd(free, rawF)
         val room = budget - spentInWindow(paper.fills, market.ticker)
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
+        val kellyQuote = PaperKellySizer.size(
+            winProb = picked.winProb,
+            ask = picked.ask,
+            bankrollUsd = free,
+            kellyFraction = settings.paperKellyFraction,
+            feeRate = settings.feeRate,
+            depthContracts = null,
+            maxStakeUsd = room
+        )
+        if (kellyQuote.ok && com.dirk.kalshiodds.decision.AutopilotMinStake.below(kellyQuote.allInUsd)) {
+            return Decision(
+                skip = true,
+                reason = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON,
+                side = picked,
+                kellyF = kellyQuote.kellyF,
+                freeBankrollUsd = free,
+                maxStakeUsd = room
+            )
+        }
         val sized = PaperKellySizer.size(
             winProb = picked.winProb,
             ask = picked.ask,
@@ -321,7 +392,8 @@ object PaperAutopilot {
         yesDepth: Int? = null,
         noDepth: Int? = null,
         book: BookLevelSnapshot? = null,
-        bookPaper: Boolean = true
+        bookPaper: Boolean = true,
+        assessment: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment? = null
     ): Tick {
         val liveYes = if (book != null && !book.isEmpty()) {
             TicketBuilder.bookAskOrNull("YES", book)
@@ -341,7 +413,8 @@ object PaperAutopilot {
             yesAsk = liveYes,
             noAsk = liveNo,
             yesDepth = yesDepth,
-            noDepth = noDepth
+            noDepth = noDepth,
+            assessment = assessment
         )
         if (!decision.ok) {
             decision.reason?.let { paperBook.rememberMessage(it) }
