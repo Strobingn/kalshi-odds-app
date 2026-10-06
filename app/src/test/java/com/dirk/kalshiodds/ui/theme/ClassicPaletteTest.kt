@@ -5,7 +5,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Non-red defaults stay the 0.3.23 classic palette. DOWN reds are the 0.3.27 deeper set. */
+/** Chrome stays the 0.3.23 classic palette. UP greens and DOWN reds are the 0.3.36 deeper set. */
 class ClassicPaletteTest {
 
     @Test
@@ -17,13 +17,14 @@ class ClassicPaletteTest {
         assertEquals(Color(0xFFF0F6FC), ClassicDarkPalette.textPrimary)
         assertEquals(Color(0xFF8B949E), ClassicDarkPalette.textSecondary)
         assertEquals(Color(0xFF58A6FF), ClassicDarkPalette.accentBlue)
-        assertEquals(Color(0xFF3FB950), ClassicDarkPalette.up)
-        assertEquals(Color(0xFF14301C), ClassicDarkPalette.upContainer)
-        assertEquals(Color(0xFFF85149), ClassicDarkPalette.down)
-        assertEquals(Color(0xFFE04E44), ClassicDarkPalette.downInk)
-        assertEquals(Color(0xFFC62828), ClassicDarkPalette.downButton)
+        assertEquals(Color(0xFF37A146), ClassicDarkPalette.up)
+        assertEquals(Color(0xFF329440), ClassicDarkPalette.upButton)
+        assertEquals(Color(0xFF102616), ClassicDarkPalette.upContainer)
+        assertEquals(Color(0xFFF85048), ClassicDarkPalette.down)
+        assertEquals(Color(0xFFDE4439), ClassicDarkPalette.downInk)
+        assertEquals(Color(0xFF9E2020), ClassicDarkPalette.downButton)
         assertEquals(Color(0xFFFFFFFF), ClassicDarkPalette.onDown)
-        assertEquals(Color(0xFF1C0A0A), ClassicDarkPalette.downContainer)
+        assertEquals(Color(0xFF160808), ClassicDarkPalette.downContainer)
         assertEquals(Color(0xFFD29922), ClassicDarkPalette.accentOrange)
         assertEquals(Color(0xFFF6F8FA), ClassicLightPalette.bg)
         assertEquals(Color(0xFFFFFFFF), ClassicLightPalette.surface)
@@ -31,12 +32,14 @@ class ClassicPaletteTest {
         assertEquals(Color(0xFF1F2328), ClassicLightPalette.textPrimary)
         assertEquals(Color(0xFF57606A), ClassicLightPalette.textSecondary)
         assertEquals(Color(0xFF0550AE), ClassicLightPalette.accentBlue)
-        assertEquals(Color(0xFF116329), ClassicLightPalette.up)
-        assertEquals(Color(0xFF8E1515), ClassicLightPalette.down)
-        assertEquals(Color(0xFF8E1515), ClassicLightPalette.downInk)
-        assertEquals(Color(0xFFB71C1C), ClassicLightPalette.downButton)
+        assertEquals(Color(0xFF0E4F21), ClassicLightPalette.up)
+        assertEquals(Color(0xFF0E4F21), ClassicLightPalette.upButton)
+        assertEquals(Color(0xFF9DD2B1), ClassicLightPalette.upContainer)
+        assertEquals(Color(0xFF721111), ClassicLightPalette.down)
+        assertEquals(Color(0xFF721111), ClassicLightPalette.downInk)
+        assertEquals(Color(0xFF921616), ClassicLightPalette.downButton)
         assertEquals(Color(0xFFFFFFFF), ClassicLightPalette.onDown)
-        assertEquals(Color(0xFFF6D2D5), ClassicLightPalette.downContainer)
+        assertEquals(Color(0xFFE7868E), ClassicLightPalette.downContainer)
         assertEquals(Color(0xFF7D4E00), ClassicLightPalette.accentOrange)
         assertEquals(ClassicDarkPalette, DipTheme.palette(dark = true))
         assertEquals(ClassicLightPalette, DipTheme.palette(dark = false))

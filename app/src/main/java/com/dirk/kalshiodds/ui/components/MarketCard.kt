@@ -306,9 +306,9 @@ fun MarketCard(
                     onClick = { onPaperUp?.invoke() },
                     enabled = onPaperUp != null && paperUpOk,
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = colors.up,
+                        containerColor = colors.upButton,
                         contentColor = colors.onUp,
-                        disabledContainerColor = colors.up.copy(alpha = 0.38f),
+                        disabledContainerColor = colors.upButton.copy(alpha = 0.38f),
                         disabledContentColor = colors.onUp.copy(alpha = 0.70f)
                     ),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
@@ -941,7 +941,7 @@ internal fun LastMinutePlayBox(
     val fired = snap.phase == com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.FIRED
     val border = when {
         fired && call.headline == BetCall.Headline.BET_DOWN -> colors.downButton
-        fired && call.headline == BetCall.Headline.BET_UP -> colors.up
+        fired && call.headline == BetCall.Headline.BET_UP -> colors.upButton
         else -> MaterialTheme.colorScheme.outline
     }
     Column(
