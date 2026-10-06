@@ -66,6 +66,7 @@ fun LiveApproveScreen(viewModel: OddsViewModel) {
                 .padding(padding)
                 .padding(com.dirk.kalshiodds.ui.theme.FieldMetrics.screenPadding)
         ) {
+            LiveDecisionStatus(state.cfFeedLines, state.decisionLines)
             com.dirk.kalshiodds.ui.components.TradeTicketsSection(
                 tickets = state.tickets,
                 credentialsConfigured = hasKey,
@@ -82,6 +83,36 @@ fun LiveApproveScreen(viewModel: OddsViewModel) {
                 onCancelApprove = { viewModel.cancelTicketApprove() },
                 onCancelOrder = { viewModel.cancelWorkingOrder(it) },
                 onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) }
+            )
+        }
+    }
+}
+
+/** CF Benchmarks feed status (all three coins) and the latest deterministic gate verdicts. */
+@Composable
+private fun LiveDecisionStatus(cfLines: List<String>, decisionLines: List<String>) {
+    val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
+    androidx.compose.foundation.layout.Column(Modifier.padding(bottom = androidx.compose.ui.unit.Dp(8f))) {
+        androidx.compose.material3.Text(
+            "Settlement feed (CF Benchmarks primary, Coinbase fallback)",
+            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+            color = colors.textPrimary
+        )
+        if (cfLines.isEmpty()) {
+            androidx.compose.material3.Text(
+                "CF feed status appears once markets load.",
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary
+            )
+        }
+        cfLines.forEach {
+            androidx.compose.material3.Text(it, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+        }
+        decisionLines.take(6).forEach { line ->
+            androidx.compose.material3.Text(
+                line,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = if (line.contains("NO BET")) colors.textSecondary else colors.up
             )
         }
     }

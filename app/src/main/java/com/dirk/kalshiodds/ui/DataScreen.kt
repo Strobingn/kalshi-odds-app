@@ -253,7 +253,7 @@ fun DataScreen(
                 color = colors.textSecondary
             )
             Text(
-                "Get latest model checks the newest model-YYYYMMDD release, or ml/published/latest.json on kashi. edge-model-latest and edge-model-main are rejected. It checks package com.dirk.kalshiodds.kashi, sha256, non-synthetic, at least 5,000 rows, and activates only if beat_market is true. A model that does not beat the market is rejected and the bundled DipHunter model stays active. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Get latest model checks the newest model-YYYYMMDD release, or ml/published/latest.json on kashi. edge-model-latest and edge-model-main are rejected. It checks package com.dirk.kalshiodds.kashi, sha256, non-synthetic, at least 5,000 rows, and activates only if beat_market is true (it beats the market out of sample after fees). A model that does not beat the market is rejected and the bundled DipHunter model stays active. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

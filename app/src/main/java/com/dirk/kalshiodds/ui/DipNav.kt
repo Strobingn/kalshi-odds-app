@@ -64,6 +64,20 @@ object DipNav {
             tab = false
         ),
         MoreDestination(
+            AppRoutes.CALIBRATION,
+            "Records",
+            "Calibration report",
+            "Reliability buckets, Brier and logloss vs the market",
+            tab = false
+        ),
+        MoreDestination(
+            AppRoutes.LADDER,
+            "Records",
+            "Strategy ladder",
+            "v060 · v150 · fav15: paper → shadow → limited live",
+            tab = false
+        ),
+        MoreDestination(
             AppRoutes.DATA,
             "Data",
             "Data",
@@ -98,6 +112,8 @@ object DipNav {
         AppRoutes.HISTORY -> "More → History"
         AppRoutes.SIGNAL_HISTORY -> "More → Signal history"
         AppRoutes.CHART -> "Home → a market"
+        AppRoutes.CALIBRATION -> "More → Calibration report"
+        AppRoutes.LADDER -> "More → Strategy ladder"
         else -> error("No path for $route")
     }
 

@@ -118,7 +118,7 @@ class PredictionLedgerMigrationTest {
         assertEquals("cfbenchmarks_value", row.settlementSource)
         assertNull(row.calibratedProb)
         val csv = store.ledgerCsv()
-        assertTrue(csv.startsWith("timestamp_ms,"))
+        assertTrue(csv.startsWith("id,timestamp_ms,"))
         assertTrue(csv.contains("KXBTC15M-OLD"))
         assertFalse(csv.contains("BEGIN PRIVATE KEY"))
         val again = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY)

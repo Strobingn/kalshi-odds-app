@@ -57,7 +57,9 @@ fun DipApp(
     chart: @Composable () -> Unit,
     live: @Composable () -> Unit = {},
     more: @Composable () -> Unit = {},
-    realMoney: @Composable () -> Unit = {}
+    realMoney: @Composable () -> Unit = {},
+    /** Extra non-tab routes (calibration report, strategy ladder). */
+    extra: Map<String, @Composable () -> Unit> = emptyMap()
 ) {
     BackHandler(enabled = navigator.canPop && !sheetOpen) {
         navigator.back()
@@ -68,7 +70,7 @@ fun DipApp(
     val showBar = navigator.current in AppRoutes.TABS
     CompositionLocalProvider(LocalDipTabBar provides showBar) {
         if (!showBar) {
-            RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney)
+            RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney, extra)
         } else {
             Column(
                 Modifier
@@ -76,7 +78,7 @@ fun DipApp(
                     .background(MaterialTheme.colorScheme.background)
             ) {
                 Box(Modifier.weight(1f)) {
-                    RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney)
+                    RouteBody(navigator, home, settings, scorecard, data, history, signalHistory, chart, live, more, realMoney, extra)
                 }
                 DipBottomBar(
                     current = navigator.current,
@@ -100,8 +102,14 @@ private fun RouteBody(
     chart: @Composable () -> Unit,
     live: @Composable () -> Unit,
     more: @Composable () -> Unit,
-    realMoney: @Composable () -> Unit
+    realMoney: @Composable () -> Unit,
+    extra: Map<String, @Composable () -> Unit>
 ) {
+    val custom = extra[navigator.current]
+    if (custom != null) {
+        custom()
+        return
+    }
     when (navigator.current) {
         AppRoutes.SETTINGS -> settings()
         AppRoutes.SCORECARD -> scorecard()

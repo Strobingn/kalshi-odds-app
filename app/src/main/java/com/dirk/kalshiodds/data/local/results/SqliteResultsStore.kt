@@ -959,7 +959,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
             values,
             "ticker = ? AND settlement_result IS NULL",
-            arrayOf(ticker)
+            arrayOf(ticker.uppercase())
         )
     }
 

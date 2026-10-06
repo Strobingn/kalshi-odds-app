@@ -265,7 +265,7 @@ object ModelActivation {
             return ModelActivationDecision(
                 activate = false,
                 manifest = manifest,
-                reason = "Sample count ${manifest.nRows} is below $MIN_ACTIVATE_ROWS — bundled model stays active."
+                reason = "Sample too small: ${manifest.nRows} rows is below $MIN_ACTIVATE_ROWS — bundled model stays active."
             )
         }
         if (manifest.tag.equals("edge-model-main", true) || manifest.tag.equals("edge-model-latest", true)) {

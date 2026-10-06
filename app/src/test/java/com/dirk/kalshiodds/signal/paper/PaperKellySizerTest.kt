@@ -234,7 +234,8 @@ class PaperBankrollPersistenceTest {
         assertTrue(n > SignalConstants.PAPER_LEDGER_MAX)
         assertEquals(totalPnl, snap.lifetimeRealizedPnlUsd!!, 1e-6)
         assertEquals(SignalConstants.PAPER_START_USD + totalPnl, snap.paperBankrollUsd, 1e-6)
-        assertEquals(n * 0.90, totalPnl, 1e-6)
+        // 1 contract at 10¢: fee ceil(0.07×0.1×0.9) = 1¢ on every fill → +0.89 per win.
+        assertEquals(n * 0.89, totalPnl, 1e-6)
     }
 
     @Test

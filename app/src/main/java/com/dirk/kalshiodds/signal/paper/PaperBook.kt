@@ -552,7 +552,8 @@ class PaperBook(
             rememberMessage("Paper skip $ticker — 0 contracts")
             return null
         }
-        val stake = qty * px
+        // Fee on every paper fill: all-in cost = contracts × price + Kalshi fee rounded up.
+        val stake = com.dirk.kalshiodds.signal.trade.KalshiFee.totalCost(qty, px, feeRate)
         synchronized(lock) {
             val cur = _state.value
             if (cur.cashUsd + 1e-9 < stake) {
@@ -887,7 +888,9 @@ class PaperBook(
                     voided = outcome == "void",
                     feeRate = feeRate
                 )
-                cash += payout
+                // Legacy fills recorded without the fee pay it now so cash matches P&L.
+                val unpaidFee = if (outcome == "void") 0.0 else ((payout - pnl) - fill.stakeUsd).coerceAtLeast(0.0)
+                cash += payout - unpaidFee
                 fill.copy(
                     settled = true,
                     outcome = outcome,

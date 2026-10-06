@@ -103,12 +103,15 @@ class LatestModelClient(
         if (manifestRaw.isNullOrBlank()) {
             return Outcome.Failed("Release ${release.tag} has no manifest. ${BundledEdge.NOTE}")
         }
-        return verify(modelRaw, manifestRaw)
+        return verify(modelRaw, manifestRaw, release.tag)
     }
 
-    private fun verify(modelRaw: String, manifestRaw: String): Outcome {
+    private fun verify(modelRaw: String, manifestRaw: String, releaseTag: String? = null): Outcome {
         val manifest = runCatching { EdgeModelManifest.parse(manifestRaw) }.getOrElse {
             return Outcome.Failed("Manifest failed validation: ${it.message}. ${BundledEdge.NOTE}")
+        }
+        ModelPullSafety.reject(manifest, modelRaw, packageId, releaseTag)?.let {
+            return Outcome.Failed("$it. ${BundledEdge.NOTE}")
         }
         if (manifest.packageId != packageId) {
             return Outcome.Failed(

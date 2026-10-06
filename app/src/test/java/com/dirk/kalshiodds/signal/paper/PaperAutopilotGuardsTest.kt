@@ -56,8 +56,9 @@ class PaperAutopilotGuardsTest {
         )
         assertNotNull(parked)
         val snap = book.snapshot()
-        assertEquals(200.0, snap.openStakeUsd, 1e-6)
-        assertEquals(800.0, PaperAutopilot.freeBankroll(snap), 1e-6)
+        // 400 × 50¢ + Kalshi fee ceil(0.07 × 400 × 0.25) = $7 on the paper fill.
+        assertEquals(207.0, snap.openStakeUsd, 1e-6)
+        assertEquals(793.0, PaperAutopilot.freeBankroll(snap), 1e-6)
         val market = edge(ticker = "KXBTC15M-NEXT", yesAsk = 0.25, aiYes = 80.0)
         val fill = enter(book, market)!!
         val anchored = PaperAutopilot.anchoredYes(0.80, 0.25)

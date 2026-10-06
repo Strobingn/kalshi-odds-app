@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
     private val historyViewModel: com.dirk.kalshiodds.ui.HistoryViewModel by viewModels()
+    private val decisionViewModel: com.dirk.kalshiodds.ui.DecisionViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -145,6 +146,14 @@ class MainActivity : ComponentActivity() {
                         live = {
                             com.dirk.kalshiodds.ui.LiveApproveScreen(oddsViewModel)
                         },
+                        extra = mapOf<String, @androidx.compose.runtime.Composable () -> Unit>(
+                            AppRoutes.CALIBRATION to {
+                                com.dirk.kalshiodds.ui.CalibrationReportScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.LADDER to {
+                                com.dirk.kalshiodds.ui.StrategyLadderScreen(decisionViewModel, onBack = { navigator.back() })
+                            }
+                        ),
                         realMoney = {
                             com.dirk.kalshiodds.ui.RealMoneyScreen(
                                 odds = oddsViewModel,

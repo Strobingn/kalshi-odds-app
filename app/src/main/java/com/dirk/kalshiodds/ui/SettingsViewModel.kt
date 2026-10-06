@@ -222,13 +222,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     ) {
         prefs.updateAutopilotMode(mode.name)
     }
-    fun setLiveAutopilotDailyCap(usd: Double) = track(
-        "live_autopilot_daily_cap",
-        _state.value.settings.liveAutopilotDailyCapUsd,
-        usd
-    ) {
-        prefs.updateLiveAutopilotDailyCapUsd(usd)
-    }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
     fun resetPaperBook() {
         val start = _state.value.settings.paperBankrollStartUsd

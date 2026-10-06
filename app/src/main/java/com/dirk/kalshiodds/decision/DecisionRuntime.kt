@@ -114,7 +114,7 @@ class DecisionRuntime(
         try {
             val now = nowMs()
             val rows = runCatching { s.settledLedger(now - lookbackDays * 86_400_000L, MAX_FIT_ROWS) }.getOrElse { emptyList() }
-            val model = RegimeCalibration.fit(samplesFrom(rows), now)
+            val model = RegimeCalibration.fit(samplesAsOf(rows, now), now)
             calibrationRef.set(model)
             unsettled.set(
                 runCatching { s.unsettledLedgerTickers(now, now - 3L * 86_400_000L, 60) }.getOrElse { emptyList() }
@@ -143,6 +143,13 @@ class DecisionRuntime(
          * One calibration sample per (market, time bucket): the latest
          * prediction in that bucket. Stops a single window from dominating.
          */
+        /**
+         * Look-ahead safe training set: only predictions made AND settled at
+         * or before [asOfMs]. Rows from the future can never move a fit.
+         */
+        fun samplesAsOf(rows: List<LedgerRow>, asOfMs: Long): List<RegimeCalibration.Sample> =
+            samplesFrom(rows.filter { it.timestampMs <= asOfMs && (it.settledAtMs ?: Long.MAX_VALUE) <= asOfMs })
+
         fun samplesFrom(rows: List<LedgerRow>): List<RegimeCalibration.Sample> {
             val best = LinkedHashMap<String, LedgerRow>()
             for (r in rows) {
