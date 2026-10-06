@@ -67,6 +67,7 @@ class KalshiOddsApp : Application() {
             LiveSignalsKeepAlive.ensureService(this)
         }
         runCatching { MarketRefreshScheduler.enqueue(this) }
+        runCatching { com.dirk.kalshiodds.worker.ModelUpdateWorker.enqueuePeriodic(this) }
         runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this) }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
