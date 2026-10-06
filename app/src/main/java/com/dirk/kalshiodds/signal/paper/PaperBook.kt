@@ -139,7 +139,7 @@ class PaperBook(
             side = alert.predictedSide,
             limitPrice = px,
             source = "AI signal",
-            note = alert.reason.ifBlank { "LiveCall / Bitcoin Claude signal" },
+            note = alert.reason.ifBlank { "LiveCall / Claude Bitcoin signal" },
             winProb = alert.fairValuePp.takeIf { it.isFinite() }?.div(100.0)?.let {
                 if (alert.predictedSide.equals("NO", true)) 1.0 - it else it
             }

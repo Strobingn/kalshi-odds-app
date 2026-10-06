@@ -11,5 +11,5 @@ object AppVersion {
     val versionCode: Int get() = BuildConfig.VERSION_CODE
 
     val label: String
-        get() = "Bitcoin Claude v$versionName ($versionCode)"
+        get() = "Claude Bitcoin v$versionName ($versionCode)"
 }

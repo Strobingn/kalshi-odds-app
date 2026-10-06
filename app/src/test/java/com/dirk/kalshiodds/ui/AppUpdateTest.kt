@@ -24,8 +24,8 @@ class AppUpdateTest {
     private val sample = "[" + listOf(
         release("edge-model-latest", null),
         release("arb-v1.0-Claude", "ArbHunter-v1.0-Claude-12.apk"),
-        release("v1.3-Claude", "DipHunter-v1.3-Claude-61.apk", "Bitcoin Claude v1.3 (34) from `Claude` @ abc1234, run #61."),
-        release("v1.2-Claude", "DipHunter-v1.2-Claude-58.apk", "Bitcoin Claude v1.2 (33) from `Claude` @ 1180cc9, run #58."),
+        release("v1.3-Claude", "DipHunter-v1.3-Claude-61.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #61."),
+        release("v1.2-Claude", "DipHunter-v1.2-Claude-58.apk", "Claude Bitcoin v1.2 (33) from `Claude` @ 1180cc9, run #58."),
         release("v0.3.15-main", "DipHunter-v0.3.15-main-99.apk", "DipHunter v0.3.15 (31) from `main` @ d34495b, run #99."),
         release("v1.4-Claude", "DipHunter-v1.4-Claude-70.apk", "draft", draft = true)
     ).joinToString(",") + "]"
@@ -88,7 +88,7 @@ class AppUpdateTest {
 
     @Test
     fun runNumberFallsBackToTheReleaseNotes() {
-        val json = "[" + release("v1.3-Claude", "BitcoinClaude.apk", "Bitcoin Claude v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
+        val json = "[" + release("v1.3-Claude", "BitcoinClaude.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
         assertEquals(77, AppUpdate.parse(json).single().runNumber)
     }
 

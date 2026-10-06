@@ -17,7 +17,7 @@ import okhttp3.Request
  *
  * Every push to `Claude` runs the Build APK workflow, which publishes the
  * APK on a rolling GitHub prerelease tagged `v<versionName>-Claude` with an
- * asset named `DipHunter-v<versionName>-Claude-<run number>.apk`. The build
+ * asset named `ClaudeBitcoin-v<versionName>-Claude-<run number>.apk`. The build
  * stamps the same run number into [BuildConfig.CI_RUN_NUMBER], so "is there
  * a newer build?" is a comparison of run numbers. Every CI APK is signed
  * with the committed debug keystore, so the new one installs over this one
@@ -157,7 +157,7 @@ class AppUpdateChecker(
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "BitcoinClaude/${BuildConfig.VERSION_NAME}")
+                .header("User-Agent", "ClaudeBitcoin/${BuildConfig.VERSION_NAME}")
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

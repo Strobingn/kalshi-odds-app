@@ -46,7 +46,7 @@ jobs:
         id: apk
         run: |
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          out="DipHunter-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
+          out="ClaudeBitcoin-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
@@ -63,11 +63,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
-          notes="Bitcoin Claude v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+          notes="Claude Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
           # Rolling release per version + branch: move the tag to this commit.
           gh release delete "$tag" --yes --cleanup-tag || true
           gh release create "$tag" "${{ steps.apk.outputs.path }}" \
             --target "$GITHUB_SHA" \
-            --title "Bitcoin Claude v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
+            --title "Claude Bitcoin v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
             --notes "$notes" \
             --prerelease

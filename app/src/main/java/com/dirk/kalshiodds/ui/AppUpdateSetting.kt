@@ -46,6 +46,44 @@ fun AppUpdateSetting(
         }
     }
     LaunchedEffect(autoCheck) { if (autoCheck) check() }
+    // null = idle; -1 = size unknown; 0..100 = downloading
+    var progress by remember { mutableStateOf<Int?>(null) }
+    var note by remember { mutableStateOf<String?>(null) }
+    var downloaded by remember { mutableStateOf<java.io.File?>(null) }
+    val startInstall: (java.io.File) -> Unit = { apk ->
+        if (!AppInstaller.canInstall(context)) {
+            downloaded = apk
+            note = "Android needs your OK once: turn on “Allow from this source”, go back, then tap Install."
+            AppInstaller.openInstallPermission(context)
+        } else if (!AppInstaller.install(context, apk)) {
+            note = "Android could not open the installer. Use “Open in browser” instead."
+        } else {
+            note = null
+        }
+    }
+    val install: (AppUpdate.Release) -> Unit = { release ->
+        if (progress == null) {
+            val ready = downloaded?.takeIf { it.exists() && it.name == AppInstaller.localName(release.apkName) }
+            if (ready != null) {
+                startInstall(ready)
+            } else {
+                note = null
+                progress = -1
+                scope.launch {
+                    runCatching {
+                        AppInstaller.download(context, release.apkUrl, release.apkName) { progress = it }
+                    }.onSuccess {
+                        progress = null
+                        downloaded = it
+                        startInstall(it)
+                    }.onFailure {
+                        progress = null
+                        note = "Download failed: ${it.message?.take(120) ?: it.javaClass.simpleName}. Use “Open in browser” instead."
+                    }
+                }
+            }
+        }
+    }
 
     Text(
         "App update",
@@ -71,18 +109,36 @@ fun AppUpdateSetting(
     )
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         if (available != null) {
-            Button(onClick = { openLink(context, available.latest.apkUrl) }, modifier = Modifier.height(44.dp)) {
-                Text("Download ${available.latest.label}")
+            Button(
+                onClick = { install(available.latest) },
+                enabled = progress == null,
+                modifier = Modifier.height(44.dp)
+            ) {
+                Text(
+                    when {
+                        progress == null && downloaded != null -> "Install ${available.latest.label}"
+                        progress == null -> "Download & install ${available.latest.label}"
+                        progress == -1 -> "Downloading…"
+                        else -> "Downloading ${progress}%"
+                    }
+                )
             }
         }
         OutlinedButton(onClick = check, modifier = Modifier.height(44.dp)) {
             Text(if (status == AppUpdate.Status.Checking) "Checking…" else "Check for update")
         }
     }
+    if (available != null) {
+        OutlinedButton(onClick = { openLink(context, available.latest.apkUrl) }, modifier = Modifier.height(36.dp)) {
+            Text("Open in browser instead")
+        }
+    }
+    note?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = colors.accentRed)
+    }
     Text(
         if (available != null) {
-            "Download opens the APK in your browser. Open the downloaded file and tap Update: " +
-                "it installs over this app and keeps your settings and Kalshi key."
+            "Downloads here, then Android shows its Update prompt. It installs over this app and keeps your settings and Kalshi key."
         } else {
             "Builds come from the Claude branch on GitHub. A new one installs over this app and keeps your settings and Kalshi key."
         },
