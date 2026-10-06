@@ -46,8 +46,9 @@ class LatestModelClient(
             return Outcome.NeedsAuth(
                 when (release.code) {
                     404 ->
-                        "Release `$tag` is missing or the repo is private. " +
-                            "Paste a GitHub token (repo read) below, or use Import model JSON."
+                        "No `$tag` model release has been published yet. " +
+                            "Run the chat-GTP Train edge model workflow, then tap Get latest model again. " +
+                            "If the repository is private, paste a GitHub token with Contents: Read."
                     else ->
                         "GitHub returned ${release.code}. A token with Contents: Read is needed " +
                             "for a private repo. Import model JSON still works without one."

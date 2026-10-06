@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.ws
 
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.TickSource
+import com.dirk.kalshiodds.signal.external.CfBenchmarksValue
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -12,6 +13,7 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.jsonObject
 
 object KalshiWsMessages {
     val json = Json {
@@ -56,23 +58,43 @@ object KalshiWsMessages {
             val seq: Int?,
             val receiveElapsedNanos: Long
         ) : Parsed()
-        data class Subscribed(val sid: Int?, val raw: String) : Parsed()
+        data class Subscribed(val sid: Int?, val requestId: Int?, val raw: String) : Parsed()
         data class Unsubscribed(val sids: List<Int>, val raw: String) : Parsed()
         data class Lifecycle(
             val ticker: String,
             val eventType: String,
             val result: String? = null
         ) : Parsed()
+        data class CfBenchmarks(val value: CfBenchmarksValue) : Parsed()
+        data class CfBenchmarksIndexList(val indexIds: List<String>) : Parsed()
         data class Error(val code: Int?, val message: String) : Parsed()
         data class Other(val type: String?, val raw: String) : Parsed()
     }
 
-    fun subscribe(id: Int, channels: List<String>, marketTickers: List<String>? = null): String {
+    fun subscribe(
+        id: Int,
+        channels: List<String>,
+        marketTickers: List<String>? = null,
+        indexIds: List<String>? = null
+    ): String {
+        val wantsCfBenchmarks = channels.contains("cfbenchmarks_value")
+        require(!wantsCfBenchmarks || (channels.size == 1 && marketTickers.isNullOrEmpty())) {
+            "cfbenchmarks_value requires a dedicated subscription without market tickers"
+        }
+        require(!wantsCfBenchmarks || !indexIds.isNullOrEmpty()) {
+            "cfbenchmarks_value requires index_ids"
+        }
+        require(wantsCfBenchmarks || indexIds.isNullOrEmpty()) {
+            "index_ids are only valid for cfbenchmarks_value"
+        }
         val params = mutableMapOf<String, JsonElement>(
             "channels" to json.parseToJsonElement(json.encodeToString(channels))
         )
         if (!marketTickers.isNullOrEmpty()) {
             params["market_tickers"] = json.parseToJsonElement(json.encodeToString(marketTickers))
+        }
+        if (!indexIds.isNullOrEmpty()) {
+            params["index_ids"] = json.parseToJsonElement(json.encodeToString(indexIds))
         }
         return json.encodeToString(Command(id = id, cmd = "subscribe", params = params))
     }
@@ -107,6 +129,28 @@ object KalshiWsMessages {
         return json.encodeToString(Command(id = id, cmd = "update_subscription", params = params))
     }
 
+    fun updateIndexSubscription(
+        id: Int,
+        sid: Int,
+        action: String,
+        indexIds: List<String>? = null
+    ): String {
+        require(action in setOf("subscribe_indices", "unsubscribe_indices", "indexlist")) {
+            "unsupported CF Benchmarks action: $action"
+        }
+        require(action == "indexlist" || !indexIds.isNullOrEmpty()) {
+            "$action requires index_ids"
+        }
+        val params = mutableMapOf<String, JsonElement>(
+            "sid" to JsonPrimitive(sid),
+            "action" to JsonPrimitive(action)
+        )
+        if (!indexIds.isNullOrEmpty()) {
+            params["index_ids"] = json.parseToJsonElement(json.encodeToString(indexIds))
+        }
+        return json.encodeToString(Command(id = id, cmd = "update_subscription", params = params))
+    }
+
     fun parse(raw: String, receiveElapsedNanos: Long): Parsed {
         val env = runCatching { json.decodeFromString<Envelope>(raw) }.getOrNull()
             ?: return Parsed.Other(null, raw)
@@ -125,7 +169,7 @@ object KalshiWsMessages {
             "orderbook_delta" -> {
                 parseDelta(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
             }
-            "subscribed" -> Parsed.Subscribed(env.sid ?: env.msg?.intField("sid"), raw)
+            "subscribed" -> Parsed.Subscribed(env.sid ?: env.msg?.intField("sid"), env.id, raw)
             "unsubscribed" -> Parsed.Unsubscribed(
                 sids = env.msg?.intList("sids").orEmpty().ifEmpty {
                     listOfNotNull(env.sid)
@@ -141,6 +185,12 @@ object KalshiWsMessages {
                     result = env.msg.stringField("result")
                 )
             }
+            "cfbenchmarks_value" -> {
+                parseCfBenchmarks(env.msg, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
+            }
+            "cfbenchmarks_value_indexlist" -> Parsed.CfBenchmarksIndexList(
+                env.msg?.stringList("index_ids").orEmpty()
+            )
             "error" -> Parsed.Error(
                 code = env.msg?.intField("code"),
                 message = env.msg?.stringField("msg") ?: env.msg?.stringField("message") ?: "WS error"
@@ -227,6 +277,26 @@ object KalshiWsMessages {
         )
     }
 
+    fun parseCfBenchmarks(msg: JsonObject?, receiveElapsedNanos: Long): Parsed.CfBenchmarks? {
+        if (msg == null) return null
+        val indexId = msg.stringField("index_id") ?: return null
+        val rawData = msg.stringField("data") ?: return null
+        val source = runCatching { json.parseToJsonElement(rawData).jsonObject }.getOrNull() ?: return null
+        val value = source.rawDouble("value") ?: return null
+        val sourceTs = source.longField("time") ?: msg.longField("received_at") ?: return null
+        val finalWindow = msg.objectField("last_60s_windowed_average_15min")
+        return Parsed.CfBenchmarks(
+            CfBenchmarksValue(
+                indexId = indexId,
+                valueUsd = value,
+                sourceTsMs = CfBenchmarksValue.epochMillis(sourceTs),
+                receivedAtMs = System.currentTimeMillis(),
+                finalMinuteAverageUsd = finalWindow?.rawDouble("value"),
+                finalMinuteSamples = finalWindow?.intField("window_size") ?: 0
+            )
+        )
+    }
+
     private fun JsonObject.levelArray(vararg names: String): List<Pair<Double, Double>> {
         for (n in names) {
             val arr = this[n] as? JsonArray ?: continue
@@ -272,12 +342,28 @@ object KalshiWsMessages {
         return v.longOrNull?.toInt() ?: v.contentOrNull?.toIntOrNull()
     }
 
+    private fun JsonObject.objectField(name: String): JsonObject? {
+        val value = this[name] ?: return null
+        return when (value) {
+            is JsonObject -> value
+            is JsonPrimitive -> value.contentOrNull?.let { raw ->
+                runCatching { json.parseToJsonElement(raw).jsonObject }.getOrNull()
+            }
+            else -> null
+        }
+    }
+
     private fun JsonObject.intList(name: String): List<Int>? {
         val arr = this[name] as? JsonArray ?: return null
         return arr.mapNotNull { el ->
             val p = el as? JsonPrimitive ?: return@mapNotNull null
             p.longOrNull?.toInt() ?: p.contentOrNull?.toIntOrNull()
         }
+    }
+
+    private fun JsonObject.stringList(name: String): List<String>? {
+        val arr = this[name] as? JsonArray ?: return null
+        return arr.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.takeIf(String::isNotBlank) }
     }
 
     private fun JsonObject.rawDouble(vararg names: String): Double? {

@@ -66,7 +66,11 @@ fun SignalHistoryScreen(
                     )
                 }
             } else {
-                items(cards, key = { "${it.title}-${it.call}-${it.modelLine}" }) { card ->
+                // Multiple alerts can legitimately have the same displayed
+                // window/call/model line. Those strings are presentation
+                // values, not a unique alert ID; using them as a Lazy key
+                // crashes Compose as soon as the Live tab renders duplicates.
+                items(cards) { card ->
                     SignalSummaryCard(card)
                 }
             }

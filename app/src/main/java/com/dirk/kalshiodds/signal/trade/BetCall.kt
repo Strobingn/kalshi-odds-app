@@ -107,6 +107,10 @@ object BetCall {
         market.muted -> market.muteReason ?: "NO BET — market is muted"
         ctx.alertsPaused -> "NO BET — signal alerts are paused"
         !market.uncertaintyPassed -> "NO BET — model uncertainty is too high"
+        market.conformalAmbiguous -> "NO BET — calibrated uncertainty still includes both sides"
+        market.metaTake == false -> market.metaNote ?: "NO BET — execution meta-model declined the setup"
+        market.pFill != null && market.pFill < MIN_AUTOMATIC_FILL_PROBABILITY ->
+            "NO BET — estimated fill probability is too low for an automatic recommendation"
         market.tapeConflict -> market.tapeConflictNote ?: "NO BET — model and market direction disagree"
         !market.modelEdgeQualified -> "NO BET — imported model did not clear fees and confidence margin"
         ctx.books[market.ticker]?.isEmpty() != false ->
@@ -145,4 +149,6 @@ object BetCall {
 
     private const val FINAL_WINDOW_MS = 60_000L
     private const val STRONG_DIRECTION_GAP_MULTIPLIER = 4.0
+    /** A paper recommendation still needs a realistic chance of executing at the displayed quote. */
+    private const val MIN_AUTOMATIC_FILL_PROBABILITY = 0.60
 }

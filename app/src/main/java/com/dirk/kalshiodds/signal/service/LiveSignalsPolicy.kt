@@ -81,6 +81,7 @@ object LiveSignalsPolicy {
             add("ticker")
             if (wanted.isNotEmpty()) add("orderbook_delta")
             if (subscribeTrades) add("trade")
+            add("cfbenchmarks_value")
             add(LIFECYCLE_CHANNEL)
         }
         return SubscriptionPlan(channels, wanted)

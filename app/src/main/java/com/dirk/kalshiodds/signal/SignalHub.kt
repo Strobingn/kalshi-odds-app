@@ -9,6 +9,7 @@ import com.dirk.kalshiodds.data.local.archive.ChartTickRow
 import com.dirk.kalshiodds.data.local.results.OddsMidRow
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.signal.config.SignalConstants
+import com.dirk.kalshiodds.signal.external.CfBenchmarksValue
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.PredictionLogStore
@@ -115,6 +116,11 @@ class SignalHub(
 
     fun applyExternal(snapshot: com.dirk.kalshiodds.signal.external.ExternalSnapshot) {
         scoring.external = snapshot
+    }
+
+    /** Exact CF index values are settlement inputs; public-exchange quotes remain context only. */
+    fun ingestCfBenchmarks(value: CfBenchmarksValue) {
+        scoring.rememberCfBenchmarks(value)
     }
 
     @Volatile

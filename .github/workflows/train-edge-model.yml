@@ -3,6 +3,13 @@ name: Train edge model
 on:
   # Run this workflow on chat-GTP for a branch-only model release. GitHub
   # schedules run the default branch and would use main's trainer instead.
+  push:
+    branches: [chat-GTP]
+    paths:
+      - '.github/workflows/train-edge-model.yml'
+      - 'ml/train_edge.py'
+      - 'ml/test_train_edge.py'
+      - 'ml/fixtures/**'
   workflow_dispatch:
     inputs:
       days:
@@ -33,7 +40,7 @@ jobs:
           from pathlib import Path
 
           manifest = json.loads(Path("ml/edge_model_manifest.json").read_text())
-          assert manifest["data_source"] == "kalshi_settled_coinbase_spot_v1"
+          assert manifest["data_source"] == "kalshi_live_historical_coinbase_spot_v2"
           assert manifest["n_samples"] > 0
           assert manifest["trained_at"]
           PY
@@ -51,24 +58,37 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release delete edge-model-chat-GTP --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
           p = pathlib.Path("ml/edge_model_manifest.json")
           m = json.loads(p.read_text()) if p.is_file() else {}
           print(
-              "Weekly edge model\\n\\n"
+              "Branch-only edge model candidate\\n\\n"
               f"- version: {m.get('version')}\\n"
               f"- trained_at: {m.get('trained_at')}\\n"
               f"- n_samples: {m.get('n_samples')}\\n"
               f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
               f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
-              f"- beats_market: {m.get('beats_market')}"
+              f"- beats_market: {m.get('beats_market')}\\n"
+              f"- promotion_eligible: {m.get('promotion_eligible')}\\n"
+              f"- final_window: {m.get('final_window_model_brier')} vs market {m.get('final_window_market_brier')} "
+              f"(n={m.get('final_window_samples')})"
           )
           PY
           )
-          gh release create edge-model-chat-GTP \
-            ml/edge_model.json \
-            ml/edge_model_manifest.json \
-            --title "Edge model (latest)" \
-            --notes "$NOTES"
+          if gh release view edge-model-chat-GTP >/dev/null 2>&1; then
+            gh release upload edge-model-chat-GTP \
+              ml/edge_model.json \
+              ml/edge_model_manifest.json \
+              --clobber
+            gh release edit edge-model-chat-GTP \
+              --title "Edge model (chat-GTP candidate)" \
+              --notes "$NOTES"
+          else
+            gh release create edge-model-chat-GTP \
+              ml/edge_model.json \
+              ml/edge_model_manifest.json \
+              --target "$GITHUB_SHA" \
+              --title "Edge model (chat-GTP candidate)" \
+              --notes "$NOTES"
+          fi

@@ -98,4 +98,26 @@ class EdgeModelTest {
         assertEquals(model.weights.toList(), again.weights.toList())
         assertEquals(model.bias, again.bias, 1e-5f)
     }
+
+    @Test
+    fun marketPriorThenIsotonicCalibrationMatchesExportContract() {
+        val names = EdgeFeatures.NAMES
+        val model = EdgeModel(
+            version = 1,
+            kind = "logistic",
+            featureNames = names,
+            weights = FloatArray(names.size),
+            bias = 0f,
+            mean = FloatArray(names.size),
+            std = FloatArray(names.size) { 1f },
+            marketPrior = true,
+            isotonicX = doubleArrayOf(0.25, 0.75),
+            isotonicY = doubleArrayOf(0.20, 0.80)
+        )
+        val raw = FloatArray(names.size).also { it[names.indexOf("market_mid")] = 0.75f }
+
+        // sigmoid(0 + logit(0.75)) is 0.75, then the fitted PAV knot maps it to 0.80.
+        assertEquals(0.80, model.predictYes(raw), 1e-6)
+        assertEquals(model.predictYes(raw), EdgeModel.parse(model.toJson()).predictYes(raw), 1e-6)
+    }
 }

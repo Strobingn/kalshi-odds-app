@@ -18,7 +18,13 @@ class ModelActivationTest {
               "market_brier": 0.22,
               "model_logloss": 0.50,
               "market_logloss": 0.58,
-              "data_source": "kalshi_settled_coinbase_spot_v1"
+              "data_source": "kalshi_settled_coinbase_spot_v1",
+              "final_window_samples": 20,
+              "final_window_model_brier": 0.17,
+              "final_window_market_brier": 0.22,
+              "calibration_error": 0.03,
+              "market_calibration_error": 0.05,
+              "promotion_eligible": true
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
@@ -61,6 +67,49 @@ class ModelActivationTest {
         val d = ModelActivation.decide(m, modelValid = false)
         assertFalse(d.activate)
         assertTrue(d.reason.contains("failed validation"))
+    }
+
+    @Test
+    fun candidateThatMissesPromotionGateKeepsPreviousModel() {
+        val m = EdgeModelManifest(
+            version = "1",
+            trainedAt = "2026-09-25T00:00:00Z",
+            nSamples = 80,
+            modelBrier = 0.10,
+            marketBrier = 0.22,
+            modelLogLoss = 0.40,
+            marketLogLoss = 0.55,
+            dataSource = "kalshi_settled_coinbase_spot_v1",
+            finalWindowSamples = 20,
+            finalWindowModelBrier = 0.10,
+            finalWindowMarketBrier = 0.22,
+            promotionEligible = false
+        )
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("promotion gates"))
+    }
+
+    @Test
+    fun historicalTierManifestIsAcceptedWhenItPassesPromotion() {
+        val m = EdgeModelManifest(
+            version = "2",
+            trainedAt = "2026-10-06T00:00:00Z",
+            nSamples = 120,
+            modelBrier = 0.18,
+            marketBrier = 0.22,
+            modelLogLoss = 0.50,
+            marketLogLoss = 0.58,
+            dataSource = "kalshi_live_historical_coinbase_spot_v2",
+            finalWindowSamples = 20,
+            finalWindowModelBrier = 0.17,
+            finalWindowMarketBrier = 0.22,
+            calibrationError = 0.03,
+            marketCalibrationError = 0.05,
+            promotionEligible = true
+        )
+
+        assertTrue(ModelActivation.decide(m, modelValid = true).activate)
     }
 
     @Test

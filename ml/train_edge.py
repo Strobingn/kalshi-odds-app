@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Offline edge trainer for DipHunter 0.3.7.
+Offline edge trainer for DipHunter 0.3.8.
 
-Walk-forward logistic on settled Kalshi BTC/ETH/SOL 15m markets + Coinbase
-spot candles. Calibrates (Platt), reports Brier / log-loss vs the market
-price, and a simulated net P&L after Kalshi-style fees.
+Walk-forward logistic on settled Kalshi BTC/ETH/SOL 15m markets from both
+the live and historical Kalshi API tiers, plus Coinbase spot candles.
+Calibrates with monotone PAV, reports Brier / log-loss vs the market price,
+and a simulated net P&L after Kalshi-style fees.
 
 Exports a compact JSON the Android app can import (Data → Import model).
 
@@ -142,26 +143,48 @@ def _f(x: Any) -> float | None:
 
 
 def fetch_settled(series: str, days: int, limit: int = 200) -> list[dict]:
+    """Read both Kalshi market tiers so archive migration cannot shrink training data.
+
+    Kalshi publishes the live-to-historical handoff at
+    ``/historical/cutoff``. The two market endpoints have the same cursor
+    semantics; deduplicate by ticker because an overlap can exist at handoff.
+    """
+    horizon = time.time() - days * 86400
+    try:
+        archived_before = parse_iso(http_get(f"{KALSHI}/historical/cutoff").get("market_settled_ts"))
+    except Exception as exc:
+        print(f"  historical cutoff unavailable ({exc}); using live tier only", flush=True)
+        archived_before = None
+
     out: list[dict] = []
-    cursor = None
-    cutoff = time.time() - days * 86400
-    while len(out) < limit:
-        q = {"series_ticker": series, "status": "settled", "limit": min(200, limit - len(out))}
-        if cursor:
-            q["cursor"] = cursor
-        data = http_get(f"{KALSHI}/markets?{urllib.parse.urlencode(q)}")
-        batch = data.get("markets") or []
-        if not batch:
-            break
-        for m in batch:
-            ct = parse_iso(m.get("close_time"))
-            if ct and ct.timestamp() >= cutoff and (m.get("result") or "").lower() in ("yes", "no"):
-                out.append(m)
-        cursor = data.get("cursor")
-        time.sleep(0.08)
-        if not cursor:
-            break
-    return out
+    seen: set[str] = set()
+    endpoints = [f"{KALSHI}/markets"]
+    if archived_before and horizon < archived_before.timestamp():
+        endpoints.append(f"{KALSHI}/historical/markets")
+    for endpoint in endpoints:
+        cursor: str | None = None
+        while len(out) < limit:
+            q = {"series_ticker": series, "status": "settled", "limit": min(200, limit - len(out))}
+            if cursor:
+                q["cursor"] = cursor
+            data = http_get(f"{endpoint}?{urllib.parse.urlencode(q)}")
+            batch = data.get("markets") or []
+            if not batch:
+                break
+            for market in batch:
+                ticker = str(market.get("ticker") or "")
+                close = parse_iso(market.get("close_time"))
+                if (
+                    ticker and ticker not in seen and close and close.timestamp() >= horizon and
+                    (market.get("result") or "").lower() in ("yes", "no")
+                ):
+                    out.append(market)
+                    seen.add(ticker)
+            cursor = data.get("cursor")
+            time.sleep(0.08)
+            if not cursor:
+                break
+    return sorted(out, key=lambda market: market.get("close_time") or "", reverse=True)
 
 
 def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list[dict]:
@@ -310,15 +333,19 @@ def standardize(X: list[list[float]]) -> tuple[list[list[float]], list[float], l
     return Z, mean, std
 
 
-def fit_logistic(X: list[list[float]], y: list[int], iters: int = 80, lr: float = 0.15) -> tuple[list[float], float]:
+def fit_logistic(
+    X: list[list[float]], y: list[int], iters: int = 80, lr: float = 0.15,
+    offsets: list[float] | None = None
+) -> tuple[list[float], float]:
     n = len(X[0])
     w = [0.0] * n
     b = 0.0
+    offsets = offsets or [0.0] * len(X)
     for _ in range(iters):
         gw = [0.0] * n
         gb = 0.0
-        for row, yi in zip(X, y):
-            z = b + sum(wj * xj for wj, xj in zip(w, row))
+        for row, yi, offset in zip(X, y, offsets):
+            z = b + offset + sum(wj * xj for wj, xj in zip(w, row))
             p = sigmoid(z)
             err = p - yi
             for i in range(n):
@@ -331,16 +358,55 @@ def fit_logistic(X: list[list[float]], y: list[int], iters: int = 80, lr: float 
     return w, b
 
 
-def predict_rows(X: list[list[float]], w: list[float], b: float, a: float = 1.0, pb: float = 0.0) -> list[float]:
+def predict_rows(
+    X: list[list[float]], w: list[float], b: float, a: float = 1.0, pb: float = 0.0,
+    offsets: list[float] | None = None, isotonic_x: list[float] | None = None,
+    isotonic_y: list[float] | None = None
+) -> list[float]:
     out = []
-    for row in X:
-        p = sigmoid(b + sum(wj * xj for wj, xj in zip(w, row)))
+    offsets = offsets or [0.0] * len(X)
+    for row, offset in zip(X, offsets):
+        p = sigmoid(b + offset + sum(wj * xj for wj, xj in zip(w, row)))
         if a != 1.0 or pb != 0.0:
             q = min(1 - 1e-6, max(1e-6, p))
             lp = math.log(q / (1 - q))
             p = sigmoid(a * lp + pb)
-        out.append(min(0.98, max(0.02, p)))
+        if isotonic_x and isotonic_y:
+            p = apply_isotonic(p, isotonic_x, isotonic_y)
+        out.append(min(1.0 - 1e-4, max(1e-4, p)))
     return out
+
+
+def market_offsets(mids: list[float]) -> list[float]:
+    return [math.log(min(1 - 1e-6, max(1e-6, p)) / (1 - min(1 - 1e-6, max(1e-6, p)))) for p in mids]
+
+
+def fit_isotonic(p: list[float], y: list[int]) -> tuple[list[float], list[float]]:
+    """Pool-adjacent-violators calibration, fitted only on past/fit rows."""
+    blocks: list[dict[str, float]] = []
+    for prob, label in sorted(zip(p, y), key=lambda item: item[0]):
+        blocks.append({"lo": prob, "hi": prob, "sum": float(label), "n": 1.0})
+        while len(blocks) >= 2 and blocks[-2]["sum"] / blocks[-2]["n"] > blocks[-1]["sum"] / blocks[-1]["n"]:
+            right, left = blocks.pop(), blocks.pop()
+            blocks.append({"lo": left["lo"], "hi": right["hi"], "sum": left["sum"] + right["sum"], "n": left["n"] + right["n"]})
+    return ([(b["lo"] + b["hi"]) / 2.0 for b in blocks], [b["sum"] / b["n"] for b in blocks])
+
+
+def apply_isotonic(p: float, xs: list[float], ys: list[float]) -> float:
+    if len(xs) < 2 or len(xs) != len(ys):
+        return p
+    if p <= xs[0]:
+        return ys[0]
+    if p >= xs[-1]:
+        return ys[-1]
+    for i in range(1, len(xs)):
+        if p <= xs[i]:
+            width = xs[i] - xs[i - 1]
+            if width <= 1e-12:
+                return ys[i]
+            t = (p - xs[i - 1]) / width
+            return ys[i - 1] + t * (ys[i] - ys[i - 1])
+    return ys[-1]
 
 
 def fit_platt(p: list[float], y: list[int]) -> tuple[float, float]:
@@ -363,6 +429,18 @@ def logloss(p: list[float], y: list[int]) -> float:
         q = min(1 - 1e-9, max(1e-9, pi))
         s += -(yi * math.log(q) + (1 - yi) * math.log(1 - q))
     return s / len(y)
+
+
+def calibration_error(p: list[float], y: list[int], bins: int = 10) -> float:
+    """Expected calibration error; report it alongside proper scores, never alone."""
+    if not p:
+        return 1.0
+    total = 0.0
+    for bucket in range(bins):
+        rows = [(pi, yi) for pi, yi in zip(p, y) if min(bins - 1, int(pi * bins)) == bucket]
+        if rows:
+            total += len(rows) / len(p) * abs(sum(pi for pi, _ in rows) / len(rows) - sum(yi for _, yi in rows) / len(rows))
+    return total
 
 
 def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, float]:
@@ -399,18 +477,19 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
         if tr_end < 20 or te_end <= tr_end:
             continue
         Ztr, mean, std = standardize(X[:tr_end])
-        w, b = fit_logistic(Ztr, y[:tr_end])
+        offset_tr = market_offsets(mids[:tr_end])
+        offset_te = market_offsets(mids[tr_end:te_end])
+        w, b = fit_logistic(Ztr, y[:tr_end], offsets=offset_tr)
         Zte = [[(X[i][j] - mean[j]) / std[j] for j in range(len(mean))] for i in range(tr_end, te_end)]
-        raw = predict_rows(Zte, w, b)
-        a, pb = fit_platt(predict_rows(Ztr, w, b), y[:tr_end])
-        cal = predict_rows(Zte, w, b, a, pb)
+        raw_train = predict_rows(Ztr, w, b, offsets=offset_tr)
+        iso_x, iso_y = fit_isotonic(raw_train, y[:tr_end])
+        cal = predict_rows(Zte, w, b, offsets=offset_te, isotonic_x=iso_x, isotonic_y=iso_y)
         for i, p in enumerate(cal):
             preds[tr_end + i] = p
     # fill unfilled with market
     for i, p in enumerate(preds):
         if p == 0.0:
             preds[i] = mids[i]
-    hold = [i for i, p in enumerate(preds) if p != mids[i] or True]
     hold = list(range(fold, len(X)))  # first fold is train-only
     if not hold:
         hold = list(range(len(X)))
@@ -418,6 +497,10 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
     yh = [y[i] for i in hold]
     mh = [mids[i] for i in hold]
     pnl = simulated_pnl(ph, mh, yh)
+    final = [i for i in hold if X[i][1] <= (2.0 / 15.0)]
+    final_p = [preds[i] for i in final]
+    final_y = [y[i] for i in final]
+    final_m = [mids[i] for i in final]
     return {
         "n_holdout": len(hold),
         "model_brier": brier(ph, yh),
@@ -427,15 +510,23 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
         "sim_trades": pnl["n"],
         "sim_pnl": pnl["pnl"],
         "sim_hit_rate": pnl["hit_rate"],
+        "calibration_error": calibration_error(ph, yh),
+        "market_calibration_error": calibration_error(mh, yh),
+        "final_window_samples": len(final),
+        "final_window_model_brier": brier(final_p, final_y) if final else 1.0,
+        "final_window_market_brier": brier(final_m, final_y) if final else 1.0,
     }
 
 
-def fit_final(X: list[list[float]], y: list[int]) -> dict[str, Any]:
+def fit_final(X: list[list[float]], y: list[int], mids: list[float]) -> dict[str, Any]:
     Z, mean, std = standardize(X)
-    w, b = fit_logistic(Z, y)
-    raw = predict_rows(Z, w, b)
-    a, pb = fit_platt(raw, y)
-    return {"weights": w, "bias": b, "mean": mean, "std": std, "platt_a": a, "platt_b": pb}
+    w, b = fit_logistic(Z, y, offsets=market_offsets(mids))
+    raw = predict_rows(Z, w, b, offsets=market_offsets(mids))
+    iso_x, iso_y = fit_isotonic(raw, y)
+    return {
+        "weights": w, "bias": b, "mean": mean, "std": std,
+        "platt_a": 1.0, "platt_b": 0.0, "isotonic_x": iso_x, "isotonic_y": iso_y,
+    }
 
 
 def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[int]]:
@@ -474,9 +565,20 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "sim_hit_rate": metrics.get("sim_hit_rate"),
         "model_asset": "edge_model.json",
         "tag": "edge-model-chat-GTP",
-        "data_source": "synthetic_fixture" if fixture else "kalshi_settled_coinbase_spot_v1",
+        "data_source": "synthetic_fixture" if fixture else "kalshi_live_historical_coinbase_spot_v2",
         "beats_market": not fixture and n > 0 and model_brier < market_brier and model_ll < market_ll,
+        "final_window_samples": int(metrics.get("final_window_samples", 0)),
+        "final_window_model_brier": metrics.get("final_window_model_brier"),
+        "final_window_market_brier": metrics.get("final_window_market_brier"),
+        "calibration_error": metrics.get("calibration_error"),
+        "market_calibration_error": metrics.get("market_calibration_error"),
     }
+    payload["promotion_eligible"] = bool(
+        payload["beats_market"] and
+        payload["final_window_samples"] >= 8 and
+        float(payload["final_window_model_brier"] or 1.0) < float(payload["final_window_market_brier"] or 1.0) and
+        float(payload["calibration_error"] or 1.0) <= float(payload["market_calibration_error"] or 1.0)
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     print(f"wrote {path}", flush=True)
@@ -496,6 +598,9 @@ def export(model: dict[str, Any], metrics: dict[str, Any], path: Path) -> None:
         "blend_weight": 0.35,
         "fee_margin": FEE_RATE,
         "confidence_margin": CONF_MARGIN,
+        "market_prior": True,
+        "isotonic_x": model.get("isotonic_x", []),
+        "isotonic_y": model.get("isotonic_y", []),
         "metrics": metrics,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -525,7 +630,7 @@ def main() -> int:
     print(f"samples {len(X)} yes={sum(y)} no={len(y) - sum(y)}", flush=True)
     metrics = walk_forward(X, y, mids, times)
     print(json.dumps(metrics, indent=2), flush=True)
-    model = fit_final(X, y)
+    model = fit_final(X, y, mids)
     export(model, metrics, Path(args.out))
     write_manifest(metrics, Path(args.manifest), fixture=args.fixture)
     # Do not overwrite the hand-checked Android/Python parity fixture.
@@ -539,6 +644,9 @@ def main() -> int:
                 model["bias"],
                 model["platt_a"],
                 model["platt_b"],
+                offsets=market_offsets([mids[0]]),
+                isotonic_x=model["isotonic_x"],
+                isotonic_y=model["isotonic_y"],
             )[0],
         }
         out_dir = Path(args.out).resolve().parent

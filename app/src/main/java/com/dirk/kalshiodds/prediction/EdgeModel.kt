@@ -56,6 +56,11 @@ data class EdgeModel(
     val blendWeight: Float = 0.35f,
     val feeMargin: Float = 0.07f,
     val confidenceMargin: Float = 0.03f,
+    /** Train only a correction to the market log-odds instead of relearning the market from scratch. */
+    val marketPrior: Boolean = false,
+    /** Monotone PAV calibration knots, learned offline on historical settlements. */
+    val isotonicX: DoubleArray = doubleArrayOf(),
+    val isotonicY: DoubleArray = doubleArrayOf(),
     val metrics: Map<String, Double> = emptyMap(),
     val trees: List<EdgeTree> = emptyList(),
     val baseScore: Double = 0.0,
@@ -65,6 +70,16 @@ data class EdgeModel(
         require(kind == "logistic" || kind == "gbdt") { "unsupported model kind" }
         require(weights.size == featureNames.size) { "weights ${weights.size} != names ${featureNames.size}" }
         require(mean.size == weights.size && std.size == weights.size)
+        require(isotonicX.size == isotonicY.size) { "isotonic calibration length mismatch" }
+        require(isotonicX.zip(isotonicY).all { (x, y) -> x.isFinite() && y.isFinite() }) {
+            "non-finite isotonic calibration"
+        }
+        require((1 until isotonicX.size).all { index -> isotonicX[index] >= isotonicX[index - 1] }) {
+            "isotonic x values must be sorted"
+        }
+        require((1 until isotonicY.size).all { index -> isotonicY[index] >= isotonicY[index - 1] }) {
+            "isotonic y values must be monotone"
+        }
         if (kind == "gbdt") {
             require(featureNames == EdgeFeatures.NAMES) { "GBDT feature order differs from live app" }
             require(trees.isNotEmpty() && trees.size <= 512) { "invalid tree count" }
@@ -83,7 +98,13 @@ data class EdgeModel(
             val lp = logitFromProb(p)
             sigmoid(plattA * lp + plattB)
         }
-        return calibrated.coerceIn(0.02, 0.98)
+        val withMarketPrior = if (marketPrior) {
+            val market = raw.getOrNull(featureNames.indexOf("market_mid"))?.toDouble()
+            calibratedLogit(calibrated, market)
+        } else {
+            calibrated
+        }
+        return applyIsotonic(withMarketPrior).coerceIn(MIN_DECISION_PROBABILITY, 1.0 - MIN_DECISION_PROBABILITY)
     }
 
     fun logit(raw: FloatArray): Double {
@@ -116,7 +137,8 @@ data class EdgeModel(
 
     fun blendWithMarket(modelYes: Double, marketMid: Double): Double {
         val w = blendWeight.toDouble().coerceIn(0.0, 1.0)
-        return ((1.0 - w) * marketMid + w * modelYes).coerceIn(0.02, 0.98)
+        return ((1.0 - w) * marketMid + w * modelYes)
+            .coerceIn(MIN_DECISION_PROBABILITY, 1.0 - MIN_DECISION_PROBABILITY)
     }
 
     fun toJson(): String {
@@ -133,6 +155,11 @@ data class EdgeModel(
         o.put("blend_weight", blendWeight.toDouble())
         o.put("fee_margin", feeMargin.toDouble())
         o.put("confidence_margin", confidenceMargin.toDouble())
+        o.put("market_prior", marketPrior)
+        if (isotonicX.isNotEmpty()) {
+            o.put("isotonic_x", JSONArray(isotonicX.toList()))
+            o.put("isotonic_y", JSONArray(isotonicY.toList()))
+        }
         if (kind == "gbdt") {
             o.put("base_score", baseScore)
             o.put("learning_rate", learningRate)
@@ -203,6 +230,9 @@ data class EdgeModel(
                 blendWeight = o.optDouble("blend_weight", 0.35).toFloat(),
                 feeMargin = o.optDouble("fee_margin", 0.07).toFloat(),
                 confidenceMargin = o.optDouble("confidence_margin", 0.03).toFloat(),
+                marketPrior = o.optBoolean("market_prior", false),
+                isotonicX = doubleArray(o.optJSONArray("isotonic_x")),
+                isotonicY = doubleArray(o.optJSONArray("isotonic_y")),
                 metrics = metrics,
                 trees = trees,
                 baseScore = o.optDouble("base_score", 0.0),
@@ -220,6 +250,9 @@ data class EdgeModel(
             return ln(q / (1.0 - q))
         }
 
+        private fun doubleArray(a: JSONArray?): DoubleArray =
+            if (a == null) doubleArrayOf() else DoubleArray(a.length()) { a.getDouble(it) }
+
         private fun stringList(a: JSONArray): List<String> =
             (0 until a.length()).map { a.getString(it) }
 
@@ -231,5 +264,27 @@ data class EdgeModel(
             for (x in xs) a.put(x.toDouble())
             return a
         }
+
+        const val MIN_DECISION_PROBABILITY = 1e-4
+    }
+
+    private fun calibratedLogit(modelProbability: Double, marketProbability: Double?): Double {
+        val market = marketProbability?.takeIf { it.isFinite() }
+            ?.coerceIn(MIN_DECISION_PROBABILITY, 1.0 - MIN_DECISION_PROBABILITY)
+            ?: return modelProbability
+        return sigmoid(logitFromProb(modelProbability) + logitFromProb(market))
+    }
+
+    private fun applyIsotonic(probability: Double): Double {
+        if (isotonicX.size < 2 || isotonicX.size != isotonicY.size) return probability
+        if (probability <= isotonicX.first()) return isotonicY.first()
+        if (probability >= isotonicX.last()) return isotonicY.last()
+        val upper = isotonicX.indexOfFirst { probability <= it }
+        if (upper <= 0) return probability
+        val lower = upper - 1
+        val width = isotonicX[upper] - isotonicX[lower]
+        if (width <= 1e-12) return isotonicY[upper]
+        val t = (probability - isotonicX[lower]) / width
+        return isotonicY[lower] + (isotonicY[upper] - isotonicY[lower]) * t
     }
 }

@@ -75,6 +75,53 @@ class KalshiWsMessagesTest {
         assertTrue(body.contains("orderbook_delta"))
         assertTrue(body.contains("KXBTC15M-A"))
         assertTrue(body.contains("KXETH15M-B"))
+        val cfBody = KalshiWsMessages.subscribe(
+            4,
+            listOf("cfbenchmarks_value"),
+            indexIds = listOf("BRTI", "ETHUSD_RTI")
+        )
+        assertTrue(cfBody.contains("BRTI"))
+        assertTrue(cfBody.contains("ETHUSD_RTI"))
+        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
+            KalshiWsMessages.subscribe(
+                5,
+                listOf("ticker", "cfbenchmarks_value"),
+                marketTickers = listOf("KXBTC15M-A"),
+                indexIds = listOf("BRTI")
+            )
+        }
+    }
+
+    @Test
+    fun parseCfBenchmarksSettlementValueAndPartialAverage() {
+        val raw = """
+            {
+              "type": "cfbenchmarks_value",
+              "msg": {
+                "index_id": "BRTI",
+                "data": "{\"value\": 85684.25, \"time\": 1760000000}",
+                "last_60s_windowed_average_15min": "{\"value\": 85682.75, \"window_size\": 17}"
+              }
+            }
+        """.trimIndent()
+        val parsed = KalshiWsMessages.parse(raw, 1L) as KalshiWsMessages.Parsed.CfBenchmarks
+
+        assertEquals("BRTI", parsed.value.indexId)
+        assertEquals(85_684.25, parsed.value.valueUsd, 1e-6)
+        assertEquals(1_760_000_000_000L, parsed.value.sourceTsMs)
+        assertEquals(85_682.75, parsed.value.settlementReferenceUsd, 1e-6)
+        assertEquals(17, parsed.value.finalMinuteSamples)
+    }
+
+    @Test
+    fun parseCfBenchmarksIndexListAndEncodeIndexListRequest() {
+        val raw = """{"type":"cfbenchmarks_value_indexlist","msg":{"index_ids":["BRTI","ETHUSD_RTI"]}}"""
+        val parsed = KalshiWsMessages.parse(raw, 1L) as KalshiWsMessages.Parsed.CfBenchmarksIndexList
+        assertEquals(listOf("BRTI", "ETHUSD_RTI"), parsed.indexIds)
+
+        val request = KalshiWsMessages.updateIndexSubscription(6, sid = 4, action = "indexlist")
+        assertTrue(request.contains("\"sid\":4"))
+        assertTrue(request.contains("\"action\":\"indexlist\""))
     }
 
     @Test

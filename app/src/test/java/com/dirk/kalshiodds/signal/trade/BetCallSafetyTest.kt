@@ -55,6 +55,31 @@ class BetCallSafetyTest {
         assertTrue(decision.noBetReason.orEmpty().contains("verified live order-book"))
     }
 
+    @Test
+    fun automaticRecommendationAbstainsOnAmbiguousConformalSetOrPoorFill() {
+        val nowMs = 3_000_000L
+        val market = finalWindowMarket(nowMs).copy(
+            closeTimeEpochMs = nowMs + 5 * 60_000L,
+            conformalAmbiguous = true,
+            pFill = 0.25,
+            predictedSide = "YES",
+            primaryHeroSide = "YES",
+            aiYesPercent = 99.0,
+            importedModelPp = 99.0
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(),
+            alertsPaused = false,
+            nowMs = nowMs,
+            books = mapOf(market.ticker to BookLevelSnapshot(yes = listOf(0.999 to 5_000.0)))
+        )
+
+        val decision = BetCall.decide(market, ctx)
+
+        assertEquals(BetCall.Headline.NO_BET, decision.headline)
+        assertTrue(decision.noBetReason.orEmpty().contains("uncertain"))
+    }
+
     private fun finalWindowMarket(nowMs: Long) = MarketUiModel(
         ticker = "KXBTC15M-SAFETY",
         title = "Bitcoin price up?",

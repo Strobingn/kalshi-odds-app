@@ -226,6 +226,7 @@ class LiveSignalsService : Service() {
                         }
                     }
                 },
+                onCfBenchmarks = { value -> runCatching { hub.ingestCfBenchmarks(value) } },
                 onBookSnapshot = { snap ->
                     runCatching {
                         hub.ingestBookSnapshot(

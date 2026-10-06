@@ -4,6 +4,7 @@ import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.prediction.DipHunterModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.external.ExternalSnapshot
+import com.dirk.kalshiodds.signal.external.CfBenchmarksValue
 import com.dirk.kalshiodds.signal.external.SpotFeatureMath
 import com.dirk.kalshiodds.signal.feedback.Allowlist
 import com.dirk.kalshiodds.signal.feedback.Calibrator
@@ -171,6 +172,15 @@ class ScoringEngine(
     @Volatile
     var external: ExternalSnapshot = ExternalSnapshot()
 
+    private val cfBenchmarks = java.util.concurrent.ConcurrentHashMap<String, CfBenchmarksValue>()
+
+    fun rememberCfBenchmarks(value: CfBenchmarksValue) {
+        cfBenchmarks[value.indexId.uppercase()] = value
+    }
+
+    fun cfBenchmarksForSeries(series: String): CfBenchmarksValue? =
+        CfBenchmarksValue.forSeries(series)?.let { cfBenchmarks[it] }
+
     private val lastAlertMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val lastBookScoreMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val tapeStreak = java.util.concurrent.ConcurrentHashMap<String, Int>()
@@ -233,7 +243,9 @@ class ScoringEngine(
             }
         }
         val spotFeat = external.forSeries(tick.series)
-        spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
+        val settlementIndex = cfBenchmarksForSeries(tick.series)
+        val settlementSpot = settlementIndex?.settlementReferenceUsd ?: spotFeat?.lastPrice
+        settlementSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
@@ -537,7 +549,7 @@ class ScoringEngine(
         val strikeUsd = tick.floorStrike ?: book.strike(tick.ticker)
             ?: DirectionSanity.parseStrike(tick.ticker)
         val dir = DirectionSanity.apply(
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = settlementSpot,
             strikeUsd = strikeUsd,
             spotReturn = spotRet,
             fairPp = fair,
@@ -586,7 +598,12 @@ class ScoringEngine(
             heavyOut.usedHeavy &&
             !heavyOut.uncertaintyPassed
         val extBlocked = extOut?.blockReason
-        val passed = filter.passed && !muted && !uncBlocked && extBlocked == null
+        // Kalshi crypto contracts settle from the CF Benchmarks index. During
+        // the final minute, a proxy venue price is not enough for a BET call.
+        val finalSettlementMinute = (tteSec ?: Long.MAX_VALUE) <= 60L
+        val settlementFresh = settlementIndex?.isFresh(nowMs) == true
+        val settlementBlocked = finalSettlementMinute && !settlementFresh
+        val passed = filter.passed && !muted && !uncBlocked && extBlocked == null && !settlementBlocked
         val skipReason = when {
             muted -> muteReason
             uncBlocked -> String.format(
@@ -596,6 +613,7 @@ class ScoringEngine(
                 settings.maxUncertainty
             )
             extBlocked != null -> extBlocked
+            settlementBlocked -> "waiting for a fresh CF Benchmarks settlement index"
             else -> filter.reason
         }
         val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
@@ -603,9 +621,9 @@ class ScoringEngine(
             else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
                 .coerceIn(0.01, 5.0)
         }
-        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
+        val digitalFairPp = if (settlementSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
-                spot = spotFeat.lastPrice!!,
+                spot = settlementSpot,
                 strike = strikeUsd,
                 tteSeconds = (tteSec ?: 900L).toDouble(),
                 sigmaAnnual = sigmaAnnual
@@ -620,7 +638,7 @@ class ScoringEngine(
         if (loaded != null) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
-                    spot = spotFeat?.lastPrice,
+                    spot = settlementSpot,
                     strike = strikeUsd,
                     tteSeconds = (tteSec ?: 900L).toDouble(),
                     sigmaAnnual = sigmaAnnual,
@@ -658,7 +676,7 @@ class ScoringEngine(
             modelSide = predictedSide,
             yesAsk = tick.yesAsk,
             noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = settlementSpot,
             strikeUsd = strikeUsd,
             fairYes = fair / 100.0,
             previousPrimary = lastPrimarySide[tick.ticker],
@@ -771,7 +789,7 @@ class ScoringEngine(
             extendedNote = extOut?.note,
             directionalLock = dir.applied,
             spotVsTargetUsd = dir.spotVsTargetUsd,
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = settlementSpot,
             tapeTrend = tape.trend.name,
             tapeConflict = tape.conflict,
             tapeConflictNote = tape.banner,

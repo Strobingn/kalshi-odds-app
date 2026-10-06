@@ -4,6 +4,7 @@ import android.os.SystemClock
 import android.util.Log
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.model.MarketTick
+import com.dirk.kalshiodds.signal.external.CfBenchmarksValue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -32,6 +33,7 @@ class KalshiWsClient(
     private val onBookSnapshot: (KalshiWsMessages.Parsed.OrderbookSnapshot) -> Unit = {},
     private val onBookDelta: (KalshiWsMessages.Parsed.OrderbookDelta) -> Unit = {},
     private val onLifecycle: (ticker: String, eventType: String) -> Unit = { _, _ -> },
+    private val onCfBenchmarks: (CfBenchmarksValue) -> Unit = {},
     private val httpClient: OkHttpClient = defaultClient(),
     private val urls: List<String> = KalshiWsAuth.WS_URLS
 ) {
@@ -52,13 +54,23 @@ class KalshiWsClient(
     private var pem: String = ""
     @Volatile private var channels: List<String> = listOf("ticker", "orderbook_delta")
     @Volatile private var marketTickers: List<String> = emptyList()
+    @Volatile private var indexIds: List<String> = CfBenchmarksValue.DEFAULT_INDEX_IDS
     private val subscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
+    private val cfSubscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
+    private val cfSubscribeRequestIds = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
-    fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
+    fun start(
+        keyId: String,
+        pem: String,
+        channels: List<String>,
+        marketTickers: List<String>,
+        indexIds: List<String> = CfBenchmarksValue.DEFAULT_INDEX_IDS
+    ) {
         this.keyId = keyId
         this.pem = pem
         this.channels = channels.ifEmpty { listOf("ticker", "orderbook_delta") }.toList()
         this.marketTickers = marketTickers.toList()
+        this.indexIds = indexIds.toList()
         if (running.getAndSet(true)) {
             resubscribe()
             return
@@ -78,7 +90,7 @@ class KalshiWsClient(
         if (!running.get() || socket == null) return
         val cmds = WsSubscriptionSwitch.replace(
             idStart = msgId.get(),
-            channels = nextChannels,
+            channels = marketChannels(nextChannels),
             previousTickers = previousTickers,
             nextTickers = nextTickers,
             sids = subscribedSids.toList()
@@ -125,10 +137,18 @@ class KalshiWsClient(
 
     private fun resubscribe() {
         val ws = socket ?: return
-        val id = msgId.getAndIncrement()
-        val payload = KalshiWsMessages.subscribe(id, channels, marketTickers.takeIf { it.isNotEmpty() })
-        ws.send(payload)
-        onLog("subscribe id=$id channels=$channels tickers=${marketTickers.size}")
+        val marketChannels = marketChannels(channels)
+        if (marketChannels.isNotEmpty()) {
+            val id = msgId.getAndIncrement()
+            ws.send(KalshiWsMessages.subscribe(id, marketChannels, marketTickers.takeIf { it.isNotEmpty() }))
+            onLog("subscribe id=$id channels=$marketChannels tickers=${marketTickers.size}")
+        }
+        if (channels.contains(CF_BENCHMARKS_CHANNEL) && indexIds.isNotEmpty()) {
+            val id = msgId.getAndIncrement()
+            cfSubscribeRequestIds += id
+            ws.send(KalshiWsMessages.subscribe(id, listOf(CF_BENCHMARKS_CHANNEL), indexIds = indexIds))
+            onLog("subscribe id=$id channel=$CF_BENCHMARKS_CHANNEL indices=$indexIds")
+        }
     }
 
     private fun scheduleReconnect() {
@@ -156,6 +176,8 @@ class KalshiWsClient(
             runCatching {
                 backoffMs = INITIAL_BACKOFF_MS
                 subscribedSids.clear()
+                cfSubscribedSids.clear()
+                cfSubscribeRequestIds.clear()
                 val host = webSocket.request().url.toString()
                 onLog("ws open $host")
                 onState(State(connected = true, reconnecting = false, host = host, detail = null))
@@ -191,16 +213,38 @@ class KalshiWsClient(
                     runCatching { onBookDelta(parsed) }
                 }
                 is KalshiWsMessages.Parsed.Subscribed -> {
-                    parsed.sid?.let { subscribedSids += it }
-                    onLog("subscribed sid=${parsed.sid}")
+                    parsed.sid?.let { sid ->
+                        val requestId = parsed.requestId
+                        if (requestId != null && requestId in cfSubscribeRequestIds) {
+                            cfSubscribeRequestIds.remove(requestId)
+                            cfSubscribedSids += sid
+                            requestCfIndexList(webSocket, sid)
+                        } else {
+                            subscribedSids += sid
+                        }
+                    }
+                    onLog("subscribed sid=${parsed.sid} request=${parsed.requestId}")
                 }
                 is KalshiWsMessages.Parsed.Unsubscribed -> {
                     subscribedSids.removeAll(parsed.sids.toSet())
+                    cfSubscribedSids.removeAll(parsed.sids.toSet())
                     onLog("unsubscribed sids=${parsed.sids}")
                 }
                 is KalshiWsMessages.Parsed.Lifecycle -> {
                     onLog("lifecycle ${parsed.eventType} ${parsed.ticker}")
                     runCatching { onLifecycle(parsed.ticker, parsed.eventType) }
+                }
+                is KalshiWsMessages.Parsed.CfBenchmarks -> {
+                    runCatching { onCfBenchmarks(parsed.value) }
+                }
+                is KalshiWsMessages.Parsed.CfBenchmarksIndexList -> {
+                    val missing = indexIds.filterNot { requested ->
+                        parsed.indexIds.any { available -> available.equals(requested, ignoreCase = true) }
+                    }
+                    onLog(
+                        if (missing.isEmpty()) "CF Benchmarks indices verified: ${indexIds.joinToString()}"
+                        else "CF Benchmarks indices unavailable: ${missing.joinToString()}"
+                    )
                 }
                 is KalshiWsMessages.Parsed.Error -> {
                     onLog("ws error ${parsed.code}: ${parsed.message}")
@@ -231,6 +275,7 @@ class KalshiWsClient(
 
     companion object {
         private const val TAG = "DipHunterTick"
+        private const val CF_BENCHMARKS_CHANNEL = "cfbenchmarks_value"
         const val INITIAL_BACKOFF_MS = 1_000L
         const val MAX_BACKOFF_MS = 30_000L
 
@@ -241,5 +286,14 @@ class KalshiWsClient(
                 .readTimeout(0, TimeUnit.MILLISECONDS)
                 .writeTimeout(15, TimeUnit.SECONDS)
                 .build()
+
+        private fun marketChannels(channels: List<String>): List<String> =
+            channels.filterNot { it == CF_BENCHMARKS_CHANNEL }
+    }
+
+    private fun requestCfIndexList(ws: WebSocket, sid: Int) {
+        val id = msgId.getAndIncrement()
+        ws.send(KalshiWsMessages.updateIndexSubscription(id, sid, action = "indexlist"))
+        onLog("CF Benchmarks indexlist request id=$id sid=$sid")
     }
 }

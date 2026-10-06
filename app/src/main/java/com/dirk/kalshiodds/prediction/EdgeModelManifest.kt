@@ -18,10 +18,17 @@ data class EdgeModelManifest(
     val tag: String = "edge-model-latest",
     val simPnl: Double? = null,
     val simHitRate: Double? = null,
-    val dataSource: String = "unknown"
+    val dataSource: String = "unknown",
+    /** Held-out, final-window diagnostics; zero means a legacy manifest. */
+    val finalWindowSamples: Int = 0,
+    val finalWindowModelBrier: Double? = null,
+    val finalWindowMarketBrier: Double? = null,
+    val calibrationError: Double? = null,
+    val marketCalibrationError: Double? = null,
+    val promotionEligible: Boolean = false
 ) {
     val beatsMarket: Boolean
-        get() = dataSource == "kalshi_settled_coinbase_spot_v1" && nSamples > 0 &&
+        get() = dataSource in SUPPORTED_DATA_SOURCES && nSamples > 0 &&
             modelBrier < marketBrier &&
             modelLogLoss < marketLogLoss
 
@@ -37,6 +44,12 @@ data class EdgeModelManifest(
         o.put("model_asset", modelAsset)
         o.put("tag", tag)
         o.put("data_source", dataSource)
+        o.put("final_window_samples", finalWindowSamples)
+        finalWindowModelBrier?.let { o.put("final_window_model_brier", it) }
+        finalWindowMarketBrier?.let { o.put("final_window_market_brier", it) }
+        calibrationError?.let { o.put("calibration_error", it) }
+        marketCalibrationError?.let { o.put("market_calibration_error", it) }
+        o.put("promotion_eligible", promotionEligible)
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
         o.put("beats_market", beatsMarket)
@@ -44,6 +57,12 @@ data class EdgeModelManifest(
     }
 
     companion object {
+        /** v1 remains valid for releases published before historical-tier collection. */
+        val SUPPORTED_DATA_SOURCES = setOf(
+            "kalshi_settled_coinbase_spot_v1",
+            "kalshi_live_historical_coinbase_spot_v2"
+        )
+
         fun parse(raw: String): EdgeModelManifest {
             val o = JSONObject(raw)
             val n = when {
@@ -72,7 +91,13 @@ data class EdgeModelManifest(
                 tag = o.optString("tag").ifBlank { "edge-model-latest" },
                 simPnl = o.optDoubleOrNull("sim_pnl"),
                 simHitRate = o.optDoubleOrNull("sim_hit_rate"),
-                dataSource = o.optString("data_source", "unknown")
+                dataSource = o.optString("data_source", "unknown"),
+                finalWindowSamples = o.optInt("final_window_samples", 0).coerceAtLeast(0),
+                finalWindowModelBrier = o.optDoubleOrNull("final_window_model_brier"),
+                finalWindowMarketBrier = o.optDoubleOrNull("final_window_market_brier"),
+                calibrationError = o.optDoubleOrNull("calibration_error"),
+                marketCalibrationError = o.optDoubleOrNull("market_calibration_error"),
+                promotionEligible = o.optBoolean("promotion_eligible", false)
             )
         }
 
@@ -92,7 +117,13 @@ data class EdgeModelManifest(
                 marketLogLoss = m["market_logloss"] ?: error("model missing market_logloss"),
                 simPnl = m["sim_pnl"],
                 simHitRate = m["sim_hit_rate"],
-                dataSource = "unknown"
+                dataSource = "unknown",
+                finalWindowSamples = (m["final_window_samples"] ?: 0.0).toInt(),
+                finalWindowModelBrier = m["final_window_model_brier"],
+                finalWindowMarketBrier = m["final_window_market_brier"],
+                calibrationError = m["calibration_error"],
+                marketCalibrationError = m["market_calibration_error"],
+                promotionEligible = false
             )
         }
 
@@ -133,7 +164,7 @@ object ModelActivation {
                 reason = "Manifest has no holdout samples — not activating."
             )
         }
-        if (manifest.dataSource != "kalshi_settled_coinbase_spot_v1") {
+        if (manifest.dataSource !in EdgeModelManifest.SUPPORTED_DATA_SOURCES) {
             val provenance = when (manifest.dataSource) {
                 "unknown" -> "The release manifest omits data_source provenance"
                 "synthetic_fixture" -> "The release is a synthetic fixture"
@@ -155,13 +186,20 @@ object ModelActivation {
                     "Previous model stays active."
             )
         }
+        if (!manifest.promotionEligible) {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Candidate did not pass all walk-forward promotion gates — previous model stays active."
+            )
+        }
         return ModelActivationDecision(
             activate = true,
             manifest = manifest,
             reason = "Activated — holdout beats market " +
                 "(Brier ${fmt(manifest.modelBrier)} < ${fmt(manifest.marketBrier)}, " +
                 "log-loss ${fmt(manifest.modelLogLoss)} < ${fmt(manifest.marketLogLoss)}, " +
-                "n=${manifest.nSamples})."
+                "n=${manifest.nSamples}, final-window n=${manifest.finalWindowSamples})."
         )
     }
 
