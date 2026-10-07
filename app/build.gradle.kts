@@ -11,13 +11,13 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Claude's branch build: separate package so it installs next to
-        // the main DipHunter app instead of replacing it.
-        applicationId = "com.dirk.kalshiodds.claude"
+        // Mis_bitcoin build: separate package so it installs next to
+        // the main DipHunter and Claude apps instead of replacing them.
+        applicationId = "com.dirk.kalshiodds.mis"
         minSdk = 26
         targetSdk = 35
-        versionCode = 43
-        versionName = "1.8.0"
+        versionCode = 44
+        versionName = "1.8.0-mis.1"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(

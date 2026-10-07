@@ -23,28 +23,29 @@ class AppUpdateTest {
 
     private val sample = "[" + listOf(
         release("edge-model-latest", null),
-        release("arb-v1.0-Claude", "ArbHunter-v1.0-Claude-12.apk"),
+        release("arb-v1.0-Mis_bitcoin", "ArbHunter-v1.0-Mis_bitcoin-12.apk"),
         release("v1.3-Claude", "DipHunter-v1.3-Claude-61.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #61."),
         release("v1.2-Claude", "DipHunter-v1.2-Claude-58.apk", "Claude Bitcoin v1.2 (33) from `Claude` @ 1180cc9, run #58."),
         release("v0.3.15-main", "DipHunter-v0.3.15-main-99.apk", "DipHunter v0.3.15 (31) from `main` @ d34495b, run #99."),
-        release("v1.4-Claude", "DipHunter-v1.4-Claude-70.apk", "draft", draft = true)
+        release("v1.4-Claude", "DipHunter-v1.4-Claude-70.apk", "draft", draft = true),
+        release("v1.8.0-mis.1-Mis_bitcoin", "MisBitcoin-v1.8.0-mis.1-Mis_bitcoin-140.apk", "Mis Bitcoin v1.8.0-mis.1 (44) from `Mis_bitcoin` @ b5d0de6, run #140.")
     ).joinToString(",") + "]"
 
     @Test
-    fun parsesOnlyClaudeBranchAppReleasesWithAnApk() {
+    fun parsesOnlyMisBitcoinBranchAppReleasesWithAnApk() {
         val r = AppUpdate.parse(sample)
-        assertEquals(listOf("v1.3-Claude", "v1.2-Claude"), r.map { it.tag })
+        assertEquals(listOf("v1.8.0-mis.1-Mis_bitcoin", "v1.3-Claude", "v1.2-Claude"), r.map { it.tag })
         val newest = r.first()
-        assertEquals("1.3", newest.versionName)
+        assertEquals("1.8.0-mis.1", newest.versionName)
         assertEquals(61, newest.runNumber)
         assertEquals(34, newest.versionCode)
         assertEquals("abc1234", newest.sha)
-        assertEquals("DipHunter-v1.3-Claude-61.apk", newest.apkName)
+        assertEquals("MisBitcoin-v1.8.0-mis.1-Mis_bitcoin-140.apk", newest.apkName)
         assertEquals(
-            "https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.3-Claude/DipHunter-v1.3-Claude-61.apk",
+            "https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.8.0-mis.1-Mis_bitcoin/MisBitcoin-v1.8.0-mis.1-Mis_bitcoin-140.apk",
             newest.apkUrl
         )
-        assertEquals("v1.3 build #61", newest.label)
+        assertEquals("v1.8.0-mis.1 build #140", newest.label)
     }
 
     @Test
@@ -58,23 +59,23 @@ class AppUpdateTest {
     @Test
     fun latestIsTheHighestRunNumber() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))!!
-        assertEquals(61, latest.runNumber)
+        assertEquals(140, latest.runNumber)
         assertNull(AppUpdate.latest(emptyList()))
     }
 
     @Test
     fun newerRunIsAnUpdateEvenAtTheSameVersion() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))
-        assertTrue(AppUpdate.decide(latest, currentRun = 60, currentCode = 34) is AppUpdate.Status.Available)
-        assertTrue(AppUpdate.decide(latest, currentRun = 61, currentCode = 34) is AppUpdate.Status.UpToDate)
-        assertTrue(AppUpdate.decide(latest, currentRun = 62, currentCode = 34) is AppUpdate.Status.UpToDate)
+        assertTrue(AppUpdate.decide(latest, currentRun = 139, currentCode = 34) is AppUpdate.Status.Available)
+        assertTrue(AppUpdate.decide(latest, currentRun = 140, currentCode = 34) is AppUpdate.Status.UpToDate)
+        assertTrue(AppUpdate.decide(latest, currentRun = 141, currentCode = 34) is AppUpdate.Status.UpToDate)
     }
 
     @Test
     fun localBuildFallsBackToVersionCode() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))
-        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 33) is AppUpdate.Status.Available)
-        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 34) is AppUpdate.Status.UpToDate)
+        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 43) is AppUpdate.Status.Available)
+        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 44) is AppUpdate.Status.UpToDate)
     }
 
     @Test
@@ -83,12 +84,12 @@ class AppUpdateTest {
         assertTrue(AppUpdate.parse("""{"message":"API rate limit exceeded"}""").isEmpty())
         val status = AppUpdate.decide(null)
         assertTrue(status is AppUpdate.Status.Failed)
-        assertEquals("Could not check: No Claude build with an APK was found on GitHub", AppUpdate.statusLine(status))
+        assertEquals("Could not check: No Mis_bitcoin build with an APK was found on GitHub", AppUpdate.statusLine(status))
     }
 
     @Test
     fun runNumberFallsBackToTheReleaseNotes() {
-        val json = "[" + release("v1.3-Claude", "BitcoinClaude.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
+        val json = "[" + release("v1.3-Claude", "BitcoinClaude.apk", "Mis Bitcoin v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
         assertEquals(77, AppUpdate.parse(json).single().runNumber)
     }
 

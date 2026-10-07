@@ -19,6 +19,10 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.0-mis.1 (Mis_bitcoin branch, Mis Bitcoin)
+
+Fork of the Claude 1.8.0 build with a hardened model-promotion pipeline: the trainer now publishes a market-block bootstrap 90% P&L CI at the ask and `promotion_eligible` (>= 20 EV-at-ask trades AND CI excluding zero); `ModelActivation` refuses activation on `promotion_eligible: false` even when Brier/log-loss beat the market. Separate package `com.dirk.kalshiodds.mis`, its own model release tag `mis-bitcoin-edge-model`, retrains on every push to `Mis_bitcoin` that touches `ml/`.
+
 ## 1.3 (Claude branch, Bitcoin Claude)
 
 **No way of betting this market came out positive.** A study of Kalshi's own public trade history (952 settled `KXBTC15M` windows, 33.3M trades, 2026-09-24 → 2026-10-04) found that buying at the ask lost 1.01¢ per contract (−2.1% of stake, 95% CI [−1.14, −0.87]), almost all of it the fee. Resting orders earned +0.29¢ per fill only at the front of the queue and lost 0.9–1.5¢ behind the 2,000–10,000 contracts that normally sit at the best bid. Full write-up: [`docs/tape-study-2026-10-04.md`](docs/tape-study-2026-10-04.md). 1.3 does not add a live strategy; it shows the cost, limits the damage, and paper-tests the one lead that turned up.
@@ -27,7 +31,7 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
 - **Daily live cap.** Live buys stop once the day's all-in total reaches the cap (default **$50**, Settings → Live Approve tickets, 0 = off). A buy that would pass it is not sent and the reason is shown. Sells and paper are never blocked. The count resets at midnight on the phone; the part of a resting order Kalshi confirms as cancelled is given back. `LiveDailyCap` / `LiveDailyCapTest`.
 - **Trade-tape study tool.** `tools/research/tape_study.py` (`pull`, `report`, `makersim`, `hourly`, `streaks`) reproduces the write-up from public data, no API key.
 - **Flow fade, paper only.** Signal: takers buying one side at least 3:1 over the last 30 s. Buying the other side at the ask looked good on the 11 days it was found on and **failed on the 12 days before** (774 bets, −2.9¢ per contract; all 23 days: −0.0¢), so it is retired. What the home card **Flow fade (resting bid) · PAPER** runs instead is a resting no-fee bid on the side takers are not buying, counted as filled only after the queue ahead has traded: +1.8¢ per fill with 2,000 contracts ahead and +1.0¢ with 5,000 over 23 days, both with a 95% interval that includes zero. Not proven; paper only; needs Live signals on. Write-up: [`docs/flow-fade-2026-10-04.md`](docs/flow-fade-2026-10-04.md); tool: `tools/research/flow_study.py`. `FlowFadeRule` / `MakerPaperBook` / `FlowMakerTest`.
-- **Update from inside the app.** Settings → **App update** shows this build's number, checks GitHub for a newer `Claude` build when Settings opens or on tap, and Download hands the APK to the browser. Every CI APK is signed with the same committed debug key, so it installs over the old one and keeps settings and the Kalshi key. `AppUpdate` / `AppUpdateTest`.
+- **Update from inside the app.** Settings → **App update** shows this build's number, checks GitHub for a newer `Mis_bitcoin` build when Settings opens or on tap, and Download hands the APK to the browser. Every CI APK is signed with the same committed debug key, so it installs over the old one and keeps settings and the Kalshi key. `AppUpdate` / `AppUpdateTest`.
 
 | Control | Code | Test |
 |---------|------|------|

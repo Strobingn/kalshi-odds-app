@@ -13,11 +13,11 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * In-app update check for the Claude-branch build.
+ * In-app update check for the Mis_bitcoin-branch build.
  *
- * Every push to `Claude` runs the Build APK workflow, which publishes the
- * APK on a rolling GitHub prerelease tagged `v<versionName>-Claude` with an
- * asset named `ClaudeBitcoin-v<versionName>-Claude-<run number>.apk`. The build
+ * Every push to `Mis_bitcoin` runs the Build APK workflow, which publishes the
+ * APK on a rolling GitHub prerelease tagged `v<versionName>-Mis_bitcoin` with an
+ * asset named `MisBitcoin-v<versionName>-<branch>-<run number>.apk`. The build
  * stamps the same run number into [BuildConfig.CI_RUN_NUMBER], so "is there
  * a newer build?" is a comparison of run numbers. Every CI APK is signed
  * with the committed debug keystore, so the new one installs over this one
@@ -30,9 +30,9 @@ object AppUpdate {
 
     const val RELEASES_URL = "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases?per_page=30"
     const val RELEASES_PAGE = "https://github.com/Strobingn/kalshi-odds-app/releases"
-    const val BRANCH = "Claude"
+    const val BRANCH = "Mis_bitcoin"
 
-    private val TAG = Regex("""^v(\d+(?:\.\d+)*)-(.+)$""")
+    private val TAG = Regex("""^v(\d+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?)-(.+)$""")
     private val ASSET_RUN = Regex("""-(\d+)\.apk$""")
     private val BODY_RUN = Regex("""run #(\d+)""")
     private val BODY_CODE = Regex("""\((\d+)\)""")
@@ -157,7 +157,7 @@ class AppUpdateChecker(
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "ClaudeBitcoin/${BuildConfig.VERSION_NAME}")
+                .header("User-Agent", "MisBitcoin/${BuildConfig.VERSION_NAME}")
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

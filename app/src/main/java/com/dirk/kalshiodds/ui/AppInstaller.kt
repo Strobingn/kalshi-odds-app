@@ -47,7 +47,7 @@ object AppInstaller {
             dir.listFiles()?.forEach { it.delete() }
             val target = File(dir, localName(apkName))
             val part = File(dir, target.name + ".part")
-            val request = Request.Builder().url(url).header("User-Agent", "ClaudeBitcoin-updater").build()
+            val request = Request.Builder().url(url).header("User-Agent", "MisBitcoin-updater").build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) throw IllegalStateException("Download failed: HTTP ${response.code}")
                 val body = response.body ?: throw IllegalStateException("Download failed: empty answer")

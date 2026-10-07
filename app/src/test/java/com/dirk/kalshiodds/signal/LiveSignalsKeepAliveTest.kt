@@ -141,7 +141,7 @@ class LiveSignalsKeepAliveTest {
         )
         assertEquals("diphunter_keepalive", LiveSignalsPolicy.PREFS_NAME)
         assertEquals("live_signals_enabled", LiveSignalsPolicy.PREFS_ENABLED_KEY)
-        assertEquals("Claude Bitcoin live signals", LiveSignalsPolicy.NOTIFICATION_TITLE)
+        assertEquals("Mis Bitcoin live signals", LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertEquals("diphunter_live_signals_quiet", LiveSignalsPolicy.CHANNEL_ONGOING)
         assertTrue("diphunter_live_signals_ongoing" in LiveSignalsPolicy.CHANNELS_RETIRED)
         assertFalse(LiveSignalsPolicy.CHANNEL_ONGOING in LiveSignalsPolicy.CHANNELS_RETIRED)

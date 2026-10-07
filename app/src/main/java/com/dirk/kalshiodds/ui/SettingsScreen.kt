@@ -353,7 +353,7 @@ fun SettingsContent(
 
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows a silent ongoing “Claude Bitcoin live signals” notice while it runs. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows a silent ongoing “Mis Bitcoin live signals” notice while it runs. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -369,7 +369,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Claude Bitcoin battery usage to Unrestricted. This never auto-trades.",
+                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Mis Bitcoin battery usage to Unrestricted. This never auto-trades.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -388,7 +388,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. Claude Bitcoin watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Bitcoin-only. Mis Bitcoin watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )

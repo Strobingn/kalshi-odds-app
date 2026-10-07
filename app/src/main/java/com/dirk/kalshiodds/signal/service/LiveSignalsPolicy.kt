@@ -15,7 +15,7 @@ object LiveSignalsPolicy {
     const val WAKELOCK_TAG = "diphunter:live-signals"
     const val WAKELOCK_TIMEOUT_MS = 3L * 60L * 60L * 1000L
 
-    const val NOTIFICATION_TITLE = "Claude Bitcoin live signals"
+    const val NOTIFICATION_TITLE = "Mis Bitcoin live signals"
     /**
      * IMPORTANCE_MIN channel: silent, collapsed, no status-bar icon. A new id
      * because Android never lowers an existing channel's importance.
