@@ -114,3 +114,25 @@ The manifest also publishes `model_calibration_error` /
 `ModelActivation.decide` refuses activation when `promotion_eligible` is
 false even if `beats_market` is true; manifests without the flag (older
 trainers) are judged on scores only.
+
+## 270-day training, L2 sweep, recency check (this branch)
+
+- **`--days 270` is the workflow default** now. Kalshi's historical tier
+  reaches back to Dec 2025 for KXBTC15M; the trainer pages both tiers, so a
+  270-day window is ~30k settled markets / ~400k decision minutes — roughly
+  100x the 1-day fit. If a run times out, dispatch the workflow with a
+  smaller `days`.
+- **`--sweep-l2`**: L2 is selected by holdout log-loss over a fixed grid
+  (0.5 → 0.005). Selection happens inside the walk-forward folds, so the
+  published gate numbers are never chosen on their own holdout. Log-loss,
+  not Brier, is the selection score: clustered minutes reward memorization
+  and log-loss punishes overconfidence.
+- **Recency metrics**: `recent_model_brier` / `recent_market_brier` score
+  the most recent 25% of the holdout separately. Crypto regimes drift; a
+  full-holdout win that goes stale on recent data shows up here before
+  promotion.
+- **Margin curve**: `margin_curve` in the printed metrics shows EV-at-ask
+  P&L per bet at margins 0¢–12¢. The app fires at 3¢; if a higher margin
+  shows materially better P&L per bet with enough trades, raising the
+  threshold is the cheapest improvement: fewer, better bets. Diagnostic
+  only — the promotion gate stays the 3¢ bootstrap CI.

@@ -274,6 +274,32 @@ class OffsetModelTest(unittest.TestCase):
             payload = json.loads(man.read_text())
         self.assertFalse(payload["promotion_eligible"])
 
+    def test_recency_metrics_flag_a_stale_fit(self) -> None:
+        hold = [(s, s.mid) for s in _samples(240, seed=3)]
+        r = te.recency_metrics(hold)
+        self.assertEqual(r["recent_n"], 780.0)  # 240 markets x 13 min x 25%
+        # market vs itself: perfect parity on the recent slice
+        self.assertAlmostEqual(r["recent_model_brier"], r["recent_market_brier"], places=9)
+
+    def test_sweep_l2_prefers_some_regularization(self) -> None:
+        # A lagging market: the truth moves and the mid underreacts. Any
+        # nonzero L2 should be selected; the sweep must return a candidate.
+        best, per = te.sweep_l2(_samples(360, seed=11, lag=0.4), folds=3, candidates=(0.5, 0.05, 0.005))
+        self.assertIn(best, (0.5, 0.05, 0.005))
+        self.assertEqual(len(per), 3)
+        for cand, m in per.items():
+            self.assertIn("logloss", m)
+            self.assertGreater(m["logloss"], 0.0)
+
+    def test_margin_curve_monotone_fewer_bets(self) -> None:
+        hold = [(s, te.sigmoid(2.0 * s.x[0])) for s in _samples(240, seed=5, lag=0.4)]
+        curve = te.margin_curve(hold)
+        self.assertIn("0.03", curve)
+        ns = [curve[k]["n"] for k in sorted(curve)]
+        margins = sorted(float(k) for k in curve)
+        counts = [curve[f"{m:.2f}"]["n"] for m in margins]
+        self.assertEqual(counts, sorted(counts, reverse=True), "higher margin → fewer (or equal) bets")
+
     def test_walk_forward_reports_calibration_and_bootstrap(self) -> None:
         metrics = te.walk_forward(_samples(360, seed=9, lag=0.3))
         for key in ("model_calibration_error", "market_calibration_error", "boot_ci_low", "boot_ci_high", "boot_p_of_loss"):

@@ -949,6 +949,95 @@ def fold_splits(samples: list[Sample], folds: int = 4) -> list[tuple[list[Sample
     return out
 
 
+def walk_forward_hold(
+    samples: list[Sample],
+    folds: int = 4,
+    kind: str = KIND_OFFSET,
+    design: list[str] | None = None,
+    l2: float = DEFAULT_L2,
+) -> list[tuple[Sample, float]]:
+    """Walk-forward holdout rows (sample, predicted P(YES)) in time order."""
+    hold: list[tuple[Sample, float]] = []
+    for train, test in fold_splits(samples, folds):
+        model = fit_model(train, kind, design, l2)
+        hold.extend((s, model_predict(model, s.x, s.mid)) for s in test)
+    return hold
+
+
+def recency_metrics(hold: list[tuple[Sample, float]], fraction: float = 0.25) -> dict[str, float]:
+    """Scores on the most recent [fraction] of the holdout only.
+
+    Crypto vol regimes drift over months; a model can beat the market on the
+    full holdout and still be stale on the most recent data. These numbers
+    gate nothing by themselves (the full-holdout gates do), but the manifest
+    publishes them so a stale fit is visible before promotion.
+    """
+    if not hold:
+        return {"recent_model_brier": 1.0, "recent_market_brier": 0.0, "recent_n": 0.0}
+    cut = int(len(hold) * (1.0 - fraction))
+    recent = hold[cut:]
+    ph = [p for _, p in recent]
+    yh = [s.y for s, _ in recent]
+    mh = [s.mid for s, _ in recent]
+    return {
+        "recent_model_brier": brier(ph, yh),
+        "recent_market_brier": brier(mh, yh),
+        "recent_n": float(len(recent)),
+    }
+
+
+def sweep_l2(
+    samples: list[Sample],
+    folds: int = 4,
+    kind: str = KIND_OFFSET,
+    design: list[str] | None = None,
+    candidates: tuple[float, ...] = (0.5, 0.2, 0.05, 0.02, 0.005),
+) -> tuple[float, dict[str, dict[str, float]]]:
+    """Pick the L2 that minimizes holdout log-loss on the same folds.
+
+    Rows are clustered by market, so a smaller L2 can look better by
+    memorizing; log-loss punishes overconfidence harder than Brier, which
+    makes it the right selection score. Returns (best_l2, per-candidate
+    metrics) — nested selection stays inside the walk-forward folds, so
+    the final gate numbers are never chosen on their own holdout.
+    """
+    per: dict[str, dict[str, float]] = {}
+    best_l2, best_ll = None, float("inf")
+    for cand in candidates:
+        hold = walk_forward_hold(samples, folds, kind, design, cand)
+        if not hold:
+            continue
+        ll = logloss([p for _, p in hold], [s.y for s, _ in hold])
+        mb = brier([p for _, p in hold], [s.y for s, _ in hold])
+        mm = brier([s.mid for s, _ in hold], [s.y for s, _ in hold])
+        per[str(cand)] = {"logloss": ll, "brier": mb, "market_brier": mm}
+        if ll < best_ll:
+            best_ll, best_l2 = ll, cand
+    if best_l2 is None:
+        best_l2 = DEFAULT_L2
+    return best_l2, per
+
+
+def margin_curve(hold: list[tuple[Sample, float]], margins: tuple[float, ...] = (0.0, 0.01, 0.02, 0.03, 0.05, 0.08, 0.12)) -> dict[str, dict[str, float]]:
+    """EV-at-ask P&L per margin threshold: how picky should the bet rule be?
+
+    The app fires at EV_MARGIN = 3¢. If a higher margin shows a materially
+    better P&L per bet with enough trades, raising the app's threshold is
+    the cheapest possible improvement: fewer, better bets. Diagnostic only —
+    the bootstrap CI at the shipped margin stays the promotion gate.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for m in margins:
+        stats = ev_pnl(hold, m)
+        out[f"{m:.2f}"] = {
+            "n": stats["n"],
+            "pnl": stats["pnl"],
+            "pnl_per_bet": stats["pnl_per_bet"],
+            "hit_rate": stats["hit_rate"],
+        }
+    return out
+
+
 def walk_forward(
     samples: list[Sample],
     folds: int = 4,
@@ -956,12 +1045,20 @@ def walk_forward(
     design: list[str] | None = None,
     l2: float = DEFAULT_L2,
     ev_margin: float = EV_MARGIN,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Time-ordered walk-forward over [fold_splits]."""
-    hold: list[tuple[Sample, float]] = []
-    for train, test in fold_splits(samples, folds):
-        model = fit_model(train, kind, design, l2)
-        hold.extend((s, model_predict(model, s.x, s.mid)) for s in test)
+    hold = walk_forward_hold(samples, folds, kind, design, l2)
+    return walk_forward_metrics(hold, samples, ev_margin, folds=folds, l2=l2)
+
+
+def walk_forward_metrics(
+    hold: list[tuple[Sample, float]],
+    samples: list[Sample],
+    ev_margin: float,
+    folds: int,
+    l2: float,
+) -> dict[str, Any]:
+    """Holdout metrics for precomputed walk-forward rows."""
     if not hold:
         return {"n_samples": float(len(samples)), "n_holdout": 0.0}
     ph = [p for _, p in hold]
@@ -998,6 +1095,7 @@ def walk_forward(
         "boot_ci_high": boot["ci_high"],
         "boot_p_of_loss": boot["p_low"],
         "boot_markets": boot["n_boot_markets"],
+        "margin_curve": margin_curve(hold),  # type: ignore[arg-type]
     }
 
 
@@ -1111,6 +1209,7 @@ def main() -> int:
     ap.add_argument("--kind", choices=[KIND_OFFSET, KIND_LOGISTIC], default=KIND_OFFSET)
     ap.add_argument("--features", default=",".join(OFFSET_FEATURES), help="offset model design columns")
     ap.add_argument("--l2", type=float, default=DEFAULT_L2)
+    ap.add_argument("--sweep-l2", action="store_true", help="pick L2 by holdout log-loss over a fixed grid")
     ap.add_argument("--folds", type=int, default=4)
     ap.add_argument("--ev-margin", type=float, default=EV_MARGIN)
     ap.add_argument("--workers", type=int, default=3)
@@ -1146,7 +1245,15 @@ def main() -> int:
             samples, synthetic = fixture_dataset(), True
     n_yes = sum(s.y for s in samples)
     print(f"samples {len(samples)} markets {len({s.ticker for s in samples})} yes={n_yes} no={len(samples) - n_yes}", flush=True)
-    metrics = walk_forward(samples, args.folds, args.kind, design, args.l2, args.ev_margin)
+    if args.sweep_l2 and not synthetic:
+        best_l2, per = sweep_l2(samples, args.folds, args.kind, design)
+        print("l2 sweep:", json.dumps(per), flush=True)
+        print(f"selected l2={best_l2}", flush=True)
+        args.l2 = best_l2
+    hold = walk_forward_hold(samples, args.folds, args.kind, design, args.l2)
+    metrics = walk_forward_metrics(hold, samples, args.ev_margin, folds=args.folds, l2=args.l2)
+    if not synthetic:
+        metrics.update(recency_metrics(hold))
     if synthetic:
         metrics["synthetic"] = 1.0
     print(json.dumps(metrics, indent=2), flush=True)
