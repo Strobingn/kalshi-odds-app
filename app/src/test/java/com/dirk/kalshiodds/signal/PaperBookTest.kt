@@ -96,14 +96,17 @@ class PaperBookTest {
         assertEquals(3, snap.fills.count { it.settled })
         assertEquals(0, snap.openCount)
         val win = snap.fills.first { it.ticker == "WIN-1" }
-        val fee = win.feeUsd
         assertEquals(true, win.won)
-        assertEquals(120.0 - fee, win.pnlUsd!!, 1e-6)
+        assertEquals(120.0 - win.feeUsd, win.pnlUsd!!, 1e-6)
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
-        assertEquals(-5.0 - fee, loss.pnlUsd!!, 1e-6)
-        assertEquals(115.0 - 2.0 * fee, snap.realizedPnlUsd, 1e-6)
-        assertEquals(215.0 - 2.0 * fee, snap.cashUsd, 1e-6)
+        assertEquals(-5.0 - loss.feeUsd, loss.pnlUsd!!, 1e-6)
+        val void = snap.fills.first { it.ticker == "VOID-1" }
+        assertEquals(null, void.won)
+        assertEquals(0.0, void.pnlUsd!!, 1e-6)
+        val expectedPnl = win.pnlUsd!! + loss.pnlUsd!! + void.pnlUsd!!
+        assertEquals(expectedPnl, snap.realizedPnlUsd, 1e-6)
+        assertEquals(SignalConstants.PAPER_START_USD + expectedPnl, snap.cashUsd, 1e-6)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())
@@ -156,9 +159,7 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        val fee = KalshiFee.total(fill.contracts, fill.limitPrice)
-        assertEquals(fee, fill.feeUsd, 1e-9)
-        assertEquals(100.0 - 8.0 - fee, book.snapshot().cashUsd, 1e-6)
+        assertEquals(100.0 - fill.stakeUsd - fill.feeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
     }
 
