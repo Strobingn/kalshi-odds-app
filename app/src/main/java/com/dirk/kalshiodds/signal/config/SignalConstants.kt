@@ -63,7 +63,17 @@ object SignalConstants {
 
     const val DEFAULT_AUTO_TUNE = true
     const val DEFAULT_AUTO_TUNE_OVERRIDE = false
-    const val AUTO_TUNE_MIN_SAMPLES = 30
+    /**
+     * An adaptive threshold is a production decision, not a chart fit.  Do
+     * not let a handful of lucky settlements turn "sit out" off.
+     */
+    const val AUTO_TUNE_MIN_SAMPLES = 300
+    const val AUTO_TUNE_MIN_DAYS = 14
+    const val AUTO_TUNE_MIN_BRIER_ADVANTAGE = 0.0025
+    const val AUTO_TUNE_BOOTSTRAP_REPS = 1_000
+
+    /** AI-generated paper fills are deliberately a fixed small experiment. */
+    const val AI_PAPER_STAKE_CAP_USD = 5.0
 
     const val DEFAULT_OPPORTUNITY_ALERTS = true
     const val DEFAULT_OPPORTUNITY_QUIET = false
@@ -181,8 +191,8 @@ object SignalConstants {
      * mode; other failures auto-disable after 3.
      */
     const val DEFAULT_HEAVY_ML = false
-    const val DEFAULT_SEQUENCE_MODEL = true
-    const val DEFAULT_GBM = true
+    const val DEFAULT_SEQUENCE_MODEL = false
+    const val DEFAULT_GBM = false
     const val DEFAULT_UNCERTAINTY_GATE = true
 
     /**
@@ -190,21 +200,21 @@ object SignalConstants {
      * or propose a ticket. 0.12 ≈ models may disagree by ~12pp.
      */
     const val DEFAULT_MAX_UNCERTAINTY = 0.12
-    const val DEFAULT_CONTINUAL_FINETUNE = true
+    const val DEFAULT_CONTINUAL_FINETUNE = false
     const val DEFAULT_POLICY_EVAL_STAKE_USD = 5.0
 
     // --- v0.3.0 extended AI (10–19); advisory / gates only ---
 
     /** Master switch for 10–19. Default off (light mode) — see Heavy ML. */
     const val DEFAULT_EXTENDED_AI = false
-    const val DEFAULT_REGIME_CLASSIFIER = true
-    const val DEFAULT_ANOMALY_GATE = true
-    const val DEFAULT_SURVIVAL_MODEL = true
-    const val DEFAULT_RL_SIZER = true
-    const val DEFAULT_NEWS_PULSE = true
-    const val DEFAULT_RIVAL_FLOW = true
-    const val DEFAULT_BAYESIAN_MM = true
-    const val DEFAULT_CONFORMAL = true
-    const val DEFAULT_META_LABEL = true
-    const val DEFAULT_PATH_SIM = true
+    const val DEFAULT_REGIME_CLASSIFIER = false
+    const val DEFAULT_ANOMALY_GATE = false
+    const val DEFAULT_SURVIVAL_MODEL = false
+    const val DEFAULT_RL_SIZER = false
+    const val DEFAULT_NEWS_PULSE = false
+    const val DEFAULT_RIVAL_FLOW = false
+    const val DEFAULT_BAYESIAN_MM = false
+    const val DEFAULT_CONFORMAL = false
+    const val DEFAULT_META_LABEL = false
+    const val DEFAULT_PATH_SIM = false
 }
