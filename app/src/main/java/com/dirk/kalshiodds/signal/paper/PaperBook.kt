@@ -117,23 +117,18 @@ class PaperBook(
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
-        val price = (ticket.estimatedAvgFill.takeIf { it > 0.0 } ?: ticket.limitPrice)
-            .takeIf { it > 0.0 } ?: return null
-        val wanted = ticket.contracts.takeIf { it > 0 }
-            ?: ticket.stakeUsd.takeIf { it > 0.0 }?.let { kotlin.math.floor(it / price).toInt() }
-            ?: 0
         return fill(
             ticker = ticket.ticker,
             side = ticket.side,
-            limitPrice = price,
+            limitPrice = ticket.limitPrice,
             source = source,
             note = if (ticket.winTargetUsd != null) {
                 "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
             } else {
                 "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
             },
-            contracts = cappedAiContracts(wanted, price).takeIf { it > 0 },
-            stakeUsd = null,
+            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
+            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
             winTargetUsd = ticket.winTargetUsd
         )
     }
@@ -151,7 +146,7 @@ class PaperBook(
         )
     }
 
-    /** Automatic paper execution; every AI fill is capped to a fixed experiment size. */
+    /** Automatic paper execution at the currently visible touch liquidity. */
     fun considerUnboundedTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled || !ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
@@ -166,14 +161,14 @@ class PaperBook(
             ticker = ticket.ticker,
             side = ticket.side,
             limitPrice = price,
-            contracts = cappedAiContracts(visible, price),
+            contracts = visible,
             source = source,
-            note = "AI paper cap $${SignalConstants.AI_PAPER_STAKE_CAP_USD} · visible touch liquidity only · never sent to Kalshi",
+            note = "Unlimited-credit paper autopilot · visible touch liquidity only · never sent to Kalshi",
             winTargetUsd = ticket.winTargetUsd
         )
     }
 
-    /** Same capped execution for an alert that has no ticket. */
+    /** Same unlimited-credit execution for an alert that has no ticket. */
     fun considerUnboundedAlert(
         alert: SignalAlert,
         ask: Double?,
@@ -187,9 +182,9 @@ class PaperBook(
             ticker = alert.ticker,
             side = alert.predictedSide,
             limitPrice = px,
-            contracts = cappedAiContracts(quantity, px),
+            contracts = quantity,
             source = "AI autopilot signal",
-            note = "AI paper cap $${SignalConstants.AI_PAPER_STAKE_CAP_USD} · visible touch liquidity only · ${alert.reason.ifBlank { "AI signal" }} · never sent to Kalshi"
+            note = "Unlimited-credit paper autopilot · visible touch liquidity only · ${alert.reason.ifBlank { "AI signal" }} · never sent to Kalshi"
         )
     }
 
@@ -686,9 +681,8 @@ class PaperBook(
                 note = "$note · fee ${fmt(fee)}",
                 winTargetUsd = winTargetUsd
             )
-            // AI sizing was capped before this point. The synthetic ledger can
-            // go negative for longitudinal evaluation, but no single model
-            // call can turn a weak edge into an all-in result.
+            // Autopilot uses only the visible touch liquidity. Its synthetic
+            // balance may go negative and never reads or affects Kalshi cash.
             val fills = listOf(row) + cur.fills
             publish(
                 cur.copy(
@@ -696,27 +690,17 @@ class PaperBook(
                     fills = fills,
                     lastMessage = String.format(
                         java.util.Locale.US,
-                        "PAPER AUTO %s %s · %d ct @ %.1f¢ · all-in $%.2f · AI cap $%.2f · never Kalshi",
+                        "PAPER AUTO %s %s · %d visible ct @ %.1f¢ · all-in $%.2f · unlimited synthetic credit · never Kalshi",
                         row.displaySide,
                         row.ticker,
                         row.contracts,
                         row.limitPrice * 100,
-                        stake + fee,
-                        SignalConstants.AI_PAPER_STAKE_CAP_USD
+                        stake + fee
                     )
                 )
             )
             return row
         }
-    }
-
-    private fun cappedAiContracts(visibleContracts: Int, limitPrice: Double): Int {
-        val price = KalshiPrice.usable(limitPrice) ?: return 0
-        return PaperBuy.capContracts(
-            want = visibleContracts,
-            cashUsd = SignalConstants.AI_PAPER_STAKE_CAP_USD,
-            price = price
-        ).first
     }
 
     private fun publish(next: PaperBookState) {
