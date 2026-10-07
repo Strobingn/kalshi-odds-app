@@ -455,6 +455,23 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    fun exportSettlementIndex() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val store = KalshiOddsApp.from(getApplication()).container.resultsStore
+                    val csv = ResultsExporter.settlementIndexCsv(store.settlementIndexRows(500_000))
+                    ResultsFileExport.write(getApplication(), csv, prefix = "diphunter-settlement-index")
+                }.getOrElse {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(
+                        false, null, it.message ?: "Settlement-index export failed"
+                    )
+                }
+            }
+            _state.update { it.copy(exportMessage = result.message) }
+        }
+    }
+
     fun clearCredentials() {
         prefs.clearCredentials()
         _state.update {
