@@ -69,6 +69,16 @@ data class OddsMidRow(
     val noBid: Double? = null
 )
 
+/** Sampled CF Benchmarks settlement-index observation for later training. */
+data class SettlementIndexRow(
+    val indexId: String,
+    val sourceTsMs: Long,
+    val valueUsd: Double,
+    val finalMinuteAverageUsd: Double? = null,
+    val finalMinuteSamples: Int = 0,
+    val receivedAtMs: Long
+)
+
 /** First qualifying live signal for a market, retained independently of rolling predictions. */
 data class ForwardTestRow(
     val ticker: String,
@@ -111,7 +121,8 @@ data class ResultsBundle(
     val snapshots: List<ScoredSnapshotRow> = emptyList(),
     val alerts: List<AlertRow> = emptyList(),
     val scorecards: List<ScorecardRow> = emptyList(),
-    val tickets: List<TicketAttemptRow> = emptyList()
+    val tickets: List<TicketAttemptRow> = emptyList(),
+    val settlementIndex: List<SettlementIndexRow> = emptyList()
 )
 
 interface ResultsStore {
@@ -120,6 +131,7 @@ interface ResultsStore {
     fun insertScorecard(row: ScorecardRow)
     fun insertTicket(row: TicketAttemptRow)
     fun insertOddsMids(rows: List<OddsMidRow>)
+    fun insertSettlementIndex(rows: List<SettlementIndexRow>)
     fun insertForwardTests(rows: List<ForwardTestRow>)
     fun insertTicketForward(rows: List<TicketForwardRow>)
     fun recentSnapshots(limit: Int = 80): List<ScoredSnapshotRow>
@@ -127,6 +139,7 @@ interface ResultsStore {
     fun recentScorecards(limit: Int = 80): List<ScorecardRow>
     fun recentTickets(limit: Int = 40): List<TicketAttemptRow>
     fun recentOddsMids(limit: Int = 800): List<OddsMidRow>
+    fun settlementIndexRows(limit: Int = 50_000): List<SettlementIndexRow>
     fun forwardTests(limit: Int = 5_000): List<ForwardTestRow>
     fun ticketForward(limit: Int = 5_000): List<TicketForwardRow>
     fun exportBundle(limit: Int = 400): ResultsBundle
