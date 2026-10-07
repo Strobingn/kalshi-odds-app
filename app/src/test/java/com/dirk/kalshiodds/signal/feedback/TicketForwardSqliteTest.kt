@@ -23,33 +23,47 @@ class TicketForwardSqliteTest {
     @Test fun firstTicketSurvivesRestartAndSettlementJoinsLater() {
         val context = RuntimeEnvironment.getApplication()
         context.deleteDatabase(SqliteResultsStore.DB_NAME)
+        var store: SqliteResultsStore? = null
+        var reopened: SqliteResultsStore? = null
         try {
             val first = row()
-            SqliteResultsStore(context).insertTicketForward(listOf(first, first.copy(modelYes = 0.99)))
-            val reopened = SqliteResultsStore(context)
-            reopened.upsertSettled(listOf(SettledWindowRow(first.ticker, first.series, "no")))
-            val saved = reopened.ticketForward().single()
+            val firstStore = SqliteResultsStore(context)
+            store = firstStore
+            firstStore.insertTicketForward(listOf(first, first.copy(modelYes = 0.99)))
+            val reopenedStore = SqliteResultsStore(context)
+            reopened = reopenedStore
+            reopenedStore.upsertSettled(listOf(SettledWindowRow(first.ticker, first.series, "no")))
+            val saved = reopenedStore.ticketForward().single()
             assertEquals(0.15, saved.modelYes, 1e-9)
             assertEquals("no", saved.outcome)
             assertEquals(40, saved.contracts)
             assertEquals(1_000_034, saved.buildCode)
-        } finally { context.deleteDatabase(SqliteResultsStore.DB_NAME) }
+        } finally {
+            reopened?.close()
+            store?.close()
+            context.deleteDatabase(SqliteResultsStore.DB_NAME)
+        }
     }
 
     @Test fun existingVersionSixDatabaseGetsNewTableWithoutLosingForwardSignals() {
         val context = RuntimeEnvironment.getApplication()
         context.deleteDatabase(SqliteResultsStore.DB_NAME)
+        var store: SqliteResultsStore? = null
         try {
             val db = SQLiteDatabase.openOrCreateDatabase(context.getDatabasePath(SqliteResultsStore.DB_NAME), null)
-            db.execSQL("CREATE TABLE settled_windows (ticker TEXT PRIMARY KEY, result TEXT)")
-            db.execSQL("CREATE TABLE forward_test (ticker TEXT PRIMARY KEY, series TEXT, captured_at_ms INTEGER, model_yes REAL, market_yes REAL, side TEXT, book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL, fee_usd REAL, quote_qualified INTEGER)")
-            db.execSQL("INSERT INTO forward_test VALUES ('KXBTC15M-OLD', 'KXBTC15M', 1, .7, .5, 'YES', .6, 20, 8, 4.9, .1, 1)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS settled_windows (ticker TEXT PRIMARY KEY, result TEXT)")
+            db.execSQL("CREATE TABLE IF NOT EXISTS forward_test (ticker TEXT PRIMARY KEY, series TEXT, captured_at_ms INTEGER, model_yes REAL, market_yes REAL, side TEXT, book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL, fee_usd REAL, quote_qualified INTEGER)")
+            db.execSQL("INSERT OR REPLACE INTO forward_test VALUES ('KXBTC15M-OLD', 'KXBTC15M', 1, .7, .5, 'YES', .6, 20, 8, 4.9, .1, 1)")
             db.version = 6
             db.close()
-            val store = SqliteResultsStore(context)
-            store.insertTicketForward(listOf(row()))
-            assertEquals("KXBTC15M-OLD", store.forwardTests().single().ticker)
-            assertEquals(row().ticker, store.ticketForward().single().ticker)
-        } finally { context.deleteDatabase(SqliteResultsStore.DB_NAME) }
+            val activeStore = SqliteResultsStore(context)
+            store = activeStore
+            activeStore.insertTicketForward(listOf(row()))
+            assertEquals("KXBTC15M-OLD", activeStore.forwardTests().first { it.ticker == "KXBTC15M-OLD" }.ticker)
+            assertEquals(row().ticker, activeStore.ticketForward().first { it.ticker == row().ticker }.ticker)
+        } finally {
+            store?.close()
+            context.deleteDatabase(SqliteResultsStore.DB_NAME)
+        }
     }
 }
