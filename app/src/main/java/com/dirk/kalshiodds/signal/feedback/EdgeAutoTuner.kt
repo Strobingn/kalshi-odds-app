@@ -204,8 +204,9 @@ object EdgeAutoTuner {
             brierDeltas += delta
             ev += if (sampledTaken.isEmpty()) Double.NEGATIVE_INFINITY else expectedValue(sampledTaken) / sampledTaken.size
         }
-        brierDeltas.sort()
-        ev.sort()
+        // MutableList.sort() is a stdlib extension and has failed CI as an unresolved reference.
+        java.util.Collections.sort(brierDeltas)
+        java.util.Collections.sort(ev)
         val q = max(0, ((brierDeltas.size - 1) * 0.05).toInt())
         return BootstrapEvidence(brierDeltas[q], ev[q])
     }

@@ -156,9 +156,9 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        val fee = KalshiFee.total(20, 0.40)
+        val fee = KalshiFee.total(fill.contracts, fill.limitPrice)
         assertEquals(fee, fill.feeUsd, 1e-9)
-        assertEquals(92.0 - fee, book.snapshot().cashUsd, 1e-6)
+        assertEquals(100.0 - 8.0 - fee, book.snapshot().cashUsd, 1e-6)
         assertTrue(fill.note.contains("win-target"))
     }
 
