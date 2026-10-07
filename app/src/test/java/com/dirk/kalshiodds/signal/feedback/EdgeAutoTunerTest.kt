@@ -9,14 +9,14 @@ import org.junit.Test
 class EdgeAutoTunerTest {
 
     @Test
-    fun notEnoughSamplesDoesNotSitOut() {
+    fun notEnoughSamplesKeepsAutoTuningSittingOut() {
         val samples = (0 until 10).map { i ->
             EdgeAutoTuner.Sample(0.70, 0.50, outcomeYes = true, edgeAfterFeesPp = 8.0)
         }
         val r = EdgeAutoTuner.tune(samples, minSamples = 30)
         assertFalse(r.enoughSamples)
-        assertFalse(r.sitOut)
-        assertTrue(r.reason.contains("Not enough"))
+        assertTrue(r.sitOut)
+        assertTrue(r.reason.contains("need"))
     }
 
     @Test
@@ -27,10 +27,11 @@ class EdgeAutoTunerTest {
                 modelYes = if (yes) 0.20 else 0.80,
                 marketMid = if (yes) 0.80 else 0.20,
                 outcomeYes = yes,
-                edgeAfterFeesPp = 12.0
+                edgeAfterFeesPp = 12.0,
+                timestampMs = i * 86_400_000L
             )
         }
-        val r = EdgeAutoTuner.tune(samples, minSamples = 30)
+        val r = EdgeAutoTuner.tune(samples, minSamples = 30, minDays = 14, bootstrapReps = 100)
         assertTrue(r.enoughSamples)
         assertTrue(r.sitOut)
         assertTrue(r.modelBrier!! > r.marketBrier!!)
@@ -44,13 +45,13 @@ class EdgeAutoTunerTest {
     fun picksThresholdThatMaximizesEv() {
         val samples = buildList {
             repeat(20) {
-                add(EdgeAutoTuner.Sample(0.80, 0.40, true, edgeAfterFeesPp = 12.0))
+                add(EdgeAutoTuner.Sample(0.80, 0.40, true, edgeAfterFeesPp = 12.0, timestampMs = it * 86_400_000L))
             }
             repeat(20) {
-                add(EdgeAutoTuner.Sample(0.55, 0.52, false, edgeAfterFeesPp = 1.0))
+                add(EdgeAutoTuner.Sample(0.55, 0.52, false, edgeAfterFeesPp = 1.0, timestampMs = (it + 20) * 86_400_000L))
             }
         }
-        val r = EdgeAutoTuner.tune(samples, minSamples = 20)
+        val r = EdgeAutoTuner.tune(samples, minSamples = 20, minDays = 14, bootstrapReps = 100)
         assertTrue(r.enoughSamples)
         assertFalse(r.sitOut)
         assertTrue(r.thresholdPp >= 1.5)
@@ -73,7 +74,7 @@ class EdgeAutoTunerTest {
                 edgePp = 10.0
             )
         }
-        val r = EdgeAutoTuner.fromEntries(rows, minSamples = 20)
+        val r = EdgeAutoTuner.fromEntries(rows, minSamples = 20, minDays = 1, bootstrapReps = 100)
         assertEquals(25, r.n)
         assertTrue(r.enoughSamples)
     }
