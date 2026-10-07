@@ -154,15 +154,31 @@ class ExternalMarketClient(
         )
     }
 
+    /**
+     * EWMA volatility gives the fair-value model a smooth, recent estimate
+     * instead of letting one 1-minute print flip its sigma.  Keep this in
+     * parity with ml/train_edge.py's [realized_vol_annual].
+     */
     private fun realizedVol(closes: List<Double>): Double? {
         if (closes.size < 4) return null
         val rets = closes.zipWithNext { a, b ->
             if (a > 0.0 && b > 0.0) ln(b / a) else 0.0
         }
         if (rets.isEmpty()) return null
-        val mean = rets.average()
-        val var_ = rets.map { val d = it - mean; d * d }.average()
+        var weightedSquares = 0.0
+        var weightSum = 0.0
+        var weight = 1.0
+        for (r in rets.asReversed()) {
+            weightedSquares += weight * r * r
+            weightSum += weight
+            weight *= EWMA_DECAY
+        }
+        val var_ = weightedSquares / weightSum.coerceAtLeast(1e-12)
         return sqrt(var_.coerceAtLeast(0.0))
+    }
+
+    private companion object {
+        const val EWMA_DECAY = 0.90
     }
 
     private fun getJsonObject(url: String): JSONObject? {
