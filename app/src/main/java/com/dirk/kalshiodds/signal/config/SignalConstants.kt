@@ -72,9 +72,6 @@ object SignalConstants {
     const val AUTO_TUNE_MIN_BRIER_ADVANTAGE = 0.0025
     const val AUTO_TUNE_BOOTSTRAP_REPS = 1_000
 
-    /** AI-generated paper fills are deliberately a fixed small experiment. */
-    const val AI_PAPER_STAKE_CAP_USD = 5.0
-
     const val DEFAULT_OPPORTUNITY_ALERTS = true
     const val DEFAULT_OPPORTUNITY_QUIET = false
     const val OPPORTUNITY_DEDUPE_MS = 15 * 60_000L
