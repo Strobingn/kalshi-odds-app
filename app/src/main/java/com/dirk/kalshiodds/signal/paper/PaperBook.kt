@@ -117,18 +117,23 @@ class PaperBook(
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
+        val price = (ticket.estimatedAvgFill.takeIf { it > 0.0 } ?: ticket.limitPrice)
+            .takeIf { it > 0.0 } ?: return null
+        val wanted = ticket.contracts.takeIf { it > 0 }
+            ?: ticket.stakeUsd.takeIf { it > 0.0 }?.let { kotlin.math.floor(it / price).toInt() }
+            ?: 0
         return fill(
             ticker = ticket.ticker,
             side = ticket.side,
-            limitPrice = ticket.limitPrice,
+            limitPrice = price,
             source = source,
             note = if (ticket.winTargetUsd != null) {
                 "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
             } else {
                 "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
             },
-            contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
-            stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
+            contracts = cappedAiContracts(wanted, price).takeIf { it > 0 },
+            stakeUsd = null,
             winTargetUsd = ticket.winTargetUsd
         )
     }
