@@ -541,8 +541,10 @@ class PaperBook(
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                // Void returns stake and fee, so the trade is a scratch, not a fee-sized win.
-                val pnl = if (outcome == "void") 0.0 else payout - fill.stakeUsd - fill.feeUsd
+                // A void returns both stake and the simulated entry fee, so its
+                // net P&L is zero. Subtract the fee for every outcome to keep
+                // realized P&L consistent with the cash ledger.
+                val pnl = payout - fill.stakeUsd - fill.feeUsd
                 cash += payout
                 fill.copy(
                     settled = true,
