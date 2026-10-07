@@ -28,8 +28,10 @@ class OffsetEdgeModelScoringTest {
         val engine = engine(model(kind = "offset_logistic"))
         val score = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)
         assertNotNull(score)
-        assertEquals(41.0, score!!.importedModelPp!!, 1e-4)
-        assertEquals("anchored output is the fair, not a 0.55/0.45 mix", 41.0, score.fairValuePp, 1e-4)
+        assertEquals("anchored output is recorded", 41.0, score.importedModelPp!!, 1e-4)
+        // No holdout win: the decision fair stays on the market, which this
+        // zero-weight model also reproduces.
+        assertEquals("unproven model does not leave the mid", 41.0, score.fairValuePp, 1e-4)
         assertEquals(0.0, score.deltaPp, 1e-4)
         assertEquals(1.0, score.blendWeight!!, 0.0)
         assertFalse("fair == mid is never an edge", score.modelEdgeQualified)
@@ -38,28 +40,29 @@ class OffsetEdgeModelScoringTest {
     }
 
     @Test
-    fun offsetModelMovesTheFairOnlyByItsWeights() {
-        // bias +0.4 in logit space on a 41¢ mid → sigmoid(logit(0.41) + 0.4) ≈ 50.9%.
+    fun offsetModelDoesNotMoveTheFairUntilItBeatsTheMarket() {
         val engine = engine(model(kind = "offset_logistic", bias = 0.4))
         val score = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
-        val expected = 100.0 / (1.0 + kotlin.math.exp(-(kotlin.math.ln(0.41 / 0.59) + 0.4)))
-        assertEquals(expected, score.fairValuePp, 1e-3)
-        assertEquals("YES", score.predictedSide)
-        assertTrue(score.netEdgePp!! > 0.0)
+        assertEquals(41.0, score.fairValuePp, 1e-3)
+        assertEquals("NO", score.predictedSide)
     }
 
     @Test
-    fun legacyLogisticStillBlendsWithTheEngineFair() {
-        val tickArgs = tick(yesBid = 0.40, yesAsk = 0.42)
-        val base = engine(null).score(tickArgs, settings(), nowMs = 10_000L)!!
-        val legacy = engine(model(kind = "logistic")).score(tickArgs, settings(), nowMs = 10_000L)!!
-        // Zero-weight legacy model → sigmoid(0) = 0.5, blended 0.35 with the mid,
-        // then 0.45 of that mixed into the engine fair (unchanged behavior).
+    fun provenOffsetModelPullsAQuarterOfTheWay() {
+        val engine = engine(model(kind = "offset_logistic", bias = 0.4, beats = true))
+        val score = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
+        val modelPp = 100.0 / (1.0 + kotlin.math.exp(-(kotlin.math.ln(0.41 / 0.59) + 0.4)))
+        val expected = 0.75 * 41.0 + 0.25 * modelPp
+        assertEquals(expected, score.fairValuePp, 1e-2)
+        assertEquals("YES", score.predictedSide)
+    }
+
+    @Test
+    fun legacyLogisticWithoutAHoldoutWinStaysOnTheMid() {
+        val legacy = engine(model(kind = "logistic")).score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
         assertEquals(50.0, legacy.importedModelPp!!, 1e-4)
-        assertEquals(0.35, legacy.blendWeight!!, 1e-6)
-        val blended = 0.65 * 0.41 + 0.35 * 0.5
-        val expected = (0.55 * (base.fairValuePp / 100.0) + 0.45 * blended) * 100.0
-        assertEquals(expected, legacy.fairValuePp, 1e-4)
+        assertEquals(41.0, legacy.fairValuePp, 1e-3)
+        assertEquals("NO", legacy.predictedSide)
     }
 
     private fun engine(edge: EdgeModel?): ScoringEngine {
@@ -69,7 +72,7 @@ class OffsetEdgeModelScoringTest {
         return engine
     }
 
-    private fun model(kind: String, bias: Double = 0.0): EdgeModel = EdgeModel.parse(
+    private fun model(kind: String, bias: Double = 0.0, beats: Boolean = false): EdgeModel = EdgeModel.parse(
         """
         {
           "version": 2,
@@ -86,7 +89,8 @@ class OffsetEdgeModelScoringTest {
           "platt_b": 0.0,
           "blend_weight": ${if (kind == "logistic") 0.35 else 1.0},
           "fee_margin": 0.07,
-          "confidence_margin": 0.03
+          "confidence_margin": 0.03,
+          "metrics": ${if (beats) """{"model_brier":0.10,"market_brier":0.14,"model_logloss":0.30,"market_logloss":0.40,"synthetic":0}""" else "{}"}
         }
         """.trimIndent()
     )

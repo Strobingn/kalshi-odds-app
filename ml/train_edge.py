@@ -87,14 +87,14 @@ KIND_LOGISTIC = "logistic"
 # (KalshiPrice 0.1¢–99.9¢), so w = 0 reproduces every usable mid.
 MID_CLIP = 0.001
 # Columns the offset model may weight. Everything else gets weight 0.
-# market_mid stays in: next to the fixed logit(mid) offset, a linear mid
-# term lets the fit trade the market off against the spot features (and
-# correct its calibration slope). L2 keeps it at ~0 unless that helps.
-# Left out on purpose: tte_frac / spread (no direction), imbalance (always 0
-# in training — no historical L2), momentum / realized_vol (the app builds
-# them from its tick buffer, training from 1m candles — no parity),
-# time_of_day (trainer UTC vs app New York clock).
-OFFSET_FEATURES = ["dist_to_strike_vol", "market_mid", "cross_asset", "digital_fair"]
+# market_mid is NOT a column: logit(mid) is already the offset. A second
+# linear mid term is what lets the fit walk off a price that is already
+# the better forecast.
+# Left out on purpose: market_mid, tte_frac / spread (no direction),
+# imbalance (always 0 in training — no historical L2), momentum /
+# realized_vol (the app builds them from its tick buffer, training from
+# 1m candles — no parity), time_of_day (trainer UTC vs app New York clock).
+OFFSET_FEATURES = ["dist_to_strike_vol", "cross_asset", "digital_fair"]
 # Rows are clustered: the 13 minutes of one market share one outcome, so
 # the effective sample is the market count. 0.05 keeps a calibrated
 # market close to w = 0 at a few hundred markets (see test_train_edge.py).

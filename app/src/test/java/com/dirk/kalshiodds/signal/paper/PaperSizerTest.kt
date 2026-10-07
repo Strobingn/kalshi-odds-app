@@ -32,14 +32,15 @@ class PaperSizerTest {
     @Test
     fun kellyFractionMatchesTheFormula() {
         val c = 0.5 + 0.07 * 0.25
-        assertEquals((0.70 - c) / (1.0 - c), PaperSizer.fraction(0.50, 0.70), 1e-12)
+        val full = (0.70 - c) / (1.0 - c)
+        assertEquals(PaperSizer.KELLY_MULTIPLIER * full, PaperSizer.fraction(0.50, 0.70), 1e-12)
     }
 
     @Test
-    fun aCertainWinUsesAllTheCash() {
-        assertEquals(1.0, PaperSizer.fraction(0.50, 1.0), 1e-12)
+    fun aCertainWinUsesAQuarterOfTheCashNotAllOfIt() {
+        assertEquals(0.25, PaperSizer.fraction(0.50, 1.0), 1e-12)
         val n = PaperSizer.contracts(100.0, 0.50, 1.0)
-        assertTrue("n=$n", n in 180..200)
+        assertTrue("n=$n", n in 40..55)
     }
 
     @Test
@@ -57,18 +58,18 @@ class PaperSizerTest {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         // NO side: fair YES 62% means NO wins 38%; NO ask 20¢ is a large edge.
         val fill = book.considerAlert(alert("NO", 62.0), ask = 0.20, enabled = true)!!
-        assertTrue("stake ${fill.stakeUsd}", fill.stakeUsd > 5.5)
-        assertTrue(fill.note.contains("sized by edge"))
-        assertTrue(book.snapshot().cashUsd >= 0.0)
-        assertTrue(book.snapshot().cashUsd < 94.5)
+        assertTrue("stake ${fill.stakeUsd}", fill.stakeUsd > 1.0)
+        assertTrue(fill.stakeUsd < 30.0)
+        assertTrue(fill.note.contains("quarter-Kelly"))
+        assertTrue(book.snapshot().cashUsd >= 70.0)
     }
 
     @Test
-    fun alertWithoutEdgeKeepsTheFiveDollarClip() {
+    fun alertWithoutEdgeIsSkipped() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        val fill = book.considerAlert(alert("YES", 52.0), ask = 0.51, enabled = true)!!
-        assertEquals(9, fill.contracts) // floor(5 / 0.51)
-        assertTrue(!fill.note.contains("sized by edge"))
+        val fill = book.considerAlert(alert("YES", 52.0), ask = 0.51, enabled = true)
+        assertEquals(null, fill)
+        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
@@ -77,7 +78,8 @@ class PaperSizerTest {
         val book = PaperBook(idFactory = { "p${n++}" }, nowMs = { 10L })
         val first = book.considerAlert(alert("YES", 90.0), ask = 0.50, enabled = true)!!
         val second = book.considerAlert(alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"), ask = 0.50, enabled = true)
-        assertTrue(first.stakeUsd > 50.0)
+        assertTrue(first.stakeUsd > 10.0)
+        assertTrue(first.stakeUsd < 40.0)
         assertTrue(second == null || second.stakeUsd < first.stakeUsd)
         assertTrue(book.snapshot().cashUsd >= 0.0)
     }
