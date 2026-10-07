@@ -208,8 +208,8 @@ object EdgeAutoTuner {
             if (stake <= 0.0) Double.NaN else pnl / stake
         }.filter { !it.isNaN() }
         if (means.isEmpty()) return null
-        means.sort()
-        return means[(means.size * 0.10).toInt().coerceIn(0, means.size - 1)]
+        val sorted = means.sorted()
+        return sorted[(sorted.size * 0.10).toInt().coerceIn(0, sorted.size - 1)]
     }
 
     private fun fmt3(v: Double): String = String.format(java.util.Locale.US, "%.3f", v)
