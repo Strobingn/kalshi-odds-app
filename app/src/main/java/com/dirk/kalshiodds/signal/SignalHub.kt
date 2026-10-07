@@ -8,6 +8,7 @@ import com.dirk.kalshiodds.data.local.results.CrashBreadcrumb
 import com.dirk.kalshiodds.data.local.archive.ChartTickRow
 import com.dirk.kalshiodds.data.local.results.OddsMidRow
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
+import com.dirk.kalshiodds.data.local.results.SettlementIndexRow
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.external.CfBenchmarksValue
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
@@ -73,6 +74,7 @@ class SignalHub(
     private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
+    private val lastSettlementIndexPersistMs = ConcurrentHashMap<String, Long>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
     private val bookMailbox = LatestWinsMailbox<Long>()
     private val logWriteBusy = AtomicBoolean(false)
@@ -121,6 +123,21 @@ class SignalHub(
     /** Exact CF index values are settlement inputs; public-exchange quotes remain context only. */
     fun ingestCfBenchmarks(value: CfBenchmarksValue) {
         scoring.rememberCfBenchmarks(value)
+        // Persist one point per 15 seconds. The feed's final-minute average is
+        // retained too, so this stays compact enough for a four-week archive.
+        val previous = lastSettlementIndexPersistMs.put(value.indexId, value.sourceTsMs) ?: Long.MIN_VALUE
+        if (value.sourceTsMs - previous >= SETTLEMENT_INDEX_SAMPLE_MS) {
+            results?.enqueueSettlementIndex(
+                SettlementIndexRow(
+                    indexId = value.indexId,
+                    sourceTsMs = value.sourceTsMs,
+                    valueUsd = value.valueUsd,
+                    finalMinuteAverageUsd = value.finalMinuteAverageUsd,
+                    finalMinuteSamples = value.finalMinuteSamples,
+                    receivedAtMs = value.receivedAtMs
+                )
+            )
+        }
     }
 
     @Volatile
@@ -492,6 +509,7 @@ class SignalHub(
     companion object {
         private const val TAG = "DipHunterTick"
         const val MAX_ALERTS = 30
+        private const val SETTLEMENT_INDEX_SAMPLE_MS = 15_000L
 
         fun elapsedNanos(): Long = try {
             SystemClock.elapsedRealtimeNanos()
