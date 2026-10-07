@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import sys
 import tempfile
@@ -218,6 +219,68 @@ class OffsetModelTest(unittest.TestCase):
         # Margin: 3¢ after fees (1.3¢ here).
         self.assertIsNone(te.ev_side(0.56, 0.53, 0.48)[0])
 
+    def test_calibration_error_small_for_calibrated_forecast(self) -> None:
+        # 100 rows at p=0.7 with 70 YES: that bin's ECE is 0.
+        p = [0.7] * 100
+        y = [1] * 70 + [0] * 30
+        self.assertAlmostEqual(te.calibration_error(p, y), 0.0)
+        # Same forecast, wrong outcomes: large ECE.
+        self.assertGreater(te.calibration_error(p, [1] * 30 + [0] * 70), 0.3)
+        self.assertEqual(te.calibration_error([], []), 1.0)
+
+    def test_bootstrap_ci_brackets_true_pnl_and_is_deterministic(self) -> None:
+        samples = _samples(240, seed=5, lag=0.4)
+        rows = [(s, te.sigmoid(2.0 * s.x[0])) for s in samples]
+        base = te.ev_pnl(rows)
+        a = te.bootstrap_pnl_ci(rows, n_boot=200)
+        b = te.bootstrap_pnl_ci(rows, n_boot=200)
+        self.assertEqual(a, b, "fixed seed → deterministic CI")
+        self.assertLessEqual(a["ci_low"], base["pnl_per_bet"] + 0.05)
+        self.assertGreaterEqual(a["ci_high"], base["pnl_per_bet"] - 0.05)
+        self.assertGreaterEqual(a["ci_low"], 0.0 if base["pnl_per_bet"] > 0.10 else -1.0)
+        self.assertTrue(0.0 <= a["p_low"] <= 1.0)
+        self.assertEqual(a["n_boot_markets"], 240.0, "one block per market")
+
+    def test_promotion_requires_bootstrap_ci_excluding_zero(self) -> None:
+        # Beats the market on scores but the CI includes zero → not eligible.
+        metrics = {
+            "n_holdout": 100.0,
+            "model_brier": 0.10,
+            "market_brier": 0.15,
+            "model_logloss": 0.30,
+            "market_logloss": 0.40,
+            "sim_trades": 40.0,
+            "boot_ci_low": -0.01,
+            "boot_ci_high": 0.05,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertTrue(payload["beats_market"])
+        self.assertFalse(payload["promotion_eligible"])
+        metrics["boot_ci_low"] = 0.01
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertTrue(payload["promotion_eligible"])
+        # Too few simulated trades can never promote.
+        metrics["sim_trades"] = 5.0
+        metrics["boot_ci_low"] = 0.05
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertFalse(payload["promotion_eligible"])
+
+    def test_walk_forward_reports_calibration_and_bootstrap(self) -> None:
+        metrics = te.walk_forward(_samples(360, seed=9, lag=0.3))
+        for key in ("model_calibration_error", "market_calibration_error", "boot_ci_low", "boot_ci_high", "boot_p_of_loss"):
+            self.assertIn(key, metrics)
+            self.assertTrue(math.isfinite(metrics[key]), key)
+        self.assertLessEqual(metrics["model_calibration_error"], metrics["market_calibration_error"] + 0.05)
+
     def test_export_is_offset_logistic_with_ten_features(self) -> None:
         samples = _samples(90)
         model = te.fit_model(samples)
@@ -235,7 +298,7 @@ class OffsetModelTest(unittest.TestCase):
         self.assertEqual(payload["mid_clip"], te.MID_CLIP)
         self.assertEqual((payload["platt_a"], payload["platt_b"]), (1.0, 0.0))
         self.assertTrue(all(isinstance(v, float) for v in payload["metrics"].values()))
-        self.assertEqual(manifest["tag"], "claude-edge-model")
+        self.assertEqual(manifest["tag"], "mis-bitcoin-edge-model")
         self.assertFalse(manifest["beats_market"], "synthetic data never activates")
 
 

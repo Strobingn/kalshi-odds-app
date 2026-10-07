@@ -19,7 +19,12 @@ data class EdgeModelManifest(
     val simPnl: Double? = null,
     val simHitRate: Double? = null,
     /** Trained on the fixture / fallback data, never on settled markets. */
-    val synthetic: Boolean = false
+    val synthetic: Boolean = false,
+    /** Market-block bootstrap 90% CI (per contract, at the ask) when published. */
+    val bootCiLow: Double? = null,
+    val bootCiHigh: Double? = null,
+    /** Manifests without the flag (older trainers) are judged on scores only. */
+    val promotionEligible: Boolean? = null
 ) {
     val beatsMarket: Boolean
         get() = !synthetic &&
@@ -41,6 +46,9 @@ data class EdgeModelManifest(
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
         if (synthetic) o.put("synthetic", true)
+        bootCiLow?.let { o.put("boot_ci_low", it) }
+        bootCiHigh?.let { o.put("boot_ci_high", it) }
+        promotionEligible?.let { o.put("promotion_eligible", it) }
         o.put("beats_market", beatsMarket)
         return o.toString()
     }
@@ -76,7 +84,10 @@ data class EdgeModelManifest(
                 },
                 simPnl = o.optDoubleOrNull("sim_pnl"),
                 simHitRate = o.optDoubleOrNull("sim_hit_rate"),
-                synthetic = o.optBoolean("synthetic", false)
+                synthetic = o.optBoolean("synthetic", false),
+                bootCiLow = o.optDoubleOrNull("boot_ci_low"),
+                bootCiHigh = o.optDoubleOrNull("boot_ci_high"),
+                promotionEligible = if (o.has("promotion_eligible")) o.optBoolean("promotion_eligible") else null
             )
         }
 
@@ -96,7 +107,13 @@ data class EdgeModelManifest(
                 marketLogLoss = m["market_logloss"] ?: error("model missing market_logloss"),
                 simPnl = m["sim_pnl"],
                 simHitRate = m["sim_hit_rate"],
-                synthetic = (m["synthetic"] ?: 0.0) > 0.0
+                synthetic = (m["synthetic"] ?: 0.0) > 0.0,
+                bootCiLow = m["boot_ci_low"],
+                bootCiHigh = m["boot_ci_high"],
+                promotionEligible = when (val pe = m["promotion_eligible"]) {
+                    null -> null
+                    else -> pe > 0.5
+                }
             )
         }
 
@@ -152,6 +169,16 @@ object ModelActivation {
                     "(Brier ${fmt(manifest.modelBrier)} vs ${fmt(manifest.marketBrier)}, " +
                     "log-loss ${fmt(manifest.modelLogLoss)} vs ${fmt(manifest.marketLogLoss)}). " +
                     "Previous model stays active."
+            )
+        }
+        if (manifest.promotionEligible == false) {
+            return ModelActivationDecision(
+                activate = false,
+                manifest = manifest,
+                reason = "Holdout beats the market on scores, but the ask-fill bootstrap " +
+                    "P&L CI does not exclude zero " +
+                    "(CI ${manifest.bootCiLow ?: Double.NaN} .. ${manifest.bootCiHigh ?: Double.NaN}) — " +
+                    "not promoting; model stays advisory."
             )
         }
         return ModelActivationDecision(

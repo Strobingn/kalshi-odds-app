@@ -64,7 +64,7 @@ Python 3.10+ standard library only (no pip packages).
 
 GitHub Actions: **Actions → Train edge model → Run workflow**, or the weekly
 Monday cron. The JSON + `edge_model_manifest.json` are uploaded as an artifact
-and published on the rolling `claude-edge-model` release (this branch's app
+and published on the rolling `mis-bitcoin-edge-model` release (this branch's app
 reads that tag; `edge-model-latest` belongs to the main app). In the app:
 **Data → Get latest model**.
 
@@ -89,3 +89,28 @@ The script prints hold-out `model_brier` vs `market_brier` (and log-loss). If
 the model does not beat the market on both, the app does not activate it. The
 app also hides “edge” flags until |model − market| > fee + margin, and the
 ticket side is whichever side has EV > 3¢ at the ask — often neither.
+
+## Promotion gate (this branch)
+
+Two gates must both pass before a model may influence live sizing:
+
+1. `beats_market` — out-of-sample Brier **and** log-loss below the market mid
+   on the walk-forward holdout (same as before).
+2. `promotion_eligible` — NEW: at least 20 EV-at-ask simulated trades and the
+   **market-block bootstrap 90% P&L CI excluding zero**
+   (`boot_ci_low > 0`). The bootstrap resamples whole markets (their minutes
+   share one settlement), not minutes, so a single lucky window cannot
+   promote a coin flip.
+
+Reference numbers from a live 1-day pull (288 markets, 3,744 minutes):
+model Brier 0.1652 vs market 0.1656, ECE 0.0200 vs 0.0279, sim P&L +$1.95 over
+145 bets, but bootstrap CI [-0.031, +0.188] with P(loss) = 0.12 —
+`beats_market: true`, `promotion_eligible: false`. The model is honest and
+stays advisory. That is the intended behavior: a scoring win with a P&L CI
+straddling zero is not money.
+
+The manifest also publishes `model_calibration_error` /
+`market_calibration_error` (ECE) and `boot_p_of_loss`. On the phone,
+`ModelActivation.decide` refuses activation when `promotion_eligible` is
+false even if `beats_market` is true; manifests without the flag (older
+trainers) are judged on scores only.

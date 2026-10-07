@@ -1,6 +1,6 @@
 name: Train edge model
 
-# Publishes to the rolling `claude-edge-model` release, which the Claude app
+# Publishes to the rolling `mis-bitcoin-edge-model` release, which this app
 # (SignalConstants.EDGE_MODEL_RELEASE_TAG) downloads. `edge-model-latest`
 # belongs to the main app; nothing in this file may write to it.
 # Scheduled workflows only run from the default branch, and even there this
@@ -21,7 +21,7 @@ permissions:
   contents: write
 
 env:
-  RELEASE_TAG: claude-edge-model
+  RELEASE_TAG: mis-bitcoin-edge-model
 
 jobs:
   train:
@@ -58,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          test "$RELEASE_TAG" = "claude-edge-model"
+          test "$RELEASE_TAG" = "mis-bitcoin-edge-model"
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
@@ -72,7 +72,10 @@ jobs:
               f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
               f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
               f"- sim EV-at-ask trades: {m.get('sim_trades')}, P&L/contract sum: {m.get('sim_pnl')}\\n"
-              f"- beats_market: {m.get('beats_market')}"
+              f"- calibration ECE: {m.get('model_calibration_error')} vs market {m.get('market_calibration_error')}\n"
+              f"- bootstrap 90% P&L CI at ask: [{m.get('boot_ci_low')}, {m.get('boot_ci_high')}], P(loss)={m.get('boot_p_of_loss')}\n"
+              f"- beats_market: {m.get('beats_market')}\n"
+              f"- promotion_eligible: {m.get('promotion_eligible')}"
           )
           PY
           )
@@ -80,5 +83,5 @@ jobs:
             ml/edge_model.json \
             ml/edge_model_manifest.json \
             --target "$GITHUB_SHA" \
-            --title "Edge model (Claude app)" \
+            --title "Edge model (Mis_bitcoin app)" \
             --notes "$NOTES"

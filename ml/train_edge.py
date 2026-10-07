@@ -38,6 +38,7 @@ import argparse
 import bisect
 import json
 import math
+import random
 import sys
 import threading
 import time
@@ -807,6 +808,20 @@ def logloss(p: list[float], y: list[int]) -> float:
     return s / len(y)
 
 
+def calibration_error(p: list[float], y: list[int], bins: int = 10) -> float:
+    """Expected calibration error; reported with proper scores, never alone."""
+    if not p:
+        return 1.0
+    total = 0.0
+    for bucket in range(bins):
+        rows = [(pi, yi) for pi, yi in zip(p, y) if min(bins - 1, int(pi * bins)) == bucket]
+        if rows:
+            total += len(rows) / len(p) * abs(
+                sum(pi for pi, _ in rows) / len(rows) - sum(yi for _, yi in rows) / len(rows)
+            )
+    return total
+
+
 def fee_per_contract(price: float, fee_rate: float = FEE_RATE) -> float:
     """Kalshi taker fee `rate·P·(1−P)` per contract, before cent rounding.
 
@@ -830,6 +845,52 @@ def ev_side(p_yes: float, yes_ask: float | None, no_ask: float | None, margin: f
     if best is None or best[1] <= margin:
         return None, ev_yes, ev_no
     return best[0], ev_yes, ev_no
+
+
+def bootstrap_pnl_ci(
+    rows: list[tuple[Sample, float]],
+    margin: float = EV_MARGIN,
+    n_boot: int = 1000,
+    level: float = 0.90,
+    seed: int = 2026,
+) -> dict[str, float]:
+    """Block bootstrap over MARKETS of the EV-at-ask betting rule.
+
+    A market's minutes share one settlement, so the resample unit is the
+    market (one bet per market in [ev_pnl]). The CI is on per-contract P&L;
+    `ci_low > 0` is the promotion gate — a higher hit rate alone never is.
+    """
+    by_ticker: dict[str, tuple[Sample, float]] = {}
+    for s, p in rows:
+        by_ticker.setdefault(s.ticker, (s, p))
+    blocks = list(by_ticker.values())
+    if not blocks:
+        return {"ci_low": 0.0, "ci_high": 0.0, "p_low": 0.0, "n_boot_markets": 0.0}
+    rng = random.Random(seed)
+    per_bet: list[float] = []
+    for m in range(n_boot):
+        pnl = 0.0
+        n = 0
+        for _ in range(len(blocks)):
+            s, p = blocks[rng.randrange(len(blocks))]
+            side, _, _ = ev_side(p, s.yes_ask, s.no_ask, margin)
+            if side is None:
+                continue
+            ask = s.yes_ask if side == "YES" else s.no_ask
+            fee = fee_per_contract(ask)
+            won = (s.y == 1) == (side == "YES")
+            pnl += (1.0 - ask - fee) if won else (-ask - fee)
+            n += 1
+        if n:
+            per_bet.append(pnl / n)
+    if not per_bet:
+        return {"ci_low": 0.0, "ci_high": 0.0, "p_low": 1.0, "n_boot_markets": 0.0}
+    per_bet.sort()
+    def q(frac: float) -> float:
+        return per_bet[min(len(per_bet) - 1, max(0, int(frac * len(per_bet))))]
+    lo, hi = q((1.0 - level) / 2.0), q(1.0 - (1.0 - level) / 2.0)
+    p_low = sum(1.0 for v in per_bet if v <= 0.0) / len(per_bet)
+    return {"ci_low": lo, "ci_high": hi, "p_low": p_low, "n_boot_markets": float(len(blocks))}
 
 
 def ev_pnl(rows: list[tuple[Sample, float]], margin: float = EV_MARGIN) -> dict[str, float]:
@@ -908,6 +969,7 @@ def walk_forward(
     mh = [s.mid for s, _ in hold]
     sim = ev_pnl(hold, ev_margin)
     market_sim = ev_pnl([(s, s.mid) for s, _ in hold], ev_margin)
+    boot = bootstrap_pnl_ci(hold, ev_margin)
     model_brier = brier(ph, yh)
     market_brier = brier(mh, yh)
     return {
@@ -930,6 +992,12 @@ def walk_forward(
         "sim_pnl_per_bet": sim["pnl_per_bet"],
         # Sanity: the market as its own model can never clear ask + fee.
         "market_sim_trades": market_sim["n"],
+        "model_calibration_error": calibration_error(ph, yh),
+        "market_calibration_error": calibration_error(mh, yh),
+        "boot_ci_low": boot["ci_low"],
+        "boot_ci_high": boot["ci_high"],
+        "boot_p_of_loss": boot["p_low"],
+        "boot_markets": boot["n_boot_markets"],
     }
 
 
@@ -961,7 +1029,7 @@ def fixture_dataset(n: int = 240) -> list[Sample]:
 # --- Export -------------------------------------------------------------------
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, synthetic: bool = False, tag: str = "claude-edge-model", version: str = "2") -> None:
+def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, synthetic: bool = False, tag: str = "mis-bitcoin-edge-model", version: str = "2") -> None:
     n = int(metrics.get("n_holdout", metrics.get("n_samples", 0)) or 0)
     model_brier = float(metrics.get("model_brier", 1.0))
     market_brier = float(metrics.get("market_brier", 1.0))
@@ -982,8 +1050,25 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "model_asset": "edge_model.json",
         "tag": tag,
         "synthetic": synthetic,
+        "model_calibration_error": metrics.get("model_calibration_error"),
+        "market_calibration_error": metrics.get("market_calibration_error"),
+        "boot_ci_low": metrics.get("boot_ci_low"),
+        "boot_ci_high": metrics.get("boot_ci_high"),
+        "boot_p_of_loss": metrics.get("boot_p_of_loss"),
+        "sim_trades": metrics.get("sim_trades"),
         # Synthetic (fixture) data never activates on a phone.
         "beats_market": (not synthetic) and n > 0 and model_brier < market_brier and model_ll < market_ll,
+        # Promotion needs BOTH: the model beats the market mid out of sample
+        # (proper scores) AND the market-block bootstrap P&L CI at the ask
+        # excludes zero. Either failing keeps the model advisory-only.
+        "promotion_eligible": (
+            (not synthetic)
+            and n > 0
+            and model_brier < market_brier
+            and model_ll < market_ll
+            and float(metrics.get("sim_trades", 0) or 0) >= 20
+            and float(metrics.get("boot_ci_low", 0.0) or 0.0) > 0.0
+        ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -1030,7 +1115,7 @@ def main() -> int:
     ap.add_argument("--ev-margin", type=float, default=EV_MARGIN)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--cache", default=None, help="train from a tools/backtest cache dir instead of the network")
-    ap.add_argument("--tag", default="claude-edge-model", help="release tag written into the manifest")
+    ap.add_argument("--tag", default="mis-bitcoin-edge-model", help="release tag written into the manifest")
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
     ap.add_argument("--fixture", action="store_true")
