@@ -17,7 +17,9 @@ object EdgeAutoTuner {
         val marketMid: Double,
         val outcomeYes: Boolean,
         val edgeAfterFeesPp: Double,
-        val stakeUsd: Double = 1.0
+        val stakeUsd: Double = 1.0,
+        /** UTC day of the market close (closeTimeMs / 86400000) — bootstrap block. */
+        val closeDay: Long = 0L
     )
 
     data class Result(
@@ -30,6 +32,8 @@ object EdgeAutoTuner {
         val modelLogLoss: Double?,
         val marketLogLoss: Double?,
         val evAtThreshold: Double?,
+        /** Day-block bootstrap: 10th percentile of per-bet EV across runs. */
+        val evP10: Double? = null,
         val reason: String
     ) {
         val beatsMarket: Boolean
@@ -62,7 +66,8 @@ object EdgeAutoTuner {
                 marketMid = mid,
                 outcomeYes = outcome == "yes",
                 edgeAfterFeesPp = afterFees,
-                stakeUsd = 1.0
+                stakeUsd = 1.0,
+                closeDay = (e.closeTimeMs ?: e.timestampMs) / 86_400_000L
             )
         }
         return tune(samples, minSamples)
@@ -97,7 +102,9 @@ object EdgeAutoTuner {
         var bestN = 0
         for (t in CANDIDATE_PP) {
             val taken = samples.filter { it.edgeAfterFeesPp + 1e-12 >= t }
-            if (taken.size < minSamples) continue
+            // A threshold is only a candidate if enough bets fire at it: an EV built
+            // from a handful of settlements is one lucky day.
+            if (taken.size < SignalConstants.AUTO_TUNE_MIN_BETS) continue
             val ev = expectedValue(taken)
             if (ev > bestEv + 1e-12 || (kotlin.math.abs(ev - bestEv) <= 1e-12 && t < bestThreshold)) {
                 bestEv = ev
@@ -107,7 +114,8 @@ object EdgeAutoTuner {
         }
 
         val negativeEv = bestEv.isFinite() && bestEv <= 0.0
-        val sitOut = !beats || negativeEv || bestEv == Double.NEGATIVE_INFINITY
+        val bootP10 = bootstrapEvP10(samples, bestThreshold)
+        val sitOut = !beats || negativeEv || bestEv == Double.NEGATIVE_INFINITY || bootP10 == null || bootP10 <= 0.0
         val reason = when {
             !beats && negativeEv ->
                 "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
@@ -117,8 +125,12 @@ object EdgeAutoTuner {
                 "This bet's expected value is negative."
             bestEv == Double.NEGATIVE_INFINITY ->
                 "Not enough similar bets after fees to size a threshold."
+            bootP10 == null ->
+                "Not enough bets at any threshold to test for luck."
+            bootP10 <= 0.0 ->
+                "EV is positive but does not survive day resampling (10th pct ${fmt(bootP10)}) — sitting out."
             else ->
-                "Auto-tune ${fmt(bestThreshold)} pp · EV ${fmt(bestEv)} on $bestN / ${samples.size} signals."
+                "Auto-tune ${fmt(bestThreshold)} pp · EV ${fmt(bestEv)} (10th pct ${fmt(bootP10)}) on $bestN / ${samples.size} signals."
         }
         return Result(
             sitOut = sitOut,
@@ -130,6 +142,7 @@ object EdgeAutoTuner {
             modelLogLoss = modelLl,
             marketLogLoss = marketLl,
             evAtThreshold = bestEv.takeIf { it.isFinite() && it != Double.NEGATIVE_INFINITY },
+            evP10 = bootP10,
             reason = reason
         )
     }
@@ -165,5 +178,39 @@ object EdgeAutoTuner {
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%+.2f", v)
+    /**
+     * Day-block bootstrap EV at [thresholdPp]: resample UTC close days with
+     * replacement, re-take the bets at the threshold, and return the 10th
+     * percentile of mean per-bet EV across runs. Null when too few days or
+     * bets to resample.
+     */
+    private fun bootstrapEvP10(samples: List<Sample>, thresholdPp: Double): Double? {
+        val taken = samples.filter { it.edgeAfterFeesPp + 1e-12 >= thresholdPp }
+        if (taken.isEmpty()) return null
+        val byDay = taken.groupBy { it.closeDay }.values.toList()
+        if (byDay.size < 2) return null
+        val rng = java.util.Random(2026L)
+        val runs = SignalConstants.AUTO_TUNE_BOOTSTRAP_RUNS
+        val means = DoubleArray(runs) {
+            var pnl = 0.0
+            var stake = 0.0
+            repeat(byDay.size) {
+                val day = byDay[rng.nextInt(byDay.size)]
+                for (s in day) {
+                    val sideYes = s.modelYes >= s.marketMid
+                    val won = sideYes == s.outcomeYes
+                    val price = if (sideYes) s.marketMid else 1.0 - s.marketMid
+                    val fee = KalshiFee.perContract(price, SignalConstants.DEFAULT_FEE_RATE, s.stakeUsd)
+                    pnl += (if (won) (1.0 - price - fee) else (-price - fee)) * s.stakeUsd
+                    stake += s.stakeUsd
+                }
+            }
+            if (stake <= 0.0) Double.NaN else pnl / stake
+        }.filter { !it.isNaN() }
+        if (means.isEmpty()) return null
+        means.sort()
+        return means[(means.size * 0.10).toInt().coerceIn(0, means.size - 1)]
+    }
+
     private fun fmt3(v: Double): String = String.format(java.util.Locale.US, "%.3f", v)
 }

@@ -239,7 +239,8 @@ class OffsetModelTest(unittest.TestCase):
         self.assertGreaterEqual(a["ci_high"], base["pnl_per_bet"] - 0.05)
         self.assertGreaterEqual(a["ci_low"], 0.0 if base["pnl_per_bet"] > 0.10 else -1.0)
         self.assertTrue(0.0 <= a["p_low"] <= 1.0)
-        self.assertEqual(a["n_boot_markets"], 240.0, "one block per market")
+        # Day blocks: the 240 synthetic markets span 2 UTC days of close_ts.
+        self.assertEqual(a["n_boot_markets"], 2.0, "one block per UTC day")
 
     def test_promotion_requires_bootstrap_ci_excluding_zero(self) -> None:
         # Beats the market on scores but the CI includes zero → not eligible.
@@ -249,7 +250,7 @@ class OffsetModelTest(unittest.TestCase):
             "market_brier": 0.15,
             "model_logloss": 0.30,
             "market_logloss": 0.40,
-            "sim_trades": 40.0,
+            "sim_trades": 240.0,
             "boot_ci_low": -0.01,
             "boot_ci_high": 0.05,
         }
@@ -266,7 +267,7 @@ class OffsetModelTest(unittest.TestCase):
             payload = json.loads(man.read_text())
         self.assertTrue(payload["promotion_eligible"])
         # Too few simulated trades can never promote.
-        metrics["sim_trades"] = 5.0
+        metrics["sim_trades"] = 150.0
         metrics["boot_ci_low"] = 0.05
         with tempfile.TemporaryDirectory() as tmp:
             man = Path(tmp) / "manifest.json"

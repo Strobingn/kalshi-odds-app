@@ -41,13 +41,19 @@ class EdgeAutoTunerTest {
     }
 
     @Test
-    fun picksThresholdThatMaximizesEv() {
+    fun picksThresholdThatMaximizesEvAndSurvivesDayResampling() {
+        // 8 UTC days of genuinely winning bets (model right, price cheap):
+        // the day-block bootstrap keeps a positive 10th-percentile EV.
         val samples = buildList {
-            repeat(20) {
-                add(EdgeAutoTuner.Sample(0.80, 0.40, true, edgeAfterFeesPp = 12.0))
-            }
-            repeat(20) {
-                add(EdgeAutoTuner.Sample(0.55, 0.52, false, edgeAfterFeesPp = 1.0))
+            var day = 0L
+            repeat(64) { i ->
+                if (i % 8 == 0) day++
+                val strong = i % 4 != 0
+                if (strong) {
+                    add(EdgeAutoTuner.Sample(0.80, 0.40, true, edgeAfterFeesPp = 12.0, closeDay = day))
+                } else {
+                    add(EdgeAutoTuner.Sample(0.55, 0.52, false, edgeAfterFeesPp = 1.0, closeDay = day))
+                }
             }
         }
         val r = EdgeAutoTuner.tune(samples, minSamples = 20)
@@ -55,6 +61,26 @@ class EdgeAutoTunerTest {
         assertFalse(r.sitOut)
         assertTrue(r.thresholdPp >= 1.5)
         assertTrue((r.evAtThreshold ?: 0.0) > 5.0)
+        assertTrue((r.evP10 ?: 0.0) > 0.0, "10th-percentile EV must survive day resampling")
+    }
+
+    @Test
+    fun sitsOutWhenEvDoesNotSurviveDayResampling() {
+        // One lucky day carries the whole EV: most days lose. The full-sample
+        // EV is positive but the day-block bootstrap 10th percentile is not.
+        val samples = buildList {
+            repeat(10) {
+                add(EdgeAutoTuner.Sample(0.90, 0.20, true, edgeAfterFeesPp = 40.0, closeDay = 7))
+            }
+            repeat(60) { i ->
+                val day = 1L + (i % 6)
+                // Slight favorite priced about right: small negative EV.
+                add(EdgeAutoTuner.Sample(0.60, 0.58, false, edgeAfterFeesPp = 40.0, closeDay = day))
+            }
+        }
+        val r = EdgeAutoTuner.tune(samples, minSamples = 20)
+        assertTrue(r.sitOut)
+        assertTrue(r.reason.contains("resampling"))
     }
 
     @Test

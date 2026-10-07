@@ -32,14 +32,23 @@ class PaperSizerTest {
     @Test
     fun kellyFractionMatchesTheFormula() {
         val c = 0.5 + 0.07 * 0.25
-        assertEquals((0.70 - c) / (1.0 - c), PaperSizer.fraction(0.50, 0.70), 1e-12)
+        // Below the 10% cap the fraction is raw Kelly.
+        val f = (0.70 - c) / (1.0 - c)
+        if (f <= PaperSizer.MAX_FRACTION) {
+            assertEquals(f, PaperSizer.fraction(0.50, 0.70), 1e-12)
+        } else {
+            assertEquals(PaperSizer.MAX_FRACTION, PaperSizer.fraction(0.50, 0.70), 1e-12)
+        }
     }
 
     @Test
-    fun aCertainWinUsesAllTheCash() {
-        assertEquals(1.0, PaperSizer.fraction(0.50, 1.0), 1e-12)
+    fun aCertainWinIsCappedAtTenPercent() {
+        // A model that equals the market must not make paper results luck:
+        // even a "certain" win stakes at most 10% of paper cash.
+        assertEquals(PaperSizer.MAX_FRACTION, PaperSizer.fraction(0.50, 1.0), 1e-12)
+        assertEquals(0.10, PaperSizer.MAX_FRACTION, 1e-12)
         val n = PaperSizer.contracts(100.0, 0.50, 1.0)
-        assertTrue("n=$n", n in 180..200)
+        assertTrue("n=$n", n in 18..20)
     }
 
     @Test

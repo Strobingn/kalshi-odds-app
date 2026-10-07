@@ -232,7 +232,22 @@ class LiveSignalsService : Service() {
                     runCatching { hub.ingestTick(tick) }
                 },
                 onIndex = { v ->
-                    runCatching { container.cfIndex.onUpdate(v, System.currentTimeMillis()) }
+                    runCatching {
+                        val now = System.currentTimeMillis()
+                        container.cfIndex.onUpdate(v, now)
+                        // Record the settlement index too: training on the
+                        // real CF source needs 2-4 weeks of these first.
+                        com.dirk.kalshiodds.signal.external.CfIndexBook.assetOf(v.indexId)?.let { asset ->
+                            container.recorder.onIndex(
+                                asset = asset,
+                                indexId = v.indexId,
+                                value = v.value,
+                                avg60 = v.avg60,
+                                finalMinuteAvg = v.finalMinuteAvg,
+                                nowMs = now
+                            )
+                        }
+                    }
                 },
                 onLifecycle = { ticker, eventType ->
                     scope.launch {

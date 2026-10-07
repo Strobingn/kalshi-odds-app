@@ -8,12 +8,21 @@ name: Train edge model
 
 on:
   # GitHub schedules only run from the default branch, so the reliable
-  # retrain triggers here are pushes/PRs to this branch plus manual runs.
+  # retrain triggers here are pushes to this branch, manual runs, and
+  # repository_dispatch (a PAT or the main-branch bridge can fire this
+  # on a cron: gh api -X POST repos/{owner}/{repo}/dispatches
+  #   -f event_type=retrain-mis-bitcoin --field days=270).
   push:
     branches: [Mis_bitcoin]
     paths:
       - "ml/**"
       - ".github/workflows/train-edge-model.yml"
+  repository_dispatch:
+    types: [retrain-mis-bitcoin]
+  schedule:
+    # Kept for the day Mis_bitcoin becomes the default branch. Until then
+    # this cron never fires; use the repository_dispatch bridge instead.
+    - cron: "17 8 * * 1"
   workflow_dispatch:
     inputs:
       days:
@@ -44,7 +53,7 @@ jobs:
       - name: Train
         run: |
           python3 ml/train_edge.py \
-            --days ${{ github.event.inputs.days || '270' }} \
+            --days ${{ github.event.inputs.days || github.event.client_payload.days || '270' }} \
             --tag "$RELEASE_TAG" \
             --sweep-l2 \
             --require-live \
@@ -57,6 +66,7 @@ jobs:
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
+            ml/bet_log.json
             ml/parity_sample.last.json
           if-no-files-found: error
       - name: Publish rolling release
@@ -88,6 +98,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
+            ml/bet_log.json \
             --target "$GITHUB_SHA" \
             --title "Edge model (Mis_bitcoin app)" \
             --notes "$NOTES"

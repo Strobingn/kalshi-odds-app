@@ -59,6 +59,23 @@ class SpotThrottle(private val windowMs: Long = 250L) {
  * least [minIntervalMs] passed since the last row, or as a heartbeat after
  * [heartbeatMs] without a row. Called only from the recorder's writer.
  */
+/**
+ * Generic 1-per-[windowMs] throttle keyed by an arbitrary string (e.g. the
+ * CF settlement index id). Returns the key's previous-bucket timestamp when
+ * a new window has opened, else null.
+ */
+class KeyThrottle(private val windowMs: Long) {
+    private val last = HashMap<String, Long>()
+
+    @Synchronized
+    fun offer(key: String, nowMs: Long): Pair<Long, String>? {
+        val prev = last[key]
+        last[key] = nowMs
+        if (prev == null || nowMs / windowMs == prev / windowMs) return null
+        return prev to key
+    }
+}
+
 class BookRowGate(
     private val minIntervalMs: Long = 1_000L,
     private val heartbeatMs: Long = 5_000L

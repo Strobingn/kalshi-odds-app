@@ -75,7 +75,9 @@ FEE_RATE = 0.07
 CONF_MARGIN = 0.03
 UA = "DipHunterTrainer/1.1"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
-SPOT_LOOKBACK_BARS = 16
+SPOT_LOOKBACK_BARS = 60
+# EWMA decay for realized vol (matches the app's ExternalMarketFeatures).
+EWMA_LAMBDA = 0.86
 # Ignore spot bars older than this at a decision (data gaps must not feed
 # hours-old spot into dist / digital fair).
 SPOT_MAX_AGE_S = 60 * (SPOT_LOOKBACK_BARS + 5)
@@ -410,14 +412,27 @@ def spot_known_at(spot: list[tuple[int, float]], decision_ts: int, keep: int = S
 
 
 def realized_vol_annual(closes: list[float]) -> float | None:
+    """EWMA sigma over 1-minute log returns (lambda = 0.86, ~60 bars).
+
+    The 16-bar sample std was noisy: sigma is the digital fair's only
+    parameter, and jitter in it moved the fair ~30% farther from the market
+    than EWMA in testing. Same formula as the app's
+    ExternalMarketFeatures.realizedVol — trainer and phone must agree.
+    """
     if len(closes) < 5:
         return None
     rets = [math.log(b / a) for a, b in zip(closes, closes[1:]) if a > 0 and b > 0]
     if len(rets) < 4:
         return None
+    lam = EWMA_LAMBDA
+    # Unbiased-start EWMA: seed with the sample variance, then weight the rest.
     mean = sum(rets) / len(rets)
-    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
-    std = math.sqrt(max(var, 0.0))
+    var = sum((r - mean) ** 2 for r in rets) / len(rets)
+    w_sum = 1.0
+    for r in rets:
+        var = lam * var + (1.0 - lam) * (r - mean) ** 2
+        w_sum = lam * w_sum + (1.0 - lam)
+    std = math.sqrt(max(var / w_sum, 0.0))
     if std <= 0:
         return None
     return min(5.0, max(0.01, std * math.sqrt(SECONDS_PER_YEAR / 60.0)))
@@ -847,6 +862,42 @@ def ev_side(p_yes: float, yes_ask: float | None, no_ask: float | None, margin: f
     return best[0], ev_yes, ev_no
 
 
+def bet_log(rows: list[tuple[Sample, float]], margin: float = EV_MARGIN) -> list[dict[str, Any]]:
+    """Every simulated EV-at-ask bet, newest last, for release publication.
+
+    One bet per market (first minute clearing the margin, same as ev_pnl):
+    ticker, minute offset, side, ask, fee, model P(YES), mid, EV, outcome.
+    """
+    by_ticker: dict[str, list[tuple[Sample, float]]] = {}
+    for s, p in rows:
+        by_ticker.setdefault(s.ticker, []).append((s, p))
+    out: list[dict[str, Any]] = []
+    for ticker, items in by_ticker.items():
+        items.sort(key=lambda sp: sp[0].ts)
+        for s, p in items:
+            side, ev_yes, ev_no = ev_side(p, s.yes_ask, s.no_ask, margin)
+            if side is None:
+                continue
+            ask = s.yes_ask if side == "YES" else s.no_ask
+            fee = fee_per_contract(ask)
+            won = (s.y == 1) == (side == "YES")
+            out.append({
+                "ticker": ticker,
+                "minute": (s.ts - (s.close_ts - 900)) // 60,
+                "side": side,
+                "ask": ask,
+                "fee": fee,
+                "p_yes": p,
+                "mid": s.mid,
+                "ev": (ev_yes if side == "YES" else ev_no),
+                "won": won,
+                "pnl": (1.0 - ask - fee) if won else (-ask - fee),
+            })
+            break
+    out.sort(key=lambda b: b["ticker"])
+    return out
+
+
 def bootstrap_pnl_ci(
     rows: list[tuple[Sample, float]],
     margin: float = EV_MARGIN,
@@ -854,33 +905,34 @@ def bootstrap_pnl_ci(
     level: float = 0.90,
     seed: int = 2026,
 ) -> dict[str, float]:
-    """Block bootstrap over MARKETS of the EV-at-ask betting rule.
+    """Block bootstrap over DAYS of the EV-at-ask betting rule.
 
-    A market's minutes share one settlement, so the resample unit is the
-    market (one bet per market in [ev_pnl]). The CI is on per-contract P&L;
-    `ci_low > 0` is the promotion gate — a higher hit rate alone never is.
+    A market's minutes share one settlement, and a day's markets share a
+    vol regime, so the resample unit is the UTC DAY (all of its bets move
+    together). The CI is on per-contract P&L; `ci_low > 0` is the promotion
+    gate — a higher hit rate alone never is.
     """
-    by_ticker: dict[str, tuple[Sample, float]] = {}
+    by_day: dict[int, list[tuple[Sample, float]]] = {}
     for s, p in rows:
-        by_ticker.setdefault(s.ticker, (s, p))
-    blocks = list(by_ticker.values())
-    if not blocks:
+        by_day.setdefault(s.close_ts // 86400, []).append((s, p))
+    days = sorted(by_day.values(), key=lambda d: min(s.ts for s, _ in d))
+    if not days:
         return {"ci_low": 0.0, "ci_high": 0.0, "p_low": 0.0, "n_boot_markets": 0.0}
     rng = random.Random(seed)
     per_bet: list[float] = []
     for m in range(n_boot):
         pnl = 0.0
         n = 0
-        for _ in range(len(blocks)):
-            s, p = blocks[rng.randrange(len(blocks))]
-            side, _, _ = ev_side(p, s.yes_ask, s.no_ask, margin)
-            if side is None:
-                continue
-            ask = s.yes_ask if side == "YES" else s.no_ask
-            fee = fee_per_contract(ask)
-            won = (s.y == 1) == (side == "YES")
-            pnl += (1.0 - ask - fee) if won else (-ask - fee)
-            n += 1
+        for _ in range(len(days)):
+            for s, p in days[rng.randrange(len(days))]:
+                side, _, _ = ev_side(p, s.yes_ask, s.no_ask, margin)
+                if side is None:
+                    continue
+                ask = s.yes_ask if side == "YES" else s.no_ask
+                fee = fee_per_contract(ask)
+                won = (s.y == 1) == (side == "YES")
+                pnl += (1.0 - ask - fee) if won else (-ask - fee)
+                n += 1
         if n:
             per_bet.append(pnl / n)
     if not per_bet:
@@ -890,7 +942,7 @@ def bootstrap_pnl_ci(
         return per_bet[min(len(per_bet) - 1, max(0, int(frac * len(per_bet))))]
     lo, hi = q((1.0 - level) / 2.0), q(1.0 - (1.0 - level) / 2.0)
     p_low = sum(1.0 for v in per_bet if v <= 0.0) / len(per_bet)
-    return {"ci_low": lo, "ci_high": hi, "p_low": p_low, "n_boot_markets": float(len(blocks))}
+    return {"ci_low": lo, "ci_high": hi, "p_low": p_low, "n_boot_markets": float(len(days))}
 
 
 def ev_pnl(rows: list[tuple[Sample, float]], margin: float = EV_MARGIN) -> dict[str, float]:
@@ -1164,7 +1216,7 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
             and n > 0
             and model_brier < market_brier
             and model_ll < market_ll
-            and float(metrics.get("sim_trades", 0) or 0) >= 20
+            and float(metrics.get("sim_trades", 0) or 0) >= 200
             and float(metrics.get("boot_ci_low", 0.0) or 0.0) > 0.0
         ),
     }
@@ -1261,6 +1313,10 @@ def main() -> int:
     print("weights " + ", ".join(f"{n}={w:+.4f}" for n, w in zip(FEATURE_NAMES, model["weights"]) if w) + f", bias={model['bias']:+.4f}", flush=True)
     export(model, metrics, Path(args.out))
     write_manifest(metrics, Path(args.manifest), synthetic=synthetic, tag=args.tag, version="2" if args.kind == KIND_OFFSET else "1")
+    if not synthetic:
+        log_path = Path(args.out).resolve().parent / "bet_log.json"
+        log_path.write_text(json.dumps(bet_log(hold, args.ev_margin), indent=2), encoding="utf-8")
+        print(f"wrote {log_path}", flush=True)
     # Do not overwrite the hand-checked Android/Python parity fixture.
     # Write a sample next to the exported model for debugging only.
     if not args.fixture:

@@ -136,3 +136,39 @@ trainers) are judged on scores only.
   shows materially better P&L per bet with enough trades, raising the
   threshold is the cheapest improvement: fewer, better bets. Diagnostic
   only — the promotion gate stays the 3¢ bootstrap CI.
+
+## Honest gates, v2 (day-block bootstrap)
+
+A 0.01% Brier improvement with two simulated bets never activates a model.
+`promotion_eligible` now requires:
+
+- beats_market on BOTH holdout Brier and log-loss (as before), AND
+- at least **200** EV-at-ask simulated trades, AND
+- the **day-block** bootstrap 90% P&L CI excluding zero. Days (UTC close
+  day) are the resample unit — a day's settlements share a vol regime, so
+  one lucky day cannot carry the gate. `ml/bet_log.json` in the model
+  release lists every simulated bet (ticker, minute, side, ask, EV,
+  outcome) so any "what were the bets" question is answerable directly.
+
+The app's auto-tuner got the same treatment (`EdgeAutoTuner`): it needs
+100 settled signals, ≥30 bets at the chosen threshold, and a positive
+10th-percentile EV under day resampling before the app stops sitting
+out. `SignalConstants.AUTO_TUNE_*` hold the knobs.
+
+## EWMA volatility
+
+Realized vol is now an EWMA (λ = 0.86) over up to 60 one-minute returns
+instead of the 16-bar sample std, in both the trainer
+(`realized_vol_annual`) and the app (`ExternalMarketFeatures.realizedVol`)
+— identical formula, so train/serve parity holds. Sigma is the digital
+fair's only parameter; the smoother estimate brought the app's fair value
+about 30% closer to the market in testing.
+
+## Settlement-index recording
+
+`MarketDataRecorder` now records the CF Benchmarks index stream
+(`index_YYYY-MM-DD.csv.gz`: ts_ms,asset,index_id,value,avg_60,
+final_minute_avg, ~1/s per asset) whenever recording is on. Coinbase
+points to the wrong side of the target in ~6.7% of BTC windows; after
+2-4 weeks of index rows the trainer can learn from the real settlement
+source (`load_backtest_cache` path will read them).

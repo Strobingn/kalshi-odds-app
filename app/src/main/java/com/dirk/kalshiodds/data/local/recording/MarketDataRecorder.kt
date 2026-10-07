@@ -60,6 +60,7 @@ class MarketDataRecorder(
         class Spot(ts: Long, val product: String, val price: Double) : Rec(ts)
         class Book(ts: Long, val ticker: String, val strike: Double?, val closeMs: Long?, val top: TopOfBook) : Rec(ts)
         class Trade(ts: Long, val ticker: String, val yesPrice: Double?, val count: Double?, val side: String?) : Rec(ts)
+        class Index(ts: Long, val asset: String, val indexId: String, val value: Double, val avg60: Double?, val finalMinuteAvg: Double?) : Rec(ts)
     }
 
     private data class Pending(val closeMs: Long, val strike: Double?)
@@ -71,6 +72,7 @@ class MarketDataRecorder(
     private val queued = AtomicInteger(0)
     private val dropped = AtomicLong(0L)
     private val spot = SpotThrottle(250L)
+    private val indexGate = KeyThrottle(1000L)
     private val gate = BookRowGate()
     private val pending = ConcurrentHashMap<String, Pending>()
     private val pendingLock = Any()
@@ -112,6 +114,18 @@ class MarketDataRecorder(
     fun onSpot(product: String, price: Double) {
         if (!active || product !in spotProducts) return
         spot.offer(clock(), product, price)?.let { enqueue(Rec.Spot(it.tsMs, it.product, it.price)) }
+    }
+
+    /**
+     * CF Benchmarks settlement-index print (the index the 15m markets
+     * actually settle on). Throttled to ~1/s per asset; tick path, no I/O.
+     * Training on the real settlement source needs 2-4 weeks of these.
+     */
+    fun onIndex(asset: String, indexId: String, value: Double, avg60: Double?, finalMinuteAvg: Double?, nowMs: Long = clock()) {
+        if (!active || !value.isFinite() || value <= 0.0) return
+        indexGate.offer("$asset|$indexId", nowMs)?.let {
+            enqueue(Rec.Index(it.first, asset, indexId, value, avg60, finalMinuteAvg))
+        }
     }
 
     /** Kalshi WS tick; only public trades are recorded. Tick path: no I/O. */
@@ -242,6 +256,8 @@ class MarketDataRecorder(
                     RecordingFormat.bookRow(rec.tsMs, rec.ticker, rec.strike, rec.closeMs, rec.top)
                 is Rec.Trade -> RecordingFormat.KIND_TRADES to
                     RecordingFormat.tradeRow(rec.tsMs, rec.ticker, rec.yesPrice, rec.count, rec.side)
+                is Rec.Index -> RecordingFormat.KIND_INDEX to
+                    RecordingFormat.indexRow(rec.tsMs, rec.asset, rec.indexId, rec.value, rec.avg60, rec.finalMinuteAvg)
             }
             grouped.getOrPut(kind to RecordingFormat.utcDay(rec.tsMs)) { ArrayList() }.add(line)
         }
