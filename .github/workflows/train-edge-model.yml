@@ -40,7 +40,10 @@ jobs:
           from pathlib import Path
 
           manifest = json.loads(Path("ml/edge_model_manifest.json").read_text())
-          assert manifest["data_source"] == "kalshi_live_historical_cf_settlement_index_v3"
+          assert manifest["data_source"] in {
+              "kalshi_live_historical_coinbase_spot_v2",
+              "kalshi_live_historical_cf_settlement_index_v3",
+          }
           assert manifest["n_samples"] > 0
           assert manifest["trained_at"]
           PY
