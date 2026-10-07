@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBook
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
@@ -27,7 +28,9 @@ class PaperBookTest {
         assertEquals("AI hunter", fill.source)
         assertEquals(125, fill.contracts) // floor(5 / 0.04)
         assertEquals(5.0, fill.stakeUsd, 1e-9)
-        assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
+        val fee = KalshiFee.total(125, 0.04)
+        assertEquals(fee, fill.feeUsd, 1e-9)
+        assertEquals(100.0 - 5.0 - fee, book.snapshot().cashUsd, 1e-6)
         assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
     }
@@ -93,14 +96,14 @@ class PaperBookTest {
         assertEquals(3, snap.fills.count { it.settled })
         assertEquals(0, snap.openCount)
         val win = snap.fills.first { it.ticker == "WIN-1" }
+        val fee = win.feeUsd
         assertEquals(true, win.won)
-        assertEquals(120.0, win.pnlUsd!!, 1e-9) // 125 * 1 - 5
+        assertEquals(120.0 - fee, win.pnlUsd!!, 1e-6)
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
-        assertEquals(-5.0, loss.pnlUsd!!, 1e-9)
-        assertEquals(115.0, snap.realizedPnlUsd, 1e-9)
-        // cash: 100 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 215
-        assertEquals(215.0, snap.cashUsd, 1e-9)
+        assertEquals(-5.0 - fee, loss.pnlUsd!!, 1e-6)
+        assertEquals(115.0 - 2.0 * fee, snap.realizedPnlUsd, 1e-6)
+        assertEquals(215.0 - 2.0 * fee, snap.cashUsd, 1e-6)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())

@@ -72,11 +72,15 @@ class NoLookAheadTest(unittest.TestCase):
         self.assertEqual(te.spot_return(closes[:3], 5), 0.0)
 
     def test_no_profit_fills_at_no_ask(self) -> None:
-        # mid 0.30 → NO ask ≈ 0.70 + half-spread (explicit ask list keeps
-        # parity with the old contract: pass the YES ask column).
-        pnl = te.simulated_pnl([0.10], [0.30], [0], asks=[0.30])
+        # mid 0.30, YES ask 0.40 => YES bid 0.20 => NO ask 0.80.
+        pnl = te.simulated_pnl([0.10], [0.30], [0], asks=[0.40])
         self.assertEqual(pnl["n"], 1)
-        no_ask = 1.0 - (0.30 - 2.0 * te.SIM_HALF_SPREAD)
+        no_ask = 0.80
+        self.assertAlmostEqual(pnl["pnl"], 1.0 - no_ask - 0.07 * no_ask * (1 - no_ask))
+
+    def test_flat_book_still_charges_half_spread_on_no(self) -> None:
+        pnl = te.simulated_pnl([0.10], [0.30], [0], asks=[0.30])
+        no_ask = 1.0 - 0.30 + te.SIM_HALF_SPREAD
         self.assertAlmostEqual(pnl["pnl"], 1.0 - no_ask - 0.07 * no_ask * (1 - no_ask))
 
     def test_default_fill_never_at_midpoint(self) -> None:

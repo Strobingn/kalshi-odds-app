@@ -266,12 +266,13 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     ]
 
 
-def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[float], list[int]]:
+def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[float], list[int], list[int]]:
     X: list[list[float]] = []
     y: list[int] = []
     mids: list[float] = []
     asks: list[float] = []
     times: list[int] = []
+    closes: list[int] = []
     per = max(8, max_markets // len(SERIES))
     for series in SERIES:
         print(f"=== {series}", flush=True)
@@ -312,7 +313,8 @@ def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], 
                 mids.append(mid)
                 asks.append(ask)
                 times.append(int(c.get("end_period_ts") or close_ts))
-    return X, y, mids, asks, times
+                closes.append(close_ts)
+    return X, y, mids, asks, times, closes
 
 
 def standardize(X: list[list[float]]) -> tuple[list[list[float]], list[float], list[float]]:
@@ -394,7 +396,14 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int], asks: list[fl
     hits = 0
     for i, (pi, m, yi) in enumerate(zip(p, mids, y)):
         yes_ask = asks[i] if asks is not None else min(0.999, m + SIM_HALF_SPREAD)
-        no_ask = 1.0 - (yes_ask - 2.0 * SIM_HALF_SPREAD) if asks is not None else 1.0 - m + SIM_HALF_SPREAD
+        if asks is not None:
+            # YES bid = 2*mid - YES ask when mid is the book midpoint.
+            # NO ask = 1 - YES bid. Never cheaper than half a spread, and
+            # never the old 1-(ask-2¢) which got cheaper as the book widened.
+            bid = min(yes_ask, max(0.001, 2.0 * m - yes_ask))
+            no_ask = max(1.0 - bid, 1.0 - m + SIM_HALF_SPREAD)
+        else:
+            no_ask = 1.0 - m + SIM_HALF_SPREAD
         no_ask = min(0.999, max(0.001, no_ask))
         gap = abs(pi - m)
         fee_at_mid = FEE_RATE * m * (1 - m)
@@ -410,17 +419,30 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int], asks: list[fl
     return {"n": n, "pnl": pnl, "hit_rate": (hits / n) if n else 0.0}
 
 
-def walk_forward(X: list[list[float]], y: list[int], mids: list[float], asks: list[float], times: list[int], folds: int = 4) -> dict[str, Any]:
-    order = sorted(range(len(X)), key=lambda i: times[i])
+def walk_forward(X: list[list[float]], y: list[int], mids: list[float], asks: list[float], times: list[int], folds: int = 4, closes: list[int] | None = None) -> dict[str, Any]:
+    """Folds are whole markets. Two rows from one 15-minute contract never
+    sit on opposite sides of a split — that leak is how a holdout can beat
+    the market without knowing anything new."""
+    groups = list(closes) if closes is not None else list(times)
+    order = sorted(range(len(X)), key=lambda i: (groups[i], times[i]))
     X = [X[i] for i in order]
     y = [y[i] for i in order]
     mids = [mids[i] for i in order]
     asks = [asks[i] for i in order]
-    fold = max(1, len(X) // folds)
+    groups = [groups[i] for i in order]
+    starts = [0]
+    for i in range(1, len(groups)):
+        if groups[i] != groups[i - 1]:
+            starts.append(i)
+    starts.append(len(X))
+    n_markets = max(1, len(starts) - 1)
+    fold = max(1, n_markets // folds)
     preds = [0.0] * len(X)
     for k in range(1, folds):
-        tr_end = k * fold
-        te_end = len(X) if k == folds - 1 else (k + 1) * fold
+        tr_m = min(n_markets, k * fold)
+        te_m = n_markets if k == folds - 1 else min(n_markets, (k + 1) * fold)
+        tr_end = starts[tr_m]
+        te_end = starts[te_m]
         if tr_end < 20 or te_end <= tr_end:
             continue
         Ztr, mean, std = standardize(X[:tr_end])
@@ -435,7 +457,8 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], asks: li
     for i, p in enumerate(preds):
         if p == 0.0:
             preds[i] = mids[i]
-    hold = list(range(fold, len(X)))  # first fold is train-only
+    hold_start = starts[min(fold, n_markets)]
+    hold = list(range(hold_start, len(X)))  # first fold is train-only
     if not hold:
         hold = list(range(len(X)))
     ph = [preds[i] for i in hold]
@@ -463,8 +486,8 @@ def fit_final(X: list[list[float]], y: list[int]) -> dict[str, Any]:
     return {"weights": w, "bias": b, "mean": mean, "std": std, "platt_a": a, "platt_b": pb}
 
 
-def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[float], list[int]]:
-    X, y, mids, asks, times = [], [], [], [], []
+def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[float], list[int], list[int]]:
+    X, y, mids, asks, times, closes = [], [], [], [], [], []
     t0 = 1_700_000_000
     for i in range(n):
         mid = 0.35 + 0.3 * ((i % 40) / 40.0)
@@ -476,8 +499,9 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
         y.append(label)
         mids.append(mid)
         asks.append(min(0.999, mid + SIM_HALF_SPREAD))
-        times.append(t0 + i * 900)
-    return X, y, mids, asks, times
+        times.append(t0 + i * 60)
+        closes.append(t0 + (i // 2) * 900)
+    return X, y, mids, asks, times, closes
 
 
 def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, fixture: bool = False) -> None:
@@ -538,10 +562,10 @@ def main() -> int:
     ap.add_argument("--fixture", action="store_true")
     args = ap.parse_args()
     if args.fixture:
-        X, y, mids, asks, times = fixture_dataset()
+        X, y, mids, asks, times, closes = fixture_dataset()
     else:
         try:
-            X, y, mids, asks, times = collect(args.days, args.max_markets)
+            X, y, mids, asks, times, closes = collect(args.days, args.max_markets)
         except Exception as e:
             print(f"live collect failed ({e}); refusing to publish a fixture model", file=sys.stderr, flush=True)
             return 1
@@ -549,7 +573,7 @@ def main() -> int:
         print(f"only {len(X)} rows — refusing to publish an unvalidated model", file=sys.stderr, flush=True)
         return 1
     print(f"samples {len(X)} yes={sum(y)} no={len(y) - sum(y)}", flush=True)
-    metrics = walk_forward(X, y, mids, asks, times)
+    metrics = walk_forward(X, y, mids, asks, times, closes=closes)
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y)
     export(model, metrics, Path(args.out))
