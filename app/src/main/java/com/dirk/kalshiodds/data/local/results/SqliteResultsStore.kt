@@ -62,6 +62,32 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
     }
 
+    override fun insertSettlementIndex(rows: List<SettlementIndexRow>) {
+        if (rows.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    TABLE_SETTLEMENT_INDEX,
+                    null,
+                    ContentValues().apply {
+                        put("index_id", r.indexId)
+                        put("source_ts_ms", r.sourceTsMs)
+                        put("value_usd", r.valueUsd)
+                        put("final_minute_average_usd", r.finalMinuteAverageUsd)
+                        put("final_minute_samples", r.finalMinuteSamples)
+                        put("received_at_ms", r.receivedAtMs)
+                    },
+                    SQLiteDatabase.CONFLICT_IGNORE
+                )
+            }
+            // Four weeks at a 15-second cadence for three indices is < 500k rows.
+            w.delete(TABLE_SETTLEMENT_INDEX, "source_ts_ms < ?", arrayOf((System.currentTimeMillis() - SETTLEMENT_INDEX_RETENTION_MS).toString()))
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+    }
+
     override fun insertForwardTests(rows: List<ForwardTestRow>) {
         if (rows.isEmpty()) return
         val w = db.writableDatabase
@@ -163,11 +189,38 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
     override fun recentOddsMids(limit: Int): List<OddsMidRow> =
         query(TABLE_ODDS, limit) { cursorToOdds(it) }
 
+    override fun settlementIndexRows(limit: Int): List<SettlementIndexRow> {
+        val out = ArrayList<SettlementIndexRow>()
+        db.readableDatabase.query(
+            TABLE_SETTLEMENT_INDEX,
+            null,
+            null,
+            null,
+            null,
+            null,
+            "source_ts_ms DESC",
+            limit.coerceIn(1, MAX_SETTLEMENT_INDEX_EXPORT).toString()
+        ).use { c ->
+            while (c.moveToNext()) {
+                out += SettlementIndexRow(
+                    indexId = c.str("index_id"),
+                    sourceTsMs = c.long("source_ts_ms"),
+                    valueUsd = c.dbl("value_usd"),
+                    finalMinuteAverageUsd = c.dblOrNull("final_minute_average_usd"),
+                    finalMinuteSamples = c.intOrNull("final_minute_samples") ?: 0,
+                    receivedAtMs = c.long("received_at_ms")
+                )
+            }
+        }
+        return out.asReversed()
+    }
+
     override fun exportBundle(limit: Int): ResultsBundle = ResultsBundle(
         snapshots = recentSnapshots(limit),
         alerts = recentAlerts(limit),
         scorecards = recentScorecards(limit),
-        tickets = recentTickets(limit)
+        tickets = recentTickets(limit),
+        settlementIndex = settlementIndexRows(limit.coerceAtMost(50_000))
     )
 
     private fun <T> query(table: String, limit: Int, map: (Cursor) -> T): List<T> {
@@ -965,6 +1018,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createChartTickTable(db)
             createForwardTable(db)
             createTicketForwardTable(db)
+            createSettlementIndexTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -977,6 +1031,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             if (oldVersion < 5) createChartTickTable(db)
             if (oldVersion < 6) createForwardTable(db)
             if (oldVersion < 7) createTicketForwardTable(db)
+            if (oldVersion < 8) createSettlementIndexTable(db)
         }
 
         private fun createForwardTable(db: SQLiteDatabase) {
@@ -1003,6 +1058,21 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_ticket_forward_time ON $TABLE_TICKET_FORWARD(captured_at_ms)")
+        }
+
+        private fun createSettlementIndexTable(db: SQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS $TABLE_SETTLEMENT_INDEX (
+                    index_id TEXT NOT NULL,
+                    source_ts_ms INTEGER NOT NULL,
+                    value_usd REAL NOT NULL,
+                    final_minute_average_usd REAL,
+                    final_minute_samples INTEGER NOT NULL,
+                    received_at_ms INTEGER NOT NULL,
+                    PRIMARY KEY(index_id, source_ts_ms)
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_settlement_index_time ON $TABLE_SETTLEMENT_INDEX(source_ts_ms)")
         }
 
         private fun createChartTickTable(db: SQLiteDatabase) {
@@ -1113,7 +1183,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 7
+        const val DB_VERSION = 8
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
@@ -1130,6 +1200,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val TABLE_CHART = com.dirk.kalshiodds.data.local.chart.ChartTickSchema.TABLE
         const val TABLE_FORWARD = "forward_test"
         const val TABLE_TICKET_FORWARD = "ticket_forward_test"
+        const val TABLE_SETTLEMENT_INDEX = "settlement_index"
         const val MAX_FORWARD = 5_000
         const val MAX_SNAP = 1_200
         const val MAX_ALERT = 400
@@ -1139,6 +1210,8 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val MAX_PATH = 8_000
         const val MAX_SPOT = 12_000
         const val MAX_CHART = 2_880
+        const val MAX_SETTLEMENT_INDEX_EXPORT = 500_000
+        const val SETTLEMENT_INDEX_RETENTION_MS = 28L * 24L * 60L * 60L * 1_000L
     }
 }
 
