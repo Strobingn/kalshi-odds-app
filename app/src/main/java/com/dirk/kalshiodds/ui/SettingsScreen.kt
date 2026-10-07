@@ -631,6 +631,9 @@ fun SettingsContent(
             Button(onClick = { viewModel?.exportResults() }, modifier = Modifier.fillMaxWidth()) {
                 Text("Export results")
             }
+            OutlinedButton(onClick = { viewModel?.exportSettlementIndex() }, modifier = Modifier.fillMaxWidth()) {
+                Text("Export settlement index for training")
+            }
             state.exportMessage?.let {
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
@@ -706,14 +709,16 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. AI autopilot has unlimited synthetic credit and takes the visible touch size when an AI hunter / LiveCall " +
+                "signal would trade. It never calls Kalshi. Reset starts a fresh \$100 ledger; the home-screen PAPER BOOK " +
+                "Isolated from live money. AI autopilot records at most \$5 per idea, including the quoted fee, even when more visible liquidity exists. " +
+                "It never calls Kalshi. Reset starts a fresh \$100 ledger; the home-screen PAPER BOOK " +
                     "signal would trade. It never calls Kalshi. Reset starts a fresh \$100 ledger; the home-screen PAPER BOOK " +
                     "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
                     "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Paper autopilot (unlimited synthetic credit)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("Paper autopilot ($5 AI cap)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
