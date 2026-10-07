@@ -25,6 +25,10 @@ data class EdgeModelManifest(
     val finalWindowMarketBrier: Double? = null,
     val calibrationError: Double? = null,
     val marketCalibrationError: Double? = null,
+    val distinctDays: Int = 0,
+    val brierAdvantageLower95: Double? = null,
+    val simPnlLower95: Double? = null,
+    val settlementIndexCoverage: Double? = null,
     val promotionEligible: Boolean = false
 ) {
     val beatsMarket: Boolean
@@ -49,6 +53,10 @@ data class EdgeModelManifest(
         finalWindowMarketBrier?.let { o.put("final_window_market_brier", it) }
         calibrationError?.let { o.put("calibration_error", it) }
         marketCalibrationError?.let { o.put("market_calibration_error", it) }
+        o.put("distinct_days", distinctDays)
+        brierAdvantageLower95?.let { o.put("brier_advantage_lower_95", it) }
+        simPnlLower95?.let { o.put("sim_pnl_lower_95", it) }
+        settlementIndexCoverage?.let { o.put("settlement_index_coverage", it) }
         o.put("promotion_eligible", promotionEligible)
         if (simPnl != null) o.put("sim_pnl", simPnl)
         if (simHitRate != null) o.put("sim_hit_rate", simHitRate)
@@ -60,7 +68,8 @@ data class EdgeModelManifest(
         /** v1 remains valid for releases published before historical-tier collection. */
         val SUPPORTED_DATA_SOURCES = setOf(
             "kalshi_settled_coinbase_spot_v1",
-            "kalshi_live_historical_coinbase_spot_v2"
+            "kalshi_live_historical_coinbase_spot_v2",
+            "kalshi_live_historical_cf_settlement_index_v3"
         )
 
         fun parse(raw: String): EdgeModelManifest {
@@ -97,6 +106,10 @@ data class EdgeModelManifest(
                 finalWindowMarketBrier = o.optDoubleOrNull("final_window_market_brier"),
                 calibrationError = o.optDoubleOrNull("calibration_error"),
                 marketCalibrationError = o.optDoubleOrNull("market_calibration_error"),
+                distinctDays = o.optInt("distinct_days", 0).coerceAtLeast(0),
+                brierAdvantageLower95 = o.optDoubleOrNull("brier_advantage_lower_95"),
+                simPnlLower95 = o.optDoubleOrNull("sim_pnl_lower_95"),
+                settlementIndexCoverage = o.optDoubleOrNull("settlement_index_coverage"),
                 promotionEligible = o.optBoolean("promotion_eligible", false)
             )
         }
@@ -123,6 +136,10 @@ data class EdgeModelManifest(
                 finalWindowMarketBrier = m["final_window_market_brier"],
                 calibrationError = m["calibration_error"],
                 marketCalibrationError = m["market_calibration_error"],
+                distinctDays = (m["distinct_days"] ?: 0.0).toInt(),
+                brierAdvantageLower95 = m["brier_advantage_lower_95"],
+                simPnlLower95 = m["sim_pnl_lower_95"],
+                settlementIndexCoverage = m["settlement_index_coverage"],
                 promotionEligible = false
             )
         }
@@ -190,7 +207,9 @@ object ModelActivation {
             return ModelActivationDecision(
                 activate = false,
                 manifest = manifest,
-                reason = "Candidate did not pass all walk-forward promotion gates — previous model stays active."
+                reason = "Candidate did not pass promotion gates (days=${manifest.distinctDays}, " +
+                    "settlement-index coverage=${manifest.settlementIndexCoverage?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "unknown"}, " +
+                    "Brier lower-95=${manifest.brierAdvantageLower95?.let(::fmt) ?: "unknown"}) — previous model stays active."
             )
         }
         return ModelActivationDecision(
