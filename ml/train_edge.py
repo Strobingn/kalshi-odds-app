@@ -553,15 +553,85 @@ def collect(days: int, max_markets: int = 0, workers: int = 3) -> list[Sample]:
         done = 0
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futs = {pool.submit(one, m): m for m in markets}
+            skipped: list[dict] = []
             for fut in as_completed(futs):
                 try:
                     samples.extend(fut.result())
                 except Exception as e:
+                    # 429s are transient: keep the market for one retry pass
+                    # instead of dropping its 13 decision minutes forever.
+                    skipped.append(futs[fut])
                     print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
+            for attempt in range(2):
+                if not skipped:
+                    break
+                print(f"  retrying {len(skipped)} rate-limited markets (pass {attempt + 1})", flush=True)
+                time.sleep(30.0 * (attempt + 1))
+                retry, skipped = skipped, []
+                with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                    futs = {pool.submit(one, m): m for m in retry}
+                    for fut in as_completed(futs):
+                        try:
+                            samples.extend(fut.result())
+                        except Exception as e:
+                            skipped.append(futs[fut])
+                            print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
                 done += 1
                 if done % 250 == 0:
                     print(f"  candles {done}/{len(markets)} rows {len(samples)}", flush=True)
     return samples
+
+
+def samples_cache_path(cache: Path, days: int) -> Path:
+    return cache / f"samples_{days}d.jsonl"
+
+
+def load_samples_cache(cache: Path, days: int) -> list[Sample] | None:
+    """Previously collected live samples for this window, or None.
+
+    A 270-day pull takes hours and gets 429-skipped markets; once it is
+    collected it is cached verbatim (feature rows are immutable — they
+    only depend on settled data). Retrains refit on the same rows.
+    """
+    path = samples_cache_path(cache, days)
+    if not path.is_file():
+        return None
+    out: list[Sample] = []
+    with path.open() as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                o = json.loads(line)
+                out.append(Sample(
+                    x=[float(v) for v in o["x"]],
+                    y=int(o["y"]),
+                    mid=float(o["mid"]),
+                    ts=int(o["ts"]),
+                    close_ts=int(o["close_ts"]),
+                    ticker=str(o["ticker"]),
+                    yes_ask=float(o["yes_ask"]) if o.get("yes_ask") is not None else None,
+                    no_ask=float(o["no_ask"]) if o.get("no_ask") is not None else None,
+                ))
+            except Exception:
+                continue
+    print(f"  samples cache {path}: {len(out)} rows", flush=True)
+    return out if out else None
+
+
+def save_samples_cache(cache: Path, days: int, samples: list[Sample]) -> None:
+    cache.mkdir(parents=True, exist_ok=True)
+    path = samples_cache_path(cache, days)
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w") as f:
+        for s in samples:
+            f.write(json.dumps({
+                "x": s.x, "y": s.y, "mid": s.mid, "ts": s.ts,
+                "close_ts": s.close_ts, "ticker": s.ticker,
+                "yes_ask": s.yes_ask, "no_ask": s.no_ask,
+            }) + "\n")
+    tmp.replace(path)
+    print(f"  wrote samples cache {path} ({len(samples)} rows)", flush=True)
 
 
 def load_backtest_cache(cache: Path, days: int | None = None) -> list[Sample]:
@@ -1043,7 +1113,7 @@ def sweep_l2(
     folds: int = 4,
     kind: str = KIND_OFFSET,
     design: list[str] | None = None,
-    candidates: tuple[float, ...] = (0.5, 0.2, 0.05, 0.02, 0.005),
+    candidates: tuple[float, ...] = (0.5, 0.05, 0.005),
 ) -> tuple[float, dict[str, dict[str, float]]]:
     """Pick the L2 that minimizes holdout log-loss on the same folds.
 
@@ -1266,6 +1336,7 @@ def main() -> int:
     ap.add_argument("--ev-margin", type=float, default=EV_MARGIN)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--cache", default=None, help="train from a tools/backtest cache dir instead of the network")
+    ap.add_argument("--samples-cache", default=None, help="dir to cache/reuse the collected live sample rows")
     ap.add_argument("--tag", default="mis-bitcoin-edge-model", help="release tag written into the manifest")
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
@@ -1282,7 +1353,16 @@ def main() -> int:
         samples = fixture_dataset()
     else:
         try:
-            samples = load_backtest_cache(Path(args.cache), args.days) if args.cache else collect(args.days, args.max_markets, args.workers)
+            if args.samples_cache:
+                scache = Path(args.samples_cache)
+                cached = load_samples_cache(scache, args.days)
+                if cached is not None:
+                    samples = cached
+                else:
+                    samples = collect(args.days, args.max_markets, args.workers)
+                    save_samples_cache(scache, args.days, samples)
+            else:
+                samples = load_backtest_cache(Path(args.cache), args.days) if args.cache else collect(args.days, args.max_markets, args.workers)
         except Exception as e:
             if args.require_live:
                 print(f"live collect failed: {e}", flush=True)

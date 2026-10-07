@@ -33,6 +33,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: train-edge-model-Mis_bitcoin
+  cancel-in-progress: true
+
 env:
   RELEASE_TAG: mis-bitcoin-edge-model
 
@@ -50,15 +54,33 @@ jobs:
           python-version: "3.12"
       - name: Trainer tests (no look-ahead, offset model)
         run: python3 ml/test_train_edge.py
+
+      - name: Restore sample cache
+        id: samples
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ml/.samples-cache
+          # Keyed by the sample's newest row, not the run: a cache with
+          # fresher data than any previous run wins.
+          key: mis-samples-v1
       - name: Train
         run: |
           python3 ml/train_edge.py \
             --days ${{ github.event.inputs.days || github.event.client_payload.days || '270' }} \
             --tag "$RELEASE_TAG" \
+            --samples-cache ml/.samples-cache \
             --sweep-l2 \
             --require-live \
             --out ml/edge_model.json \
             --manifest ml/edge_model_manifest.json
+      - name: Save sample cache
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ml/.samples-cache
+          key: mis-samples-v1
+
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
