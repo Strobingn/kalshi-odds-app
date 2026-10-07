@@ -541,7 +541,7 @@ class PaperBook(
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                val pnl = payout - fill.stakeUsd - (if (outcome == "void") 0.0 else fill.feeUsd)
+                val pnl = payout - fill.stakeUsd - fill.feeUsd
                 cash += payout
                 fill.copy(
                     settled = true,
