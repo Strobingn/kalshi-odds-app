@@ -14,6 +14,11 @@ import android.database.sqlite.SQLiteOpenHelper
 class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
     private val db = Helper(context.applicationContext)
 
+    /** Releases the SQLite helper. Call this from short-lived workers and tests. */
+    fun close() {
+        db.close()
+    }
+
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
         if (rows.isEmpty()) return
         val w = db.writableDatabase
