@@ -15,6 +15,8 @@ object ResultsExporter {
         "kind,ticker,series,outcome,score,brier,edge_pp,policy_roi,created_at_ms,note"
     const val TICKET_HEADER =
         "kind,ticker,side,stake_usd,approved,result,created_at_ms,client_order_id,note"
+    const val SETTLEMENT_INDEX_HEADER =
+        "kind,index_id,source_ts_ms,value_usd,final_minute_average_usd,final_minute_samples,received_at_ms"
 
     fun json(bundle: ResultsBundle): String {
         val root = org.json.JSONObject()
@@ -76,6 +78,20 @@ object ResultsExporter {
             )
         }
         root.put("tickets", tickets)
+        val index = org.json.JSONArray()
+        for (r in bundle.settlementIndex) {
+            index.put(
+                org.json.JSONObject()
+                    .put("kind", "settlement_index")
+                    .put("index_id", r.indexId)
+                    .put("source_ts_ms", r.sourceTsMs)
+                    .put("value_usd", r.valueUsd)
+                    .put("final_minute_average_usd", r.finalMinuteAverageUsd)
+                    .put("final_minute_samples", r.finalMinuteSamples)
+                    .put("received_at_ms", r.receivedAtMs)
+            )
+        }
+        root.put("settlement_index", index)
         return root.toString()
     }
 
@@ -191,6 +207,34 @@ object ResultsExporter {
                     r.createdAtMs.toString(),
                     csv(r.clientOrderId),
                     csv(r.note)
+                ).joinToString(",")
+            )
+        }
+        appendLine()
+        appendLine(SETTLEMENT_INDEX_HEADER)
+        for (r in bundle.settlementIndex) {
+            appendLine(
+                listOf(
+                    "settlement_index",
+                    csv(r.indexId),
+                    r.sourceTsMs.toString(),
+                    num(r.valueUsd),
+                    num(r.finalMinuteAverageUsd),
+                    r.finalMinuteSamples.toString(),
+                    r.receivedAtMs.toString()
+                ).joinToString(",")
+            )
+        }
+    }
+
+    /** A training-ready export without materializing the unrelated app ledger. */
+    fun settlementIndexCsv(rows: List<SettlementIndexRow>): String = buildString {
+        appendLine(SETTLEMENT_INDEX_HEADER)
+        for (r in rows) {
+            appendLine(
+                listOf(
+                    "settlement_index", csv(r.indexId), r.sourceTsMs.toString(), num(r.valueUsd),
+                    num(r.finalMinuteAverageUsd), r.finalMinuteSamples.toString(), r.receivedAtMs.toString()
                 ).joinToString(",")
             )
         }
