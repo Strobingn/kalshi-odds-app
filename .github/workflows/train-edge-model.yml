@@ -15,7 +15,7 @@ on:
       days:
         description: Lookback days for settled Kalshi 15m markets
         required: false
-        default: "4"
+        default: "30"
 
 permissions:
   contents: write
@@ -32,7 +32,7 @@ jobs:
       - name: Trainer tests (no look-ahead)
         run: python3 ml/test_train_edge.py
       - name: Train
-        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '4' }} --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} --out ml/edge_model.json --manifest ml/edge_model_manifest.json
       - name: Verify model provenance
         run: |
           python3 - <<'PY'
@@ -40,7 +40,7 @@ jobs:
           from pathlib import Path
 
           manifest = json.loads(Path("ml/edge_model_manifest.json").read_text())
-          assert manifest["data_source"] == "kalshi_live_historical_coinbase_spot_v2"
+          assert manifest["data_source"] == "kalshi_live_historical_cf_settlement_index_v3"
           assert manifest["n_samples"] > 0
           assert manifest["trained_at"]
           PY
