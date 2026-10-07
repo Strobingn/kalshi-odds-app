@@ -19,6 +19,7 @@ import argparse
 import json
 import math
 import os
+import random
 import sys
 import time
 import urllib.error
@@ -52,8 +53,14 @@ FEE_RATE = 0.07
 CONF_MARGIN = 0.03
 SIM_HALF_SPREAD = 0.01
 UA = "DipHunterTrainer/0.3.8"
-# App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
+# App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)); both use the
+# same recent-weighted EWMA so a train/inference feature cannot drift.
 SPOT_LOOKBACK_BARS = 16
+EWMA_DECAY = 0.90
+MIN_PROMOTION_TRADES = 300
+MIN_PROMOTION_DAYS = 14
+MIN_BRIER_ADVANTAGE = 0.0025
+BOOTSTRAP_REPS = 1_000
 
 
 def http_get(url: str, retries: int = 5) -> Any:
@@ -227,8 +234,14 @@ def realized_vol_annual(closes: list[float]) -> float | None:
     rets = [math.log(b / a) for a, b in zip(closes, closes[1:]) if a > 0 and b > 0]
     if len(rets) < 4:
         return None
-    mean = sum(rets) / len(rets)
-    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
+    weight = 1.0
+    weighted_squares = 0.0
+    weight_sum = 0.0
+    for ret in reversed(rets):
+        weighted_squares += weight * ret * ret
+        weight_sum += weight
+        weight *= EWMA_DECAY
+    var = weighted_squares / max(weight_sum, 1e-12)
     std = math.sqrt(max(var, 0.0))
     if std <= 0:
         return None
@@ -283,12 +296,49 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     ]
 
 
-def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[int], list[int]]:
+def load_settlement_index(path: str | None) -> dict[str, list[tuple[int, float]]]:
+    """Read the app's `diphunter-settlement-index` CSV export, oldest first."""
+    if not path:
+        return {}
+    rows: dict[str, list[tuple[int, float]]] = {}
+    with Path(path).open(encoding="utf-8") as f:
+        header = next(f, "").strip().split(",")
+        cols = {name: i for i, name in enumerate(header)}
+        required = {"index_id", "source_ts_ms", "value_usd"}
+        if not required.issubset(cols):
+            raise ValueError("settlement-index CSV is missing required columns")
+        for line in f:
+            values = line.rstrip("\n").split(",")
+            try:
+                index_id = values[cols["index_id"]].strip().upper()
+                ts = int(values[cols["source_ts_ms"]])
+                value = float(values[cols["value_usd"]])
+            except (IndexError, ValueError):
+                continue
+            if index_id and ts > 0 and value > 0:
+                rows.setdefault(index_id, []).append((ts // 1_000, value))
+    return {key: sorted(value) for key, value in rows.items()}
+
+
+def settlement_spot_known_at(rows: list[tuple[int, float]], decision_ts: int) -> list[float]:
+    """Minute buckets complete before the decision; mirrors Coinbase no-look-ahead."""
+    latest_by_minute: dict[int, float] = {}
+    for ts, value in rows:
+        minute = ts - (ts % 60)
+        if minute + 60 <= decision_ts:
+            latest_by_minute[minute] = value
+    return [latest_by_minute[t] for t in sorted(latest_by_minute)[-SPOT_LOOKBACK_BARS:]]
+
+
+def collect(days: int, max_markets: int, settlement_index: dict[str, list[tuple[int, float]]] | None = None) -> tuple[list[list[float]], list[int], list[float], list[int], list[int], float]:
     X: list[list[float]] = []
     y: list[int] = []
     mids: list[float] = []
     times: list[int] = []
     closes: list[int] = []
+    settlement_index = settlement_index or {}
+    cf_rows = 0
+    total_rows = 0
     per = max(8, max_markets // len(SERIES))
     for series in SERIES:
         print(f"=== {series}", flush=True)
@@ -311,18 +361,27 @@ def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], 
             time.sleep(0.06)
             if len(candles) < 3:
                 continue
-            spot = fetch_spot(PRODUCT[series], open_ts - 900, close_ts)
+            coinbase_spot = fetch_spot(PRODUCT[series], open_ts - 900, close_ts)
+            index_id = {"KXBTC15M": "BRTI", "KXETH15M": "ETHUSD_RTI", "KXSOL15M": "SOLUSD_RTI"}[series]
             # two samples: mid-window and late
             for idx in (max(1, len(candles) // 2), max(1, len(candles) - 2)):
+                end_ts = int(candles[idx].get("end_period_ts") or close_ts)
+                settlement_spot = settlement_spot_known_at(settlement_index.get(index_id, []), end_ts)
+                # Never silently substitute Coinbase when a settlement archive
+                # was requested: coverage is measured and promotion will fail
+                # until the 2–4 week CF collection is complete.
+                spot = settlement_spot if len(settlement_spot) >= 5 else coinbase_spot
                 feats = features_for(m, candles, spot, idx)
                 if not feats:
                     continue
                 X.append(feats)
                 y.append(label)
                 mids.append(feats[2])
-                times.append(int(candles[idx].get("end_period_ts") or close_ts))
+                times.append(end_ts)
                 closes.append(close_ts)
-    return X, y, mids, times, closes
+                total_rows += 1
+                cf_rows += int(len(settlement_spot) >= 5)
+    return X, y, mids, times, closes, (cf_rows / total_rows if total_rows else 0.0)
 
 
 def standardize(X: list[list[float]]) -> tuple[list[list[float]], list[float], list[float]]:
@@ -467,6 +526,35 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, 
     return {"n": n, "pnl": pnl, "hit_rate": (hits / n) if n else 0.0}
 
 
+def bootstrap_by_day(p: list[float], mids: list[float], y: list[int], times: list[int]) -> dict[str, float]:
+    """Blocked bootstrap: resample whole UTC days, never correlated rows."""
+    by_day: dict[str, list[int]] = {}
+    for i, ts in enumerate(times):
+        day = datetime.fromtimestamp(ts, tz=timezone.utc).date().isoformat()
+        by_day.setdefault(day, []).append(i)
+    days = sorted(by_day)
+    if not days:
+        return {"days": 0.0, "brier_advantage_lower_95": 0.0, "sim_pnl_lower_95": float("-inf")}
+    rng = random.Random(0xD1A10)
+    brier_delta: list[float] = []
+    pnl_samples: list[float] = []
+    for _ in range(BOOTSTRAP_REPS):
+        indexes = [i for _ in days for i in by_day[rng.choice(days)]]
+        pp = [p[i] for i in indexes]
+        mm = [mids[i] for i in indexes]
+        yy = [y[i] for i in indexes]
+        brier_delta.append(brier(mm, yy) - brier(pp, yy))
+        pnl_samples.append(simulated_pnl(pp, mm, yy)["pnl"])
+    brier_delta.sort()
+    pnl_samples.sort()
+    q = int((BOOTSTRAP_REPS - 1) * 0.05)
+    return {
+        "days": float(len(days)),
+        "brier_advantage_lower_95": brier_delta[q],
+        "sim_pnl_lower_95": pnl_samples[q],
+    }
+
+
 def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: list[int], folds: int = 4, closes: list[int] | None = None) -> dict[str, Any]:
     """Folds are whole markets so a late row cannot train on its own settlement."""
     groups = list(closes) if closes is not None else list(times)
@@ -516,6 +604,7 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
     final_p = [preds[i] for i in final]
     final_y = [y[i] for i in final]
     final_m = [mids[i] for i in final]
+    evidence = bootstrap_by_day(ph, mh, yh, [times[i] for i in hold])
     return {
         "n_holdout": len(hold),
         "model_brier": brier(ph, yh),
@@ -530,6 +619,9 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
         "final_window_samples": len(final),
         "final_window_model_brier": brier(final_p, final_y) if final else 1.0,
         "final_window_market_brier": brier(final_m, final_y) if final else 1.0,
+        "distinct_days": evidence["days"],
+        "brier_advantage_lower_95": evidence["brier_advantage_lower_95"],
+        "sim_pnl_lower_95": evidence["sim_pnl_lower_95"],
     }
 
 
@@ -561,7 +653,7 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
     return X, y, mids, times, closes
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, fixture: bool = False) -> None:
+def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, fixture: bool = False, cf_coverage: float = 0.0) -> None:
     n = int(metrics.get("n_holdout") or metrics.get("n_samples") or 0)
     model_brier = float(metrics.get("model_brier", 1.0))
     market_brier = float(metrics.get("market_brier", 1.0))
@@ -581,17 +673,27 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "sim_hit_rate": metrics.get("sim_hit_rate"),
         "model_asset": "edge_model.json",
         "tag": "edge-model-chat-GTP",
-        "data_source": "synthetic_fixture" if fixture else "kalshi_live_historical_coinbase_spot_v2",
+        "data_source": "synthetic_fixture" if fixture else "kalshi_live_historical_cf_settlement_index_v3",
         "beats_market": not fixture and n > 0 and model_brier < market_brier and model_ll < market_ll,
         "final_window_samples": int(metrics.get("final_window_samples", 0)),
         "final_window_model_brier": metrics.get("final_window_model_brier"),
         "final_window_market_brier": metrics.get("final_window_market_brier"),
         "calibration_error": metrics.get("calibration_error"),
         "market_calibration_error": metrics.get("market_calibration_error"),
+        "distinct_days": int(metrics.get("distinct_days", 0)),
+        "brier_advantage_lower_95": metrics.get("brier_advantage_lower_95"),
+        "sim_pnl_lower_95": metrics.get("sim_pnl_lower_95"),
+        "settlement_index_coverage": cf_coverage,
     }
     payload["promotion_eligible"] = bool(
         payload["beats_market"] and
-        payload["final_window_samples"] >= 8 and
+        n >= MIN_PROMOTION_TRADES and
+        payload["sim_trades"] >= MIN_PROMOTION_TRADES and
+        payload["distinct_days"] >= MIN_PROMOTION_DAYS and
+        cf_coverage >= 0.95 and
+        float(payload["brier_advantage_lower_95"] or 0.0) >= MIN_BRIER_ADVANTAGE and
+        float(payload["sim_pnl_lower_95"] or float("-inf")) > 0.0 and
+        payload["final_window_samples"] >= 60 and
         float(payload["final_window_model_brier"] or 1.0) < float(payload["final_window_market_brier"] or 1.0) and
         float(payload["calibration_error"] or 1.0) <= float(payload["market_calibration_error"] or 1.0)
     )
@@ -630,13 +732,16 @@ def main() -> int:
     ap.add_argument("--max-markets", type=int, default=180)
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
+    ap.add_argument("--settlement-index-csv", help="App export after 2–4 weeks of CF collection")
     ap.add_argument("--fixture", action="store_true")
     args = ap.parse_args()
     if args.fixture:
         X, y, mids, times, closes = fixture_dataset()
+        cf_coverage = 1.0
     else:
         try:
-            X, y, mids, times, closes = collect(args.days, args.max_markets)
+            index = load_settlement_index(args.settlement_index_csv)
+            X, y, mids, times, closes, cf_coverage = collect(args.days, args.max_markets, index)
         except Exception as e:
             print(f"live collect failed ({e}); refusing to publish a fixture model", file=sys.stderr, flush=True)
             return 1
@@ -648,7 +753,8 @@ def main() -> int:
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y, mids)
     export(model, metrics, Path(args.out))
-    write_manifest(metrics, Path(args.manifest), fixture=args.fixture)
+    metrics["settlement_index_coverage"] = cf_coverage
+    write_manifest(metrics, Path(args.manifest), fixture=args.fixture, cf_coverage=cf_coverage)
     # Do not overwrite the hand-checked Android/Python parity fixture.
     # Write a sample next to the exported model for debugging only.
     if not args.fixture:
