@@ -673,7 +673,11 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "sim_hit_rate": metrics.get("sim_hit_rate"),
         "model_asset": "edge_model.json",
         "tag": "edge-model-chat-GTP",
-        "data_source": "synthetic_fixture" if fixture else "kalshi_live_historical_cf_settlement_index_v3",
+        "data_source": (
+            "synthetic_fixture" if fixture else
+            "kalshi_live_historical_cf_settlement_index_v3" if cf_coverage >= 0.95 else
+            "kalshi_live_historical_coinbase_spot_v2"
+        ),
         "beats_market": not fixture and n > 0 and model_brier < market_brier and model_ll < market_ll,
         "final_window_samples": int(metrics.get("final_window_samples", 0)),
         "final_window_model_brier": metrics.get("final_window_model_brier"),
