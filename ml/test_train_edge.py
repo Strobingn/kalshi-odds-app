@@ -71,10 +71,11 @@ class NoLookAheadTest(unittest.TestCase):
         self.assertAlmostEqual(te.spot_return(closes, 5), 0.10)
         self.assertEqual(te.spot_return(closes[:3], 5), 0.0)
 
-    def test_no_profit_uses_no_midpoint(self) -> None:
+    def test_no_profit_uses_no_ask_not_the_midpoint(self) -> None:
         pnl = te.simulated_pnl([0.10], [0.30], [0])
         self.assertEqual(pnl["n"], 1)
-        self.assertAlmostEqual(pnl["pnl"], 1.0 - 0.70 - 0.07 * 0.70 * 0.30)
+        price = 0.70 + te.SIM_HALF_SPREAD
+        self.assertAlmostEqual(pnl["pnl"], 1.0 - price - 0.07 * price * (1.0 - price))
 
     def test_fixture_manifest_cannot_claim_edge(self) -> None:
         from tempfile import TemporaryDirectory

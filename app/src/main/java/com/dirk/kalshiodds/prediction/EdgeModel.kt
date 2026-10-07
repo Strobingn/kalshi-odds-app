@@ -89,6 +89,18 @@ data class EdgeModel(
         }
     }
 
+    /** True only when this file's own holdout beat the Kalshi mid on both scores. */
+    val beatsMarket: Boolean
+        get() {
+            fun m(key: String): Double? = metrics[key]?.takeIf { it.isFinite() }
+            val mb = m("model_brier") ?: return false
+            val kb = m("market_brier") ?: return false
+            val ml = m("model_logloss") ?: return false
+            val kl = m("market_logloss") ?: return false
+            if ((metrics["synthetic"] ?: 0.0) != 0.0) return false
+            return mb < kb && ml < kl
+        }
+
     fun predictYes(raw: FloatArray): Double {
         val z = logit(raw)
         val p = sigmoid(z)

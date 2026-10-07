@@ -50,6 +50,7 @@ FEATURE_NAMES = [
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
 FEE_RATE = 0.07
 CONF_MARGIN = 0.03
+SIM_HALF_SPREAD = 0.01
 UA = "DipHunterTrainer/0.3.8"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
 SPOT_LOOKBACK_BARS = 16
@@ -282,11 +283,12 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     ]
 
 
-def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[int]]:
+def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], list[float], list[int], list[int]]:
     X: list[list[float]] = []
     y: list[int] = []
     mids: list[float] = []
     times: list[int] = []
+    closes: list[int] = []
     per = max(8, max_markets // len(SERIES))
     for series in SERIES:
         print(f"=== {series}", flush=True)
@@ -319,7 +321,8 @@ def collect(days: int, max_markets: int) -> tuple[list[list[float]], list[int], 
                 y.append(label)
                 mids.append(feats[2])
                 times.append(int(candles[idx].get("end_period_ts") or close_ts))
-    return X, y, mids, times
+                closes.append(close_ts)
+    return X, y, mids, times, closes
 
 
 def standardize(X: list[list[float]]) -> tuple[list[list[float]], list[float], list[float]]:
@@ -444,6 +447,8 @@ def calibration_error(p: list[float], y: list[int], bins: int = 10) -> float:
 
 
 def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, float]:
+    """Taker fill at the ask, not the midpoint. A midpoint fill is the
+    2026-09-25 bug that made every strategy look better than a real order."""
     pnl = 0.0
     n = 0
     hits = 0
@@ -453,9 +458,7 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, 
         if gap <= fee + CONF_MARGIN:
             continue
         side_yes = pi > m
-        # The input is the YES midpoint. A NO contract costs 1 - YES mid,
-        # even before the executable ask and spread are accounted for.
-        price = m if side_yes else 1.0 - m
+        price = min(0.999, m + SIM_HALF_SPREAD) if side_yes else min(0.999, (1.0 - m) + SIM_HALF_SPREAD)
         fee_c = FEE_RATE * price * (1 - price)
         win = (yi == 1) if side_yes else (yi == 0)
         pnl += (1.0 - price - fee_c) if win else (-price - fee_c)
@@ -464,16 +467,27 @@ def simulated_pnl(p: list[float], mids: list[float], y: list[int]) -> dict[str, 
     return {"n": n, "pnl": pnl, "hit_rate": (hits / n) if n else 0.0}
 
 
-def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: list[int], folds: int = 4) -> dict[str, Any]:
-    order = sorted(range(len(X)), key=lambda i: times[i])
+def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: list[int], folds: int = 4, closes: list[int] | None = None) -> dict[str, Any]:
+    """Folds are whole markets so a late row cannot train on its own settlement."""
+    groups = list(closes) if closes is not None else list(times)
+    order = sorted(range(len(X)), key=lambda i: (groups[i], times[i]))
     X = [X[i] for i in order]
     y = [y[i] for i in order]
     mids = [mids[i] for i in order]
-    fold = max(1, len(X) // folds)
+    groups = [groups[i] for i in order]
+    starts = [0]
+    for i in range(1, len(groups)):
+        if groups[i] != groups[i - 1]:
+            starts.append(i)
+    starts.append(len(X))
+    n_markets = max(1, len(starts) - 1)
+    fold = max(1, n_markets // folds)
     preds = [0.0] * len(X)
     for k in range(1, folds):
-        tr_end = k * fold
-        te_end = len(X) if k == folds - 1 else (k + 1) * fold
+        tr_m = min(n_markets, k * fold)
+        te_m = n_markets if k == folds - 1 else min(n_markets, (k + 1) * fold)
+        tr_end = starts[tr_m]
+        te_end = starts[te_m]
         if tr_end < 20 or te_end <= tr_end:
             continue
         Ztr, mean, std = standardize(X[:tr_end])
@@ -490,7 +504,8 @@ def walk_forward(X: list[list[float]], y: list[int], mids: list[float], times: l
     for i, p in enumerate(preds):
         if p == 0.0:
             preds[i] = mids[i]
-    hold = list(range(fold, len(X)))  # first fold is train-only
+    hold_start = starts[min(fold, n_markets)]
+    hold = list(range(hold_start, len(X)))  # first fold is train-only
     if not hold:
         hold = list(range(len(X)))
     ph = [preds[i] for i in hold]
@@ -529,8 +544,8 @@ def fit_final(X: list[list[float]], y: list[int], mids: list[float]) -> dict[str
     }
 
 
-def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[int]]:
-    X, y, mids, times = [], [], [], []
+def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[float], list[int], list[int]]:
+    X, y, mids, times, closes = [], [], [], [], []
     t0 = 1_700_000_000
     for i in range(n):
         mid = 0.35 + 0.3 * ((i % 40) / 40.0)
@@ -541,8 +556,9 @@ def fixture_dataset(n: int = 240) -> tuple[list[list[float]], list[int], list[fl
         X.append(row)
         y.append(label)
         mids.append(mid)
-        times.append(t0 + i * 900)
-    return X, y, mids, times
+        times.append(t0 + i * 60)
+        closes.append(t0 + (i // 2) * 900)
+    return X, y, mids, times, closes
 
 
 def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, fixture: bool = False) -> None:
@@ -617,10 +633,10 @@ def main() -> int:
     ap.add_argument("--fixture", action="store_true")
     args = ap.parse_args()
     if args.fixture:
-        X, y, mids, times = fixture_dataset()
+        X, y, mids, times, closes = fixture_dataset()
     else:
         try:
-            X, y, mids, times = collect(args.days, args.max_markets)
+            X, y, mids, times, closes = collect(args.days, args.max_markets)
         except Exception as e:
             print(f"live collect failed ({e}); refusing to publish a fixture model", file=sys.stderr, flush=True)
             return 1
@@ -628,7 +644,7 @@ def main() -> int:
         print(f"only {len(X)} rows — refusing to publish an unvalidated model", file=sys.stderr, flush=True)
         return 1
     print(f"samples {len(X)} yes={sum(y)} no={len(y) - sum(y)}", flush=True)
-    metrics = walk_forward(X, y, mids, times)
+    metrics = walk_forward(X, y, mids, times, closes=closes)
     print(json.dumps(metrics, indent=2), flush=True)
     model = fit_final(X, y, mids)
     export(model, metrics, Path(args.out))

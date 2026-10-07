@@ -539,12 +539,13 @@ class PaperBook(
                     "yes" -> fill.side.equals("YES", true)
                     else -> fill.side.equals("NO", true)
                 }
+                val costBack = if (outcome == "void") fill.stakeUsd + fill.feeUsd else 0.0
                 val payout = when {
-                    outcome == "void" -> fill.stakeUsd
+                    outcome == "void" -> costBack
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                val pnl = payout - fill.stakeUsd - fill.feeUsd
+                val pnl = payout - fill.stakeUsd - (if (outcome == "void") 0.0 else fill.feeUsd)
                 cash += payout
                 fill.copy(
                     settled = true,
@@ -618,6 +619,7 @@ class PaperBook(
                 return null
             }
             val stake = useQty * px
+            val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(useQty, px)
             val row = PaperFill(
                 id = idFactory(),
                 ticker = ticker,
@@ -627,13 +629,14 @@ class PaperBook(
                 limitPrice = px,
                 source = source,
                 createdAtMs = nowMs(),
+                feeUsd = fees,
                 note = note,
                 winTargetUsd = winTargetUsd
             )
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             publish(
                 cur.copy(
-                    cashUsd = cur.cashUsd - stake,
+                    cashUsd = cur.cashUsd - stake - fees,
                     fills = fills,
                     lastMessage = String.format(
                         java.util.Locale.US,

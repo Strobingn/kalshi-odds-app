@@ -39,6 +39,51 @@ object DigitalOptionFairValue {
         return normCdf(d2).coerceIn(0.0, 1.0)
     }
 
+    /** Kalshi 15m crypto settles on the average of the last 60 s of the index. */
+    const val SETTLE_WINDOW_SECONDS = 60.0
+
+    fun indexNoiseLog(asset: String?): Double = when (asset?.uppercase()) {
+        "BTC" -> 0.5e-4
+        "ETH" -> 0.9e-4
+        "SOL" -> 1.1e-4
+        else -> 1.0e-4
+    }
+
+    /**
+     * P(YES) under Kalshi's settlement rule: the simple average of the index
+     * over the last 60 seconds is at least the strike (ties settle YES).
+     * This is the contract the app is scored on. A point-spot digital is not.
+     */
+    fun pSettleAtLeast(
+        spot: Double,
+        strike: Double,
+        tteSeconds: Double,
+        sigmaAnnual: Double,
+        observedMeanLog: Double? = null,
+        indexNoise: Double = 1.0e-4,
+        windowSeconds: Double = SETTLE_WINDOW_SECONDS
+    ): Double? {
+        if (!spot.isFinite() || !strike.isFinite() || spot <= 0.0 || strike <= 0.0) return null
+        if (!tteSeconds.isFinite() || !sigmaAnnual.isFinite() || sigmaAnnual <= 0.0) return null
+        if (!windowSeconds.isFinite() || windowSeconds <= 0.0) return null
+        val lnS = ln(spot)
+        val lnK = ln(strike)
+        val obs = observedMeanLog?.takeIf { it.isFinite() } ?: lnS
+        val w = windowSeconds
+        val t = tteSeconds.coerceAtLeast(0.0)
+        val s2 = sigmaAnnual * sigmaAnnual / SECONDS_PER_YEAR
+        val (mean, pathVar) = if (t >= w) {
+            lnS to s2 * ((t - w) + w / 3.0)
+        } else {
+            val f = t / w
+            ((w - t) * obs + t * lnS) / w to f * f * s2 * t / 3.0
+        }
+        val noise = if (indexNoise.isFinite() && indexNoise > 0.0) indexNoise else 0.0
+        val sd = sqrt(pathVar + noise * noise)
+        if (!sd.isFinite() || sd <= 1e-15) return if (mean >= lnK) 1.0 else 0.0
+        return normCdf((mean - lnK) / sd).coerceIn(0.0, 1.0)
+    }
+
     /** Distance to strike in remaining-vol units: ln(S/K) / (σ √T). */
     fun distanceVolUnits(
         spot: Double,

@@ -622,11 +622,12 @@ class ScoringEngine(
                 .coerceIn(0.01, 5.0)
         }
         val digitalFairPp = if (settlementSpot != null && strikeUsd != null && sigmaAnnual != null) {
-            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
+            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
                 spot = settlementSpot,
                 strike = strikeUsd,
                 tteSeconds = (tteSec ?: 900L).toDouble(),
-                sigmaAnnual = sigmaAnnual
+                sigmaAnnual = sigmaAnnual,
+                indexNoise = com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.indexNoiseLog("BTC")
             )?.times(100.0)
         } else {
             null
@@ -661,14 +662,48 @@ class ScoringEngine(
             delta = fair - midPp
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
-        // The imported model is a probability input, not permission to undo a
-        // strong spot-vs-target semantic lock. Re-apply after the model blend;
-        // otherwise a late tail estimate can flip an established UP/YES or
-        // DOWN/NO direction immediately before close.
-        if (dir.applied) {
-            fair = dir.fairPp
-            predictedSide = dir.side
+        // The learned blend loses to Kalshi's mid. Keep a strong spot lock
+        // until the last minute, then the 60s settlement average — the thing
+        // Kalshi actually pays — is allowed to call the side.
+        run {
+            val anchored = com.dirk.kalshiodds.signal.fair.WinningSide.fairYesPp(
+                marketPp = midPp,
+                settlePp = digitalFairPp,
+                tteSeconds = tteSec?.toDouble(),
+                modelPp = if (loaded?.beatsMarket == true) importedModelPp else null
+            )
+            val settleDominates = digitalFairPp != null && (tteSec ?: 900L) <= 60L
+            if (dir.applied && !settleDominates) {
+                fair = if (dir.side == "YES") maxOf(anchored, dir.fairPp) else minOf(anchored, dir.fairPp)
+                fair = fair.coerceIn(2.0, 98.0)
+                predictedSide = dir.side
+            } else {
+                fair = anchored
+                predictedSide = com.dirk.kalshiodds.signal.fair.WinningSide.side(fair)
+            }
             delta = fair - midPp
+            ev = NetExpectedValue.compute(
+                fairYes = fair / 100.0,
+                mid = mid01,
+                spreadDollars = spread,
+                feeRate = settings.feeRate,
+                preferSide = predictedSide,
+                stakeUsd = settings.ticketStakeUsd
+            )
+            size = PositionSizer.suggest(
+                fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
+                contractPrice = ev.contractPrice,
+                bankrollUsd = settings.bankrollUsd,
+                mode = PositionSizer.modeOf(settings.useKelly),
+                kellyFraction = settings.kellyFraction,
+                fixedFraction = settings.fixedFraction,
+                maxFraction = settings.maxBankrollFraction,
+                liquidity = liquidityObs,
+                depthNearMid = depthNear,
+                spreadDollars = spread,
+                maxSpreadCents = settings.maxSpreadCents,
+                netEvPositive = ev.netEv > 0.0
+            )
         }
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
