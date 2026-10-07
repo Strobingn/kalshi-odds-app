@@ -1,0 +1,38 @@
+name: Retrain Mis_bitcoin model (bridge)
+
+# Scheduled workflows only run from the default branch. This bridge lives on
+# main and fires the Mis_bitcoin trainer's repository_dispatch trigger on a
+# weekly cron, so that model actually retrains on fresh settled data.
+#
+# Requires a repo-scoped PAT with repo access stored as the secret
+# RETRAIN_DISPATCH_TOKEN (the default GITHUB_TOKEN cannot send dispatches
+# cross-branch in some configurations). Until that secret exists, the
+# dispatch step fails softly and the run stays green.
+
+on:
+  schedule:
+    # Monday 08:41 UTC — after the weekend's settled windows.
+    - cron: "41 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fire retrain-mis-bitcoin dispatch
+        env:
+          GH_TOKEN: ${{ secrets.RETRAIN_DISPATCH_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "RETRAIN_DISPATCH_TOKEN secret not set — nothing to do."
+            exit 0
+          fi
+          gh api -X POST repos/${{ github.repository }}/dispatches \
+            -f event_type=retrain-mis-bitcoin \
+            -F days=270
+          echo "dispatched retrain-mis-bitcoin (days=270)"
