@@ -29,6 +29,7 @@ class AsyncResultsWriter(
     private val scorecards = ConcurrentLinkedQueue<ScorecardRow>()
     private val tickets = ConcurrentLinkedQueue<TicketAttemptRow>()
     private val odds = ConcurrentLinkedQueue<OddsMidRow>()
+    private val settlementIndex = ConcurrentLinkedQueue<SettlementIndexRow>()
     private val chartTicks = ConcurrentLinkedQueue<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
     private val forwardTests = ConcurrentLinkedQueue<ForwardTestRow>()
     private val ticketForward = ConcurrentLinkedQueue<TicketForwardRow>()
@@ -58,6 +59,11 @@ class AsyncResultsWriter(
 
     fun enqueueOddsMid(row: OddsMidRow) {
         odds.add(row)
+        schedule()
+    }
+
+    fun enqueueSettlementIndex(row: SettlementIndexRow) {
+        settlementIndex.add(row)
         schedule()
     }
 
@@ -94,7 +100,7 @@ class AsyncResultsWriter(
 
     private fun pending(): Boolean =
         snapshots.isNotEmpty() || alerts.isNotEmpty() || scorecards.isNotEmpty() ||
-            tickets.isNotEmpty() || odds.isNotEmpty() || chartTicks.isNotEmpty() ||
+            tickets.isNotEmpty() || odds.isNotEmpty() || settlementIndex.isNotEmpty() || chartTicks.isNotEmpty() ||
             forwardTests.isNotEmpty() || ticketForward.isNotEmpty()
 
     @Synchronized
@@ -159,6 +165,14 @@ class AsyncResultsWriter(
                 batch.add(next)
             }
             if (batch.isNotEmpty()) store.insertOddsMids(batch)
+        }
+        runCatching {
+            val batch = ArrayList<SettlementIndexRow>(maxBatch)
+            while (batch.size < maxBatch) {
+                val next = settlementIndex.poll() ?: break
+                batch.add(next)
+            }
+            if (batch.isNotEmpty()) store.insertSettlementIndex(batch)
         }
         runCatching {
             val archive = store as? com.dirk.kalshiodds.data.local.archive.DataArchive
