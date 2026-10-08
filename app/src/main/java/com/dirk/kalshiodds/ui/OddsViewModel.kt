@@ -822,7 +822,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         refreshPositionMarks()
     }
 
-    /** Keeps AI paper positions open through strength and exits at a fresh bid. */
+    /** Runs the AI paper scalp: hold strength, exit at a fresh bid on a turn. */
     private fun managePaperPositions(
         live: List<MarketUiModel>,
         context: TicketBuilder.Context,

@@ -8,7 +8,7 @@ import org.junit.Test
 class PaperPositionManagerTest {
     private fun fill(high: Double = 0.0) = PaperFill(
         id = "p1", ticker = "KXBTC15M-TEST", side = "YES", stakeUsd = 20.0,
-        contracts = 100, limitPrice = 0.20, source = "AI residual paper research",
+        contracts = 100, limitPrice = 0.20, source = "AI scalping research",
         createdAtMs = 1_000L, feeUsd = 0.0, highWaterMarkPrice = high, note = "test"
     )
 
@@ -45,7 +45,7 @@ class PaperPositionManagerTest {
         val candidate = PaperOpportunity.Candidate(
             ticker = "KXBTC15M-TEST", side = "YES", fairSideProbability = 0.80,
             ask = 0.20, visibleContracts = 100, feePerContractUsd = 0.0112,
-            expectedNetPerContractUsd = 0.5888, source = "residual paper research"
+            expectedNetPerContractUsd = 0.5888, source = "scalping research"
         )
         val opened = book.considerUnboundedOpportunity(candidate, enabled = true)!!
         book.updateAutoPositionHighWater(opened.ticker, opened.side, 0.40)

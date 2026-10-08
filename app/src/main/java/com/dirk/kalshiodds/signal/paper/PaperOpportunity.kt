@@ -54,7 +54,7 @@ object PaperOpportunity {
             visibleContracts = visible,
             feePerContractUsd = fee,
             expectedNetPerContractUsd = expected,
-            source = "residual paper research"
+            source = "scalping research"
         )
     }
 }

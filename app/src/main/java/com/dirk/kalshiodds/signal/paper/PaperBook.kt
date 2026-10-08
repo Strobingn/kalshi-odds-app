@@ -189,7 +189,7 @@ class PaperBook(
             limitPrice = opportunity.ask,
             contracts = opportunity.visibleContracts,
             source = "AI ${opportunity.source}",
-            note = "Unlimited-credit paper research · EV ${String.format(java.util.Locale.US, "%+.4f", opportunity.expectedNetPerContractUsd)} per contract · visible touch only · never sent to Kalshi",
+            note = "Unlimited-credit paper scalping · EV ${String.format(java.util.Locale.US, "%+.4f", opportunity.expectedNetPerContractUsd)} per contract · visible touch only · never sent to Kalshi",
             oneEntryPerTicker = true
         )
     }
@@ -499,7 +499,7 @@ class PaperBook(
     }
 
     /**
-     * Marks an AI-owned paper position from the currently executable bid.
+     * Marks an AI-owned paper scalp from the currently executable bid.
      * The high-water mark is persisted with the paper ledger so an app restart
      * cannot erase a trailing exit that the model has already earned.
      */
@@ -522,14 +522,14 @@ class PaperBook(
         }
     }
 
-    /** Automated exit for an AI-owned paper position. Never submits a Kalshi order. */
+    /** Automated exit for an AI-owned paper scalp. Never submits a Kalshi order. */
     fun autoSell(ticker: String, side: String, bid: Double, reason: String): PaperFill? =
         closeOpen(
             ticker = ticker,
             side = side,
             price = bid,
             requestedContracts = Int.MAX_VALUE,
-            note = "AI paper exit · $reason · never sent to Kalshi",
+            note = "AI scalp exit · $reason · never sent to Kalshi",
             onlyAiOwned = true
         )
 

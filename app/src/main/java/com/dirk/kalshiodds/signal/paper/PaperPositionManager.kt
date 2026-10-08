@@ -4,7 +4,7 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 
 /**
- * Paper-only exit policy for an already-open AI fill. A model cannot know the
+ * Paper-only scalping exit policy for an already-open AI fill. A model cannot know the
  * exact tick before a decline; it can protect a proven gain after a retrace or
  * exit when its fair probability falls below the bid another trader will pay.
  */
