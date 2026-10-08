@@ -209,6 +209,21 @@ class PaperBookTest {
     }
 
     @Test
+    fun aiSellsAWinnerWhenTheFirstSevenMinutesFlatten() {
+        val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
+        val fill = book.considerTicket(hunterTicket(), enabled = true)!!
+        val key = "${fill.ticker.uppercase()}|${fill.side}"
+        assertTrue(book.exitIfRisen(mapOf(key to 0.15), mapOf(key to 4L * 60L * 1000L)).isEmpty())
+        assertFalse(book.snapshot().fills.single().settled)
+        val sold = book.exitIfRisen(mapOf(key to 0.15), mapOf(key to ScalpExit.MOVE_WINDOW_MS))
+        assertEquals(1, sold.size)
+        assertEquals("sell", sold.single().outcome)
+        assertTrue(sold.single().won == true)
+        assertTrue(sold.single().note.contains("flattened"))
+        assertEquals(0, book.snapshot().openCount)
+    }
+
+    @Test
     fun manualPaperFillIsNotSoldJustBecauseTheBidRose() {
         val book = PaperBook(idFactory = { "m" }, nowMs = { 1L })
         val ticket = hunterTicket().copy(kind = TicketKind.MANUAL)

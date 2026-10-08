@@ -70,8 +70,9 @@ data class PaperBookState(
 
 /**
  * Isolated paper book. Never calls Kalshi.
- * The AI buys under 50¢. A cheaper ask gets a larger share of the cash.
- * It holds while the bid is rising and sells when the bid comes off the high.
+ * The AI buys under 50¢ in the first 7 minutes. A cheaper ask gets a larger
+ * share of the cash. It holds while the bid is rising, then sells when the
+ * bid comes off the high or the early move flattens.
  */
 class PaperBook(
     initial: PaperBookState = PaperBookState(),
@@ -491,12 +492,13 @@ class PaperBook(
     }
 
     /**
-     * Hold an open AI fill while the bid is making highs. Sell when the bid
-     * falls 3¢ off that high and the sale still clears both taker fees.
-     * [bids] is keyed `TICKER|SIDE` (uppercase). Manual and tile fills stay open.
-     * Never hits Kalshi. A fill that never rises can still settle later.
+     * Hold an open AI fill while the bid is making highs in the first 7 minutes.
+     * Sell when the bid falls 3¢ off that high, or when those 7 minutes are
+     * over and the sale still clears fees. [bids] and [elapsedMs] are keyed
+     * `TICKER|SIDE` (uppercase). Manual and tile fills stay open.
+     * Never hits Kalshi.
      */
-    fun exitIfRisen(bids: Map<String, Double>): List<PaperFill> {
+    fun exitIfRisen(bids: Map<String, Double>, elapsedMs: Map<String, Long> = emptyMap()): List<PaperFill> {
         synchronized(lock) {
             val cur = _state.value
             var cash = cur.cashUsd
@@ -509,19 +511,21 @@ class PaperBook(
                     next += fill
                     continue
                 }
+                val key = "${fill.ticker.uppercase()}|${fill.side.uppercase()}"
                 val prevPeak = if (fill.peakBid > 0.0) fill.peakBid else fill.limitPrice
-                val bid = KalshiPrice.usable(
-                    bids["${fill.ticker.uppercase()}|${fill.side.uppercase()}"]
-                )
+                val bid = KalshiPrice.usable(bids[key])
                 if (bid == null) {
                     next += fill
                     continue
                 }
-                if (ScalpExit.shouldSell(fill.limitPrice, bid, prevPeak, fill.contracts, fill.feeUsd)) {
+                val elapsed = elapsedMs[key]
+                if (ScalpExit.shouldSell(fill.limitPrice, bid, prevPeak, fill.contracts, fill.feeUsd, elapsedMs = elapsed)) {
                     val sellFee = KalshiFee.total(fill.contracts, bid)
                     val proceeds = fill.contracts * bid
                     val pnl = proceeds - sellFee - fill.stakeUsd - fill.feeUsd
                     cash += proceeds - sellFee
+                    val giveback = prevPeak - bid >= ScalpExit.GIVEBACK - 1e-9
+                    val why = if (giveback) "bid came off the high" else "the first 7 minutes flattened"
                     val closed = fill.copy(
                         settled = true,
                         outcome = "sell",
@@ -530,20 +534,22 @@ class PaperBook(
                         peakBid = maxOf(prevPeak, bid),
                         note = String.format(
                             java.util.Locale.US,
-                            "Sold %d ct @ %.1f¢ — bid came off the high, did not wait for settlement",
+                            "Sold %d ct @ %.1f¢ — %s, did not wait for settlement",
                             fill.contracts,
-                            bid * 100.0
+                            bid * 100.0,
+                            why
                         )
                     )
                     sold += closed
                     lastMsg = String.format(
                         java.util.Locale.US,
-                        "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · sold the rollover, not settlement",
+                        "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · %s",
                         closed.displaySide,
                         closed.ticker,
                         closed.contracts,
                         bid * 100.0,
-                        pnl
+                        pnl,
+                        why
                     )
                     next += closed
                     continue

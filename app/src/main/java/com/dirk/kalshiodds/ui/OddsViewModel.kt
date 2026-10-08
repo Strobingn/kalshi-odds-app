@@ -911,8 +911,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove && ScalpExit.isLowPrice(it.limitPrice) }
-                .forEach { paperBook.considerTicket(it, enabled = true) }
+            paperTickets.filter { ticket ->
+                if (!ticket.canApprove || !ScalpExit.isLowPrice(ticket.limitPrice)) return@filter false
+                val market = live.firstOrNull { it.ticker.equals(ticket.ticker, true) } ?: return@filter false
+                ScalpExit.inMoveWindow(ctx.nowMs, market.closeTimeEpochMs, market.openTimeEpochMs)
+            }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
         exitPaperWhenUp(live, ctx)
         offerLiveScalps(live, ctx)
@@ -1073,13 +1076,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
             }
             if (ask == null || !ScalpExit.isLowPrice(ask)) return@forEach
+            if (market == null || !ScalpExit.inMoveWindow(now, market.closeTimeEpochMs, market.openTimeEpochMs)) return@forEach
             paperBook.considerAlert(alert, ask, enabled = true)
         }
         val ctx = ticketContext(_state.value, now)
         exitPaperWhenUp(markets.values.toList(), ctx)
     }
 
-    /** Sell AI paper fills whose bid is up. Does not wait for settlement. */
+    /** Sell a paper winner when the bid rolls over, or when the first 7 minutes flatten. */
     private fun exitPaperWhenUp(markets: List<MarketUiModel>, ctx: TicketBuilder.Context) {
         val open = paperBook.snapshot().fills.any { !it.settled }
         if (!open) return
@@ -1091,7 +1095,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 put("${fill.ticker.uppercase()}|${fill.side.uppercase()}", bid)
             }
         }
-        val sold = paperBook.exitIfRisen(bids)
+        val elapsed = buildMap {
+            for (fill in paperBook.snapshot().fills) {
+                if (fill.settled) continue
+                val market = markets.firstOrNull { it.ticker.equals(fill.ticker, true) } ?: continue
+                val ms = ScalpExit.elapsedMs(ctx.nowMs, market.closeTimeEpochMs, market.openTimeEpochMs) ?: continue
+                put("${fill.ticker.uppercase()}|${fill.side.uppercase()}", ms)
+            }
+        }
+        val sold = paperBook.exitIfRisen(bids, elapsed)
         if (sold.isNotEmpty()) {
             _state.update {
                 it.copy(userMessage = paperBook.snapshot().lastMessage, paper = paperBook.snapshot())
@@ -1121,7 +1133,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val high = maxOf(peak, bid)
             scalpPeak[key] = high
             val entryFee = KalshiFee.total(qty, avg, ctx.settings.feeRate)
-            if (!ScalpExit.shouldSell(avg, bid, peak, qty, entryFee, ctx.settings.feeRate)) return@mapNotNull null
+            val elapsed = ScalpExit.elapsedMs(ctx.nowMs, market.closeTimeEpochMs, market.openTimeEpochMs)
+            if (!ScalpExit.shouldSell(avg, bid, peak, qty, entryFee, ctx.settings.feeRate, elapsed)) return@mapNotNull null
             val ticket = TicketBuilder.proposeSell(market, pos.side, qty, ctx) ?: return@mapNotNull null
             if (!ticket.canApprove) return@mapNotNull null
             ticket.copy(gateNote = ScalpExit.SELL_NOTE)

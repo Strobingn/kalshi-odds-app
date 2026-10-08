@@ -39,6 +39,20 @@ class ScalpExitTest {
         assertFalse(ScalpExit.shouldSell(entry, 0.14, 0.15, contracts, entryFee))
         assertTrue(ScalpExit.shouldSell(entry, 0.12, 0.15, contracts, entryFee))
         assertFalse(ScalpExit.shouldSell(entry, null, 0.15, contracts, entryFee))
+        assertFalse(ScalpExit.shouldSell(entry, 0.15, 0.15, contracts, entryFee, elapsedMs = 4L * 60L * 1000L))
+        assertTrue(ScalpExit.shouldSell(entry, 0.15, 0.15, contracts, entryFee, elapsedMs = ScalpExit.MOVE_WINDOW_MS))
+    }
+
+    @Test
+    fun buysOnlyWhileTheFirstSevenMinutesAreStillMoving() {
+        val open = 1_000_000L
+        val close = open + 900_000L
+        assertTrue(ScalpExit.inMoveWindow(open + 60_000L, close, open))
+        assertTrue(ScalpExit.inMoveWindow(open + 6L * 60L * 1000L, close, open))
+        assertFalse(ScalpExit.inMoveWindow(open + ScalpExit.MOVE_WINDOW_MS, close, open))
+        assertFalse(ScalpExit.inMoveWindow(open + 10L * 60L * 1000L, close, open))
+        assertFalse(ScalpExit.inMoveWindow(open - 1L, close, open))
+        assertFalse(ScalpExit.inMoveWindow(open + 60_000L, null, null))
     }
 
     @Test

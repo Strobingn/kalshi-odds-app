@@ -56,7 +56,7 @@ fun PaperBookCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Start $100 · buys under 50¢ · sells when the bid rolls over · never hits Kalshi",
+                        "Start $100 · buys under 50¢ in the first 7 min · sells the rollover or the flatten · never hits Kalshi",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
@@ -84,9 +84,9 @@ fun PaperBookCard(
         if (!homeMode) {
             Text(
                 if (enabled) {
-                    "AI buys under 50¢, more when the price is lower, and sells when the bid comes off the high. Live Approve is the only path that can place a real order."
+                    "AI buys under 50¢ in the first 7 minutes, more when the price is lower, and sells when the bid rolls over or the market flattens. Live Approve is the only path that can place a real order."
                 } else {
-                    "Paper trading is off. Turn it on to buy under 50¢ and sell the rollover on this $100 book."
+                    "Paper trading is off. Turn it on to buy the early move under 50¢ on this $100 book."
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
