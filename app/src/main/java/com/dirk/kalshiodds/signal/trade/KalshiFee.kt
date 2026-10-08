@@ -65,6 +65,24 @@ object KalshiFee {
         return floor((stakeUsd / p) + 1e-9).toInt().coerceAtLeast(0)
     }
 
+    /**
+     * Largest contract count whose **total debit** (position + order fee)
+     * stays within [stakeUsd]. The fee is paid on top of C×P, so
+     * [contractsForStake] can overshoot the stake by a few cents; EV and
+     * "all-in" ticket math must use this budget-aware count instead.
+     */
+    fun contractsWithinBudget(
+        stakeUsd: Double,
+        price: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): Int {
+        if (!stakeUsd.isFinite() || stakeUsd <= 0.0) return 0
+        val p = KalshiPrice.usable(price) ?: return 0
+        var c = contractsForStake(stakeUsd, p)
+        while (c > 0 && totalCost(c, p, feeRate) > stakeUsd + 1e-9) c--
+        return c
+    }
+
     /** Unrounded model fee `coef × C × P × (1 − P)`. */
     fun raw(contracts: Int, price: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double =
         modelFeeBd(contracts, price, feeRate).toDouble()
@@ -149,6 +167,22 @@ object KalshiFee {
     ): Double {
         val p = clipPrice(price)
         val c = contractsForStake(stakeUsd, p).coerceAtLeast(1)
+        return total(c, p, feeRate) / c.toDouble()
+    }
+
+    /**
+     * Like [perContract] but amortized over [contractsWithinBudget] — the
+     * count a real order can afford without exceeding [stakeUsd]. Use this
+     * for EV math; [perContract] is kept for display / gate compatibility.
+     */
+    fun budgetPerContract(
+        price: Double,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Double {
+        val p = clipPrice(price)
+        val c = contractsWithinBudget(stakeUsd, p, feeRate)
+        if (c <= 0) return Double.POSITIVE_INFINITY
         return total(c, p, feeRate) / c.toDouble()
     }
 

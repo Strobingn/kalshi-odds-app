@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.data.api
 
 import com.dirk.kalshiodds.signal.ws.KalshiWsAuth
+import java.io.IOException
 import okhttp3.Interceptor
 import okhttp3.Response
 
@@ -24,7 +25,11 @@ class KalshiAuthInterceptor(
     override fun intercept(chain: Interceptor.Chain): Response {
         val (keyId, pem) = credentials()
         if (keyId.isBlank() || pem.isBlank()) {
-            throw IllegalStateException("Kalshi API key missing — add Key ID + PEM in Settings")
+            // IOException, not IllegalStateException: OkHttp/Retrofit propagate
+            // IOException to the caller as a normal request failure, while an
+            // unchecked exception escapes the call stack and crashes the
+            // coroutine on any trade-path request made before keys are saved.
+            throw IOException("Kalshi API key missing — add Key ID + PEM in Settings")
         }
         val key = parsedKey(pem)
         val request = chain.request()
