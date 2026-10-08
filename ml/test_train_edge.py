@@ -109,7 +109,7 @@ def _samples(n_markets: int, seed: int = 3, lag: float = 0.0) -> list[te.Sample]
         for k in range(1, 14):
             spot_logit = truth + rng.gauss(0.0, 0.5)
             mid = te.sigmoid((1.0 - lag) * truth + (rng.gauss(0.0, 0.3) if lag else 0.0))
-            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit), 0.0]
+            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit), 0.0, 0.0]
             out.append(
                 te.Sample(
                     x=x,

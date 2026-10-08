@@ -10,7 +10,7 @@ import kotlin.math.ln
  * Order **must** match `ml/train_edge.py` / the JSON `feature_names`.
  */
 object EdgeFeatures {
-    const val SIZE = 11
+    const val SIZE = 12
     val NAMES = listOf(
         "dist_to_strike_vol",
         "tte_frac",
@@ -22,7 +22,8 @@ object EdgeFeatures {
         "cross_asset",
         "time_of_day",
         "digital_fair",
-        "prev_window_return"
+        "prev_window_return",
+        "is_funding_hour"
     )
 
     data class Raw(
@@ -44,7 +45,12 @@ object EdgeFeatures {
          * reversal tilt (arXiv 2608.21888: 50.2% -> 53.0% sign-flip by
          * prior-move size). Positive = BTC rose into this market's open.
          */
-        val prevWindowReturn: Double? = null
+        val prevWindowReturn: Double? = null,
+        /** True when this window closes into a perpetual funding settlement
+         * (close time at 00/08/16 UTC): documented weaker reversal accuracy
+         * and different payoff geometry in those hours. Parity with the
+         * trainer's is_funding_hour. Derived from close time when null. */
+        val isFundingHour: Boolean? = null
     )
 
     fun build(raw: Raw): FloatArray {
@@ -73,8 +79,18 @@ object EdgeFeatures {
             (raw.crossAssetRet ?: 0.0).toFloat().coerceIn(-0.2f, 0.2f),
             tod,
             (digital ?: raw.marketMid).toFloat().coerceIn(0f, 1f),
-            (raw.prevWindowReturn ?: 0.0).toFloat().coerceIn(-0.05f, 0.05f)
+            (raw.prevWindowReturn ?: 0.0).toFloat().coerceIn(-0.05f, 0.05f),
+            if (raw.isFundingHour ?: isFundingHour(raw.nowMs, raw.tteSeconds)) 1f else 0f
         )
+    }
+
+    /**
+     * True when the window closing [nowMs] + [tteSeconds] lands on a
+     * perpetual funding settlement (00/08/16 UTC, ±7.5 min).
+     */
+    fun isFundingHour(nowMs: Long, tteSeconds: Double?): Boolean {
+        val closeMs = nowMs + (tteSeconds ?: 900.0).coerceAtLeast(0.0).toLong() * 1000L
+        return closeMs % (8 * 3_600_000L) < 900_000L
     }
 
     fun timeOfDayFrac(nowMs: Long, tz: TimeZone = TimeZone.getTimeZone("America/New_York")): Float {

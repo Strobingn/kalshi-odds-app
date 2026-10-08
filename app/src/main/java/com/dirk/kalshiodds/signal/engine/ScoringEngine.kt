@@ -674,7 +674,10 @@ class ScoringEngine(
                     digitalFair = null,
                     // Trailing-15-minute return = the previous window's move
                     // (reversal tilt; parity with prev_window_return).
-                    prevWindowReturn = spotFeat?.prevWindowReturn
+                    prevWindowReturn = spotFeat?.prevWindowReturn,
+                    // Funding-settlement close (00/08/16 UTC): regime flag,
+                    // parity with is_funding_hour.
+                    isFundingHour = null  // EdgeFeatures derives it from close time
                 )
             )
             val pYes = loaded.predictYes(feats, mid01)
