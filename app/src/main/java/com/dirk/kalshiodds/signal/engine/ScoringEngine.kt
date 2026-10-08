@@ -102,6 +102,9 @@ class ScoringEngine(
         val halfSpread: Double? = null,
         val spotLabel: String? = null,
         val spotPp: Double? = null,
+        /** Live public-spot returns carried through for paper scalp experiments. */
+        val spotReturn1m: Double? = null,
+        val spotReturn5m: Double? = null,
         val adapterReady: Boolean = false,
         val featureDevs: Map<String, Double> = emptyMap(),
         val mlpPp: Double? = null,
@@ -809,6 +812,8 @@ class ScoringEngine(
             halfSpread = ev.halfSpread,
             spotLabel = combinedSpotLabel,
             spotPp = spotAdjPp,
+            spotReturn1m = spotFeat?.spotReturn1m,
+            spotReturn5m = spotFeat?.spotReturn5m,
             adapterReady = adapterState.ready,
             featureDevs = featureDevs,
             mlpPp = mlpPp,

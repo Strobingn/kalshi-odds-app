@@ -160,6 +160,7 @@ class PaperBook(
         val source = when (ticket.kind) {
             TicketKind.HUNTER -> "AI autopilot hunter"
             TicketKind.HUNTER_VALUE -> "AI autopilot long-shot"
+            TicketKind.SCALP -> "AI autopilot scalp"
             else -> "AI autopilot"
         }
         return unboundedFill(

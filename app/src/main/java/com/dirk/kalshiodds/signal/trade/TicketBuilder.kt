@@ -54,8 +54,9 @@ object TicketBuilder {
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
+        val scalps = live.mapNotNull { proposeScalp(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
-        return (hunter + value + configured)
+        return (scalps + hunter + value + configured)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
@@ -98,12 +99,33 @@ object TicketBuilder {
         }
     }
 
+    /**
+     * Early-window favorite/spot confirmation candidate. This is intentionally
+     * paper-only and still must clear the same executable after-fee model edge
+     * as any other automatic suggestion.
+     */
+    fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled || !MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val scalp = ScalpSignal.candidate(market, ctx.nowMs) ?: return null
+        return buildTicket(
+            market = market,
+            side = scalp.side,
+            ctx = ctx,
+            stakeUsd = SignalConstants.HUNTER_STAKE_USD,
+            minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
+            kind = TicketKind.SCALP,
+            requireGates = false,
+            explicitGateNote = scalp.note()
+        )
+    }
+
     /** Rebuild the same kind of ticket (live $5 cap, not bankroll win-target). */
     fun resizeForBankroll(ticket: TradeTicket, market: MarketUiModel, ctx: Context): TradeTicket {
         if (ticket.isSell) return ticket
         return when (ticket.kind) {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
+            TicketKind.SCALP -> proposeScalp(market, ctx)
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
             TicketKind.SELL -> ticket
@@ -318,7 +340,8 @@ object TicketBuilder {
         stakeUsd: Double,
         minPayoutUsd: Double,
         kind: TicketKind,
-        requireGates: Boolean
+        requireGates: Boolean,
+        explicitGateNote: String? = null
     ): TradeTicket? {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         if (requireGates) {
@@ -386,7 +409,7 @@ object TicketBuilder {
 
         val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
         val bookSide = if (side == "YES") "bid" else "ask"
-        val minProfit = ctx.settings.minProfitIfWinUsd
+        val minProfit = if (kind == TicketKind.SCALP) 0.0 else ctx.settings.minProfitIfWinUsd
         val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
         val blockedReason = if (belowMin) {
             LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
@@ -427,6 +450,7 @@ object TicketBuilder {
                     model01,
                     minProfit
                 )
+                TicketKind.SCALP -> explicitGateNote ?: "Paper-only scalp experiment"
                 TicketKind.MANUAL ->
                     "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
@@ -434,6 +458,7 @@ object TicketBuilder {
             },
             createdAtMs = ctx.nowMs,
             kind = kind,
+            paperOnly = kind == TicketKind.SCALP,
             blockedReason = blockedReason,
             impliedChance = implied,
             modelChance = model01,

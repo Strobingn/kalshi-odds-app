@@ -18,6 +18,7 @@ object OpportunityDedupe {
     fun kindLabel(kind: TicketKind): String = when (kind) {
         TicketKind.HUNTER_VALUE -> "longshot"
         TicketKind.HUNTER -> "hunter"
+        TicketKind.SCALP -> "scalp"
         TicketKind.CONFIGURED -> "wintarget"
         TicketKind.MANUAL -> "manual"
         TicketKind.SELL -> "sell"
@@ -28,6 +29,7 @@ object OpportunityDedupe {
         if (ticket.contracts <= 0) return false
         return ticket.kind == TicketKind.HUNTER_VALUE ||
             ticket.kind == TicketKind.HUNTER ||
+            ticket.kind == TicketKind.SCALP ||
             (ticket.winTargetUsd != null && ticket.kind != TicketKind.SELL)
     }
 

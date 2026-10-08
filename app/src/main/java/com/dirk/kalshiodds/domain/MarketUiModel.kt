@@ -62,6 +62,9 @@ data class MarketUiModel(
     val feePerContract: Double? = null,
     val halfSpread: Double? = null,
     val spotLabel: String? = null,
+    /** Live public-spot returns; used by the paper-only SCALP experiment. */
+    val spotReturn1m: Double? = null,
+    val spotReturn5m: Double? = null,
     val adapterReady: Boolean = false,
     val uncertainty: Double? = null,
     val uncertaintyPassed: Boolean = true,
@@ -245,6 +248,8 @@ fun MarketUiModel.withSignalScore(
         feePerContract = score.feePerContract,
         halfSpread = score.halfSpread,
         spotLabel = score.spotLabel,
+        spotReturn1m = score.spotReturn1m,
+        spotReturn5m = score.spotReturn5m,
         adapterReady = score.adapterReady,
         uncertainty = score.uncertainty,
         uncertaintyPassed = score.uncertaintyPassed,
