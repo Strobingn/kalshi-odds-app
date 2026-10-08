@@ -268,7 +268,13 @@ class ExtendedAiRuntimeTest {
     @Test
     fun votesOnlyAfterEnoughTicks() {
         val rt = ExtendedAiRuntime()
-        val on = SignalSettings(extendedAiEnabled = true)
+        // Experimental modules ship disabled until their settlement replay is
+        // promoted. Enable the two capabilities exercised by this unit test.
+        val on = SignalSettings(
+            extendedAiEnabled = true,
+            survivalModelEnabled = true,
+            pathSimEnabled = true
+        )
         val cold = rt.evaluate(
             sampleInput(nTicks = 2),
             on,
@@ -329,7 +335,7 @@ class DefaultExtendedConfigTest {
         assertFalse(cfg.extendedAiEnabled)
         assertFalse(cfg.pathSimEnabled)
         assertTrue(cfg.rlSizerEnabled)
-        assertTrue(cfg.conformalEnabled)
-        assertTrue(cfg.metaLabelEnabled)
+        assertFalse(cfg.conformalEnabled)
+        assertFalse(cfg.metaLabelEnabled)
     }
 }
