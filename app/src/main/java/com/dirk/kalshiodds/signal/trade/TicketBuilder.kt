@@ -55,9 +55,91 @@ object TicketBuilder {
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
-        return (hunter + value + configured)
+        val scalps = live.mapNotNull { proposeScalp(it, ctx) }
+        return (hunter + value + configured + scalps)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
+    }
+
+    /**
+     * Scalp: inside the first ~7 minutes of the window, when spot moved in
+     * the favorite's direction over the last minute, join the bid on the
+     * favorite (50-99c). Backtested positive in IS and OOS on 7 days of live
+     * 15m markets (docs/edge-research-2026-10-08.md). Approve still required.
+     */
+    fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val openMs = market.openTimeEpochMs ?: return null
+        val elapsedMs = ctx.nowMs - openMs
+        if (elapsedMs < SCALP_MIN_ELAPSED_MS || elapsedMs > SCALP_MAX_ELAPSED_MS) return null
+        val mid = midOf(market) ?: return null
+        val favorite = if (mid >= 0.5) "YES" else "NO"
+        val ret = market.spotReturn1m ?: return null
+        val spotConfirms = if (favorite == "YES") ret > 0.0 else ret < 0.0
+        if (!spotConfirms) return null
+        return buildScalpTicket(market, favorite, ctx)
+    }
+
+    private fun buildScalpTicket(market: MarketUiModel, side: String, ctx: Context): TradeTicket? {
+        val ask = bestAsk(market, side, ctx) ?: return null
+        val bid = freshBestBid(market, side, ctx)
+        val tick = KalshiPrice.MIN_TICK_DOLLARS
+        val entry = when {
+            bid == null -> ask
+            bid < ask - tick -> bid
+            else -> (ask - tick).coerceAtLeast(tick)
+        }
+        if (entry < SCALP_MIN_ENTRY || entry > SCALP_MAX_ENTRY) return null
+        val live = LiveOrderSizer.size(entry, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+        if (!live.ok) return null
+        val minProfit = ctx.settings.minProfitIfWinUsd
+        val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
+        val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = side,
+            bookSide = if (side == "YES") "bid" else "ask",
+            stakeUsd = live.allInUsd,
+            limitPrice = live.price,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = live.count,
+            estimatedFillUsd = live.allInUsd,
+            maxPayoutUsd = live.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = live.price,
+            title = market.title,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "%d ct @ %.1f¢ · join bid · all-in $%.2f (fee $%.2f)",
+                live.count, live.price * 100.0, live.allInUsd, live.feeUsd
+            ),
+            gateNote = String.format(
+                java.util.Locale.US,
+                "Scalp · spot confirms %s · first 7m · join bid · hold to close · Approve still required",
+                if (side == "YES") "UP" else "DOWN"
+            ),
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.SCALP,
+            blockedReason = if (belowMin) {
+                LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
+            } else null,
+            impliedChance = live.price,
+            modelChance = null,
+            fairChance = market.digitalFairPp?.div(100.0),
+            profitIfWinUsd = live.profitIfWinUsd,
+            feeUsd = live.feeUsd,
+            allInUsd = live.allInUsd,
+            belowMinProfit = belowMin,
+            minProfitIfWinUsd = minProfit,
+            winTargetUsd = minProfit,
+            winTargetCapped = true,
+            winTargetNote = String.format(
+                java.util.Locale.US,
+                "≤$5 all-in · wins $%.2f",
+                live.profitIfWinUsd
+            )
+        )
     }
 
     /** Cheap hunter tickets still require positive modeled value after costs. */
@@ -104,6 +186,7 @@ object TicketBuilder {
         return when (ticket.kind) {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
+            TicketKind.SCALP -> proposeScalp(market, ctx)
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
             TicketKind.SELL -> ticket
@@ -448,6 +531,7 @@ object TicketBuilder {
                 TicketKind.MANUAL ->
                     "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
+                TicketKind.SCALP -> "Scalp · spot confirms the favorite · Approve still required"
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
             createdAtMs = ctx.nowMs,
@@ -498,6 +582,18 @@ object TicketBuilder {
     }
 
     const val AUTO_VALUE_MARGIN = 0.08
+
+    /** Scalp window: first 1-7 minutes of the 15m window. */
+    const val SCALP_MIN_ELAPSED_MS = 60_000L
+    const val SCALP_MAX_ELAPSED_MS = 7 * 60_000L
+    const val SCALP_MIN_ENTRY = 0.50
+    const val SCALP_MAX_ENTRY = 0.99
+
+    private fun midOf(market: MarketUiModel): Double? {
+        val yb = KalshiPrice.usable(market.yesBid) ?: return null
+        val ya = KalshiPrice.usable(market.yesAsk) ?: return null
+        return (yb + ya) / 2.0
+    }
 
     /** Rank the two actual buys independently; a hero direction is not an order price. */
     private fun rankedValueSides(market: MarketUiModel, ctx: Context): List<String> =

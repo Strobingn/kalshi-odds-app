@@ -141,7 +141,8 @@ class ScoringEngine(
         val digitalFairPp: Double? = null,
         val importedModelPp: Double? = null,
         val modelEdgeQualified: Boolean = true,
-        val blendWeight: Double? = null
+        val blendWeight: Double? = null,
+        val spotReturn1m: Double? = null
     )
 
     data class BlendWeights(

@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -801,5 +802,79 @@ class MakerEntryEconomicsTest {
         assertNull(TicketBuilder.propose(weak, ctx))
         val strong = weak.copy(aiYesPercent = 20.0) // ~17pp over the 3c entry
         assertTrue(TicketBuilder.propose(strong, ctx) != null)
+    }
+}
+
+class ScalpTicketTest {
+    private fun scalpMarket(
+        mid: Double = 0.70,
+        spotReturn1m: Double? = 0.001,
+        elapsedMin: Long = 4
+    ) = market(passed = true, muted = false, ask = mid + 0.005, volume = 5_000.0).let { m ->
+        val open = at(0)
+        m.copy(
+            yesBid = mid - 0.005,
+            yesAsk = mid + 0.005,
+            noBid = 1.0 - mid - 0.005,
+            noAsk = 1.0 - mid + 0.005,
+            spotReturn1m = spotReturn1m,
+            openTimeEpochMs = open
+        ).let { it.copy(closeTimeEpochMs = open + 15 * 60_000L) }
+    }
+
+    private fun ctx(nowMs: Long = 1_700_000_000_000L) = TicketBuilder.Context(
+        settings = SignalSettings(), alertsPaused = false, nowMs = nowMs
+    )
+
+    private fun at(minute: Long): Long = 1_700_000_000_000L + minute * 60_000L
+
+    @Test
+    fun scalpSurfacesWhenSpotConfirmsFavorite() {
+        val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)  // YES favorite, spot up
+        val t = TicketBuilder.proposeScalp(m, ctx(at(4)))!!
+        assertEquals("YES", t.side)
+        assertEquals(TicketKind.SCALP, t.kind)
+        assertTrue("joins the bid, never crosses", t.limitPrice!! <= 0.695)
+        assertTrue(t.contracts > 0)
+        assertTrue(t.gateNote!!.contains("Scalp"))
+        assertTrue(t.gateNote!!.contains("Approve still required"))
+    }
+
+    @Test
+    fun scalpSkipsWhenSpotMovesAgainstFavorite() {
+        val m = scalpMarket(mid = 0.70, spotReturn1m = -0.002)
+        assertNull(TicketBuilder.proposeScalp(m, ctx(at(4))))
+    }
+
+    @Test
+    fun scalpSkipsOutsideFirstSevenMinutes() {
+        val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)
+        assertNull("before 1m", TicketBuilder.proposeScalp(m, ctx(at(0))))
+        assertNull("after 7m", TicketBuilder.proposeScalp(m, ctx(at(8))))
+    }
+
+    @Test
+    fun scalpSkipsCheapSideEntries() {
+        val m = scalpMarket(mid = 0.30, spotReturn1m = -0.002)  // NO favorite at ~70c
+        val no = TicketBuilder.proposeScalp(m, ctx(at(4)))
+        assertEquals("NO", no!!.side)
+        // a 50-50 coin flip window has no favorite to scalp
+        val flat = scalpMarket(mid = 0.50, spotReturn1m = 0.002)
+        assertNull(TicketBuilder.proposeScalp(flat.copy(yesBid = 0.495, yesAsk = 0.505), ctx(at(4))))
+    }
+
+    @Test
+    fun scalpMissingSpotOrOpenTimeIsNoTicket() {
+        val noSpot = scalpMarket(spotReturn1m = null)
+        assertNull(TicketBuilder.proposeScalp(noSpot, ctx(at(4))))
+        val noOpen = scalpMarket().copy(openTimeEpochMs = null)
+        assertNull(TicketBuilder.proposeScalp(noOpen, ctx(at(4))))
+    }
+
+    @Test
+    fun scalpIncludedInProposeAllAndDedupesByKind() {
+        val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)
+        val all = TicketBuilder.proposeAll(listOf(m), ctx(at(4)))
+        assertTrue(all.any { it.kind == TicketKind.SCALP })
     }
 }

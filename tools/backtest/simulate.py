@@ -65,7 +65,7 @@ STRATEGIES = (
 )
 STRESS_STRATEGIES = ("app_shipped_stress",)
 # OOS only; not in the IS tune grid; do not treat as a claimed edge.
-EXPLORATORY_STRATEGIES = ("app_32_50", "app_tte_11_9")
+EXPLORATORY_STRATEGIES = ("app_32_50", "app_tte_11_9", "scalp_taker", "scalp_spot")
 ALL_STRATEGIES = STRATEGIES + STRESS_STRATEGIES + EXPLORATORY_STRATEGIES
 
 
@@ -349,7 +349,7 @@ def _rand_side(ticker: str) -> str:
 
 
 def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | None:
-    for d in decisions:
+    for i0, d in enumerate(decisions):
         if strategy == "app_shipped":
             # shipped ticket side (hero/primary first). Qualifying = can fill $5 ticket.
             if not d.would_alert:
@@ -401,6 +401,43 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
                 continue
             side = _rand_side(d.ticker)
             return _place(d, strategy, side, split)
+        if strategy == "scalp_taker":
+            # Dip-buy scalp: after a >=2c 1m mid drop, buy the dipped side at
+            # the ask, take profit at +3c mid, stop at 2c off peak, force-exit
+            # at 60s left or window end. Taker both legs + fees: backtested
+            # negative (see docs/edge-research-2026-10-08.md). OOS tracking only.
+            if i0 < 1:
+                continue
+            prev_mid = decisions[i0 - 1].mid
+            if prev_mid is None or d.mid is None or d.mid - prev_mid > -0.02 + 1e-12:
+                continue
+            ask = _fill_for(d, "YES") if d.mid < 0.5 else _fill_for(d, "NO")
+            side = "YES" if d.mid < 0.5 else "NO"
+            if ask is None or ask > 0.80:
+                continue
+            b = _place(d, strategy, side, split)
+            if b:
+                return b
+        if strategy == "scalp_spot":
+            # Shipped scalp: first 1-7m of the window, spot confirms the
+            # favorite over the last minute, join the bid on the favorite
+            # (50-99c). Fills only when a later candle trades through the
+            # resting price. Backtested positive IS+OOS (see
+            # docs/edge-research-2026-10-08.md).
+            elapsed = getattr(d, "elapsed_min", None)
+            if elapsed is None or not (1 <= elapsed <= 7):
+                continue
+            mid = d.mid
+            if mid is None:
+                continue
+            fav = "YES" if mid >= 0.5 else "NO"
+            ask = _fill_for(d, fav)
+            if ask is None or ask < 0.50 - 1e-9 or ask > 0.99 + 1e-9:
+                continue
+            px = _maker_entry(d, fav)
+            if px is None:
+                continue
+            return _place_at(d, strategy, fav, px, split)
         if strategy == "app_32_50":
             if not d.would_alert:
                 continue

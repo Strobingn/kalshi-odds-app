@@ -17,6 +17,7 @@ object OpportunityDedupe {
 
     fun kindLabel(kind: TicketKind): String = when (kind) {
         TicketKind.HUNTER_VALUE -> "longshot"
+        TicketKind.SCALP -> "scalp"
         TicketKind.HUNTER -> "hunter"
         TicketKind.CONFIGURED -> "wintarget"
         TicketKind.MANUAL -> "manual"

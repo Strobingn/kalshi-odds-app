@@ -7,6 +7,8 @@ enum class TicketKind {
     HUNTER,
     /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */
     HUNTER_VALUE,
+    /** Scalp: spot confirms the favorite inside the first ~7m; join the bid. */
+    SCALP,
     /** User tapped Buy on a market card / hero. */
     MANUAL,
     /** Sell / reduce a held YES or NO position. IoC reduce-only at the bid. */
