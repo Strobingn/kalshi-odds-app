@@ -2,7 +2,7 @@ name: Unit tests
 
 on:
   push:
-    branches: [Claude]
+    branches: [Claude, claude/kalshi-odds-newest]
   workflow_dispatch:
 
 permissions:

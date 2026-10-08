@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [Mis_bitcoin, Claude, main]
+    branches: [Mis_bitcoin, Claude, main, claude/kalshi-odds-newest]
   workflow_dispatch:
 
 permissions:
