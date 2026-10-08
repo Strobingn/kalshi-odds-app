@@ -639,7 +639,11 @@ internal fun ApproveTicketDialog(
                     TextButton(
                         onClick = onRest,
                         enabled = ticket.canApprove
-                    ) { Text("REST 1¢ BETTER") }
+                    ) {
+                        // Maker fee on our series is 0 (fee probe 2026-10-07);
+                        // resting saves the taker fee AND a cent of spread.
+                        Text("REST 1¢ BETTER · NO FEE")
+                    }
                 }
                 if (!ticket.isSell) {
                     TextButton(
