@@ -71,6 +71,15 @@ FEATURE_NAMES = [
     # Simple return over the full previous 15-minute window (open-900s to
     # open): the 15-minute sign-reversal tilt (arXiv 2608.21888).
     "prev_window_return",
+    # 1.0 when the window CLOSES into a perpetual funding settlement
+    # (00/08/16 UTC): documented different payoff geometry and weaker
+    # reversal accuracy in those hours (arXiv 2608.21888 / 2607.09426).
+    "is_funding_hour",
+    # mid^2 interaction: the GWU favorite-longshot study (313,972 contracts)
+    # found expensive contracts win MORE than price implies and cheap ones
+    # less. A quadratic in mid lets the fit express that curvature instead
+    # of a linear tilt only.
+    "mid_squared",
 ]
 MID_INDEX = FEATURE_NAMES.index("market_mid")
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
@@ -97,12 +106,15 @@ MID_CLIP = 0.001
 # linear mid term is what lets the fit walk off a price that is already
 # the better forecast.
 # prev_window_return tests the 15-minute sign reversal (arXiv 2608.21888);
-# L2 keeps it at ~0 unless it helps on the holdout.
+# is_funding_hour lets calibration shift for windows closing into perp
+# funding; mid_squared fits favorite-longshot curvature. mid_squared is
+# monotone in the mid on [0, 1], so it can stand in for part of a linear mid
+# term: L2 and the holdout promotion gate are what keep it honest.
 # Left out on purpose: market_mid, tte_frac / spread (no direction),
 # imbalance (always 0 in training — no historical L2), momentum /
 # realized_vol (the app builds them from its tick buffer, training from
 # 1m candles — no parity), time_of_day (trainer UTC vs app New York clock).
-OFFSET_FEATURES = ["dist_to_strike_vol", "cross_asset", "digital_fair", "prev_window_return"]
+OFFSET_FEATURES = ["dist_to_strike_vol", "cross_asset", "digital_fair", "prev_window_return", "is_funding_hour", "mid_squared"]
 # Rows are clustered: the 13 minutes of one market share one outcome, so
 # the effective sample is the market count. 0.05 keeps a calibrated
 # market close to w = 0 at a few hundred markets (see test_train_edge.py).
@@ -512,6 +524,8 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
         float((hour * 60) / (24 * 60)),
         float(fair if fair is not None else mid),
         float(max(-0.05, min(0.05, prev_window_return(spot_rows, open_ts)))),
+        1.0 if (close_dt.timestamp() if close_dt else end_ts) % 28800 < 900 else 0.0,
+        float(mid * mid),
     ]
 
 
@@ -1260,7 +1274,7 @@ def fixture_dataset(n: int = 240) -> list[Sample]:
         mid = 0.35 + 0.3 * ((i % 40) / 40.0)
         dist = (mid - 0.5) * 2
         fair = min(0.95, max(0.05, mid + 0.08 * math.sin(i / 7.0)))
-        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair, 0.0]
+        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair, 0.0, 0.0, mid * mid]
         label = 1 if fair + 0.02 * math.sin(i) > 0.5 else 0
         ts = t0 + i * 900
         out.append(

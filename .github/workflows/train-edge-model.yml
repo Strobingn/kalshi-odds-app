@@ -13,7 +13,7 @@ on:
   # on a cron: gh api -X POST repos/{owner}/{repo}/dispatches
   #   -f event_type=retrain-mis-bitcoin --field days=270).
   push:
-    branches: [Mis_bitcoin, claude/kalshi-odds-newest]
+    branches: [Mis_bitcoin]
     paths:
       - "ml/**"
       - ".github/workflows/train-edge-model.yml"

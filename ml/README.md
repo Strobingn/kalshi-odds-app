@@ -190,3 +190,26 @@ feature in the offset model:
 The model can now learn the tilt instead of hand-coding it; if the fitted
 weight is ~0 on 270 days of data, the reversal is not capturable here
 either — an honest result the L2 sweep will surface.
+
+(Changelog note: the reversal-feature training run is dispatched via a
+push touching ml/ — see the workflow paths filter.)
+
+## Funding-hour regime feature (is_funding_hour, feature #11)
+
+Windows whose CLOSE lands on a perpetual funding settlement (00/08/16
+UTC, i.e. close_ts mod 28800 < 900) carry documented differences: weaker
+reversal-signal accuracy in funding hours (arXiv 2608.21888) and abnormal
+boundary flow (arXiv 2607.09426). Added as a binary feature so the model
+can shift its calibration for those windows instead of the trader
+guessing. Trainer computes it from close_ts; the app derives it from
+nowMs + tte (same predicate, parity verified on boundary cases).
+
+## Favorite-longshot curvature feature (mid_squared, feature #12)
+
+The GWU maker/taker study (313,972 Kalshi contracts) rejected
+price-as-unbiased-forecaster with the classic favorite-longshot shape:
+expensive contracts win more often than their price implies, cheap ones
+less. The offset model's linear market_mid weight can only tilt;
+`mid_squared` lets the fit express the curvature. If the 270-day fit
+gives it a stable nonzero weight, buying the well-priced favorite side
+via REST (no fee) is where that bias is collectable.
