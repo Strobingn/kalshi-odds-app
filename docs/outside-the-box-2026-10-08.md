@@ -69,3 +69,28 @@ T-60 s / improve / margin 3¢: +$0.37 per fill, 99% CI [−2.08, +1.57]).
   0). Could be one up-trending week. Re-check when more days are recorded.
 
 Re-run when the recorder has ~3 more days (primary needs ≥ 30 fills).
+
+## Reversal study result, 2026-10-08 (90 days, 8,516 back-to-back KXBTC15M pairs)
+
+**The reversal is real, Kalshi already prices it, and it does not pay.**
+
+| prev move | pairs | flip rate | implied flip @1m | taker $/ct (95% day CI) |
+|---|---|---|---|---|
+| [0,5) bps | 3,257 | 50.0% | 50.8% | −0.030 [−0.043, −0.016] |
+| [5,10) bps | 1,945 | 50.6% | 51.2% | −0.028 [−0.050, −0.009] |
+| [10,20) bps | 1,965 | 51.5% | 51.0% | −0.016 [−0.039, +0.005] |
+| [20,40) bps | 1,038 | 52.1% | 50.9% | −0.010 [−0.040, +0.020] |
+| ≥40 bps | 311 | 54.0% | 52.2% | −0.003 [−0.059, +0.047] |
+
+- The flip rate rises with the size of the previous move exactly as the
+  paper says (50.0% → 54.0%), but the price one minute into the next
+  window already implies most of it (50.8% → 52.2%).
+- Pre-registered rule (bet the flip when |move| ≥ 20 bps): IS 871 bets,
+  53.6% flips, +0.3¢/ct; **OOS 478 bets, 50.6% flips, −3.0¢/ct, 99% CI
+  [−9.2¢, +3.9¢]. Decision: NO EDGE SHOWN.** The IS flip rate did not hold.
+- The maker column (rest 1¢ above the bid, assumed filled, no adverse
+  selection) is positive, but it is an upper bound only; the pair-maker
+  study measured a 6¢ markout on exactly that kind of fill.
+- Implication for the model: `prev_window_return` (Mis_bitcoin's new edge
+  model input) should earn ~0 weight, because the mid it is offset from
+  already carries this information.
