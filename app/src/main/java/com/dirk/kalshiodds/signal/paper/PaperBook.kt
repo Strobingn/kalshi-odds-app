@@ -669,6 +669,14 @@ class PaperBook(
         if (quantity < 1) return null
         synchronized(lock) {
             val cur = _state.value
+            // A paper autopilot entry represents one executable order in one
+            // contract window. Rebuilds happen as quotes/scores refresh; they
+            // must not turn the same visible touch into repeated full-depth
+            // buys. This is not a stake cap: the first fill still uses all
+            // visible touch liquidity with unlimited synthetic credit.
+            if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) {
+                return null
+            }
             val stake = quantity * px
             val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.total(quantity, px)
             val row = PaperFill(
