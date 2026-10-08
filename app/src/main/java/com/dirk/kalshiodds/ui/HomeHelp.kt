@@ -15,9 +15,9 @@ object HomeHelp {
 
     const val PAPER_TITLE = "Paper book"
     const val PAPER_BODY =
-        "The AI buys at 20¢ or less, then sells when the bid is up enough to clear fees. " +
-            "It does not wait for the window to end. Paper UP / Paper DOWN on the Bitcoin card " +
-            "are still a separate $10 tap. Live Approve is the only path that can place a real order."
+        "The AI buys anything under 50¢. A lower price gets a bigger buy. " +
+            "It holds while the bid is rising and sells when the bid comes off the high, " +
+            "instead of waiting for the window to end. Live Approve is the only path that can place a real order."
 
     const val SIGNALS_TITLE = "Signals"
     const val SIGNALS_BODY =

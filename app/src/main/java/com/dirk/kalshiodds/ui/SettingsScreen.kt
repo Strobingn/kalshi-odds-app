@@ -769,14 +769,15 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \$100. The AI buys only when the contract is 20¢ or less, " +
-                    "then sells when the bid is up enough to clear Kalshi fees. It does not hold to the end of the market. " +
-                    "Never calls Kalshi. Reset returns cash to \$100. A live position that was bought cheap gets a sell ticket " +
-                    "when the bid is up — Approve is still required, nothing is sent on its own.",
+                "Isolated from live money. Starts at \$100. The AI buys any contract under 50¢. " +
+                    "A lower price takes a larger share of the cash, so the same rise pays more. " +
+                    "It holds while the bid is rising and sells when the bid comes off the high. " +
+                    "It does not hold to the end of the market. Never calls Kalshi. " +
+                    "A cheap live position gets a sell ticket on that rollover — Approve is still required.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Paper trading (AI buys cheap, sells the rise)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("Paper trading (AI buys under 50¢, sells the rollover)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }

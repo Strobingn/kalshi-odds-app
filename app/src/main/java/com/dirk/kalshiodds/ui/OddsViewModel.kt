@@ -97,6 +97,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
 
+    /** Highest bid seen for an open cheap live position, keyed TICKER|SIDE. */
+    private val scalpPeak = mutableMapOf<String, Double>()
+
     /** Daily cap on live buys (Settings → Live Approve tickets). Never touches paper or sells. */
     private val liveCap = com.dirk.kalshiodds.signal.trade.LiveDailyCapStore.get(application)
 
@@ -1097,26 +1100,33 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * A cheap live position whose bid is up gets one Approve sell ticket.
-     * This does not place the order.
+     * A live position bought under 50¢ gets one Approve sell ticket when the
+     * bid comes off its high. This does not place the order.
      */
     private fun offerLiveScalps(markets: List<MarketUiModel>, ctx: TicketBuilder.Context) {
         if (!ctx.settings.ticketsEnabled) {
             ticketSession.syncScalpSells(emptyList())
             return
         }
+        val still = mutableSetOf<String>()
         val offers = _state.value.positions.mapNotNull { pos ->
             val qty = PositionParser.heldContracts(pos)
             val avg = pos.avgCost ?: return@mapNotNull null
             if (qty < 1 || !ScalpExit.isLowPrice(avg)) return@mapNotNull null
             val market = markets.firstOrNull { it.ticker.equals(pos.ticker, true) } ?: return@mapNotNull null
-            val bid = TicketBuilder.freshBestBid(market, pos.side, ctx)
+            val bid = TicketBuilder.freshBestBid(market, pos.side, ctx) ?: return@mapNotNull null
+            val key = "${pos.ticker.uppercase()}|${pos.side.uppercase()}"
+            still += key
+            val peak = scalpPeak[key] ?: avg
+            val high = maxOf(peak, bid)
+            scalpPeak[key] = high
             val entryFee = KalshiFee.total(qty, avg, ctx.settings.feeRate)
-            if (!ScalpExit.shouldSell(avg, bid, qty, entryFee, ctx.settings.feeRate)) return@mapNotNull null
+            if (!ScalpExit.shouldSell(avg, bid, peak, qty, entryFee, ctx.settings.feeRate)) return@mapNotNull null
             val ticket = TicketBuilder.proposeSell(market, pos.side, qty, ctx) ?: return@mapNotNull null
             if (!ticket.canApprove) return@mapNotNull null
             ticket.copy(gateNote = ScalpExit.SELL_NOTE)
         }
+        scalpPeak.keys.retainAll(still)
         ticketSession.syncScalpSells(offers)
     }
 

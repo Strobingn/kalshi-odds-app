@@ -10,29 +10,42 @@ import org.junit.Test
 class ScalpExitTest {
 
     @Test
-    fun onlyBuysAtTwentyCentsOrLess() {
+    fun buysAnythingUnderFiftyNotACoinFlip() {
         assertTrue(ScalpExit.isLowPrice(0.04))
         assertTrue(ScalpExit.isLowPrice(0.20))
-        assertFalse(ScalpExit.isLowPrice(0.21))
+        assertTrue(ScalpExit.isLowPrice(0.49))
+        assertFalse(ScalpExit.isLowPrice(0.50))
+        assertFalse(ScalpExit.isLowPrice(0.62))
         assertFalse(ScalpExit.isLowPrice(0.0))
         assertFalse(ScalpExit.isLowPrice(null))
     }
 
     @Test
-    fun sellsOnlyAfterTheBidClearsFees() {
-        val contracts = 125
-        val entry = 0.04
-        val entryFee = KalshiFee.total(contracts, entry)
-        assertFalse(ScalpExit.shouldSell(entry, entry, contracts, entryFee))
-        assertFalse(ScalpExit.shouldSell(entry, entry + 0.01, contracts, entryFee))
-        assertTrue(ScalpExit.shouldSell(entry, 0.15, contracts, entryFee))
-        assertFalse(ScalpExit.shouldSell(entry, null, contracts, entryFee))
+    fun cheaperAskBuysMoreCashAndMoreContracts() {
+        val lowStake = ScalpExit.stakeUsd(0.04, 100.0)
+        val highStake = ScalpExit.stakeUsd(0.40, 100.0)
+        assertTrue(lowStake > highStake)
+        assertTrue(ScalpExit.contractsFor(0.04, 100.0) > ScalpExit.contractsFor(0.40, 100.0))
+        assertTrue(lowStake < 50.0)
+        assertEquals(0.0, ScalpExit.stakeUsd(0.50, 100.0), 0.0)
     }
 
     @Test
-    fun oneCentOfRiseOnOneContractIsNotWorthTheFee() {
+    fun holdsANewHighAndSellsWhenTheBidComesOffIt() {
+        val contracts = ScalpExit.contractsFor(0.04, 100.0)
+        val entry = 0.04
+        val entryFee = KalshiFee.total(contracts, entry)
+        assertFalse(ScalpExit.shouldSell(entry, 0.15, entry, contracts, entryFee))
+        assertFalse(ScalpExit.shouldSell(entry, 0.14, 0.15, contracts, entryFee))
+        assertTrue(ScalpExit.shouldSell(entry, 0.12, 0.15, contracts, entryFee))
+        assertFalse(ScalpExit.shouldSell(entry, null, 0.15, contracts, entryFee))
+    }
+
+    @Test
+    fun oneCentOfRiseOnOneContractIsNotARollover() {
         val entryFee = KalshiFee.total(1, 0.10)
-        assertFalse(ScalpExit.shouldSell(0.10, 0.12, 1, entryFee))
+        assertFalse(ScalpExit.shouldSell(0.10, 0.12, 0.10, 1, entryFee))
+        assertFalse(ScalpExit.shouldSell(0.10, 0.11, 0.12, 1, entryFee))
     }
 
     @Test

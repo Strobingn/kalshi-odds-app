@@ -35,7 +35,9 @@ data class PaperFill(
     /** Taker fee debited with the stake. Old ledgers load as 0. */
     val feeUsd: Double = 0.0,
     val note: String,
-    val winTargetUsd: Double? = null
+    val winTargetUsd: Double? = null,
+    /** Highest bid seen since the fill. 0 means not tracked yet. */
+    val peakBid: Double = 0.0
 ) {
     val displaySide: String get() = side.uppercase()
 }
@@ -68,8 +70,8 @@ data class PaperBookState(
 
 /**
  * Isolated paper book. Never calls Kalshi.
- * The AI buys at 20¢ or less and sells when the bid is up enough to clear fees.
- * It does not wait for the window to settle.
+ * The AI buys under 50¢. A cheaper ask gets a larger share of the cash.
+ * It holds while the bid is rising and sells when the bid comes off the high.
  */
 class PaperBook(
     initial: PaperBookState = PaperBookState(),
@@ -113,9 +115,9 @@ class PaperBook(
     }
 
     /**
-     * Auto-log a paper fill when an AI hunter / configured ticket would trade,
-     * and only when the ask is cheap. Manual live tickets are ignored —
-     * those need an explicit Paper tap. The exit is a later sale, not settlement.
+     * Auto-log a paper fill when an AI ticket would trade under 50¢.
+     * Cheaper asks are sized larger. Manual tickets need an explicit Paper tap.
+     * The exit is a sale once the bid comes off its high, not settlement.
      */
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
@@ -129,14 +131,13 @@ class PaperBook(
             limitPrice = ticket.limitPrice,
             source = source,
             note = if (ticket.winTargetUsd != null) {
-                "Paper win-target · ${ticket.kind.name.lowercase()} · sell when the bid is up · never sent to Kalshi"
+                "Paper win-target · ${ticket.kind.name.lowercase()} · hold until the bid rolls over · never sent to Kalshi"
             } else {
-                "Paper fill · ${ticket.kind.name.lowercase()} signal · sell when the bid is up · never sent to Kalshi"
+                "Paper fill · ${ticket.kind.name.lowercase()} signal · hold until the bid rolls over · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
             stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
-            winTargetUsd = ticket.winTargetUsd,
-            winProb = ticket.modelChance
+            winTargetUsd = ticket.winTargetUsd
         )
     }
 
@@ -151,9 +152,6 @@ class PaperBook(
             limitPrice = px,
             source = "AI signal",
             note = alert.reason.ifBlank { "LiveCall / grok-bitcoin signal" },
-            winProb = alert.fairValuePp.takeIf { it.isFinite() }?.div(100.0)?.let {
-                if (alert.predictedSide.equals("NO", true)) 1.0 - it else it
-            }
         )
     }
 
@@ -493,10 +491,10 @@ class PaperBook(
     }
 
     /**
-     * Close open AI fills when the bid is up enough to clear both taker fees.
+     * Hold an open AI fill while the bid is making highs. Sell when the bid
+     * falls 3¢ off that high and the sale still clears both taker fees.
      * [bids] is keyed `TICKER|SIDE` (uppercase). Manual and tile fills stay open.
-     * Never hits Kalshi. A fill that never rises can still settle later; the
-     * plan is the sale, not the end of the market.
+     * Never hits Kalshi. A fill that never rises can still settle later.
      */
     fun exitIfRisen(bids: Map<String, Double>): List<PaperFill> {
         synchronized(lock) {
@@ -504,53 +502,66 @@ class PaperBook(
             var cash = cur.cashUsd
             val sold = mutableListOf<PaperFill>()
             var lastMsg: String? = null
+            var changed = false
             val next = ArrayList<PaperFill>(cur.fills.size)
             for (fill in cur.fills) {
                 if (fill.settled || !ScorecardLedger.isAiSource(fill.source)) {
                     next += fill
                     continue
                 }
+                val prevPeak = if (fill.peakBid > 0.0) fill.peakBid else fill.limitPrice
                 val bid = KalshiPrice.usable(
                     bids["${fill.ticker.uppercase()}|${fill.side.uppercase()}"]
                 )
-                if (bid == null || !ScalpExit.shouldSell(fill.limitPrice, bid, fill.contracts, fill.feeUsd)) {
+                if (bid == null) {
                     next += fill
                     continue
                 }
-                val sellFee = KalshiFee.total(fill.contracts, bid)
-                val proceeds = fill.contracts * bid
-                val pnl = proceeds - sellFee - fill.stakeUsd - fill.feeUsd
-                cash += proceeds - sellFee
-                val closed = fill.copy(
-                    settled = true,
-                    outcome = "sell",
-                    won = pnl > 0.0,
-                    pnlUsd = pnl,
-                    note = String.format(
-                        java.util.Locale.US,
-                        "Sold %d ct @ %.1f¢ — price was up, did not wait for settlement",
-                        fill.contracts,
-                        bid * 100.0
+                if (ScalpExit.shouldSell(fill.limitPrice, bid, prevPeak, fill.contracts, fill.feeUsd)) {
+                    val sellFee = KalshiFee.total(fill.contracts, bid)
+                    val proceeds = fill.contracts * bid
+                    val pnl = proceeds - sellFee - fill.stakeUsd - fill.feeUsd
+                    cash += proceeds - sellFee
+                    val closed = fill.copy(
+                        settled = true,
+                        outcome = "sell",
+                        won = pnl > 0.0,
+                        pnlUsd = pnl,
+                        peakBid = maxOf(prevPeak, bid),
+                        note = String.format(
+                            java.util.Locale.US,
+                            "Sold %d ct @ %.1f¢ — bid came off the high, did not wait for settlement",
+                            fill.contracts,
+                            bid * 100.0
+                        )
                     )
-                )
-                sold += closed
-                lastMsg = String.format(
-                    java.util.Locale.US,
-                    "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · sold the rise, not settlement",
-                    closed.displaySide,
-                    closed.ticker,
-                    closed.contracts,
-                    bid * 100.0,
-                    pnl
-                )
-                next += closed
+                    sold += closed
+                    lastMsg = String.format(
+                        java.util.Locale.US,
+                        "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · sold the rollover, not settlement",
+                        closed.displaySide,
+                        closed.ticker,
+                        closed.contracts,
+                        bid * 100.0,
+                        pnl
+                    )
+                    next += closed
+                    continue
+                }
+                val high = maxOf(prevPeak, bid)
+                if (high > prevPeak + 1e-9) {
+                    next += fill.copy(peakBid = high)
+                    changed = true
+                } else {
+                    next += fill
+                }
             }
-            if (sold.isEmpty()) return emptyList()
+            if (sold.isEmpty() && !changed) return emptyList()
             publish(
                 cur.copy(
                     cashUsd = cash,
                     fills = next,
-                    lastMessage = lastMsg
+                    lastMessage = lastMsg ?: cur.lastMessage
                 )
             )
             return sold
@@ -636,31 +647,39 @@ class PaperBook(
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null
-            // A probability means size by quarter-Kelly and skip when the fee
-            // eats the edge. A ticket that already passed the gates and has
-            // no probability keeps the flat $5 clip.
-            val clip = floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            // A win-target ticket brings its own size. Otherwise a cheaper ask
+            // takes a larger share of paper cash. Quarter-Kelly remains only
+            // when a caller passes a win probability and no contract count.
+            val cheapQty = if (contracts == null && winProb == null) {
+                ScalpExit.contractsFor(px, cur.cashUsd)
+            } else {
+                0
+            }
             val edgeQty = if (contracts == null && winProb != null) PaperSizer.contracts(cur.cashUsd, px, winProb) else 0
             val qty = when {
                 contracts != null && contracts > 0 -> contracts
                 winProb != null -> edgeQty
-                else -> clip
+                else -> cheapQty
             }
             if (winProb != null && contracts == null && edgeQty < 1) {
                 publish(cur.copy(lastMessage = "Paper skip $ticker — no edge after the taker fee"))
                 return null
             }
-            val sizedNote = if (edgeQty > 0 && cur.cashUsd > 0.0) {
-                String.format(
+            val sizedNote = when {
+                edgeQty > 0 && cur.cashUsd > 0.0 -> String.format(
                     java.util.Locale.US,
                     " · quarter-Kelly %.0f%% of paper cash",
                     edgeQty * px / cur.cashUsd * 100.0
                 )
-            } else {
-                ""
+                cheapQty > 0 && cur.cashUsd > 0.0 -> String.format(
+                    java.util.Locale.US,
+                    " · %.0f%% of paper cash · lower price, larger buy",
+                    cheapQty * px / cur.cashUsd * 100.0
+                )
+                else -> ""
             }
             if (qty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
+                publish(cur.copy(lastMessage = "Paper skip $ticker — cannot size a buy under 50¢"))
                 return null
             }
             val rawStake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)

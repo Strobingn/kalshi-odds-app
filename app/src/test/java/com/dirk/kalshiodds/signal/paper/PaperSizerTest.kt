@@ -54,14 +54,14 @@ class PaperSizerTest {
     }
 
     @Test
-    fun autoAlertFillIsSizedByEdgeInsteadOfFiveDollars() {
+    fun autoAlertFillIsLargerWhenTheAskIsLower() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        // NO side: fair YES 62% means NO wins 38%; NO ask 20¢ is a large edge.
         val fill = book.considerAlert(alert("NO", 62.0), ask = 0.20, enabled = true)!!
-        assertTrue("stake ${fill.stakeUsd}", fill.stakeUsd > 1.0)
-        assertTrue(fill.stakeUsd < 30.0)
-        assertTrue(fill.note.contains("quarter-Kelly"))
-        assertTrue(book.snapshot().cashUsd >= 70.0)
+        val qty = com.dirk.kalshiodds.signal.trade.ScalpExit.contractsFor(0.20, 100.0)
+        assertEquals(qty, fill.contracts)
+        assertEquals(qty * 0.20, fill.stakeUsd, 1e-6)
+        assertTrue(fill.note.contains("lower price"))
+        assertTrue(book.snapshot().cashUsd < 100.0)
     }
 
     @Test
@@ -77,10 +77,13 @@ class PaperSizerTest {
         var n = 0
         val book = PaperBook(idFactory = { "p${n++}" }, nowMs = { 10L })
         val first = book.considerAlert(alert("YES", 90.0), ask = 0.20, enabled = true)!!
-        val second = book.considerAlert(alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"), ask = 0.20, enabled = true)
+        val second = book.considerAlert(
+            alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"),
+            ask = 0.20,
+            enabled = true
+        )
         assertTrue(first.stakeUsd > 10.0)
-        assertTrue(first.stakeUsd < 40.0)
-        assertTrue(second == null || second.stakeUsd < first.stakeUsd)
+        assertTrue(second != null && second.stakeUsd < first.stakeUsd)
         assertTrue(book.snapshot().cashUsd >= 0.0)
     }
 }
