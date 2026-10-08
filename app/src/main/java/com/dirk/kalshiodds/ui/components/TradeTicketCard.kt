@@ -593,6 +593,17 @@ internal fun ApproveTicketDialog(
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
+                // Maker-vs-taker economics: the fee is 0 when resting (fee
+                // probe 2026-10-07). Show what the REST button saves.
+                ticket.makerNote?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accentBlue,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(top = 6.dp)
+                    )
+                }
             }
         },
         confirmButton = {

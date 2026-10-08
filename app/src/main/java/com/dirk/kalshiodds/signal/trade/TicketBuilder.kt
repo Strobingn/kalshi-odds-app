@@ -385,12 +385,24 @@ object TicketBuilder {
         } else {
             null
         }
+        // P(YES) for [MakerEdge]; model01 is side-specific.
+        val pYes01 = market.importedModelPp?.div(100.0)
+            ?: market.aiYesPercent?.div(100.0)
+            ?: market.digitalFairPp?.div(100.0)
+        val makerNote = if ((side == "YES" || side == "NO") && pYes01 != null) {
+            val yb = freshBestBid(market, "YES", ctx)
+            val ya = bestAsk(market, "YES", ctx)
+            MakerEdge.compare(pYes01, side, yb, ya, ctx.settings.feeRate)?.summary()
+        } else {
+            null
+        }
         return TradeTicket(
             id = ctx.idFactory(),
             ticker = market.ticker,
             side = side,
             bookSide = bookSide,
             stakeUsd = live.allInUsd,
+            makerNote = makerNote,
             limitPrice = live.price,
             yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
             contracts = live.count,

@@ -41,6 +41,8 @@ data class TradeTicket(
     val title: String? = null,
     val sizingNote: String,
     val gateNote: String? = null,
+    /** Maker-vs-taker entry economics ([MakerEdge]); shown on the Approve sheet. */
+    val makerNote: String? = null,
     val createdAtMs: Long = System.currentTimeMillis(),
     val kind: TicketKind = TicketKind.CONFIGURED,
     /**
