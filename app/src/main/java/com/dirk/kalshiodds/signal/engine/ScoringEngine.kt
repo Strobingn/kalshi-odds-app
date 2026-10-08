@@ -589,7 +589,7 @@ class ScoringEngine(
         // settlement average Kalshi publishes.
         val cfAsset = com.dirk.kalshiodds.signal.external.ExternalSnapshot.assetOf(tick.series)
         val cf = cfAsset?.let { a -> runCatching { cfIndex?.fresh(a, nowMs) }.getOrNull() }
-        val cfFinalAvg = if (cf != null && cfAsset != null && close != null) {
+        val cfFinalAvg = if (cf != null && close != null) {
             runCatching { cfIndex?.finalMinuteAverage(cfAsset, close, nowMs) }.getOrNull()
         } else {
             null

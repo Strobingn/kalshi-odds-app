@@ -7,7 +7,6 @@ import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.TickSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -26,8 +25,9 @@ class OffsetEdgeModelScoringTest {
     @Test
     fun zeroWeightOffsetModelFairIsTheMid() {
         val engine = engine(model(kind = "offset_logistic"))
-        val score = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)
-        assertNotNull(score)
+        val score = checkNotNull(
+            engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)
+        ) { "expected a score" }
         assertEquals("anchored output is recorded", 41.0, score.importedModelPp!!, 1e-4)
         // No holdout win: the decision fair stays on the market, which this
         // zero-weight model also reproduces.
