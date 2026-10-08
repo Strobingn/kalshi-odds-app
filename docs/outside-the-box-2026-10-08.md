@@ -49,3 +49,23 @@ evidence of an edge; it is a to-do list with the duplicates removed.
 4. **Quarter-hour opening imbalance.** `open_study.py` tests the first 90 s
    for mispricing; it does not yet use taker imbalance in those seconds as a
    signal for the rest of the window.
+
+## Endgame maker re-run, 2026-10-08 (6 recording days, 440 BTC markets)
+
+`endgame_maker.py` (resting bid on the side the settlement-aware fair favours,
+last 90/60/30 s) now has the 6 days its pre-registration needs, but the
+**primary hypothesis is still NOT EVALUABLE: 21 fills < 30** (pooled,
+T-60 s / improve / margin 3¢: +$0.37 per fill, 99% CI [−2.08, +1.57]).
+
+- T-90 s loses (pooled join m0.03: −$0.78/fill, 99% CI excludes 0).
+- T-60 s join is positive but not significant (+$0.46 to +$0.82/fill).
+- **The settlement-aware fair is overconfident late:** fills priced ~10–20¢
+  under fair (fair ≈ 75¢), yet those sides won only ~60–67%. This study uses
+  Coinbase + an open-time basis, not the CF index the app uses since 1.8.0,
+  so check the app's final-minute fair against settled outcomes before
+  trusting late picks.
+- **Lead, not a claim:** in near-50/50 markets at T-30 s, YES won 64% (45
+  markets, 5 days) and NO bids that filled lost $3.1/fill (99% CI excludes
+  0). Could be one up-trending week. Re-check when more days are recorded.
+
+Re-run when the recorder has ~3 more days (primary needs ≥ 30 fills).
