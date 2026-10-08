@@ -459,9 +459,14 @@ object TicketBuilder {
     }
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
-        val yes = market.importedModelPp?.div(100.0)
-            ?: market.aiYesPercent?.div(100.0)
+        // `aiYesPercent` is the score overlay's settlement-aware fair value:
+        // it has already applied DirectionSanity and the 60-second settlement
+        // average logic. An imported residual model is only one input to that
+        // fair value, and using it first here could buy an extreme cheap side
+        // against the displayed/settlement-aware winner.
+        val yes = market.aiYesPercent?.div(100.0)
             ?: market.digitalFairPp?.div(100.0)
+            ?: market.importedModelPp?.div(100.0)
         if (yes == null || !yes.isFinite()) return null
         return if (side == "NO") 1.0 - yes else yes
     }
