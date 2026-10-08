@@ -61,8 +61,9 @@ class SpotThrottle(private val windowMs: Long = 250L) {
  */
 /**
  * Generic 1-per-[windowMs] throttle keyed by an arbitrary string (e.g. the
- * CF settlement index id). Returns the key's previous-bucket timestamp when
- * a new window has opened, else null.
+ * CF settlement index id). Returns (nowMs, key) on the FIRST update and on
+ * each new bucket, else null — the caller records the current values with
+ * the current timestamp.
  */
 class KeyThrottle(private val windowMs: Long) {
     private val last = HashMap<String, Long>()
@@ -71,8 +72,10 @@ class KeyThrottle(private val windowMs: Long) {
     fun offer(key: String, nowMs: Long): Pair<Long, String>? {
         val prev = last[key]
         last[key] = nowMs
-        if (prev == null || nowMs / windowMs == prev / windowMs) return null
-        return prev to key
+        // First-ever update or a new bucket: report it (the caller records
+        // the current values with the current timestamp).
+        if (prev == null || nowMs / windowMs != prev / windowMs) return nowMs to key
+        return null
     }
 }
 

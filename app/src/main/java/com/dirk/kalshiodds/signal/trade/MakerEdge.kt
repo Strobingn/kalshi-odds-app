@@ -62,23 +62,24 @@ object MakerEdge {
         val winProb = if (wantYes) p else 1.0 - p
         val takePrice = if (wantYes) yesAsk else yesBid?.let { 1.0 - it }
         val tp = takePrice?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 } ?: return null
-        val restPrice = if (wantYes) {
+        // Resting bid = the side's own best bid + 1¢, strictly under its ask.
+        // YES quote is (yesBid, yesAsk); the NO quote mirrors to
+        // (1 − yesAsk, 1 − yesBid). NO rest = (1 − yesAsk) + 1¢.
+        val restPx = if (wantYes) {
             restPrice(yesBid, yesAsk)
+        } else if (yesAsk != null && yesBid != null) {
+            restPrice(1.0 - yesAsk, 1.0 - yesBid)
         } else {
-            // NO entry rests at 1 − (yes ask − 1¢): one cent better than the
-            // implied NO ask (1 − yes bid) needs the NO side's own quote; with
-            // only the YES quote, rest at (1 − yesAsk) + 1¢ would cross. Use
-            // the YES ask − 1¢ as the maker's YES anchor and mirror it.
-            restPrice(yesBid, yesAsk)?.let { 1.0 - it }
+            null
         }
         val feeTake = KalshiFee.perContract(tp, feeRate)
         val evTake = winProb - tp - feeTake
-        val evRest = restPrice?.let { winProb - it }
-        val save = restPrice?.let { (tp + feeTake) - it }
+        val evRest = restPx?.let { winProb - it }
+        val save = restPx?.let { (tp + feeTake) - it }
         return Compare(
             side = if (wantYes) "YES" else "NO",
             takePrice = tp,
-            restPrice = restPrice,
+            restPrice = restPx,
             savePerContract = save,
             evTake = evTake,
             evRest = evRest

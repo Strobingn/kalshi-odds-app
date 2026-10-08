@@ -1,7 +1,6 @@
 package com.dirk.kalshiodds.signal.trade
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -31,13 +30,17 @@ class MakerEdgeTest {
     }
 
     @Test
-    fun noEntryRestsAtOneMinusTheYesRestMirror() {
-        // NO take = 1 − yes bid; NO rest mirrors the YES rest price.
+    fun noEntryRestsOneCentAboveTheNoBid() {
+        // NO quote mirrors the YES quote: NO bid = 1 − yes ask = 0.42,
+        // NO ask = 1 − yes bid = 0.45. The resting NO bid is 0.42 + 1¢.
         val c = MakerEdge.compare(0.40, "NO", yesBid = 0.55, yesAsk = 0.58)!!
         assertEquals(0.45, c.takePrice, 1e-12) // 1 − yes bid
-        assertEquals(0.44, c.restPrice!!, 1e-12) // 1 − (bid + 1¢)
+        assertEquals(0.43, c.restPrice!!, 1e-12) // (1 − yes ask) + 1¢
         // NO win chance is 1 − p = 0.60.
-        assertEquals(0.60 - 0.44, c.evRest!!, 1e-12)
+        assertEquals(0.60 - 0.43, c.evRest!!, 1e-12)
+        // Resting saves 2¢ of spread plus the taker fee.
+        val fee = KalshiFee.perContract(0.45, 0.07)
+        assertEquals(0.45 + fee - 0.43, c.savePerContract!!, 1e-9)
     }
 
     @Test
@@ -51,8 +54,9 @@ class MakerEdgeTest {
     @Test
     fun restPriceStaysInsideTheFiveToNinetyFiveBand() {
         // bid 4¢ → bid+1 = 5¢ is allowed; bid 3¢ → 4¢ is not.
-        assertNotNull(MakerEdge.compare(0.9, "YES", yesBid = 0.04, yesAsk = 0.10))
-        assertNull(MakerEdge.compare(0.9, "YES", yesBid = 0.03, yesAsk = 0.10))
-        assertNull(MakerEdge.compare(0.9, "YES", yesBid = 0.95, yesAsk = 0.96))
+        // Out of band there is no rest price; the take side is still compared.
+        assertEquals(0.05, MakerEdge.compare(0.9, "YES", yesBid = 0.04, yesAsk = 0.10)!!.restPrice!!, 1e-12)
+        assertNull(MakerEdge.compare(0.9, "YES", yesBid = 0.03, yesAsk = 0.10)!!.restPrice)
+        assertNull(MakerEdge.compare(0.9, "YES", yesBid = 0.95, yesAsk = 0.97)!!.restPrice)
     }
 }
