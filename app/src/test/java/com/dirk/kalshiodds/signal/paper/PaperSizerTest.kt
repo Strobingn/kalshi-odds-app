@@ -76,8 +76,8 @@ class PaperSizerTest {
     fun theSecondBetUsesWhatIsLeftNotTheStartingBalance() {
         var n = 0
         val book = PaperBook(idFactory = { "p${n++}" }, nowMs = { 10L })
-        val first = book.considerAlert(alert("YES", 90.0), ask = 0.50, enabled = true)!!
-        val second = book.considerAlert(alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"), ask = 0.50, enabled = true)
+        val first = book.considerAlert(alert("YES", 90.0), ask = 0.20, enabled = true)!!
+        val second = book.considerAlert(alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"), ask = 0.20, enabled = true)
         assertTrue(first.stakeUsd > 10.0)
         assertTrue(first.stakeUsd < 40.0)
         assertTrue(second == null || second.stakeUsd < first.stakeUsd)

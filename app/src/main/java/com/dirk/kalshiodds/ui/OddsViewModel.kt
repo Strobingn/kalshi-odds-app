@@ -16,8 +16,10 @@ import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
+import com.dirk.kalshiodds.signal.trade.ScalpExit
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.chart.ChartWindowService
@@ -906,8 +908,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            paperTickets.filter { it.canApprove && ScalpExit.isLowPrice(it.limitPrice) }
+                .forEach { paperBook.considerTicket(it, enabled = true) }
         }
+        exitPaperWhenUp(live, ctx)
+        offerLiveScalps(live, ctx)
         refreshPositionMarks()
     }
 
@@ -1064,8 +1069,55 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val ask = market?.let {
                 TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
             }
+            if (ask == null || !ScalpExit.isLowPrice(ask)) return@forEach
             paperBook.considerAlert(alert, ask, enabled = true)
         }
+        val ctx = ticketContext(_state.value, now)
+        exitPaperWhenUp(markets.values.toList(), ctx)
+    }
+
+    /** Sell AI paper fills whose bid is up. Does not wait for settlement. */
+    private fun exitPaperWhenUp(markets: List<MarketUiModel>, ctx: TicketBuilder.Context) {
+        val open = paperBook.snapshot().fills.any { !it.settled }
+        if (!open) return
+        val bids = buildMap {
+            for (fill in paperBook.snapshot().fills) {
+                if (fill.settled) continue
+                val market = markets.firstOrNull { it.ticker.equals(fill.ticker, true) } ?: continue
+                val bid = TicketBuilder.freshBestBid(market, fill.side, ctx) ?: continue
+                put("${fill.ticker.uppercase()}|${fill.side.uppercase()}", bid)
+            }
+        }
+        val sold = paperBook.exitIfRisen(bids)
+        if (sold.isNotEmpty()) {
+            _state.update {
+                it.copy(userMessage = paperBook.snapshot().lastMessage, paper = paperBook.snapshot())
+            }
+        }
+    }
+
+    /**
+     * A cheap live position whose bid is up gets one Approve sell ticket.
+     * This does not place the order.
+     */
+    private fun offerLiveScalps(markets: List<MarketUiModel>, ctx: TicketBuilder.Context) {
+        if (!ctx.settings.ticketsEnabled) {
+            ticketSession.syncScalpSells(emptyList())
+            return
+        }
+        val offers = _state.value.positions.mapNotNull { pos ->
+            val qty = PositionParser.heldContracts(pos)
+            val avg = pos.avgCost ?: return@mapNotNull null
+            if (qty < 1 || !ScalpExit.isLowPrice(avg)) return@mapNotNull null
+            val market = markets.firstOrNull { it.ticker.equals(pos.ticker, true) } ?: return@mapNotNull null
+            val bid = TicketBuilder.freshBestBid(market, pos.side, ctx)
+            val entryFee = KalshiFee.total(qty, avg, ctx.settings.feeRate)
+            if (!ScalpExit.shouldSell(avg, bid, qty, entryFee, ctx.settings.feeRate)) return@mapNotNull null
+            val ticket = TicketBuilder.proposeSell(market, pos.side, qty, ctx) ?: return@mapNotNull null
+            if (!ticket.canApprove) return@mapNotNull null
+            ticket.copy(gateNote = ScalpExit.SELL_NOTE)
+        }
+        ticketSession.syncScalpSells(offers)
     }
 
     private fun scheduleChartBackfill(snap: MarketsSnapshot) {

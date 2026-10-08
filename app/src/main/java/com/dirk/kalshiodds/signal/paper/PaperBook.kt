@@ -5,6 +5,9 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStance
+import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
+import com.dirk.kalshiodds.signal.trade.KalshiFee
+import com.dirk.kalshiodds.signal.trade.ScalpExit
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlin.math.floor
@@ -14,9 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
-/**
- * Isolated paper book. Never calls Kalshi. $100 start / $5 per AI fill.
- */
+/** One simulated fill. Never sent to Kalshi. */
 @Serializable
 data class PaperFill(
     val id: String,
@@ -65,6 +66,11 @@ data class PaperBookState(
     val openCount: Int get() = fills.count { !it.settled }
 }
 
+/**
+ * Isolated paper book. Never calls Kalshi.
+ * The AI buys at 20¢ or less and sells when the bid is up enough to clear fees.
+ * It does not wait for the window to settle.
+ */
 class PaperBook(
     initial: PaperBookState = PaperBookState(),
     private val persist: (PaperBookState) -> Unit = {},
@@ -107,13 +113,15 @@ class PaperBook(
     }
 
     /**
-     * Auto-log a $5 paper fill when an AI hunter / configured ticket would trade.
-     * Manual live tickets are ignored — those need an explicit Paper tap.
+     * Auto-log a paper fill when an AI hunter / configured ticket would trade,
+     * and only when the ask is cheap. Manual live tickets are ignored —
+     * those need an explicit Paper tap. The exit is a later sale, not settlement.
      */
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
+        if (!ScalpExit.isLowPrice(ticket.limitPrice)) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
         return fill(
             ticker = ticket.ticker,
@@ -121,9 +129,9 @@ class PaperBook(
             limitPrice = ticket.limitPrice,
             source = source,
             note = if (ticket.winTargetUsd != null) {
-                "Paper win-target · ${ticket.kind.name.lowercase()} · never sent to Kalshi"
+                "Paper win-target · ${ticket.kind.name.lowercase()} · sell when the bid is up · never sent to Kalshi"
             } else {
-                "Paper fill · ${ticket.kind.name.lowercase()} signal · never sent to Kalshi"
+                "Paper fill · ${ticket.kind.name.lowercase()} signal · sell when the bid is up · never sent to Kalshi"
             },
             contracts = ticket.contracts.takeIf { ticket.winTargetUsd != null && it > 0 },
             stakeUsd = ticket.stakeUsd.takeIf { ticket.winTargetUsd != null && it > 0.0 },
@@ -136,6 +144,7 @@ class PaperBook(
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        if (!ScalpExit.isLowPrice(px)) return null
         return fill(
             ticker = alert.ticker,
             side = alert.predictedSide,
@@ -477,6 +486,71 @@ class PaperBook(
                         px * 100,
                         pnl
                     )
+                )
+            )
+            return sold
+        }
+    }
+
+    /**
+     * Close open AI fills when the bid is up enough to clear both taker fees.
+     * [bids] is keyed `TICKER|SIDE` (uppercase). Manual and tile fills stay open.
+     * Never hits Kalshi. A fill that never rises can still settle later; the
+     * plan is the sale, not the end of the market.
+     */
+    fun exitIfRisen(bids: Map<String, Double>): List<PaperFill> {
+        synchronized(lock) {
+            val cur = _state.value
+            var cash = cur.cashUsd
+            val sold = mutableListOf<PaperFill>()
+            var lastMsg: String? = null
+            val next = ArrayList<PaperFill>(cur.fills.size)
+            for (fill in cur.fills) {
+                if (fill.settled || !ScorecardLedger.isAiSource(fill.source)) {
+                    next += fill
+                    continue
+                }
+                val bid = KalshiPrice.usable(
+                    bids["${fill.ticker.uppercase()}|${fill.side.uppercase()}"]
+                )
+                if (bid == null || !ScalpExit.shouldSell(fill.limitPrice, bid, fill.contracts, fill.feeUsd)) {
+                    next += fill
+                    continue
+                }
+                val sellFee = KalshiFee.total(fill.contracts, bid)
+                val proceeds = fill.contracts * bid
+                val pnl = proceeds - sellFee - fill.stakeUsd - fill.feeUsd
+                cash += proceeds - sellFee
+                val closed = fill.copy(
+                    settled = true,
+                    outcome = "sell",
+                    won = pnl > 0.0,
+                    pnlUsd = pnl,
+                    note = String.format(
+                        java.util.Locale.US,
+                        "Sold %d ct @ %.1f¢ — price was up, did not wait for settlement",
+                        fill.contracts,
+                        bid * 100.0
+                    )
+                )
+                sold += closed
+                lastMsg = String.format(
+                    java.util.Locale.US,
+                    "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · sold the rise, not settlement",
+                    closed.displaySide,
+                    closed.ticker,
+                    closed.contracts,
+                    bid * 100.0,
+                    pnl
+                )
+                next += closed
+            }
+            if (sold.isEmpty()) return emptyList()
+            publish(
+                cur.copy(
+                    cashUsd = cash,
+                    fills = next,
+                    lastMessage = lastMsg
                 )
             )
             return sold

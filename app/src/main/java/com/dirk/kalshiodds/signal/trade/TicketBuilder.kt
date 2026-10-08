@@ -412,7 +412,7 @@ object TicketBuilder {
             ),
             gateNote = when (kind) {
                 TicketKind.HUNTER ->
-                    "Hunter print ($1 can settle ≥$25) · live size is the $5 all-in cap · Approve still required"
+                    "Cheap ask · paper sells when the bid is up, it does not hold to settlement · live size is the $5 all-in cap · Approve still required"
                 TicketKind.HUNTER_VALUE -> longShotNote(
                     ctx.settings.longShotMaxAsk,
                     implied,

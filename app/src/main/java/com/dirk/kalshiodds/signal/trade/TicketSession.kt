@@ -359,6 +359,51 @@ class TicketSession(
         return TicketPhase.AwaitingApprove(ticket, others, id)
     }
 
+    /**
+     * One reduce-only sell per ticker and side when a cheap position is up.
+     * Replaces the previous offer so a moving bid does not stack cards.
+     * Does not open the confirm sheet and never places an order.
+     */
+    fun syncScalpSells(offers: List<TradeTicket>) {
+        _state.update { cur ->
+            fun keyOf(t: TradeTicket) = "${t.ticker.uppercase()}|${t.side.uppercase()}"
+            fun isScalp(t: TradeTicket) = t.isSell && t.gateNote == ScalpExit.SELL_NOTE
+            val manualKeys = cur.proposals.filter { it.isSell && !isScalp(it) }.map { keyOf(it) }.toSet()
+            val incoming = offers
+                .filter { it.isSell && it.canApprove && keyOf(it) !in manualKeys }
+                .map { it.copy(gateNote = ScalpExit.SELL_NOTE) }
+                .associateBy { keyOf(it) }
+            val submitting = (cur.phase as? TicketPhase.Submitting)?.ticket
+            val awaiting = (cur.phase as? TicketPhase.AwaitingApprove)?.ticket
+            val kept = cur.proposals.mapNotNull { t ->
+                if (!isScalp(t)) return@mapNotNull t
+                val locked = t.id == submitting?.id || t.id == awaiting?.id
+                val fresh = incoming[keyOf(t)]
+                when {
+                    fresh != null -> fresh.copy(id = t.id)
+                    locked -> t
+                    else -> null
+                }
+            }
+            val have = kept.filter { isScalp(it) }.map { keyOf(it) }.toSet()
+            val merged = kept + incoming.filter { (k, _) -> k !in have }.values
+            val phase = when (val p = cur.phase) {
+                is TicketPhase.AwaitingApprove -> {
+                    val fresh = merged.firstOrNull { it.id == p.ticket.id }
+                    if (fresh != null) {
+                        confirmPhase(fresh, merged.filterNot { it.id == fresh.id }, p.clientOrderId)
+                    } else {
+                        p
+                    }
+                }
+                is TicketPhase.Idle, is TicketPhase.Proposed ->
+                    if (merged.isEmpty()) TicketPhase.Idle else TicketPhase.Proposed(merged)
+                else -> p
+            }
+            cur.copy(proposals = merged, phase = phase)
+        }
+    }
+
     fun failSoft(message: String) {
         _state.update { it.copy(lastError = message) }
     }

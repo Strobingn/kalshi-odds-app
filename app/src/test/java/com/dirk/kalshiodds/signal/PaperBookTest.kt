@@ -149,16 +149,59 @@ class PaperBookTest {
         val ticket = hunterTicket().copy(
             winTargetUsd = 50.0,
             contracts = 20,
-            stakeUsd = 8.0,
-            limitPrice = 0.40,
-            estimatedAvgFill = 0.40,
+            stakeUsd = 4.0,
+            limitPrice = 0.20,
+            estimatedAvgFill = 0.20,
             ticker = "KXBTC15M-WT"
         )
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
-        assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(100.0 - 8.0 - fill.feeUsd, book.snapshot().cashUsd, 1e-9)
+        assertEquals(4.0, fill.stakeUsd, 1e-9)
+        assertEquals(100.0 - 4.0 - fill.feeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
+    }
+
+    @Test
+    fun aiDoesNotBuyAboveTwentyCents() {
+        val book = PaperBook()
+        val pricey = hunterTicket().copy(limitPrice = 0.40, estimatedAvgFill = 0.40, ticker = "KXBTC15M-HI")
+        assertNull(book.considerTicket(pricey, enabled = true))
+        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+    }
+
+    @Test
+    fun aiSellsWhenTheBidRisesAndDoesNotWaitForSettlement() {
+        val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
+        val fill = book.considerTicket(hunterTicket(), enabled = true)!!
+        val key = "${fill.ticker.uppercase()}|${fill.side}"
+        assertTrue(book.exitIfRisen(mapOf(key to fill.limitPrice)).isEmpty())
+        assertFalse(book.snapshot().fills.single().settled)
+        assertTrue(book.exitIfRisen(mapOf(key to fill.limitPrice + 0.01)).isEmpty())
+
+        val bid = 0.15
+        val sold = book.exitIfRisen(mapOf(key to bid))
+        assertEquals(1, sold.size)
+        assertEquals("sell", sold.single().outcome)
+        assertEquals(true, sold.single().won)
+        val sellFee = KalshiFee.total(fill.contracts, bid)
+        val pnl = fill.contracts * bid - sellFee - fill.stakeUsd - fill.feeUsd
+        assertTrue(pnl > 0.0)
+        assertEquals(pnl, sold.single().pnlUsd!!, 1e-6)
+        assertEquals(100.0 + pnl, book.snapshot().cashUsd, 1e-6)
+        assertEquals(0, book.snapshot().openCount)
+        assertTrue(sold.single().note.contains("did not wait for settlement"))
+        assertTrue(book.exitIfRisen(mapOf(key to bid)).isEmpty())
+    }
+
+    @Test
+    fun manualPaperFillIsNotSoldJustBecauseTheBidRose() {
+        val book = PaperBook(idFactory = { "m" }, nowMs = { 1L })
+        val ticket = hunterTicket().copy(kind = TicketKind.MANUAL)
+        val fill = book.manualFill(ticket)
+        assertTrue(fill != null)
+        val key = "${ticket.ticker.uppercase()}|YES"
+        assertTrue(book.exitIfRisen(mapOf(key to 0.20)).isEmpty())
+        assertEquals(1, book.snapshot().openCount)
     }
 
     private fun hunterTicket(

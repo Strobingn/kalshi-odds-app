@@ -15,9 +15,9 @@ object HomeHelp {
 
     const val PAPER_TITLE = "Paper book"
     const val PAPER_BODY =
-        "Start / reset $100 · win-target sizing · never hits Kalshi. " +
-            "Paper UP / Paper DOWN on the Bitcoin card log a $10 paper bet at the live ask. " +
-            "The switch enables paper auto-log. Live Approve is the only path that can place a real V2 order."
+        "The AI buys at 20¢ or less, then sells when the bid is up enough to clear fees. " +
+            "It does not wait for the window to end. Paper UP / Paper DOWN on the Bitcoin card " +
+            "are still a separate $10 tap. Live Approve is the only path that can place a real order."
 
     const val SIGNALS_TITLE = "Signals"
     const val SIGNALS_BODY =
