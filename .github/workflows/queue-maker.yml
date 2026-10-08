@@ -1,0 +1,71 @@
+name: Queue maker (Claude)
+
+# Queue-aware resting bids on KXBTC15M (tools/research/queue_maker.py), run on
+# the 1 s recordings that record.yml keeps in the Actions cache. The cache is
+# restored READ-ONLY here (never saved). Caches are scoped to the branch that
+# wrote them (Claude), so this runs on pushes to Claude, on pull requests into
+# Claude and by hand. The Markdown report goes to the job log between markers
+# and to the run summary. Nothing is committed, released or traded.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/queue_maker.py"
+      - "tools/research/test_queue_maker.py"
+      - ".github/workflows/queue-maker.yml"
+  pull_request:
+    branches: [Claude]
+    paths:
+      - "tools/research/queue_maker.py"
+      - "tools/research/test_queue_maker.py"
+      - ".github/workflows/queue-maker.yml"
+  workflow_dispatch:
+    inputs:
+      iters:
+        description: Bootstrap resamples
+        required: false
+        default: "2000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: queue-maker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests (synthetic recordings)
+        run: |
+          python3 tools/research/test_queue_maker.py
+          python3 tools/research/test_maker_sim.py
+
+      - name: Restore recordings (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings
+        run: |
+          mkdir -p rec
+          ls -la rec | tail -n 30
+
+      - name: Queue maker study
+        run: |
+          python3 tools/research/queue_maker.py --dir rec --iters "${{ github.event.inputs.iters || '2000' }}" --out queue_maker.md > /dev/null
+          echo "===== QUEUE MAKER ====="
+          cat queue_maker.md
+          echo "===== END QUEUE MAKER ====="
+          cat queue_maker.md >> "$GITHUB_STEP_SUMMARY"
