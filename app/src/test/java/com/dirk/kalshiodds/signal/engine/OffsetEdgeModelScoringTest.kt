@@ -83,12 +83,12 @@ class OffsetEdgeModelScoringTest {
           "kind": "$kind",
           "feature_names": [
             "dist_to_strike_vol","tte_frac","market_mid","imbalance","spread",
-            "momentum","realized_vol","cross_asset","time_of_day","digital_fair"
+            "momentum","realized_vol","cross_asset","time_of_day","digital_fair","prev_window_return"
           ],
-          "weights": [0,0,0,0,0,0,0,0,0,0],
+          "weights": [0,0,0,0,0,0,0,0,0,0,0],
           "bias": $bias,
-          "mean": [0,0,0,0,0,0,0,0,0,0],
-          "std":  [1,1,1,1,1,1,1,1,1,1],
+          "mean": [0,0,0,0,0,0,0,0,0,0,0],
+          "std":  [1,1,1,1,1,1,1,1,1,1,1],
           "platt_a": 1.0,
           "platt_b": 0.0,
           "blend_weight": ${if (kind == "logistic") 0.35 else 1.0},
