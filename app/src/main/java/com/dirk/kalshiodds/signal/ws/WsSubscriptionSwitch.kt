@@ -13,6 +13,7 @@ package com.dirk.kalshiodds.signal.ws
  */
 object WsSubscriptionSwitch {
     const val LIFECYCLE_CHANNEL = "market_lifecycle_v2"
+    private const val CF_BENCHMARKS_CHANNEL = "cfbenchmarks_value"
 
     data class Outbound(
         val cmd: String,
@@ -42,7 +43,10 @@ object WsSubscriptionSwitch {
         }
         out += Outbound(
             cmd = "subscribe",
-            json = KalshiWsMessages.subscribe(id, channels, nextTickers.takeIf { it.isNotEmpty() }),
+            // CF Benchmarks uses a dedicated, index-id subscription. Combining it
+            // with ticker channels makes Kalshi reject the command and can leave a
+            // rollover with no active book subscription.
+            json = KalshiWsMessages.subscribe(id, marketChannels(channels), nextTickers.takeIf { it.isNotEmpty() }),
             marketTickers = nextTickers
         )
         return out
@@ -54,7 +58,10 @@ object WsSubscriptionSwitch {
         currentTickers: List<String>
     ): Outbound = Outbound(
         cmd = "subscribe",
-        json = KalshiWsMessages.subscribe(id, channels, currentTickers.takeIf { it.isNotEmpty() }),
+        json = KalshiWsMessages.subscribe(id, marketChannels(channels), currentTickers.takeIf { it.isNotEmpty() }),
         marketTickers = currentTickers
     )
+
+    private fun marketChannels(channels: List<String>): List<String> =
+        channels.filterNot { it == CF_BENCHMARKS_CHANNEL }
 }
