@@ -25,6 +25,14 @@ Pre-registered grid (fixed before any data was seen):
                       side at its ask (taker fee 0.07), so every fill ends as a
                       pair; if there is no ask, hold
 
+Spot guard (added 2026-10-08 after the first run showed one-legged fills
+adversely selected by 6–15¢; pre-registered before the guarded run):
+
+  guard     0 (off) / 2 / 5 / 10 bps: cancel a leg once Coinbase spot has
+            moved that far against it since the post (YES leg: spot down;
+            NO leg: spot up). The cancel takes effect 1 s later
+            (GUARD_LATENCY_MS); trades in that second still fill us.
+
 Size: 10 contracts per leg. Decision times every 30 s from 1:00 to 13:00
 elapsed. One episode (a pair of resting bids) at a time per market; the next
 episode may start at the first decision time after the previous one ended.
@@ -51,6 +59,7 @@ Python 3 stdlib only. Prints (and optionally writes) a Markdown report.
 from __future__ import annotations
 
 import argparse
+import bisect
 import math
 import sys
 from collections import defaultdict
@@ -71,6 +80,8 @@ RULES = ("join", "improve")
 LOCKS = (0.01, 0.02, 0.03)
 CANCEL_SECS = (30, 60, 120)
 UNWINDS = ("hold", "complete")
+GUARDS_BPS = (0.0, 2.0, 5.0, 10.0)
+GUARD_LATENCY_MS = 1_000
 CONTRACTS = 10
 DECISION_ELAPSED_S = tuple(range(60, 781, 30))
 CANCEL_BEFORE_CLOSE_MS = ms.CANCEL_BEFORE_CLOSE_MS
@@ -89,12 +100,33 @@ class Config:
     lock: float
     cancel_s: int
     unwind: str
+    guard_bps: float = 0.0
 
     def label(self) -> str:
-        return f"{self.rule}/L{self.lock:.2f}/T{self.cancel_s}/{self.unwind}"
+        g = f"/G{self.guard_bps:g}" if self.guard_bps > 0 else ""
+        return f"{self.rule}/L{self.lock:.2f}/T{self.cancel_s}/{self.unwind}{g}"
 
 
-GRID = [Config(r, lk, t, u) for r in RULES for lk in LOCKS for t in CANCEL_SECS for u in UNWINDS]
+GRID = [Config(r, lk, t, u, g) for r in RULES for lk in LOCKS for t in CANCEL_SECS for u in UNWINDS
+        for g in GUARDS_BPS]
+
+
+def guard_cancel(m: ms.Market, side: str, post_ms: int, end_ms: int, guard_bps: float) -> int:
+    """When a leg's resting bid is gone: GUARD_LATENCY_MS after spot first moves
+    guard_bps against it (YES: down, NO: up), never later than end_ms."""
+    if guard_bps <= 0:
+        return end_ms
+    ref = m.spot_at(post_ms)
+    if ref is None:
+        return end_ms
+    lo, hi = ref * (1 - guard_bps / 1e4), ref * (1 + guard_bps / 1e4)
+    i = bisect.bisect_right(m.spot_ts, post_ms)
+    while i < len(m.spot_ts) and m.spot_ts[i] <= end_ms:
+        px = m.spot_px[i]
+        if (side == "YES" and px <= lo + EPS) or (side == "NO" and px >= hi - EPS):
+            return min(end_ms, m.spot_ts[i] + GUARD_LATENCY_MS)
+        i += 1
+    return end_ms
 
 
 def _bid(snap: ms.Snap, side: str) -> tuple[float | None, float | None]:
@@ -195,8 +227,10 @@ def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) ->
             continue
         py, qy, pn, qn = q
         end = ms.cancel_time(t, cfg.cancel_s, m.close_ms)
-        fy, _ = ms.conservative_fill("YES", py, CONTRACTS, qy, m.trades, t, end, trade_ts)
-        fn, _ = ms.conservative_fill("NO", pn, CONTRACTS, qn, m.trades, t, end, trade_ts)
+        end_y = guard_cancel(m, "YES", t, end, cfg.guard_bps)
+        end_n = guard_cancel(m, "NO", t, end, cfg.guard_bps)
+        fy, _ = ms.conservative_fill("YES", py, CONTRACTS, qy, m.trades, t, end_y, trade_ts)
+        fn, _ = ms.conservative_fill("NO", pn, CONTRACTS, qn, m.trades, t, end_n, trade_ts)
         end_snap = m.snap_at(end)
         asks = {s: (end_snap.side(s)[2] if end_snap is not None else None) for s in ("YES", "NO")}
         pnl, cost, completed = episode_pnl(fy, py, fn, pn, m.result, maker_fee, cfg.unwind, asks)
