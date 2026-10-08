@@ -1,0 +1,109 @@
+name: Favourite-side maker (Claude)
+
+# Favourite-side resting bids on KXBTC15M, scored on Kalshi's public trade
+# tape (tools/research/tape_study.py favmaker). The tape study's own days
+# (2026-09-24..10-04) formed the idea, so by default only the other days are
+# downloaded and the verdict reads only those. Three runners each download a
+# third of the markets at 10 requests/s. Public data, no API key. Nothing is
+# committed, released or traded; the report goes to the job log between
+# markers and to the run summary.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - ".github/workflows/fav-maker.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of history to consider"
+        default: "27"
+      skip_days:
+        description: "UTC open days to leave out, A:B (empty = pull every day)"
+        default: "2026-09-24:2026-10-04"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fav-maker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q numpy pandas tabulate
+
+      - name: Unit tests
+        run: python3 tools/research/test_tape_study.py
+
+      - name: Restore earlier tape
+        uses: actions/cache/restore@v4
+        with:
+          path: tape
+          key: claude-tape-${{ matrix.shard }}-${{ github.run_id }}
+          restore-keys: claude-tape-${{ matrix.shard }}-
+
+      - name: Pull trades
+        run: |
+          python3 tools/research/tape_study.py pull --dir tape \
+            --days "${{ github.event.inputs.days || '27' }}" \
+            --skip-days "${{ github.event_name == 'workflow_dispatch' && github.event.inputs.skip_days || '2026-09-24:2026-10-04' }}" \
+            --shard "${{ matrix.shard }}/3" --rate 10 --workers 8
+
+      - name: Save tape
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: tape
+          key: claude-tape-${{ matrix.shard }}-${{ github.run_id }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tape-${{ matrix.shard }}
+          path: tape
+          retention-days: 3
+          compression-level: 0
+
+  report:
+    needs: pull
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q numpy pandas tabulate
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tape-*
+          path: tape
+          merge-multiple: true
+
+      - name: Favourite-side maker
+        run: |
+          ls tape/raw | wc -l
+          python3 tools/research/tape_study.py favmaker --dir tape > fav_maker.md
+          echo "===== FAV MAKER ====="
+          cat fav_maker.md
+          echo "===== END FAV MAKER ====="
+          cat fav_maker.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Taker and maker by price, time and size (context)
+        run: |
+          echo "===== TAPE REPORT ====="
+          python3 tools/research/tape_study.py report --dir tape
+          echo "===== END TAPE REPORT ====="

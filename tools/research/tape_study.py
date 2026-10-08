@@ -14,6 +14,11 @@ Sub-commands (all public market data, no API key):
   makersim  resting-order simulation: join the best bid on YES and on NO every
             30 s, cancel after 30 s, hold fills to settlement, for several
             queue positions (contracts that must trade at our price first)
+  favmaker  the same resting-order simulation, split by which side the bid is
+            on: favourite side (our price 50-90c, i.e. the other side of a
+            cheap-side buyer) against underdog side. Days 2026-09-24..10-04
+            formed the idea, so the verdict reads only the other days and uses
+            a day-block bootstrap (docs/queue-maker-2026-10-08.md)
   hourly    same-settlement check against the hourly KXBTCD "above K" ladder
             for windows that close on the hour
   streaks   UP rate after UP / DOWN runs and by hour of day
@@ -108,6 +113,21 @@ def settled_markets(http: Http, days: float) -> list[dict]:
 
 
 # ---------------------------------------------------------------- pull
+def market_day(m: dict) -> str:
+    return datetime.fromtimestamp(m["open"], timezone.utc).strftime("%Y-%m-%d")
+
+
+def pull_subset(markets: list[dict], shard: str = "0/1", skip_days: str = "") -> list[dict]:
+    """Markets this run downloads: drop UTC open days in `A:B` (inclusive), then keep shard `i/n`."""
+    if skip_days:
+        lo, hi = skip_days.split(":")
+        markets = [m for m in markets if not (lo <= market_day(m) <= hi)]
+    i, n = (int(x) for x in shard.split("/"))
+    if not (0 <= i < n):
+        raise ValueError(f"bad shard {shard}")
+    return [m for k, m in enumerate(markets) if k % n == i]
+
+
 def cmd_pull(a) -> None:
     os.makedirs(os.path.join(a.dir, "raw"), exist_ok=True)
     http = Http(a.rate)
@@ -118,6 +138,9 @@ def cmd_pull(a) -> None:
     markets = sorted(known.values(), key=lambda m: -m["close"])
     json.dump(markets, open(mpath, "w"))
     print(f"{len(markets)} settled markets", flush=True)
+    markets = pull_subset(markets, a.shard, a.skip_days)
+    print(f"{len(markets)} to pull (shard {a.shard}, skipping days {a.skip_days or 'none'})", flush=True)
+    failed: list[str] = []
     done = [0]
     lock = threading.Lock()
 
@@ -146,9 +169,17 @@ def cmd_pull(a) -> None:
             if done[0] % 25 == 0:
                 print(f"  {done[0]} markets pulled", flush=True)
 
+    def safe(m: dict) -> None:
+        try:
+            pull(m)
+        except Exception as e:  # one market that keeps failing must not lose the rest
+            with lock:
+                failed.append(m["ticker"])
+            print(f"  skipped {m['ticker']}: {str(e)[:80]}", flush=True)
+
     with ThreadPoolExecutor(a.workers) as ex:
-        list(ex.map(pull, markets))
-    print("done", flush=True)
+        list(ex.map(safe, markets))
+    print(f"pull finished: {done[0]} new, {len(failed)} skipped", flush=True)
 
 
 def _load(dirname: str):
@@ -237,9 +268,11 @@ def cmd_report(a) -> None:
 
 
 # ---------------------------------------------------------------- makersim
-def cmd_makersim(a) -> None:
+def _maker_frame(a) -> pd.DataFrame:
+    """One row per resting order and queue position: tk, day, tau, Q, cost, pnl (NaN = no fill)."""
     rows = []
     for m, left, p, c, s in _load(a.dir):
+        day = datetime.fromtimestamp(m["open"], timezone.utc).strftime("%Y-%m-%d")
         t = 900.0 - left
         o = np.argsort(t, kind="stable")
         t, p, c, s = t[o], p[o], c[o], s[o]
@@ -268,8 +301,12 @@ def cmd_makersim(a) -> None:
                     reached = cum > (Q if Q >= 0 else np.inf)
                     k_queue = int(np.argmax(reached)) if reached.any() else None
                     filled = k_through is not None or k_queue is not None
-                    rows.append((m["ticker"], tau, Q, cost, pnl if filled else np.nan))
-    df = pd.DataFrame(rows, columns=["tk", "tau", "Q", "cost", "pnl"])
+                    rows.append((m["ticker"], day, tau, Q, cost, pnl if filled else np.nan))
+    return pd.DataFrame(rows, columns=["tk", "day", "tau", "Q", "cost", "pnl"])
+
+
+def cmd_makersim(a) -> None:
+    df = _maker_frame(a)
     df["phase"] = pd.cut(df.tau, [0, 300, 600, 900], labels=["first 5 min", "minutes 5-10", "minutes 10-14"])
     rng = np.random.default_rng(3)
 
@@ -286,6 +323,93 @@ def cmd_makersim(a) -> None:
     print("| Phase | Queue position | Orders | Fill % | P&L c/fill | 95% CI |\n|---|---|---:|---:|---:|---|")
     for (phase, Q), g in list(df.groupby(["phase", "Q"], observed=True)) + [(("all", Q), g) for Q, g in df.groupby("Q")]:
         print(f"| {phase} | {QUEUE_LABELS[Q]} | {len(g)} | {g.pnl.notna().mean() * 100:.1f} | {g.pnl.mean() * 100:+.2f} | {ci(g)} |")
+
+
+# ---------------------------------------------------------------- favmaker
+# Fixed on 2026-10-08 before the fresh days were scored.
+IDEA_DAYS = ("2026-09-24", "2026-10-04")     # the tape study's days: they formed the idea
+FAV_PRICE = (0.50, 0.90)                     # our bid price on the favourite side
+DOG_PRICE = (0.10, 0.50)                     # control: our bid on the underdog side
+EARLY_S = 300
+DECISION_Q = 2000                            # a new order normally sits behind about this many
+
+
+def day_block_ci(by_day: pd.DataFrame, level: float, rng, iters: int) -> tuple[float, float]:
+    """CI of cents per fill with whole UTC days resampled. by_day: columns sum, count."""
+    if len(by_day) < 2 or by_day["count"].sum() == 0:
+        return float("nan"), float("nan")
+    idx = rng.integers(0, len(by_day), size=(iters, len(by_day)))
+    num, den = by_day["sum"].values[idx].sum(1), by_day["count"].values[idx].sum(1)
+    v = num[den > 0] / den[den > 0] * 100
+    a = (1 - level) / 2 * 100
+    return tuple(np.percentile(v, [a, 100 - a]))
+
+
+def fav_cell(g: pd.DataFrame, rng, iters: int) -> dict:
+    """Summary of one cell (one queue position): fills, cents per fill, day-block CIs."""
+    f = g.dropna(subset=["pnl"])
+    out = {"orders": len(g), "fills": len(f)}
+    if not len(f):
+        return out
+    bd = f.groupby("day").pnl.agg(["sum", "count"])
+    out.update(cents=f.pnl.mean() * 100, days=len(bd), pos_days=int((bd["sum"] > 0).sum()),
+               ci95=day_block_ci(bd, 0.95, rng, iters), ci99=day_block_ci(bd, 0.99, rng, iters))
+    return out
+
+
+def _ci_text(ci) -> str:
+    return "n/a" if any(np.isnan(x) for x in ci) else f"[{ci[0]:+.2f}, {ci[1]:+.2f}]"
+
+
+def fav_verdict(c: dict, min_days: int = 5) -> str:
+    if c.get("days", 0) < min_days:
+        return f"NOT EVALUABLE ({c.get('days', 0)} fresh day(s); need >= {min_days})"
+    lo, hi = c["ci99"]
+    if lo > 0:
+        return "PASS - 99% day-block CI above 0 on fresh days. Paper trade it next; it is not proven live"
+    if hi < 0:
+        return "FAIL - 99% day-block CI below 0 on fresh days"
+    return "NO EDGE SHOWN - 99% day-block CI includes 0 on fresh days"
+
+
+def fav_masks(df: pd.DataFrame) -> dict:
+    fav = (df.cost >= FAV_PRICE[0] - 1e-9) & (df.cost <= FAV_PRICE[1] + 1e-9)
+    dog = (df.cost >= DOG_PRICE[0] - 1e-9) & (df.cost < DOG_PRICE[1] - 1e-9)
+    early = df.tau <= EARLY_S
+    return {"all orders": pd.Series(True, index=df.index), "favourite side (50-90c)": fav,
+            "favourite side, first 5 min": fav & early, "underdog side (10-50c)": dog,
+            "underdog side, first 5 min": dog & early}
+
+
+def cmd_favmaker(a) -> None:
+    df = _maker_frame(a)
+    rng = np.random.default_rng(11)
+    idea = (df.day >= IDEA_DAYS[0]) & (df.day <= IDEA_DAYS[1])
+    samples = (("Fresh days (not used to form the idea)", ~idea), (f"Idea days {IDEA_DAYS[0]} to {IDEA_DAYS[1]}", idea),
+               ("All days", pd.Series(True, index=df.index)))
+    print(f"# Favourite-side resting bids: {SERIES}\n\n{df.tk.nunique()} markets, {df.day.nunique()} days "
+          f"({df.day.min()} to {df.day.max()}). Join the best bid on each side every 30 s, cancel after {a.cancel} s, "
+          f"hold to settlement, maker fee 0. Cents per filled contract; CIs resample whole UTC days.\n")
+    masks = fav_masks(df)
+    decision = None
+    for title, sm in samples:
+        d = df[sm]
+        print(f"## {title}: {d.tk.nunique()} markets, {d.day.nunique()} days\n")
+        print("| Cell | Queue position | Orders | Fill % | c/fill | 95% day CI | 99% day CI | Days + |\n|---|---|---:|---:|---:|---|---|---:|")
+        for name, mk in masks.items():
+            for Q in QUEUES:
+                g = d[mk[sm] & (d.Q == Q)]
+                c = fav_cell(g, rng, a.iters)
+                if not c["fills"]:
+                    print(f"| {name} | {QUEUE_LABELS[Q]} | {c['orders']} | 0.0 | n/a | n/a | n/a | n/a |")
+                    continue
+                print(f"| {name} | {QUEUE_LABELS[Q]} | {c['orders']} | {c['fills'] / c['orders'] * 100:.1f} | {c['cents']:+.2f} "
+                      f"| {_ci_text(c['ci95'])} | {_ci_text(c['ci99'])} | {c['pos_days']}/{c['days']} |")
+                if title.startswith("Fresh") and name.startswith("favourite side (") and Q == DECISION_Q:
+                    decision = c
+        print()
+    print(f"Decision (favourite side, {QUEUE_LABELS[DECISION_Q]}, fresh days): "
+          + (fav_verdict(decision) if decision else "NOT EVALUABLE (no fresh-day fills)"))
 
 
 # ---------------------------------------------------------------- hourly
@@ -363,7 +487,7 @@ def cmd_streaks(a) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name, fn in (("pull", cmd_pull), ("report", cmd_report), ("makersim", cmd_makersim), ("hourly", cmd_hourly), ("streaks", cmd_streaks)):
+    for name, fn in (("pull", cmd_pull), ("report", cmd_report), ("makersim", cmd_makersim), ("favmaker", cmd_favmaker), ("hourly", cmd_hourly), ("streaks", cmd_streaks)):
         p = sub.add_parser(name)
         p.set_defaults(fn=fn)
         p.add_argument("--dir", default="tape")
@@ -372,6 +496,8 @@ def main() -> None:
         p.add_argument("--workers", type=int, default=8)
         p.add_argument("--iters", type=int, default=2000, help="bootstrap iterations")
         p.add_argument("--cancel", type=int, default=30, help="makersim: seconds before cancel")
+        p.add_argument("--shard", default="0/1", help="pull: download only part i of n, e.g. 1/3")
+        p.add_argument("--skip-days", default="", help="pull: skip UTC open days A:B (inclusive), e.g. 2026-09-24:2026-10-04")
     a = ap.parse_args()
     a.fn(a)
 
