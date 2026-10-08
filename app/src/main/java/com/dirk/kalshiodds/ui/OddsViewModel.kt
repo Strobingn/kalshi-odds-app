@@ -811,6 +811,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollUsd = paperBook.snapshot().equityUsd,
                 bankrollSource = "paper"
             )
+            managePaperPositions(live, paperCtx, now)
             // Paper research is intentionally independent of the live $5
             // ticket cap and live minimum-profit UI rule. It remains a
             // simulated taker fill at currently visible touch liquidity.
@@ -819,6 +820,32 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         refreshPositionMarks()
+    }
+
+    /** Keeps AI paper positions open through strength and exits at a fresh bid. */
+    private fun managePaperPositions(
+        live: List<MarketUiModel>,
+        context: TicketBuilder.Context,
+        nowMs: Long
+    ) {
+        val markets = live.associateBy { it.ticker }
+        paperBook.snapshot().fills.filter { !it.settled && it.source.startsWith("AI ") }.forEach { fill ->
+            val market = markets[fill.ticker] ?: return@forEach
+            val bid = TicketBuilder.freshBestBid(market, fill.side, context) ?: return@forEach
+            val marked = paperBook.updateAutoPositionHighWater(fill.ticker, fill.side, bid) ?: return@forEach
+            val fairSide = when (marked.side.uppercase()) {
+                "YES" -> market.aiYesPercent?.div(100.0)
+                "NO" -> market.aiNoPercent?.div(100.0)
+                else -> null
+            }
+            val exit = com.dirk.kalshiodds.signal.paper.PaperPositionManager.decide(
+                fill = marked,
+                executableBid = bid,
+                fairSideProbability = fairSide,
+                nowMs = nowMs
+            ) ?: return@forEach
+            paperBook.autoSell(marked.ticker, marked.side, exit.bid, exit.reason)
+        }
     }
 
     private fun captureTicketForward(
