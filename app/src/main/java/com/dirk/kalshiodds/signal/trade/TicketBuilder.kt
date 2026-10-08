@@ -50,11 +50,13 @@ object TicketBuilder {
 
     fun proposeAll(markets: List<MarketUiModel>, ctx: Context): List<TradeTicket> {
         if (!ctx.settings.ticketsEnabled) return emptyList()
-        if (ctx.settings.isSittingOut()) return emptyList()
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
+        // SCALP is a separate paper-only experiment. The legacy auto-tuner's
+        // sitting-out state must not suppress collection of its evidence.
+        val scalps = live.mapNotNull { proposeScalp(it, ctx) }
+        if (ctx.settings.isSittingOut()) return scalps
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
-        val scalps = live.mapNotNull { proposeScalp(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
         return (scalps + hunter + value + configured)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
