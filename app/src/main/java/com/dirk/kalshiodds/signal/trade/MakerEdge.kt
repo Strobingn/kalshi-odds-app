@@ -67,8 +67,10 @@ object MakerEdge {
         // (1 − yesAsk, 1 − yesBid). NO rest = (1 − yesAsk) + 1¢.
         val restPx = if (wantYes) {
             restPrice(yesBid, yesAsk)
-        } else {
+        } else if (yesAsk != null && yesBid != null) {
             restPrice(1.0 - yesAsk, 1.0 - yesBid)
+        } else {
+            null
         }
         val feeTake = KalshiFee.perContract(tp, feeRate)
         val evTake = winProb - tp - feeTake
