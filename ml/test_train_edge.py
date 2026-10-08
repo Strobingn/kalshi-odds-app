@@ -329,5 +329,75 @@ class OffsetModelTest(unittest.TestCase):
         self.assertFalse(manifest["beats_market"], "synthetic data never activates")
 
 
+class ResumableCollectTest(unittest.TestCase):
+    """A pull killed by the job timeout must keep every finished market."""
+
+    def _fake(self, markets, fail_after=None):
+        calls = []
+
+        def fetch_settled(series, days, per=0):
+            return [dict(m) for m in markets] if series == te.SERIES[0] else []
+
+        def fetch_spot(product, start, end):
+            return []
+
+        def fetch_candles(series, ticker, open_ts, close_ts):
+            if fail_after is not None and len(calls) >= fail_after:
+                raise KeyboardInterrupt  # the runner killing the job
+            calls.append(ticker)
+            return []
+
+        def market_samples(m, candles, spot):
+            return [te.Sample(x=[0.0] * len(te.FEATURE_NAMES), y=1, mid=0.5, ts=1, close_ts=2,
+                              ticker=m["ticker"], yes_ask=0.51, no_ask=0.5)]
+
+        return calls, {"fetch_settled": fetch_settled, "fetch_spot": fetch_spot,
+                       "fetch_candles": fetch_candles, "market_samples": market_samples}
+
+    def _patched(self, fakes):
+        saved = {k: getattr(te, k) for k in fakes}
+        for k, v in fakes.items():
+            setattr(te, k, v)
+        return saved
+
+    def test_killed_pull_resumes_without_refetching(self) -> None:
+        markets = [{"ticker": f"KXBTC15M-T{i}", "close_time": "2026-09-01T00:15:00Z",
+                    "open_time": "2026-09-01T00:00:00Z", "result": "yes"} for i in range(6)]
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            calls, fakes = self._fake(markets, fail_after=4)
+            saved = self._patched(fakes)
+            try:
+                with self.assertRaises(KeyboardInterrupt):
+                    te.collect(30, workers=1, progress=prog)
+                self.assertEqual(len(te.load_progress(prog)), 4)
+                calls2, fakes2 = self._fake(markets)
+                self._patched(fakes2)
+                rows = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(len(calls2), 2)  # only the two unfinished markets
+            self.assertEqual(sorted(r.ticker for r in rows), sorted(m["ticker"] for m in markets))
+            self.assertEqual(len(te.load_progress(prog)), 6)
+
+    def test_truncated_progress_line_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            prog.write_text('{"ticker": "A", "rows": []}\n{"ticker": "B", "ro')
+            self.assertEqual(list(te.load_progress(prog)), ["A"])
+
+    def test_cache_paths_change_with_the_feature_contract(self) -> None:
+        d = Path("/tmp/x")
+        a = te.samples_cache_path(d, 270)
+        saved = list(te.FEATURE_NAMES)
+        try:
+            te.FEATURE_NAMES.append("extra")
+            self.assertNotEqual(a, te.samples_cache_path(d, 270))
+            self.assertNotEqual(te.progress_path(d, 270), te.samples_cache_path(d, 270))
+        finally:
+            te.FEATURE_NAMES[:] = saved
+
+
 if __name__ == "__main__":
     unittest.main()

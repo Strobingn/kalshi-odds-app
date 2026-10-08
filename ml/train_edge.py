@@ -575,14 +575,80 @@ def market_samples(market: dict, candles: list[dict], spot_rows: list[tuple[int,
     return out
 
 
-def collect(days: int, max_markets: int = 0, workers: int = 3) -> list[Sample]:
-    """Live pull: settled markets, their 1m candles, and Coinbase spot."""
+def _sample_row(s: Sample) -> dict:
+    return {
+        "x": s.x, "y": s.y, "mid": s.mid, "ts": s.ts,
+        "close_ts": s.close_ts, "ticker": s.ticker,
+        "yes_ask": s.yes_ask, "no_ask": s.no_ask,
+    }
+
+
+def _sample_from_row(o: dict) -> Sample:
+    return Sample(
+        x=[float(v) for v in o["x"]],
+        y=int(o["y"]),
+        mid=float(o["mid"]),
+        ts=int(o["ts"]),
+        close_ts=int(o["close_ts"]),
+        ticker=str(o["ticker"]),
+        yes_ask=float(o["yes_ask"]) if o.get("yes_ask") is not None else None,
+        no_ask=float(o["no_ask"]) if o.get("no_ask") is not None else None,
+    )
+
+
+def load_progress(path: Path | None) -> dict[str, list[Sample]]:
+    """Markets already pulled by an earlier (possibly killed) run: ticker -> rows.
+
+    One JSON line per finished market, appended as it completes, so a run cut
+    off by the job timeout keeps everything it pulled. A truncated last line
+    is skipped. A market with zero usable rows is still recorded (as []), so
+    it is not fetched again.
+    """
+    done: dict[str, list[Sample]] = {}
+    if path is None or not path.is_file():
+        return done
+    with path.open() as f:
+        for line in f:
+            try:
+                o = json.loads(line)
+                done[str(o["ticker"])] = [_sample_from_row(r) for r in o["rows"]]
+            except Exception:
+                continue
+    return done
+
+
+def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | None = None) -> list[Sample]:
+    """Live pull: settled markets, their 1m candles, and Coinbase spot.
+
+    With [progress], markets finished by an earlier run are reused and every
+    newly finished market is appended to that file straight away.
+    """
     samples: list[Sample] = []
+    done_before = load_progress(progress)
+    if done_before:
+        print(f"  progress {progress}: {len(done_before)} markets already pulled", flush=True)
+    sink = None
+    if progress is not None:
+        progress.parent.mkdir(parents=True, exist_ok=True)
+        sink = progress.open("a")
+
+    def record(m: dict, rows: list[Sample]) -> None:
+        samples.extend(rows)
+        if sink is not None:
+            sink.write(json.dumps({"ticker": m["ticker"], "rows": [_sample_row(r) for r in rows]}) + "\n")
+            sink.flush()
     per = 0 if max_markets <= 0 else max(1, max_markets // len(SERIES))
     for series in SERIES:
         print(f"=== {series}", flush=True)
         markets = fetch_settled(series, days, per)
         print(f"  settled {len(markets)}", flush=True)
+        if not markets:
+            continue
+        reused = [m for m in markets if m["ticker"] in done_before]
+        for m in reused:
+            samples.extend(done_before[m["ticker"]])
+        markets = [m for m in markets if m["ticker"] not in done_before]
+        print(f"  reused {len(reused)} from progress, {len(markets)} to fetch", flush=True)
         if not markets:
             continue
         closes = [int(parse_iso(m["close_time"]).timestamp()) for m in markets]
@@ -602,12 +668,15 @@ def collect(days: int, max_markets: int = 0, workers: int = 3) -> list[Sample]:
             skipped: list[dict] = []
             for fut in as_completed(futs):
                 try:
-                    samples.extend(fut.result())
+                    record(futs[fut], fut.result())
                 except Exception as e:
                     # 429s are transient: keep the market for one retry pass
                     # instead of dropping its 13 decision minutes forever.
                     skipped.append(futs[fut])
                     print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
+                done += 1
+                if done % 250 == 0:
+                    print(f"  candles {done}/{len(markets)} rows {len(samples)}", flush=True)
             for attempt in range(2):
                 if not skipped:
                     break
@@ -618,18 +687,27 @@ def collect(days: int, max_markets: int = 0, workers: int = 3) -> list[Sample]:
                     futs = {pool.submit(one, m): m for m in retry}
                     for fut in as_completed(futs):
                         try:
-                            samples.extend(fut.result())
+                            record(futs[fut], fut.result())
                         except Exception as e:
                             skipped.append(futs[fut])
                             print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
-                done += 1
-                if done % 250 == 0:
-                    print(f"  candles {done}/{len(markets)} rows {len(samples)}", flush=True)
+    if sink is not None:
+        sink.close()
     return samples
 
 
+def _feature_tag() -> str:
+    """Short hash of the feature contract: rows from another contract are not reused."""
+    import hashlib
+    return hashlib.sha1(",".join(FEATURE_NAMES).encode()).hexdigest()[:8]
+
+
 def samples_cache_path(cache: Path, days: int) -> Path:
-    return cache / f"samples_{days}d.jsonl"
+    return cache / f"samples_{days}d_{_feature_tag()}.jsonl"
+
+
+def progress_path(cache: Path, days: int) -> Path:
+    return cache / f"progress_{days}d_{_feature_tag()}.jsonl"
 
 
 def load_samples_cache(cache: Path, days: int) -> list[Sample] | None:
@@ -648,17 +726,7 @@ def load_samples_cache(cache: Path, days: int) -> list[Sample] | None:
             if not line.strip():
                 continue
             try:
-                o = json.loads(line)
-                out.append(Sample(
-                    x=[float(v) for v in o["x"]],
-                    y=int(o["y"]),
-                    mid=float(o["mid"]),
-                    ts=int(o["ts"]),
-                    close_ts=int(o["close_ts"]),
-                    ticker=str(o["ticker"]),
-                    yes_ask=float(o["yes_ask"]) if o.get("yes_ask") is not None else None,
-                    no_ask=float(o["no_ask"]) if o.get("no_ask") is not None else None,
-                ))
+                out.append(_sample_from_row(json.loads(line)))
             except Exception:
                 continue
     print(f"  samples cache {path}: {len(out)} rows", flush=True)
@@ -671,11 +739,7 @@ def save_samples_cache(cache: Path, days: int, samples: list[Sample]) -> None:
     tmp = path.with_suffix(".tmp")
     with tmp.open("w") as f:
         for s in samples:
-            f.write(json.dumps({
-                "x": s.x, "y": s.y, "mid": s.mid, "ts": s.ts,
-                "close_ts": s.close_ts, "ticker": s.ticker,
-                "yes_ask": s.yes_ask, "no_ask": s.no_ask,
-            }) + "\n")
+            f.write(json.dumps(_sample_row(s)) + "\n")
     tmp.replace(path)
     print(f"  wrote samples cache {path} ({len(samples)} rows)", flush=True)
 
@@ -1405,7 +1469,8 @@ def main() -> int:
                 if cached is not None:
                     samples = cached
                 else:
-                    samples = collect(args.days, args.max_markets, args.workers)
+                    samples = collect(args.days, args.max_markets, args.workers,
+                                      progress=progress_path(scache, args.days))
                     save_samples_cache(scache, args.days, samples)
             else:
                 samples = load_backtest_cache(Path(args.cache), args.days) if args.cache else collect(args.days, args.max_markets, args.workers)
