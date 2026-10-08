@@ -34,12 +34,12 @@ class AppUpdateTest {
     @Test
     fun parsesOnlyMisBitcoinBranchAppReleasesWithAnApk() {
         val r = AppUpdate.parse(sample)
-        assertEquals(listOf("v1.8.0-mis.1-Mis_bitcoin", "v1.3-Claude", "v1.2-Claude"), r.map { it.tag })
+        assertEquals(listOf("v1.8.0-mis.1-Mis_bitcoin"), r.map { it.tag })
         val newest = r.first()
         assertEquals("1.8.0-mis.1", newest.versionName)
-        assertEquals(61, newest.runNumber)
-        assertEquals(34, newest.versionCode)
-        assertEquals("abc1234", newest.sha)
+        assertEquals(140, newest.runNumber)
+        assertEquals(44, newest.versionCode)
+        assertEquals("b5d0de6", newest.sha)
         assertEquals("MisBitcoin-v1.8.0-mis.1-Mis_bitcoin-140.apk", newest.apkName)
         assertEquals(
             "https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.8.0-mis.1-Mis_bitcoin/MisBitcoin-v1.8.0-mis.1-Mis_bitcoin-140.apk",
@@ -89,21 +89,21 @@ class AppUpdateTest {
 
     @Test
     fun runNumberFallsBackToTheReleaseNotes() {
-        val json = "[" + release("v1.3-Claude", "BitcoinClaude.apk", "Mis Bitcoin v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
+        val json = "[" + release("v1.3-Mis_bitcoin", "MisBitcoin.apk", "Mis Bitcoin v1.3 (34) from `Mis_bitcoin` @ abc1234, run #77.") + "]"
         assertEquals(77, AppUpdate.parse(json).single().runNumber)
     }
 
     @Test
     fun nonHttpsDownloadLinksAreDropped() {
-        val json = """[{"tag_name":"v1.3-Claude","draft":false,"body":"","assets":[{"name":"a-5.apk","browser_download_url":"http://example.com/a-5.apk"}]}]"""
+        val json = """[{"tag_name":"v1.3-Mis_bitcoin","draft":false,"body":"","assets":[{"name":"a-5.apk","browser_download_url":"http://example.com/a-5.apk"}]}]"""
         assertTrue(AppUpdate.parse(json).isEmpty())
     }
 
     @Test
     fun copyIsPlain() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))!!
-        assertEquals("Update available: v1.3 build #61", AppUpdate.statusLine(AppUpdate.Status.Available(latest)))
-        assertEquals("Up to date. Newest on GitHub: v1.3 build #61", AppUpdate.statusLine(AppUpdate.Status.UpToDate(latest)))
+        assertEquals("Update available: v1.8.0-mis.1 build #140", AppUpdate.statusLine(AppUpdate.Status.Available(latest)))
+        assertEquals("Up to date. Newest on GitHub: v1.8.0-mis.1 build #140", AppUpdate.statusLine(AppUpdate.Status.UpToDate(latest)))
         assertEquals("Checking GitHub…", AppUpdate.statusLine(AppUpdate.Status.Checking))
         assertEquals("Build #61 · abc1234", AppUpdate.buildLabel(61, "abc1234"))
         assertEquals("Local build (not from GitHub)", AppUpdate.buildLabel(0, "local"))

@@ -85,8 +85,9 @@ class PaperSizerTest {
         val book = PaperBook(idFactory = { "p${n++}" }, nowMs = { 10L })
         val first = book.considerAlert(alert("YES", 90.0), ask = 0.50, enabled = true)!!
         val second = book.considerAlert(alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"), ask = 0.50, enabled = true)
-        assertTrue(first.stakeUsd > 10.0)
-        assertTrue(first.stakeUsd < 40.0)
+        // Quarter Kelly of a 90% call at 50¢ is ~20%, capped at 10% of $100.
+        assertTrue("stake=${first.stakeUsd}", first.stakeUsd > 5.0)
+        assertTrue("stake=${first.stakeUsd}", first.stakeUsd <= 10.0 + 1e-9)
         assertTrue(second == null || second.stakeUsd < first.stakeUsd)
         assertTrue(book.snapshot().cashUsd >= 0.0)
     }

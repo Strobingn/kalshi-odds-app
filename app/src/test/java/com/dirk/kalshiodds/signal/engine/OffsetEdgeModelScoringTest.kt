@@ -55,7 +55,10 @@ class OffsetEdgeModelScoringTest {
         val modelPp = 100.0 / (1.0 + kotlin.math.exp(-(kotlin.math.ln(0.41 / 0.59) + 0.4)))
         val expected = 0.75 * 41.0 + 0.25 * modelPp
         assertEquals(expected, score.fairValuePp, 1e-2)
-        assertEquals("YES", score.predictedSide)
+        // The side is the likely winner: a 25% pull from 41 lands near 43.5,
+        // still under 50, so NO stays the pick.
+        assertTrue(expected < 50.0)
+        assertEquals("NO", score.predictedSide)
     }
 
     @Test

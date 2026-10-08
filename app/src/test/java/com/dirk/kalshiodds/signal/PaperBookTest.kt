@@ -102,6 +102,7 @@ class PaperBookTest {
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
         assertEquals(-5.0 - fee, loss.pnlUsd!!, 1e-6)
+        assertEquals(0.0, snap.fills.first { it.ticker == "VOID-1" }.pnlUsd!!, 1e-9)
         assertEquals(115.0 - 2.0 * fee, snap.realizedPnlUsd, 1e-6)
         // 100 - 3*(5+fee) + 125 win + 0 loss + (5+fee) void
         assertEquals(215.0 - 2.0 * fee, snap.cashUsd, 1e-6)
@@ -157,7 +158,8 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
+        // Paper charges the taker fee on top of the stake, like a live buy.
+        assertEquals(92.0 - fill.feeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
     }
 
