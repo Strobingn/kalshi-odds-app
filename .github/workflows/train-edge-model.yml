@@ -1,8 +1,9 @@
 name: Train edge model
 
 on:
-  # Run this workflow on chat-GTP for a branch-only model release. GitHub
-  # schedules run the default branch and would use main's trainer instead.
+  # Keep all training changes on chat-GTP. GitHub schedules run from the
+  # default branch, so this branch-only workflow is deliberately started by a
+  # push or Actions → Run workflow.
   push:
     branches: [chat-GTP]
     paths:
@@ -16,6 +17,18 @@ on:
         description: Lookback days for settled Kalshi 15m markets
         required: false
         default: "30"
+      run_research_challenger:
+        description: Train the independent GBDT research challenger after the baseline passes
+        required: false
+        default: true
+        type: boolean
+
+# Prevent two runs from replacing the global latest-model aliases out of order.
+# `cancel-in-progress: false` means a newer experiment waits until the current
+# candidate has recorded its metrics and published its artifacts.
+concurrency:
+  group: edge-model-research-chat-gtp
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -56,7 +69,7 @@ jobs:
             ml/edge_model_manifest.json
             ml/fixtures/parity_sample.json
           if-no-files-found: error
-      - name: Publish rolling release
+      - name: Publish baseline releases for every app branch
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -79,19 +92,58 @@ jobs:
           )
           PY
           )
-          if gh release view edge-model-chat-GTP >/dev/null 2>&1; then
-            gh release upload edge-model-chat-GTP \
-              ml/edge_model.json \
-              ml/edge_model_manifest.json \
-              --clobber
-            gh release edit edge-model-chat-GTP \
-              --title "Edge model (chat-GTP candidate)" \
-              --notes "$NOTES"
-          else
-            gh release create edge-model-chat-GTP \
-              ml/edge_model.json \
-              ml/edge_model_manifest.json \
-              --target "$GITHUB_SHA" \
-              --title "Edge model (chat-GTP candidate)" \
-              --notes "$NOTES"
-          fi
+          # `edge-model-latest` is the shared endpoint for new app builds on
+          # every branch. Keep the original tag in sync so already-installed
+          # builds that still request edge-model-chat-GTP get the same model.
+          for tag in edge-model-latest edge-model-chat-GTP; do
+            if gh release view "$tag" >/dev/null 2>&1; then
+              gh release upload "$tag" \
+                ml/edge_model.json \
+                ml/edge_model_manifest.json \
+                --clobber
+              gh release edit "$tag" \
+                --title "Edge model candidate (shared)" \
+                --notes "$NOTES"
+            else
+              gh release create "$tag" \
+                ml/edge_model.json \
+                ml/edge_model_manifest.json \
+                --target "$GITHUB_SHA" \
+                --title "Edge model candidate (shared)" \
+                --notes "$NOTES"
+            fi
+          done
+
+  research_challenger:
+    name: Train GBDT research challenger after baseline
+    needs: train
+    if: github.event_name != 'workflow_dispatch' || inputs.run_research_challenger
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install challenger dependencies
+        run: pip install 'numpy>=2,<3' 'scikit-learn>=1.7,<2'
+      - name: Challenger contract tests
+        run: python3 ml/test_train_big_edge.py
+      - name: Train independent GBDT challenger
+        env:
+          TRAIN_DAYS: ${{ github.event.inputs.days || '30' }}
+        run: |
+          python3 ml/train_big_edge.py --collect \
+            --days "$TRAIN_DAYS" --max-per-day 16 \
+            --out ml/big_edge_model.json \
+            --manifest ml/big_edge_manifest.json
+      - name: Archive challenger model and holdout evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: big-edge-research-model
+          path: |
+            ml/big_edge_model.json
+            ml/big_edge_manifest.json
+          if-no-files-found: error

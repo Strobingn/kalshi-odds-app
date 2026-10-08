@@ -30,9 +30,15 @@ python3 ml/train_edge.py --fixture   # no network; synthetic walk-forward
 Python 3.10+ standard library only (no pip packages).
 
 GitHub Actions: **Actions → Train edge model → Run workflow → chat-GTP**.
-The JSON + `edge_model_manifest.json` are uploaded as an artifact
-and published on the branch-only `edge-model-chat-GTP` release. In this app:
-**Data → Get latest model**.
+The JSON + `edge_model_manifest.json` are uploaded as an artifact and published
+to the shared `edge-model-latest` release. Every app branch can download that
+same experimental candidate through **Data → Get latest model**. The workflow
+also refreshes the legacy `edge-model-chat-GTP` alias for already-installed
+builds.
+
+After the baseline trainer passes its no-look-ahead checks, the same Actions
+run queues an independent GBDT research challenger. It is archived as an
+artifact only—it never auto-replaces the phone model.
 
 ## Features (order is the Android contract)
 

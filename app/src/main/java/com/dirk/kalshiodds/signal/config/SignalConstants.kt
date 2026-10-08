@@ -82,7 +82,8 @@ object SignalConstants {
 
     const val GITHUB_OWNER = "Strobingn"
     const val GITHUB_REPO = "kalshi-odds-app"
-    const val EDGE_MODEL_RELEASE_TAG = "edge-model-chat-GTP"
+    /** Shared candidate release. Every app branch can read this same release. */
+    const val EDGE_MODEL_RELEASE_TAG = "edge-model-latest"
 
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true

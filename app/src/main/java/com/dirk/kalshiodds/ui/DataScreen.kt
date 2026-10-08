@@ -230,7 +230,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 color = colors.textSecondary
             )
             Text(
-                "Run Train edge model on chat-GTP to publish edge-model-chat-GTP. Get latest model checks the source and holdout Brier/log-loss before activation; that does not prove trading profit. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Run Train edge model on chat-GTP to publish the shared edge-model-latest release. Every app branch can fetch it. Get latest model checks the source and holdout Brier/log-loss before activation; previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

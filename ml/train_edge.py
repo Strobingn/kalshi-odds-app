@@ -672,7 +672,9 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "sim_pnl": metrics.get("sim_pnl"),
         "sim_hit_rate": metrics.get("sim_hit_rate"),
         "model_asset": "edge_model.json",
-        "tag": "edge-model-chat-GTP",
+        # Shared release endpoint. The workflow also maintains the legacy
+        # chat-GTP alias so app builds already in the wild can update.
+        "tag": "edge-model-latest",
         "data_source": (
             "synthetic_fixture" if fixture else
             "kalshi_live_historical_cf_settlement_index_v3" if cf_coverage >= 0.95 else
