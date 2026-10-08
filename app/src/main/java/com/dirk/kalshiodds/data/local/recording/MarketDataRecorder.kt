@@ -123,8 +123,10 @@ class MarketDataRecorder(
      */
     fun onIndex(asset: String, indexId: String, value: Double, avg60: Double?, finalMinuteAvg: Double?, nowMs: Long = clock()) {
         if (!active || !value.isFinite() || value <= 0.0) return
-        indexGate.offer("$asset|$indexId", nowMs)?.let {
-            enqueue(Rec.Index(it.first, asset, indexId, value, avg60, finalMinuteAvg))
+        // One row per ~1 s bucket per index: offer() reports the bucket
+        // change, and the row carries the CURRENT timestamp and values.
+        if (indexGate.offer("$asset|$indexId", nowMs) != null) {
+            enqueue(Rec.Index(nowMs, asset, indexId, value, avg60, finalMinuteAvg))
         }
     }
 
