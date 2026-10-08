@@ -172,3 +172,21 @@ final_minute_avg, ~1/s per asset) whenever recording is on. Coinbase
 points to the wrong side of the target in ~6.7% of BTC windows; after
 2-4 weeks of index rows the trainer can learn from the real settlement
 source (`load_backtest_cache` path will read them).
+
+## 15-minute reversal feature (prev_window_return, feature #10)
+
+arXiv 2608.21888: at 15-minute horizons crypto shows pervasive out-of-sample
+sign reversion (90% of 183 Binance pairs; flip rate 50.2% -> 53.0% by prior
+move size), concentrated after flow-driven moves. Implemented as a parity
+feature in the offset model:
+
+- Trainer: `prev_window_return` — simple return over the previous window
+  (open-900s .. open) from Coinbase bars that closed by the open (no
+  look-ahead), clipped to ±5%.
+- App: `SpotTape.returnOver(15 min)` -> `StreamSpot.return15m` ->
+  `AssetSpotFeatures.prevWindowReturn` -> `EdgeFeatures.Raw.prevWindowReturn`
+  (feature #10, SIZE 11).
+
+The model can now learn the tilt instead of hand-coding it; if the fitted
+weight is ~0 on 270 days of data, the reversal is not capturable here
+either — an honest result the L2 sweep will surface.

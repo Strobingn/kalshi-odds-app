@@ -68,6 +68,9 @@ FEATURE_NAMES = [
     "cross_asset",
     "time_of_day",
     "digital_fair",
+    # Simple return over the full previous 15-minute window (open-900s to
+    # open): the 15-minute sign-reversal tilt (arXiv 2608.21888).
+    "prev_window_return",
 ]
 MID_INDEX = FEATURE_NAMES.index("market_mid")
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
@@ -97,7 +100,7 @@ MID_CLIP = 0.001
 # in training — no historical L2), momentum / realized_vol (the app builds
 # them from its tick buffer, training from 1m candles — no parity),
 # time_of_day (trainer UTC vs app New York clock).
-OFFSET_FEATURES = ["dist_to_strike_vol", "market_mid", "cross_asset", "digital_fair"]
+OFFSET_FEATURES = ["dist_to_strike_vol", "market_mid", "cross_asset", "digital_fair", "prev_window_return"]
 # Rows are clustered: the 13 minutes of one market share one outcome, so
 # the effective sample is the market count. 0.05 keeps a calibrated
 # market close to w = 0 at a few hundred markets (see test_train_edge.py).
@@ -445,6 +448,30 @@ def spot_return(closes: list[float], bars: int) -> float:
     return (closes[-1] - closes[-1 - bars]) / closes[-1 - bars]
 
 
+def prev_window_return(spot_rows: list[tuple[int, float]], open_ts: int) -> float:
+    """Simple return over the PREVIOUS window (open-900 .. open), 0 when unknown.
+
+    Parity: the app's SpotTape.returnOver(15 min, at open) — bars that closed
+    by open_ts only (no look-ahead). The 15-minute sign-reversal tilt
+    (arXiv 2608.21888): positive prior move -> slightly lower P(YES).
+    """
+    lo = open_ts - 900
+    hi = open_ts
+    known = [c for ts, c in spot_rows if lo + 60 <= ts + 60 <= hi]
+    # first and last bar closes strictly inside the previous window
+    first = None
+    last = None
+    for ts, c in spot_rows:
+        if ts + 60 <= lo:
+            first = c
+        elif ts + 60 <= hi and ts >= lo:
+            if last is None or ts > (last[0] if last else -1):
+                last = (ts, c)
+    if first is None or last is None or last[1] <= 0 or first <= 0:
+        return 0.0
+    return (last[1] - first) / first
+
+
 def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, float]], idx: int) -> list[float] | None:
     mid = candle_mid(candles[idx])
     if mid is None:
@@ -452,6 +479,8 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     close_dt = parse_iso(market.get("close_time"))
     end_ts = int(candles[idx].get("end_period_ts") or 0)
     tte = max(0.0, (close_dt.timestamp() if close_dt else end_ts) - end_ts)
+    open_dt = parse_iso(market.get("open_time"))
+    open_ts = int(open_dt.timestamp()) if open_dt else (int(close_dt.timestamp()) - 900 if close_dt else end_ts - 900)
     window = [candle_mid(c) for c in candles[max(0, idx - 7) : idx + 1]]
     mids = [m for m in window if m is not None]
     momentum = (mids[-1] - mids[0]) if len(mids) >= 2 else 0.0
@@ -480,6 +509,7 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
         float(max(-0.2, min(0.2, spot_return(spot, 5)))),
         float((hour * 60) / (24 * 60)),
         float(fair if fair is not None else mid),
+        float(max(-0.05, min(0.05, prev_window_return(spot_rows, open_ts)))),
     ]
 
 
@@ -1228,7 +1258,7 @@ def fixture_dataset(n: int = 240) -> list[Sample]:
         mid = 0.35 + 0.3 * ((i % 40) / 40.0)
         dist = (mid - 0.5) * 2
         fair = min(0.95, max(0.05, mid + 0.08 * math.sin(i / 7.0)))
-        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair]
+        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair, 0.0]
         label = 1 if fair + 0.02 * math.sin(i) > 0.5 else 0
         ts = t0 + i * 900
         out.append(

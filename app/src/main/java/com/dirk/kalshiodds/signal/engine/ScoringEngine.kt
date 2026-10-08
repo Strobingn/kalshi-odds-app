@@ -671,7 +671,10 @@ class ScoringEngine(
                     // Null: EdgeFeatures computes the point-spot digital the
                     // model was trained on (ml/train_edge.py), not the
                     // settlement-average fair shown in the app.
-                    digitalFair = null
+                    digitalFair = null,
+                    // Trailing-15-minute return = the previous window's move
+                    // (reversal tilt; parity with prev_window_return).
+                    prevWindowReturn = spotFeat?.prevWindowReturn
                 )
             )
             val pYes = loaded.predictYes(feats, mid01)

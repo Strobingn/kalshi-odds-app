@@ -109,7 +109,7 @@ def _samples(n_markets: int, seed: int = 3, lag: float = 0.0) -> list[te.Sample]
         for k in range(1, 14):
             spot_logit = truth + rng.gauss(0.0, 0.5)
             mid = te.sigmoid((1.0 - lag) * truth + (rng.gauss(0.0, 0.3) if lag else 0.0))
-            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit)]
+            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit), 0.0]
             out.append(
                 te.Sample(
                     x=x,
@@ -127,8 +127,8 @@ def _samples(n_markets: int, seed: int = 3, lag: float = 0.0) -> list[te.Sample]
 
 class OffsetModelTest(unittest.TestCase):
     def _zero_model(self, mean_mid: float = 0.0, std_mid: float = 1.0) -> dict:
-        mean = [0.0] * 10
-        std = [1.0] * 10
+        mean = [0.0] * len(te.FEATURE_NAMES)
+        std = [1.0] * len(te.FEATURE_NAMES)
         mean[te.MID_INDEX] = mean_mid
         std[te.MID_INDEX] = std_mid
         return {
@@ -146,7 +146,7 @@ class OffsetModelTest(unittest.TestCase):
         # A scaler on market_mid must not touch the offset: it is logit(mid), not a feature.
         for model in (self._zero_model(), self._zero_model(mean_mid=0.5, std_mid=0.2)):
             for mid in (0.001, 0.03, 0.31, 0.5, 0.77, 0.999):
-                x = [0.0] * 10
+                x = [0.0] * len(te.FEATURE_NAMES)
                 x[te.MID_INDEX] = mid
                 self.assertAlmostEqual(te.model_predict(model, x, mid), mid, places=9)
         clipped = te.model_predict(self._zero_model(), [0.0] * 10, 0.0002)
@@ -308,7 +308,7 @@ class OffsetModelTest(unittest.TestCase):
             self.assertTrue(math.isfinite(metrics[key]), key)
         self.assertLessEqual(metrics["model_calibration_error"], metrics["market_calibration_error"] + 0.05)
 
-    def test_export_is_offset_logistic_with_ten_features(self) -> None:
+    def test_export_is_offset_logistic_with_all_features(self) -> None:
         samples = _samples(90)
         model = te.fit_model(samples)
         metrics = te.walk_forward(samples)
@@ -321,7 +321,7 @@ class OffsetModelTest(unittest.TestCase):
             manifest = json.loads(man.read_text())
         self.assertEqual(payload["kind"], "offset_logistic")
         self.assertEqual(payload["feature_names"], te.FEATURE_NAMES)
-        self.assertEqual(len(payload["weights"]), 10)
+        self.assertEqual(len(payload["weights"]), len(te.FEATURE_NAMES))
         self.assertEqual(payload["mid_clip"], te.MID_CLIP)
         self.assertEqual((payload["platt_a"], payload["platt_b"]), (1.0, 0.0))
         self.assertTrue(all(isinstance(v, float) for v in payload["metrics"].values()))
