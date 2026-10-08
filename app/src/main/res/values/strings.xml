@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Bitcoin Kimi</string>
+    <string name="app_name">Bitcoin-KIMI</string>
     <string name="bitcoin_section">Bitcoin (KXBTC15M)</string>
     <string name="eth_section">Ethereum (KXETH15M)</string>
     <string name="sol_section">Solana (KXSOL15M)</string>
