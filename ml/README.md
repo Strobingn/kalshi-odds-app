@@ -190,3 +190,6 @@ feature in the offset model:
 The model can now learn the tilt instead of hand-coding it; if the fitted
 weight is ~0 on 270 days of data, the reversal is not capturable here
 either — an honest result the L2 sweep will surface.
+
+(Changelog note: the reversal-feature training run is dispatched via a
+push touching ml/ — see the workflow paths filter.)
