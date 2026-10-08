@@ -1,34 +1,40 @@
-name: Train edge model
+name: Train models
 
-# Publishes to the rolling `claude-edge-model` release, which the Claude app
-# (SignalConstants.EDGE_MODEL_RELEASE_TAG) downloads. `edge-model-latest`
-# belongs to the main app; nothing in this file may write to it.
-# Scheduled workflows only run from the default branch, and even there this
-# file only ever targets RELEASE_TAG below.
+# Publishes the rolling `grok-bitcoin-edge-model` release. The app downloads
+# that tag (SignalConstants.EDGE_MODEL_RELEASE_TAG). Never write
+# `edge-model-latest` (main app) or `claude-edge-model`.
+#
+# Trains every model this repo can fit without a paid API:
+#   - offset logistic (the model Settings → Get latest model installs)
+#   - plain logistic (same release, logistic_model.json, not auto-activated)
+# Heavy student and the TFLite net stay as the copies already in the APK.
+# They need a history CSV / TensorFlow and are not refit here.
+#
+# Uses only public Kalshi + Coinbase data and GitHub-hosted runners.
 
 on:
-  schedule:
-    # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
-    - cron: "17 8 * * 1"
   workflow_dispatch:
     inputs:
       days:
         description: Lookback days for settled Kalshi 15m markets
         required: false
         default: "30"
+  push:
+    branches: [grok-bitcoin]
+    paths:
+      - "ml/**"
+      - ".github/workflows/train-edge-model.yml"
 
 permissions:
   contents: write
 
 env:
-  RELEASE_TAG: claude-edge-model
+  RELEASE_TAG: grok-bitcoin-edge-model
 
 jobs:
   train:
     runs-on: ubuntu-latest
-    # Every decision minute of every settled market: ~9k candle pulls at
-    # ≤ 10 req/s, then a few minutes of pure-Python Newton fits.
-    timeout-minutes: 120
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,21 +42,33 @@ jobs:
           python-version: "3.12"
       - name: Trainer tests (no look-ahead, offset model)
         run: python3 ml/test_train_edge.py
-      - name: Train
+      - name: Train offset model
         run: |
           python3 ml/train_edge.py \
             --days ${{ github.event.inputs.days || '30' }} \
+            --kind offset_logistic \
             --tag "$RELEASE_TAG" \
             --require-live \
             --out ml/edge_model.json \
             --manifest ml/edge_model_manifest.json
-      - name: Upload model
+      - name: Train logistic model
+        run: |
+          python3 ml/train_edge.py \
+            --days ${{ github.event.inputs.days || '30' }} \
+            --kind logistic \
+            --tag grok-bitcoin-logistic-model \
+            --require-live \
+            --out ml/logistic_model.json \
+            --manifest ml/logistic_manifest.json
+      - name: Upload models
         uses: actions/upload-artifact@v4
         with:
-          name: edge-model-json
+          name: grok-bitcoin-models
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
+            ml/logistic_model.json
+            ml/logistic_manifest.json
             ml/parity_sample.last.json
           if-no-files-found: error
       - name: Publish rolling release
@@ -58,14 +76,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          test "$RELEASE_TAG" = "claude-edge-model"
-          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
+          test "$RELEASE_TAG" = "grok-bitcoin-edge-model"
           NOTES=$(python3 - <<'PY'
           import json, pathlib
           p = pathlib.Path("ml/edge_model_manifest.json")
           m = json.loads(p.read_text()) if p.is_file() else {}
           print(
-              "Weekly edge model (market-anchored offset logistic)\\n\\n"
+              "grok-bitcoin models (public data only)\\n\\n"
+              "Offset logistic is what the app installs. Logistic is attached and not auto-activated.\\n\\n"
               f"- version: {m.get('version')}\\n"
               f"- trained_at: {m.get('trained_at')}\\n"
               f"- n_holdout: {m.get('n_samples')}\\n"
@@ -76,9 +94,12 @@ jobs:
           )
           PY
           )
+          gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           gh release create "$RELEASE_TAG" \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
+            ml/logistic_model.json \
+            ml/logistic_manifest.json \
             --target "$GITHUB_SHA" \
-            --title "Edge model (Claude app)" \
+            --title "grok-bitcoin models" \
             --notes "$NOTES"

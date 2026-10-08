@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Claude Bitcoin: a bitcoin coin (app orange) with a B and the two ticks,
+<!-- grok-bitcoin: a bitcoin coin (app orange) with a B and the two ticks,
      over a rising green line. Colours are the app theme's AccentOrange, Bg, UpColor.
      Content stays inside the 66dp adaptive-icon safe zone (21..87). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"

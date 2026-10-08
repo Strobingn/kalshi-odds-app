@@ -235,7 +235,7 @@ class OffsetModelTest(unittest.TestCase):
         self.assertEqual(payload["mid_clip"], te.MID_CLIP)
         self.assertEqual((payload["platt_a"], payload["platt_b"]), (1.0, 0.0))
         self.assertTrue(all(isinstance(v, float) for v in payload["metrics"].values()))
-        self.assertEqual(manifest["tag"], "claude-edge-model")
+        self.assertEqual(manifest["tag"], "grok-bitcoin-edge-model")
         self.assertFalse(manifest["beats_market"], "synthetic data never activates")
 
 

@@ -13,24 +13,24 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * In-app update check for the Claude-branch build.
+ * In-app update check for the grok-bitcoin build.
  *
- * Every push to `Claude` runs the Build APK workflow, which publishes the
- * APK on a rolling GitHub prerelease tagged `v<versionName>-Claude` with an
- * asset named `ClaudeBitcoin-v<versionName>-Claude-<run number>.apk`. The build
+ * Every push to `grok-bitcoin` runs the Build APK workflow, which publishes the
+ * APK on a rolling GitHub prerelease tagged `v<versionName>-grok-bitcoin` with an
+ * asset named `grok-bitcoin-v<versionName>-grok-bitcoin-<run number>.apk`. The build
  * stamps the same run number into [BuildConfig.CI_RUN_NUMBER], so "is there
  * a newer build?" is a comparison of run numbers. Every CI APK is signed
  * with the committed debug keystore, so the new one installs over this one
  * and keeps the saved Kalshi key.
  *
- * Reads the public GitHub releases list (no token). Downloading is handed
- * to the browser; nothing is installed without the Android install prompt.
+ * Reads the public GitHub releases list (no token). Settings downloads the
+ * APK and hands it to Android's installer. Nothing installs without that prompt.
  */
 object AppUpdate {
 
     const val RELEASES_URL = "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases?per_page=30"
     const val RELEASES_PAGE = "https://github.com/Strobingn/kalshi-odds-app/releases"
-    const val BRANCH = "Claude"
+    const val BRANCH = "grok-bitcoin"
 
     private val TAG = Regex("""^v(\d+(?:\.\d+)*)-(.+)$""")
     private val ASSET_RUN = Regex("""-(\d+)\.apk$""")
@@ -157,7 +157,7 @@ class AppUpdateChecker(
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "ClaudeBitcoin/${BuildConfig.VERSION_NAME}")
+                .header("User-Agent", "grok-bitcoin/${BuildConfig.VERSION_NAME}")
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

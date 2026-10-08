@@ -27,7 +27,7 @@ object CredentialBackup {
     private const val KEY_LEN_BITS = 256
 
     class WrongPassphrase : IllegalArgumentException("wrong passphrase")
-    class BadFile : IllegalArgumentException("not a Claude Bitcoin credential backup")
+    class BadFile : IllegalArgumentException("not a grok-bitcoin credential backup")
 
     data class Contents(
         val keyId: String,

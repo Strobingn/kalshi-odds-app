@@ -11,13 +11,13 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Claude's branch build: separate package so it installs next to
-        // the main DipHunter app instead of replacing it.
-        applicationId = "com.dirk.kalshiodds.claude"
+        // grok-bitcoin: its own package so it installs beside DipHunter and
+        // updates in place from Settings → Check for update.
+        applicationId = "com.dirk.kalshiodds.grokbitcoin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 44
-        versionName = "1.8.1"
+        versionCode = 45
+        versionName = "1.9.0"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(

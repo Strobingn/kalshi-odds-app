@@ -19,7 +19,7 @@ import kotlin.math.roundToInt
  */
 object HomeCardDetails {
     const val SECTION = "BITCOIN CLAUDE AI"
-    const val EDGE_TITLE = "Claude Bitcoin edge"
+    const val EDGE_TITLE = "grok-bitcoin edge"
     const val MARKET_REF = "Kalshi market (reference)"
     const val LIVE_BOOK = "LIVE BOOK · UP / DOWN"
     const val DETAILS = "Details"

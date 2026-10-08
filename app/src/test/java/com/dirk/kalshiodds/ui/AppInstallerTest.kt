@@ -7,7 +7,7 @@ import org.junit.Test
 class AppInstallerTest {
     @Test
     fun keepsAnOrdinaryApkName() {
-        assertEquals("ClaudeBitcoin-v1.7.0-Claude-130.apk", AppInstaller.localName("ClaudeBitcoin-v1.7.0-Claude-130.apk"))
+        assertEquals("grok-bitcoin-v1.7.0-grok-bitcoin-130.apk", AppInstaller.localName("grok-bitcoin-v1.7.0-grok-bitcoin-130.apk"))
     }
 
     @Test

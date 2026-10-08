@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Claude Bitcoin</string>
+    <string name="app_name">grok-bitcoin</string>
     <string name="bitcoin_section">Bitcoin (KXBTC15M)</string>
     <string name="eth_section">Ethereum (KXETH15M)</string>
     <string name="sol_section">Solana (KXSOL15M)</string>
@@ -10,15 +10,15 @@
     <string name="no_markets">No open markets</string>
     <string name="error_generic">Could not load markets</string>
     <string name="settings">Settings</string>
-    <string name="signal_channel_name">Claude Bitcoin signals</string>
-    <string name="signal_channel_desc">Instant local alerts when a crypto contract mid diverges from Claude Bitcoin fair value. Tickets still need an in-app Approve.</string>
-    <string name="live_signals_channel_name">Claude Bitcoin live signals</string>
+    <string name="signal_channel_name">grok-bitcoin signals</string>
+    <string name="signal_channel_desc">Instant local alerts when a crypto contract mid diverges from grok-bitcoin fair value. Tickets still need an in-app Approve.</string>
+    <string name="live_signals_channel_name">grok-bitcoin live signals</string>
     <string name="live_signals_channel_desc">Silent ongoing notice Android requires while Live signals keeps the Kalshi WebSocket and scoring loop alive. Turn off Live signals in the app to remove it.</string>
-    <string name="live_signals_fg_title">Claude Bitcoin live signals</string>
+    <string name="live_signals_fg_title">grok-bitcoin live signals</string>
     <string name="live_signals_fg_text">Watching crypto ticker + orderbook WebSocket. Alerts never auto-place; Approve is required per ticket.</string>
     <string name="live_signals_stop">Stop</string>
     <string name="live_signals_allow_background">Allow background</string>
-    <string name="signal_alert_title">Claude Bitcoin · %1$s</string>
+    <string name="signal_alert_title">grok-bitcoin · %1$s</string>
     <string name="scorecard">Scorecard</string>
     <string name="opportunity_channel_name">Long-shot and hunter cards</string>
     <string name="opportunity_channel_desc">Fires when a Long-shot or hunter ticket appears. Tapping opens the ticket. Approve is still required — never auto-placed.</string>

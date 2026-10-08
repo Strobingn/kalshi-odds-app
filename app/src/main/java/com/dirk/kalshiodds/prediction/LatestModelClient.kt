@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 
 /**
  * Download the rolling [SignalConstants.EDGE_MODEL_RELEASE_TAG] release
- * (`claude-edge-model`: manifest + model JSON).
+ * (`grok-bitcoin-edge-model`: manifest + model JSON).
  * Public repos work without a token. Private repos need a GitHub token
  * (classic `repo` or fine-grained Contents: Read) — never the Kalshi key.
  */

@@ -961,7 +961,7 @@ def fixture_dataset(n: int = 240) -> list[Sample]:
 # --- Export -------------------------------------------------------------------
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, synthetic: bool = False, tag: str = "claude-edge-model", version: str = "2") -> None:
+def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, synthetic: bool = False, tag: str = "grok-bitcoin-edge-model", version: str = "2") -> None:
     n = int(metrics.get("n_holdout", metrics.get("n_samples", 0)) or 0)
     model_brier = float(metrics.get("model_brier", 1.0))
     market_brier = float(metrics.get("market_brier", 1.0))
@@ -1030,7 +1030,7 @@ def main() -> int:
     ap.add_argument("--ev-margin", type=float, default=EV_MARGIN)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--cache", default=None, help="train from a tools/backtest cache dir instead of the network")
-    ap.add_argument("--tag", default="claude-edge-model", help="release tag written into the manifest")
+    ap.add_argument("--tag", default="grok-bitcoin-edge-model", help="release tag written into the manifest")
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
     ap.add_argument("--fixture", action="store_true")

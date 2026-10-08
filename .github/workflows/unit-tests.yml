@@ -2,7 +2,7 @@ name: Unit tests
 
 on:
   push:
-    branches: [Claude]
+    branches: [grok-bitcoin]
   workflow_dispatch:
 
 permissions:

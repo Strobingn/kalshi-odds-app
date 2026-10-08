@@ -140,7 +140,7 @@ fun AppUpdateSetting(
         if (available != null) {
             "Downloads here, then Android shows its Update prompt. It installs over this app and keeps your settings and Kalshi key."
         } else {
-            "Builds come from the Claude branch on GitHub. A new one installs over this app and keeps your settings and Kalshi key."
+            "Builds come from the grok-bitcoin branch on GitHub. A new one installs over this app and keeps your settings and Kalshi key."
         },
         style = MaterialTheme.typography.labelMedium,
         color = colors.textSecondary

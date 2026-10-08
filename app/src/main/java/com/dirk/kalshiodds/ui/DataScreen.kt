@@ -123,7 +123,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
             Section("Import file")
             Text(
-                "Pick a Claude Bitcoin or DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
+                "Pick a grok-bitcoin or DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -233,7 +233,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 color = colors.textSecondary
             )
             Text(
-                "Weekly GitHub Action publishes claude-edge-model. Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "GitHub Action publishes grok-bitcoin-edge-model (offset model the app uses, plus the logistic model on the same release). Get latest model downloads the manifest + JSON, shows holdout Brier/log-loss, and activates only if it beats the market. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

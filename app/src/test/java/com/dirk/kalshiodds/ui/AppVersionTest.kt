@@ -16,10 +16,10 @@ class AppVersionTest {
         assertEquals(BuildConfig.VERSION_NAME, AppVersion.versionName)
         assertEquals(BuildConfig.VERSION_CODE, AppVersion.versionCode)
         assertEquals(
-            "Claude Bitcoin v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            "grok-bitcoin v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             AppVersion.label
         )
-        assertTrue(AppVersion.label.startsWith("Claude Bitcoin v"))
+        assertTrue(AppVersion.label.startsWith("grok-bitcoin v"))
         assertTrue(AppVersion.label.endsWith("(${BuildConfig.VERSION_CODE})"))
     }
 }
