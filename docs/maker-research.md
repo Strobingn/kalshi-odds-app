@@ -131,3 +131,28 @@ python3 tools/research/test_pair_maker.py
 ```
 
 Workflow "Pair maker (Claude)" runs it on the cloud recorder's cache.
+
+### Result, 2026-10-08 (cloud recordings 2026-10-03 → 10-08, 440 markets)
+
+**It loses.** Every config with a real sample lost money; the locked pairs
+are swamped by one-legged fills.
+
+| | IS (4 days) | OOS (2 days) |
+|---|---|---|
+| picked config | `join/L0.01/T30/hold` | same |
+| episodes | 6,450 | 1,781 |
+| both legs filled | 48% | 51% |
+| $ per episode (10 ct/leg) | −0.283, 99% CI [−0.381, −0.205] | −0.199, 99% CI [−0.312, −0.198] |
+| locked $ / other $ | +310 / −2,134 | +92 / −446 |
+| one-leg Δmid | −6.2¢ | −6.8¢ |
+
+- The book is almost always 1¢ wide, so the most a pair can lock is 1¢;
+  a lock of ≥ 2¢ happened 50 times in 4 days, and `improve` (1¢ inside on
+  both sides) almost never fits.
+- A lone leg is adversely selected by 6–15¢ (worse the longer the bid
+  rests), roughly ten times the 1¢ a completed pair earns.
+- Completing the lone leg at the ask does not help: it pays the 7% fee on
+  a price that already moved.
+- The decision rule says NOT EVALUABLE (2 OOS days < 5), but the sign is
+  not in doubt: retire the idea unless a fill-toxicity model (cancel the
+  bid before it is picked off) can remove most of the 6¢ markout.
