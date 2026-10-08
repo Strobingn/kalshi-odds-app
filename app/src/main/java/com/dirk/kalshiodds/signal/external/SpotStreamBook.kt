@@ -14,6 +14,9 @@ data class StreamSpot(
     val lastPrintMs: Long,
     val return1m: Double?,
     val return5m: Double?,
+    /** Return over the trailing 15 minutes (the previous window when the
+     * market just opened): the 15-minute sign-reversal feature. */
+    val return15m: Double?,
     val barStd1m: Double?,
     val ewmaReturns: Int
 )
@@ -84,6 +87,7 @@ class SpotStreamBook(
             lastPrintMs = printMs,
             return1m = tape.returnOver(60_000L, nowMs),
             return5m = tape.returnOver(300_000L, nowMs),
+            return15m = tape.returnOver(900_000L, nowMs),
             barStd1m = tape.barStd1m(),
             ewmaReturns = tape.returnCount
         )
@@ -128,6 +132,7 @@ object SpotMerge {
             asset = stream.asset,
             spotReturn1m = stream.return1m ?: rest?.spotReturn1m,
             spotReturn5m = stream.return5m ?: rest?.spotReturn5m,
+            prevWindowReturn = stream.return15m ?: rest?.prevWindowReturn,
             realizedVol15m = stream.barStd1m ?: rest?.realizedVol15m,
             fundingRate = rest?.fundingRate,
             lastPrice = stream.lastPrice,

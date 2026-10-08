@@ -32,6 +32,10 @@ data class AssetSpotFeatures(
     val asset: String,
     val spotReturn1m: Double? = null,
     val spotReturn5m: Double? = null,
+    /** Return over the trailing 15 minutes at this market's open — the
+     * previous window's move (reversal-tilt feature; parity with the
+     * trainer's prev_window_return). */
+    val prevWindowReturn: Double? = null,
     val realizedVol15m: Double? = null,
     val fundingRate: Double? = null,
     val lastPrice: Double? = null,
