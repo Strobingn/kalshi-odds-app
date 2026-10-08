@@ -398,7 +398,7 @@ ml/train_heavy.py        export student JSON / optional TFLite
 - Extended AI master + regime / anomaly / survival / RL / news / flow / MM / conformal / meta / path-sim
 - Kalshi API Key ID + private key PEM (secure storage; WS + Approve only)
 
-Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 5pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).
+Defaults live in `app/src/main/assets/default_signal_config.json` (`watchBtc/Eth/Sol: true`, threshold 8pp, live signals off, min confidence 45%, min liquidity 500, max spread 8¢).
 
 ## Secrets
 

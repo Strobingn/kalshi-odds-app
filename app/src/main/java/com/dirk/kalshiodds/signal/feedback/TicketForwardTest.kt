@@ -34,11 +34,13 @@ object TicketForwardTest {
         if (!marketYes.isFinite() || marketYes !in 0.0..1.0) return null
         val opposite = if (ticket.side == "YES") noBid else yesBid
         val ask = KalshiPrice.impliedAskFromOppositeBid(opposite.first) ?: return null
-        if (abs(ticket.limitPrice - ask) > 1e-6 || opposite.second + 1e-9 < ticket.contracts) return null
+        // Maker entries rest at our own bid instead of the executable ask;
+        // require the ticket price to be executable (at or below the ask).
+        if (ticket.limitPrice > ask + 1e-6) return null
         val allIn = ticket.allInUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return null
         val fee = ticket.feeUsd?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
-        if (abs(allIn - LiveOrderSizer.allInUsd(ticket.contracts, ask, feeRate)) > 1e-6 ||
-            abs(fee - LiveOrderSizer.feeUsd(ticket.contracts, ask, feeRate)) > 1e-6 ||
+        if (abs(allIn - LiveOrderSizer.allInUsd(ticket.contracts, ticket.limitPrice, feeRate)) > 1e-6 ||
+            abs(fee - LiveOrderSizer.feeUsd(ticket.contracts, ticket.limitPrice, feeRate)) > 1e-6 ||
             allIn > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) return null
         val expected = modelSide * ticket.contracts - allIn
         if (ticket.netEvUsd?.let { !it.isFinite() || abs(it - expected) > 1e-6 } != false) return null

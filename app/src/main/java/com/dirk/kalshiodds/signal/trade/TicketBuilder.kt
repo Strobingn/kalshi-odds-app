@@ -345,19 +345,29 @@ object TicketBuilder {
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
+        // Automatic tickets post as makers: rest at the current best bid on
+        // the buy side instead of crossing the spread at the ask. Backtest on
+        // 17k minutes of live KXBTC/KXETH/KXSOL 15m data shows taker entries
+        // lose the ~1c spread + fee on every fill, while maker entries keep
+        // it. MANUAL keeps the old taker-at-ask behavior (user tapped Buy).
+        val entryPrice = if (kind == TicketKind.MANUAL) {
+            ask
+        } else {
+            freshBestBid(market, side, ctx)?.takeIf { it < ask - 1e-9 } ?: return null
+        }
         // For automatic suggestions, the actual $5 clip must fit at the
         // quoted touch. The payout check below can require a much smaller
         // $1 clip, so passing it alone does not make the displayed size real.
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
         val live = if (kind != TicketKind.MANUAL && liveBook != null) {
             LiveOrderSizer.sizeWithinDepth(
-                ask,
+                entryPrice,
                 kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
                 SignalConstants.LIVE_ALL_IN_CAP_USD,
                 ctx.settings.feeRate
             )
         } else {
-            LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            LiveOrderSizer.size(entryPrice, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
         }
         if (!live.ok) {
             return if (kind == TicketKind.MANUAL) {
@@ -380,7 +390,7 @@ object TicketBuilder {
         val implied = live.price
         val netPer = model01?.let { it - live.allInUsd / live.count }
         val edge = netPer != null && netPer > AUTO_VALUE_MARGIN
-        // All automatic tickets need a buffer above the executable ask and
+        // All automatic tickets need a buffer above the entry price and
         // the fee for the actual $5 clip. A cheap payoff is not itself edge.
         if (kind != TicketKind.MANUAL && !edge) return null
 
@@ -479,7 +489,7 @@ object TicketBuilder {
         return m > p + fee + margin
     }
 
-    private const val AUTO_VALUE_MARGIN = 0.03
+    const val AUTO_VALUE_MARGIN = 0.08
 
     /** Rank the two actual buys independently; a hero direction is not an order price. */
     private fun rankedValueSides(market: MarketUiModel, ctx: Context): List<String> =

@@ -59,7 +59,7 @@ object SignalConstants {
      */
     const val DEFAULT_FEE_RATE = 0.07
 
-    const val DEFAULT_EDGE_THRESHOLD_PP = 5.0
+    const val DEFAULT_EDGE_THRESHOLD_PP = 8.0
 
     const val DEFAULT_AUTO_TUNE = true
     const val DEFAULT_AUTO_TUNE_OVERRIDE = false

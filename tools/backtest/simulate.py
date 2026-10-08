@@ -56,6 +56,7 @@ class Bet:
 
 STRATEGIES = (
     "app_shipped",
+    "app_maker",
     "app_dirk",
     "fair_dirk",
     "cheap_side",
@@ -245,6 +246,15 @@ def decisions_for_market(m: dict, rows: list[dict], spots: dict[str, dict[int, f
     return out
 
 
+def _maker_entry(d: Decision, side: str) -> float | None:
+    """Resting bid on the buy side (join the maker side, do not cross)."""
+    ask = _fill_for(d, side)
+    if ask is None:
+        return None
+    bid = max(0.01, 2 * d.mid - ask)
+    return bid if bid < ask - 1e-9 else None
+
+
 def _fill_for(d: Decision, side: str, stress: bool = False) -> float | None:
     if stress:
         return d.fill_yes_stress if side == "YES" else d.fill_no_stress
@@ -253,6 +263,10 @@ def _fill_for(d: Decision, side: str, stress: bool = False) -> float | None:
 
 def _place(d: Decision, strategy: str, side: str, split: str, stress: bool = False) -> Bet | None:
     ask = _fill_for(d, side, stress=stress)
+    return _place_at(d, strategy, side, ask, split, stress=stress)
+
+
+def _place_at(d: Decision, strategy: str, side: str, ask: float | None, split: str, stress: bool = False) -> Bet | None:
     if ask is None:
         return None
     c, cost, fee = size_all_in(ask, STAKE_USD)
@@ -341,6 +355,14 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
             if not d.would_alert:
                 continue
             return _place(d, strategy, d.app_side, split)
+        if strategy == "app_maker":
+            # New shipped path: 8pp net-edge gate + resting limit at the bid.
+            if abs(d.net_edge_pp) < 8.0:
+                continue
+            px = _maker_entry(d, d.app_side)
+            if px is None:
+                continue
+            return _place_at(d, strategy, d.app_side, px, split)
         if strategy == "app_shipped_stress":
             if not d.would_alert:
                 continue

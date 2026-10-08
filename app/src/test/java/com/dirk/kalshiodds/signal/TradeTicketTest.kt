@@ -532,9 +532,10 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.04).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
         assertEquals("YES", ticket.side)
         assertEquals("bid", ticket.bookSide)
+        assertTrue("automatic entry joins the bid instead of crossing the ask", ticket.limitPrice!! < 0.04 - 1e-9)
     }
 
     @Test
@@ -552,11 +553,9 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(market(passed = true, muted = false, ask = 0.03, volume = 5_000.0), ctx)
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.02).count, ticket!!.contracts)
         assertTrue(ticket.maxPayoutUsd >= 100.0)
-    }
-
-    @Test
+    }    @Test
     fun expensiveMarketNotProposed() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketRespectGates = false, ticketsEnabled = true),
@@ -593,7 +592,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(m, ctx)
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.04).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
     }
 
     @Test
@@ -608,7 +607,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.proposeHunter(m, ctx)!!
         assertEquals(40, ticket.contracts)
-        assertEquals(LiveOrderSizer.sizeWithinDepth(0.04, 40).feeUsd, ticket.feeUsd!!, 1e-9)
+        assertEquals(LiveOrderSizer.sizeWithinDepth(0.03, 40).feeUsd, ticket.feeUsd!!, 1e-9)
         assertEquals(ticket.modelChance!! - ticket.allInUsd!! / 40, ticket.netEvPerContract!!, 1e-9)
         assertTrue(ticket.allInUsd!! <= 5.0)
         assertNull(TicketBuilder.propose(m, ctx)) // $5 to $100 payout needs deeper liquidity.
@@ -671,7 +670,7 @@ class TicketBuilderGateTest {
         )
         assertTrue(ticket != null)
         assertTrue(ticket!!.stakeUsd in 4.0..5.0 + 1e-6)
-        assertEquals(LiveOrderSizer.size(0.04).count, ticket.contracts)
+        assertEquals(LiveOrderSizer.size(0.03).count, ticket.contracts)
         assertTrue(ticket.maxPayoutUsd >= 25.0)
         assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)
     }
@@ -776,3 +775,31 @@ private fun market(
     netEdgePp = 6.0,
     netEvDollars = 0.04
 )
+
+class MakerEntryEconomicsTest {
+    @Test
+    fun automaticTicketsRestAtTheBidInsteadOfCrossingTheAsk() {
+        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        val ticket = TicketBuilder.propose(m, ctx)!!
+        assertEquals(0.03, ticket.limitPrice!!, 1e-9)
+        assertEquals(0.03, ticket.impliedChance!!, 1e-9)
+        assertTrue(ticket.modelEdge)
+    }
+
+    @Test
+    fun automaticMarginIsBacktestedEightPoints() {
+        assertEquals(0.08, TicketBuilder.AUTO_VALUE_MARGIN, 1e-12)
+        assertEquals(8.0, SignalConstants.DEFAULT_EDGE_THRESHOLD_PP, 1e-12)
+    }
+
+    @Test
+    fun automaticTicketNeedsEightPointsOverEntry() {
+        val weak = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+            .copy(aiYesPercent = 10.0) // ~7pp over the 3c entry: under the 8pp gate
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        assertNull(TicketBuilder.propose(weak, ctx))
+        val strong = weak.copy(aiYesPercent = 20.0) // ~17pp over the 3c entry
+        assertTrue(TicketBuilder.propose(strong, ctx) != null)
+    }
+}
