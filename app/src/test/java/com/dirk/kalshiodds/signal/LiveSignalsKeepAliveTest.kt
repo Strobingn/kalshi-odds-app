@@ -35,7 +35,10 @@ class LiveSignalsKeepAliveTest {
             subscribeTrades = true,
             watchedTickers = listOf("KXBTC15M-A", "KXETH15M-B", "KXBTC15M-A", "")
         )
-        assertEquals(listOf("ticker", "orderbook_delta", "trade", "market_lifecycle_v2"), plan.channels)
+        assertEquals(
+            listOf("ticker", "orderbook_delta", "trade", "cfbenchmarks_value", "market_lifecycle_v2"),
+            plan.channels
+        )
         assertEquals(listOf("KXBTC15M-A", "KXETH15M-B"), plan.marketTickers)
     }
 
@@ -45,7 +48,7 @@ class LiveSignalsKeepAliveTest {
             subscribeTrades = false,
             watchedTickers = emptyList()
         )
-        assertEquals(listOf("ticker", "market_lifecycle_v2"), plan.channels)
+        assertEquals(listOf("ticker", "cfbenchmarks_value", "market_lifecycle_v2"), plan.channels)
         assertTrue(plan.marketTickers.isEmpty())
     }
 
