@@ -93,6 +93,12 @@ data class ForwardTestRow(
     val allInUsd: Double?,
     val feeUsd: Double?,
     val quoteQualified: Boolean,
+    /** CF settlement state captured with this paper-only observation. */
+    val settlementYes: Double? = null,
+    val finalMinuteSamples: Int? = null,
+    val finalMinuteAverageUsd: Double? = null,
+    val requiredRemainingAverageUsd: Double? = null,
+    val expectedNetPerContractUsd: Double? = null,
     val outcome: String? = null
 )
 

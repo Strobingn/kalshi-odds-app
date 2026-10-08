@@ -16,7 +16,11 @@ object ForwardTest {
         marketYes: Double,
         side: String,
         book: BookLevelSnapshot?,
-        feeRate: Double
+        feeRate: Double,
+        settlementYes: Double? = null,
+        finalMinuteSamples: Int? = null,
+        finalMinuteAverageUsd: Double? = null,
+        requiredRemainingAverageUsd: Double? = null
     ): ForwardTestRow? {
         if (ticker.isBlank() || series.isBlank() || atMs <= 0 ||
             !modelYes.isFinite() || modelYes !in 0.0..1.0 ||
@@ -31,6 +35,8 @@ object ForwardTest {
         val ask = if (crossed) null else opposite?.first?.let { KalshiPrice.usable(1.0 - it) }
         val clip = ask?.let { LiveOrderSizer.size(it, feeRate = feeRate) }?.takeIf { it.ok }
         val available = opposite?.second?.takeIf { it.isFinite() && it > 0.0 }
+        val modelSide = if (side == "YES") modelYes else 1.0 - modelYes
+        val feePerContract = ask?.let { LiveOrderSizer.feeUsd(1, it, feeRate) }
         return ForwardTestRow(
             ticker = ticker,
             series = series,
@@ -43,7 +49,14 @@ object ForwardTest {
             contracts = clip?.count,
             allInUsd = clip?.allInUsd,
             feeUsd = clip?.feeUsd,
-            quoteQualified = clip != null && available != null && available + 1e-9 >= clip.count
+            quoteQualified = clip != null && available != null && available + 1e-9 >= clip.count,
+            settlementYes = settlementYes?.takeIf { it.isFinite() && it in 0.0..1.0 },
+            finalMinuteSamples = finalMinuteSamples?.takeIf { it in 1..60 },
+            finalMinuteAverageUsd = finalMinuteAverageUsd?.takeIf { it.isFinite() && it > 0.0 },
+            requiredRemainingAverageUsd = requiredRemainingAverageUsd?.takeIf { it.isFinite() },
+            expectedNetPerContractUsd = if (ask != null && feePerContract != null) {
+                modelSide - ask - feePerContract
+            } else null
         )
     }
 
@@ -88,7 +101,8 @@ object ForwardTest {
 
     fun csv(rows: List<ForwardTestRow>): String {
         val header = "ticker,series,captured_at_ms,model_yes,market_yes,side,book_ask," +
-            "size_at_ask,contracts,all_in_usd,fee_usd,quote_qualified,outcome,quoted_proxy_pnl_usd"
+            "size_at_ask,contracts,all_in_usd,fee_usd,quote_qualified,settlement_yes,final_minute_samples," +
+            "final_minute_average_usd,required_remaining_average_usd,expected_net_per_contract_usd,outcome,quoted_proxy_pnl_usd"
         fun number(v: Double?): String = v?.let { String.format(Locale.US, "%.6f", it) } ?: ""
         fun safe(v: String?): String {
             val raw = v.orEmpty()
@@ -104,7 +118,9 @@ object ForwardTest {
             listOf(safe(r.ticker), safe(r.series), r.capturedAtMs.toString(), number(r.modelYes),
                 number(r.marketYes), safe(r.side), number(r.bookAsk), number(r.sizeAtAsk),
                 r.contracts?.toString().orEmpty(), number(r.allInUsd), number(r.feeUsd),
-                r.quoteQualified.toString(), safe(r.outcome), number(pnl)).joinToString(",")
+                r.quoteQualified.toString(), number(r.settlementYes), r.finalMinuteSamples?.toString().orEmpty(),
+                number(r.finalMinuteAverageUsd), number(r.requiredRemainingAverageUsd), number(r.expectedNetPerContractUsd),
+                safe(r.outcome), number(pnl)).joinToString(",")
         }).joinToString("\n", postfix = "\n")
     }
 }

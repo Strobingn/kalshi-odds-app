@@ -75,6 +75,7 @@ class SignalHub(
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
     private val lastSettlementIndexPersistMs = ConcurrentHashMap<String, Long>()
+    private val lastFinalMinuteSamplePersist = ConcurrentHashMap<String, Int>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
     private val bookMailbox = LatestWinsMailbox<Long>()
     private val logWriteBusy = AtomicBoolean(false)
@@ -123,10 +124,15 @@ class SignalHub(
     /** Exact CF index values are settlement inputs; public-exchange quotes remain context only. */
     fun ingestCfBenchmarks(value: CfBenchmarksValue) {
         scoring.rememberCfBenchmarks(value)
-        // Persist one point per 15 seconds. The feed's final-minute average is
-        // retained too, so this stays compact enough for a four-week archive.
-        val previous = lastSettlementIndexPersistMs.put(value.indexId, value.sourceTsMs) ?: Long.MIN_VALUE
-        if (value.sourceTsMs - previous >= SETTLEMENT_INDEX_SAMPLE_MS) {
+        // Keep broad history compact, but retain every distinct CF sample in
+        // the final minute. Fifteen-second samples cannot replay a settlement
+        // that is defined by a 60-second arithmetic average.
+        val previous = lastSettlementIndexPersistMs[value.indexId] ?: Long.MIN_VALUE
+        val finalSample = value.finalMinuteSamples.takeIf { it in 1..60 }
+        val newFinalSample = finalSample != null &&
+            lastFinalMinuteSamplePersist.put(value.indexId, finalSample) != finalSample
+        if (newFinalSample || value.sourceTsMs - previous >= SETTLEMENT_INDEX_SAMPLE_MS) {
+            lastSettlementIndexPersistMs[value.indexId] = value.sourceTsMs
             results?.enqueueSettlementIndex(
                 SettlementIndexRow(
                     indexId = value.indexId,
@@ -385,7 +391,11 @@ class SignalHub(
                     marketYes = scored.marketMidPp / 100.0,
                     side = side,
                     book = scoring.book.snapshotBook(tick.ticker),
-                    feeRate = settings.feeRate
+                    feeRate = settings.feeRate,
+                    settlementYes = scored.finalMinuteFairPp?.div(100.0),
+                    finalMinuteSamples = scored.finalMinuteSamples,
+                    finalMinuteAverageUsd = scored.finalMinuteAverageUsd,
+                    requiredRemainingAverageUsd = scored.requiredRemainingAverageUsd
                 ) ?: return@runCatching false
                 forwardWriter.enqueueForwardTest(row)
                 true

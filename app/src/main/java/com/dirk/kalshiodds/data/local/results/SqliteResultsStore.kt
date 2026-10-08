@@ -105,6 +105,11 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                     put("book_ask", r.bookAsk); put("size_at_ask", r.sizeAtAsk)
                     put("contracts", r.contracts); put("all_in_usd", r.allInUsd); put("fee_usd", r.feeUsd)
                     put("quote_qualified", if (r.quoteQualified) 1 else 0)
+                    put("settlement_yes", r.settlementYes)
+                    put("final_minute_samples", r.finalMinuteSamples)
+                    put("final_minute_average_usd", r.finalMinuteAverageUsd)
+                    put("required_remaining_average_usd", r.requiredRemainingAverageUsd)
+                    put("expected_net_per_contract_usd", r.expectedNetPerContractUsd)
                 }
                 w.insertWithOnConflict(TABLE_FORWARD, null, v, SQLiteDatabase.CONFLICT_IGNORE)
             }
@@ -129,6 +134,11 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 bookAsk = c.dblOrNull("book_ask"), sizeAtAsk = c.dblOrNull("size_at_ask"),
                 contracts = c.intOrNull("contracts"), allInUsd = c.dblOrNull("all_in_usd"),
                 feeUsd = c.dblOrNull("fee_usd"), quoteQualified = c.long("quote_qualified") == 1L,
+                settlementYes = c.dblOrNull("settlement_yes"),
+                finalMinuteSamples = c.intOrNull("final_minute_samples"),
+                finalMinuteAverageUsd = c.dblOrNull("final_minute_average_usd"),
+                requiredRemainingAverageUsd = c.dblOrNull("required_remaining_average_usd"),
+                expectedNetPerContractUsd = c.dblOrNull("expected_net_per_contract_usd"),
                 outcome = c.strOrNull("outcome")
             ))
         }
@@ -1037,6 +1047,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             if (oldVersion < 6) createForwardTable(db)
             if (oldVersion < 7) createTicketForwardTable(db)
             if (oldVersion < 8) createSettlementIndexTable(db)
+            if (oldVersion in 6..8) addForwardResearchColumns(db)
         }
 
         private fun createForwardTable(db: SQLiteDatabase) {
@@ -1045,10 +1056,21 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                     ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
                     model_yes REAL NOT NULL, market_yes REAL NOT NULL, side TEXT NOT NULL,
                     book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL,
-                    fee_usd REAL, quote_qualified INTEGER NOT NULL
+                    fee_usd REAL, quote_qualified INTEGER NOT NULL,
+                    settlement_yes REAL, final_minute_samples INTEGER,
+                    final_minute_average_usd REAL, required_remaining_average_usd REAL,
+                    expected_net_per_contract_usd REAL
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_forward_time ON $TABLE_FORWARD(captured_at_ms)")
+        }
+
+        private fun addForwardResearchColumns(db: SQLiteDatabase) {
+            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN settlement_yes REAL")
+            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN final_minute_samples INTEGER")
+            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN final_minute_average_usd REAL")
+            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN required_remaining_average_usd REAL")
+            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN expected_net_per_contract_usd REAL")
         }
 
         private fun createTicketForwardTable(db: SQLiteDatabase) {
@@ -1188,7 +1210,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 8
+        const val DB_VERSION = 9
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

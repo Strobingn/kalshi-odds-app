@@ -168,6 +168,26 @@ class PaperBook(
         )
     }
 
+    /**
+     * Research-only fill that is intentionally independent of the live-ticket
+     * $5 cap and minimum-profit presentation rules. It still buys no more than
+     * the displayed touch quantity and never reaches Kalshi.
+     */
+    fun considerUnboundedOpportunity(
+        opportunity: PaperOpportunity.Candidate,
+        enabled: Boolean
+    ): PaperFill? {
+        if (!enabled) return null
+        return unboundedFill(
+            ticker = opportunity.ticker,
+            side = opportunity.side,
+            limitPrice = opportunity.ask,
+            contracts = opportunity.visibleContracts,
+            source = "AI ${opportunity.source}",
+            note = "Unlimited-credit paper research · EV ${String.format(java.util.Locale.US, "%+.4f", opportunity.expectedNetPerContractUsd)} per contract · visible touch only · never sent to Kalshi"
+        )
+    }
+
     /** Same unlimited-credit execution for an alert that has no ticket. */
     fun considerUnboundedAlert(
         alert: SignalAlert,

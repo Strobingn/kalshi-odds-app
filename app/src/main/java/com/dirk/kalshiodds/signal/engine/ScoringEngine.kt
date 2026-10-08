@@ -140,6 +140,11 @@ class ScoringEngine(
         val primaryHeroSide: String? = null,
         val modelLeanSide: String? = null,
         val digitalFairPp: Double? = null,
+        /** CF final-minute research state; populated only from a fresh CF feed. */
+        val finalMinuteSamples: Int? = null,
+        val finalMinuteAverageUsd: Double? = null,
+        val requiredRemainingAverageUsd: Double? = null,
+        val finalMinuteFairPp: Double? = null,
         val importedModelPp: Double? = null,
         val modelEdgeQualified: Boolean = true,
         val blendWeight: Double? = null
@@ -244,7 +249,9 @@ class ScoringEngine(
         }
         val spotFeat = external.forSeries(tick.series)
         val settlementIndex = cfBenchmarksForSeries(tick.series)
-        val settlementSpot = settlementIndex?.settlementReferenceUsd ?: spotFeat?.lastPrice
+        // Use the current CF index as spot. The partial final-minute average
+        // is a locked arithmetic settlement component, not a spot quote.
+        val settlementSpot = settlementIndex?.valueUsd ?: spotFeat?.lastPrice
         settlementSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
@@ -621,7 +628,16 @@ class ScoringEngine(
             else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
                 .coerceIn(0.01, 5.0)
         }
-        val digitalFairPp = if (settlementSpot != null && strikeUsd != null && sigmaAnnual != null) {
+        val finalMinuteEstimate = com.dirk.kalshiodds.signal.fair.FinalMinuteSettlement.estimate(
+            observedAverageUsd = settlementIndex?.finalMinuteAverageUsd,
+            observedSamples = settlementIndex?.finalMinuteSamples ?: 0,
+            currentIndexUsd = settlementIndex?.valueUsd,
+            strikeUsd = strikeUsd,
+            sigmaAnnual = sigmaAnnual,
+            indexNoiseLog = com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.indexNoiseLog("BTC")
+        )
+        val finalMinuteFairPp = finalMinuteEstimate?.yesProbability?.times(100.0)
+        val digitalFairPp = finalMinuteFairPp ?: if (settlementSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
                 spot = settlementSpot,
                 strike = strikeUsd,
@@ -831,6 +847,10 @@ class ScoringEngine(
             primaryHeroSide = tape.primarySide,
             modelLeanSide = if (tape.conflict) tape.modelSide else null,
             digitalFairPp = digitalFairPp,
+            finalMinuteSamples = finalMinuteEstimate?.observedSamples,
+            finalMinuteAverageUsd = finalMinuteEstimate?.observedAverageUsd,
+            requiredRemainingAverageUsd = finalMinuteEstimate?.requiredRemainingAverageUsd,
+            finalMinuteFairPp = finalMinuteFairPp,
             importedModelPp = importedModelPp,
             modelEdgeQualified = modelEdgeQualified,
             blendWeight = importedBlendW

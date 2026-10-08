@@ -377,7 +377,13 @@ object HomeCardDetails {
         val model = market.importedModelPp?.takeIf { it.isFinite() }?.let {
             String.format(Locale.US, "%.0f¢", it)
         } ?: "baseline"
-        return String.format(Locale.US, "Fair value %.0f¢  ·  model %s", fv, model)
+        val locked = market.finalMinuteSamples?.takeIf { it in 1..60 }?.let { samples ->
+            val needed = market.requiredRemainingAverageUsd?.takeIf { it.isFinite() }?.let {
+                String.format(Locale.US, " · remaining needs $%,.0f", it)
+            }.orEmpty()
+            " · CF $samples/60$needed"
+        }.orEmpty()
+        return String.format(Locale.US, "Fair value %.0f¢  ·  model %s%s", fv, model, locked)
     }
 
     fun payoutLine(market: MarketUiModel): String {

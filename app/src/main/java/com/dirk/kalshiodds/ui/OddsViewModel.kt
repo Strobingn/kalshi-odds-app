@@ -811,9 +811,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollUsd = paperBook.snapshot().equityUsd,
                 bankrollSource = "paper"
             )
-            val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach {
-                paperBook.considerUnboundedTicket(it, enabled = true)
+            // Paper research is intentionally independent of the live $5
+            // ticket cap and live minimum-profit UI rule. It remains a
+            // simulated taker fill at currently visible touch liquidity.
+            com.dirk.kalshiodds.signal.paper.PaperOpportunity.all(live, paperCtx).forEach {
+                paperBook.considerUnboundedOpportunity(it, enabled = true)
             }
         }
         refreshPositionMarks()
