@@ -36,6 +36,9 @@ jobs:
           code=$(sed -n 's/^ *versionCode = \([0-9]*\)/\1/p' app/build.gradle.kts)
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
+          # Branch names like claude/x hold a slash: unusable in a file name,
+          # artifact name or release tag.
+          echo "ref=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
 
       # Debug build: signed with the committed app/signing/diphunter-debug.jks,
       # so every CI APK installs over the previous one.
@@ -46,14 +49,14 @@ jobs:
         id: apk
         run: |
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          out="MisBitcoin-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
+          out="MisBitcoin-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DipHunter-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
+          name: DipHunter-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
@@ -62,12 +65,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
-          notes="Mis Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+          tag="v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}"
+          notes="Mis Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ steps.ver.outputs.ref }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
           # Rolling release per version + branch: move the tag to this commit.
           gh release delete "$tag" --yes --cleanup-tag || true
           gh release create "$tag" "${{ steps.apk.outputs.path }}" \
             --target "$GITHUB_SHA" \
-            --title "Mis Bitcoin v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
+            --title "Mis Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.ref }})" \
             --notes "$notes" \
             --prerelease

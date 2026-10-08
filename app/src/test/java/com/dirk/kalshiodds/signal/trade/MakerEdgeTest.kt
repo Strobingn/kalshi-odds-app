@@ -37,7 +37,7 @@ class MakerEdgeTest {
         assertEquals(0.45, c.takePrice, 1e-12) // 1 − yes bid
         assertEquals(0.44, c.restPrice!!, 1e-12) // 1 − (bid + 1¢)
         // NO win chance is 1 − p = 0.60.
-        assertEquals(0.60 - 0.44, c.evRest, 1e-12)
+        assertEquals(0.60 - 0.44, c.evRest!!, 1e-12)
     }
 
     @Test

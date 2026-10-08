@@ -28,6 +28,7 @@ class OffsetEdgeModelScoringTest {
         val engine = engine(model(kind = "offset_logistic"))
         val score = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)
         assertNotNull(score)
+        score!!
         assertEquals("anchored output is recorded", 41.0, score.importedModelPp!!, 1e-4)
         // No holdout win: the decision fair stays on the market, which this
         // zero-weight model also reproduces.

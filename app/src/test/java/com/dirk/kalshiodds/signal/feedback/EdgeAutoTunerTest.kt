@@ -61,7 +61,7 @@ class EdgeAutoTunerTest {
         assertFalse(r.sitOut)
         assertTrue(r.thresholdPp >= 1.5)
         assertTrue((r.evAtThreshold ?: 0.0) > 5.0)
-        assertTrue((r.evP10 ?: 0.0) > 0.0, "10th-percentile EV must survive day resampling")
+        assertTrue("10th-percentile EV must survive day resampling", (r.evP10 ?: 0.0) > 0.0)
     }
 
     @Test
