@@ -1,33 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Bitcoin-KIMI launcher icon: bitcoin coin + Kimi moon on an orbit ring. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Orange coin disc, sized to the adaptive-icon safe zone. -->
+
+    <!-- Orbit ring (behind the coin). -->
+    <path android:pathData="M23.19,51.60 A37.80,16.80 -16.0 1,1 43.13,39.91 L44.27,42.24 A35.20,14.20 -16.0 1,0 25.56,52.66 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="linear"
+                android:startX="20" android:startY="60"
+                android:endX="92" android:endY="40"
+                android:startColor="#93C5FD" android:endColor="#2563EB" />
+        </aapt:attr>
+    </path>
+
+    <!-- Coin disc. -->
+    <path android:pathData="M27.00,54.00 A27.00,27.00 0 1,1 81.00,54.00 A27.00,27.00 0 1,1 27.00,54.00 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial"
+                android:centerX="45" android:centerY="43" android:gradientRadius="41.85"
+                android:startColor="#FFCD6E" android:centerColor="#F7931A" android:endColor="#C46204" />
+        </aapt:attr>
+    </path>
+
+    <!-- Soft top-left highlight. -->
+    <path android:pathData="M38.00,41.00 A9.00,9.00 0 1,1 56.00,41.00 A9.00,9.00 0 1,1 38.00,41.00 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial"
+                android:centerX="47" android:centerY="41" android:gradientRadius="12"
+                android:startColor="#2EFFFFFF" android:endColor="#00FFFFFF" />
+        </aapt:attr>
+    </path>
+
+    <!-- Rim light. -->
     <path
-        android:fillColor="#F7931A"
-        android:pathData="M54,24 m-30,0 a30,30 0 1,0 60,0 a30,30 0 1,0 -60,0" />
-    <!-- Stylized bitcoin mark: double top/bottom ticks, stem, two bumps. -->
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46.5,36 h3.4 v7 h-3.4 z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M53.5,36 h3.4 v7 h-3.4 z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46,42 h4.6 v27 h-4.6 z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M50.6,42 h9 a8,7.5 0 0 1 0,15 h-9 z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M50.6,54 h10.5 a8.5,7.5 0 0 1 0,15 h-10.5 z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M46.5,69 h3.4 v7 h-3.4 z" />
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M53.5,69 h3.4 v7 h-3.4 z" />
+        android:pathData="M28.75,54.00 A25.25,25.25 0 1,1 79.25,54.00 A25.25,25.25 0 1,1 28.75,54.00 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#5AFFDC96"
+        android:strokeWidth="1.1" />
+
+    <!-- Glyph shadow, then the bitcoin mark. -->
+    <group android:translateY="0.9">
+        <path android:pathData="M49.26,69.12 L49.26,65.78 L46.01,65.78 L46.01,41.51 L49.26,41.51 L49.26,38.12 L52.39,38.12 L52.39,41.51 L53.04,41.51 Q53.58,41.51 54.09,41.55 L54.09,38.12 L57.22,38.12 L57.22,41.99 Q59.52,42.60 60.56,44.01 Q61.60,45.42 61.60,47.56 Q61.60,49.16 61.02,50.27 Q60.44,51.37 59.58,52.02 Q58.71,52.66 57.79,52.83 L57.79,53.00 Q58.78,53.24 59.76,53.81 Q60.75,54.38 61.39,55.53 Q62.04,56.68 62.04,58.61 Q62.04,61.12 60.79,62.82 Q59.54,54.00 57.30,54.16 L57.30,54.00 Q56.30,53.55 55.31,52.83 Q54.32,52.10 54.11,50.95 Q54.09,50.84 54.09,50.56 Q54.09,49.02 53.00,48.36 Q51.92,47.70 50.56,47.70 L49.26,47.70 Z M53.12,51.10 Q54.11,51.10 54.67,50.42 Q55.23,49.73 55.23,48.79 Q55.23,47.84 54.58,47.33 Q53.93,46.83 53.00,46.83 L52.18,46.83 L52.18,51.10 Z M52.18,55.57 L52.18,60.64 L53.47,60.64 Q54.56,60.64 55.12,59.93 Q55.67,59.21 55.67,58.05 Q55.67,57.06 55.10,56.50 Q54.53,55.94 53.35,55.94 Z" transform="translate(0,0)" android:fillColor="#6E8C3C00" />
+    </group>
 </vector>
