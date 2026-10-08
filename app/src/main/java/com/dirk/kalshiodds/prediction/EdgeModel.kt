@@ -106,9 +106,16 @@ data class EdgeModel(
             return z
         }
         val n = weights.size
+        // Fail loud on a feature-count mismatch. The old minOf(n, raw.size)
+        // loop silently dropped trailing weights when the feature builder
+        // shipped fewer features than the model expects, producing a
+        // confident-looking but wrong probability. GBDT already requires an
+        // exact match; logistic now does too.
+        require(raw.size == n && raw.all { it.isFinite() }) {
+            "invalid logistic features: got ${raw.size}, model expects $n"
+        }
         var acc = bias
-        val lim = minOf(n, raw.size)
-        for (i in 0 until lim) {
+        for (i in 0 until n) {
             val s = if (std[i] < 1e-6f) 1f else std[i]
             acc += weights[i] * ((raw[i] - mean[i]) / s)
         }

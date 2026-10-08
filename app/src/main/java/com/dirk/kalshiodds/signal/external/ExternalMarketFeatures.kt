@@ -154,15 +154,25 @@ class ExternalMarketClient(
         )
     }
 
-    private fun realizedVol(closes: List<Double>): Double? {
+    /**
+     * Per-bar return volatility, EWMA-weighted (RiskMetrics, λ = 0.85).
+     * The old flat window gave a 15-bar-old print the same weight as the
+     * latest minute, so a fresh vol spike took ~8 bars to register — too
+     * slow when pricing a 15-minute digital. EWMA halves the effective
+     * lag to ~4 bars while staying smooth in quiet regimes.
+     */
+    private fun realizedVol(closes: List<Double>, lambda: Double = 0.85): Double? {
         if (closes.size < 4) return null
         val rets = closes.zipWithNext { a, b ->
             if (a > 0.0 && b > 0.0) ln(b / a) else 0.0
         }
         if (rets.isEmpty()) return null
-        val mean = rets.average()
-        val var_ = rets.map { val d = it - mean; d * d }.average()
-        return sqrt(var_.coerceAtLeast(0.0))
+        val lam = lambda.coerceIn(0.5, 0.999)
+        var v = rets.first() * rets.first()
+        for (i in 1 until rets.size) {
+            v = lam * v + (1.0 - lam) * rets[i] * rets[i]
+        }
+        return sqrt(v.coerceAtLeast(0.0))
     }
 
     private fun getJsonObject(url: String): JSONObject? {
