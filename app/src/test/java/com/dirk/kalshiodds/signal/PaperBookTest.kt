@@ -164,7 +164,7 @@ class PaperBookTest {
     }
 
     @Test
-    fun unlimitedAutopilotUsesVisibleDepthWithoutPaperCashOrPositionCaps() {
+    fun unlimitedAutopilotUsesVisibleDepthOncePerOpenContractWindow() {
         val book = PaperBook(idFactory = { "auto-${bookIds++}" }, nowMs = { 12L })
         val ticket = hunterTicket(ticker = "KXBTC15M-AUTO").copy(
             limitPrice = 0.40,
@@ -173,17 +173,21 @@ class PaperBookTest {
         )
 
         val first = book.considerUnboundedTicket(ticket, enabled = true)!!
-        val second = book.considerUnboundedTicket(ticket, enabled = true)!!
+        val duplicate = book.considerUnboundedTicket(ticket, enabled = true)
 
         assertEquals(2_000, first.contracts)
-        assertEquals(2_000, second.contracts)
         assertTrue(first.feeUsd > 0.0)
-        assertEquals(2, book.snapshot().fills.count { !it.settled })
+        assertNull(duplicate)
+        assertEquals(1, book.snapshot().fills.count { !it.settled })
         assertTrue(book.snapshot().cashUsd < 0.0)
 
         book.settle(ticket.ticker, "yes")
-        assertEquals(2, book.snapshot().fills.count { it.settled })
+        assertEquals(1, book.snapshot().fills.count { it.settled })
         assertTrue(book.snapshot().realizedPnlUsd.isFinite())
+
+        val nextWindowEntry = book.considerUnboundedTicket(ticket, enabled = true)
+        assertTrue(nextWindowEntry != null)
+        assertEquals(2_000, nextWindowEntry!!.contracts)
     }
 
     private var bookIds: Int = 0
