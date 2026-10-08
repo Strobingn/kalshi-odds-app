@@ -1,0 +1,64 @@
+name: Reversal study
+
+# Does a KXBTC15M window settle the other way from the one before it, and does
+# Kalshi's price one minute in already price that? (tools/research/reversal_study.py)
+# Public Kalshi API only (no key). The Markdown report goes to the job log
+# between markers and to the run summary. Nothing is committed, released or traded.
+
+on:
+  push:
+    branches: [claude/kalshi-odds-newest]
+    paths:
+      - "tools/research/reversal_study.py"
+      - "tools/research/test_reversal_study.py"
+      - ".github/workflows/reversal-study.yml"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Lookback days of settled KXBTC15M markets
+        required: false
+        default: "90"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reversal-study-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests
+        run: python3 tools/research/test_reversal_study.py
+
+      - name: Pull settled markets and 1-minute quotes
+        run: |
+          python3 tools/research/reversal_study.py pull \
+            --days "${{ github.event.inputs.days || '90' }}" --cache rev.json
+
+      - name: Reversal study
+        run: |
+          python3 tools/research/reversal_study.py report --cache rev.json --out reversal.md > /dev/null
+          echo "===== REVERSAL ====="
+          cat reversal.md
+          echo "===== END REVERSAL ====="
+          cat reversal.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the pulled data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reversal-data-${{ github.run_number }}
+          path: |
+            rev.json
+            reversal.md
+          if-no-files-found: ignore
