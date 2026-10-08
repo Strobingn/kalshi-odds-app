@@ -1,0 +1,73 @@
+name: Pair maker (Claude)
+
+# Two-sided resting bids on KXBTC15M (tools/research/pair_maker.py), run on
+# the 1 s recordings that record.yml keeps in the Actions cache. The cache is
+# restored READ-ONLY here (never saved). Caches are scoped to the branch that
+# wrote them (Claude), so this runs on pushes to Claude, on pull requests into
+# Claude (which may read the base branch's caches) and by hand. The Markdown
+# report goes to the job log between markers and to the run summary. Nothing
+# is committed, released or traded.
+
+on:
+  push:
+    branches: [Claude]
+    paths:
+      - "tools/research/pair_maker.py"
+      - "tools/research/test_pair_maker.py"
+      - ".github/workflows/pair-maker.yml"
+  pull_request:
+    branches: [Claude]
+    paths:
+      - "tools/research/pair_maker.py"
+      - "tools/research/test_pair_maker.py"
+      - ".github/workflows/pair-maker.yml"
+  workflow_dispatch:
+    inputs:
+      iters:
+        description: Bootstrap resamples
+        required: false
+        default: "2000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pair-maker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  study:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Unit tests (synthetic recordings)
+        run: |
+          python3 tools/research/test_pair_maker.py
+          python3 tools/research/test_maker_sim.py
+
+      - name: Restore recordings (read-only)
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings
+        run: |
+          mkdir -p rec
+          ls -la rec | tail -n 30
+          python3 tools/research/recordings.py rec || true
+
+      - name: Pair maker study
+        run: |
+          python3 tools/research/pair_maker.py --dir rec --iters "${{ github.event.inputs.iters || '2000' }}" --out pair_maker.md > /dev/null
+          echo "===== PAIR MAKER ====="
+          cat pair_maker.md
+          echo "===== END PAIR MAKER ====="
+          cat pair_maker.md >> "$GITHUB_STEP_SUMMARY"

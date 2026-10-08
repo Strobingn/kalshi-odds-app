@@ -104,3 +104,30 @@ the verified maker fee**, with at least 5 OOS days. The optimistic model, the
 IS tables and the fee-sensitivity grid are context and never count. Even on a
 pass, check the Δmid columns: a strongly negative Δmid means the edge depends
 on the settlement fair being right, not on capturing spread.
+
+## Pair maker (two-sided resting bids) — `tools/research/pair_maker.py`
+
+YES and NO on one market pay exactly $1 between them, and KXBTC15M has no
+maker fee. A YES bid at Py plus a NO bid at Pn with Py + Pn < $1 therefore
+locks in 1 − Py − Pn per pair when both legs fill, with no forecast. The
+risk is a one-legged fill right before the price moves against it.
+
+Pre-registered grid: `join` / `improve` (1¢ above the bid, queue 0) ×
+lock ≥ 1 / 2 / 3¢ × cancel 30 / 60 / 120 s × unwind `hold` (keep the lone
+leg to settlement) or `complete` (buy the missing leg at the ask with the
+0.07 taker fee). 10 contracts per leg, decisions every 30 s from 1:00 to
+13:00, one pair of bids at a time per market, conservative fills only.
+Maker fee 0 (verified) with 0.0175 as a stress line.
+
+The report splits P&L into *locked $* (the riskless pairs) and *other $*
+(everything a one-legged fill cost or made), and shows the filled leg's
+mid move for one-legged fills (negative = adverse selection). Same IS/OOS
+protocol and decision rule as `maker_sim.py`: paper trade only if the OOS
+99% day-block CI of $ per posted episode excludes 0 with ≥ 5 OOS days.
+
+```
+python3 tools/research/pair_maker.py --dir <recordings dir> --out pair.md
+python3 tools/research/test_pair_maker.py
+```
+
+Workflow "Pair maker (Claude)" runs it on the cloud recorder's cache.
