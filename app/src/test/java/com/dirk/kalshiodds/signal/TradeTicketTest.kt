@@ -494,6 +494,23 @@ class TicketBuilderGateTest {
     }
 
     @Test
+    fun automaticTicketUsesSettlementAwareFairValueBeforeImportedResidual() {
+        // This reproduces the "buy 0.1c DOWN" failure: the residual model
+        // says YES=5%, while the scored, settlement-aware fair value says
+        // YES=98%. The automatic path must not fade the locked-in winner.
+        val market = market(passed = true, muted = false, ask = 0.99, volume = 5_000.0).copy(
+            aiYesPercent = 98.0,
+            importedModelPp = 5.0,
+            predictedSide = "YES"
+        )
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+
+        assertEquals(0.98, TicketBuilder.modelProb(market, "YES")!!, 1e-9)
+        assertEquals(0.02, TicketBuilder.modelProb(market, "NO")!!, 1e-9)
+        assertTrue(TicketBuilder.proposeAll(listOf(market), ctx).isEmpty())
+    }
+
+    @Test
     fun qualityGatesBlockWhenEnabled() {
         val cheap = market(passed = false, muted = false, ask = 0.04)
         val ctx = TicketBuilder.Context(
