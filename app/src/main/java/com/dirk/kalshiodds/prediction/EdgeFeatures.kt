@@ -10,7 +10,7 @@ import kotlin.math.ln
  * Order **must** match `ml/train_edge.py` / the JSON `feature_names`.
  */
 object EdgeFeatures {
-    const val SIZE = 12
+    const val SIZE = 13
     val NAMES = listOf(
         "dist_to_strike_vol",
         "tte_frac",
@@ -23,7 +23,8 @@ object EdgeFeatures {
         "time_of_day",
         "digital_fair",
         "prev_window_return",
-        "is_funding_hour"
+        "is_funding_hour",
+        "mid_squared"
     )
 
     data class Raw(
@@ -80,7 +81,8 @@ object EdgeFeatures {
             tod,
             (digital ?: raw.marketMid).toFloat().coerceIn(0f, 1f),
             (raw.prevWindowReturn ?: 0.0).toFloat().coerceIn(-0.05f, 0.05f),
-            if (raw.isFundingHour ?: isFundingHour(raw.nowMs, raw.tteSeconds)) 1f else 0f
+            if (raw.isFundingHour ?: isFundingHour(raw.nowMs, raw.tteSeconds)) 1f else 0f,
+            (raw.marketMid * raw.marketMid).toFloat().coerceIn(0f, 1f)
         )
     }
 

@@ -203,3 +203,13 @@ boundary flow (arXiv 2607.09426). Added as a binary feature so the model
 can shift its calibration for those windows instead of the trader
 guessing. Trainer computes it from close_ts; the app derives it from
 nowMs + tte (same predicate, parity verified on boundary cases).
+
+## Favorite-longshot curvature feature (mid_squared, feature #12)
+
+The GWU maker/taker study (313,972 Kalshi contracts) rejected
+price-as-unbiased-forecaster with the classic favorite-longshot shape:
+expensive contracts win more often than their price implies, cheap ones
+less. The offset model's linear market_mid weight can only tilt;
+`mid_squared` lets the fit express the curvature. If the 270-day fit
+gives it a stable nonzero weight, buying the well-priced favorite side
+via REST (no fee) is where that bias is collectable.
