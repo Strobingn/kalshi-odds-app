@@ -422,10 +422,10 @@ class KnownIssuesRegressionTest {
         val market = sample("KXETH15M-HUNTER", yesAsk = 0.03, noAsk = 0.97, aiYes = 4.0, predicted = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = nowMs)
         val hunter = TicketBuilder.proposeHunter(market, ctx)
-        assertNotNull(hunter)
-        assertEquals(TicketKind.HUNTER, hunter!!.kind)
-        assertFalse(hunter.modelEdge)
-        assertFalse(BetCall.qualifies(hunter, market, ctx))
+        // The executable fair value is the settlement-aware score, not a
+        // residual model probability. A 3c YES contract with fair YES=4%
+        // has no fee-clearing value and must not create a hunter ticket.
+        assertNull(hunter)
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         assertFalse(decision.isActionable)
