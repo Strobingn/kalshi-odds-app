@@ -592,7 +592,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(m, ctx)
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.039).count, ticket!!.contracts)
     }
 
     @Test

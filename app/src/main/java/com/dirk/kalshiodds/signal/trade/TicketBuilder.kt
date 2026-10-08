@@ -350,10 +350,18 @@ object TicketBuilder {
         // 17k minutes of live KXBTC/KXETH/KXSOL 15m data shows taker entries
         // lose the ~1c spread + fee on every fill, while maker entries keep
         // it. MANUAL keeps the old taker-at-ask behavior (user tapped Buy).
+        // A crossed or missing book must never fabricate a cheap entry: the
+        // resting price is clipped below the executable ask.
         val entryPrice = if (kind == TicketKind.MANUAL) {
             ask
         } else {
-            freshBestBid(market, side, ctx)?.takeIf { it < ask - 1e-9 } ?: return null
+            val bid = freshBestBid(market, side, ctx)
+            val tick = KalshiPrice.MIN_TICK_DOLLARS
+            when {
+                bid == null -> ask
+                bid < ask - tick -> bid
+                else -> (ask - tick).coerceAtLeast(tick)
+            }
         }
         // For automatic suggestions, the actual $5 clip must fit at the
         // quoted touch. The payout check below can require a much smaller

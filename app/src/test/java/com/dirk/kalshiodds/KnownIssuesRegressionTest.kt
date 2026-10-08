@@ -421,11 +421,7 @@ class KnownIssuesRegressionTest {
     fun cheapHunterWithNoModelEdgeIsNoBetHeadline() {
         val market = sample("KXETH15M-HUNTER", yesAsk = 0.03, noAsk = 0.97, aiYes = 4.0, predicted = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = nowMs)
-        val hunter = TicketBuilder.proposeHunter(market, ctx)
-        assertNotNull(hunter)
-        assertEquals(TicketKind.HUNTER, hunter!!.kind)
-        assertFalse(hunter.modelEdge)
-        assertFalse(BetCall.qualifies(hunter, market, ctx))
+        assertNull("no-edge print must not surface a ticket", TicketBuilder.proposeHunter(market, ctx))
         val decision = BetCall.decide(market, ctx)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         assertFalse(decision.isActionable)
