@@ -99,3 +99,55 @@ actions. If no theta has a positive VALID total, the policy is "do not trade" an
 Score: once on TEST. Cents per action with 95% and 99% day-resampled intervals. Six targets are tried, so
 only a 99% interval above zero counts. Also reported as context: TEST P&L by prediction decile and the
 "act on everything" baseline.
+
+
+# Real order books — fixed 2026-10-09 (afternoon) before any real-queue number was scored
+
+New data: the cloud recorder's 1-second snapshots of the live window's best bid / ask **with sizes**, and
+Coinbase BTC-USD about once a second, 2026-10-03 .. 10-09 (586 windows with a complete trade tape). These
+are exactly the TEST days of the shipped compact model, so its picks on them are out of sample.
+
+Tick: 1 cent between 10c and 90c, 0.1 cent outside. Only bids from 10c to 90c are scored here.
+
+## Part G — the shipped model and rules with the real queue (nothing is fitted)
+
+Decisions every 5 s from 60 s to 780 s after the open, both sides. A row is live when the book snapshot
+is at most 5 s old, bid < ask, bid 10c..90c, and the tape quotes are fresh (the app's feature rule).
+Order: 10 contracts joined at the BOOK's best bid, 20 s to fill; then an offer 1c higher, stop when the
+book bid is 4c lower, time-out 120 s, both sold at the book bid with the taker fee (rounded up per order
+as Kalshi does); still open at the close settles.
+
+Fill rules (entry and offer):
+  FRONT   any print at the price (first in line)
+  BACK    only a print through the price (last in line, nothing ahead ever cancels or trades away)
+  VOLUME  through, or the size displayed ahead when posted plus our 10 has traded at the price (the
+          app's paper rule: nobody ahead cancels)
+  BOOK    VOLUME, and the contracts ahead can never be more than the size displayed at that price in
+          any later snapshot (0 once the best quote has moved past it). Orders that join later are
+          behind us, so a displayed size is an upper bound on what is ahead. Still conservative: cancels
+          ahead of us while the level stays large are not credited.
+  An offer posted inside the spread has nothing ahead; one posted behind the best ask starts at 3,500.
+BOOK is the headline. Scored: every live row, the shipped model's picks (prediction >= theta), its
+queue-aware picks (prediction - penalty(displayed size) >= 0), each by displayed-size bucket; the three
+fast signals, resting and buy-now. Cents per order posted, per fill, fill rate; 95% intervals resampling
+the 7 UTC days and, separately, the windows.
+
+## Part H — a model that sees the book and Bitcoin
+
+Rows every 2 s, same live rule. Target: cents per order posted under BOOK (Part G's order).
+Features, all known at the decision second, in the row's side frame:
+  the 23 tape features of the shipped model;
+  book: bid, spread in ticks, log sizes at bid and ask, size imbalance, microprice - mid, book mid change
+        over 1/2/5 s, seconds since the best bid / ask price last changed, direction of the last bid
+        change, bid size relative to its 60 s mean, book mid - tape mid;
+  spot: distance from the start price (bp), return over 1/2/5/10/30/60 s, 300 s volatility, z,
+        spot-implied fair - book mid, change of fair over 5/10 s minus change of book mid, seconds since
+        the spot print last changed.
+Validation: leave one UTC day out, 7 folds. Inside a fold the latest training day is the inner validation
+day: early stopping and theta (best inner-validation total P&L over the top 100/50/30/20/10/5/2/1 % of
+predictions, at least 200 actions, must be positive, else "do not trade"). LightGBM, fixed: learning rate
+0.03, 31 leaves, min 300 rows per leaf, feature and bagging fraction 0.7, L2 10, up to 1500 rounds, early
+stopping 100. No other tuning.
+Score: all out-of-fold picks pooled. It counts only if the 99% day-resampled interval is above zero.
+Context only (does not count): the shipped model's picks on the same rows, and the same model with only
+the book features added and with only the spot features added.
