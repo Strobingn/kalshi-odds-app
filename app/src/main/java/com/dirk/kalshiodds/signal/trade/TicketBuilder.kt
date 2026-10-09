@@ -110,6 +110,62 @@ object TicketBuilder {
         } ?: ticket
     }
 
+    /**
+     * Re-size an automatic buy ticket to the armed auto-trade stake. Standard
+     * tickets are built at the $5 manual all-in cap; this grows the clip at
+     * the same limit price (depth-capped when the book is visible) and stamps
+     * [TradeTicket.stakeCapUsd] so the final pre-HTTP check honors the auto
+     * cap instead of $5. Manual tickets are never passed here.
+     */
+    fun resizeForAuto(
+        ticket: TradeTicket,
+        market: MarketUiModel,
+        ctx: Context,
+        stakeCapUsd: Double
+    ): TradeTicket {
+        if (ticket.isSell || ticket.paperOnly) return ticket
+        if (!stakeCapUsd.isFinite() || stakeCapUsd <= 0.0) return ticket
+        val ask = bestAsk(market, ticket.side, ctx) ?: return ticket
+        val quoted = quotedSize(market, ticket.side, ctx.books[market.ticker])
+        val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
+        val clip = if (liveBook != null) {
+            LiveOrderSizer.sizeWithinDepth(
+                ask,
+                kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
+                stakeCapUsd,
+                ctx.settings.feeRate
+            )
+        } else {
+            LiveOrderSizer.size(ask, stakeCapUsd, ctx.settings.feeRate)
+        }
+        if (!clip.ok) return ticket
+        val netPer = ticket.netEvPerContract
+        val yesLimit = if (ticket.side.equals("NO", true)) 1.0 - clip.price else clip.price
+        return ticket.copy(
+            limitPrice = clip.price,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = clip.count,
+            stakeUsd = clip.allInUsd,
+            estimatedFillUsd = clip.allInUsd,
+            maxPayoutUsd = clip.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = clip.price,
+            netEvUsd = netPer?.let { it * clip.count },
+            profitIfWinUsd = clip.profitIfWinUsd,
+            feeUsd = clip.feeUsd,
+            allInUsd = clip.allInUsd,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · auto cap",
+                clip.count,
+                clip.price * 100.0,
+                clip.allInUsd,
+                clip.feeUsd,
+                clip.profitIfWinUsd
+            ),
+            stakeCapUsd = stakeCapUsd
+        )
+    }
+
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
         val settings = ctx.settings
         if (!settings.ticketsEnabled) return null
