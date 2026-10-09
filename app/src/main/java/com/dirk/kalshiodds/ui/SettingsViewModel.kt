@@ -325,13 +325,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setAutoMaxStake(v: Double) = viewModelScope.launch { prefs.updateAutoMaxStakeUsd(v) }
     fun setAutoDailyLoss(v: Double) = viewModelScope.launch { prefs.updateAutoDailyLossLimitUsd(v) }
 
-    /** Today’s order count / estimated P&L / open slots + pause reason. */
+    /** Today’s order count / estimated P&L + per-strategy leaderboard. */
     fun refreshAutoStatus() {
         val armed = _state.value.settings.autoTradeEnabled
         _state.update {
             it.copy(
                 autoStatusLine = if (armed) {
-                    container.autoTrade.statusLine(System.currentTimeMillis())
+                    container.autoTrade.strategyBoard(System.currentTimeMillis())
                 } else {
                     null
                 }
