@@ -164,3 +164,27 @@ def take_scalp(fr, D, mode, X, S, H):
     p = np.where(lv, a, NAN)
     pnl, kind = exit_(fr, p, np.where(lv, D, -1), X, S, H, mode, entry_fee=np.where(lv, fee(np.nan_to_num(p, nan=0.5)), 0.0))
     return np.where(lv, pnl, NAN), kind
+
+
+def take_markout(fr, D, K):
+    """Buy at the book ask now, sell at the book bid K seconds later (first fresh bid from then), fee both ways."""
+    b = fr.bid[D]; a = fr.ask[D]
+    with np.errstate(invalid="ignore"):
+        lv = (~np.isnan(b)) & (~np.isnan(a)) & (b < a - EPS) & (a >= 0.10 - EPS) & (a <= 0.90 + EPS)
+    out = np.full(len(D), NAN); open_ = lv.copy(); p = np.where(lv, a, 0.5)
+    for h in range(K, K + 31):
+        k = D + h; inw = open_ & (k < 900)
+        if not inw.any(): break
+        x = fr.bid[np.clip(k, 0, 899)]; hit = inw & ~np.isnan(x)
+        out[hit] = x[hit] - p[hit] - fee(x[hit]) - fee(p[hit]); open_ &= ~hit
+    out[open_] = fr.res - p[open_] - fee(p[open_])
+    return out
+
+
+def take_hold(fr, D):
+    """Buy at the book ask now and hold to settlement: one fee."""
+    b = fr.bid[D]; a = fr.ask[D]
+    with np.errstate(invalid="ignore"):
+        lv = (~np.isnan(b)) & (~np.isnan(a)) & (b < a - EPS) & (a >= 0.10 - EPS) & (a <= 0.90 + EPS)
+    p = np.where(lv, a, 0.5)
+    return np.where(lv, fr.res - p - fee(p), NAN)

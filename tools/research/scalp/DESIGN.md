@@ -151,3 +151,17 @@ stopping 100. No other tuning.
 Score: all out-of-fold picks pooled. It counts only if the 99% day-resampled interval is above zero.
 Context only (does not count): the shipped model's picks on the same rows, and the same model with only
 the book features added and with only the spot features added.
+
+## Part I — buying at the ask with the same inputs (added 2026-10-09 after Parts G and H, before any Part I number)
+
+Parts G and H said a bid joined at the best price is hit mostly when the price is about to fall. If the
+resting side loses that much, the takers hitting it are on average right, so the same inputs are tried on
+the taker side. Same rows (every 2 s), features, folds, model settings and theta rule as Part H. Targets,
+cents per contract after fees (taker fee rounded up per 10-contract order):
+  take22_book   buy at the book ask; offer 2c higher (BOOK fill rule), stop 2c, 30 s
+  take_m10      buy at the ask, sell at the book bid 10 s later (two fees)
+  take_m30      the same after 30 s
+  take_hold     buy at the ask, hold to settlement (one fee)
+Four targets, so only a 99% day-resampled interval above zero counts.
+Context, nothing fitted: how far the book mid moves in the taker's favour 1/5/10/30/60 s after every
+public trade, weighted by contracts, and what those trades made held to settlement, before and after the fee.

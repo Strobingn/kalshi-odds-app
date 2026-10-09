@@ -16,7 +16,8 @@ BOOK = ["b_bid", "b_spread", "b_lbq", "b_laq", "b_imb", "b_micro", "b_dm1", "b_d
         "b_bid_dir", "b_bq_rel", "b_minus_tape"]
 SPOT = ["s_dist", "s_ret1", "s_ret2", "s_ret5", "s_ret10", "s_ret30", "s_ret60", "s_vol", "s_z", "s_fair_mid", "s_lag5", "s_lag10", "s_stale"]
 FEATS = TAPE + BOOK + SPOT
-TARGETS = ["book", "volume", "front", "back", "hold_book", "improve_book", "rest30_book", "take22_book", "take33_book"]
+TARGETS = ["book", "volume", "front", "back", "hold_book", "improve_book", "rest30_book", "take22_book", "take33_book",
+           "take_m10", "take_m30", "take_hold"]
 
 
 def rollsum(a, w):
@@ -138,6 +139,7 @@ def one(args):
             Y["rest30_book"], _, _ = R.rest_scalp(fr, SECS, "book", H=30)
             Y["take22_book"], _ = R.take_scalp(fr, SECS, "book", 0.02, 0.02, 30)
             Y["take33_book"], _ = R.take_scalp(fr, SECS, "book", 0.03, 0.03, 60)
+            Y["take_m10"] = R.take_markout(fr, SECS, 10); Y["take_m30"] = R.take_markout(fr, SECS, 30); Y["take_hold"] = R.take_hold(fr, SECS)
             Ym = np.column_stack([Y[k] for k in TARGETS]).astype(np.float32)
             meta = np.column_stack([np.full(len(SECS), wi), SECS, np.full(len(SECS), fi), fs_book, kind, tq.astype(int)])
             out.append((X[lv], Ym[lv], meta[lv], fr.bidq[SECS][lv]))

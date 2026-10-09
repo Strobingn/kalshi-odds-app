@@ -51,4 +51,9 @@ check("price band", R.rest_scalp(win([], {0: (.95, 100, .96, 200)})[0], D, "book
 # 11. offer queue: filled at 50c while the best ask is 53c -> our 51c offer is alone in front: any lift at >= 51c fills
 up, dn = win([(101, .49, 30, False), (102, .51, 10, True)], {0: (.50, 100, .51, 200), 101: (.48, 100, .53, 200)})
 pnl, fs, kind = R.rest_scalp(up, D, "book", S=0.10); check("offer alone", pnl[0], 0.01)
+# 12. mark-out: buy at 51c, the bid 10 s later is 55c -> +4c - fees ceil(17.49)=18c and ceil(17.325)=18c per 10
+up, dn = win([], {0: (.50, 100, .51, 200), 105: (.55, 100, .56, 200)})
+check("markout", R.take_markout(up, D, 10)[0], 0.55 - 0.51 - 0.018 - 0.018)
+check("hold yes", R.take_hold(up, D)[0], 1.0 - 0.51 - 0.018)
+check("hold down side", R.take_hold(dn, D)[0], 0.0 - 0.45 - 0.018)
 print("ok", n, "checks")
