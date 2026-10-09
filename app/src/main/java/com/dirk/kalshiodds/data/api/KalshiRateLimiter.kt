@@ -42,14 +42,28 @@ class KalshiRateLimiter(
      * shorter than the server asked for, even when that is longer than
      * the exponential cap.
      */
-    fun onFailure(httpCode: Int?, retryAfterMs: Long?): Long {
+    fun onFailure(httpCode: Int?, retryAfterMs: Long?, local: Boolean = false): Long {
         synchronized(lock) {
+            // 0.3.44: our own token bucket said "wait" (synthetic 429). Honor exactly that short wait; never escalate
+            // the exponential backoff — that is what turned brief local throttling into "retrying in 70s".
+            if (local) {
+                val wait = (retryAfterMs ?: 1_000L).coerceIn(250L, 5_000L)
+                holdUntilMs = maxOf(holdUntilMs, nowMs() + wait)
+                localThrottles++
+                return wait
+            }
+            realFailures++
             val wait = backoffDelayMs(attempt, retryAfterMs, randomUnit())
             attempt = (attempt + 1).coerceAtMost(8)
             holdUntilMs = maxOf(holdUntilMs, nowMs() + wait)
             return wait
         }
     }
+
+    @Volatile var localThrottles: Int = 0
+        private set
+    @Volatile var realFailures: Int = 0
+        private set
 
     fun remainingHoldMs(now: Long = nowMs()): Long =
         synchronized(lock) { (holdUntilMs - now).coerceAtLeast(0L) }

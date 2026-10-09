@@ -80,6 +80,20 @@ object KalshiRequestStatus {
         return null
     }
 
+    /** 0.3.44: true for the gate's own synthetic 429 (local token bucket), not a real Kalshi 429. */
+    fun isLocalThrottle(error: Throwable?): Boolean {
+        var current = error
+        var guard = 0
+        while (current != null && guard < 6) {
+            if (current is HttpException) {
+                return current.response()?.headers()?.get(KalshiHttpGate.LOCAL_HEADER) == "1"
+            }
+            current = current.cause
+            guard++
+        }
+        return false
+    }
+
     fun parseRetryAfter(raw: String?): Long? {
         val seconds = raw?.trim()?.toLongOrNull() ?: return null
         if (seconds < 0L) return null

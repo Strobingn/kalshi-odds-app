@@ -43,8 +43,10 @@ class KalshiHttpGate(
         if (wait != null) {
             return synthetic429(request, wait)
         }
+        countNetwork(request)
         val response = chain.proceed(request)
         if (response.code == 429) {
+            real429.incrementAndGet()
             bucket.noteWrite429(retryAfterMs(response))
         } else if (response.code in 200..299) {
             cache.clear()
@@ -54,10 +56,11 @@ class KalshiHttpGate(
 
     private fun interceptRead(chain: Interceptor.Chain, request: Request): Response {
         val key = request.url.toString()
-        fresh(key)?.let { return it.toResponse(request) }
+        fresh(key)?.let { cacheHits.incrementAndGet(); return it.toResponse(request) }
         val mine = Flight()
         val existing = flights.putIfAbsent(key, mine)
         if (existing != null) {
+            cacheHits.incrementAndGet()
             if (!existing.latch.await(30, TimeUnit.SECONDS)) {
                 throw IOException("Kalshi GET still in flight")
             }
@@ -71,14 +74,17 @@ class KalshiHttpGate(
             }
             val denied = awaitRead()
             if (denied != null) {
+                local429.incrementAndGet()
                 val snap = Snap.from(synthetic429(request, denied))
                 mine.snap = snap
                 return snap.toResponse(request)
             }
+            countNetwork(request)
             val network = chain.proceed(request)
             val snap = Snap.from(network)
             network.close()
             if (snap.code == 429) {
+                real429.incrementAndGet()
                 bucket.noteRead429(snap.retryAfterMs())
             } else if (snap.code in 200..299) {
                 cache[key] = snap.copy(untilMs = nowMs() + cacheTtlMs)
@@ -167,7 +173,59 @@ class KalshiHttpGate(
         }
     }
 
+    /**
+     * 0.3.44 per-endpoint request counters (network calls only; cache hits and joined in-flight GETs are not Kalshi
+     * requests). Shown in Data.
+     */
+    private val counts = ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicLong>()
+    private val real429 = java.util.concurrent.atomic.AtomicLong()
+    private val local429 = java.util.concurrent.atomic.AtomicLong()
+    private val cacheHits = java.util.concurrent.atomic.AtomicLong()
+    private val startedAtMs = nowMs()
+    private val recent = java.util.ArrayDeque<Long>()
+
+    private fun countNetwork(request: Request) {
+        counts.getOrPut(endpointKey(request)) { java.util.concurrent.atomic.AtomicLong() }.incrementAndGet()
+        val now = nowMs()
+        synchronized(recent) {
+            recent.addLast(now)
+            while (recent.isNotEmpty() && now - recent.first() > 60_000L) recent.removeFirst()
+        }
+    }
+
+    data class Stats(
+        val perEndpoint: Map<String, Long>,
+        val real429: Long,
+        val local429: Long,
+        val cacheHits: Long,
+        val lastMinute: Int,
+        val sinceMs: Long
+    ) {
+        val total: Long get() = perEndpoint.values.sum()
+        fun lines(): List<String> = listOf(
+            String.format(java.util.Locale.US, "Kalshi REST: %d requests (%d in last 60 s = %.2f/s) · budget %.0f/s burst %.0f",
+                total, lastMinute, lastMinute / 60.0, KalshiPollBudget.READ_PER_SEC, KalshiPollBudget.READ_BURST),
+            "429s: $real429 from Kalshi · $local429 local throttles · $cacheHits cache/dedupe hits"
+        ) + perEndpoint.entries.sortedByDescending { it.value }.map { "  ${it.key}: ${it.value}" }
+    }
+
+    fun stats(): Stats = Stats(
+        perEndpoint = counts.mapValues { it.value.get() },
+        real429 = real429.get(), local429 = local429.get(), cacheHits = cacheHits.get(),
+        lastMinute = synchronized(recent) { val now = nowMs(); recent.count { now - it <= 60_000L } },
+        sinceMs = startedAtMs
+    )
+
     companion object {
+        const val LOCAL_HEADER = "X-Kashi-Local-Throttle"
+
+        /** "GET markets", "GET markets/{ticker}/orderbook", "GET portfolio/balance" … (tickers collapsed). */
+        fun endpointKey(request: Request): String {
+            val segs = request.url.pathSegments.dropWhile { it == "trade-api" || it == "v2" }
+            val norm = segs.mapIndexed { i, s -> if (i > 0 && s.any { it.isDigit() } && s.any { it == '-' }) "{ticker}" else s }
+            return request.method.uppercase() + " " + norm.joinToString("/")
+        }
+
         fun isKalshi(request: Request): Boolean {
             val host = request.url.host.lowercase()
             return host == "kalshi.com" || host.endsWith(".kalshi.com") || host.endsWith(".kalshi.co")
@@ -187,6 +245,7 @@ class KalshiHttpGate(
                 .code(429)
                 .message("Too Many Requests")
                 .header("Retry-After", seconds.toString())
+                .header(LOCAL_HEADER, "1")
                 .header("Content-Type", "application/json")
                 .body(json.toResponseBody("application/json".toMediaType()))
                 .build()

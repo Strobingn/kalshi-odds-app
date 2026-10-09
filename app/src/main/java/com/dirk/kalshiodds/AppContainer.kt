@@ -233,7 +233,8 @@ class AppContainer(context: Context) {
             if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(error)) {
                 val wait = kalshiTraffic.limiter.onFailure(
                     com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(error),
-                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error)
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error),
+                local = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isLocalThrottle(error)
                 )
                 kalshiTraffic.health.note(error, wait)
             }

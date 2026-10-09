@@ -28,6 +28,8 @@ data class DataUiState(
     /** 0.3.43: Price debug log (WS/REST price inputs and what was applied / dropped). */
     val priceLogLines: List<String> = emptyList(),
     val priceLogSummary: String? = null,
+    /** 0.3.44 Kalshi REST request counters (per endpoint, 429s, loop owners). */
+    val requestLines: List<String> = emptyList(),
     val priceLogNote: String? = null,
     val stats: DataStats = DataStats(),
     val settings: DataHubSettings = DataHubSettings(),
@@ -339,6 +341,14 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun requestLines(): List<String> {
+        val c = KalshiOddsApp.from(getApplication()).container
+        val lim = c.kalshiTraffic.limiter
+        return com.dirk.kalshiodds.data.api.KalshiRest.gate.stats().lines() +
+            "Backoff holds: ${lim.realFailures} real failures · ${lim.localThrottles} local throttles (no escalation) · hold ${lim.remainingHoldMs() / 1000}s" +
+            com.dirk.kalshiodds.data.api.KalshiPollLoops.lines()
+    }
+
     fun refreshPriceLog() {
         val log = com.dirk.kalshiodds.signal.debug.PriceDebugLog
         val counts = log.countByVerdict().entries.sortedByDescending { it.value }
@@ -346,7 +356,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         _state.update {
             it.copy(
                 priceLogLines = log.recent(40).asReversed().map(log::line),
-                priceLogSummary = "${log.size()} entries (last ${log.CAPACITY} kept)" + if (counts.isNotEmpty()) " — $counts" else ""
+                priceLogSummary = "${log.size()} entries (last ${log.CAPACITY} kept)" + if (counts.isNotEmpty()) " — $counts" else "",
+                requestLines = requestLines()
             )
         }
     }

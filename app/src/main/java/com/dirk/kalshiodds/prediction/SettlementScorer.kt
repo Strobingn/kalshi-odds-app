@@ -145,7 +145,8 @@ class SettlementScorer(
         if (!com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(error)) return
         val wait = rateLimiter?.onFailure(
             com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(error),
-            com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error)
+            com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error),
+                local = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isLocalThrottle(error)
         ) ?: com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error) ?: 1_000L
         feedHealth?.note(error, wait)
     }
