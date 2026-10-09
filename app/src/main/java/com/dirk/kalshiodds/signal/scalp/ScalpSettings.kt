@@ -43,26 +43,99 @@ data class ScalpSettings(
     /** Max dollars spent per entry (position cost + entry fee). */
     val maxStakeUsd: Double = 5.0,
     /** Sell at the bid once it is this many cents above entry. Backtest: 6¢ is the only TP with any hope of clearing ~5–6¢ round-trip friction. */
-    val takeProfitPp: Double = 6.0,
+    val takeProfitPp: Double = DEFAULT_TAKE_PROFIT_PP,
     /** Cut at the bid once it is this many cents below entry. Grid-optimal per the backtest; wider stops did not help. */
-    val stopLossPp: Double = 5.0,
+    val stopLossPp: Double = DEFAULT_STOP_LOSS_PP,
     /** Max time an open position is held before a timeout exit. Backtest: 8 min — beyond ~9 min the time stop almost never fires (median bounce lead 2 min). */
-    val maxHoldMs: Long = 8 * 60 * 1000L,
+    val maxHoldMs: Long = DEFAULT_MAX_HOLD_MS,
     /** Rolling one-hour cap on completed scalp entries. Backtest: 2 — caps the bleed rate; one scalp per market. */
-    val maxTradesPerHour: Int = 2,
+    val maxTradesPerHour: Int = DEFAULT_MAX_TRADES_PER_HOUR,
     /** Stop opening new positions once today's realized loss exceeds this. */
     val maxDailyLossUsd: Double = 10.0,
     /** Rolling feature window in seconds ([ScalpMath]). */
-    val windowSeconds: Int = 60,
+    val windowSeconds: Int = DEFAULT_WINDOW_SECONDS,
     /** Min drop below the short EMA (and below the window max) to qualify as a dip. Backtest: 5¢ dominates the grid (cheapest entry, not a stronger signal). */
-    val dipMinDropPp: Double = 5.0,
+    val dipMinDropPp: Double = DEFAULT_DIP_MIN_DROP_PP,
     /**
      * Persisted circuit breaker. When true the engine refuses to trade until
      * the user manually clears it — survives reboots because it lives here.
      */
-    val killSwitch: Boolean = false
+    val killSwitch: Boolean = false,
+    /**
+     * Master aggression switch for this experiment branch. True = run three
+     * strategies concurrently (DIP_HUNT + MOMENTUM_SNIPER + EXTREME_REVERSAL),
+     * each holding up to one position, with the aggressive profile from
+     * [effective]. False = single DIP_HUNT with the conservative defaults
+     * above. The daily-loss breaker and kill switch are NOT relaxed either way.
+     */
+    val aggressive: Boolean = true,
+    /** Max concurrent open scalp positions across all strategies. */
+    val maxOpenPositions: Int = 3
 ) {
     val paper: Boolean get() = !liveMode
+
+    /**
+     * Resolve the settings the engine actually runs with. When [aggressive]
+     * is on, any field still at its conservative default is replaced by the
+     * aggressive-profile value; a stored value the user changed (it differs
+     * from the declared default) always wins. `maxStakeUsd`, `maxDailyLossUsd`
+     * and `maxOpenPositions` are identical in both profiles — the daily-loss
+     * circuit breaker is never raised or removed.
+     */
+    fun effective(): ScalpSettings {
+        if (!aggressive) return this
+        return copy(
+            maxTradesPerHour = if (maxTradesPerHour == DEFAULT_MAX_TRADES_PER_HOUR) {
+                AGGRESSIVE_MAX_TRADES_PER_HOUR
+            } else {
+                maxTradesPerHour
+            },
+            windowSeconds = if (windowSeconds == DEFAULT_WINDOW_SECONDS) {
+                AGGRESSIVE_WINDOW_SECONDS
+            } else {
+                windowSeconds
+            },
+            takeProfitPp = if (takeProfitPp == DEFAULT_TAKE_PROFIT_PP) {
+                AGGRESSIVE_TAKE_PROFIT_PP
+            } else {
+                takeProfitPp
+            },
+            stopLossPp = if (stopLossPp == DEFAULT_STOP_LOSS_PP) {
+                AGGRESSIVE_STOP_LOSS_PP
+            } else {
+                stopLossPp
+            },
+            maxHoldMs = if (maxHoldMs == DEFAULT_MAX_HOLD_MS) {
+                AGGRESSIVE_MAX_HOLD_MS
+            } else {
+                maxHoldMs
+            },
+            dipMinDropPp = if (dipMinDropPp == DEFAULT_DIP_MIN_DROP_PP) {
+                AGGRESSIVE_DIP_MIN_DROP_PP
+            } else {
+                dipMinDropPp
+            }
+        )
+    }
+
+    companion object {
+        // Conservative declared defaults — the baseline effective() compares
+        // against to detect "user never changed this".
+        const val DEFAULT_MAX_TRADES_PER_HOUR = 2
+        const val DEFAULT_WINDOW_SECONDS = 60
+        const val DEFAULT_TAKE_PROFIT_PP = 6.0
+        const val DEFAULT_STOP_LOSS_PP = 5.0
+        const val DEFAULT_MAX_HOLD_MS = 480_000L
+        const val DEFAULT_DIP_MIN_DROP_PP = 5.0
+
+        // Aggressive profile (bitcoin-swarm experiment branch).
+        const val AGGRESSIVE_MAX_TRADES_PER_HOUR = 20
+        const val AGGRESSIVE_WINDOW_SECONDS = 30
+        const val AGGRESSIVE_TAKE_PROFIT_PP = 4.0
+        const val AGGRESSIVE_STOP_LOSS_PP = 6.0
+        const val AGGRESSIVE_MAX_HOLD_MS = 300_000L
+        const val AGGRESSIVE_DIP_MIN_DROP_PP = 2.0
+    }
 }
 
 /**
@@ -124,18 +197,28 @@ class ScalpSettingsStore(context: Context) {
         app.scalpStore.edit { it[KEY_KILL] = tripped }
     }
 
+    suspend fun updateAggressive(aggressive: Boolean) {
+        app.scalpStore.edit { it[KEY_AGGRESSIVE] = aggressive }
+    }
+
+    suspend fun updateMaxOpenPositions(n: Int) {
+        app.scalpStore.edit { it[KEY_MAX_OPEN] = n.coerceIn(1, 5) }
+    }
+
     private fun Preferences.toSettings() = ScalpSettings(
         enabled = this[KEY_ENABLED] ?: false,
         liveMode = this[KEY_LIVE] ?: false,
         maxStakeUsd = this[KEY_STAKE] ?: 5.0,
-        takeProfitPp = this[KEY_TP] ?: 6.0,
-        stopLossPp = this[KEY_SL] ?: 5.0,
-        maxHoldMs = this[KEY_HOLD] ?: 8 * 60 * 1000L,
-        maxTradesPerHour = this[KEY_TPH] ?: 2,
+        takeProfitPp = this[KEY_TP] ?: ScalpSettings.DEFAULT_TAKE_PROFIT_PP,
+        stopLossPp = this[KEY_SL] ?: ScalpSettings.DEFAULT_STOP_LOSS_PP,
+        maxHoldMs = this[KEY_HOLD] ?: ScalpSettings.DEFAULT_MAX_HOLD_MS,
+        maxTradesPerHour = this[KEY_TPH] ?: ScalpSettings.DEFAULT_MAX_TRADES_PER_HOUR,
         maxDailyLossUsd = this[KEY_DAILY_LOSS] ?: 10.0,
-        windowSeconds = this[KEY_WINDOW] ?: 60,
-        dipMinDropPp = this[KEY_DIP] ?: 5.0,
-        killSwitch = this[KEY_KILL] ?: false
+        windowSeconds = this[KEY_WINDOW] ?: ScalpSettings.DEFAULT_WINDOW_SECONDS,
+        dipMinDropPp = this[KEY_DIP] ?: ScalpSettings.DEFAULT_DIP_MIN_DROP_PP,
+        killSwitch = this[KEY_KILL] ?: false,
+        aggressive = this[KEY_AGGRESSIVE] ?: true,
+        maxOpenPositions = this[KEY_MAX_OPEN] ?: 3
     )
 
     companion object {
@@ -150,5 +233,7 @@ class ScalpSettingsStore(context: Context) {
         private val KEY_WINDOW = intPreferencesKey("scalp_window_seconds")
         private val KEY_DIP = doublePreferencesKey("scalp_dip_min_drop_pp")
         private val KEY_KILL = booleanPreferencesKey("scalp_kill_switch")
+        private val KEY_AGGRESSIVE = booleanPreferencesKey("scalp_aggressive")
+        private val KEY_MAX_OPEN = intPreferencesKey("scalp_max_open_positions")
     }
 }

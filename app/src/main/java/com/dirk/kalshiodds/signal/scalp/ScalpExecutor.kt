@@ -93,7 +93,15 @@ class LiveScalpExecutor(
     private val onPlaced: (ScalpPosition, PlacedOrder) -> Unit = { _, _ -> }
 ) : ScalpExecutor {
 
-    override suspend fun enter(position: ScalpPosition): Boolean = runCatching {
+    override suspend fun enter(position: ScalpPosition): Boolean {
+        // Compile-time paper-only lock: this build can never place a live
+        // scalp order, regardless of settings (belt + suspenders with the
+        // engine's routing gate in ScalpEngine.liveAllowed).
+        if (!scalpLiveTradingEnabled) return false
+        return enterLocked(position)
+    }
+
+    private suspend fun enterLocked(position: ScalpPosition): Boolean = runCatching {
         val ask01 = position.entryPriceCents / 100.0
         val ticket = TradeTicket(
             id = idFactory(),
@@ -124,7 +132,12 @@ class LiveScalpExecutor(
         true
     }.getOrDefault(false)
 
-    override suspend fun exit(position: ScalpPosition, reason: ExitReason): FillResult? = runCatching {
+    override suspend fun exit(position: ScalpPosition, reason: ExitReason): FillResult? {
+        if (!scalpLiveTradingEnabled) return null
+        return exitLocked(position, reason)
+    }
+
+    private suspend fun exitLocked(position: ScalpPosition, reason: ExitReason): FillResult? = runCatching {
         val exitCents = position.exitPriceCents ?: return null
         val bid01 = exitCents / 100.0
         val ticket = TradeTicket(

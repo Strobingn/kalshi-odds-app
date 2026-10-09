@@ -71,10 +71,19 @@ class ScalpGuardrailsTest {
     }
 
     @Test
-    fun blocksWhenAlreadyInPosition() {
-        val block = ScalpGuardrails.checkEnter(state(openPositionCount = 1), settings())
+    fun blocksWhenMaxOpenPositionsReached() {
+        // Default cap is 3 — two open is fine, the third concurrent entry is not.
+        assertNull(ScalpGuardrails.checkEnter(state(openPositionCount = 2), settings()))
+        val block = ScalpGuardrails.checkEnter(state(openPositionCount = 3), settings())
         assertNotNull(block)
-        assertTrue(block!!.contains("one at a time"))
+        assertTrue(block!!.contains("max open scalp positions"))
+    }
+
+    @Test
+    fun respectsCustomOpenPositionCap() {
+        val s = settings().copy(maxOpenPositions = 1)
+        assertNotNull(ScalpGuardrails.checkEnter(state(openPositionCount = 1), s))
+        assertNull(ScalpGuardrails.checkEnter(state(openPositionCount = 0), s))
     }
 
     @Test
@@ -102,6 +111,9 @@ class ScalpGuardrailsTest {
         assertEquals(5.0, s.stopLossPp, 1e-9)
         assertEquals(480_000L, s.maxHoldMs)
         assertEquals(5.0, s.dipMinDropPp, 1e-9)
+        // Aggression switch + concurrent-position cap (Task 2 additions).
+        assertTrue(s.aggressive)
+        assertEquals(3, s.maxOpenPositions)
         assertTrue(s.paper)
     }
 }

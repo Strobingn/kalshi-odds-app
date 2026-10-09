@@ -17,6 +17,10 @@ android {
         versionCode = 33
         versionName = "0.3.18"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Compile-time paper-only lock for the bitcoin-swarm experiment branch:
+        // no code path can reach live scalping when this is false. There is
+        // intentionally no product-flavor escape hatch.
+        buildConfigField("boolean", "SCALP_LIVE_TRADING", "false")
     }
 
     signingConfigs {

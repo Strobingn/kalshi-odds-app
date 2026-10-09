@@ -18,6 +18,8 @@ data class ScalpPosition(
     val contracts: Int,
     val entryTimeMs: Long,
     val mode: ScalpMode,
+    /** Which strategy opened this position (multi-strategy aggressive mode). */
+    val strategy: ScalpStrategy = ScalpStrategy.DIP_HUNT,
     val status: ScalpPositionStatus = ScalpPositionStatus.OPEN,
     val exitPriceCents: Int? = null,
     val exitTimeMs: Long? = null,
@@ -50,6 +52,7 @@ data class ScalpTradeRow(
     val pnlCents: Int?,
     val reason: String?,
     val mode: String,
+    val strategy: String = ScalpStrategy.DIP_HUNT.name,
     val clientOrderId: String?,
     val createdAtMs: Long
 )

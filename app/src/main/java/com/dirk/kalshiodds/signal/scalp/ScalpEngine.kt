@@ -11,16 +11,26 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+/** Live FLAT / IN_POSITION state for one strategy (aggressive mode UI). */
+data class ScalpStrategyState(
+    val strategy: ScalpStrategy,
+    val state: String,
+    val position: ScalpPosition? = null
+)
+
 /** Everything the UI needs to render the scalper panel. */
 data class ScalpUiState(
     val enabled: Boolean = false,
     val liveMode: Boolean = false,
     val running: Boolean = false,
-    /** FLAT or IN_POSITION. */
+    /** FLAT or IN_POSITION (aggregated across strategies). */
     val state: String = "FLAT",
     val openPosition: ScalpPosition? = null,
     val lastMidPp: Double? = null,
-    val lastEvent: ScalpEvent? = null
+    val lastEvent: ScalpEvent? = null,
+    val aggressive: Boolean = false,
+    /** Per-strategy state — populated when aggressive. */
+    val strategyStates: List<ScalpStrategyState> = emptyList()
 )
 
 sealed class ScalpEvent {
@@ -42,9 +52,15 @@ sealed class ScalpEvent {
  *
  * The ONE non-approve-gated trading path in the app. Hard rules baked in:
  * - never trades unless `settings.enabled && !settings.killSwitch`
- * - paper by default (`!settings.liveMode`)
- * - guardrails checked BEFORE every entry ([ScalpGuardrails])
- * - max one open position, debounce between round trips
+ * - paper by default — and on this build structurally paper-only:
+ *   [scalpLiveTradingEnabled] is a compile-time BuildConfig constant (false
+ *   on the bitcoin-swarm branch), so `settings.liveMode` can never route
+ *   to [liveExecutor] and [LiveScalpExecutor] refuses anyway (belt + suspenders)
+ * - guardrails checked BEFORE every entry ([ScalpGuardrails]) — global
+ *   trades/hour + daily-loss breaker + kill switch, plus one position
+ *   per strategy and [ScalpSettings.maxOpenPositions] overall
+ * - aggressive mode runs one state machine per [ScalpStrategy], each with
+ *   its own [ScalpMath] window; conservative mode runs DIP_HUNT only
  * - every soft failure becomes a [ScalpEvent], never a thrown exception
  *
  * The wiring agent feeds ticks via [onTick] (any thread) and lifecycle via
@@ -86,7 +102,10 @@ class ScalpEngine(
     @Volatile
     private var lastGuardrailEventMs: Long = 0L
 
-    private var math = ScalpMath(windowSeconds = ScalpSettings().windowSeconds)
+    /** One feature window per strategy; rebuilt when windowSeconds changes. */
+    private val mathLock = Any()
+    private var mathByStrategy: Map<ScalpStrategy, ScalpMath> = emptyMap()
+    private var mathWindowSeconds: Int = -1
 
     private var settingsJob: Job? = null
 
@@ -95,45 +114,51 @@ class ScalpEngine(
         runCatching {
             val s = settingsSnapshot
             val mid = tick.midPp
+            val strategies = strategiesFor(s)
             if (mid != null) {
-                if (math.windowSeconds != s.windowSeconds) {
-                    math = ScalpMath(windowSeconds = s.windowSeconds)
-                }
-                math.onPrice(mid, now())
                 lastMidPp = mid
+                if (!s.enabled || s.killSwitch) return
+                if (!running) return
+                val math = mathFor(s, strategies)
+                for (strategy in strategies) {
+                    math.getValue(strategy).onPrice(mid, now())
+                }
+            } else {
+                if (!s.enabled || s.killSwitch || !running) return
             }
-            if (!s.enabled || s.killSwitch) return
-            if (!running) return
-
-            val position = store.openPosition()
-            if (position == null && now() - lastTradeEndMs < debounceMs) return
 
             val book = bookProvider()
             val bidCents = bookQuote(book?.bestYesBid()) ?: tickQuote(tick.yesBid)
             val askCents = bookQuote(book?.bestYesAsk()) ?: tickQuote(tick.yesAsk)
             if (bidCents == null || askCents == null) return
 
-            val features = math.snapshot(now())
+            val eff = s.effective()
             val imbalance = book?.imbalance()
-            val decider = deciderFor(s)
-            val decision = decider.decide(
-                features = features,
-                bestBidCents = bidCents,
-                bestAskCents = askCents,
-                imbalance = imbalance,
-                position = position?.let {
-                    ScalpDecision.OpenPosition(it.entryPriceCents, it.entryTimeMs)
-                },
-                nowMs = now()
-            )
-            when (decision) {
-                is ScalpDecision.ScalpDecision.Enter ->
-                    scope.launch { enter(s, tick.ticker, decision.entryPriceCents) }
-                is ScalpDecision.ScalpDecision.Exit ->
-                    position?.let { pos ->
-                        scope.launch { exit(s, pos, decision.reason, decision.exitPriceCents) }
-                    }
-                else -> Unit
+            val math = mathFor(s, strategies)
+            for (strategy in strategies) {
+                val position = store.openPosition(strategy)
+                if (position == null && now() - lastTradeEndMs < debounceFor(s)) continue
+                val features = math.getValue(strategy).snapshot(now())
+                val decision = deciderFor(eff, strategy).decide(
+                    features = features,
+                    bestBidCents = bidCents,
+                    bestAskCents = askCents,
+                    imbalance = imbalance,
+                    position = position?.let {
+                        ScalpDecision.OpenPosition(it.entryPriceCents, it.entryTimeMs)
+                    },
+                    nowMs = now(),
+                    closeTimeEpochMs = tick.closeTimeEpochMs
+                )
+                when (decision) {
+                    is ScalpDecision.ScalpDecision.Enter ->
+                        scope.launch { enter(eff, s, strategy, tick.ticker, decision.entryPriceCents) }
+                    is ScalpDecision.ScalpDecision.Exit ->
+                        position?.let { pos ->
+                            scope.launch { exit(eff, pos, decision.reason, decision.exitPriceCents) }
+                        }
+                    else -> Unit
+                }
             }
         }.onFailure { emit(ScalpEvent.Error("tick failed: ${it.message ?: it.javaClass.simpleName}")) }
     }
@@ -160,33 +185,89 @@ class ScalpEngine(
     /** Synchronous state snapshot for UI. */
     fun currentState(): ScalpUiState {
         val s = settingsSnapshot
-        val open = store.openPosition()
+        val open = store.openPositions()
+        val strategies = strategiesFor(s)
         return ScalpUiState(
             enabled = s.enabled,
             liveMode = s.liveMode,
             running = running,
-            state = if (open == null) "FLAT" else "IN_POSITION",
-            openPosition = open,
+            state = if (open.isEmpty()) "FLAT" else "IN_POSITION",
+            openPosition = open.firstOrNull(),
             lastMidPp = lastMidPp,
-            lastEvent = lastEvent
+            lastEvent = lastEvent,
+            aggressive = s.aggressive,
+            strategyStates = if (s.aggressive) {
+                strategies.map { strat ->
+                    val pos = open.firstOrNull { it.strategy == strat }
+                    ScalpStrategyState(
+                        strategy = strat,
+                        state = if (pos == null) "FLAT" else "IN_POSITION",
+                        position = pos
+                    )
+                }
+            } else {
+                emptyList()
+            }
         )
     }
 
     // ---- internals ----------------------------------------------------------
 
-    private fun deciderFor(s: ScalpSettings): ScalpDecision = ScalpDecision(
-        dipMinDropPp = s.dipMinDropPp,
-        takeProfitPp = s.takeProfitPp,
-        stopLossPp = s.stopLossPp,
-        maxHoldMs = s.maxHoldMs,
-        maxSpreadCents = maxSpreadCents
-    )
+    private fun strategiesFor(s: ScalpSettings): List<ScalpStrategy> =
+        if (s.aggressive) ScalpStrategy.values().toList() else listOf(ScalpStrategy.DIP_HUNT)
 
-    private suspend fun enter(settings: ScalpSettings, ticker: String, askCents: Int) {
-        if (store.openPosition() != null) return
+    /** Aggressive mode re-trades quickly; conservative keeps the long debounce. */
+    private fun debounceFor(s: ScalpSettings): Long = if (s.aggressive) 5_000L else debounceMs
+
+    private fun mathFor(s: ScalpSettings, strategies: List<ScalpStrategy>): Map<ScalpStrategy, ScalpMath> {
+        synchronized(mathLock) {
+            if (mathWindowSeconds != s.windowSeconds || mathByStrategy.size != strategies.size) {
+                mathByStrategy = strategies.associateWith { ScalpMath(windowSeconds = s.windowSeconds) }
+                mathWindowSeconds = s.windowSeconds
+            }
+            return mathByStrategy
+        }
+    }
+
+    private fun deciderFor(eff: ScalpSettings, strategy: ScalpStrategy): ScalpDecision = when (strategy) {
+        ScalpStrategy.DIP_HUNT -> ScalpDecision(
+            strategy = strategy,
+            dipMinDropPp = eff.dipMinDropPp,
+            takeProfitPp = eff.takeProfitPp,
+            stopLossPp = eff.stopLossPp,
+            maxHoldMs = eff.maxHoldMs,
+            maxSpreadCents = maxSpreadCents
+        )
+        ScalpStrategy.MOMENTUM_SNIPER -> ScalpDecision(
+            strategy = strategy,
+            takeProfitPp = 3.0,
+            stopLossPp = 5.0,
+            maxHoldMs = 3 * 60 * 1000L,
+            maxSpreadCents = maxSpreadCents
+        )
+        ScalpStrategy.EXTREME_REVERSAL -> ScalpDecision(
+            strategy = strategy,
+            takeProfitPp = 5.0,
+            stopLossPp = 3.0,
+            maxHoldMs = 8 * 60 * 1000L,
+            maxSpreadCents = maxSpreadCents
+        )
+    }
+
+    /** LIVE only when the user asked AND the compile-time flag allows it. */
+    private fun liveAllowed(s: ScalpSettings): Boolean = s.liveMode && scalpLiveTradingEnabled
+
+    private suspend fun enter(
+        eff: ScalpSettings,
+        raw: ScalpSettings,
+        strategy: ScalpStrategy,
+        ticker: String,
+        askCents: Int
+    ) {
+        if (store.openPosition(strategy) != null) return
         val block = ScalpGuardrails.checkEnter(
-            ScalpGuardrails.snapshot(store, settings, now()),
-            settings
+            ScalpGuardrails.snapshot(store, eff, now()),
+            eff
         )
         if (block != null) {
             // Throttle guardrail spam: at most one event per 60s.
@@ -197,9 +278,9 @@ class ScalpEngine(
             return
         }
         val ask01 = askCents / 100.0
-        val contracts = KalshiFee.contractsForStake(settings.maxStakeUsd, ask01)
+        val contracts = KalshiFee.contractsForStake(eff.maxStakeUsd, ask01)
         if (contracts < 1) {
-            emit(ScalpEvent.Error("scalp entry skipped — $${settings.maxStakeUsd} cannot buy 1 ct @ ${askCents}c"))
+            emit(ScalpEvent.Error("scalp entry skipped — $${eff.maxStakeUsd} cannot buy 1 ct @ ${askCents}c"))
             return
         }
         val position = ScalpPosition(
@@ -209,9 +290,10 @@ class ScalpEngine(
             entryPriceCents = askCents,
             contracts = contracts,
             entryTimeMs = now(),
-            mode = if (settings.liveMode) ScalpMode.LIVE else ScalpMode.PAPER
+            mode = if (liveAllowed(raw)) ScalpMode.LIVE else ScalpMode.PAPER,
+            strategy = strategy
         )
-        val executor = if (settings.liveMode) liveExecutor else paperExecutor
+        val executor = if (position.mode == ScalpMode.LIVE) liveExecutor else paperExecutor
         val ok = runCatching { executor.enter(position) }
             .onFailure { emit(ScalpEvent.Error("scalp entry failed: ${safeMsg(it)}")) }
             .getOrDefault(false)
@@ -221,17 +303,21 @@ class ScalpEngine(
         }
         val entryFeeCents = feeCents(contracts, ask01)
         val stored = store.recordEnter(position, entryFeeCents, clientOrderId = null)
-        lastEvent = ScalpEvent.Entered(stored)
-        onEvent(ScalpEvent.Entered(stored))
+        emit(ScalpEvent.Entered(stored))
     }
 
     private suspend fun exit(
-        settings: ScalpSettings,
+        eff: ScalpSettings,
         position: ScalpPosition,
         reason: ExitReason,
         bidCents: Int
     ) {
-        val executor = if (settings.liveMode) liveExecutor else paperExecutor
+        // Re-check the compile-time lock at the exit boundary too.
+        val executor = if (position.mode == ScalpMode.LIVE && scalpLiveTradingEnabled) {
+            liveExecutor
+        } else {
+            paperExecutor
+        }
         val withExit = position.copy(exitPriceCents = bidCents)
         val fill = runCatching { executor.exit(withExit, reason) }
             .onFailure { emit(ScalpEvent.Error("scalp exit failed: ${safeMsg(it)}")) }

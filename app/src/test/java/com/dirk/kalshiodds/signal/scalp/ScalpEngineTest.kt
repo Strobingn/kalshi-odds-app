@@ -94,9 +94,12 @@ class ScalpEngineTest {
             )
         }
 
-        fun tick(midCents: Int) {
-            val bid = (midCents - 1) / 100.0
-            val ask = (midCents + 1) / 100.0
+        fun tick(midCents: Int) = tickMid(midCents.toDouble())
+
+        /** Half-cent mids allowed — the book quotes are derived from the mid. */
+        fun tickMid(mid: Double) {
+            val bid = (mid - 1) / 100.0
+            val ask = (mid + 1) / 100.0
             book.replaceSnapshot(
                 yesLevels = listOf(bid to 100.0),
                 noLevels = listOf((1.0 - ask) to 100.0)
@@ -107,7 +110,7 @@ class ScalpEngineTest {
                     series = "KXBTC15M",
                     yesBid = bid,
                     yesAsk = ask,
-                    lastPrice = midCents / 100.0,
+                    lastPrice = mid / 100.0,
                     volume = null,
                     openInterest = null,
                     closeTimeEpochMs = null,
@@ -126,6 +129,7 @@ class ScalpEngineTest {
     private fun enabledSettings() = ScalpSettings(
         enabled = true,
         liveMode = false,
+        aggressive = false, // these tests exercise the single-strategy DIP path
         maxStakeUsd = 5.0,
         // 5¢ target: after Kalshi taker fees on both legs (~3.5¢/ct at 45¢)
         // a 3¢ bounce is a guaranteed loser — the target must clear fees.
@@ -259,5 +263,82 @@ class ScalpEngineTest {
         listOf(45, 46, 47, 48, 49).forEach { tickOnly(it) }
         assertEquals(0, events.filterIsInstance<ScalpEvent.Exited>().size)
         assertEquals("IN_POSITION", engine.currentState().state)
+    }
+
+    /**
+     * Aggressive mode runs one state machine per strategy on the same tick
+     * stream. Series (half-cent steps, 1s apart):
+     * - 56 → 50 in 1.5¢ drops, then flat at 50: DIP_HUNT enters at the ask
+     *   (51¢) once the fall stabilizes (tick 9).
+     * - Bounce 51 → 52.5 → 54 with growing steps: MOMENTUM_SNIPER enters at
+     *   54¢ (velocity > 0.3¢/s, acceleration > 0) while DIP is still holding —
+     *   proving the strategies trade concurrently.
+     * - 54 → 56: DIP_HUNT exits TARGET at 55¢ (entry 51 + effective TP 4).
+     * - Ride at 56–56.5 then fade 54 → 52: MOMENTUM_SNIPER never reaches its
+     *   57¢ target bid and exits MOMENTUM_FADE at 51¢ (a small loser — the
+     *   fade cut, not the 5¢ stop).
+     * EXTREME_REVERSAL never sees an extreme (mids stay in 50–56.5).
+     */
+    @Test
+    fun aggressiveRunsMultipleStrategiesConcurrently() = runBlocking {
+        val h = Harness(ScalpSettings(enabled = true)) // aggressive defaults
+        h.engine.start()
+
+        // Fall 56 → 50 (1.5¢/tick), then flat at 50 ×6.
+        listOf(56.0, 54.5, 53.0, 51.5, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0)
+            .forEach { h.tickMid(it) }
+        // Bounce, ride, fade (capped at 56.5 → 56¢ bid, below the 57¢ target).
+        listOf(51.0, 52.5, 54.0, 56.0, 56.0, 56.0, 54.0, 52.0)
+            .forEach { h.tickMid(it) }
+
+        val entered = h.events.filterIsInstance<ScalpEvent.Entered>()
+        assertEquals("expected two entries, events=${h.events}", 2, entered.size)
+        val dipEntry = entered.first()
+        val momentumEntry = entered.last()
+        assertEquals(ScalpStrategy.DIP_HUNT, dipEntry.position.strategy)
+        assertEquals(51, dipEntry.position.entryPriceCents)
+        assertEquals(ScalpStrategy.MOMENTUM_SNIPER, momentumEntry.position.strategy)
+        assertEquals(54, momentumEntry.position.entryPriceCents)
+
+        val exited = h.events.filterIsInstance<ScalpEvent.Exited>()
+        assertEquals("expected two exits, events=${h.events}", 2, exited.size)
+
+        // Concurrency proof: momentum entered while DIP was still holding.
+        assertTrue(
+            "momentum entry must precede the dip exit, events=${h.events}",
+            h.events.indexOf(momentumEntry) < h.events.indexOf(exited.first())
+        )
+
+        val dipExit = exited.first { it.position.strategy == ScalpStrategy.DIP_HUNT }
+        assertEquals(ExitReason.TARGET, dipExit.reason)
+        assertEquals(55, dipExit.position.exitPriceCents)
+        assertTrue("dip target exit should be profitable", dipExit.pnlCents > 0)
+
+        val momentumExit = exited.first { it.position.strategy == ScalpStrategy.MOMENTUM_SNIPER }
+        assertEquals(ExitReason.MOMENTUM_FADE, momentumExit.reason)
+        assertEquals(51, momentumExit.position.exitPriceCents)
+        assertTrue("fade cut a loser before the stop", momentumExit.pnlCents < 0)
+
+        // Ledger: both round trips closed, no stragglers.
+        assertTrue(h.ledger.openPositions().isEmpty())
+        assertEquals(2, h.ledger.positions.size)
+        assertEquals(
+            setOf(ScalpStrategy.DIP_HUNT, ScalpStrategy.MOMENTUM_SNIPER),
+            h.ledger.positions.map { it.strategy }.toSet()
+        )
+        h.ledger.positions.forEach {
+            assertEquals(ScalpPositionStatus.CLOSED, it.status)
+            assertEquals(ScalpMode.PAPER, it.mode)
+        }
+
+        // UI state: flat overall, all three strategies reported flat.
+        val state = h.engine.currentState()
+        assertEquals("FLAT", state.state)
+        assertTrue(state.aggressive)
+        assertEquals(3, state.strategyStates.size)
+        assertTrue(
+            "all strategies flat, states=${state.strategyStates}",
+            state.strategyStates.all { it.state == "FLAT" }
+        )
     }
 }

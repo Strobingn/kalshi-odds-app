@@ -129,6 +129,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     /** Paper is selected directly; Live always goes through the confirm dialog. */
     fun requestScalpLiveMode(v: Boolean) {
+        // Compile-time paper-only lock (bitcoin-swarm branch): the Live
+        // option is structurally disabled — never even open the dialog.
+        if (v && !com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled) {
+            viewModelScope.launch { container.scalpSettingsStore.updateLiveMode(false) }
+            return
+        }
         if (!v) {
             viewModelScope.launch { container.scalpSettingsStore.updateLiveMode(false) }
         } else {
@@ -138,10 +144,17 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun confirmScalpLiveMode() {
         _state.update { it.copy(pendingScalpLive = false) }
+        if (!com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled) return
         viewModelScope.launch { container.scalpSettingsStore.updateLiveMode(true) }
     }
 
     fun cancelScalpLiveMode() = _state.update { it.copy(pendingScalpLive = false) }
+
+    fun setScalpAggressive(v: Boolean) =
+        viewModelScope.launch { container.scalpSettingsStore.updateAggressive(v) }
+
+    fun setScalpMaxOpenPositions(n: Int) =
+        viewModelScope.launch { container.scalpSettingsStore.updateMaxOpenPositions(n) }
 
     fun setScalpStake(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateMaxStakeUsd(v) }
     fun setScalpTakeProfitPp(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateTakeProfitPp(v) }

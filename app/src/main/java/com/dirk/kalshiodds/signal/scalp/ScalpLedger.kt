@@ -12,6 +12,10 @@ interface ScalpLedger {
 
     fun openPosition(): ScalpPosition?
 
+    /** Open position for one strategy (multi-strategy aggressive mode). */
+    fun openPosition(strategy: ScalpStrategy): ScalpPosition? =
+        openPositions().firstOrNull { it.strategy == strategy }
+
     fun openPositions(): List<ScalpPosition>
 
     /** ENTER rows in `[nowMs − windowMs, nowMs]`. */

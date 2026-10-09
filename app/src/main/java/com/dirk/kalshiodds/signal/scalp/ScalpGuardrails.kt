@@ -27,8 +27,8 @@ object ScalpGuardrails {
         if (state.killSwitch) {
             return "kill switch tripped — clear it in Scalp settings to resume"
         }
-        if (state.openPositionCount >= 1) {
-            return "already in a scalp position — one at a time"
+        if (state.openPositionCount >= settings.maxOpenPositions) {
+            return "max open scalp positions reached (${settings.maxOpenPositions})"
         }
         if (state.entriesLastHour >= settings.maxTradesPerHour) {
             return "scalp trade cap reached (${settings.maxTradesPerHour}/hour)"

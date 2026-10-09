@@ -19,6 +19,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -383,18 +384,69 @@ fun SettingsContent(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     if (!state.scalp.liveMode) {
                         Button(onClick = { viewModel?.requestScalpLiveMode(false) }) { Text("Paper (simulated)") }
-                        OutlinedButton(onClick = { viewModel?.requestScalpLiveMode(true) }) { Text("Live (real money)") }
+                        OutlinedButton(
+                            onClick = { viewModel?.requestScalpLiveMode(true) },
+                            enabled = com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled
+                        ) { Text("Live (real money)") }
                     } else {
                         OutlinedButton(onClick = { viewModel?.requestScalpLiveMode(false) }) { Text("Paper (simulated)") }
-                        Button(onClick = { viewModel?.requestScalpLiveMode(true) }) { Text("Live (real money)") }
+                        Button(
+                            onClick = { viewModel?.requestScalpLiveMode(true) },
+                            enabled = com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled
+                        ) { Text("Live (real money)") }
                     }
                 }
-                if (!state.scalp.liveMode) {
+                if (!com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled) {
+                    Text(
+                        "Live disabled on this build (paper-only experiment branch)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accentOrange
+                    )
+                } else if (!state.scalp.liveMode) {
                     Text(
                         "Paper fills are simulated at the live book — no Kalshi orders.",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
+                }
+                ToggleRow(
+                    "Aggression (3 strategies concurrently)",
+                    state.scalp.aggressive,
+                    { viewModel?.setScalpAggressive(it) }
+                )
+                Text(
+                    "On: Dip Hunt + Momentum + Reversal run at once, up to " +
+                        "${state.scalp.maxOpenPositions} open positions, faster re-entry. " +
+                        "Off: single Dip Hunt with the conservative backtest profile. " +
+                        "The daily-loss breaker and kill switch apply either way.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+                if (state.scalp.aggressive && state.scalpStatus.strategyStates.isNotEmpty()) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        for (st in state.scalpStatus.strategyStates) {
+                            AssistChip(
+                                onClick = { },
+                                label = {
+                                    Text(
+                                        String.format(
+                                            Locale.US,
+                                            "%s · %s",
+                                            st.strategy.label,
+                                            if (st.state == "IN_POSITION") {
+                                                "IN @ ${st.position?.entryPriceCents ?: "?"}¢"
+                                            } else {
+                                                "FLAT"
+                                            }
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                    }
                 }
                 Text(
                     String.format(Locale.US, "Max stake per entry  $%.0f  (cap $10 · Live $10 all-in re-enforced)", state.scalp.maxStakeUsd),
@@ -1042,10 +1094,11 @@ private fun scalpStatusLine(st: com.dirk.kalshiodds.signal.scalp.ScalpUiState): 
 
 private fun scalpEventLine(e: com.dirk.kalshiodds.signal.scalp.ScalpEvent): String = when (e) {
     is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Entered ->
-        "entered ${e.position.ticker} @ ${e.position.entryPriceCents}¢"
+        "${e.position.strategy.name.lowercase()} entered ${e.position.ticker} @ ${e.position.entryPriceCents}¢"
     is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Exited -> {
         val pnlUsd = e.pnlCents / 100.0
-        "exited ${if (pnlUsd >= 0) "+" else "−"}$${"%.2f".format(kotlin.math.abs(pnlUsd))} (${e.reason.name.lowercase()})"
+        "${e.position.strategy.name.lowercase()} exited " +
+            "${if (pnlUsd >= 0) "+" else "−"}$${"%.2f".format(kotlin.math.abs(pnlUsd))} (${e.reason.name.lowercase()})"
     }
     is com.dirk.kalshiodds.signal.scalp.ScalpEvent.GuardrailBlocked -> "blocked: ${e.reason}"
     is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Error -> "error: ${e.message}"

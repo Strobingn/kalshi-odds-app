@@ -36,6 +36,9 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
     /** Synchronous read of the open position, if any. */
     override fun openPosition(): ScalpPosition? = synchronized(cacheLock) { cachedOpen.firstOrNull() }
 
+    override fun openPosition(strategy: ScalpStrategy): ScalpPosition? =
+        synchronized(cacheLock) { cachedOpen.firstOrNull { it.strategy == strategy } }
+
     override fun openPositions(): List<ScalpPosition> = synchronized(cacheLock) { cachedOpen.toList() }
 
     /** Newest-first flat ledger rows (bounded cache). */
@@ -97,6 +100,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
                     pnlCents = null,
                     reason = null,
                     mode = stored.mode.name,
+                    strategy = stored.strategy.name,
                     clientOrderId = clientOrderId,
                     createdAtMs = stored.entryTimeMs
                 )
@@ -158,6 +162,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
                         pnlCents = pnlCents,
                         reason = reason.name,
                         mode = pos.mode.name,
+                        strategy = pos.strategy.name,
                         clientOrderId = pos.clientOrderId,
                         createdAtMs = exitTimeMs
                     )
@@ -203,6 +208,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
         put("contracts", p.contracts)
         put("entry_time_ms", p.entryTimeMs)
         put("mode", p.mode.name)
+        put("strategy", p.strategy.name)
         put("status", p.status.name)
         put("exit_price_cents", p.exitPriceCents)
         put("exit_time_ms", p.exitTimeMs)
@@ -231,6 +237,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
         put("pnl_cents", pnlCents)
         put("reason", reason?.name)
         put("mode", pos.mode.name)
+        put("strategy", pos.strategy.name)
         put("client_order_id", pos.clientOrderId)
         put("created_at_ms", pos.entryTimeMs)
     }
@@ -258,6 +265,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
         contracts = c.long("contracts").toInt(),
         entryTimeMs = c.long("entry_time_ms"),
         mode = if (c.str("mode") == ScalpMode.LIVE.name) ScalpMode.LIVE else ScalpMode.PAPER,
+        strategy = ScalpStrategy.parse(c.strOrNull("strategy")),
         status = if (c.str("status") == ScalpPositionStatus.CLOSED.name) {
             ScalpPositionStatus.CLOSED
         } else {
@@ -286,6 +294,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
         pnlCents = c.longOrNull("pnl_cents")?.toInt(),
         reason = c.strOrNull("reason"),
         mode = c.str("mode"),
+        strategy = c.strOrNull("strategy") ?: ScalpStrategy.DIP_HUNT.name,
         clientOrderId = c.strOrNull("client_order_id"),
         createdAtMs = c.long("created_at_ms")
     )
@@ -303,8 +312,23 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-            // v1 → v2 placeholder: additive-only migrations, never DROP.
-            createTables(db)
+            // Additive-only migrations, never DROP — same discipline as
+            // SqliteResultsStore / PaperFillSchema.
+            if (oldVersion < 2) {
+                addColumnIfMissing(db, TABLE_POSITIONS, "strategy", "ALTER TABLE $TABLE_POSITIONS ADD COLUMN strategy TEXT")
+                addColumnIfMissing(db, TABLE_TRADES, "strategy", "ALTER TABLE $TABLE_TRADES ADD COLUMN strategy TEXT")
+            }
+        }
+
+        /** ALTER TABLE only when the column is not already there (idempotent). */
+        private fun addColumnIfMissing(db: SQLiteDatabase, table: String, column: String, ddl: String) {
+            val exists = db.rawQuery("PRAGMA table_info($table)", null).use { c ->
+                while (c.moveToNext()) {
+                    if (c.getString(1) == column) return@use true
+                }
+                false
+            }
+            if (!exists) db.execSQL(ddl)
         }
 
         private fun createTables(db: SQLiteDatabase) {
@@ -318,6 +342,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
                   contracts INTEGER NOT NULL,
                   entry_time_ms INTEGER NOT NULL,
                   mode TEXT,
+                  strategy TEXT,
                   status TEXT,
                   exit_price_cents INTEGER,
                   exit_time_ms INTEGER,
@@ -343,6 +368,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
                   pnl_cents INTEGER,
                   reason TEXT,
                   mode TEXT,
+                  strategy TEXT,
                   client_order_id TEXT,
                   created_at_ms INTEGER NOT NULL
                 )
@@ -354,7 +380,7 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
 
     companion object {
         const val DB_NAME = "diphunter_scalp.db"
-        const val DB_VERSION = 1
+        const val DB_VERSION = 2
         const val TABLE_POSITIONS = "scalp_positions"
         const val TABLE_TRADES = "scalp_trades"
         const val ACTION_ENTER = "ENTER"
