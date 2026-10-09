@@ -19,6 +19,10 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## Scalping study, 2026-10-09 (no app change)
+
+**A scalp on this market pays only from the front of the queue.** Buying at the ask and selling at the bid lost 1.6–4.3¢ a round trip under every rule tried (67 cells over 46 days of quotes and 22 days of the full trade tape), and a LightGBM model could rank those scalps but not find a positive group. Resting in and resting out earned +0.18¢ per order at the front of the queue and lost 2.9¢ at the back; a model that picks calm stretches raised the front-of-queue figure to +0.44¢ (99% interval [+0.36, +0.52], 7 of 7 test days). Break-even is about 250 contracts ahead; the usual queue is 2,000–10,000. Write-up: [`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md); tools: `tools/research/scalp/`.
+
 ## 1.8.2 (Claude branch): Clear lead, Dirk's rule
 
 The app now bets the way Bitcoin is going, once it is clearly ahead. When Bitcoin is 0.10–0.20% from the window's start price between minute 3 and minute 10, the Bitcoin card says **BET UP** or **BET DOWN** on the side Bitcoin is on, and Buy opens a $5 all-in ticket on that side. Approve is still required and the $5 cap and daily cap are unchanged.
