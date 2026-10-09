@@ -579,6 +579,7 @@ class Decision:
     regime: str
     volume: float
     oi: float
+    spot_side: str | None = None
 
 
 def close_fill(side: str, yes_ask_close: float | None, yes_bid_close: float | None) -> float | None:
@@ -715,6 +716,7 @@ class DecisionEngine:
             series=series,
             now_ms=now_ms,
             elapsed_min=elapsed_min,
+            spot_side=("YES" if (ret_1m or 0.0) > 0 else "NO" if (ret_1m or 0.0) < 0 else None) if ret_1m is not None else None,
             tte_sec=tte_sec,
             tte_bucket=tte,
             coin=coin,

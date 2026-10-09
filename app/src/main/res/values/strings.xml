@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">DipHunter GTP</string>
+    <string name="app_name">DipHunter Scalper</string>
     <string name="bitcoin_section">Bitcoin (KXBTC15M)</string>
     <string name="eth_section">Ethereum (KXETH15M)</string>
     <string name="sol_section">Solana (KXSOL15M)</string>
@@ -10,15 +10,15 @@
     <string name="no_markets">No open markets</string>
     <string name="error_generic">Could not load markets</string>
     <string name="settings">Settings</string>
-    <string name="signal_channel_name">DipHunter GTP signals</string>
+    <string name="signal_channel_name">DipHunter Scalper signals</string>
     <string name="signal_channel_desc">Instant local alerts when a crypto contract mid diverges from Dip Hunter fair value. Tickets still need an in-app Approve.</string>
-    <string name="live_signals_channel_name">DipHunter GTP live signals</string>
+    <string name="live_signals_channel_name">DipHunter Scalper live signals</string>
     <string name="live_signals_channel_desc">Ongoing notice that keeps the Kalshi WebSocket and scoring loop alive in the background. Allow this notification or Android will stop live odds.</string>
-    <string name="live_signals_fg_title">DipHunter GTP live signals</string>
+    <string name="live_signals_fg_title">DipHunter Scalper live signals</string>
     <string name="live_signals_fg_text">Watching crypto ticker + orderbook WebSocket. Alerts never auto-place; Approve is required per ticket.</string>
     <string name="live_signals_stop">Stop</string>
     <string name="live_signals_allow_background">Allow background</string>
-    <string name="signal_alert_title">DipHunter GTP · %1$s</string>
+    <string name="signal_alert_title">DipHunter Scalper · %1$s</string>
     <string name="scorecard">Scorecard</string>
     <string name="opportunity_channel_name">Long-shot and hunter cards</string>
     <string name="opportunity_channel_desc">Fires when a Long-shot or hunter ticket appears. Tapping opens the ticket. Approve is still required — never auto-placed.</string>

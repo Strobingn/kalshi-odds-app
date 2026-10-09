@@ -829,46 +829,45 @@ class ScalpTicketTest {
     private fun at(minute: Long): Long = 1_700_000_000_000L + minute * 60_000L
 
     @Test
-    fun scalpSurfacesWhenSpotConfirmsFavorite() {
-        val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)  // YES favorite, spot up
-        val t = TicketBuilder.proposeScalp(m, ctx(at(4)))!!
+    fun scalpBuysTheSpotConfirmedSide() {
+        // spot up -> YES even when YES is NOT the favorite
+        val up = scalpMarket(mid = 0.30, spotReturn1m = 0.002)
+        val t = TicketBuilder.proposeScalp(up, ctx(at(4)))!!
         assertEquals("YES", t.side)
         assertEquals(TicketKind.SCALP, t.kind)
-        assertTrue("joins the bid, never crosses", t.limitPrice!! <= 0.695)
+        assertTrue("joins the bid, never crosses", t.limitPrice!! <= up.yesAsk!! - 1e-9)
         assertTrue(t.contracts > 0)
         assertTrue(t.gateNote!!.contains("Scalp"))
         assertTrue(t.gateNote!!.contains("Approve still required"))
+        // spot down -> NO
+        val down = scalpMarket(mid = 0.70, spotReturn1m = -0.002)
+        assertEquals("NO", TicketBuilder.proposeScalp(down, ctx(at(4)))!!.side)
     }
 
     @Test
-    fun scalpSkipsWhenSpotMovesAgainstFavorite() {
-        val m = scalpMarket(mid = 0.70, spotReturn1m = -0.002)
-        assertNull(TicketBuilder.proposeScalp(m, ctx(at(4))))
-    }
-
-    @Test
-    fun scalpSkipsOutsideFirstSevenMinutes() {
+    fun scalpWorksAnyTimeInsideTheWindow() {
         val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)
-        assertNull("before 1m", TicketBuilder.proposeScalp(m, ctx(at(0))))
-        assertNull("after 7m", TicketBuilder.proposeScalp(m, ctx(at(8))))
+        assertTrue("minute 1", TicketBuilder.proposeScalp(m, ctx(at(1))) != null)
+        assertTrue("minute 8", TicketBuilder.proposeScalp(m, ctx(at(8))) != null)
+        assertTrue("minute 13", TicketBuilder.proposeScalp(m, ctx(at(13))) != null)
     }
 
     @Test
-    fun scalpSkipsCheapSideEntries() {
-        val m = scalpMarket(mid = 0.30, spotReturn1m = -0.002)  // NO favorite at ~70c
-        val no = TicketBuilder.proposeScalp(m, ctx(at(4)))
-        assertEquals("NO", no!!.side)
-        // a 50-50 coin flip window has no favorite to scalp
-        val flat = scalpMarket(mid = 0.50, spotReturn1m = 0.002)
-        assertNull(TicketBuilder.proposeScalp(flat.copy(yesBid = 0.495, yesAsk = 0.505), ctx(at(4))))
+    fun scalpAllowsCheapSpotConfirmedEntries() {
+        // aggressive: 20c+ entries allowed on the spot-confirmed side
+        val m = scalpMarket(mid = 0.25, spotReturn1m = 0.002)  // YES at ~25c, spot up
+        val t = TicketBuilder.proposeScalp(m, ctx(at(4)))
+        assertEquals("YES", t!!.side)
+        assertTrue(t.limitPrice!! >= 0.20 - 1e-9)
+        // below 20c is still skipped
+        val tooCheap = scalpMarket(mid = 0.15, spotReturn1m = 0.002)
+        assertNull(TicketBuilder.proposeScalp(tooCheap, ctx(at(4))))
     }
 
     @Test
-    fun scalpMissingSpotOrOpenTimeIsNoTicket() {
+    fun scalpMissingSpotIsNoTicket() {
         val noSpot = scalpMarket(spotReturn1m = null)
         assertNull(TicketBuilder.proposeScalp(noSpot, ctx(at(4))))
-        val noOpen = scalpMarket().copy(openTimeEpochMs = null)
-        assertNull(TicketBuilder.proposeScalp(noOpen, ctx(at(4))))
     }
 
     @Test

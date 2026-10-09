@@ -62,23 +62,23 @@ object TicketBuilder {
     }
 
     /**
-     * Scalp: inside the first ~7 minutes of the window, when spot moved in
-     * the favorite's direction over the last minute, join the bid on the
-     * favorite (50-99c). Backtested positive in IS and OOS on 7 days of live
-     * 15m markets (docs/edge-research-2026-10-08.md). Approve still required.
+     * Aggressive scalp: any time in the window, buy the side the live spot
+     * return confirms (up -> YES, down -> NO), join the bid (20-99c entries).
+     * Backtested on 7 days of live 15m markets: the spot-confirmed side wins
+     * OOS +0.88/bet (n=7516) vs +0.47 for favorite-only - the spot direction
+     * is the edge, not the favorite label (docs/edge-research-2026-10-08.md).
+     * Approve still required.
      */
     fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val openMs = market.openTimeEpochMs ?: return null
-        val elapsedMs = ctx.nowMs - openMs
-        if (elapsedMs < SCALP_MIN_ELAPSED_MS || elapsedMs > SCALP_MAX_ELAPSED_MS) return null
-        val mid = midOf(market) ?: return null
-        val favorite = if (mid >= 0.5) "YES" else "NO"
         val ret = market.spotReturn1m ?: return null
-        val spotConfirms = if (favorite == "YES") ret > 0.0 else ret < 0.0
-        if (!spotConfirms) return null
-        return buildScalpTicket(market, favorite, ctx)
+        val side = when {
+            ret > 0.0 -> "YES"
+            ret < 0.0 -> "NO"
+            else -> return null
+        }
+        return buildScalpTicket(market, side, ctx)
     }
 
     private fun buildScalpTicket(market: MarketUiModel, side: String, ctx: Context): TradeTicket? {
@@ -116,7 +116,7 @@ object TicketBuilder {
             ),
             gateNote = String.format(
                 java.util.Locale.US,
-                "Scalp · spot confirms %s · first 7m · join bid · hold to close · Approve still required",
+                "Scalp · spot moving %s · join bid · hold to close · Approve still required",
                 if (side == "YES") "UP" else "DOWN"
             ),
             createdAtMs = ctx.nowMs,
@@ -583,17 +583,10 @@ object TicketBuilder {
 
     const val AUTO_VALUE_MARGIN = 0.08
 
-    /** Scalp window: first 1-7 minutes of the 15m window. */
-    const val SCALP_MIN_ELAPSED_MS = 60_000L
-    const val SCALP_MAX_ELAPSED_MS = 7 * 60_000L
-    const val SCALP_MIN_ENTRY = 0.50
+    /** Aggressive scalp entries: spot-confirmed side, 20-99c. */
+    const val SCALP_MIN_ENTRY = 0.20
     const val SCALP_MAX_ENTRY = 0.99
 
-    private fun midOf(market: MarketUiModel): Double? {
-        val yb = KalshiPrice.usable(market.yesBid) ?: return null
-        val ya = KalshiPrice.usable(market.yesAsk) ?: return null
-        return (yb + ya) / 2.0
-    }
 
     /** Rank the two actual buys independently; a hero direction is not an order price. */
     private fun rankedValueSides(market: MarketUiModel, ctx: Context): List<String> =

@@ -419,20 +419,15 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
             if b:
                 return b
         if strategy == "scalp_spot":
-            # Shipped scalp: first 1-7m of the window, spot confirms the
-            # favorite over the last minute, join the bid on the favorite
-            # (50-99c). Fills only when a later candle trades through the
-            # resting price. Backtested positive IS+OOS (see
-            # docs/edge-research-2026-10-08.md).
-            elapsed = getattr(d, "elapsed_min", None)
-            if elapsed is None or not (1 <= elapsed <= 7):
+            # Shipped aggressive scalp: any time in the window, buy the side
+            # the 1m spot return confirms, join the bid (20-99c entries).
+            # Backtested OOS +0.88/bet (n=7516) - see
+            # docs/edge-research-2026-10-08.md.
+            fav = getattr(d, "spot_side", None)
+            if fav is None:
                 continue
-            mid = d.mid
-            if mid is None:
-                continue
-            fav = "YES" if mid >= 0.5 else "NO"
             ask = _fill_for(d, fav)
-            if ask is None or ask < 0.50 - 1e-9 or ask > 0.99 + 1e-9:
+            if ask is None or ask < 0.20 - 1e-9 or ask > 0.99 + 1e-9:
                 continue
             px = _maker_entry(d, fav)
             if px is None:
