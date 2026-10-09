@@ -635,7 +635,9 @@ internal fun ApproveTicketDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!ticket.isSell && !ticket.postOnly && !paperBuy && !paperTradingEnabled && credentialsConfigured && onRest != null) {
+                if (!ticket.isSell && !ticket.postOnly && !paperBuy && !paperTradingEnabled && credentialsConfigured && onRest != null &&
+                    com.dirk.kalshiodds.signal.trade.RestingBid.allowedFor(ticket.ticker)
+                ) {
                     TextButton(
                         onClick = onRest,
                         enabled = ticket.canApprove
