@@ -840,7 +840,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ctx = ticketContext(s, now)
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        val scalpTickets = container.scalp.observe(live, ctx) { hub.hasFreshBook(it, now) }
+        val scalpTickets = container.scalp.observe(live, ctx, if (s.settings.kalshiDemoEnabled) "demo" else "live") { hub.hasFreshBook(it, now) }
+            .filterNot { candidate -> !candidate.isSell && s.tickets.working.any {
+                it.ticket.ticker == candidate.ticker && (it.fillCount > 0 || it.isResting || it.status in setOf("unknown", "submitting"))
+            } }
         val exitIds = scalpTickets.map { it.id }.toSet()
         ticketSession.snapshot().proposals.filter { it.id.startsWith("scalp-exit-") && it.id !in exitIds }
             .forEach { ticketSession.dismiss(it.id) }

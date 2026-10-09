@@ -128,7 +128,7 @@ class AppContainer(context: Context) {
         extraOpenTickers = { paper.book.openTickers() },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
-            if (result.equals("yes", true) || result.equals("no", true)) scalp.settle(ticker, result.equals("yes", true))
+            if (result.equals("yes", true) || result.equals("no", true)) scalp.settle(ticker, result.equals("yes", true), source = if (hub.settings.kalshiDemoEnabled) "demo" else "live")
         },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {

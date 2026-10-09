@@ -210,7 +210,7 @@ private fun ProposedTicketCard(
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
-                        TicketKind.SCALP -> "EXPERIMENTAL SCALP · PAPER"
+                        TicketKind.SCALP -> "EXPERIMENTAL SCALP · UNVERIFIED"
                     } + " · " + TradeModeLabel.forApprove(
                         paperTradingEnabled = paperTradingEnabled,
                         liveCredentialsConfigured = credentialsConfigured,
@@ -498,6 +498,7 @@ internal fun ApproveTicketDialog(
                 when {
                     paperSell -> "PAPER sell this position?"
                     ticket.isSell -> "REAL MONEY — live sell"
+                    ticket.kind == TicketKind.SCALP -> "EXPERIMENTAL — real money"
                     else -> "REAL MONEY"
                 }
             )
@@ -527,6 +528,9 @@ internal fun ApproveTicketDialog(
                         colors.accentOrange
                     }
                 )
+                if (ticket.kind == TicketKind.SCALP) Text(
+                    "Profitability is unverified. The proxy fair model is not BRTI. This confirmation can lose the full entry cost.",
+                    color = colors.accentOrange, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(8.dp))
                 if (ticket.isSell && !paperSell && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())

@@ -13,15 +13,17 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
     data class Replay(val ticker: String, val side: String, val enteredMs: Long,
         val entry: Double, val count: Int, val entryDebit: Double,
         val closeMs: Long, val exit: Double? = null, val netUsd: Double? = null,
-        val reason: String? = null, val endedMs: Long? = null)
+        val reason: String? = null, val endedMs: Long? = null, val source: String = "live")
     private data class Quote(val at: Long, val bid: Double, val ask: Double, val fair: Double)
     private val history = mutableMapOf<String, ArrayDeque<Quote>>()
     private val records = initial.toMutableList()
     private val signals = mutableMapOf<String, TradeTicket>()
+    private var activeSource = "live"
 
     @Synchronized
-    fun observe(markets: List<MarketUiModel>, ctx: TicketBuilder.Context,
+    fun observe(markets: List<MarketUiModel>, ctx: TicketBuilder.Context, source: String = "live",
                 freshBook: (String) -> Boolean): List<TradeTicket> {
+        if (source != activeSource) { history.clear(); signals.clear(); activeSource = source }
         val active = markets.filter { it.ticker.startsWith("KXBTC15M-") &&
             MarketLifecycle.isCurrentWindow(it, ctx.nowMs) }
         val activeIds = active.map { it.ticker }.toSet()
@@ -39,7 +41,7 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
                 // Missing quotes leave the position unresolved, never a fictional fill.
                 continue
             }
-            val replayIndex = records.indexOfFirst { it.ticker == m.ticker && it.side == side && it.endedMs == null }
+            val replayIndex = records.indexOfFirst { it.source == source && it.ticker == m.ticker && it.side == side && it.endedMs == null }
             if (replayIndex >= 0) {
                 val rec = records[replayIndex]
                 val reason = exitReason(rec.entry, bid, fair)
@@ -78,7 +80,7 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
             val total = LiveOrderSizer.allInUsd(count, ask)
             val base = TicketBuilder.proposeManual(m, side, ctx) ?: continue
             signals[key] = base.copy(id = "scalp-$key", kind = TicketKind.SCALP,
-                paperOnly = true, contracts = count, limitPrice = ask,
+                paperOnly = false, contracts = count, limitPrice = ask,
                 yesLimitPrice = if (side == "YES") ask else 1 - ask,
                 stakeUsd = total, allInUsd = total, feeUsd = LiveOrderSizer.feeUsd(count, ask),
                 maxPayoutUsd = count.toDouble(), estimatedFillUsd = total,
@@ -86,8 +88,8 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
                 netEvUsd = null, netEvPerContract = null, netEdgePp = null,
                 gateNote = "Experimental bounce after a ≥5¢ drop and ≥1¢ recovery; proxy fair value ≥6¢ over ask. No verified Kalshi profit model.",
                 sizingNote = "$count contracts · ≤0.5% bankroll / $5 · both-leg fees included in replay", winTargetUsd = null)
-            if (records.none { it.ticker == m.ticker && it.side == side }) {
-                records += Replay(m.ticker, side, ctx.nowMs, ask, count, total, m.closeTimeEpochMs ?: continue)
+            if (records.none { it.source == source && it.ticker == m.ticker && it.side == side }) {
+                records += Replay(m.ticker, side, ctx.nowMs, ask, count, total, m.closeTimeEpochMs ?: continue, source = source)
                 persist()
             }
         }
@@ -117,8 +119,8 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
         persist()
     }
     @Synchronized
-    fun settle(ticker: String, yesWon: Boolean, atMs: Long = System.currentTimeMillis()) {
-        records.indices.filter { records[it].ticker == ticker && records[it].endedMs == null }.forEach { i ->
+    fun settle(ticker: String, yesWon: Boolean, atMs: Long = System.currentTimeMillis(), source: String = activeSource) {
+        records.indices.filter { records[it].source == source && records[it].ticker == ticker && records[it].endedMs == null }.forEach { i ->
             val rec = records[i]
             val payout = if ((rec.side == "YES") == yesWon) rec.count.toDouble() else 0.0
             records[i] = rec.copy(exit = payout / rec.count, netUsd = payout - rec.entryDebit,
@@ -128,9 +130,9 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
     }
     @Synchronized
     fun summary(): String {
-        val finished = records.filter { it.endedMs != null }
-        val unresolved = records.count { it.endedMs == null }
-        return "Quote replay: ${finished.size} completed · $unresolved unresolved · net $${"%.2f".format(java.util.Locale.US, finished.sumOf { it.netUsd ?: 0.0 })}. Hypothetical taker fills; queue, latency and slippage untested."
+        val finished = records.filter { it.source == activeSource && it.endedMs != null }
+        val unresolved = records.count { it.source == activeSource && it.endedMs == null }
+        return "${activeSource.uppercase()} quote replay: ${finished.size} completed · $unresolved unresolved · net $${"%.2f".format(java.util.Locale.US, finished.sumOf { it.netUsd ?: 0.0 })}. Hypothetical taker fills; queue, latency and slippage untested."
     }
     @Synchronized fun snapshot(): List<Replay> = records.toList()
     private fun persist() {

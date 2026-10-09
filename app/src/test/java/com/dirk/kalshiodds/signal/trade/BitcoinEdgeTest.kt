@@ -89,13 +89,26 @@ class BitcoinEdgeTest {
                 proposals = engine.observe(listOf(market), ctx) { true }
             }
             val entry = proposals.first { it.kind == TicketKind.SCALP && it.side == "YES" }
-            assertTrue(entry.paperOnly)
-            assertFalse(entry.canApprove)
+            assertFalse(entry.paperOnly)
+            assertTrue(entry.canApprove)
             assertEquals(.455, entry.limitPrice, 1e-9)
             val replay = engine.snapshot().single()
             assertTrue(replay.entryDebit > replay.entry * replay.count)
             assertNull(replay.endedMs)
         }
+    }
+
+    @Test fun liveScalpSizeUsesFreshCashNotConfiguredBankroll() {
+        val scalp = ticket().copy(kind = TicketKind.SCALP)
+        assertTrue(runCatching { LimitOrderEditor.edit(scalp, 3, .4, LimitOptions(), 100.0, 1000) }.isFailure)
+        assertTrue(LimitOrderEditor.edit(scalp, 1, .4, LimitOptions(), 100.0, 1000).canApprove)
+    }
+    @Test fun changedAccountBlocksPlacement() = runBlocking {
+        var account = "a"
+        var calls = 0
+        val session = TicketSession(placeOrder = { _, _ -> calls++; error("must not submit") }, currentAccount = { account })
+        session.selectAccount("a"); session.addManual(ticket()); account = "b"; session.approve("t")
+        assertEquals(0, calls)
     }
 
 }

@@ -23,4 +23,12 @@ class AppUpdaterTest {
             "browser_download_url":"https://github.com/other/repo/releases/download/tag/app.apk"}]}"""
         assertNull(AppUpdater.parseAsset(raw))
     }
+    @Test fun choosesNewestIndependentApk() {
+        val raw = """{"assets":[
+          {"name":"BitcoinEdge-Codex-v1.1.0-17.apk", "browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/bitcoin-edge-codex/old.apk"},
+          {"name":"BitcoinEdge-Codex-v1.1.0-99.apk", "browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/bitcoin-edge-codex/new.apk"}
+        ]}"""
+        assertEquals(2_000_099, AppUpdater.parseAsset(raw)!!.versionCode)
+    }
+
 }

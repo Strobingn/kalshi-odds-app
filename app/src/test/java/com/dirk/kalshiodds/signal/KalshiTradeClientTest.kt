@@ -173,6 +173,42 @@ class KalshiTradeClientTest {
         assertTrue(api.creates.isEmpty())
     }
 
+
+    @Test fun noMakerOrderTransmitsExpiryAndExactOutcomeComplement() = runBlocking {
+        val api = RecordingTradeApi(Response.success(CreateOrderV2Response(orderId = "maker", fillCount = "0", remainingCount = "3")))
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+        val expiry = System.currentTimeMillis() / 1000 + 60
+        val ticket = sampleTicket().copy(side = "NO", bookSide = "ask", contracts = 3,
+            limitPrice = .4, yesLimitPrice = .6,
+            limitOptions = com.dirk.kalshiodds.signal.trade.LimitOptions(true, expirationTime = expiry))
+        client.createLimit(ticket, "cid")
+        assertEquals("ask", api.creates.single().side)
+        assertEquals("0.6000", api.creates.single().price)
+        assertEquals("3.00", api.creates.single().count)
+        assertTrue(api.creates.single().postOnly)
+        assertEquals(expiry, api.creates.single().expirationTime)
+    }
+    @Test fun serverErrorNeverRetriesAWriteOnAnotherHost() = runBlocking {
+        val primary = RecordingTradeApi(error(500, "{}"))
+        val fallback = RecordingTradeApi()
+        val client = KalshiTradeClient(primary, fallback, credentials = { "key" to fakePem })
+        assertTrue(runCatching { client.createLimit(sampleTicket(), "cid") }.isFailure)
+        assertEquals(1, primary.creates.size)
+        assertTrue(fallback.creates.isEmpty())
+    }
+    @Test fun cancelReadsFinalPartialFillAndFees() = runBlocking {
+        val api = RecordingTradeApi()
+        val dto = com.dirk.kalshiodds.data.dto.OrderStateDto("oid", "cid", sampleTicket().ticker,
+            "canceled", "1.00", "0.00", "0.01", "0.00")
+        api.read = Response.success(com.dirk.kalshiodds.data.dto.GetOrderResponse(dto))
+        val client = KalshiTradeClient(primary = api, credentials = { "key" to fakePem })
+        val order = com.dirk.kalshiodds.signal.trade.PlacedOrder(sampleTicket(), "cid", "oid", 0.0, 2.0, null, 0L, status = "resting")
+        val canceled = client.cancel(order)
+        assertEquals(1.0, canceled.fillCount, 0.0)
+        assertEquals(0.0, canceled.remainingCount, 0.0)
+        assertFalse(canceled.isResting)
+        assertEquals(.01, canceled.actualFeesUsd!!, 0.0)
+    }
     private fun sampleTicket() = TradeTicket(
         id = "t1",
         ticker = "KXBTC15M-26SEP241445-45",
@@ -197,7 +233,8 @@ class KalshiTradeClientTest {
             CreateOrderV2Response(orderId = "x")
         )
     ) : KalshiTradeApi {
-        override suspend fun getOrder(orderId: String): Response<com.dirk.kalshiodds.data.dto.GetOrderResponse> = error("Not configured")
+        var read: Response<com.dirk.kalshiodds.data.dto.GetOrderResponse>? = null
+        override suspend fun getOrder(orderId: String): Response<com.dirk.kalshiodds.data.dto.GetOrderResponse> = read ?: error("Not configured")
         override suspend fun getOrders(ticker: String, cursor: String?, limit: Int): Response<com.dirk.kalshiodds.data.dto.GetOrdersResponse> = error("Not configured")
 
         val creates = mutableListOf<CreateOrderV2Request>()
@@ -220,6 +257,6 @@ class KalshiTradeClientTest {
             orderId: String,
             marketTicker: String?,
             exchangeIndex: Int
-        ): Response<CancelOrderV2Response> = Response.success(CancelOrderV2Response(orderId = orderId))
+        ): Response<CancelOrderV2Response> = Response.success(CancelOrderV2Response(orderId = orderId, reducedBy = "1.00"))
     }
 }

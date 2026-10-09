@@ -29,7 +29,8 @@ object LimitOrderEditor {
         require(kotlin.math.abs(wire.toDouble() - price) < 1e-8) { "Price supports at most four dollar decimal places" }
         options.validate(nowMs, false)
         val total = LiveOrderSizer.allInUsd(count, price)
-        require(total <= LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) { "Limit exceeds the $5 all-in cap" }
+        val cap = if (ticket.kind == TicketKind.SCALP) minOf(5.0, (cashUsd ?: 0.0) * .005) else 5.0
+        require(total <= cap + 1e-9) { "Limit exceeds the all-in risk cap ($5; scalps also ≤0.5% live cash)" }
         require(cashUsd != null && cashUsd.isFinite() && total <= cashUsd + 1e-9) { "Refresh live cash; order must fit available balance" }
         return ticket.copy(contracts = count, limitPrice = price,
             yesLimitPrice = if (ticket.side == "NO") 1.0 - price else price,

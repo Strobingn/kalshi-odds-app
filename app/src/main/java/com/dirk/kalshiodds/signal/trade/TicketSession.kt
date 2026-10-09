@@ -286,6 +286,12 @@ class TicketSession(
             return _state.value
         }
 
+        if (ticket.kind == TicketKind.SCALP && cur.working.any {
+            it.ticket.ticker == ticket.ticker && (it.fillCount > 0 || it.isResting)
+        }) {
+            _state.update { it.copy(lastError = "Scalp entry blocked; a position or working order already exists") }
+            return _state.value
+        }
         val clientOrderId = (cur.phase as? TicketPhase.AwaitingApprove)
             ?.clientOrderId
             ?.takeIf { it.isNotBlank() }
