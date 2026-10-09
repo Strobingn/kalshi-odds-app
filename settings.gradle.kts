@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "DipHunter"
+rootProject.name = "scalpHunter-Kimi"
 include(":app")

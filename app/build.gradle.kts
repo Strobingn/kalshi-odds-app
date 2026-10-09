@@ -11,9 +11,10 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        // scalpHunter-Kimi identity: separate install slot from DipHunter
+        // and Bitcoin-KIMI. Keep this ID and the committed debug signing key
+        // stable so future APKs update this app in place.
+        applicationId = "com.dirk.scalphunter.kimi"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a

@@ -11,5 +11,5 @@ object AppVersion {
     val versionCode: Int get() = BuildConfig.VERSION_CODE
 
     val label: String
-        get() = "Bitcoin Kimi v$versionName ($versionCode)"
+        get() = "scalpHunter-Kimi v$versionName ($versionCode)"
 }
