@@ -1,0 +1,73 @@
+name: Train edge model
+
+on:
+  schedule:
+    # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
+    - cron: "17 8 * * 1"
+  workflow_dispatch:
+    inputs:
+      days:
+        description: Lookback days for settled Kalshi 15m markets
+        required: false
+        default: "30"
+
+permissions:
+  contents: write
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    # Fetching ~30 days of 1m candles for ~8.6k markets takes a while on a cold cache.
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Trainer + backtest port tests (no look-ahead, no fixture fallback)
+        run: |
+          python3 ml/test_train_edge.py
+          python3 tools/backtest/test_parity.py
+      - name: Restore market cache
+        uses: actions/cache@v4
+        with:
+          path: tools/backtest/cache
+          key: kalshi-15m-cache-${{ github.run_id }}
+          restore-keys: kalshi-15m-cache-
+      - name: Train
+        # Exits non-zero (and skips publishing) when there is not enough real data.
+        run: python3 ml/train_edge.py --fetch --days ${{ github.event.inputs.days || '30' }} --cache tools/backtest/cache --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+      - name: Upload model
+        uses: actions/upload-artifact@v4
+        with:
+          name: edge-model-json
+          path: |
+            ml/edge_model.json
+            ml/edge_model_manifest.json
+          if-no-files-found: error
+      - name: Publish rolling release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh release delete edge-model-latest --yes || true
+          NOTES=$(python3 - <<'PY'
+          import json, pathlib
+          p = pathlib.Path("ml/edge_model_manifest.json")
+          m = json.loads(p.read_text()) if p.is_file() else {}
+          print(
+              "Weekly edge model\\n\\n"
+              f"- version: {m.get('version')}\\n"
+              f"- trained_at: {m.get('trained_at')}\\n"
+              f"- n_samples: {m.get('n_samples')}\\n"
+              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
+              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
+              f"- beats_market: {m.get('beats_market')}"
+          )
+          PY
+          )
+          gh release create edge-model-latest \
+            ml/edge_model.json \
+            ml/edge_model_manifest.json \
+            --title "Edge model (latest)" \
+            --notes "$NOTES"

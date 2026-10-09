@@ -1,0 +1,68 @@
+# Built application files
+*.apk
+*.aar
+*.ap_
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Java class files
+*.class
+
+# Generated files
+bin/
+gen/
+out/
+release/
+
+# Gradle
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+local.properties
+.gradletasknamecache
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+.navigation/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# NDK
+obj/
+
+# Keystores (never commit)
+*.jks
+*.keystore
+!app/signing/diphunter-debug.jks
+
+# Google Services / secrets
+google-services.json
+**/secrets.*
+**/local.secrets.*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Kotlin
+.kotlin/
+
+# Misc
+*.log
+*.swp
+*~
+ml/train_log.txt
+ml/edge_model.json
+ml/parity_sample.last.json
+
+# Backtest raw cache (re-fetch; only fixtures/ are committed)
+tools/backtest/cache/
+tools/backtest/**/__pycache__/
+tools/backtest/**/*.pyc

@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "note": "Student snapshot. Empty trees keep the compiled Kotlin GBM prior. Refresh via python3 ml/train_heavy.py — see ml/DISTILL.md.",
+  "stack": {
+    "mlp": 0.55,
+    "cnn": 0.20,
+    "lstm": 0.10,
+    "gbm": 0.15,
+    "sampleCount": 0
+  },
+  "gbm": {
+    "learningRate": 0.35,
+    "baseScore": 0.0,
+    "trees": []
+  },
+  "series": ["KXBTC15M", "KXETH15M", "KXSOL15M"]
+}
