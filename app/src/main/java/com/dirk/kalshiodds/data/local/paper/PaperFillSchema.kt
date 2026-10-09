@@ -8,7 +8,7 @@ package com.dirk.kalshiodds.data.local.paper
 object PaperFillSchema {
     const val TABLE = "paper_fills"
     const val FROM_VERSION = 5
-    const val VERSION = 7
+    const val VERSION = 8
 
     val CREATE = """
         CREATE TABLE IF NOT EXISTS $TABLE (

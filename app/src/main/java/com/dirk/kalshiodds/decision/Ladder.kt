@@ -188,10 +188,26 @@ object V060Rule {
 object StrategyLadder {
     enum class Stage(val label: String) { PAPER("Paper"), SHADOW("Shadow"), LIMITED_LIVE("Limited live (Approve + REAL MONEY)") }
 
-    enum class Id(val key: String, val label: String, val rule: String, val need: Int, val countsFilled: Boolean) {
+    enum class Id(
+        val key: String,
+        val label: String,
+        val rule: String,
+        val need: Int,
+        val countsFilled: Boolean,
+        /** Highest stage this build allows. Scalp stays paper in 0.3.38: no shadow or live scalping. */
+        val maxStage: Stage = Stage.LIMITED_LIVE
+    ) {
         V060("v060", "v060 daily BTC favourite", "KXBTCD 5 PM ET, frozen FLB model, EV/$ ≥ 0.06 at the ask, one bet per event", 100, true),
         V150("v150", "v150 D3 maker bid", "D3 maker bid 85–97¢, 2–4 PM ET, queue-honest fills", 100, true),
-        FAV15("fav15", "fav15 15-minute favourite", "Buy the favourite when the cheaper ask is 2–15¢ with ≥ 5 min left, first entry per market", 300, false)
+        FAV15("fav15", "fav15 15-minute favourite", "Buy the favourite when the cheaper ask is 2–15¢ with ≥ 5 min left, first entry per market", 300, false),
+        SCALP(
+            "scalp",
+            "scalp 15-minute fair-gap scalp (PAPER)",
+            "Buy 10¢+ below spot fair after fee, sell at the bid when selling beats holding / fair turns down / 20 s left; fees both legs",
+            ScalpRule.PROMOTION_ROUND_TRIPS,
+            false,
+            Stage.PAPER
+        )
     }
 
     data class Stats(val filled: Int, val settled: Int, val ci: ClusteredBootstrap.Ci?)
@@ -219,11 +235,19 @@ object StrategyLadder {
         val lo = s.ci?.lo
         val enough = n >= id.need
         val positive = lo != null && lo > 0.0 && (s.ci?.mean ?: 0.0) > 0.0
-        val next = nextStage(stage)
+        val next = nextStage(stage)?.takeIf { it.ordinal <= id.maxStage.ordinal }
         val eligible = next != null && enough && positive
-        val noun = if (id.countsFilled) "filled" else "settled"
+        val noun = when {
+            id == Id.SCALP -> "round trips"
+            id.countsFilled -> "filled"
+            else -> "settled"
+        }
         val ciText = s.ci?.let { String.format(Locale.US, "mean %+.3f, 95%% CI [%+.3f, %+.3f] over %d markets", it.mean, it.lo, it.hi, it.clusters) } ?: "no settled entries"
         val reason = when {
+            id.maxStage == Stage.PAPER -> {
+                val bar = if (enough && positive) "Bar met" else "Bar: ${id.need} $noun with CI lower bound > 0 (now $n)"
+                "$bar · $ciText. Shadow/live scalping is not available in this release."
+            }
             next == null -> "At the top stage. $n $noun · $ciText. Real orders still need Approve + REAL MONEY."
             !enough -> "Needs ${id.need} $noun (now $n) · $ciText"
             !positive -> "$n $noun but the CI lower bound is not above 0 · $ciText"
@@ -240,7 +264,8 @@ object StrategyLadder {
 
     fun rulesText(): String =
         "Strategy ladder: paper → shadow → limited live. v060 and v150 need ${Id.V060.need} fills, " +
-            "fav15 needs ${Id.FAV15.need} settled, each with a market-clustered bootstrap 95% CI lower bound > 0. " +
+            "fav15 needs ${Id.FAV15.need} settled, scalp needs ${Id.SCALP.need} round trips (paper only in this release), " +
+            "each with a market-clustered bootstrap 95% CI lower bound > 0. " +
             "Live orders always need Approve + REAL MONEY."
 
     fun parseStage(raw: String?): Stage = Stage.values().firstOrNull { it.name == raw } ?: Stage.PAPER
@@ -333,6 +358,7 @@ class LadderStore(
     fun promote(id: StrategyLadder.Id, status: StrategyLadder.Status): Boolean {
         if (!status.eligibleForNext) return false
         val next = StrategyLadder.nextStage(stage(id)) ?: return false
+        if (next.ordinal > id.maxStage.ordinal) return false
         synchronized(lock) { publish(_state.value.copy(stages = _state.value.stages + (id.key to next.name))) }
         return true
     }

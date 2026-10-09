@@ -79,6 +79,8 @@ fun HomeScreen(
     onCancelOrder: (String) -> Unit,
     onLimitCents: (String, String) -> Unit = { _, _ -> },
     onResumeAlerts: () -> Unit = {},
+    onStop: () -> Unit = {},
+    onCancelResting: (String, String, String) -> Unit = { _, _, _ -> },
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
 ) {
@@ -222,6 +224,9 @@ fun HomeScreen(
                             }
                         }
                         item {
+                            HomeStopButton(onStop = onStop)
+                        }
+                        item {
                             ThisWindowCard(
                                 market = best?.first,
                                 decision = best?.second,
@@ -264,6 +269,13 @@ fun HomeScreen(
                             item {
                                 D3Card(snapshot = state.d3)
                             }
+                        }
+                        item {
+                            HomeOpenBetsSection(
+                                rows = HomeOpenBets.rows(state.positions, state.restingOrders, state.paper.fills),
+                                onClose = onSellPosition,
+                                onCancel = onCancelResting
+                            )
                         }
                         item {
                             Text(

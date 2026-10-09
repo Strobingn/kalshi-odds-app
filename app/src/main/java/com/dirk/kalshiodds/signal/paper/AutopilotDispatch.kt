@@ -20,7 +20,9 @@ object AutopilotDispatch {
         val shadowPrice: Double?,
         val shadowDepthFill: Boolean,
         val shadowAllInUsd: Double,
-        val alreadyAttempted: Boolean
+        val alreadyAttempted: Boolean,
+        /** 0.3.38 one-tap Stop: blocks every send until Autopilot is turned back on. */
+        val stopLatched: Boolean = false
     )
 
     data class Result(
@@ -31,6 +33,9 @@ object AutopilotDispatch {
     )
 
     fun decide(request: Request): Result {
+        if (request.stopLatched) {
+            return Result(false, false, false, "STOPPED — turn Autopilot back on to resume")
+        }
         if (!request.masterOn) {
             return Result(false, false, false, "Autopilot off")
         }

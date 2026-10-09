@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * a process kill. Writes are serialized by SQLite; callers should use
  * [AsyncResultsWriter] so scoring never blocks.
  */
-class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink {
+class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink, com.dirk.kalshiodds.decision.ScalpPersistence {
     private val db = Helper(context.applicationContext)
 
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -949,6 +949,70 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         )
     }
 
+    /** 0.3.38 paper scalps: insert or replace one row by id. Never deletes. */
+    override fun upsertScalp(trade: com.dirk.kalshiodds.decision.ScalpTrade) {
+        val v = ContentValues().apply {
+            put("id", trade.id)
+            put("ticker", trade.ticker)
+            put("side", trade.side)
+            put("state", trade.state.name)
+            put("signal_at_ms", trade.signalAtMs)
+            put("signal_ask", trade.signalAsk)
+            put("fair_at_signal", trade.fairAtSignal)
+            put("contracts", trade.contracts)
+            trade.entryPrice?.let { put("entry_price", it) } ?: putNull("entry_price")
+            put("entry_fee_usd", trade.entryFeeUsd)
+            trade.entryAtMs?.let { put("entry_at_ms", it) } ?: putNull("entry_at_ms")
+            trade.exitDecidedAtMs?.let { put("exit_decided_at_ms", it) } ?: putNull("exit_decided_at_ms")
+            put("exit_reason", trade.exitReason)
+            put("sold_contracts", trade.soldContracts)
+            put("proceeds_usd", trade.proceedsUsd)
+            put("exit_fee_usd", trade.exitFeeUsd)
+            trade.closedAtMs?.let { put("closed_at_ms", it) } ?: putNull("closed_at_ms")
+            trade.netUsd?.let { put("net_usd", it) } ?: putNull("net_usd")
+            put("note", trade.note)
+            put("rule_version", trade.ruleVersion)
+        }
+        db.writableDatabase.insertWithOnConflict(
+            com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, v, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun loadScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpTrade>()
+        db.readableDatabase.query(
+            com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, null, null, null, null, "signal_at_ms DESC", "5000"
+        ).use { c ->
+            while (c.moveToNext()) {
+                val state = runCatching { com.dirk.kalshiodds.decision.ScalpState.valueOf(c.str("state")) }
+                    .getOrDefault(com.dirk.kalshiodds.decision.ScalpState.NO_FILL)
+                out += com.dirk.kalshiodds.decision.ScalpTrade(
+                    id = c.str("id"),
+                    ticker = c.str("ticker"),
+                    side = c.str("side"),
+                    state = state,
+                    signalAtMs = c.long("signal_at_ms"),
+                    signalAsk = c.dbl("signal_ask"),
+                    fairAtSignal = c.dbl("fair_at_signal"),
+                    contracts = c.intOrNull("contracts") ?: 0,
+                    entryPrice = c.dblOrNull("entry_price"),
+                    entryFeeUsd = c.dbl("entry_fee_usd"),
+                    entryAtMs = c.dblOrNull("entry_at_ms")?.toLong(),
+                    exitDecidedAtMs = c.dblOrNull("exit_decided_at_ms")?.toLong(),
+                    exitReason = c.strOrNull("exit_reason"),
+                    soldContracts = c.intOrNull("sold_contracts") ?: 0,
+                    proceedsUsd = c.dbl("proceeds_usd"),
+                    exitFeeUsd = c.dbl("exit_fee_usd"),
+                    closedAtMs = c.dblOrNull("closed_at_ms")?.toLong(),
+                    netUsd = c.dblOrNull("net_usd"),
+                    note = c.strOrNull("note").orEmpty(),
+                    ruleVersion = c.strOrNull("rule_version") ?: com.dirk.kalshiodds.decision.ScalpRule.VERSION
+                )
+            }
+        }
+        return out
+    }
+
     /** Fill in the outcome on every unsettled prediction for [ticker]. Never deletes rows. */
     fun settleLedger(ticker: String, result: String, atMs: Long): Int {
         val values = ContentValues().apply {
@@ -1126,6 +1190,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             createPaperFillTable(db)
             createPendingOrdersTable(db)
             createLedgerTable(db)
+            createScalpTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -1138,6 +1203,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             if (oldVersion < 5) createChartTickTable(db)
             if (oldVersion < 6) createPaperFillTable(db)
             if (oldVersion < 7) createLedgerTable(db)
+            if (oldVersion < 8) createScalpTable(db)
             applyPaperFillColumns(db)
         }
 
@@ -1145,6 +1211,15 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             super.onOpen(db)
             applyPaperFillColumns(db)
             createPendingOrdersTable(db)
+            createScalpTable(db)
+        }
+
+        private fun createScalpTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.ScalpSchema.upgradeSql(
+                com.dirk.kalshiodds.data.local.paper.ScalpSchema.FROM_VERSION
+            )) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createPendingOrdersTable(db: SQLiteDatabase) {
@@ -1292,7 +1367,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 7
+        const val DB_VERSION = 8
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

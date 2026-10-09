@@ -74,7 +74,14 @@ object DipNav {
             AppRoutes.LADDER,
             "Records",
             "Strategy ladder",
-            "v060 · v150 · fav15: paper → shadow → limited live",
+            "v060 · v150 · fav15 · scalp: paper → shadow → limited live",
+            tab = false
+        ),
+        MoreDestination(
+            AppRoutes.SCALP,
+            "Records",
+            "Scalp (paper)",
+            "15-minute fair-gap scalps: open, history, net after both fees",
             tab = false
         ),
         MoreDestination(
@@ -114,6 +121,7 @@ object DipNav {
         AppRoutes.CHART -> "Home → a market"
         AppRoutes.CALIBRATION -> "More → Calibration report"
         AppRoutes.LADDER -> "More → Strategy ladder"
+        AppRoutes.SCALP -> "More → Scalp (paper)"
         else -> error("No path for $route")
     }
 

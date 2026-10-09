@@ -152,6 +152,9 @@ class MainActivity : ComponentActivity() {
                             },
                             AppRoutes.LADDER to {
                                 com.dirk.kalshiodds.ui.StrategyLadderScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.SCALP to {
+                                com.dirk.kalshiodds.ui.ScalpScreen(decisionViewModel, onBack = { navigator.back() })
                             }
                         ),
                         realMoney = {

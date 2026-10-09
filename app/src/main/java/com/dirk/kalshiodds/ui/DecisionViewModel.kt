@@ -22,6 +22,14 @@ data class CalibrationUi(
     val busy: Boolean = false
 )
 
+data class ScalpUi(
+    val open: List<ScalpCopy.Line> = emptyList(),
+    val history: List<ScalpCopy.Line> = emptyList(),
+    val stats: List<String> = emptyList(),
+    val ladder: String = "",
+    val rules: String = com.dirk.kalshiodds.decision.ScalpRule.rulesText()
+)
+
 data class LadderUi(
     val statuses: List<StrategyLadder.Status> = emptyList(),
     val entries: List<LadderEntry> = emptyList(),
@@ -36,11 +44,30 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
     private val _ladder = MutableStateFlow(LadderUi())
     val ladder: StateFlow<LadderUi> = _ladder.asStateFlow()
 
+    private val _scalp = MutableStateFlow(ScalpUi())
+    val scalp: StateFlow<ScalpUi> = _scalp.asStateFlow()
+
     init {
         refreshCalibration()
         viewModelScope.launch {
-            combine(container.ladder.state, container.d3Store.state) { l, d3 -> l to d3 }.collect { (l, d3) ->
-                _ladder.value = buildLadder(l.entries, d3.picks)
+            combine(container.ladder.state, container.d3Store.state, container.scalp.trades) { l, d3, sc -> Triple(l, d3, sc) }
+                .collect { (l, d3, sc) ->
+                    _ladder.value = buildLadder(l.entries, d3.picks, sc)
+                }
+        }
+        viewModelScope.launch {
+            combine(container.scalp.trades, container.scalp.marks) { t, m -> t to m }.collect { (t, m) ->
+                val status = StrategyLadder.status(
+                    StrategyLadder.Id.SCALP,
+                    container.ladder.stage(StrategyLadder.Id.SCALP),
+                    com.dirk.kalshiodds.decision.ScalpStats.ladderItems(t)
+                )
+                _scalp.value = ScalpUi(
+                    open = ScalpCopy.openLines(t, m),
+                    history = ScalpCopy.historyLines(t),
+                    stats = ScalpCopy.statsLines(com.dirk.kalshiodds.decision.ScalpStats.summary(t)),
+                    ladder = status.reason
+                )
             }
         }
     }
@@ -66,7 +93,8 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
 
     private fun buildLadder(
         entries: List<LadderEntry>,
-        d3: List<com.dirk.kalshiodds.signal.d3.D3Pick>
+        d3: List<com.dirk.kalshiodds.signal.d3.D3Pick>,
+        scalps: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList()
     ): LadderUi {
         val v150Items = d3.filter { it.filled }.map {
             StrategyLadder.Item(
@@ -79,7 +107,12 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
         val statuses = listOf(
             StrategyLadder.status(StrategyLadder.Id.V060, container.ladder.stage(StrategyLadder.Id.V060), container.ladder.items(V060Rule.ID)),
             StrategyLadder.status(StrategyLadder.Id.V150, container.ladder.stage(StrategyLadder.Id.V150), v150Items),
-            StrategyLadder.status(StrategyLadder.Id.FAV15, container.ladder.stage(StrategyLadder.Id.FAV15), container.ladder.items(Fav15Rule.ID))
+            StrategyLadder.status(StrategyLadder.Id.FAV15, container.ladder.stage(StrategyLadder.Id.FAV15), container.ladder.items(Fav15Rule.ID)),
+            StrategyLadder.status(
+                StrategyLadder.Id.SCALP,
+                container.ladder.stage(StrategyLadder.Id.SCALP),
+                com.dirk.kalshiodds.decision.ScalpStats.ladderItems(scalps)
+            )
         )
         return LadderUi(statuses = statuses, entries = entries)
     }
