@@ -981,7 +981,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     override fun loadScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpTrade>()
         db.readableDatabase.query(
-            com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, null, null, null, null, "signal_at_ms DESC", "5000"
+            com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, null, null, null, null, "signal_at_ms DESC", "20000"
         ).use { c ->
             while (c.moveToNext()) {
                 val state = runCatching { com.dirk.kalshiodds.decision.ScalpState.valueOf(c.str("state")) }

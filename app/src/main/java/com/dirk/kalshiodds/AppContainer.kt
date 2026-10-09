@@ -65,7 +65,8 @@ class AppContainer(context: Context) {
     /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
-            ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence()
+            ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),
+        tuneStore = com.dirk.kalshiodds.decision.SharedPrefsScalpTuneStore(app)
     )
     /** One-tap Stop latch and once-per-event trade notifications. */
     val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)

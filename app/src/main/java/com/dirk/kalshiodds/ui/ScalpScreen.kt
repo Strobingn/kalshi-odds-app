@@ -59,6 +59,23 @@ object ScalpCopy {
             Line(t.id, text, t.netUsd?.let { it > 0.0 })
         }
 
+    fun tuningLines(t: com.dirk.kalshiodds.decision.ScalpTuneState): List<String> {
+        val head = String.format(
+            Locale.US, "%s · walk-forward tuner · %d trials logged · %s",
+            t.versionLabel, t.trials,
+            if (t.lastRunAtMs > 0) "last run " + java.time.Instant.ofEpochMilli(t.lastRunAtMs)
+                .atZone(java.time.ZoneId.of("America/New_York")).toLocalDateTime().toString().replace('T', ' ').take(16) + " ET"
+            else "not run yet (needs ${com.dirk.kalshiodds.decision.ScalpTuner.RETUNE_EVERY} closed paper round trips)"
+        )
+        val coins = com.dirk.kalshiodds.decision.ScalpParams.COINS.map { c ->
+            val p = t.paramsFor(c)
+            val oos = t.oosCentsByCoin[c]?.let { String.format(Locale.US, "out-of-sample %+.2f¢/ct (n=%d)", it, t.oosNByCoin[c] ?: 0) }
+                ?: "out-of-sample: not enough data yet"
+            "$c: ${p.label()} · $oos"
+        }
+        return listOf(head) + coins + t.notes
+    }
+
     fun statsLines(s: ScalpStats.Summary): List<String> = listOf(
         String.format(Locale.US, "%d round trips · %d open · %d no-fills", s.roundTrips, s.open, s.noFills),
         String.format(Locale.US, "Net after both fees: %+.2f USD", s.netUsd),
@@ -83,6 +100,18 @@ fun ScalpScreen(viewModel: DecisionViewModel, onBack: () -> Unit) {
                 Text("Stats", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                 ui.stats.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
                 Text("Ladder: ${ui.ladder}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            }
+        }
+        item {
+            DecisionCard {
+                Text("Params (per coin)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                ui.tuning.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+            }
+        }
+        item {
+            DecisionCard {
+                Text("Scorecard", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                ui.breakdown.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
             }
         }
         item { Text("Open scalps (${ui.open.size})", fontWeight = FontWeight.SemiBold, color = colors.textPrimary) }

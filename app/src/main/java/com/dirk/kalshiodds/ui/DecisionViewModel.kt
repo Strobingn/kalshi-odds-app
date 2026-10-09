@@ -27,7 +27,10 @@ data class ScalpUi(
     val history: List<ScalpCopy.Line> = emptyList(),
     val stats: List<String> = emptyList(),
     val ladder: String = "",
-    val rules: String = com.dirk.kalshiodds.decision.ScalpRule.rulesText()
+    val rules: String = com.dirk.kalshiodds.decision.ScalpRule.rulesText(),
+    /** 0.3.40: current per-coin params version + out-of-sample result, and scorecard breakdowns. */
+    val tuning: List<String> = emptyList(),
+    val breakdown: List<String> = emptyList()
 )
 
 data class LadderUi(
@@ -56,7 +59,7 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
                 }
         }
         viewModelScope.launch {
-            combine(container.scalp.trades, container.scalp.marks) { t, m -> t to m }.collect { (t, m) ->
+            combine(container.scalp.trades, container.scalp.marks, container.scalp.tune) { t, m, tu -> Triple(t, m, tu) }.collect { (t, m, tu) ->
                 val status = StrategyLadder.status(
                     StrategyLadder.Id.SCALP,
                     container.ladder.stage(StrategyLadder.Id.SCALP),
@@ -66,7 +69,9 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
                     open = ScalpCopy.openLines(t, m),
                     history = ScalpCopy.historyLines(t),
                     stats = ScalpCopy.statsLines(com.dirk.kalshiodds.decision.ScalpStats.summary(t)),
-                    ladder = status.reason
+                    ladder = status.reason,
+                    tuning = ScalpCopy.tuningLines(tu),
+                    breakdown = com.dirk.kalshiodds.decision.ScalpBreakdown.lines(t)
                 )
             }
         }

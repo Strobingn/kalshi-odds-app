@@ -32,7 +32,8 @@ import kotlinx.coroutines.flow.asStateFlow
  */
 object ScalpRule {
     const val ID = "scalp"
-    const val VERSION = "scalp-fairgap-v1-20261009"
+    const val VERSION = "scalp-fairgap-v2-20261009"
+    const val LEGACY_VERSION = "scalp-fairgap-v1-20261009"
     const val BACKTEST_LABEL =
         "Backtest (walk-forward, held-out Oct 2–8): −0.40¢/contract after both fees, 95% CI [−2.04, +1.22], " +
             "1,068 round trips, 45% wins. Train: −1.11¢. Not proven — paper only."
@@ -43,13 +44,16 @@ object ScalpRule {
     const val MAX_SPREAD = 0.02
     const val TAU_MIN_S = 300.0
     const val TAU_MAX_S = 840.0
-    const val TIME_STOP_S = 20.0
+    /** 0.3.40: hard exit at ≥ 60 s left — never hold into the final (settlement-averaging) minute. */
+    const val TIME_STOP_S = 60.0
+    /** 0.3.40: re-entry cooldown after a scalp closes on the same market. */
+    const val REENTRY_COOLDOWN_MS = 30_000L
     const val ENTRY_LO = 0.10
     const val ENTRY_HI = 0.90
     const val SLIPPAGE = 0.01
     const val LATENCY_MS = 3_000L
     const val FRESH_BOOK_MS = 10_000L
-    const val MAX_ENTRIES_PER_MARKET = 3
+    const val MAX_ENTRIES_PER_MARKET = 8
     const val PROMOTION_ROUND_TRIPS = 300
 
     /** Fallback σ per √second (train medians, Binance 1 s) until the in-app estimator has 2 minutes of spot. */
@@ -158,46 +162,61 @@ object ScalpRule {
     data class Entry(val side: String, val ask: Double, val fair: Double, val gapAfterFee: Double)
 
     /** Entry signal at this quote, or a skip reason. Uses only this quote (no look-ahead). */
-    fun entrySignal(q: Quote): Pair<Entry?, String> {
+    fun entrySignal(q: Quote, p: ScalpParams = ScalpParams.DEFAULT, sides: Collection<String> = listOf("YES", "NO")): Pair<Entry?, String> {
         if (!q.fresh()) return null to "stale book"
         val tau = q.tauS
-        if (tau < TAU_MIN_S || tau > TAU_MAX_S) return null to "outside 5–14 min left"
+        if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
         val yb = q.yesBid ?: return null to "no bid"
         val ya = q.yesAsk ?: return null to "no ask"
-        if (ya - yb > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
-        val best = listOf("YES", "NO").mapNotNull { side ->
+        val spread = ya - yb
+        if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
+        val best = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
             val fair = q.fair(side) ?: return@mapNotNull null
             if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
         }.maxByOrNull { it.gapAfterFee } ?: return null to "no spot fair value"
-        if (best.gapAfterFee + 1e-9 < MIN_GAP) {
-            return null to String.format(Locale.US, "gap %.1f¢ under 10¢", best.gapAfterFee * 100)
+        if (best.gapAfterFee + 1e-9 < p.minGap) {
+            return null to String.format(Locale.US, "gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
+        }
+        // 0.3.40: expected move (fair − ask) must beat spread + entry fee + exit fee.
+        val move = best.fair - best.ask
+        val cost = spread + feePerContract(CONTRACTS, best.ask) + feePerContract(CONTRACTS, best.fair.coerceIn(0.01, 0.99))
+        if (move <= cost + 1e-9) {
+            return null to String.format(Locale.US, "expected move %.1f¢ ≤ spread + both fees %.1f¢", move * 100, cost * 100)
         }
         return best to "enter"
     }
 
     enum class ExitReason(val label: String) {
         GAP_CLOSED("take-profit: bid beats fair after fee"),
-        TURN_DOWN("turn-down: fair fell 10¢ below entry"),
-        TIME_STOP("time stop: 20 s left"),
+        TURN_DOWN("turn-down: fair fell below entry"),
+        PROFIT_TARGET("profit target hit"),
+        STOP("stop hit"),
+        TIME_STOP("hard exit: 60 s left"),
         SETTLED("held to settlement (no exit liquidity)")
     }
 
     /** Exit decision for an open scalp at this quote, or null to keep holding. */
-    fun exitSignal(side: String, entry: Double, q: Quote): ExitReason? {
+    fun exitSignal(side: String, entry: Double, q: Quote, p: ScalpParams = ScalpParams.DEFAULT): ExitReason? {
         if (q.tauS <= TIME_STOP_S) return ExitReason.TIME_STOP
         val bid = q.bid(side)
         val fair = q.fair(side)
-        if (bid != null && fair != null && bid > 0.0 && bid - feePerContract(CONTRACTS, bid) >= fair) return ExitReason.GAP_CLOSED
-        if (fair != null && fair <= entry - TURN_DOWN + 1e-12) return ExitReason.TURN_DOWN
+        if (bid != null && bid > 0.0) {
+            if (bid - entry >= p.target - 1e-12) return ExitReason.PROFIT_TARGET
+            if (bid <= entry - p.stop + 1e-12) return ExitReason.STOP
+            if (fair != null && bid - feePerContract(CONTRACTS, bid) >= fair) return ExitReason.GAP_CLOSED
+        }
+        if (fair != null && fair <= entry - p.turnDown + 1e-12) return ExitReason.TURN_DOWN
         return null
     }
 
     fun rulesText(): String =
-        "Scalp $VERSION (PAPER). Enter when the ask is ≥ 10¢ below spot-implied fair after the entry fee, with " +
-            "5–14 min left, spread ≤ 2¢, 10 contracts, displayed depth only, fill on the next fresh book (≥ 3 s). " +
-            "Exit at the bid when selling beats holding, when fair turns down 10¢, or at 20 s left. " +
+        "Scalp $VERSION (PAPER). Enter when the ask is below spot-implied fair by the coin's gap threshold after " +
+            "the entry fee AND the expected move beats spread + both fees, inside the coin's time window, spread ≤ 2¢, " +
+            "10 contracts, displayed depth only, fill on the next fresh book (≥ 3 s). Several round trips per window: " +
+            "one open scalp per market side, 30 s cooldown after an exit. Exit at the bid on the profit target, the stop, " +
+            "gap close or turn-down, and always by 60 s left. Per-coin params come from the walk-forward tuner. " +
             "Taker fee on both legs. $BACKTEST_LABEL"
 }
 
@@ -231,6 +250,10 @@ data class ScalpTrade(
     val holdMs: Long? get() = entryAtMs?.let { e -> closedAtMs?.let { it - e } }
     /** Window cluster key shared by BTC/ETH/SOL markets that close together. */
     val windowKey: String get() = ticker.uppercase().substringAfter('-').substringBefore('-')
+    /** 0.3.40: ruleVersion = "VERSION|variantId|P" (primary) or "…|S" (shadow tuning variant). Legacy rows are primary. */
+    val variantId: String get() = ruleVersion.split('|').getOrNull(1) ?: ScalpParams.LEGACY_ID
+    val isPrimary: Boolean get() = ruleVersion.split('|').getOrNull(2) != "S"
+    val coin: String get() = ScalpParams.coinOf(ticker)
 
     /** Mark-to-bid P&L after the exit fee for what is still held. */
     fun unrealizedUsd(bid: Double?): Double? {
@@ -260,17 +283,29 @@ class InMemoryScalpPersistence : ScalpPersistence {
  */
 class ScalpBook(
     private val store: ScalpPersistence = InMemoryScalpPersistence(),
+    /** 0.3.40: shadow tuning variants run beside the primary params (paper only). */
+    private val variants: List<ScalpParams> = ScalpParams.GRID,
+    private val tuneStore: ScalpTuneStore = InMemoryScalpTuneStore(),
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
-    private val _trades = MutableStateFlow(store.loadScalps().sortedByDescending { it.signalAtMs })
+    private val _all = MutableStateFlow(store.loadScalps().sortedByDescending { it.signalAtMs })
+    private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
+    /** Primary scalps only (what the Scalp screen, stats and ladder use). */
     val trades: StateFlow<List<ScalpTrade>> = _trades.asStateFlow()
     private val vol = HashMap<String, SpotVol>()
     private val _marks = MutableStateFlow<Map<String, ScalpRule.Quote>>(emptyMap())
     /** Latest quote per ticker, for mark-to-bid P&L on screen. */
     val marks: StateFlow<Map<String, ScalpRule.Quote>> = _marks.asStateFlow()
+    private val _tune = MutableStateFlow(tuneStore.load())
+    /** Current per-coin params version and its last out-of-sample result. */
+    val tune: StateFlow<ScalpTuneState> = _tune.asStateFlow()
 
     fun snapshot(): List<ScalpTrade> = _trades.value
+    /** Primary + shadow variants (tuner input). */
+    fun allTrades(): List<ScalpTrade> = _all.value
+
+    fun paramsFor(coin: String): ScalpParams = _tune.value.paramsFor(coin)
 
     fun openTickers(): Set<String> = _trades.value.filter {
         it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY
@@ -283,18 +318,33 @@ class ScalpBook(
         v.sigmaPerSec()
     }
 
+    private fun isActive(t: ScalpTrade) = t.state != ScalpState.CLOSED && t.state != ScalpState.NO_FILL
+
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
         _marks.value = _marks.value + (q.ticker.uppercase() to q)
         val changed = ArrayList<ScalpTrade>()
-        val mine = _trades.value.filter { it.ticker.equals(q.ticker, true) }
-        val active = mine.firstOrNull { it.state != ScalpState.CLOSED && it.state != ScalpState.NO_FILL }
-        if (active != null) {
-            step(active, q)?.let { changed += it }
-        } else if (enabled) {
-            val entries = mine.count { it.state != ScalpState.NO_FILL }
-            if (entries < ScalpRule.MAX_ENTRIES_PER_MARKET && q.nowMs < q.closeMs) {
-                val (sig, _) = ScalpRule.entrySignal(q)
+        val coin = ScalpParams.coinOf(q.ticker)
+        val primary = paramsFor(coin)
+        val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
+        // Step every open scalp first (one per market side per variant).
+        mineAll.filter { isActive(it) }.forEach { t ->
+            val p = ScalpParams.byId(t.variantId) ?: primary
+            step(t, q, p)?.let { changed += it }
+        }
+        if (enabled) {
+            val run = (listOf(primary) + variants).distinctBy { it.id }
+            for (p in run) {
+                val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
+                if (mine.count { it.state != ScalpState.NO_FILL } >= ScalpRule.MAX_ENTRIES_PER_MARKET) continue
+                if (q.nowMs >= q.closeMs) continue
+                val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
+                if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
+                val openSides = mine.filter { isActive(it) }.map { it.side }.toSet()
+                val free = listOf("YES", "NO").filter { it !in openSides }
+                if (free.isEmpty()) continue
+                val (sig, _) = ScalpRule.entrySignal(q, p, free)
                 if (sig != null) {
+                    val role = if (p.id == primary.id) "P" else "S"
                     changed += ScalpTrade(
                         id = idFactory(),
                         ticker = q.ticker.uppercase(),
@@ -303,21 +353,34 @@ class ScalpBook(
                         signalAtMs = q.nowMs,
                         signalAsk = sig.ask,
                         fairAtSignal = sig.fair,
-                        note = String.format(Locale.US, "gap %.1f¢ after fee", sig.gapAfterFee * 100)
+                        note = String.format(Locale.US, "gap %.1f¢ after fee · %s", sig.gapAfterFee * 100, p.id),
+                        ruleVersion = "${ScalpRule.VERSION}|${p.id}|$role"
                     )
                 }
             }
         }
         changed.forEach { save(it) }
-        changed
+        if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
+        changed.filter { it.isPrimary }
     }
 
-    private fun step(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+    /** Re-tune when enough new closed round trips (all variants) have accumulated. Deterministic. */
+    fun maybeTune(nowMs: Long, force: Boolean = false): ScalpTuneState = synchronized(lock) {
+        val closed = _all.value.count { it.state == ScalpState.CLOSED && it.netUsd != null }
+        val cur = _tune.value
+        if (!force && closed - cur.closedAtLastRun < ScalpTuner.RETUNE_EVERY) return cur
+        val next = ScalpTuner.tune(_all.value, cur, nowMs).copy(closedAtLastRun = closed)
+        _tune.value = next
+        runCatching { tuneStore.save(next) }
+        next
+    }
+
+    private fun step(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
         return when (t.state) {
             ScalpState.PENDING_ENTRY -> fillEntry(t, q)
             ScalpState.OPEN -> {
                 if (q.nowMs >= q.closeMs) return null
-                val reason = ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q) ?: return null
+                val reason = ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q, p) ?: return null
                 t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason.label)
             }
             ScalpState.PENDING_EXIT -> fillExit(t, q)
@@ -368,7 +431,7 @@ class ScalpBook(
     /** Settlement: anything still held pays $1 / $0, no fee; pending entries become no-fills. */
     fun settle(ticker: String, result: String, atMs: Long = System.currentTimeMillis()): List<ScalpTrade> = synchronized(lock) {
         val r = result.lowercase()
-        val out = _trades.value.filter {
+        val out = _all.value.filter {
             it.ticker.equals(ticker, true) && it.state != ScalpState.CLOSED && it.state != ScalpState.NO_FILL
         }.map { t ->
             if (t.state == ScalpState.PENDING_ENTRY) {
@@ -388,14 +451,19 @@ class ScalpBook(
             }
         }
         out.forEach { save(it) }
-        out
+        out.filter { it.isPrimary }
     }
 
     private fun save(t: ScalpTrade) {
         runCatching { store.upsertScalp(t) }
-        val cur = _trades.value
+        val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
-        _trades.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else listOf(t) + cur
+        _all.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else listOf(t) + cur
+        if (t.isPrimary) {
+            val pc = _trades.value
+            val pi = pc.indexOfFirst { it.id == t.id }
+            _trades.value = if (pi >= 0) pc.toMutableList().also { it[pi] = t } else listOf(t) + pc
+        }
     }
 
     private class SpotVol {
