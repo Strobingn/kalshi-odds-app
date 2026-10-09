@@ -65,6 +65,10 @@ import retrofit2.Response
  */
 class KnownIssuesRegressionTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     private val nowMs = 1_700_000_000_000L
     private val fakePem = "-----BEGIN PRIVATE KEY-----\n${"A".repeat(120)}\n-----END PRIVATE KEY-----"
 

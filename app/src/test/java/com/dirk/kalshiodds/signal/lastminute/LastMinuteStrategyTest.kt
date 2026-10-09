@@ -15,6 +15,10 @@ import org.junit.Test
 
 class LastMinuteStrategyTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     @Test
     fun waitingBeforeFinalMinute() {
         val snap = LastMinuteStrategy.evaluate(

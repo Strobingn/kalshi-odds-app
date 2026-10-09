@@ -157,7 +157,7 @@ object PaperAutopilot {
     }
 
     fun modelYes(market: MarketUiModel): Double? {
-        val lm = market.lastMinute?.pUp?.takeIf { it.isFinite() }
+        val lm = market.lastMinute?.pUp?.takeIf { it.isFinite() && !com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired }
         if (lm != null) return lm
         return TicketBuilder.modelProb(market, "YES")
     }

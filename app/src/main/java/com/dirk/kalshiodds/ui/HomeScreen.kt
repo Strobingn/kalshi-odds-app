@@ -79,8 +79,9 @@ fun HomeScreen(
     onCancelOrder: (String) -> Unit,
     onLimitCents: (String, String) -> Unit = { _, _ -> },
     onResumeAlerts: () -> Unit = {},
-    onStop: () -> Unit = {},
     onCancelResting: (String, String, String) -> Unit = { _, _, _ -> },
+    scalpLines: List<String> = emptyList(),
+    onOpenScalp: () -> Unit = {},
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
 ) {
@@ -223,8 +224,10 @@ fun HomeScreen(
                                 )
                             }
                         }
-                        item {
-                            HomeStopButton(onStop = onStop)
+                        if (scalpLines.isNotEmpty()) {
+                            item {
+                                HomeScalpCard(lines = scalpLines, onOpen = onOpenScalp)
+                            }
                         }
                         item {
                             ThisWindowCard(

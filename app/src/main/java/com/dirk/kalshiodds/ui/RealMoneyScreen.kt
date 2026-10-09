@@ -10,11 +10,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -115,8 +119,25 @@ fun RealMoneyScreen(
                 }
                 if (page.showLiveConfirm) {
                     Text(RealMoneyTab.LIVE_BLURB, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                    Button(onClick = { odds.confirmLiveAutopilotRealMoney() }, modifier = Modifier.fillMaxWidth()) {
+                    var typed by remember { mutableStateOf("") }
+                    OutlinedTextField(
+                        value = typed,
+                        onValueChange = { typed = it },
+                        label = { Text("Type REAL MONEY to arm") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Button(
+                        onClick = { odds.confirmLiveAutopilotRealMoney(typed) },
+                        enabled = com.dirk.kalshiodds.signal.trade.RealMoneyPhrase.matches(typed),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Text("Confirm REAL MONEY")
+                    }
+                }
+                if (state.liveAutopilotArmed) {
+                    Button(onClick = { odds.disarmLiveAutopilot() }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Disarm live Autopilot")
                     }
                 }
                 page.largeClipWarning?.let { warn ->

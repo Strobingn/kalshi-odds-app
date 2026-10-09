@@ -1,13 +1,21 @@
 package com.dirk.kalshiodds.signal.paper
 
+import com.dirk.kalshiodds.signal.trade.RealMoneyPhrase
+
 /**
- * In-memory arming for limited live Autopilot. Process death disarms.
- * [confirmRealMoney] does nothing until [tapApprove] has happened, and
- * neither call places an order.
+ * Arming for limited live Autopilot. 0.3.39: the armed flag is persisted in [store], so it
+ * survives restarts, process death and reboots. Arming still needs [tapApprove] and then the
+ * typed phrase REAL MONEY. Neither call places an order. Errors never disarm; only [disarm]
+ * (Real Money tab, or leaving LIVE mode) does.
  */
-class LiveAutopilotSession {
-    var armed: Boolean = false
+class LiveAutopilotSession(
+    private val store: LiveArmStore = InMemoryLiveArmStore(),
+    private val nowMs: () -> Long = { System.currentTimeMillis() }
+) {
+    @Volatile
+    var armed: Boolean = runCatching { store.loadArmed() }.getOrDefault(false)
         private set
+    @Volatile
     var approveTapped: Boolean = false
         private set
 
@@ -15,14 +23,20 @@ class LiveAutopilotSession {
         if (!armed) approveTapped = true
     }
 
-    fun confirmRealMoney(): Boolean {
-        if (!approveTapped || armed) return armed
+    /** Arms only after Approve and an exact typed REAL MONEY. Returns the armed state. */
+    @Synchronized
+    fun confirmRealMoney(typed: String?): Boolean {
+        if (armed) return true
+        if (!approveTapped || !RealMoneyPhrase.matches(typed)) return false
         armed = true
+        runCatching { store.saveArmed(true, nowMs()) }
         return true
     }
 
+    @Synchronized
     fun disarm() {
         armed = false
         approveTapped = false
+        runCatching { store.saveArmed(false, nowMs()) }
     }
 }

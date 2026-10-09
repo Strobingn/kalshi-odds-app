@@ -49,8 +49,6 @@ object HomeOpenBets {
         val realMoney: Boolean
     )
 
-    const val STOP_LABEL = "STOP — Autopilot off + cancel resting orders"
-    const val STOP_BLURB = "One tap, no confirmation. Every other real-money action still needs typed REAL MONEY."
 
     fun rows(positions: List<LivePosition>, resting: List<RestingOrder>, paperFills: List<PaperFill>): List<Row> {
         val out = ArrayList<Row>()
@@ -106,21 +104,6 @@ object HomeOpenBets {
     }
 
     private fun cents(p: Double?): String = p?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
-}
-
-@Composable
-fun HomeStopButton(onStop: () -> Unit) {
-    val colors = DipTheme.colors
-    Column(Modifier.fillMaxWidth()) {
-        Button(
-            onClick = onStop,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = colors.accentRed, contentColor = androidx.compose.ui.graphics.Color.White)
-        ) {
-            Text(HomeOpenBets.STOP_LABEL, fontWeight = FontWeight.Bold)
-        }
-        Text(HomeOpenBets.STOP_BLURB, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
-    }
 }
 
 @Composable

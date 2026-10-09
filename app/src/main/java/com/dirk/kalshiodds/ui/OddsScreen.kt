@@ -18,11 +18,15 @@ fun OddsScreen(
     onOpenData: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSignalHistory: () -> Unit = onOpenHistory,
-    onOpenChart: (MarketUiModel) -> Unit
+    onOpenChart: (MarketUiModel) -> Unit,
+    onOpenScalp: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val scalpTrades by viewModel.scalpTrades.collectAsStateWithLifecycle()
     HomeScreen(
         state = state,
+        scalpLines = HomeScalpCopy.lines(scalpTrades, state.settings.paperTradingEnabled),
+        onOpenScalp = onOpenScalp,
         onOpenSettings = onOpenSettings,
         onOpenApiKeySettings = onOpenApiKeySettings,
         onOpenScorecard = onOpenScorecard,
@@ -49,7 +53,6 @@ fun OddsScreen(
         onCancelOrder = { viewModel.cancelWorkingOrder(it) },
         onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) },
         onResumeAlerts = { viewModel.resumeAlerts() },
-        onStop = { viewModel.stopAll() },
         onCancelResting = { id, ticker, typed -> viewModel.cancelRestingOrder(id, ticker, typed) }
     )
 }

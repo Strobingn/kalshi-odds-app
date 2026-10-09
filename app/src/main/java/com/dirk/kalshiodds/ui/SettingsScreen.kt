@@ -813,7 +813,7 @@ fun SettingsContent(
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "The card pick is the last-minute BRTI strategy (final 60 s, EV/\$ ≥ 0.35, first fire per window). " +
+                "The last-minute play is retired (0.3.39); Autopilot runs Scalp (paper). " +
                     "Live Approve is \$10 all-in including Kalshi fees. Count is the largest integer with " +
                     "count×price + fee ≤ your stake (default and cap \$10; you can pick less). " +
                     "There is no min-profit-if-win gate — a cheap ticket is not blocked for low profit. " +

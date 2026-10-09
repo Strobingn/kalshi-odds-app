@@ -10,6 +10,10 @@ import org.junit.Test
 
 class NoBetMinProfitCopyTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     @Test
     fun minProfitGateIsOff() {
         val clip = LiveOrderSizer.size(0.63)
