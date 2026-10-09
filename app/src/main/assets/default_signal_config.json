@@ -3,7 +3,7 @@
   "watchEth": true,
   "watchSol": true,
   "extraTickers": [],
-  "edgeThresholdPp": 5.0,
+  "edgeThresholdPp": 8.0,
   "notificationsEnabled": true,
   "liveSignalsEnabled": false,
   "subscribeTrades": true,

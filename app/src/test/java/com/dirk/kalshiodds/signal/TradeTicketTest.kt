@@ -6,6 +6,8 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.LivePosition
+import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -532,9 +534,10 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.04).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
         assertEquals("YES", ticket.side)
         assertEquals("bid", ticket.bookSide)
+        assertTrue("automatic entry joins the bid instead of crossing the ask", ticket.limitPrice!! < 0.04 - 1e-9)
     }
 
     @Test
@@ -552,11 +555,9 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(market(passed = true, muted = false, ask = 0.03, volume = 5_000.0), ctx)
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.03).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.02).count, ticket!!.contracts)
         assertTrue(ticket.maxPayoutUsd >= 100.0)
-    }
-
-    @Test
+    }    @Test
     fun expensiveMarketNotProposed() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketRespectGates = false, ticketsEnabled = true),
@@ -593,7 +594,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(m, ctx)
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.04).count, ticket!!.contracts)
+        assertEquals(LiveOrderSizer.size(0.039).count, ticket!!.contracts)
     }
 
     @Test
@@ -608,7 +609,7 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.proposeHunter(m, ctx)!!
         assertEquals(40, ticket.contracts)
-        assertEquals(LiveOrderSizer.sizeWithinDepth(0.04, 40).feeUsd, ticket.feeUsd!!, 1e-9)
+        assertEquals(LiveOrderSizer.sizeWithinDepth(0.03, 40).feeUsd, ticket.feeUsd!!, 1e-9)
         assertEquals(ticket.modelChance!! - ticket.allInUsd!! / 40, ticket.netEvPerContract!!, 1e-9)
         assertTrue(ticket.allInUsd!! <= 5.0)
         assertNull(TicketBuilder.propose(m, ctx)) // $5 to $100 payout needs deeper liquidity.
@@ -671,7 +672,7 @@ class TicketBuilderGateTest {
         )
         assertTrue(ticket != null)
         assertTrue(ticket!!.stakeUsd in 4.0..5.0 + 1e-6)
-        assertEquals(LiveOrderSizer.size(0.04).count, ticket.contracts)
+        assertEquals(LiveOrderSizer.size(0.03).count, ticket.contracts)
         assertTrue(ticket.maxPayoutUsd >= 25.0)
         assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)
     }
@@ -776,3 +777,137 @@ private fun market(
     netEdgePp = 6.0,
     netEvDollars = 0.04
 )
+
+class MakerEntryEconomicsTest {
+    @Test
+    fun automaticTicketsRestAtTheBidInsteadOfCrossingTheAsk() {
+        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        val ticket = TicketBuilder.propose(m, ctx)!!
+        assertEquals(0.03, ticket.limitPrice!!, 1e-9)
+        assertEquals(0.03, ticket.impliedChance!!, 1e-9)
+        assertTrue(ticket.modelEdge)
+    }
+
+    @Test
+    fun automaticMarginIsBacktestedEightPoints() {
+        assertEquals(0.08, TicketBuilder.AUTO_VALUE_MARGIN, 1e-12)
+        assertEquals(8.0, SignalConstants.DEFAULT_EDGE_THRESHOLD_PP, 1e-12)
+    }
+
+    @Test
+    fun automaticTicketNeedsEightPointsOverEntry() {
+        val weak = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
+            .copy(aiYesPercent = 10.0) // ~7pp over the 3c entry: under the 8pp gate
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        assertNull(TicketBuilder.propose(weak, ctx))
+        val strong = weak.copy(aiYesPercent = 20.0) // ~17pp over the 3c entry
+        assertTrue(TicketBuilder.propose(strong, ctx) != null)
+    }
+}
+
+class ScalpTicketTest {
+    private fun scalpMarket(
+        mid: Double = 0.70,
+        spotReturn1m: Double? = 0.001,
+        elapsedMin: Long = 4
+    ) = market(passed = true, muted = false, ask = mid + 0.005, volume = 5_000.0).let { m ->
+        val open = at(0)
+        m.copy(
+            yesBid = mid - 0.005,
+            yesAsk = mid + 0.005,
+            noBid = 1.0 - mid - 0.005,
+            noAsk = 1.0 - mid + 0.005,
+            spotReturn1m = spotReturn1m,
+            openTimeEpochMs = open
+        ).let { it.copy(closeTimeEpochMs = open + 15 * 60_000L) }
+    }
+
+    private fun ctx(nowMs: Long = 1_700_000_000_000L) = TicketBuilder.Context(
+        settings = SignalSettings(), alertsPaused = false, nowMs = nowMs
+    )
+
+    private fun at(minute: Long): Long = 1_700_000_000_000L + minute * 60_000L
+
+    @Test
+    fun scalpBuysTheSpotConfirmedSide() {
+        // spot up -> YES even when YES is NOT the favorite
+        val up = scalpMarket(mid = 0.30, spotReturn1m = 0.002)
+        val t = TicketBuilder.proposeScalp(up, ctx(at(4)))!!
+        assertEquals("YES", t.side)
+        assertEquals(TicketKind.SCALP, t.kind)
+        assertTrue("joins the bid, never crosses", t.limitPrice!! <= up.yesAsk!! - 1e-9)
+        assertTrue(t.contracts > 0)
+        assertTrue(t.gateNote!!.contains("Scalp"))
+        assertTrue(t.gateNote!!.contains("Approve still required"))
+        // spot down -> NO
+        val down = scalpMarket(mid = 0.70, spotReturn1m = -0.002)
+        assertEquals("NO", TicketBuilder.proposeScalp(down, ctx(at(4)))!!.side)
+    }
+
+    @Test
+    fun scalpWorksAnyTimeInsideTheWindow() {
+        val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)
+        assertTrue("minute 1", TicketBuilder.proposeScalp(m, ctx(at(1))) != null)
+        assertTrue("minute 8", TicketBuilder.proposeScalp(m, ctx(at(8))) != null)
+        assertTrue("minute 13", TicketBuilder.proposeScalp(m, ctx(at(13))) != null)
+    }
+
+    @Test
+    fun scalpAllowsCheapSpotConfirmedEntries() {
+        // aggressive: 20c+ entries allowed on the spot-confirmed side
+        val m = scalpMarket(mid = 0.25, spotReturn1m = 0.002)  // YES at ~25c, spot up
+        val t = TicketBuilder.proposeScalp(m, ctx(at(4)))
+        assertEquals("YES", t!!.side)
+        assertTrue(t.limitPrice!! >= 0.20 - 1e-9)
+        // below 20c is still skipped
+        val tooCheap = scalpMarket(mid = 0.15, spotReturn1m = 0.002)
+        assertNull(TicketBuilder.proposeScalp(tooCheap, ctx(at(4))))
+    }
+
+    @Test
+    fun scalpMissingSpotIsNoTicket() {
+        val noSpot = scalpMarket(spotReturn1m = null)
+        assertNull(TicketBuilder.proposeScalp(noSpot, ctx(at(4))))
+    }
+
+    @Test
+    fun scalpIncludedInProposeAllAndDedupesByKind() {
+        val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)
+        val all = TicketBuilder.proposeAll(listOf(m), ctx(at(4)))
+        assertTrue(all.any { it.kind == TicketKind.SCALP })
+    }
+}
+
+class ScalpExitTest {
+    @Test
+    fun scalpExitLocksProfitAtChosenPrice() {
+        val m = market(passed = true, muted = false, ask = 0.60, volume = 5_000.0)
+            .copy(yesBid = 0.58, yesAsk = 0.60)
+        val pos = LivePosition(
+            ticker = m.ticker, side = "YES", contracts = 8.0, exposureUsd = 4.50,
+            avgCost = 0.5625
+        )
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        val t = TicketBuilder.proposeScalpExit(m, pos, ctx, limitPrice = 0.64)!!
+        assertEquals(TicketKind.SCALP_EXIT, t.kind)
+        assertEquals(0.64, t.limitPrice!!, 1e-9)
+        assertEquals(8, t.contracts)
+        assertTrue("locks a positive profit", t.profitIfWinUsd!! > 0.0)
+        assertTrue(t.reduceOnly)
+        assertTrue(t.gateNote!!.contains("Approve still required"))
+    }
+
+    @Test
+    fun scalpExitSkipsWhenPriceBelowCostOrThinProfit() {
+        val m = market(passed = true, muted = false, ask = 0.60, volume = 5_000.0)
+            .copy(yesBid = 0.58, yesAsk = 0.60)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        // selling below cost never surfaces
+        val losing = LivePosition(ticker = m.ticker, side = "YES", contracts = 8.0, exposureUsd = 6.00, avgCost = 0.75)
+        assertNull(TicketBuilder.proposeScalpExit(m, losing, ctx, limitPrice = 0.60))
+        // tiny profit below the $0.25 target does not surface
+        val thin = LivePosition(ticker = m.ticker, side = "YES", contracts = 1.0, exposureUsd = 0.59, avgCost = 0.59)
+        assertNull(TicketBuilder.proposeScalpExit(m, thin, ctx, limitPrice = 0.61))
+    }
+}

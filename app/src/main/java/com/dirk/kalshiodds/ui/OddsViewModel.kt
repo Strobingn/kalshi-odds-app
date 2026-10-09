@@ -646,7 +646,45 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun logScalpFill(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket?, paper: Boolean) {
+        val t = ticket ?: return
+        if (t.kind != com.dirk.kalshiodds.signal.trade.TicketKind.SCALP &&
+            t.kind != com.dirk.kalshiodds.signal.trade.TicketKind.SCALP_EXIT
+        ) return
+        val log = container.scalpLog
+        if (t.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP) {
+            log.recordEntry(
+                com.dirk.kalshiodds.signal.scalp.ScalpTrade(
+                    id = t.id,
+                    ticker = t.ticker,
+                    series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker),
+                    side = t.side,
+                    entryPrice = t.limitPrice ?: return,
+                    entryTimeMs = t.createdAtMs,
+                    contracts = t.contracts,
+                    costUsd = t.allInUsd ?: return,
+                    mode = if (paper) "PAPER" else "LIVE"
+                )
+            )
+        } else {
+            val open = log.openTrade(t.ticker) ?: return
+            val proceeds = t.stakeUsd
+            val fee = t.feeUsd ?: 0.0
+            val pnl = proceeds - fee - open.costUsd
+            log.recordExit(
+                id = open.id,
+                exitPrice = t.limitPrice ?: return,
+                exitTimeMs = System.currentTimeMillis(),
+                proceedsUsd = proceeds,
+                feeUsd = fee,
+                pnlUsd = pnl,
+                outcome = "SOLD"
+            )
+        }
+    }
+
     private fun applyPaperBuy(ticketId: String) {
+        val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
         val outcome = com.dirk.kalshiodds.signal.paper.PaperApprove.apply(
             session = ticketSession,
             book = paperBook,
@@ -656,6 +694,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching { container.resultsWriter.enqueueTicket(row) }
             }
         )
+        if (outcome.ok) runCatching { logScalpFill(ticket, paper = true) }
         _state.update {
             it.copy(
                 userMessage = if (outcome.ok) outcome.message else outcome.visibleReason,
@@ -814,7 +853,65 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
+        autoScalp(tickets, s.settings)
         refreshPositionMarks()
+    }
+
+    /**
+     * AI auto-scalp: the AI buys and sells on its own to maximize profit.
+     * Paper mode auto-trades when aiAutoScalp is on (default). Live money
+     * auto-trades only when the owner turns on BOTH aiAutoScalp and the
+     * separate aiAutoScalpLive switch - real orders are never sent by
+     * default. Only SCALP / SCALP_EXIT tickets are auto-fired; every fill
+     * lands in the Scalping tab.
+     */
+    private fun autoScalp(
+        tickets: List<com.dirk.kalshiodds.signal.trade.TradeTicket>,
+        settings: com.dirk.kalshiodds.signal.config.SignalSettings
+    ) = viewModelScope.launch {
+        if (!settings.aiAutoScalp) return@launch
+        val phase = ticketSession.snapshot().phase
+        if (phase is com.dirk.kalshiodds.signal.trade.TicketPhase.Submitting) return@launch
+        val liveAllowed = settings.aiAutoScalpLive && settings.tradingCredentialsConfigured()
+        val scalps = tickets.filter {
+            it.canApprove && !it.paperOnly &&
+                (it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP ||
+                    it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP_EXIT)
+        }
+        for (t in scalps) {
+            when (t.kind) {
+                com.dirk.kalshiodds.signal.trade.TicketKind.SCALP -> {
+                    if (settings.paperTradingEnabled) {
+                        applyAutoPaperScalp(t)
+                    } else if (liveAllowed) {
+                        ticketSession.approve(t.id)
+                        runCatching { logScalpFill(t, paper = false) }
+                    }
+                }
+                com.dirk.kalshiodds.signal.trade.TicketKind.SCALP_EXIT -> {
+                    if (settings.paperTradingEnabled) {
+                        applyAutoPaperScalp(t)
+                    } else if (liveAllowed) {
+                        ticketSession.approve(t.id)
+                        runCatching { logScalpFill(t, paper = false) }
+                    }
+                }
+                else -> Unit
+            }
+        }
+    }
+
+    private fun applyAutoPaperScalp(t: com.dirk.kalshiodds.signal.trade.TradeTicket) {
+        val outcome = com.dirk.kalshiodds.signal.paper.PaperApprove.apply(
+            session = ticketSession,
+            book = paperBook,
+            ticketId = t.id,
+            size = { paperSized(it) },
+            onHistory = { row ->
+                runCatching { container.resultsWriter.enqueueTicket(row) }
+            }
+        )
+        if (outcome.ok) runCatching { logScalpFill(t, paper = true) }
     }
 
     private fun captureTicketForward(

@@ -7,6 +7,10 @@ enum class TicketKind {
     HUNTER,
     /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */
     HUNTER_VALUE,
+    /** Scalp: spot confirms the favorite inside the first ~7m; join the bid. */
+    SCALP,
+    /** Profit-taking sell of a held scalp at a chosen price (no settlement wait). */
+    SCALP_EXIT,
     /** User tapped Buy on a market card / hero. */
     MANUAL,
     /** Sell / reduce a held YES or NO position. IoC reduce-only at the bid. */
@@ -78,7 +82,7 @@ data class TradeTicket(
 ) {
     val displaySide: String get() = side.uppercase()
 
-    val isSell: Boolean get() = kind == TicketKind.SELL
+    val isSell: Boolean get() = kind == TicketKind.SELL || kind == TicketKind.SCALP_EXIT
 
     val potentialGainUsd: Double get() = (maxPayoutUsd - stakeUsd).coerceAtLeast(0.0)
 

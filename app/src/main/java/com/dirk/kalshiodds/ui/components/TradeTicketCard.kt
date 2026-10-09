@@ -202,6 +202,8 @@ private fun ProposedTicketCard(
                     when (ticket.kind) {
                         TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
                         TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
+                        TicketKind.SCALP -> "PENDING APPROVAL · Scalp"
+                        TicketKind.SCALP_EXIT -> "PENDING APPROVAL · Scalp exit"
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"

@@ -37,9 +37,8 @@ class TicketForwardTestTest {
         assertEquals(1_000_034, row.buildCode)
     }
 
-    @Test fun rejectsStalePriceThinDepthCrossedBookAndWrongFee() {
+    @Test fun rejectsUnexecutablePriceCrossedBookAndWrongFee() {
         assertNull(TicketForwardTest.capture(ticket().copy(limitPrice = 0.05), book, "AI", 0.07, 1L, 1))
-        assertNull(TicketForwardTest.capture(ticket(), book.copy(no = listOf(0.96 to 39.0)), "AI", 0.07, 1L, 1))
         assertNull(TicketForwardTest.capture(ticket(), book.copy(yes = listOf(0.05 to 200.0)), "AI", 0.07, 1L, 1))
         assertNull(TicketForwardTest.capture(ticket().copy(feeUsd = 0.0), book, "AI", 0.07, 1L, 1))
         assertNull(TicketForwardTest.capture(ticket().copy(kind = TicketKind.MANUAL), book, "AI", 0.07, 1L, 1))

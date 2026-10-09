@@ -11,9 +11,10 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        // Independent install from the original DipHunter app and from the
+        // DipHunter GTP (chat-GTP) app. Keep this ID and the committed debug
+        // signing key stable for future APK updates of this install.
+        applicationId = "com.dirk.kalshiodds.scalper"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a

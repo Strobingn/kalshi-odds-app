@@ -39,6 +39,10 @@ object SignalConstants {
     const val PAPER_START_USD = 100.0
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
+    /** AI auto-scalp: auto-approve scalp tickets in paper mode by default. */
+    const val DEFAULT_AI_AUTO_SCALP = true
+    /** Live money is NEVER auto-traded without its own explicit opt-in. */
+    const val DEFAULT_AI_AUTO_SCALP_LIVE = false
     const val PAPER_LEDGER_MAX = 40
 
     /**
@@ -59,7 +63,7 @@ object SignalConstants {
      */
     const val DEFAULT_FEE_RATE = 0.07
 
-    const val DEFAULT_EDGE_THRESHOLD_PP = 5.0
+    const val DEFAULT_EDGE_THRESHOLD_PP = 8.0
 
     const val DEFAULT_AUTO_TUNE = true
     const val DEFAULT_AUTO_TUNE_OVERRIDE = false

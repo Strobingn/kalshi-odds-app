@@ -56,6 +56,7 @@ class Bet:
 
 STRATEGIES = (
     "app_shipped",
+    "app_maker",
     "app_dirk",
     "fair_dirk",
     "cheap_side",
@@ -64,7 +65,7 @@ STRATEGIES = (
 )
 STRESS_STRATEGIES = ("app_shipped_stress",)
 # OOS only; not in the IS tune grid; do not treat as a claimed edge.
-EXPLORATORY_STRATEGIES = ("app_32_50", "app_tte_11_9")
+EXPLORATORY_STRATEGIES = ("app_32_50", "app_tte_11_9", "scalp_taker", "scalp_spot")
 ALL_STRATEGIES = STRATEGIES + STRESS_STRATEGIES + EXPLORATORY_STRATEGIES
 
 
@@ -245,6 +246,15 @@ def decisions_for_market(m: dict, rows: list[dict], spots: dict[str, dict[int, f
     return out
 
 
+def _maker_entry(d: Decision, side: str) -> float | None:
+    """Resting bid on the buy side (join the maker side, do not cross)."""
+    ask = _fill_for(d, side)
+    if ask is None:
+        return None
+    bid = max(0.01, 2 * d.mid - ask)
+    return bid if bid < ask - 1e-9 else None
+
+
 def _fill_for(d: Decision, side: str, stress: bool = False) -> float | None:
     if stress:
         return d.fill_yes_stress if side == "YES" else d.fill_no_stress
@@ -253,6 +263,10 @@ def _fill_for(d: Decision, side: str, stress: bool = False) -> float | None:
 
 def _place(d: Decision, strategy: str, side: str, split: str, stress: bool = False) -> Bet | None:
     ask = _fill_for(d, side, stress=stress)
+    return _place_at(d, strategy, side, ask, split, stress=stress)
+
+
+def _place_at(d: Decision, strategy: str, side: str, ask: float | None, split: str, stress: bool = False) -> Bet | None:
     if ask is None:
         return None
     c, cost, fee = size_all_in(ask, STAKE_USD)
@@ -335,12 +349,20 @@ def _rand_side(ticker: str) -> str:
 
 
 def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | None:
-    for d in decisions:
+    for i0, d in enumerate(decisions):
         if strategy == "app_shipped":
             # shipped ticket side (hero/primary first). Qualifying = can fill $5 ticket.
             if not d.would_alert:
                 continue
             return _place(d, strategy, d.app_side, split)
+        if strategy == "app_maker":
+            # New shipped path: 8pp net-edge gate + resting limit at the bid.
+            if abs(d.net_edge_pp) < 8.0:
+                continue
+            px = _maker_entry(d, d.app_side)
+            if px is None:
+                continue
+            return _place_at(d, strategy, d.app_side, px, split)
         if strategy == "app_shipped_stress":
             if not d.would_alert:
                 continue
@@ -379,6 +401,38 @@ def first_bet(decisions: list[Decision], strategy: str, split: str) -> Bet | Non
                 continue
             side = _rand_side(d.ticker)
             return _place(d, strategy, side, split)
+        if strategy == "scalp_taker":
+            # Dip-buy scalp: after a >=2c 1m mid drop, buy the dipped side at
+            # the ask, take profit at +3c mid, stop at 2c off peak, force-exit
+            # at 60s left or window end. Taker both legs + fees: backtested
+            # negative (see docs/edge-research-2026-10-08.md). OOS tracking only.
+            if i0 < 1:
+                continue
+            prev_mid = decisions[i0 - 1].mid
+            if prev_mid is None or d.mid is None or d.mid - prev_mid > -0.02 + 1e-12:
+                continue
+            ask = _fill_for(d, "YES") if d.mid < 0.5 else _fill_for(d, "NO")
+            side = "YES" if d.mid < 0.5 else "NO"
+            if ask is None or ask > 0.80:
+                continue
+            b = _place(d, strategy, side, split)
+            if b:
+                return b
+        if strategy == "scalp_spot":
+            # Shipped aggressive scalp: any time in the window, buy the side
+            # the 1m spot return confirms, join the bid (20-99c entries).
+            # Backtested OOS +0.88/bet (n=7516) - see
+            # docs/edge-research-2026-10-08.md.
+            fav = getattr(d, "spot_side", None)
+            if fav is None:
+                continue
+            ask = _fill_for(d, fav)
+            if ask is None or ask < 0.20 - 1e-9 or ask > 0.99 + 1e-9:
+                continue
+            px = _maker_entry(d, fav)
+            if px is None:
+                continue
+            return _place_at(d, strategy, fav, px, split)
         if strategy == "app_32_50":
             if not d.would_alert:
                 continue

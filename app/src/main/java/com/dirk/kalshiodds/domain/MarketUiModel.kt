@@ -100,6 +100,7 @@ data class MarketUiModel(
     val importedModelPp: Double? = null,
     val modelEdgeQualified: Boolean = true,
     val spotUsd: Double? = null,
+    val spotReturn1m: Double? = null,
     val spotVsTargetUsd: Double? = null,
     val pastSettlements: List<Boolean> = emptyList(),
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
@@ -276,6 +277,7 @@ fun MarketUiModel.withSignalScore(
         importedModelPp = score.importedModelPp,
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
+        spotReturn1m = score.spotReturn1m,
         spotVsTargetUsd = score.spotVsTargetUsd,
         featureDevs = score.featureDevs
     )

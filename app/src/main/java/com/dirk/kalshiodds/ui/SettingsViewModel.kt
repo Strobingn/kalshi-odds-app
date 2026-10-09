@@ -185,6 +185,12 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         prefs.updatePaperTrading(v)
     }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
+    fun setAiAutoScalp(v: Boolean) = track("ai_auto_scalp", _state.value.settings.aiAutoScalp, v) {
+        prefs.updateAiAutoScalp(v)
+    }
+    fun setAiAutoScalpLive(v: Boolean) = track("ai_auto_scalp_live", _state.value.settings.aiAutoScalpLive, v) {
+        prefs.updateAiAutoScalpLive(v)
+    }
     fun resetPaperBook() {
         val before = container.paper.book.snapshot().cashUsd
         container.paper.book.reset()

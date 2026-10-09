@@ -22,6 +22,7 @@ class TicketSession(
     private val cancelOrder: suspend (order: PlacedOrder) -> Result<PlacedOrder> = { Result.success(it) },
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
     private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null,
+    private val onPlaced: ((TradeTicket, Boolean) -> Unit)? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
     private val voidHoldMs: Long = VOID_HOLD_MS
 ) {
@@ -284,6 +285,7 @@ class TicketSession(
             )
         }
         val result = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
+        runCatching { onPlaced?.invoke(ticket, result.isSuccess) }
         runCatching {
             onAttempt?.invoke(
                 com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
@@ -466,4 +468,4 @@ class TicketSession(
 }
 
 private val TradeTicket.isManualOrSell: Boolean
-    get() = kind == TicketKind.MANUAL || kind == TicketKind.SELL
+    get() = kind == TicketKind.MANUAL || kind == TicketKind.SELL || kind == TicketKind.SCALP_EXIT

@@ -28,7 +28,7 @@ MAX_TICK = 0.999
 STAKE_USD = 5.0
 FEE_RATE = 0.07
 CONTRACT = 1.0
-EDGE_ALERT_PP = 5.0
+EDGE_ALERT_PP = 8.0
 MIN_CONFIDENCE = 0.45
 MAX_SPREAD_CENTS = 8.0
 MIN_LIQUIDITY = 500.0
@@ -579,6 +579,7 @@ class Decision:
     regime: str
     volume: float
     oi: float
+    spot_side: str | None = None
 
 
 def close_fill(side: str, yes_ask_close: float | None, yes_bid_close: float | None) -> float | None:
@@ -715,6 +716,7 @@ class DecisionEngine:
             series=series,
             now_ms=now_ms,
             elapsed_min=elapsed_min,
+            spot_side=("YES" if (ret_1m or 0.0) > 0 else "NO" if (ret_1m or 0.0) < 0 else None) if ret_1m is not None else None,
             tte_sec=tte_sec,
             tte_bucket=tte,
             coin=coin,

@@ -134,8 +134,9 @@ class ScorecardMetricsTest {
         assertEquals(2, snap.sampleCount)
         assertEquals(1, snap.voidCount)
         assertEquals(0.5, snap.allTime.hitRate!!, 1e-9)
-        // Picked-side Brier: YES@0.70 hit → 0.09; NO@0.30 miss vs yes → (0.70−1)² = 0.09
-        assertEquals(0.09, snap.allTime.brier!!, 1e-9)
+        // Picked-side Brier: YES@0.70 hit → 0.09; picked NO@0.70 miss → 0.49; avg 0.29
+        assertEquals(0.29, snap.allTime.brier!!, 1e-9)
+        // P(YES) Brier: (0.70−1)² = 0.09; (0.30−1)² = 0.49; avg 0.29
         assertEquals(0.29, snap.allTime.pUpBrier!!, 1e-9)
         assertEquals(8.0, snap.allTime.avgEdgeWhenRight!!, 1e-9)
         assertEquals(-6.0, snap.allTime.avgEdgeWhenWrong!!, 1e-9)
@@ -303,7 +304,8 @@ class ScoringPredictabilityTest {
             hasDepth = true,
             hasCancel = true
         )!!
-        assertTrue(late.ai < early.ai)
+        assertEquals("AI channel weight is zero (extended AI off)", 0.0, early.ai, 1e-12)
+        assertEquals(0.0, late.ai, 1e-12)
         assertTrue(late.velocity > early.velocity)
         assertTrue(late.imbalance > early.imbalance)
         assertTrue(late.leadLag < early.leadLag)

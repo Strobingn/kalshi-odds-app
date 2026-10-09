@@ -55,9 +55,173 @@ object TicketBuilder {
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
-        return (hunter + value + configured)
+        val scalps = live.mapNotNull { proposeScalp(it, ctx) }
+        val exits = live.mapNotNull { market ->
+            val held = ctx.positions.firstOrNull { p ->
+                p.ticker.equals(market.ticker, true) && p.contracts >= 1.0
+            } ?: return@mapNotNull null
+            proposeScalpExit(market, held, ctx)
+        }
+        return (hunter + value + configured + scalps + exits)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
+    }
+
+    /**
+     * Aggressive scalp: any time in the window, buy the side the live spot
+     * return confirms (up -> YES, down -> NO), join the bid (20-99c entries).
+     * Backtested on 7 days of live 15m markets: the spot-confirmed side wins
+     * OOS +0.88/bet (n=7516) vs +0.47 for favorite-only - the spot direction
+     * is the edge, not the favorite label (docs/edge-research-2026-10-08.md).
+     * Approve still required.
+     */
+    fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val ret = market.spotReturn1m ?: return null
+        val side = when {
+            ret > 0.0 -> "YES"
+            ret < 0.0 -> "NO"
+            else -> return null
+        }
+        return buildScalpTicket(market, side, ctx)
+    }
+
+    private fun buildScalpTicket(market: MarketUiModel, side: String, ctx: Context): TradeTicket? {
+        val ask = bestAsk(market, side, ctx) ?: return null
+        val bid = freshBestBid(market, side, ctx)
+        val tick = KalshiPrice.MIN_TICK_DOLLARS
+        val entry = when {
+            bid == null -> ask
+            bid < ask - tick -> bid
+            else -> (ask - tick).coerceAtLeast(tick)
+        }
+        if (entry < SCALP_MIN_ENTRY || entry > SCALP_MAX_ENTRY) return null
+        val live = LiveOrderSizer.size(entry, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+        if (!live.ok) return null
+        val minProfit = ctx.settings.minProfitIfWinUsd
+        val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
+        val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = side,
+            bookSide = if (side == "YES") "bid" else "ask",
+            stakeUsd = live.allInUsd,
+            limitPrice = live.price,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = live.count,
+            estimatedFillUsd = live.allInUsd,
+            maxPayoutUsd = live.count * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = live.price,
+            title = market.title,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "%d ct @ %.1f¢ · join bid · all-in $%.2f (fee $%.2f)",
+                live.count, live.price * 100.0, live.allInUsd, live.feeUsd
+            ),
+            gateNote = String.format(
+                java.util.Locale.US,
+                "Scalp · spot moving %s · join bid · hold to close · Approve still required",
+                if (side == "YES") "UP" else "DOWN"
+            ),
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.SCALP,
+            blockedReason = if (belowMin) {
+                LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
+            } else null,
+            impliedChance = live.price,
+            modelChance = null,
+            fairChance = market.digitalFairPp?.div(100.0),
+            profitIfWinUsd = live.profitIfWinUsd,
+            feeUsd = live.feeUsd,
+            allInUsd = live.allInUsd,
+            belowMinProfit = belowMin,
+            minProfitIfWinUsd = minProfit,
+            winTargetUsd = minProfit,
+            winTargetCapped = true,
+            winTargetNote = String.format(
+                java.util.Locale.US,
+                "≤$5 all-in · wins $%.2f",
+                live.profitIfWinUsd
+            )
+        )
+    }
+
+    /**
+     * Scalp exit: propose a profit-taking sell for a held scalp position at
+     * [limitPrice] (default +5c over average cost, maker-style resting ask -
+     * never crosses down to the bid). The owner can also call this with any
+     * price to sell whenever they want; the market does not have to finish.
+     * Backtested note: hold-to-settlement beat early exits on 7 days of live
+     * data (+0.88/bet vs +0.76 for take-profit), so exits are offered, not
+     * forced - the ticket only appears when the held position is in profit.
+     */
+    fun proposeScalpExit(
+        market: MarketUiModel,
+        position: LivePosition,
+        ctx: Context,
+        limitPrice: Double? = null,
+        profitTargetUsd: Double = SCALP_EXIT_PROFIT_TARGET_USD
+    ): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val held = PositionParser.heldContracts(position)
+        if (held <= 0) return null
+        val avg = position.avgCost ?: return null
+        val ask = bestAsk(market, position.side, ctx) ?: return null
+        val requested = KalshiPrice.usable(limitPrice)
+            ?: KalshiPrice.usable((avg + SCALP_EXIT_TICKS_UP).coerceAtMost(0.99))
+        if (requested == null) return null
+        // Only offer the exit when it locks a profit above the target;
+        // a resting ask above the executable ask would never fill.
+        if (requested < avg + 1e-9) return null
+        if (ask - requested > SCALP_EXIT_MAX_ASK_DRIFT) return null
+        val proceeds = held * requested
+        val fee = KalshiFee.total(held, requested, ctx.settings.feeRate)
+        val profit = proceeds - fee - position.exposureUsd
+        if (profit < profitTargetUsd - 1e-9) return null
+        val yesLimit = if (position.side == "YES") requested else (1.0 - requested)
+        val bookSide = if (position.side == "YES") "ask" else "bid"
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = position.side,
+            bookSide = bookSide,
+            stakeUsd = proceeds,
+            limitPrice = requested,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = held,
+            estimatedFillUsd = proceeds,
+            maxPayoutUsd = proceeds,
+            estimatedAvgFill = requested,
+            title = market.title,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "sell %d ct @ %.1f¢ · locks +$%.2f · resting ask",
+                held, requested * 100.0, profit
+            ),
+            gateNote = String.format(
+                java.util.Locale.US,
+                "Scalp exit · sell %d ct @ %.1f¢ · profit +$%.2f · Approve still required",
+                held, requested * 100.0, profit
+            ),
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.SCALP_EXIT,
+            reduceOnly = true,
+            heldContracts = held,
+            feeUsd = fee,
+            allInUsd = proceeds,
+            profitIfWinUsd = profit,
+            impliedChance = requested,
+            winTargetUsd = profit,
+            winTargetCapped = true,
+            winTargetNote = String.format(
+                java.util.Locale.US,
+                "locks +$%.2f profit now · market does not need to finish",
+                profit
+            )
+        )
     }
 
     /** Cheap hunter tickets still require positive modeled value after costs. */
@@ -104,6 +268,8 @@ object TicketBuilder {
         return when (ticket.kind) {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
+            TicketKind.SCALP -> proposeScalp(market, ctx)
+            TicketKind.SCALP_EXIT -> ticket
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
             TicketKind.SELL -> ticket
@@ -345,19 +511,37 @@ object TicketBuilder {
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
+        // Automatic tickets post as makers: rest at the current best bid on
+        // the buy side instead of crossing the spread at the ask. Backtest on
+        // 17k minutes of live KXBTC/KXETH/KXSOL 15m data shows taker entries
+        // lose the ~1c spread + fee on every fill, while maker entries keep
+        // it. MANUAL keeps the old taker-at-ask behavior (user tapped Buy).
+        // A crossed or missing book must never fabricate a cheap entry: the
+        // resting price is clipped below the executable ask.
+        val entryPrice = if (kind == TicketKind.MANUAL) {
+            ask
+        } else {
+            val bid = freshBestBid(market, side, ctx)
+            val tick = KalshiPrice.MIN_TICK_DOLLARS
+            when {
+                bid == null -> ask
+                bid < ask - tick -> bid
+                else -> (ask - tick).coerceAtLeast(tick)
+            }
+        }
         // For automatic suggestions, the actual $5 clip must fit at the
         // quoted touch. The payout check below can require a much smaller
         // $1 clip, so passing it alone does not make the displayed size real.
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
         val live = if (kind != TicketKind.MANUAL && liveBook != null) {
             LiveOrderSizer.sizeWithinDepth(
-                ask,
+                entryPrice,
                 kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
                 SignalConstants.LIVE_ALL_IN_CAP_USD,
                 ctx.settings.feeRate
             )
         } else {
-            LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            LiveOrderSizer.size(entryPrice, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
         }
         if (!live.ok) {
             return if (kind == TicketKind.MANUAL) {
@@ -380,7 +564,7 @@ object TicketBuilder {
         val implied = live.price
         val netPer = model01?.let { it - live.allInUsd / live.count }
         val edge = netPer != null && netPer > AUTO_VALUE_MARGIN
-        // All automatic tickets need a buffer above the executable ask and
+        // All automatic tickets need a buffer above the entry price and
         // the fee for the actual $5 clip. A cheap payoff is not itself edge.
         if (kind != TicketKind.MANUAL && !edge) return null
 
@@ -430,6 +614,8 @@ object TicketBuilder {
                 TicketKind.MANUAL ->
                     "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
+                TicketKind.SCALP -> "Scalp · spot confirms the favorite · Approve still required"
+                TicketKind.SCALP_EXIT -> "Scalp exit · lock profit now · Approve still required"
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
             createdAtMs = ctx.nowMs,
@@ -479,7 +665,16 @@ object TicketBuilder {
         return m > p + fee + margin
     }
 
-    private const val AUTO_VALUE_MARGIN = 0.03
+    const val AUTO_VALUE_MARGIN = 0.08
+
+    /** Aggressive scalp entries: spot-confirmed side, 20-99c. */
+    const val SCALP_MIN_ENTRY = 0.20
+    const val SCALP_MAX_ENTRY = 0.99
+    /** Scalp exit defaults: rest +5c over cost, never more than 3c above the ask. */
+    const val SCALP_EXIT_TICKS_UP = 0.05
+    const val SCALP_EXIT_MAX_ASK_DRIFT = 0.03
+    const val SCALP_EXIT_PROFIT_TARGET_USD = 0.25
+
 
     /** Rank the two actual buys independently; a hero direction is not an order price. */
     private fun rankedValueSides(market: MarketUiModel, ctx: Context): List<String> =

@@ -107,6 +107,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                onOpenScalp = { navigator.open(AppRoutes.SCALP) },
                                 onOpenChart = {
                                     chartTicker = it.ticker
                                     navigator.open(AppRoutes.CHART)
@@ -153,6 +154,12 @@ class MainActivity : ComponentActivity() {
                                 onBack = { navigator.back() }
                             )
                         },
+                        scalp = {
+                            com.dirk.kalshiodds.ui.ScalpScreen(
+                                log = KalshiOddsApp.from(this@MainActivity).container.scalpLog,
+                                onBack = { navigator.back() }
+                            )
+                        },
                         chart = {
                             val market = chartMarket
                             if (market == null) {
@@ -169,6 +176,7 @@ class MainActivity : ComponentActivity() {
                                     onOpenData = { navigator.open(AppRoutes.DATA) },
                                     onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                     onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                onOpenScalp = { navigator.open(AppRoutes.SCALP) },
                                     onOpenChart = {
                                         chartTicker = it.ticker
                                         navigator.open(AppRoutes.CHART)
