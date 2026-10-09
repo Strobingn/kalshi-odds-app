@@ -26,7 +26,10 @@ import kotlinx.coroutines.flow.asStateFlow
  *  - Rule: enter only when the ask is ≥ 10¢ below fair after the entry fee. Exit when selling beats holding
  *    (bid − exit fee ≥ fair). Exit when fair turns down 10¢ below entry. Time stop at τ ≤ 20 s.
  *
- * Backtest, walk-forward. Train Sep 25–Oct 1: −1.11¢/contract (n=850). Untouched test Oct 2–8: −0.40¢/contract,
+ * 0.3.40 (v2 rule, multi round trip + target/stop + 60 s hard exit): every coin negative out of sample, see
+ * BACKTEST_LABEL and scalp-research/REPORT.md addendum. Seed params kept.
+ *
+ * v1 backtest, walk-forward. Train Sep 25–Oct 1: −1.11¢/contract (n=850). Untouched test Oct 2–8: −0.40¢/contract,
  * 95% window-clustered CI [−2.04, +1.22], n=1,068, win 45%. NOT PROVEN. 5,004 parameter combos were tried in
  * total; none had a positive mean in-sample.
  */
@@ -35,8 +38,9 @@ object ScalpRule {
     const val VERSION = "scalp-fairgap-v2-20261009"
     const val LEGACY_VERSION = "scalp-fairgap-v1-20261009"
     const val BACKTEST_LABEL =
-        "Backtest (walk-forward, held-out Oct 2–8): −0.40¢/contract after both fees, 95% CI [−2.04, +1.22], " +
-            "1,068 round trips, 45% wins. Train: −1.11¢. Not proven — paper only."
+        "Backtest v2 (walk-forward, held-out Oct 2–8, net after both fees): BTC −2.93¢/contract 95% CI [−3.69, −2.16] n=1,177; " +
+            "ETH −2.80¢ [−4.00, −1.64] n=458; SOL −3.16¢ [−4.49, −1.70] n=258. 24 grid trials; no coin or hour held up " +
+            "out of sample. Not proven — paper only."
 
     const val CONTRACTS = 10
     const val MIN_GAP = 0.10
