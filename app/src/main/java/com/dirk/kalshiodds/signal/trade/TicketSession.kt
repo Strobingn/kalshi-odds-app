@@ -26,6 +26,7 @@ class TicketSession(
     private val loadWorking: (String) -> List<PlacedOrder> = { emptyList() },
     private val saveWorking: (String, List<PlacedOrder>) -> Unit = { _, _ -> },
     private val refreshOrder: suspend (PlacedOrder) -> PlacedOrder = { it },
+    private val currentAccount: () -> String? = { null },
     private val voidHoldMs: Long = VOID_HOLD_MS
 ) {
     private val mutex = Mutex()
@@ -256,6 +257,10 @@ class TicketSession(
      */
     suspend fun approve(ticketId: String): TicketUiState = mutex.withLock {
         val cur = _state.value
+        if (currentAccount()?.let { it != account } == true) {
+            _state.update { it.copy(lastError = "Order account changed; wait for account journal recovery") }
+            return _state.value
+        }
         val ticket = when (val p = cur.phase) {
             is TicketPhase.AwaitingApprove -> p.ticket.takeIf { it.matchesApproval(ticketId) }
             is TicketPhase.Proposed -> p.tickets.firstOrNull { it.matchesApproval(ticketId) }
@@ -299,6 +304,13 @@ class TicketSession(
             )
         }
         val result = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
+        val interrupted = result.exceptionOrNull() as? kotlinx.coroutines.CancellationException
+        if (interrupted != null) {
+            val unknown = cur.working + pending.copy(status = "unknown", error = "Submission interrupted; reconcile")
+            _state.update { it.copy(working = unknown, lastError = "Submission interrupted; reconcile") }
+            saveWorking(account, unknown)
+            throw interrupted
+        }
         runCatching {
             onAttempt?.invoke(
                 com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
@@ -347,6 +359,7 @@ class TicketSession(
     }
 
     suspend fun cancelWorking(orderId: String): TicketUiState = mutex.withLock {
+        check(currentAccount()?.let { it == account } != false) { "Order account changed" }
         val cur = _state.value
         val order = cur.working.firstOrNull { it.orderId == orderId } ?: return cur
         val result = runCatching { cancelOrder(order) }.getOrElse { Result.failure(it) }
@@ -381,6 +394,7 @@ class TicketSession(
     }
 
     suspend fun reconcileWorking() = mutex.withLock {
+        check(currentAccount()?.let { it == account } != false) { "Order account changed" }
         val cur = _state.value
         val updated = cur.working.map { order ->
             if (order.status !in setOf("unknown", "submitting", "acknowledged", "resting")) order

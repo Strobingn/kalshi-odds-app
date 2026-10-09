@@ -26,7 +26,7 @@ object LimitOrderEditor {
         require(count in 1..5000) { "Enter 1–5000 contracts" }
         require(KalshiPrice.usable(price) != null && price.isFinite()) { "Enter a valid limit price" }
         val wire = KalshiPrice.toWireDollars(price) ?: error("Invalid price")
-        require(kotlin.math.abs(wire.toDouble() - price) < 1e-8) { "Price must use the exchange price grid" }
+        require(kotlin.math.abs(wire.toDouble() - price) < 1e-8) { "Price supports at most four dollar decimal places" }
         options.validate(nowMs, false)
         val total = LiveOrderSizer.allInUsd(count, price)
         require(total <= LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) { "Limit exceeds the $5 all-in cap" }

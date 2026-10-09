@@ -404,6 +404,7 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun snapshotBook(ticker: String): BookLevelSnapshot? {
         val book = books[ticker] ?: return null
+        if (book.sawGap) return null
         val snap = book.snapshot()
         return if (snap.isEmpty()) null else snap
     }

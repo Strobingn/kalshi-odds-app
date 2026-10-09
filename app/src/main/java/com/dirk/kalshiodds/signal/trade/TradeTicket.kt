@@ -116,7 +116,7 @@ data class PlacedOrder(
 
     /** IoC reduce-only sells never rest — leftover size is canceled. */
     val isResting: Boolean
-        get() = !ticket.isSell && remainingCount > 1e-9 && orderId != null && status !in setOf("canceled", "executed", "rejected")
+        get() = !ticket.isSell && ticket.limitOptions.timeInForce == "good_till_canceled" && remainingCount > 1e-9 && orderId != null && status !in setOf("canceled", "executed", "rejected")
 
     fun fillSummary(): String {
         val wanted = ticket.contracts

@@ -588,7 +588,7 @@ internal fun ApproveTicketDialog(
                         label = { Text(if (ticket.isSell) "Contracts (max $held)" else "Contracts") },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     )
-                    if (true) {
+                    run {
                         OutlinedTextField(
                             value = centsText,
                             onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) },
@@ -658,7 +658,7 @@ internal fun ApproveTicketDialog(
                     canApprove = ticket.canApprove,
                     blockedReason = ticket.blockedReason
                 )
-                Text(HomeCopy.confirmApproveLabel(mode, ticket.stakeUsd, ticket.isSell))
+                Text(if (!ticket.isSell) "Confirm limit" else HomeCopy.confirmApproveLabel(mode, ticket.stakeUsd, ticket.isSell))
             }
         },
         dismissButton = {

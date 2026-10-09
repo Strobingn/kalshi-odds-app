@@ -94,7 +94,7 @@ class SignalHub(
     fun hasFreshBook(ticker: String, nowMs: Long, maxAgeMs: Long = 3_000L): Boolean {
         val last = lastBookScoredMs[ticker] ?: return false
         return wsLive && _status.value.state == WsConnectionState.CONNECTED &&
-            nowMs >= last && nowMs - last <= maxAgeMs
+            nowMs >= last && nowMs - last <= maxAgeMs && scoring.book.snapshotBook(ticker) != null
     }
 
     fun applyCalibration(state: Calibrator.State) {

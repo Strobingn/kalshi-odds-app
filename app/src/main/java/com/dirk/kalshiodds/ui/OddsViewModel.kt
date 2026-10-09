@@ -113,6 +113,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var rolloverBound = false
     private var lastRecordedTicketError: String? = null
     private val ticketForwardLogged = ConcurrentHashMap.newKeySet<String>()
+    private var selectedOrderAccount: String? = null
 
     init {
         ticketSession.onStart()
@@ -212,7 +213,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 prefs.settings.collectLatest { settings ->
                     hub.settings = settings
-                    ticketSession.selectAccount(container.tradeClient.accountKey())
+                    val account = container.tradeClient.accountKey()
+                    ticketSession.selectAccount(account)
+                    if (selectedOrderAccount != account) {
+                        selectedOrderAccount = account
+                        _state.update { it.copy(positions = emptyList(), liveCashUsd = null) }
+                        refreshPositions()
+                    }
                     _state.update { it.copy(settings = settings) }
                     publishSupportState()
                     scheduleRebuildTickets(immediate = true)
@@ -574,8 +581,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             if (market == null || !MarketLifecycle.isCurrentWindow(market, now)) {
                 ticketSession.failSoft("Contract is not open"); return@launch
             }
+            val accountAtConfirm = container.tradeClient.accountKey()
             val result = runCatching {
                 val cash = withContext(Dispatchers.IO) { container.tradeClient.getCashUsd() }
+                check(accountAtConfirm == container.tradeClient.accountKey()) { "Account changed; review again" }
                 val options = com.dirk.kalshiodds.signal.trade.LimitOptions(makerOnly, tif,
                     if (expirySeconds > 0) now / 1000 + expirySeconds else null)
                 com.dirk.kalshiodds.signal.trade.LimitOrderEditor.edit(ticket, count, price, options, cash, now)
@@ -934,11 +943,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 decoratePositions(_state.value.positions)
                 return@launch
             }
+            val accountAtRead = container.tradeClient.accountKey()
             val (rows, cash) = withContext(Dispatchers.IO) {
                 val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrNull()
                 val cashUsd = runCatching { container.tradeClient.getCashUsd() }.getOrNull()
                 positions to cashUsd
             }
+            if (accountAtRead != container.tradeClient.accountKey()) return@launch
             if (cash != null) {
                 _state.update { it.copy(liveCashUsd = cash) }
             }

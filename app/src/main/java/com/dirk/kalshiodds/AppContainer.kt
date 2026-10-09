@@ -110,7 +110,8 @@ class AppContainer(context: Context) {
         onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) },
         loadWorking = orderJournal::load,
         saveWorking = orderJournal::save,
-        refreshOrder = tradeClient::reconcile
+        refreshOrder = tradeClient::reconcile,
+        currentAccount = tradeClient::accountKey
     )
     val clock: Clock = Clock.System
     val repository = MarketRepository(
@@ -127,7 +128,7 @@ class AppContainer(context: Context) {
         extraOpenTickers = { paper.book.openTickers() },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
-            scalp.settle(ticker, result)
+            if (result.equals("yes", true) || result.equals("no", true)) scalp.settle(ticker, result.equals("yes", true))
         },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {

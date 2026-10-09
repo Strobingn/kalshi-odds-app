@@ -303,7 +303,7 @@ class KalshiTradeClient(
             remainingCount = remaining,
             averageFillPrice = body.averageFillPrice.toDoubleOrNullSafe(),
             placedAtMs = body.tsMs ?: System.currentTimeMillis(),
-            status = if (remaining > 0 && !ticket.isSell && ticket.limitOptions.timeInForce == "good_till_canceled") "resting" else "executed"
+            status = if (remaining > 0 && !ticket.isSell && ticket.limitOptions.timeInForce == "good_till_canceled") "resting" else "acknowledged"
         )
     }
 

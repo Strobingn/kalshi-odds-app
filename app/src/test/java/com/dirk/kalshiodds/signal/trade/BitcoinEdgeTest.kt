@@ -68,4 +68,34 @@ class BitcoinEdgeTest {
         assertEquals(-rec.entryDebit, engine.snapshot().single().netUsd!!, 0.0)
         assertEquals("official settlement", engine.snapshot().single().reason)
     }
+    @Test fun bounceCanEnterNearOpenAndJustBeforeCloseAndCostsBothLegs() {
+        for (start in listOf(1000L, 894000L)) {
+            val engine = ScalpEngine()
+            val ticker = "KXBTC15M-26OCT091000-00"
+            val prices = listOf(.50, .52, .44, .445, .455)
+            var proposals = emptyList<TradeTicket>()
+            for ((i, ask) in prices.withIndex()) {
+                val now = start + i * 1000
+                val market = com.dirk.kalshiodds.domain.MarketUiModel(
+                    ticker = ticker, title = "BTC", subtitle = null, floorStrike = 60000.0,
+                    yesBid = ask - .01, yesAsk = ask, noBid = 1 - ask, noAsk = 1 - ask + .01,
+                    lastPrice = ask, yesProbabilityPercent = ask * 100, noProbabilityPercent = (1 - ask) * 100,
+                    aiYesPercent = 70.0, volume = 100.0, volume24h = 100.0, closeTimeLocal = null,
+                    closeTimeEpochMs = 900000L, openTimeEpochMs = 0, status = "active", seriesLabel = "Bitcoin")
+                val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+                    yes = listOf((ask - .01) to 20.0), no = listOf((1 - ask) to 20.0))
+                val ctx = TicketBuilder.Context(com.dirk.kalshiodds.signal.config.SignalSettings(), false,
+                    books = mapOf(ticker to book), nowMs = now, bankrollUsd = 100.0)
+                proposals = engine.observe(listOf(market), ctx) { true }
+            }
+            val entry = proposals.first { it.kind == TicketKind.SCALP && it.side == "YES" }
+            assertTrue(entry.paperOnly)
+            assertFalse(entry.canApprove)
+            assertEquals(.455, entry.limitPrice, 1e-9)
+            val replay = engine.snapshot().single()
+            assertTrue(replay.entryDebit > replay.entry * replay.count)
+            assertNull(replay.endedMs)
+        }
+    }
+
 }
