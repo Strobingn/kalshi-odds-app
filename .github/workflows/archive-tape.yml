@@ -1,0 +1,62 @@
+name: Archive trade tape (Claude)
+
+# Pulls every public trade of the settled KXBTC15M windows of the last N days
+# (tools/research/scalp/pull_tape.py), plus the 1-minute quotes and Coinbase
+# closes the scalping study uses, and stores them in the "scalper-data"
+# release so the study can be rerun after Kalshi stops serving the history.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of settled windows to pull"
+        default: "24"
+  push:
+    branches: [Claude]
+    paths:
+      - ".github/workflows/archive-tape.yml"
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONPATH: tools/research/scalp
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install numpy
+
+      - name: Pull the tape
+        run: |
+          mkdir -p tape/raw
+          python3 -m pull_tape tape "${{ inputs.days || '24' }}" 6
+
+      - name: Pull 1-minute quotes and Coinbase closes
+        run: |
+          mkdir -p minute && cd minute
+          PYTHONPATH=../tools/research/scalp python3 -m pull_candles KXBTC15M 47 || echo "(candles failed)"
+          PYTHONPATH=../tools/research/scalp python3 -m pull_cb 49 || echo "(coinbase failed)"
+          ls -la
+
+      - name: Store in the scalper-data release
+        run: |
+          tag=scalper-data
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_REF_NAME" --prerelease \
+              --title "Scalper data (recordings and study files)" \
+              --notes "Data only, no app."
+          fi
+          day=$(date -u +%Y-%m-%d)
+          n=$(ls tape/raw | wc -l)
+          echo "$n windows"
+          tar -cf "kxbtc15m_trade_tape_to_${day}.tar" -C tape markets.json raw
+          tar -czf "kxbtc15m_minute_files_to_${day}.tar.gz" -C minute .
+          gh release upload "$tag" "kxbtc15m_trade_tape_to_${day}.tar" "kxbtc15m_minute_files_to_${day}.tar.gz" --clobber
