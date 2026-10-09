@@ -1,6 +1,6 @@
 # Bitcoin Edge — Codex branch
 
-Independent Android app: **Bitcoin Edge**, package `com.wildlifewhisperer.bitcoinedge.codex`, version 1.1.0, versionCode `2000000 + GitHub run number`. Source namespace remains `com.dirk.kalshiodds`. Install alongside existing DipHunter builds; it has separate app data and keys. Updates use only the `bitcoin-edge-codex` release and `BitcoinEdge-Codex-*.apk` assets, preserving the committed signing certificate.
+Independent Android app: **Bitcoin Edge**, package `com.wildlifewhisperer.bitcoinedge.codex`, version 1.1.1, versionCode `2000000 + GitHub run number`. Source namespace remains `com.dirk.kalshiodds`. Install alongside existing DipHunter builds; it has separate app data and keys. Updates use only the `bitcoin-edge-codex` release and `BitcoinEdge-Codex-*.apk` assets, preserving the committed signing certificate.
 
 Entries and exits are evaluated across the complete exchange-open 15-minute contract. There is no 3–13 minute entry gate, 90-second holding limit, or forced late-window exit. Historical/model warmup and fresh liquidity checks still apply. No trades run merely because the app starts or a signal appears; real orders retain per-ticket Approve.
 
@@ -13,6 +13,8 @@ The experimental BTC bounce engine looks for ≥5¢ quote drops, ≥1¢ recovery
 Live and demo quote replays are separated. Persistent quote replays use ask entries and depth-qualified bid exits, count conservative fees on both legs, leave missing quotes unresolved, and settle only using the repository's official settlement callback. They assume hypothetical instantaneous taker fills; queue, latency, slippage and adverse selection are unmeasured. Replay summaries are not live P&L or a calibrated predictor. The app's imported/on-device/digital fair model is a proxy, not an authenticated BRTI valuation. Maker fill profitability is not inferred from replay.
 
 Research context supplied in this conversation: 43,200 Massive BTC one-minute bars (Sep 9–Oct 8, 2026). Last-close shock fades reversed 59.92% out of sample; the minute-VWAP check reversed only 43.9%, undermining blind BTC-last-trade fading. These are underlying-price statistics, not Kalshi win rates, and do not establish profit. The strategy deliberately collects forward quote evidence instead of importing those percentages as probabilities.
+
+Scalp entries are recomputed on every observation and withdrawn when depth or valuation changes. A stale feed resets bounce history. Fresh bid-based price exits remain eligible when the spread widens or fair probability is unavailable; thin exit depth keeps the hypothetical replay unresolved.
 
 CI builds the isolated branch, runs limit/idempotency/recovery and existing execution/updater regressions, verifies the debug certificate, and publishes the APK only after those checks succeed.
 

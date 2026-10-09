@@ -111,4 +111,63 @@ class BitcoinEdgeTest {
         assertEquals(0, calls)
     }
 
+    private fun market(ask: Double, bid: Double, ai: Double? = 70.0) =
+        com.dirk.kalshiodds.domain.MarketUiModel(
+            ticker = "KXBTC15M-26OCT091000-00", title = "BTC", subtitle = null,
+            floorStrike = 60000.0, yesBid = bid, yesAsk = ask,
+            noBid = 1 - ask, noAsk = 1 - bid, lastPrice = ask,
+            yesProbabilityPercent = ask * 100, noProbabilityPercent = (1 - ask) * 100,
+            aiYesPercent = ai, volume = 100.0, volume24h = 100.0,
+            closeTimeLocal = null, closeTimeEpochMs = 900000L, openTimeEpochMs = 0,
+            status = "active", seriesLabel = "Bitcoin")
+
+    private fun context(m: com.dirk.kalshiodds.domain.MarketUiModel, now: Long,
+                        positions: List<LivePosition> = emptyList(), depth: Double = 20.0) =
+        TicketBuilder.Context(com.dirk.kalshiodds.signal.config.SignalSettings(), false,
+            books = mapOf(m.ticker to com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+                yes = listOf(m.yesBid!! to depth), no = listOf((1 - m.yesAsk!!) to depth))),
+            positions = positions, nowMs = now, bankrollUsd = 100.0)
+
+    @Test fun wideSpreadDoesNotSuppressLossExitOrHypotheticalReplayExit() {
+        val m = market(.50, .30)
+        val rec = ScalpEngine.Replay(m.ticker, "YES", 1000, .38, 1,
+            LiveOrderSizer.allInUsd(1, .38), 900000)
+        val engine = ScalpEngine(listOf(rec))
+        val pos = LivePosition(m.ticker, "YES", 1.0, .38, .38)
+        val tickets = engine.observe(listOf(m), context(m, 10000, listOf(pos))) { true }
+        assertTrue(tickets.any { it.isSell && it.reduceOnly && it.side == "YES" })
+        assertEquals("6¢ price loss", engine.snapshot().single().reason)
+        assertEquals(.30, engine.snapshot().single().exit!!, 1e-9)
+        assertTrue(tickets.none { it.kind == TicketKind.SCALP })
+        assertEquals("6¢ price loss", engine.exitReason(.38, .30, null))
+    }
+
+    @Test fun entriesAreRevokedWhenDepthOrFairAdvantageDisappearsInsideSampleInterval() {
+        for (loseDepth in listOf(true, false)) {
+            val engine = ScalpEngine()
+            val prices = listOf(.50, .52, .44, .445, .455)
+            var tickets = emptyList<TradeTicket>()
+            for ((i, ask) in prices.withIndex()) {
+                val m = market(ask, ask - .01)
+                tickets = engine.observe(listOf(m), context(m, 1000L + i * 1000L)) { true }
+            }
+            assertTrue(tickets.any { it.kind == TicketKind.SCALP })
+            val changed = market(.455, .445, if (loseDepth) 70.0 else 46.0)
+            val result = engine.observe(listOf(changed),
+                context(changed, 5100, depth = if (loseDepth) .1 else 20.0)) { true }
+            assertTrue(result.none { it.kind == TicketKind.SCALP })
+        }
+    }
+
+    @Test fun staleFeedClearsBounceHistoryBeforeReconnect() {
+        val engine = ScalpEngine()
+        for ((i, ask) in listOf(.50, .52, .44, .445, .455).withIndex()) {
+            val m = market(ask, ask - .01)
+            engine.observe(listOf(m), context(m, 1000L + i * 1000L)) { true }
+        }
+        val m = market(.455, .445)
+        assertTrue(engine.observe(listOf(m), context(m, 6000)) { false }.isEmpty())
+        assertTrue(engine.observe(listOf(m), context(m, 7000)) { true }.isEmpty())
+    }
+
 }

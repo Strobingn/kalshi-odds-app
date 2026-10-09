@@ -32,15 +32,17 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
         val exits = mutableListOf<TradeTicket>()
         for (m in active) for (side in listOf("YES", "NO")) {
             val key = "${m.ticker}|$side"
+            // Rebuild entries from this observation, never retain an old opportunity.
+            signals.remove(key)
             val bid = TicketBuilder.freshBestBid(m, side, ctx)
             val ask = TicketBuilder.bestAsk(m, side, ctx)
             val fair = TicketBuilder.modelProb(m, side)
-            if (!freshBook(m.ticker) || bid == null || ask == null || fair == null ||
-                ask < bid || ask - bid > .02) {
-                signals.remove(key)
+            if (!freshBook(m.ticker)) {
+                history.remove(key)
                 // Missing quotes leave the position unresolved, never a fictional fill.
                 continue
             }
+            if (bid == null) continue
             val replayIndex = records.indexOfFirst { it.source == source && it.ticker == m.ticker && it.side == side && it.endedMs == null }
             if (replayIndex >= 0) {
                 val rec = records[replayIndex]
@@ -59,9 +61,14 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
                     }
                 }
             }
+            // A wide or one-sided book blocks entries, but must not suppress
+            // price-based loss/target exits when a fresh sellable bid exists.
+            if (ask == null || fair == null || ask < bid || ask - bid > .02 + 1e-9) continue
             val quotes = history.getOrPut(key) { ArrayDeque() }
-            if (quotes.lastOrNull()?.at?.let { ctx.nowMs - it < 1000 } == true) continue
-            quotes.addLast(Quote(ctx.nowMs, bid, ask, fair))
+            while (quotes.firstOrNull()?.at?.let { ctx.nowMs - it > 60_000 } == true) quotes.removeFirst()
+            if (quotes.lastOrNull()?.at?.let { ctx.nowMs - it >= 1000 } != false) {
+                quotes.addLast(Quote(ctx.nowMs, bid, ask, fair))
+            }
             while (quotes.size > 60) quotes.removeFirst()
             val window = quotes.toList()
             if (window.size < 5) continue
@@ -96,10 +103,10 @@ class ScalpEngine(initial: List<Replay> = emptyList(), private val save: (List<R
         return signals.values.toList() + exits
     }
 
-    fun exitReason(entry: Double, bid: Double, fair: Double): String? = when {
+    fun exitReason(entry: Double, bid: Double, fair: Double?): String? = when {
         bid >= entry + .08 -> "8¢ price bounce"
         bid <= entry - .06 -> "6¢ price loss"
-        fair <= bid -> "proxy fair-value advantage gone"
+        fair != null && fair <= bid -> "proxy fair-value advantage gone"
         else -> null
     }
     private fun askDepth(ctx: TicketBuilder.Context, ticker: String, side: String, ask: Double): Int {
