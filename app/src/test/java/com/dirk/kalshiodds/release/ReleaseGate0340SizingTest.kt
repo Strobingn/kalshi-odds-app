@@ -110,7 +110,7 @@ class ReleaseGate0340SizingTest {
 
     @Test
     fun paperKellyUnderFiveDollarsIsNoBet() {
-        val paper = paperBook(startUsd = 60.0)
+        val paper = paperBook(startUsd = 15.0)
         val out = runTwice(AutopilotMode.PAPER, paper, ShadowBook(), live(cash = null))
         assertTrue("got $out / ${paper.snapshot().cashUsd} ${paper.snapshot().paperBankrollUsd}", out is AutopilotStep.Outcome.Skip)
         assertEquals(AutopilotMinStake.REASON, (out as AutopilotStep.Outcome.Skip).reason)
@@ -181,5 +181,52 @@ class ReleaseGateFilesTrackedTest {
         assertTrue(java.io.File(res, "backup_rules.xml").readText().contains("kashi_live_autopilot_arm.xml"))
         val x = java.io.File(res, "data_extraction_rules.xml").readText()
         assertEquals(2, Regex("kashi_live_autopilot_arm\\.xml").findAll(x).count())
+    }
+}
+
+class LiveOffMigration0340Test {
+    private class Flag : com.dirk.kalshiodds.signal.paper.MigrationFlag {
+        var set = false
+        override fun done() = set
+        override fun markDone() { set = true }
+    }
+
+    @Test
+    fun upgradeWithPersistedArmingDisarmsAndForcesPaperOnce() = kotlinx.coroutines.runBlocking {
+        val store = com.dirk.kalshiodds.signal.paper.InMemoryLiveArmStore(armed = true) // armed under 0.3.39
+        var mode = "LIVE"
+        val flag = Flag()
+        // App start (0.3.40): sync disarm before the session is built, then the mode write.
+        assertTrue(com.dirk.kalshiodds.signal.paper.LiveOffMigration.disarmIfFirstRun(store, flag, 1L))
+        val session = com.dirk.kalshiodds.signal.paper.LiveAutopilotSession(store)
+        com.dirk.kalshiodds.signal.paper.LiveOffMigration.forcePaperMode(flag) { mode = it }
+        org.junit.Assert.assertFalse(session.armed)
+        assertEquals("PAPER", mode)
+        assertEquals(AutopilotMode.PAPER, AutopilotMode.parse(mode))
+        // Dirk can still re-arm manually; the migration never runs again.
+        mode = "LIVE"
+        session.tapApprove()
+        assertTrue(session.confirmRealMoney("REAL MONEY"))
+        org.junit.Assert.assertFalse(com.dirk.kalshiodds.signal.paper.LiveOffMigration.disarmIfFirstRun(store, flag, 2L))
+        com.dirk.kalshiodds.signal.paper.LiveOffMigration.forcePaperMode(flag) { mode = it }
+        assertTrue(com.dirk.kalshiodds.signal.paper.LiveAutopilotSession(store).armed)
+        assertEquals("LIVE", mode)
+    }
+
+    @Test
+    fun failedModeWriteRetriesNextLaunch() = kotlinx.coroutines.runBlocking {
+        val flag = Flag()
+        runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.forcePaperMode(flag) { throw java.io.IOException("disk") } }
+        org.junit.Assert.assertFalse(flag.done())
+    }
+
+    @Test
+    fun appRunsDisarmBeforeContainerLoadsArmStore() {
+        val src = listOf(
+            java.io.File("app/src/main/java/com/dirk/kalshiodds/KalshiOddsApp.kt"),
+            java.io.File("src/main/java/com/dirk/kalshiodds/KalshiOddsApp.kt")
+        ).first { it.isFile }.readText()
+        assertTrue(src.indexOf("LiveOffMigration.disarmIfFirstRun") in 1 until src.indexOf("container = AppContainer(this)"))
+        assertTrue(src.contains("LiveOffMigration.forcePaperMode"))
     }
 }

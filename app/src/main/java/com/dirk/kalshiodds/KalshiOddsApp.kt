@@ -35,7 +35,23 @@ class KalshiOddsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         runCatching { CrashBreadcrumb.install(this) }
+        // 0.3.40 (owner: live betting OFF): one-time disarm BEFORE the container loads the arm store.
+        val liveOffFlag = com.dirk.kalshiodds.signal.paper.SharedPrefsMigrationFlag(
+            this, com.dirk.kalshiodds.signal.paper.LiveOffMigration.FLAG_KEY
+        )
+        runCatching {
+            com.dirk.kalshiodds.signal.paper.LiveOffMigration.disarmIfFirstRun(
+                com.dirk.kalshiodds.signal.paper.SharedPrefsLiveArmStore(this), liveOffFlag, System.currentTimeMillis()
+            )
+        }
         container = AppContainer(this)
+        appScope.launch {
+            runCatching {
+                com.dirk.kalshiodds.signal.paper.LiveOffMigration.forcePaperMode(liveOffFlag) { mode ->
+                    container.preferences.updateAutopilotMode(mode)
+                }
+            }
+        }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->
             // SharedPreferences.apply() only — do not launch a coroutine

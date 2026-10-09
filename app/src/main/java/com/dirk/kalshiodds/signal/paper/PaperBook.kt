@@ -466,7 +466,9 @@ class PaperBook(
             allowMultipleOpen = true,
             bankrollUsd = bankrollUsd,
             maxStakeUsd = maxStakeUsd,
-            minStakeUsd = com.dirk.kalshiodds.decision.AutopilotMinStake.USD
+            minStakeUsd = com.dirk.kalshiodds.decision.AutopilotMinStake.USD,
+            kellyFractionOverride = PaperAutopilot.PAPER_AI_KELLY_FRACTION,
+            capFullKelly = false
         )
     }
 
@@ -964,7 +966,9 @@ class PaperBook(
         bankrollUsd: Double? = null,
         maxStakeUsd: Double? = null,
         /** 0.3.40: Autopilot Kelly fills under this all-in (after depth/cash caps) are skipped, never rounded up. */
-        minStakeUsd: Double? = null
+        minStakeUsd: Double? = null,
+        kellyFractionOverride: Double? = null,
+        capFullKelly: Boolean = true
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -983,10 +987,11 @@ class PaperBook(
                 winProb = p,
                 ask = px,
                 bankrollUsd = bankroll,
-                kellyFraction = kellyFraction,
+                kellyFraction = kellyFractionOverride ?: kellyFraction,
                 feeRate = feeRate,
                 depthContracts = depthContracts,
-                maxStakeUsd = maxStakeUsd
+                maxStakeUsd = maxStakeUsd,
+                capFullKelly = capFullKelly
             )
             if (!sized.ok) {
                 publish(cur.copy(lastMessage = sized.reason ?: "Paper skip $ticker — Kelly ≤ 0"))

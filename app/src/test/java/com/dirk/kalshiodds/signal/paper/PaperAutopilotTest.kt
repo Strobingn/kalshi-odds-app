@@ -99,11 +99,12 @@ class PaperAutopilotTest {
         val secondMkt = edgeMarket(ticker = "KXBTC15M-WIN2-50", yesAsk = 0.25, aiYes = 80.0)
         val second = enter(book, secondMkt, nowMs + 1)!!
         val sizedOnNew = PaperKellySizer.size(
-            0.80,
+            second.aiPct!! / 100.0,
             0.25,
             bankrollUsd = afterWin,
             kellyFraction = 0.5,
-            depthContracts = DEEP
+            depthContracts = DEEP,
+            capFullKelly = false
         )
         assertEquals(sizedOnNew.contracts, second.contracts)
         assertTrue(second.stakeUsd > first.stakeUsd - 1e-6 || second.contracts >= first.contracts)

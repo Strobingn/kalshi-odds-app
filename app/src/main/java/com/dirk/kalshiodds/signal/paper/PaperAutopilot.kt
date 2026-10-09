@@ -26,6 +26,9 @@ import kotlin.math.min
  * not moved enough to justify another clip.
  */
 object PaperAutopilot {
+    /** 0.3.40: paper Autopilot always sizes half-Kelly on the paper bankroll. */
+    const val PAPER_AI_KELLY_FRACTION = 0.5
+
 
     const val SOURCE = "AI paper autopilot"
     const val PRICE_DELTA = 0.02
@@ -302,27 +305,25 @@ object PaperAutopilot {
             return Decision(skip = true, reason = "Paper skip — flip-chance / lottery block", side = picked)
         }
         val free = freeBankroll(paper)
-        val rawF = PaperKellySizer.fullKelly(picked.winProb, picked.ask, settings.feeRate)
-        val budget = windowBudgetUsd(free, rawF)
-        val room = budget - spentInWindow(paper.fills, market.ticker)
+        // 0.3.40 owner decision: on PAPER the AI has full control of sizing — half-Kelly on the free
+        // paper bankroll, limited only by that bankroll, displayed depth and the $5 floor.
+        // (The old 5%-per-window budget and 10% full-Kelly cap no longer apply to paper.)
+        val room: Double? = null
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
         val sized = PaperKellySizer.size(
             winProb = picked.winProb,
             ask = picked.ask,
             bankrollUsd = free,
-            kellyFraction = settings.paperKellyFraction,
+            kellyFraction = PAPER_AI_KELLY_FRACTION,
             feeRate = settings.feeRate,
             depthContracts = depth,
-            maxStakeUsd = room
+            maxStakeUsd = null,
+            capFullKelly = false
         )
         if (!sized.ok) {
             return Decision(
                 skip = true,
-                reason = if (room + 1e-9 < sized.costPerContract) {
-                    "Paper skip — window Kelly budget spent"
-                } else {
-                    sized.reason ?: "Paper skip — Kelly ≤ 0 after fees"
-                },
+                reason = sized.reason ?: "Paper skip — Kelly ≤ 0 after fees",
                 side = picked,
                 kellyF = sized.kellyF,
                 freeBankrollUsd = free,

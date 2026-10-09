@@ -147,3 +147,41 @@ object LiveAutopilotPreflight {
         return Verdict(true, "Preflight ok")
     }
 }
+
+/** One-time flag storage for [LiveOffMigration]. */
+interface MigrationFlag {
+    fun done(): Boolean
+    fun markDone()
+}
+
+class SharedPrefsMigrationFlag(context: Context, private val key: String) : MigrationFlag {
+    // Same file as the live arm: excluded from backup / device transfer.
+    private val prefs = context.applicationContext.getSharedPreferences(SharedPrefsLiveArmStore.PREFS, Context.MODE_PRIVATE)
+    override fun done(): Boolean = prefs.getBoolean(key, false)
+    override fun markDone() {
+        prefs.edit().putBoolean(key, true).commit()
+    }
+}
+
+/**
+ * 0.3.40 owner decision: live betting OFF. On the first launch of 0.3.40, clear any persisted live
+ * arming and set Autopilot mode to PAPER — exactly once. Re-arming afterwards still needs the
+ * manual Approve + typed REAL MONEY flow and is then respected (this never runs again).
+ */
+object LiveOffMigration {
+    const val FLAG_KEY = "live_off_migrated_0340"
+
+    /** Synchronous part — call before anything reads the arm store. Returns true when it ran. */
+    fun disarmIfFirstRun(store: LiveArmStore, flag: MigrationFlag, nowMs: Long): Boolean {
+        if (flag.done()) return false
+        runCatching { store.saveArmed(false, nowMs) }
+        return true
+    }
+
+    /** Mode part (DataStore). Marks the flag only after the mode write succeeded, so a failed write retries next launch. */
+    suspend fun forcePaperMode(flag: MigrationFlag, setMode: suspend (String) -> Unit) {
+        if (flag.done()) return
+        setMode(AutopilotMode.PAPER.name)
+        flag.markDone()
+    }
+}

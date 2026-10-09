@@ -25,22 +25,22 @@ class PaperAutopilotGuardsTest {
     }
 
     @Test
-    fun windowBudgetCapsEveryClipInTheWindow() {
+    fun paperAiSizesHalfKellyOnBankrollWithoutWindowCap() {
+        // 0.3.40 owner decision: paper Autopilot has full sizing control — half-Kelly on the free
+        // paper bankroll; the old 5%-per-window budget no longer caps it.
         val book = PaperBook(idFactory = { "w1" }, nowMs = { nowMs })
         val market = edge(yesAsk = 0.20, aiYes = 80.0)
         val first = enter(book, market)
         assertNotNull(first)
         val spent = book.snapshot().fills.sumOf { it.stakeUsd }
-        val free = PaperAutopilot.freeBankroll(book.snapshot()) + spent
-        val budget = PaperAutopilot.windowBudgetUsd(
-            free,
+        val oldBudget = PaperAutopilot.windowBudgetUsd(
+            1_000.0,
             PaperKellySizer.fullKelly(first!!.aiPct!! / 100.0, first.limitPrice)
         )
-        assertTrue("spent $spent budget $budget", spent <= budget + 0.05)
-        val moved = edge(yesAsk = 0.30, aiYes = 80.0)
-        assertNull(PaperAutopilot.consider(book, moved, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
-        assertTrue(book.snapshot().lastMessage!!.contains("budget"))
-        assertEquals(1, book.snapshot().fills.size)
+        assertTrue("spent $spent old budget $oldBudget", spent > oldBudget)
+        val expect = PaperKellySizer.size(first.aiPct!! / 100.0, 0.20, 1_000.0, 0.5, depthContracts = 100_000, capFullKelly = false)
+        assertEquals(expect.contracts, first.contracts)
+        assertTrue(spent <= 1_000.0)
     }
 
     @Test
@@ -62,17 +62,14 @@ class PaperAutopilotGuardsTest {
         val market = edge(ticker = "KXBTC15M-NEXT", yesAsk = 0.25, aiYes = 80.0)
         val fill = enter(book, market)!!
         val anchored = PaperAutopilot.anchoredYes(0.80, 0.25)
-        val onFull = PaperKellySizer.size(anchored, 0.25, 1_000.0, 0.5, depthContracts = 100_000)
+        val onFull = PaperKellySizer.size(anchored, 0.25, 1_000.0, 0.5, depthContracts = 100_000, capFullKelly = false)
         val onFree = PaperKellySizer.size(
             anchored,
             0.25,
             PaperAutopilot.freeBankroll(snap),
             0.5,
             depthContracts = 100_000,
-            maxStakeUsd = PaperAutopilot.windowBudgetUsd(
-                PaperAutopilot.freeBankroll(snap),
-                PaperKellySizer.fullKelly(anchored, 0.25)
-            )
+            capFullKelly = false
         )
         assertTrue(onFull.contracts > onFree.contracts)
         assertEquals(onFree.contracts, fill.contracts)
