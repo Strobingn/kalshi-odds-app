@@ -56,6 +56,8 @@ object TicketBuilder {
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
         return (hunter + value + configured)
+            // The app does not suggest a side priced under 5¢ (see [MIN_CALL_ASK]). Buy on a card still works.
+            .filterNot { isLongShotPrice(it.limitPrice) }
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
@@ -515,6 +517,31 @@ object TicketBuilder {
      */
     fun entryBlockReason(market: MarketUiModel, settings: SignalSettings): String? =
         if (settings.entryFilterEnabled) market.entryBlockReason?.takeIf { it.isNotBlank() } else null
+
+    /**
+     * The app never suggests a bet on a side priced under this.
+     *
+     * The model's chance is clamped to 2–98% and its calibration rarely goes
+     * under about 4%, so on a side priced at a fraction of a cent it always
+     * "sees" a few points of edge. That is the clamp, not information: with a
+     * minute left and UP at 0.2¢, the market's 0.2% is the better number.
+     * Buyers of the cheap side are also the group that lost most on the
+     * recorded tape (docs/tape-study-2026-10-04.md). The user's own Buy on a
+     * card and limit orders are not affected.
+     */
+    const val MIN_CALL_ASK = 0.05
+
+    fun isLongShotPrice(ask: Double?): Boolean =
+        ask != null && ask.isFinite() && ask > 0.0 && ask < MIN_CALL_ASK - 1e-9
+
+    /** `UP costs 0.2¢. That far out the model cannot tell 0.2% from a few percent, so its "edge" is not real. No bet.` */
+    fun longShotReason(side: String, ask: Double): String {
+        val c = ask * 100.0
+        val fmt = if (c < 1.0) "%.1f" else "%.0f"
+        val n = String.format(java.util.Locale.US, fmt, c)
+        return "${if (side.equals("NO", true)) "DOWN" else "UP"} costs $n¢. That far out the model cannot tell " +
+            "$n% from a few percent, so its \"edge\" is not real. No bet."
+    }
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
         val yes = market.importedModelPp?.div(100.0)

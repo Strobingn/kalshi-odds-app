@@ -9,14 +9,15 @@ import org.junit.Test
 class EdgeAutoTunerTest {
 
     @Test
-    fun notEnoughSamplesDoesNotSitOut() {
+    fun notEnoughSamplesSitsOut() {
+        // Until 1.8.8 a model with no record was allowed to call bets. No record is not a reason to bet.
         val samples = (0 until 10).map { i ->
             EdgeAutoTuner.Sample(0.70, 0.50, outcomeYes = true, edgeAfterFeesPp = 8.0)
         }
         val r = EdgeAutoTuner.tune(samples, minSamples = 30)
         assertFalse(r.enoughSamples)
-        assertFalse(r.sitOut)
-        assertTrue(r.reason.contains("Not enough"))
+        assertTrue(r.sitOut)
+        assertTrue(r.reason.contains("No bet calls yet"))
     }
 
     @Test

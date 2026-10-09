@@ -19,6 +19,21 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.8 (Claude branch): the app stops telling you to bet without a reason
+
+Reported with a screenshot: `BET UP BTC · $5 wins $2330.00 profit · closes in 1:11` with UP at 0.2¢ and
+"Model 4% vs market 0% · edge +3 pts". The 4% was the model's floor (its chance is clamped to 2–98%), so
+any side priced at a fraction of a cent showed a few points of "edge".
+
+- **No call under 5¢** (`TicketBuilder.MIN_CALL_ASK`). The card says NO BET with the reason, the hunter
+  and long-shot tickets are not offered there, whatever the model says. Your own Buy and limit orders
+  still work at any price.
+- **The model has to earn BET** (`EdgeAutoTuner`). It may call a bet only when its own settled record has
+  enough calls, beats Kalshi's prices on both scores, and its average result per call is above zero by two
+  standard errors. Before, a model with no record was allowed to call bets and any positive total counted.
+  With no record, a losing one, or one within chance, the card says NO BET and why. A fresh install starts
+  silent. The clear-lead rule (your rule) is separate and unchanged.
+
 ## 1.8.7 (Claude branch): limit orders at your own price, paper and real
 
 Buy UP / Buy DOWN (or Sell on a position) → **LIMIT ORDER** / **LIMIT SELL** on the confirm sheet opens an

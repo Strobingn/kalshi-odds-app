@@ -7,8 +7,13 @@ import kotlin.math.ln
 
 /**
  * Pick the minimum edge (after fees) that maximizes realized / expected
- * value on settled signals. When the model is not beating the market,
- * sit out instead of forcing a threshold.
+ * value on settled signals, and decide whether the model may say BET at all.
+ *
+ * It may only when its own settled record shows it: enough calls, better
+ * than Kalshi's prices on both scores, and an average result per call that
+ * is above zero by two standard errors. With no record, a losing record or a
+ * record within chance, it sits out. (Until 1.8.8 a model with no record was
+ * allowed to call bets, and any positive total counted.)
  */
 object EdgeAutoTuner {
 
@@ -73,8 +78,9 @@ object EdgeAutoTuner {
         minSamples: Int = SignalConstants.AUTO_TUNE_MIN_SAMPLES
     ): Result {
         if (samples.size < minSamples) {
+            // No record is not a reason to bet: the model stays quiet until it has one.
             return Result(
-                sitOut = false,
+                sitOut = true,
                 thresholdPp = SignalConstants.DEFAULT_EDGE_THRESHOLD_PP,
                 n = samples.size,
                 enoughSamples = false,
@@ -83,7 +89,7 @@ object EdgeAutoTuner {
                 modelLogLoss = logLoss(samples) { it.modelYes },
                 marketLogLoss = logLoss(samples) { it.marketMid },
                 evAtThreshold = null,
-                reason = "Not enough settled signals to auto-tune (${samples.size}/$minSamples)."
+                reason = "No bet calls yet: the model has ${samples.size} settled calls and needs $minSamples before its record means anything."
             )
         }
         val modelBrier = brier(samples) { it.modelYes }!!
@@ -95,6 +101,7 @@ object EdgeAutoTuner {
         var bestThreshold = CANDIDATE_PP.last()
         var bestEv = Double.NEGATIVE_INFINITY
         var bestN = 0
+        var bestTaken: List<Sample> = emptyList()
         for (t in CANDIDATE_PP) {
             val taken = samples.filter { it.edgeAfterFeesPp + 1e-12 >= t }
             if (taken.size < minSamples) continue
@@ -103,11 +110,15 @@ object EdgeAutoTuner {
                 bestEv = ev
                 bestThreshold = t
                 bestN = taken.size
+                bestTaken = taken
             }
         }
 
         val negativeEv = bestEv.isFinite() && bestEv <= 0.0
-        val sitOut = !beats || negativeEv || bestEv == Double.NEGATIVE_INFINITY
+        // A positive total is not enough: a handful of lucky calls gives one too. The average result per
+        // call has to be above zero by two standard errors before the model is allowed to say BET.
+        val withinChance = !negativeEv && bestTaken.isNotEmpty() && lowerBound(bestTaken) <= 0.0
+        val sitOut = !beats || negativeEv || withinChance || bestEv == Double.NEGATIVE_INFINITY
         val reason = when {
             !beats && negativeEv ->
                 "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
@@ -117,6 +128,8 @@ object EdgeAutoTuner {
                 "This bet's expected value is negative."
             bestEv == Double.NEGATIVE_INFINITY ->
                 "Not enough similar bets after fees to size a threshold."
+            withinChance ->
+                "The model's $bestN settled calls came out ahead, but by no more than luck would give. No bet calls until the record is clear of chance."
             else ->
                 "Auto-tune ${fmt(bestThreshold)} pp · EV ${fmt(bestEv)} on $bestN / ${samples.size} signals."
         }
@@ -136,14 +149,26 @@ object EdgeAutoTuner {
 
     private fun expectedValue(taken: List<Sample>): Double {
         if (taken.isEmpty()) return Double.NEGATIVE_INFINITY
-        return taken.sumOf { s ->
-            val sideYes = s.modelYes >= s.marketMid
-            val won = sideYes == s.outcomeYes
-            val price = if (sideYes) s.marketMid else 1.0 - s.marketMid
-            val fee = KalshiFee.perContract(price, SignalConstants.DEFAULT_FEE_RATE, s.stakeUsd)
-            val pnl = if (won) (1.0 - price - fee) else (-price - fee)
-            pnl * s.stakeUsd
-        }
+        return taken.sumOf { pnlOf(it) }
+    }
+
+    /** What one call made per contract: bought at the market's price on the side the model leaned to, fee paid. */
+    private fun pnlOf(s: Sample): Double {
+        val sideYes = s.modelYes >= s.marketMid
+        val won = sideYes == s.outcomeYes
+        val price = if (sideYes) s.marketMid else 1.0 - s.marketMid
+        val fee = KalshiFee.perContract(price, SignalConstants.DEFAULT_FEE_RATE, s.stakeUsd)
+        val pnl = if (won) (1.0 - price - fee) else (-price - fee)
+        return pnl * s.stakeUsd
+    }
+
+    /** Average result per call minus two standard errors. Above zero = ahead by more than chance. */
+    internal fun lowerBound(taken: List<Sample>): Double {
+        if (taken.size < 2) return Double.NEGATIVE_INFINITY
+        val pnl = taken.map { pnlOf(it) }
+        val mean = pnl.average()
+        val variance = pnl.sumOf { (it - mean) * (it - mean) } / (pnl.size - 1)
+        return mean - 2.0 * kotlin.math.sqrt(variance / pnl.size)
     }
 
     private fun brier(samples: List<Sample>, p: (Sample) -> Double): Double? {

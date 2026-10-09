@@ -406,7 +406,8 @@ class SignalPreferences(
             edgeThresholdPp = this[KEY_THRESHOLD] ?: def.edgeThresholdPp,
             autoTuneEnabled = this[KEY_AUTO_TUNE] ?: SignalConstants.DEFAULT_AUTO_TUNE,
             autoTuneManualOverride = this[KEY_AUTO_TUNE_OVERRIDE] ?: SignalConstants.DEFAULT_AUTO_TUNE_OVERRIDE,
-            sitOut = this[KEY_SIT_OUT] ?: false,
+            // Nothing stored yet (fresh install): no model bet calls until the auto-tuner has looked at a record.
+            sitOut = this[KEY_SIT_OUT] ?: true,
             tunedEdgeThresholdPp = this[KEY_TUNED_THRESHOLD],
             autoTuneNote = this[KEY_AUTO_TUNE_NOTE].orEmpty(),
             notificationsEnabled = this[KEY_NOTIF] ?: def.notificationsEnabled,

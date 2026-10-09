@@ -51,6 +51,11 @@ object BetCall {
         // EV at the ask picks the side (or no side) whenever the engine has a fair.
         val ev = TicketBuilder.evDecision(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
         if (ev != null && ev.side == null) return none(ev.reason)
+        // The "edge" on a side priced under 5¢ is the model's floor, not information: never a call.
+        if (ev?.side != null) {
+            val ask = if (ev.side == "YES") ev.yesAsk else ev.noAsk
+            if (ask != null && TicketBuilder.isLongShotPrice(ask)) return none(TicketBuilder.longShotReason(ev.side, ask))
+        }
         val proposed = TicketBuilder.proposeAll(listOf(market), ctx).filter { !it.isSell }
         val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
         val all = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
@@ -71,6 +76,9 @@ object BetCall {
                 contracts = chosen.contracts,
                 noBetReason = null
             )
+        }
+        tickets.firstOrNull { TicketBuilder.isLongShotPrice(it.limitPrice) }?.let {
+            return none(TicketBuilder.longShotReason(it.side, it.limitPrice))
         }
         val blocked = tickets.firstOrNull { it.blockedReason != null }
         val reason = blocked?.blockedReason
@@ -110,6 +118,7 @@ object BetCall {
         if (!ticket.canApprove) return false
         val ask = KalshiPrice.usable(ticket.limitPrice) ?: return false
         if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isPlaceholder(ask)) return false
+        if (TicketBuilder.isLongShotPrice(ask)) return false
         val bid = if (ticket.side.equals("NO", true)) market.noBid else market.yesBid
         if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isCrossed(bid, ask)) return false
         return ticket.modelEdge || TicketBuilder.modelBeatsImplied(
