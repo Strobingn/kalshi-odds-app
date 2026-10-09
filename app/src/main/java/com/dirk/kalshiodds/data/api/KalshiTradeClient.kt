@@ -189,6 +189,20 @@ class KalshiTradeClient(
         }
     }
 
+    /** Cancel one resting order by id (Home Stop / open-bets Cancel). Throws on failure. */
+    suspend fun cancelById(orderId: String, ticker: String?) {
+        ensureKeys()
+        try {
+            val first = activePrimary().cancelOrderV2(orderId, marketTicker = ticker, exchangeIndex = -1)
+            val chosen = chooseHost(first) {
+                activeFallback()?.cancelOrderV2(orderId, marketTicker = ticker, exchangeIndex = -1)
+            }
+            if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
+        } catch (e: Exception) {
+            throw softFailure(e)
+        }
+    }
+
     private suspend fun <T> chooseHost(
         first: Response<T>,
         retry: suspend () -> Response<T>?

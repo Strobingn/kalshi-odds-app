@@ -87,6 +87,8 @@ data class OddsUiState(
     /** Latest deterministic gate verdict per market ("BET …" or "NO BET — …"). */
     val decisionLines: List<String> = emptyList(),
     val restingOrders: List<com.dirk.kalshiodds.signal.trade.RestingOrder> = emptyList(),
+    /** True after the Home Stop tap until Autopilot is turned on again. */
+    val autopilotStopped: Boolean = false,
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
     val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
@@ -1290,6 +1292,88 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         runPaperAutopilot(live)
     }
 
+    /**
+     * 0.3.38 paper scalp tick: one quote per BTC/ETH/SOL 15m market from the live WS book (no book, no
+     * quote), spot from the settlement feed (CF first, Coinbase fallback), σ from the in-app trailing
+     * estimator. Never calls Kalshi.
+     */
+    private fun runScalp(live: List<MarketUiModel>, s: com.dirk.kalshiodds.signal.config.SignalSettings) {
+        val now = container.clock.nowMs()
+        live.forEach { market ->
+            val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
+            if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
+            val book = hub.scoring.book.snapshotBook(market.ticker) ?: return@forEach
+            val spot = settlementFor(market.ticker, now).spot
+            val coin = when {
+                series.contains("SOL") -> "SOL"
+                series.contains("ETH") -> "ETH"
+                else -> "BTC"
+            }
+            val sigma = container.scalp.observeSpot(coin, spot, now)
+                ?: com.dirk.kalshiodds.decision.ScalpRule.defaultSigmaPerSec(market.ticker)
+            val q = com.dirk.kalshiodds.decision.ScalpRule.quoteFromBook(
+                ticker = market.ticker,
+                nowMs = now,
+                closeMs = market.closeTimeEpochMs,
+                bookAgeMs = hub.scoring.book.bookAgeMs(market.ticker, now),
+                yesBids = book.yes,
+                noBids = book.no,
+                spot = spot,
+                strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker),
+                sigmaPerSec = sigma
+            ) ?: return@forEach
+            container.scalp.onQuote(q, enabled = s.paperTradingEnabled)
+        }
+    }
+
+    /**
+     * Home one-tap Stop. No confirmation by design: Autopilot off, live arming dropped, then every
+     * resting Kalshi order is cancelled. The latch blocks Autopilot sends until Autopilot is turned on again.
+     */
+    fun stopAll() {
+        val now = container.clock.nowMs()
+        container.stopLatch.engage(now)
+        liveAutopilotSession.disarm()
+        publishLiveArm()
+        viewModelScope.launch {
+            runCatching { prefs.updateAiPaperAutopilot(false) }
+            val s = _state.value.settings
+            val outcome = if (!s.tradingCredentialsConfigured()) {
+                com.dirk.kalshiodds.signal.paper.StopOutcome(0, 0, skippedNoKey = true)
+            } else {
+                withContext(Dispatchers.IO) {
+                    val listed = runCatching { container.tradeClient.listRestingOrders() }
+                    val orders = listed.getOrElse { _state.value.restingOrders }
+                    var ok = 0
+                    var bad = if (listed.isFailure && orders.isEmpty()) 1 else 0
+                    orders.forEach { o ->
+                        if (runCatching { container.tradeClient.cancelById(o.orderId, o.ticker) }.isSuccess) ok++ else bad++
+                    }
+                    com.dirk.kalshiodds.signal.paper.StopOutcome(ok, bad, skippedNoKey = false)
+                }
+            }
+            _state.update { it.copy(userMessage = outcome.message(), autopilotStopped = true) }
+            refreshPositions()
+        }
+    }
+
+    /** Cancel one resting real-money order from the Home open-bets list. Needs typed REAL MONEY. */
+    fun cancelRestingOrder(orderId: String, ticker: String?, typed: String) {
+        if (!com.dirk.kalshiodds.signal.trade.RealMoneyPhrase.matches(typed)) {
+            _state.update { it.copy(userMessage = "Type REAL MONEY to cancel a real order") }
+            return
+        }
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { container.tradeClient.cancelById(orderId, ticker) }
+            }
+            _state.update {
+                it.copy(userMessage = if (r.isSuccess) "Cancelled resting order on ${ticker ?: orderId}" else "Cancel failed: ${r.exceptionOrNull()?.message ?: "error"}")
+            }
+            refreshPositions()
+        }
+    }
+
     fun tapLiveAutopilotApprove() {
         liveAutopilotSession.tapApprove()
         publishLiveArm()
@@ -1332,8 +1416,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value.settings
         val assessments = assessForLedger(live, s)
         if (s.paperTradingEnabled) runFav15Ladder(live)
+        runCatching { runScalp(live, s) }
         if (!s.paperTradingEnabled || !s.aiPaperAutopilotEnabled) return
+        if (container.stopLatch.engaged) return
         val mode = s.autopilotModeEnum()
+        if (mode == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE) {
+            val snapB = _state.value
+            container.tradeEvents.balance(
+                needsBalance = true,
+                fresh = com.dirk.kalshiodds.decision.LiveBalancePolicy.fresh(snapB.liveCashUsd, snapB.liveCashAtMs, container.clock.nowMs())
+            )
+        }
         paperBook.configure(
             kellyFraction = s.paperKellyFraction,
             feeRate = s.feeRate,
@@ -1417,7 +1510,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val dispatch = com.dirk.kalshiodds.signal.paper.AutopilotDispatch.decide(
                 com.dirk.kalshiodds.signal.paper.AutopilotDispatch.Request(
                     mode = mode,
-                    masterOn = true,
+                    masterOn = s.aiPaperAutopilotEnabled,
                     decisionOk = true,
                     paperFilled = tick.fill != null,
                     armed = liveAutopilotSession.armed,
@@ -1429,7 +1522,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     shadowPrice = ticket.limitPrice,
                     shadowDepthFill = ticket.depthFill,
                     shadowAllInUsd = ticket.stakeUsd,
-                    alreadyAttempted = shadowBook.snapshot().attempted(ticket.clientOrderId)
+                    alreadyAttempted = shadowBook.snapshot().attempted(ticket.clientOrderId),
+                    stopLatched = container.stopLatch.engaged
                 )
             )
             if (!dispatch.shouldPlace || !recorded.isNew) return@forEach
@@ -1449,6 +1543,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     shadowBook.releaseLiveReservation(ticket.clientOrderId, ticket.stakeUsd, day)
                     val msg = result.exceptionOrNull()?.message ?: "Live Autopilot order failed"
                     shadowBook.noteLiveError(msg)
+                    container.tradeEvents.errorStop(ticket.clientOrderId, msg)
                     liveAutopilotSession.disarm()
                     publishLiveArm()
                 }

@@ -34,7 +34,7 @@ import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun DecisionScaffold(title: String, onBack: () -> Unit, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
+internal fun DecisionScaffold(title: String, onBack: () -> Unit, content: androidx.compose.foundation.lazy.LazyListScope.() -> Unit) {
     val colors = DipTheme.colors
     Scaffold(
         containerColor = colors.bg,
@@ -64,7 +64,7 @@ private fun DecisionScaffold(title: String, onBack: () -> Unit, content: android
 }
 
 @Composable
-private fun DecisionCard(content: @Composable () -> Unit) {
+internal fun DecisionCard(content: @Composable () -> Unit) {
     val colors = DipTheme.colors
     Column(
         Modifier.fillMaxWidth()

@@ -48,7 +48,9 @@ fun OddsScreen(
         onCancelApprove = { viewModel.cancelTicketApprove() },
         onCancelOrder = { viewModel.cancelWorkingOrder(it) },
         onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) },
-        onResumeAlerts = { viewModel.resumeAlerts() }
+        onResumeAlerts = { viewModel.resumeAlerts() },
+        onStop = { viewModel.stopAll() },
+        onCancelResting = { id, ticker, typed -> viewModel.cancelRestingOrder(id, ticker, typed) }
     )
 }
 

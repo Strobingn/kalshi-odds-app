@@ -62,6 +62,14 @@ class AppContainer(context: Context) {
         longshot = com.dirk.kalshiodds.decision.LongshotResidual.loadAsset(app)
     ).also { it.refitIfDue() }
     val ladder = com.dirk.kalshiodds.decision.LadderStore(app)
+    /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
+    val scalp = com.dirk.kalshiodds.decision.ScalpBook(
+        (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
+            ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence()
+    )
+    /** One-tap Stop latch and once-per-event trade notifications. */
+    val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)
+    val stopLatch = com.dirk.kalshiodds.signal.paper.StopLatch()
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
@@ -133,7 +141,14 @@ class AppContainer(context: Context) {
     )
     val tickets = TicketSession(
         placeOrder = { ticket, clientOrderId ->
-            runCatching { tradeClient.createLimit(ticket, clientOrderId) }
+            runCatching { tradeClient.createLimit(ticket, clientOrderId) }.also { r ->
+                if (r.isSuccess) {
+                    tradeEvents.realBetPlaced(
+                        clientOrderId,
+                        "${if (ticket.isSell) "SELL" else "BUY"} ${ticket.side} ${ticket.contracts} × ${ticket.ticker} @ ${(ticket.limitPrice * 100).toInt()}¢"
+                    )
+                }
+            }
         },
         cancelOrder = { order ->
             runCatching { tradeClient.cancel(order) }
@@ -158,7 +173,7 @@ class AppContainer(context: Context) {
         logStore = logStore,
         extraOpenTickers = {
             paper.book.openTickers() + shadow.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers() +
-                ladder.openTickers() + decisions.unsettledTickers()
+                ladder.openTickers() + decisions.unsettledTickers() + scalp.openTickers()
         },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
@@ -167,6 +182,7 @@ class AppContainer(context: Context) {
             d3Store.settle(ticker, result)
             runCatching { predictionLedger?.settleLedger(ticker, result, System.currentTimeMillis()) }
             runCatching { ladder.settle(ticker, result) }
+            runCatching { scalp.settle(ticker, result) }
             decisions.onSettled()
         },
         onCalibration = { hub.applyCalibration(it) },
