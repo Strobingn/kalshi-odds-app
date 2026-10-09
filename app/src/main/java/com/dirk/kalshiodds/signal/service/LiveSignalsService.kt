@@ -63,6 +63,7 @@ class LiveSignalsService : Service() {
         // here is a process-killing RemoteServiceException. 0.3.41: nothing else runs on the
         // main thread before it; the rest of the setup moves to a background dispatcher.
         promoteToForeground()
+        isRunning = true
         scope.launch {
             runCatching { acquireWakeLock() }
             runCatching { bindRollover() }
@@ -378,7 +379,7 @@ class LiveSignalsService : Service() {
                 LiveSignalsKeepAlive.isTimeoutPaused(this)
             )
         ) {
-            LiveSignalsKeepAlive.startService(this)
+            // 0.3.42: the service keeps running (stopWithTask=false); only arm the WorkManager watchdog.
             LiveSignalsKeepAlive.enqueueSoon(this)
         }
     }
@@ -435,8 +436,11 @@ class LiveSignalsService : Service() {
         runCatching { KalshiOddsApp.from(this).container.hub.wsLive = false }
         scope.cancel()
         super.onDestroy()
+        isRunning = false
         if (restart) {
-            LiveSignalsKeepAlive.startService(applicationContext)
+            // 0.3.42: never startForegroundService() from inside onDestroy — when the system tears the
+            // service down (e.g. after a missed start window) an immediate re-start re-arms the same
+            // deadline on a stalled main thread. Restart via WorkManager (delay + exponential backoff).
             LiveSignalsKeepAlive.enqueueSoon(applicationContext)
         }
     }
@@ -483,7 +487,11 @@ class LiveSignalsService : Service() {
     companion object {
         private const val TAG = "DipHunterWS"
 
-        fun start(context: Context) = LiveSignalsKeepAlive.startService(context)
+        /** 0.3.42: true between onCreate and onDestroy of this process's service instance. */
+        @Volatile var isRunning: Boolean = false
+            private set
+
+        fun start(context: Context) = LiveSignalsKeepAlive.requestStart(context)
 
         fun stop(context: Context) = LiveSignalsKeepAlive.stopService(context)
     }

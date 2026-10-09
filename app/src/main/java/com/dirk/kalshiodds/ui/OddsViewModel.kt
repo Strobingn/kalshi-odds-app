@@ -242,7 +242,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     publishSupportState()
                     scheduleRebuildTickets(immediate = true)
                     if (serviceWanted(settings)) {
-                        runCatching { LiveSignalsService.start(getApplication()) }
+                        runCatching { LiveSignalsService.start(getApplication()) } // 0.3.42: gated requestStart
                         if (!settings.credentialsConfigured) {
                             hub.setConnection(WsConnectionState.NEEDS_API_KEY)
                         }
