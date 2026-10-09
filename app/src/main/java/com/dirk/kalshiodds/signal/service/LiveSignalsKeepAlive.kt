@@ -100,9 +100,22 @@ object LiveSignalsKeepAlive {
      * Safe FGS start. Never throws — [android.app.ForegroundServiceStartNotAllowedException]
      * and OEM failures are caught so the UI process stays up.
      */
-    fun startService(context: Context): Boolean {
+    fun startService(context: Context, fromForegroundUi: Boolean = false): Boolean {
         val app = context.applicationContext
         val intent = Intent(app, LiveSignalsService::class.java)
+        // 0.3.42: while our Activity is visible, a plain startService() is allowed and carries no
+        // "must call startForeground within N s" contract — the service still promotes itself to the
+        // foreground first thing in onCreate. This removes ForegroundServiceDidNotStartInTimeException
+        // when the main thread is stalled (seen on a slow emulator with 0.3.41).
+        if (fromForegroundUi && uiInForeground.get()) {
+            try {
+                app.startService(intent)
+                return true
+            } catch (t: Throwable) {
+                // IllegalStateException: app no longer considered foreground → fall through to FGS start.
+                Log.w(TAG, "startService (foreground UI) failed: ${t.javaClass.simpleName}")
+            }
+        }
         return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 app.startForegroundService(intent)
@@ -125,6 +138,12 @@ object LiveSignalsKeepAlive {
         val intent = Intent(app, LiveSignalsService::class.java).apply {
             action = LiveSignalsPolicy.ACTION_STOP
         }
+        // 0.3.42: never spin up the service (and arm an FGS start deadline) just to stop it.
+        if (!LiveSignalsService.isRunning) {
+            runCatching { app.stopService(Intent(app, LiveSignalsService::class.java)) }
+            return
+        }
+        if (uiInForeground.get() && runCatching { app.startService(intent) }.isSuccess) return
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 app.startForegroundService(intent)
@@ -156,8 +175,19 @@ object LiveSignalsKeepAlive {
         if (!firstFrameDrawn.get()) return
         setTimeoutPaused(context, false)
         if (LiveSignalsPolicy.shouldPromoteFromUiForeground(isEnabled(context))) {
-            startService(context)
+            startService(context, fromForegroundUi = true)
         }
+    }
+
+    /**
+     * 0.3.42: settings-driven start from the (process-scoped) view model. Never during startup —
+     * the first-frame callback starts the service — never when it is already running, and uses the
+     * deadline-free foreground-UI start when the Activity is visible.
+     */
+    fun requestStart(context: Context) {
+        if (LiveSignalsService.isRunning) return
+        if (!firstFrameDrawn.get()) return
+        if (uiInForeground.get()) startService(context, fromForegroundUi = true) else ensureService(context)
     }
 
     fun enqueueWatchdogs(context: Context) {

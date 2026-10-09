@@ -87,7 +87,7 @@ class ReleaseGate0341Test {
     @Test
     fun backgroundStartFailureFallsBackToRetryingWork() {
         val keep = kt("signal/service/LiveSignalsKeepAlive.kt")
-        val start = body(keep, "fun startService(context: Context): Boolean")
+        val start = body(keep, "fun startService(context: Context, fromForegroundUi: Boolean = false): Boolean")
         assertTrue(start.contains("startForegroundService"))
         assertTrue(start.contains("catch (t: Throwable)"))
         assertTrue(start.contains("enqueueSoon(app)"))
