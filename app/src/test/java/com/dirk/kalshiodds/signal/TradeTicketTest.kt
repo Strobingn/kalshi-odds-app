@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -467,7 +468,12 @@ class TicketBuilderGateTest {
         assertNull(TicketBuilder.proposeHunter(m, ctx))
         assertNull(TicketBuilder.proposeHunterValue(m, ctx))
         assertNull(TicketBuilder.propose(m, ctx))
-        assertTrue(TicketBuilder.proposeAll(listOf(m), ctx).isEmpty())
+        val tickets = TicketBuilder.proposeAll(listOf(m), ctx)
+        // Unrestricted paper SCALP is intentionally independent of the
+        // automatic live-ticket value gates. The live-capable kinds remain
+        // absent when the modeled value does not clear costs.
+        assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
+        assertTrue(tickets.single().kind == TicketKind.SCALP && tickets.single().paperOnly)
         assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
     }
 
@@ -507,7 +513,11 @@ class TicketBuilderGateTest {
 
         assertEquals(0.98, TicketBuilder.modelProb(market, "YES")!!, 1e-9)
         assertEquals(0.02, TicketBuilder.modelProb(market, "NO")!!, 1e-9)
-        assertTrue(TicketBuilder.proposeAll(listOf(market), ctx).isEmpty())
+        val tickets = TicketBuilder.proposeAll(listOf(market), ctx)
+        assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
+        // SCALP must follow the scorer's settlement-aware resolved side, not
+        // the stale imported residual that would buy the 0.1c DOWN leg.
+        assertEquals("YES", tickets.single { it.kind == TicketKind.SCALP }.side)
     }
 
     @Test
