@@ -1064,12 +1064,17 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             // duplicate columns on upgrade.
             if (oldVersion in 7..9) addTicketForwardScalpColumns(db)
             if (oldVersion < 11) migrateTicketForwardToMultiTrack(db)
+            // A short-lived v11 development build accidentally gave the
+            // ordinary forward-test table the multi-track entry key. That
+            // table intentionally remains one immutable observation per
+            // market; only ticket_forward_test is multi-track.
+            if (oldVersion < 12) migrateForwardTestToTickerKey(db)
         }
 
         private fun createForwardTable(db: SQLiteDatabase) {
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS $TABLE_FORWARD (
-                    entry_key TEXT PRIMARY KEY, ticker TEXT NOT NULL, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
+                    ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
                     model_yes REAL NOT NULL, market_yes REAL NOT NULL, side TEXT NOT NULL,
                     book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL,
                     fee_usd REAL, quote_qualified INTEGER NOT NULL,
@@ -1079,6 +1084,38 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_forward_time ON $TABLE_FORWARD(captured_at_ms)")
+        }
+
+        /** v12: repair the v11-only forward-test primary key without dropping recorded observations. */
+        private fun migrateForwardTestToTickerKey(db: SQLiteDatabase) {
+            val hasWrongEntryKey = db.rawQuery("PRAGMA table_info($TABLE_FORWARD)", null).use { cursor ->
+                val nameColumn = cursor.getColumnIndexOrThrow("name")
+                generateSequence { if (cursor.moveToNext()) cursor.getString(nameColumn) else null }
+                    .any { it == "entry_key" }
+            }
+            if (!hasWrongEntryKey) return
+
+            val legacy = "${TABLE_FORWARD}_legacy_v11"
+            db.execSQL("DROP TABLE IF EXISTS $legacy")
+            db.execSQL("ALTER TABLE $TABLE_FORWARD RENAME TO $legacy")
+            db.execSQL("DROP INDEX IF EXISTS idx_forward_time")
+            createForwardTable(db)
+            db.execSQL("""
+                INSERT OR IGNORE INTO $TABLE_FORWARD(
+                    ticker, series, captured_at_ms, model_yes, market_yes, side,
+                    book_ask, size_at_ask, contracts, all_in_usd, fee_usd,
+                    quote_qualified, settlement_yes, final_minute_samples,
+                    final_minute_average_usd, required_remaining_average_usd,
+                    expected_net_per_contract_usd
+                )
+                SELECT ticker, series, captured_at_ms, model_yes, market_yes, side,
+                    book_ask, size_at_ask, contracts, all_in_usd, fee_usd,
+                    quote_qualified, settlement_yes, final_minute_samples,
+                    final_minute_average_usd, required_remaining_average_usd,
+                    expected_net_per_contract_usd
+                FROM $legacy
+            """.trimIndent())
+            db.execSQL("DROP TABLE $legacy")
         }
 
         private fun addForwardResearchColumns(db: SQLiteDatabase) {
@@ -1273,7 +1310,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 11
+        const val DB_VERSION = 12
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
