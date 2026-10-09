@@ -1486,7 +1486,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     volPerSec = volPerSecFor(market.ticker),
                     settlement = settlementFor(market.ticker, now),
                     feeRate = s.feeRate,
-                    modelVersion = "app-${com.dirk.kalshiodds.BuildConfig.VERSION_NAME}"
+                    modelVersion = "app-${com.dirk.kalshiodds.BuildConfig.VERSION_NAME}",
+                    // 0.3.41: size on the free paper bankroll so TradeEligibility enforces the $5 minimum.
+                    stakeBankrollUsd = PaperAutopilot.freeBankroll(paperBook.snapshot())
                 )
                 out[market.ticker.uppercase()] = container.decisions.assess(input)
             }

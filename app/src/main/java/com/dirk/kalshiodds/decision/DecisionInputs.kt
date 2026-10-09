@@ -63,7 +63,8 @@ object DecisionInputs {
         volPerSec: Double?,
         settlement: Settlement,
         feeRate: Double,
-        modelVersion: String
+        modelVersion: String,
+        stakeBankrollUsd: Double? = null
     ): DecisionPipeline.Input = DecisionPipeline.Input(
         ticker = ticker.uppercase(),
         series = seriesOf(ticker),
@@ -85,7 +86,8 @@ object DecisionInputs {
         settlementFresh = settlement.fresh,
         cf = settlement.cf,
         feeRate = feeRate,
-        modelVersion = modelVersion
+        modelVersion = modelVersion,
+        stakeBankrollUsd = stakeBankrollUsd
     )
 
     /** Daily above/below: the raw model is the frozen v060 FLB curve on the mid. */

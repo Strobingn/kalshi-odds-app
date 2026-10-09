@@ -60,6 +60,8 @@ class MainActivity : ComponentActivity() {
         SignalNotifier.ensureChannels(this)
         com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this)
         handleOpportunityIntent(intent)
+        // 0.3.41: the Live signals FGS starts only after the first frame is drawn (off app startup).
+        LiveSignalsKeepAlive.startAfterFirstFrame(this)
         lifecycleScope.launch {
             KalshiOddsApp.from(this@MainActivity).container.preferences.settings
                 .map { it.notificationsEnabled || it.liveSignalsEnabled }

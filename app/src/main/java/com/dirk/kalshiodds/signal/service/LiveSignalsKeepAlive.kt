@@ -24,6 +24,57 @@ import java.util.concurrent.atomic.AtomicBoolean
 object LiveSignalsKeepAlive {
     private const val TAG = "DipHunterKeepAlive"
     private val uiInForeground = AtomicBoolean(false)
+    /**
+     * 0.3.41: the FGS is never started during app startup. It starts only after the Activity has drawn its
+     * first frame (plus [FIRST_FRAME_START_DELAY_MS]) so the main thread is free to run Service.onCreate →
+     * startForeground within Android's start window (ForegroundServiceDidNotStartInTimeException fix).
+     */
+    private val firstFrameDrawn = AtomicBoolean(false)
+    private val firstFrameScheduled = AtomicBoolean(false)
+    const val FIRST_FRAME_START_DELAY_MS = 1_500L
+
+    fun isFirstFrameDrawn(): Boolean = firstFrameDrawn.get()
+
+    /** Test hook. */
+    internal fun resetFirstFrameForTest() { firstFrameDrawn.set(false); firstFrameScheduled.set(false) }
+
+    /**
+     * Call from Activity.onCreate. Waits for the first drawn frame, then starts the service from the
+     * main looper after a short delay. Idempotent per process.
+     */
+    fun startAfterFirstFrame(activity: android.app.Activity) {
+        if (firstFrameDrawn.get() || !firstFrameScheduled.compareAndSet(false, true)) {
+            if (firstFrameDrawn.get()) ensureServiceFromUi(activity)
+            return
+        }
+        val app = activity.applicationContext
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val decor = runCatching { activity.window.decorView }.getOrNull()
+        val fire = Runnable {
+            main.postDelayed({ onFirstFrameDrawn(app) }, FIRST_FRAME_START_DELAY_MS)
+        }
+        if (decor == null) {
+            main.postDelayed(fire, FIRST_FRAME_START_DELAY_MS)
+            return
+        }
+        val listener = object : android.view.ViewTreeObserver.OnDrawListener {
+            private val done = AtomicBoolean(false)
+            override fun onDraw() {
+                if (!done.compareAndSet(false, true)) return
+                // Can't remove an OnDrawListener inside onDraw — post the removal.
+                main.post { runCatching { decor.viewTreeObserver.removeOnDrawListener(this) } }
+                main.post(fire)
+            }
+        }
+        runCatching { decor.viewTreeObserver.addOnDrawListener(listener) }
+            .onFailure { main.postDelayed(fire, FIRST_FRAME_START_DELAY_MS) }
+    }
+
+    /** First frame is on screen: from now on UI-foreground starts go straight through. */
+    fun onFirstFrameDrawn(context: Context) {
+        firstFrameDrawn.set(true)
+        if (uiInForeground.get()) ensureServiceFromUi(context)
+    }
 
     fun isUiInForeground(): Boolean = uiInForeground.get()
 
@@ -49,19 +100,23 @@ object LiveSignalsKeepAlive {
      * Safe FGS start. Never throws — [android.app.ForegroundServiceStartNotAllowedException]
      * and OEM failures are caught so the UI process stays up.
      */
-    fun startService(context: Context) {
+    fun startService(context: Context): Boolean {
         val app = context.applicationContext
         val intent = Intent(app, LiveSignalsService::class.java)
-        try {
+        return try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 app.startForegroundService(intent)
             } else {
                 @Suppress("DEPRECATION")
                 app.startService(intent)
             }
+            true
         } catch (t: Throwable) {
+            // Android 12+: ForegroundServiceStartNotAllowedException from a background start.
+            // Fall back to a WorkManager retry with backoff; never crash the process.
             Log.w(TAG, "startForegroundService failed: ${t.javaClass.simpleName}: ${t.message}")
-            enqueueSoon(app)
+            runCatching { enqueueSoon(app) }
+            false
         }
     }
 
@@ -82,12 +137,12 @@ object LiveSignalsKeepAlive {
         }
     }
 
-    /** Start only when the user left Live signals on. Never throws. */
-    fun ensureService(context: Context) {
+    /** Start only when the user left Live signals on. Never throws. @return false when a start was attempted and refused. */
+    fun ensureService(context: Context): Boolean {
         if (!LiveSignalsPolicy.shouldStartFromBackground(isEnabled(context), isTimeoutPaused(context))) {
-            return
+            return true
         }
-        startService(context)
+        return startService(context)
     }
 
     /**
@@ -97,6 +152,8 @@ object LiveSignalsKeepAlive {
      */
     fun ensureServiceFromUi(context: Context) {
         markUiInForeground(true)
+        // 0.3.41: never during startup — startAfterFirstFrame() calls back once the first frame is drawn.
+        if (!firstFrameDrawn.get()) return
         setTimeoutPaused(context, false)
         if (LiveSignalsPolicy.shouldPromoteFromUiForeground(isEnabled(context))) {
             startService(context)
@@ -125,6 +182,7 @@ object LiveSignalsKeepAlive {
         }
         val req = OneTimeWorkRequestBuilder<LiveSignalsWatchdogWorker>()
             .setInitialDelay(LiveSignalsPolicy.WATCHDOG_SOON_SECONDS, TimeUnit.SECONDS)
+            .setBackoffCriteria(androidx.work.BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
             .build()
         WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
             LiveSignalsWatchdogWorker.SOON_NAME,
@@ -146,13 +204,15 @@ class LiveSignalsWatchdogWorker(
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
-        // WorkManager is a background start — KeepAlive swallows FGS-not-allowed.
-        LiveSignalsKeepAlive.ensureService(applicationContext)
-        return Result.success()
+        // WorkManager is a background start — KeepAlive swallows FGS-not-allowed (Android 12+).
+        // 0.3.41: a refused start retries with exponential backoff (bounded), instead of giving up.
+        val ok = runCatching { LiveSignalsKeepAlive.ensureService(applicationContext) }.getOrDefault(false)
+        return if (ok || runAttemptCount >= MAX_RETRIES) Result.success() else Result.retry()
     }
 
     companion object {
         const val PERIODIC_NAME = "diphunter_live_signals_watchdog"
         const val SOON_NAME = "diphunter_live_signals_watchdog_soon"
+        const val MAX_RETRIES = 5
     }
 }
