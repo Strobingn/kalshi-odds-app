@@ -74,14 +74,21 @@ object DipNav {
             AppRoutes.LADDER,
             "Records",
             "Strategy ladder",
-            "v060 · v150 · fav15 · scalp: paper → shadow → limited live",
+            "v060 · v150 · fav15 · scalp: paper → shadow (no live)",
+            tab = false
+        ),
+        MoreDestination(
+            AppRoutes.SCALP_DATA,
+            "Records",
+            "Scalp Data",
+            "Scalping results only: net after fees, wins vs losses, equity curve, every round trip",
             tab = false
         ),
         MoreDestination(
             AppRoutes.SCALP,
             "Records",
             "Scalp (paper)",
-            "15-minute fair-gap scalps: open, history, net after both fees",
+            "4 paper scalp strategies: rules, per-coin params, open scalps",
             tab = false
         ),
         MoreDestination(
@@ -122,6 +129,7 @@ object DipNav {
         AppRoutes.CALIBRATION -> "More → Calibration report"
         AppRoutes.LADDER -> "More → Strategy ladder"
         AppRoutes.SCALP -> "More → Scalp (paper)"
+        AppRoutes.SCALP_DATA -> "More → Scalp Data"
         else -> error("No path for $route")
     }
 

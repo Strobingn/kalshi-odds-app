@@ -1,37 +1,26 @@
 package com.dirk.kalshiodds.signal.paper
 
 import com.dirk.kalshiodds.decision.AutopilotMinStake
-import com.dirk.kalshiodds.decision.LiveBalancePolicy
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 
 /**
- * 0.3.40: the per-market Autopilot step that OddsViewModel actually runs, extracted so unit
- * tests exercise the real execution path (paper tick → sizing → shadow record → dispatch gate →
- * live claim). The only thing left to the caller is the network send for [Outcome.Send].
+ * 0.3.40: the per-market Autopilot step OddsViewModel runs, extracted so tests exercise the real path.
  *
- * Sizing rules (owner, enforced here for every mode):
- *  - LIVE: stake = Kelly fraction × the FRESH real Kalshi balance (≤ 15 min old). Missing or
- *    stale balance → no order. The paper bankroll is never used for a live size.
- *  - Any computed Kelly stake (paper, shadow or live) under $5 → NO BET "below $5 minimum".
+ * Owner decision: Autopilot is PAPER-ONLY. This object has no network client, no order sender and no
+ * armed state; its outcomes are paper fills or shadow records ("what would have been sent", never sent).
+ *
+ * Sizing: half-Kelly on the free paper bankroll — no caps beyond that bankroll, displayed depth and fees
+ * on both legs. Any Kelly stake under $5 → NO BET "below $5 minimum" (skipped, never rounded up).
  */
 object AutopilotStep {
-    data class Live(
-        val cashUsd: Double?,
-        val cashAtMs: Long?,
-        val armed: Boolean,
-        val credentialsOk: Boolean,
-        val backoffBlocked: Boolean
-    )
-
     sealed class Outcome {
         data class Skip(val reason: String?) : Outcome()
-        /** Paper fill booked (or skipped by paper gates) — PAPER mode never goes further. */
+        /** PAPER mode: the paper fill booked (null when the book refused it). */
         data class Paper(val fill: PaperFill?) : Outcome()
+        /** SHADOW mode: the would-be order, recorded and never sent. */
         data class ShadowOnly(val ticket: ShadowTicket, val reason: String) : Outcome()
-        /** The caller must send exactly this ticket once, with [ShadowTicket.clientOrderId]. */
-        data class Send(val ticket: ShadowTicket, val dayKey: String, val sized: PaperKellySizer.Result) : Outcome()
     }
 
     fun run(
@@ -47,7 +36,6 @@ object AutopilotStep {
         noDepth: Int?,
         book: BookLevelSnapshot?,
         assessment: com.dirk.kalshiodds.decision.DecisionPipeline.Assessment?,
-        live: Live,
         clientOrderId: String,
         reasonPrefix: String = "Autopilot edge"
     ): Outcome {
@@ -61,53 +49,24 @@ object AutopilotStep {
             yesDepth = yesDepth,
             noDepth = noDepth,
             book = book,
-            bookPaper = mode != AutopilotMode.SHADOW,
+            bookPaper = mode == AutopilotMode.PAPER,
             assessment = assessment
         )
         val picked = tick.decision.side
         if (!tick.decision.ok || picked == null) return Outcome.Skip(tick.decision.reason)
         if (mode == AutopilotMode.PAPER) return Outcome.Paper(tick.fill)
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
-        val sized: PaperKellySizer.Result = if (mode == AutopilotMode.LIVE) {
-            val fresh = LiveBalancePolicy.fresh(live.cashUsd, live.cashAtMs, nowMs)
-            val liveSized = if (fresh) {
-                PaperKellySizer.size(
-                    winProb = picked.winProb,
-                    ask = picked.ask,
-                    bankrollUsd = live.cashUsd ?: 0.0,
-                    kellyFraction = settings.paperKellyFraction,
-                    feeRate = settings.feeRate,
-                    depthContracts = depth
-                )
-            } else {
-                null
-            }
-            val pre = LiveAutopilotPreflight.check(
-                armed = live.armed,
-                decisionOk = tick.decision.ok,
-                balanceFresh = fresh,
-                backoffBlocked = live.backoffBlocked,
-                kellyOk = liveSized?.ok == true,
-                allInUsd = liveSized?.allInUsd ?: 0.0
-            )
-            if (!pre.ok || liveSized == null) {
-                val why = if (!pre.ok) pre.reason else (liveSized?.reason ?: "NO BET — balance unavailable")
-                paperBook.rememberMessage(why)
-                return Outcome.Skip(why)
-            }
-            liveSized
-        } else {
-            val q = AutopilotOrderSize.quote(
-                decision = tick.decision,
-                fill = tick.fill,
-                depth = depth,
-                kellyFraction = settings.paperKellyFraction,
-                feeRate = settings.feeRate,
-                cashUsd = paperBook.snapshot().cashUsd
-            )
-            if (q.ok && AutopilotMinStake.below(q.allInUsd)) return Outcome.Skip(AutopilotMinStake.REASON)
-            q
-        }
+        val sized = PaperKellySizer.size(
+            winProb = picked.winProb,
+            ask = picked.ask,
+            bankrollUsd = tick.decision.freeBankrollUsd,
+            kellyFraction = PaperAutopilot.PAPER_AI_KELLY_FRACTION,
+            feeRate = settings.feeRate,
+            depthContracts = depth,
+            capFullKelly = false
+        )
+        if (!sized.ok) return Outcome.Skip(sized.reason)
+        if (AutopilotMinStake.below(sized.allInUsd)) return Outcome.Skip(AutopilotMinStake.REASON)
         val tags = AutopilotRegime.tags(market, picked.side, picked.ask, nowMs)
         val draft = ShadowOrderPayload.fromKelly(
             ticker = market.ticker,
@@ -120,32 +79,6 @@ object AutopilotStep {
             regimeKey = tags.key
         )
         val recorded = shadowBook.record(draft)
-        val ticket = recorded.ticket
-        val dispatch = AutopilotDispatch.decide(
-            AutopilotDispatch.Request(
-                mode = mode,
-                masterOn = settings.aiPaperAutopilotEnabled,
-                decisionOk = true,
-                paperFilled = tick.fill != null,
-                armed = live.armed,
-                credentialsOk = live.credentialsOk,
-                failClosed = live.backoffBlocked,
-                paperSide = picked.side,
-                paperPrice = picked.ask,
-                shadowSide = ticket.side,
-                shadowPrice = ticket.limitPrice,
-                shadowDepthFill = ticket.depthFill,
-                shadowAllInUsd = ticket.stakeUsd,
-                alreadyAttempted = shadowBook.snapshot().attempted(ticket.clientOrderId)
-            )
-        )
-        if (!dispatch.shouldPlace || !recorded.isNew) return Outcome.ShadowOnly(ticket, dispatch.reason)
-        // Belt and braces: the exact ticket about to be sent must itself respect the $5 floor.
-        if (AutopilotMinStake.below(ticket.stakeUsd)) return Outcome.Skip(AutopilotMinStake.REASON)
-        val day = LiveAutopilotGate.dayKey(nowMs)
-        if (!shadowBook.claimLive(ticket.clientOrderId, day, ticket.stakeUsd)) {
-            return Outcome.Skip("This client_order_id was already attempted")
-        }
-        return Outcome.Send(ticket, day, sized)
+        return Outcome.ShadowOnly(recorded.ticket, "SHADOW — recorded, never sent")
     }
 }

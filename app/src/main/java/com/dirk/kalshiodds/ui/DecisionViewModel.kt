@@ -47,6 +47,9 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
     private val _ladder = MutableStateFlow(LadderUi())
     val ladder: StateFlow<LadderUi> = _ladder.asStateFlow()
 
+    /** 0.3.40 Scalp Data: every primary paper scalp (closed and open). */
+    val scalpTrades: StateFlow<List<com.dirk.kalshiodds.decision.ScalpTrade>> = container.scalp.trades
+
     private val _scalp = MutableStateFlow(ScalpUi())
     val scalp: StateFlow<ScalpUi> = _scalp.asStateFlow()
 

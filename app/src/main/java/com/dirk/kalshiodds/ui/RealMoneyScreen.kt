@@ -48,7 +48,6 @@ fun RealMoneyScreen(
             ?: emptyList()
     }
     val mode = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(state.settings.autopilotMode)
-    val day = com.dirk.kalshiodds.signal.paper.LiveAutopilotGate.dayKey(System.currentTimeMillis())
     val page = RealMoneyTab.of(
         liveKeySaved = liveKey,
         demoEnvironment = demo,
@@ -60,9 +59,6 @@ fun RealMoneyScreen(
         resting = state.restingOrders,
         positions = state.positions,
         autopilotMode = mode,
-        liveArmed = state.liveAutopilotArmed,
-        liveApproveTapped = state.liveAutopilotApproveTapped,
-        dailySpentUsd = state.shadow.spentOn(day),
         shadowTickets = state.shadow.tickets,
         shadowBankrollUsd = state.shadow.bankrollUsd,
         shadowPnlUsd = state.shadow.lifetimeRealizedPnlUsd,
@@ -112,34 +108,6 @@ fun RealMoneyScreen(
                 )
                 AutopilotModeSelector(mode, onSelect = { settings.setAutopilotMode(it) })
                 Text(page.liveStatus, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                if (page.showLiveApprove) {
-                    Button(onClick = { odds.tapLiveAutopilotApprove() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Approve live Autopilot")
-                    }
-                }
-                if (page.showLiveConfirm) {
-                    Text(RealMoneyTab.LIVE_BLURB, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
-                    var typed by remember { mutableStateOf("") }
-                    OutlinedTextField(
-                        value = typed,
-                        onValueChange = { typed = it },
-                        label = { Text("Type REAL MONEY to arm") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Button(
-                        onClick = { odds.confirmLiveAutopilotRealMoney(typed) },
-                        enabled = com.dirk.kalshiodds.signal.trade.RealMoneyPhrase.matches(typed),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("Confirm REAL MONEY")
-                    }
-                }
-                if (state.liveAutopilotArmed) {
-                    Button(onClick = { odds.disarmLiveAutopilot() }, modifier = Modifier.fillMaxWidth()) {
-                        Text("Disarm live Autopilot")
-                    }
-                }
                 page.largeClipWarning?.let { warn ->
                     Text(warn, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
                 }

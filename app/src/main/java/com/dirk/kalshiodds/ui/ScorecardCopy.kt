@@ -21,7 +21,7 @@ import java.util.Locale
 object ScorecardCopy {
     const val TITLE = "Scorecard"
     const val SUBTITLE = "Post-settlement paper record from stored settled KXBTC15M rows. Voids are excluded from W-L. Paper dollars are settled fills in the current book only. A log row with no fill counts in W-L at $0."
-    const val ARCHIVE_TITLE = "Pre-reset archive (before 0.3.28 reset)"
+    const val ARCHIVE_TITLE = "Pre-reset archive (paper fills before the last bankroll reset)"
     const val RECONCILE_WARN = "Paper P&L does not match the bankroll (off by more than 1¢)."
     const val HYPOTHETICAL_LABEL = "Hypothetical (per 1 contract)"
     const val NO_SETTLED = HomeScorecardSummary.NO_SETTLED
@@ -167,7 +167,9 @@ object ScorecardCopy {
         val paperBankrollUsd: Double? = null,
         val reconcileWarning: String? = null,
         val hypotheticalLine: String? = null,
-        val archive: ArchiveSection = ArchiveSection()
+        val archive: ArchiveSection = ArchiveSection(),
+        /** 0.3.40: where the current paper book starts (last bankroll reset), or null if never reset. */
+        val resetMarker: String? = null
     ) {
         val settledCount: Int get() = ledger.combined.settledCount
         val showsEmptyState: Boolean get() = showsEmptyState(settledCount)
@@ -211,6 +213,7 @@ object ScorecardCopy {
             if (autopilot.bets.isNotEmpty()) {
                 lines += autopilot.bets.map { it.line }
             }
+            resetMarker?.let { lines += it }
             if (archive.fillCount > 0) {
                 lines += ARCHIVE_TITLE
                 lines += archive.line
@@ -292,7 +295,8 @@ object ScorecardCopy {
         paperBankrollUsd = paper.paperBankrollUsd,
         startingUsd = paper.startingUsd,
         archivedFills = paper.archivedFills(),
-        shadow = shadow
+        shadow = shadow,
+        resetMarker = resetMarkerLine(paper, zoneId)
     )
 
     fun of(
@@ -306,7 +310,8 @@ object ScorecardCopy {
         paperBankrollUsd: Double? = null,
         startingUsd: Double? = null,
         archivedFills: List<PaperFill> = emptyList(),
-        shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState? = null
+        shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState? = null,
+        resetMarker: String? = null
     ): View {
         val ledger = ScorecardLedger.of(entries, fills, windows, zoneId)
         val lastMinute = lastMinuteSection(lastMinutePicks)
@@ -333,7 +338,20 @@ object ScorecardCopy {
             paperBankrollUsd = paperBankrollUsd,
             reconcileWarning = reconcileWarning(ledger.combined.money.pnlUsd, paperBankrollUsd, startingUsd),
             hypotheticalLine = hypotheticalLine(ledger.hypotheticalPerContractUsd, ledger.hypotheticalPicks),
-            archive = archiveSection(archivedFills)
+            archive = archiveSection(archivedFills),
+            resetMarker = resetMarker
+        )
+    }
+
+    /** "── Paper bankroll reset to $10,000 · Oct 9, 2026 12:30 PM ET · … ──" for the latest reset, else null. */
+    fun resetMarkerLine(paper: com.dirk.kalshiodds.signal.paper.PaperBookState, zoneId: ZoneId = ET_ZONE): String? {
+        val last = paper.archived.maxByOrNull { it.archivedAtMs } ?: return null
+        val at = java.time.Instant.ofEpochMilli(last.archivedAtMs).atZone(zoneId)
+            .format(java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", Locale.US))
+        val to = last.resetToUsd ?: paper.startingUsd
+        return String.format(
+            Locale.US, "── Reset point: paper bankroll set to $%,.0f · %s ET · %d earlier fills archived (kept) · %s ──",
+            to, at, last.fills.size, last.note
         )
     }
 

@@ -88,8 +88,8 @@ class PaperBankrollPersistenceTest {
 
     @Test
     fun startsAtOneThousandAndUpdatesAfterWinAndLoss() {
-        val book = PaperBook(idFactory = { "k1" }, nowMs = { 1L })
-        assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "k1" }, nowMs = { 1L })
+        assertEquals(1_000.0 /* 0.3.40: tests size on a $1,000 book; app default is $10,000 */, book.snapshot().cashUsd, 1e-9)
         assertEquals(1_000.0, book.snapshot().paperBankrollUsd, 1e-9)
         val ticket = hunter(p = 0.70, ask = 0.40, ticker = "KXBTC15M-WIN")
         val fill = book.considerTicket(ticket, enabled = true, depthContracts = DEEP)
@@ -102,7 +102,7 @@ class PaperBankrollPersistenceTest {
         assertEquals(true, settled.single().won)
         assertTrue(settled.single().pnlUsd!! > 0.0)
         assertEquals(
-            SignalConstants.PAPER_START_USD + settled.single().pnlUsd!!,
+            1_000.0 /* 0.3.40: tests size on a $1,000 book; app default is $10,000 */ + settled.single().pnlUsd!!,
             settled.single().bankrollAfterUsd!!,
             1e-6
         )
@@ -113,7 +113,7 @@ class PaperBankrollPersistenceTest {
         val lost = book.settle("KXBTC15M-LOSS", "no")
         assertEquals(false, lost.single().won)
         assertTrue(lost.single().pnlUsd!! < 0.0)
-        val expectedBank = SignalConstants.PAPER_START_USD +
+        val expectedBank = 1_000.0 /* 0.3.40: tests size on a $1,000 book; app default is $10,000 */ +
             settled.single().pnlUsd!! + lost.single().pnlUsd!!
         assertEquals(expectedBank, lost.single().bankrollAfterUsd!!, 1e-6)
         assertEquals(expectedBank, book.snapshot().paperBankrollUsd, 1e-6)
@@ -159,11 +159,12 @@ class PaperBankrollPersistenceTest {
     fun migrateOldHundredDollarBookPreservesPnl() {
         val old = PaperBookState(startingUsd = 100.0, cashUsd = 215.0)
         val neu = PaperBookState.migrateStartUsd(old)
-        assertEquals(1_000.0, neu.startingUsd, 1e-9)
-        assertEquals(1_115.0, neu.cashUsd, 1e-9)
+        // 0.3.40: the $100 → start migration now lands on the $10,000 default.
+        assertEquals(10_000.0, neu.startingUsd, 1e-9)
+        assertEquals(10_115.0, neu.cashUsd, 1e-9)
         val already = PaperBookState.migrateStartUsd(PaperBookState())
-        assertEquals(1_000.0, already.startingUsd, 1e-9)
-        assertEquals(1_000.0, already.cashUsd, 1e-9)
+        assertEquals(10_000.0, already.startingUsd, 1e-9)
+        assertEquals(10_000.0, already.cashUsd, 1e-9)
     }
 
     @Test
@@ -213,7 +214,7 @@ class PaperBankrollPersistenceTest {
     fun bankrollSurvivesPruningPastLedgerMax() {
         val n = SignalConstants.PAPER_LEDGER_MAX + 8
         val seq = java.util.concurrent.atomic.AtomicInteger()
-        val book = PaperBook(idFactory = { "p${seq.getAndIncrement()}" }, nowMs = { seq.get().toLong() })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "p${seq.getAndIncrement()}" }, nowMs = { seq.get().toLong() })
         var totalPnl = 0.0
         repeat(n) { i ->
             val ticker = "KXBTC15M-L$i"
@@ -233,14 +234,14 @@ class PaperBankrollPersistenceTest {
         assertEquals(SignalConstants.PAPER_LEDGER_MAX, snap.fills.size)
         assertTrue(n > SignalConstants.PAPER_LEDGER_MAX)
         assertEquals(totalPnl, snap.lifetimeRealizedPnlUsd!!, 1e-6)
-        assertEquals(SignalConstants.PAPER_START_USD + totalPnl, snap.paperBankrollUsd, 1e-6)
+        assertEquals(1_000.0 /* 0.3.40: tests size on a $1,000 book; app default is $10,000 */ + totalPnl, snap.paperBankrollUsd, 1e-6)
         // 1 contract at 10¢: fee ceil(0.07×0.1×0.9) = 1¢ on every fill → +0.89 per win.
         assertEquals(n * 0.89, totalPnl, 1e-6)
     }
 
     @Test
     fun zeroFeeKellyNotePersistsFeeZero() {
-        val book = PaperBook(idFactory = { "zf" }, nowMs = { 1L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "zf" }, nowMs = { 1L })
         book.configure(feeRate = 0.0)
         val fill = book.considerTicket(
             hunter(p = 0.70, ask = 0.40, ticker = "KXBTC15M-ZF"),
@@ -282,7 +283,7 @@ class PaperBankrollPersistenceTest {
 
     @Test
     fun skipWhenKellyNonPositiveDoesNotDebit() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val fill = book.considerTicket(
             hunter(p = 0.10, ask = 0.40, ticker = "KXBTC15M-SKIP"),
             enabled = true,

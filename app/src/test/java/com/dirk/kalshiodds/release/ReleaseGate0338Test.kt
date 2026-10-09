@@ -9,9 +9,7 @@ import com.dirk.kalshiodds.decision.ScalpState
 import com.dirk.kalshiodds.decision.ScalpStats
 import com.dirk.kalshiodds.decision.StrategyLadder
 import com.dirk.kalshiodds.signal.notify.TradeEventPolicy
-import com.dirk.kalshiodds.signal.paper.AutopilotDispatch
 import com.dirk.kalshiodds.signal.paper.AutopilotMode
-import com.dirk.kalshiodds.signal.paper.LiveAutopilotSession
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.RealMoneyPhrase
@@ -29,52 +27,8 @@ import org.junit.Test
 /** 0.3.38 release gates (0.3.39: the Home Stop gates were removed with the Stop button). */
 class ReleaseGate0338Test {
 
-    private fun liveRequest(
-        masterOn: Boolean = true,
-        armed: Boolean = true
-    ) = AutopilotDispatch.Request(
-        mode = AutopilotMode.LIVE,
-        masterOn = masterOn,
-        decisionOk = true,
-        paperFilled = true,
-        armed = armed,
-        credentialsOk = true,
-        failClosed = false,
-        paperSide = "YES",
-        paperPrice = 0.55,
-        shadowSide = "YES",
-        shadowPrice = 0.55,
-        shadowDepthFill = true,
-        shadowAllInUsd = 6.0,
-        alreadyAttempted = false
-    )
-
-    @Test
-    fun baselineFullyArmedLiveRequestWouldSend() {
-        assertTrue(AutopilotDispatch.decide(liveRequest()).shouldPlace)
-    }
-
-    @Test
-    fun autopilotOffBlocksOrders() {
-        val r = AutopilotDispatch.decide(liveRequest(masterOn = false))
-        assertFalse(r.shouldPlace)
-        assertEquals("Autopilot off", r.reason)
-    }
-
-    @Test
-    fun missingRealMoneyConfirmBlocksOrders() {
-        val session = LiveAutopilotSession()
-        session.tapApprove()
-        // Approve tapped but REAL MONEY never confirmed: not armed.
-        assertFalse(session.armed)
-        val r = AutopilotDispatch.decide(liveRequest(armed = session.armed))
-        assertFalse(r.shouldPlace)
-        assertTrue(r.reason.contains("REAL MONEY"))
-        assertTrue(session.confirmRealMoney("REAL MONEY"))
-        assertTrue(AutopilotDispatch.decide(liveRequest(armed = session.armed)).shouldPlace)
-        session.disarm()
-        assertFalse(AutopilotDispatch.decide(liveRequest(armed = session.armed)).shouldPlace)
-    }
+    // 0.3.40: the live-Autopilot dispatch gates were removed with the live path (Autopilot is paper-only);
+    // see ReleaseGate0340PaperOnlyTest.
 
     @Test
     fun typedRealMoneyPhraseIsExact() {
@@ -151,7 +105,14 @@ class ReleaseGate0338Test {
 
     private fun book(): ScalpBook {
         val ids = AtomicInteger()
-        return ScalpBook(InMemoryScalpPersistence()) { "s${ids.incrementAndGet()}" }
+        // 0.3.40: pin the classic v1 params (no shadow variants) so these 0.3.38 gates keep testing the same rule.
+        return ScalpBook(
+            InMemoryScalpPersistence(),
+            emptyList(),
+            com.dirk.kalshiodds.decision.InMemoryScalpTuneStore(
+                com.dirk.kalshiodds.decision.ScalpTuneState(paramsByCoin = mapOf("BTC" to com.dirk.kalshiodds.decision.ScalpParams.CLASSIC.id))
+            )
+        ) { "s${ids.incrementAndGet()}" }
     }
 
     @Test
@@ -291,7 +252,7 @@ class ReleaseGate0338Test {
         val winners = (1..400).map { StrategyLadder.Item("w${it % 200}", true, true, 0.05) }
         val st = StrategyLadder.status(StrategyLadder.Id.SCALP, StrategyLadder.Stage.PAPER, winners)
         assertFalse(st.eligibleForNext)
-        assertTrue(st.reason.contains("not available in this release"))
+        assertTrue(st.reason.contains("paper-only"))
     }
 
     @Test

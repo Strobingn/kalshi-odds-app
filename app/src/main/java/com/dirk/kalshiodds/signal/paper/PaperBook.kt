@@ -129,7 +129,9 @@ data class PaperArchive(
     val startingUsd: Double,
     val cashUsd: Double,
     val fills: List<PaperFill>,
-    val note: String = "paper reset"
+    val note: String = "paper reset",
+    /** 0.3.40: the bankroll the book restarted at (marks the reset point on the scorecard). */
+    val resetToUsd: Double? = null
 )
 
 @Serializable
@@ -265,7 +267,7 @@ class PaperBook(
         this.startUsd = startUsd
     }
 
-    fun reset(toUsd: Double = startUsd) {
+    fun reset(toUsd: Double = startUsd, note: String = "Paper book reset — ledger archived") {
         synchronized(lock) {
             val cur = _state.value
             val start = toUsd.takeIf { it.isFinite() && it > 0.0 } ?: SignalConstants.PAPER_START_USD
@@ -275,7 +277,8 @@ class PaperBook(
                 startingUsd = cur.startingUsd,
                 cashUsd = cur.cashUsd,
                 fills = prior.map { it.copy(updatedAtMs = nowMs()) },
-                note = "Paper book reset — ledger archived"
+                note = note,
+                resetToUsd = start
             )
             publish(
                 PaperBookState(
@@ -1160,4 +1163,23 @@ class PaperBook(
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "$%.2f", v)
+}
+
+/**
+ * 0.3.40 one-time paper bankroll reset to $10,000 (owner request). Archives (never deletes) the current paper
+ * history via [PaperBook.reset], which marks the reset point. A fresh book with no history is left as is.
+ * The persisted one-time flag lives in SignalPreferences.applyPaperBankrollReset0340IfNeeded.
+ */
+object PaperBankrollReset0340 {
+    const val NOTE = "0.3.40: paper bankroll reset to \$10,000 — earlier paper fills archived, not deleted"
+
+    /** @return the bankroll the book now starts at. */
+    fun apply(book: PaperBook, target: Double = SignalConstants.PAPER_START_USD): Double {
+        val cur = book.snapshot()
+        val fresh = PaperBookState.rememberFills(cur).isEmpty() && cur.archived.isEmpty() &&
+            kotlin.math.abs(cur.startingUsd - target) < 1e-6 && kotlin.math.abs(cur.cashUsd - target) < 1e-6
+        if (!fresh) book.reset(target, NOTE)
+        book.configure(startUsd = target)
+        return target
+    }
 }

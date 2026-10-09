@@ -183,61 +183,6 @@ class ShadowBook(
         return changed
     }
 
-    /**
-     * Reserve today's spend and the client_order_id before HTTP.
-     * False means do not send. The id stays attempted even if the call fails.
-     */
-    /**
-     * Remember the client_order_id before HTTP so a failure is not retried.
-     * Spend is recorded for the session display. It does not block a later clip.
-     */
-    fun claimLive(clientOrderId: String, dayKey: String, reserveUsd: Double): Boolean =
-        synchronized(lock) {
-            val cur = _state.value
-            if (clientOrderId.isBlank() || cur.liveAttemptedIds.contains(clientOrderId)) return false
-            val spent = if (cur.liveDayKey == dayKey) cur.liveSpentUsd else 0.0
-            val reserve = reserveUsd.coerceAtLeast(0.0)
-            publish(
-                cur.copy(
-                    liveDayKey = dayKey,
-                    liveSpentUsd = spent + reserve,
-                    liveAttemptedIds = (cur.liveAttemptedIds + clientOrderId).takeLast(200)
-                )
-            )
-            true
-        }
-
-    fun releaseLiveReservation(clientOrderId: String, reserveUsd: Double, dayKey: String) = synchronized(lock) {
-        val cur = _state.value
-        if (!cur.liveAttemptedIds.contains(clientOrderId)) return
-        val spent = if (cur.liveDayKey == dayKey) {
-            (cur.liveSpentUsd - reserveUsd.coerceAtLeast(0.0)).coerceAtLeast(0.0)
-        } else {
-            cur.liveSpentUsd
-        }
-        publish(cur.copy(liveDayKey = dayKey, liveSpentUsd = spent))
-    }
-
-    fun noteLiveSpend(clientOrderId: String, dayKey: String) = synchronized(lock) {
-        val cur = _state.value
-        val tickets = cur.tickets.map {
-            if (it.clientOrderId == clientOrderId) it.copy(liveSubmitted = true) else it
-        }
-        publish(
-            cur.copy(
-                tickets = tickets,
-                liveDayKey = if (cur.liveDayKey.isBlank()) dayKey else cur.liveDayKey,
-                liveLastError = null,
-                lastMessage = String.format(
-                    java.util.Locale.US,
-                    "Limited live sent %s · day spend $%.2f",
-                    clientOrderId,
-                    cur.spentOn(dayKey)
-                )
-            )
-        )
-    }
-
     fun noteLiveError(message: String) = synchronized(lock) {
         val cur = _state.value
         publish(cur.copy(liveLastError = message, lastMessage = message))

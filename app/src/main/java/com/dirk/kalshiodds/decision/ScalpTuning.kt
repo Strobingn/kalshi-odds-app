@@ -6,11 +6,29 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 
 /**
+ * 0.3.40 paper scalp strategies. They run side by side (one open per strategy per market side), each with its
+ * own per-coin params, scorecard line and independent walk-forward tuning. PAPER ONLY — none can place an order.
+ */
+enum class ScalpStrategy(val code: String, val label: String, val blurb: String) {
+    FAIR_GAP("fair", "Fair-gap", "ask below spot-implied fair by the gap threshold"),
+    DIP_HUNTER("dip", "Dip-hunter", "mean reversion: buy after the ask drops fast while spot fair holds"),
+    MOMENTUM("momo", "Momentum-sniper", "buy into a strong bid rise when spot fair confirms the move"),
+    EXTREME_REVERSION("xrev", "Extreme-reversion", "buy the very cheap side (≤ 15¢) when it overshoots below spot fair");
+
+    companion object {
+        fun ofCode(code: String?): ScalpStrategy? = values().firstOrNull { it.code == code }
+    }
+}
+
+/**
  * 0.3.40 scalp parameters (PAPER ONLY). One set per coin; a small fixed grid runs as shadow paper
  * variants so the walk-forward tuner can compare them on the app's own realistic paper fills.
  */
 data class ScalpParams(
-    /** Entry: ask must be at least this far below fair after the entry fee (dollars). */
+    /**
+     * Entry trigger (dollars). Fair-gap: ask below fair after the entry fee. Dip-hunter: ask drop over the
+     * last 60 s. Momentum-sniper: bid rise over the last 60 s. Extreme-reversion: fair − ask on a ≤ 15¢ side.
+     */
     val minGap: Double,
     /** Exit when bid − entry ≥ target (dollars per contract). */
     val target: Double,
@@ -20,35 +38,94 @@ data class ScalpParams(
     val turnDown: Double,
     /** Entry window: seconds left to close. */
     val tauMinS: Double,
-    val tauMaxS: Double = 840.0
+    val tauMaxS: Double = 840.0,
+    val strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP
 ) {
+    /** Fair-gap ids keep the 0.3.40 format (g14-t12-…); other strategies are prefixed ("dip-g06-…"). */
     val id: String
-        get() = String.format(
+        get() = (if (strategy == ScalpStrategy.FAIR_GAP) "" else strategy.code + "-") + String.format(
             Locale.US, "g%02d-t%02d-s%02d-d%02d-w%03d",
             Math.round(minGap * 100), Math.round(target * 100), Math.round(stop * 100),
             Math.round(turnDown * 100), Math.round(tauMinS)
         )
 
-    fun label(): String = String.format(
-        Locale.US, "gap ≥ %.0f¢ · target +%.0f¢ · stop −%.0f¢ · turn-down %.0f¢ · enter %d–%d min left",
-        minGap * 100, target * 100, stop * 100, turnDown * 100, (tauMinS / 60).toInt(), (tauMaxS / 60).toInt()
-    )
+    fun label(): String {
+        val trigger = when (strategy) {
+            ScalpStrategy.FAIR_GAP -> "gap ≥ %.0f¢"
+            ScalpStrategy.DIP_HUNTER -> "drop ≥ %.0f¢/60s"
+            ScalpStrategy.MOMENTUM -> "rise ≥ %.0f¢/60s + spot"
+            ScalpStrategy.EXTREME_REVERSION -> "ask ≤ 15¢ & fair gap ≥ %.0f¢"
+        }
+        return String.format(
+            Locale.US, "$trigger · target +%.0f¢ · stop −%.0f¢ · turn-down %.0f¢ · enter %.0f–%d min left",
+            minGap * 100, target * 100, stop * 100, turnDown * 100, tauMinS / 60.0, (tauMaxS / 60).toInt()
+        )
+    }
 
     companion object {
         const val LEGACY_ID = "legacy-v1"
         val COINS = listOf("BTC", "ETH", "SOL")
 
-        /** Seed / fallback params (box research, see scalp-research/REPORT.md). */
-        val DEFAULT = ScalpParams(minGap = 0.10, target = 0.08, stop = 0.06, turnDown = 0.10, tauMinS = 300.0)
+        /** 0.3.38/0.3.39-style params (kept addressable for old rows and tests). */
+        val CLASSIC = ScalpParams(minGap = 0.10, target = 0.08, stop = 0.06, turnDown = 0.10, tauMinS = 300.0)
 
-        /** Small grid: 2 gaps × 2 exit profiles × 2 entry windows = 8 variants per coin. */
+        /**
+         * 0.3.40 seeds = the rolling weekly walk-forward's pick per coin, fitted on Dec 2025 → Sep 20 2026 1-minute
+         * history (scalp-research/long40.py, wf40.py). NOTE: the rolling out-of-sample test of that procedure was
+         * negative (pooled −3.23¢/contract, 1 of 38 weeks positive) — these are the least-bad, not proven.
+         */
+        val SEEDS: Map<String, ScalpParams> = mapOf(
+            "BTC" to ScalpParams(minGap = 0.14, target = 0.12, stop = 0.08, turnDown = 0.15, tauMinS = 300.0),
+            "ETH" to ScalpParams(minGap = 0.10, target = 0.12, stop = 0.08, turnDown = 0.15, tauMinS = 300.0),
+            "SOL" to ScalpParams(minGap = 0.14, target = 0.08, stop = 0.06, turnDown = 0.10, tauMinS = 480.0)
+        )
+
+        /** Fallback when the coin is unknown: the BTC seed. */
+        val DEFAULT: ScalpParams = SEEDS.getValue("BTC")
+
+        fun seedFor(coin: String): ScalpParams = SEEDS[coin] ?: DEFAULT
+
+        /**
+         * Seeds for the three 0.3.40 strategies = the rolling weekly walk-forward's final pick (fit on Dec 2025 → Sep 20 2026
+         * 1-minute history, scalp-research/multi40.py + wfmulti.py, 54 variants × 3 coins = 162 trials). Rolling OOS after both
+         * fees was NEGATIVE for all three: dip −4.44¢/ct [−4.58, −4.29] 0/38 weeks positive; momentum −4.77¢ [−4.93, −4.61]
+         * 0/38; extreme-reversion −2.53¢ [−2.96, −2.10] 4/38. Least-bad, not proven. Paper only.
+         */
+        val STRATEGY_SEEDS: Map<ScalpStrategy, ScalpParams> = mapOf(
+            ScalpStrategy.DIP_HUNTER to ScalpParams(0.05, 0.08, 0.06, 0.10, 180.0, strategy = ScalpStrategy.DIP_HUNTER),
+            ScalpStrategy.MOMENTUM to ScalpParams(0.04, 0.08, 0.06, 0.10, 180.0, strategy = ScalpStrategy.MOMENTUM),
+            ScalpStrategy.EXTREME_REVERSION to ScalpParams(0.12, 0.12, 0.08, 0.10, 120.0, strategy = ScalpStrategy.EXTREME_REVERSION)
+        )
+
+        fun seedFor(coin: String, strategy: ScalpStrategy): ScalpParams =
+            if (strategy == ScalpStrategy.FAIR_GAP) seedFor(coin) else STRATEGY_SEEDS.getValue(strategy)
+
+        /** Tuner-state key: "BTC" for fair-gap (0.3.40 format), "BTC:dip" etc. for the others. */
+        fun key(coin: String, strategy: ScalpStrategy): String =
+            if (strategy == ScalpStrategy.FAIR_GAP) coin else "$coin:${strategy.code}"
+
+        /** Small grid around the seeds: 2 gaps × 2 exit profiles × 2 entry windows = 8 variants per coin. */
         val GRID: List<ScalpParams> = buildList {
-            for (g in listOf(0.06, 0.10)) for (exit in listOf(Triple(0.04, 0.04, 0.06), Triple(0.08, 0.06, 0.10))) {
-                for (w in listOf(180.0, 300.0)) add(ScalpParams(g, exit.first, exit.second, exit.third, w))
+            for (g in listOf(0.10, 0.14)) for (exit in listOf(Triple(0.08, 0.06, 0.10), Triple(0.12, 0.08, 0.15))) {
+                for (w in listOf(300.0, 480.0)) add(ScalpParams(g, exit.first, exit.second, exit.third, w))
             }
         }
 
-        fun byId(id: String): ScalpParams? = GRID.firstOrNull { it.id == id } ?: DEFAULT.takeIf { it.id == id }
+        /** 4 variants per extra strategy: 2 triggers × 2 exit profiles (target, stop, turn-down). */
+        val STRATEGY_GRID: List<ScalpParams> = buildList {
+            fun add4(s: ScalpStrategy, triggers: List<Double>, exits: List<Triple<Double, Double, Double>>, w: Double) {
+                for (g in triggers) for (e in exits) add(ScalpParams(g, e.first, e.second, e.third, w, strategy = s))
+            }
+            add4(ScalpStrategy.DIP_HUNTER, listOf(0.05, 0.08), listOf(Triple(0.06, 0.05, 0.10), Triple(0.08, 0.06, 0.10)), 180.0)
+            add4(ScalpStrategy.MOMENTUM, listOf(0.04, 0.06), listOf(Triple(0.06, 0.04, 0.08), Triple(0.08, 0.06, 0.10)), 180.0)
+            add4(ScalpStrategy.EXTREME_REVERSION, listOf(0.08, 0.12), listOf(Triple(0.08, 0.05, 0.06), Triple(0.12, 0.08, 0.10)), 120.0)
+        }
+
+        /** Everything the book runs as paper variants: 8 fair-gap + 12 strategy variants. */
+        val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID
+
+        fun byId(id: String): ScalpParams? =
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC).firstOrNull { it.id == id }
 
         fun coinOf(ticker: String): String {
             val u = ticker.uppercase()
@@ -73,7 +150,9 @@ data class ScalpTuneState(
     val oosNByCoin: Map<String, Int> = emptyMap(),
     val notes: List<String> = emptyList()
 ) {
-    fun paramsFor(coin: String): ScalpParams = paramsByCoin[coin]?.let { ScalpParams.byId(it) } ?: ScalpParams.DEFAULT
+    fun paramsFor(coin: String, strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP): ScalpParams =
+        paramsByCoin[ScalpParams.key(coin, strategy)]?.let { ScalpParams.byId(it) }?.takeIf { it.strategy == strategy }
+            ?: ScalpParams.seedFor(coin, strategy)
     val versionLabel: String get() = "scalp-params v$version"
 }
 
@@ -141,12 +220,16 @@ object ScalpTuner {
         val oosN = HashMap<String, Int>()
         val notes = ArrayList<String>()
         var trials = 0
-        for (coin in ScalpParams.COINS) {
-            val mine = closed.filter { it.coin == coin }
+        for (strategy in ScalpStrategy.values()) for (coin in ScalpParams.COINS) {
+            val key = ScalpParams.key(coin, strategy)
+            val tag = "$coin ${strategy.label}"
+            val mine = closed.filter { it.coin == coin && it.strategy == strategy }
             val windows = mine.map { ScalpTicker.closeMs(it.ticker) ?: it.signalAtMs }.distinct().sorted()
-            val current = cur.paramsFor(coin)
+            val current = cur.paramsFor(coin, strategy)
             if (windows.size < 5) {
-                notes += "$coin: ${mine.size} round trips — not enough windows to tune; keeping ${current.id}"
+                if (strategy == ScalpStrategy.FAIR_GAP || mine.isNotEmpty()) {
+                    notes += "$tag: ${mine.size} round trips — not enough windows to tune; keeping ${current.id}"
+                }
                 continue
             }
             val cut = windows[(windows.size * FIT_FRACTION).toInt().coerceIn(1, windows.size - 1)]
@@ -163,17 +246,17 @@ object ScalpTuner {
             val candidate = best?.key?.let { ScalpParams.byId(it) }
             val candOos = candidate?.let { oosOf(it.id) }
             if (candidate != null && candidate.id != current.id && candOos != null && (curOos == null || candOos > curOos + 1e-12)) {
-                params[coin] = candidate.id
+                params[key] = candidate.id
                 adopted = true
-                oos[coin] = candOos * 100
-                oosN[coin] = later[candidate.id]!!.size
+                oos[key] = candOos * 100
+                oosN[key] = later[candidate.id]!!.size
                 notes += String.format(Locale.US, "%s: adopted %s — later block %.2f¢/ct (n=%d) vs current %s %s",
-                    coin, candidate.id, candOos * 100, later[candidate.id]!!.size, current.id,
+                    tag, candidate.id, candOos * 100, later[candidate.id]!!.size, current.id,
                     curOos?.let { String.format(Locale.US, "%.2f¢", it * 100) } ?: "n/a")
             } else {
-                curOos?.let { oos[coin] = it * 100; oosN[coin] = later[current.id]!!.size }
+                curOos?.let { oos[key] = it * 100; oosN[key] = later[current.id]!!.size }
                 notes += String.format(Locale.US, "%s: kept %s — later block %s; fit best %s",
-                    coin, current.id, curOos?.let { String.format(Locale.US, "%.2f¢/ct", it * 100) } ?: "n<$MIN_OOS_N",
+                    tag, current.id, curOos?.let { String.format(Locale.US, "%.2f¢/ct", it * 100) } ?: "n<$MIN_OOS_N",
                     best?.key ?: "none (n<$MIN_FIT_N)")
             }
         }
@@ -217,6 +300,7 @@ object ScalpBreakdown {
     private fun closed(trades: List<ScalpTrade>) = trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null }
 
     fun byCoin(trades: List<ScalpTrade>) = rows(closed(trades)) { it.coin }
+    fun byStrategy(trades: List<ScalpTrade>) = rows(closed(trades)) { it.strategy.label }
     fun byHourEt(trades: List<ScalpTrade>) = rows(closed(trades)) { t ->
         (t.entryAtMs ?: t.signalAtMs).let { String.format(Locale.US, "%02d ET", ScalpTicker.hourEt(it)) }
     }
@@ -244,7 +328,14 @@ object ScalpBreakdown {
         fun fmt(r: Row) = String.format(Locale.US, "%s · %d trips · %d%% wins · net $%.2f · %+.2f¢/ct",
             r.key, r.n, if (r.n == 0) 0 else Math.round(100.0 * r.wins / r.n), r.netUsd, r.avgCentsPerContract)
         val pw = roundTripsPerWindow(trades)
-        return listOf("By coin (net after both fees)") + byCoin(trades).map(::fmt) +
+        val perStrategy = ScalpStrategy.values().flatMap { st ->
+            val mine = closed(trades).filter { it.strategy == st }
+            if (mine.isEmpty()) return@flatMap listOf("${st.label} · no closed round trips yet")
+            val r = rows(mine) { st.label }.single()
+            listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
+        }
+        return listOf("By strategy (net after both fees; coin and hour ET below each)") + perStrategy +
+            listOf("By coin (net after both fees)") + byCoin(trades).map(::fmt) +
             listOf("By hour (ET, entry)") + byHourEt(trades).map(::fmt) +
             listOf("By time left at entry") + byTimeLeft(trades).map(::fmt) +
             listOf(String.format(Locale.US, "Round trips per window: %.2f avg, %d max over %d windows", pw.avg, pw.max, pw.windows))

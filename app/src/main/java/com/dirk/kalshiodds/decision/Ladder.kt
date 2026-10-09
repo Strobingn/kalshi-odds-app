@@ -180,13 +180,14 @@ object V060Rule {
 }
 
 /**
- * Strategy ladder: paper → shadow → limited live. Promotion needs the
+ * Strategy ladder: paper → shadow (never sent). Promotion needs the
  * sample size and a 95% market-clustered bootstrap CI lower bound > 0 on
- * P&L per entry after fees. Limited live never sends by itself: every real
- * order still needs Approve + typed REAL MONEY.
+ * P&L per entry after fees. 0.3.40: there is no live stage; Autopilot and
+ * Scalp cannot place orders. Only manual Approve + typed REAL MONEY can.
  */
 object StrategyLadder {
-    enum class Stage(val label: String) { PAPER("Paper"), SHADOW("Shadow"), LIMITED_LIVE("Limited live (Approve + REAL MONEY)") }
+    /** 0.3.40: no live stage — the ladder tops out at shadow (never sent). */
+    enum class Stage(val label: String) { PAPER("Paper"), SHADOW("Shadow") }
 
     enum class Id(
         val key: String,
@@ -195,7 +196,7 @@ object StrategyLadder {
         val need: Int,
         val countsFilled: Boolean,
         /** Highest stage this build allows. Scalp stays paper in 0.3.38: no shadow or live scalping. */
-        val maxStage: Stage = Stage.LIMITED_LIVE
+        val maxStage: Stage = Stage.SHADOW
     ) {
         V060("v060", "v060 daily BTC favourite", "KXBTCD 5 PM ET, frozen FLB model, EV/$ ≥ 0.06 at the ask, one bet per event", 100, true),
         V150("v150", "v150 D3 maker bid", "D3 maker bid 85–97¢, 2–4 PM ET, queue-honest fills", 100, true),
@@ -203,7 +204,7 @@ object StrategyLadder {
         SCALP(
             "scalp",
             "scalp 15-minute fair-gap scalp (PAPER)",
-            "Buy 10¢+ below spot fair after fee, sell at the bid when selling beats holding / fair turns down / 20 s left; fees both legs",
+            "Buy below spot fair after fee when the move beats spread + both fees; exit at the bid on target / stop / gap close / turn-down, always by 60 s left; fees both legs",
             ScalpRule.PROMOTION_ROUND_TRIPS,
             false,
             Stage.PAPER
@@ -246,9 +247,9 @@ object StrategyLadder {
         val reason = when {
             id.maxStage == Stage.PAPER -> {
                 val bar = if (enough && positive) "Bar met" else "Bar: ${id.need} $noun with CI lower bound > 0 (now $n)"
-                "$bar · $ciText. Shadow/live scalping is not available in this release."
+                "$bar · $ciText. Scalp is paper-only."
             }
-            next == null -> "At the top stage. $n $noun · $ciText. Real orders still need Approve + REAL MONEY."
+            next == null -> "At the top stage (shadow, never sent). $n $noun · $ciText."
             !enough -> "Needs ${id.need} $noun (now $n) · $ciText"
             !positive -> "$n $noun but the CI lower bound is not above 0 · $ciText"
             else -> "Eligible for ${next.label} · $n $noun · $ciText"
@@ -258,17 +259,16 @@ object StrategyLadder {
 
     fun nextStage(stage: Stage): Stage? = when (stage) {
         Stage.PAPER -> Stage.SHADOW
-        Stage.SHADOW -> Stage.LIMITED_LIVE
-        Stage.LIMITED_LIVE -> null
+        Stage.SHADOW -> null
     }
 
     fun rulesText(): String =
-        "Strategy ladder: paper → shadow → limited live. v060 and v150 need ${Id.V060.need} fills, " +
+        "Strategy ladder: paper → shadow (never sent). There is no live stage; Autopilot and Scalp are paper-only. v060 and v150 need ${Id.V060.need} fills, " +
             "fav15 needs ${Id.FAV15.need} settled, scalp needs ${Id.SCALP.need} round trips (paper only in this release), " +
             "each with a market-clustered bootstrap 95% CI lower bound > 0. " +
-            "Live orders always need Approve + REAL MONEY."
+            "Only manual tickets (Approve + REAL MONEY) can place real orders."
 
-    fun parseStage(raw: String?): Stage = Stage.values().firstOrNull { it.name == raw } ?: Stage.PAPER
+    fun parseStage(raw: String?): Stage = if (raw == "LIMITED_LIVE") Stage.SHADOW else Stage.values().firstOrNull { it.name == raw } ?: Stage.PAPER
 }
 
 /** Persists fav15 and v060 entries plus each strategy's ladder stage. No truncation. */

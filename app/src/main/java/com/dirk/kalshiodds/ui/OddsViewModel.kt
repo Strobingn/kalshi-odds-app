@@ -74,8 +74,6 @@ data class OddsUiState(
     val paper: PaperBookState = PaperBookState(),
     val shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState =
         com.dirk.kalshiodds.signal.paper.ShadowBookState(),
-    val liveAutopilotArmed: Boolean = false,
-    val liveAutopilotApproveTapped: Boolean = false,
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
@@ -109,7 +107,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
     private val shadowBook = container.shadow.book
-    private val liveAutopilotSession = container.liveArm
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -238,18 +235,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching {
                 prefs.settings.collectLatest { settings ->
-                    if (com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(settings.autopilotMode) !=
-                        com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE
-                    ) {
-                        liveAutopilotSession.disarm()
-                    }
                     hub.settings = settings
                     _state.update {
-                        it.copy(
-                            settings = settings,
-                            liveAutopilotArmed = liveAutopilotSession.armed,
-                            liveAutopilotApproveTapped = liveAutopilotSession.approveTapped
-                        )
+                        it.copy(settings = settings)
                     }
                     publishSupportState()
                     scheduleRebuildTickets(immediate = true)
@@ -535,14 +523,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun liveArmedNow(s: com.dirk.kalshiodds.signal.config.SignalSettings): Boolean =
-        s.autopilotModeEnum() == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE && liveAutopilotSession.armed
-
     private fun autopilotWanted(s: com.dirk.kalshiodds.signal.config.SignalSettings): Boolean =
         com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.autopilotWanted(
-            s.paperTradingEnabled, s.aiPaperAutopilotEnabled,
-            s.autopilotModeEnum() == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE,
-            liveAutopilotSession.armed
+            s.paperTradingEnabled, s.aiPaperAutopilotEnabled
         )
 
     private fun serviceWanted(s: com.dirk.kalshiodds.signal.config.SignalSettings): Boolean =
@@ -1262,8 +1245,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 val visible = com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
                 val now = System.currentTimeMillis()
-                val headlessLive = !visible && liveArmedNow(_state.value.settings)
-                if ((visible || headlessLive) && now - lastFetch >= KalshiPollBudget.POSITIONS_MS) {
+                if (visible && now - lastFetch >= KalshiPollBudget.POSITIONS_MS) {
                     lastFetch = now
                     refreshPositions()
                 }
@@ -1275,9 +1257,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private fun refreshPositions() {
         viewModelScope.launch {
             val settings = _state.value.settings
-            if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground() &&
-                !liveArmedNow(settings)
-            ) return@launch
+            if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) return@launch
             if (!settings.tradingCredentialsConfigured()) {
                 decoratePositions(_state.value.positions)
                 return@launch
@@ -1407,56 +1387,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun tapLiveAutopilotApprove() {
-        liveAutopilotSession.tapApprove()
-        publishLiveArm()
-    }
-
-    /**
-     * Second step of the Real Money confirm. Does not place an order.
-     * Later ticks may send only through [AutopilotDispatch].
-     */
-    fun confirmLiveAutopilotRealMoney(typed: String) {
-        if (!com.dirk.kalshiodds.signal.trade.RealMoneyPhrase.matches(typed)) {
-            _state.update { it.copy(userMessage = "Type REAL MONEY to arm live Autopilot") }
-            return
-        }
-        if (_state.value.settings.autopilotModeEnum() != com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE) {
-            return
-        }
-        if (!_state.value.settings.tradingCredentialsConfigured()) {
-            shadowBook.noteLiveError("Kalshi key missing — live Autopilot will not send")
-            return
-        }
-        liveAutopilotSession.confirmRealMoney(typed)
-        if (liveAutopilotSession.armed) {
-            runCatching { LiveSignalsService.start(getApplication()) }
-        }
-        publishLiveArm()
-    }
-
-    /** Manual disarm (Real Money tab). Persists, so a restart stays disarmed. */
-    fun disarmLiveAutopilot() {
-        liveAutopilotSession.disarm()
-        publishLiveArm()
-    }
-
     fun clearLiveAutopilotError() {
         shadowBook.clearLiveError()
     }
 
-    private fun publishLiveArm() {
-        _state.update {
-            it.copy(
-                liveAutopilotArmed = liveAutopilotSession.armed,
-                liveAutopilotApproveTapped = liveAutopilotSession.approveTapped
-            )
-        }
-    }
-
     /**
-     * Paper, shadow, or limited live. The order API runs only when
-     * [com.dirk.kalshiodds.signal.paper.AutopilotDispatch] says so.
+     * Paper or shadow only (0.3.40 owner decision). There is no path from here to an order:
+     * no trade client, no ticket session, no armed state.
      */
     private fun runPaperAutopilot(live: List<MarketUiModel>) {
         val now0 = container.clock.nowMs()
@@ -1484,13 +1421,6 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         runScalp(live, s)
         if (!s.paperTradingEnabled || !s.aiPaperAutopilotEnabled) return
         val mode = s.autopilotModeEnum()
-        if (mode == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE) {
-            val snapB = _state.value
-            container.tradeEvents.balance(
-                needsBalance = true,
-                fresh = com.dirk.kalshiodds.decision.LiveBalancePolicy.fresh(snapB.liveCashUsd, snapB.liveCashAtMs, container.clock.nowMs())
-            )
-        }
         paperBook.configure(
             kellyFraction = s.paperKellyFraction,
             feeRate = s.feeRate,
@@ -1503,10 +1433,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val book = hub.scoring.book.snapshotBook(market.ticker)
             val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
             val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
-            val snap = _state.value
-            // 0.3.40: the whole step (paper tick, sizing from the fresh REAL balance in LIVE, the $5
-            // floor, shadow record, dispatch gate, live claim) lives in AutopilotStep so tests run it.
-            val outcome = com.dirk.kalshiodds.signal.paper.AutopilotStep.run(
+            // 0.3.40: the whole paper/shadow step lives in AutopilotStep (paper-only, tested end to end).
+            com.dirk.kalshiodds.signal.paper.AutopilotStep.run(
                 paperBook = paperBook,
                 shadowBook = shadowBook,
                 market = market,
@@ -1519,47 +1447,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 noDepth = paperAskDepth("NO", noAsk, market.ticker, market),
                 book = book,
                 assessment = assessments[market.ticker.uppercase()],
-                live = com.dirk.kalshiodds.signal.paper.AutopilotStep.Live(
-                    cashUsd = snap.liveCashUsd,
-                    cashAtMs = snap.liveCashAtMs,
-                    armed = liveAutopilotSession.armed,
-                    credentialsOk = s.tradingCredentialsConfigured(),
-                    backoffBlocked = container.liveBackoff.blocked(now)
-                ),
                 clientOrderId = java.util.UUID.randomUUID().toString()
             )
-            if (outcome !is com.dirk.kalshiodds.signal.paper.AutopilotStep.Outcome.Send) return@forEach
-            val ticket = outcome.ticket
-            viewModelScope.launch {
-                val result = runCatching {
-                    container.tradeClient.createLimit(
-                        com.dirk.kalshiodds.signal.paper.ShadowOrderPayload.toTradeTicket(ticket),
-                        ticket.clientOrderId
-                    )
-                }
-                if (result.isSuccess) {
-                    shadowBook.noteLiveSpend(ticket.clientOrderId, outcome.dayKey)
-                    container.liveBackoff.onSuccess()
-                    // 0.3.40: the once-per-order "Real bet placed" alert was only wired for manual tickets.
-                    container.tradeEvents.realBetPlaced(
-                        ticket.clientOrderId,
-                        String.format(
-                            java.util.Locale.US,
-                            "Autopilot %s %s · %d ct @ %.0f¢ · $%.2f all-in",
-                            if (ticket.side.equals("NO", true)) "DOWN" else "UP",
-                            ticket.ticker, ticket.count, ticket.limitPrice * 100.0, ticket.stakeUsd
-                        )
-                    )
-                } else {
-                    shadowBook.releaseLiveReservation(ticket.clientOrderId, ticket.stakeUsd, outcome.dayKey)
-                    val msg = result.exceptionOrNull()?.message ?: "Live Autopilot order failed"
-                    shadowBook.noteLiveError(msg)
-                    // Stay armed; back off and resume. This client_order_id is never retried.
-                    val lb = container.liveBackoff
-                    val wait = lb.onError(container.clock.nowMs(), msg)
-                    container.tradeEvents.autopilotBackoff("live:${lb.episodeStartMs}", msg, wait)
-                }
-            }
         }
     }
 

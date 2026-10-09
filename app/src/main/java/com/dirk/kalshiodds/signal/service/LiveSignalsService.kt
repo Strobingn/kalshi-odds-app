@@ -195,13 +195,11 @@ class LiveSignalsService : Service() {
         val container = KalshiOddsApp.from(this).container
         val hub = container.hub
         hub.settings = settings
-        // 0.3.39: stay up for Live signals OR always-on Autopilot (paper/scalp, or armed live).
+        // 0.3.39: stay up for Live signals OR always-on Autopilot (paper/scalp only).
         val wanted = com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.serviceWanted(
             liveSignalsEnabled = settings.liveSignalsEnabled,
             paperTradingEnabled = settings.paperTradingEnabled,
-            aiPaperAutopilotEnabled = settings.aiPaperAutopilotEnabled,
-            liveMode = settings.autopilotModeEnum() == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE,
-            liveArmed = container.liveArm.armed
+            aiPaperAutopilotEnabled = settings.aiPaperAutopilotEnabled
         )
         LiveSignalsKeepAlive.setEnabled(this, wanted)
         lastTickerCount = tickers.size

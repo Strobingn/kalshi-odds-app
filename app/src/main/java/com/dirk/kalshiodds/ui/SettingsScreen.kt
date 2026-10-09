@@ -756,19 +756,17 @@ fun SettingsContent(
             Text(
                 "When on (default), Autopilot looks for +EV after fees on either side, sized by half-Kelly " +
                     "on the paper bankroll (no dollar cap; book-depth cap still applies). Flip-chance still blocks " +
-                    "lottery prints. Off = no AI paper, shadow, or live autopilot bets. Manual Paper UP/DOWN still works.",
+                    "lottery prints. Off = no AI paper or shadow bets. Manual Paper UP/DOWN still works.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             Text(
                 "Autopilot covers BTC, ETH, and SOL 15-minute markets. Paper books simulated fills. " +
                     "Shadow builds the same Kelly order and never submits it. " +
-                    "Limited live stays off until you arm it on the Real Money tab with Approve, then REAL MONEY. " +
-                    "Live sends only when paper and shadow agree. Paper and shadow size from the paper bankroll. " +
-                    "Limited live sizes from your Kalshi available balance (cached, not a new poll). " +
-                    "If that balance is missing or older than 15 minutes, live places nothing. " +
-                    "Kelly clips under \$5 are skipped, not rounded up. There is no daily dollar cap. Manual Approve stays \$10. " +
-                    "A missing key or an order error stops it. No retry.",
+                    "Autopilot and Scalp are paper-only: they cannot place real orders and there is nothing to arm. " +
+                    "The AI sizes half-Kelly on the free paper bankroll with no cap beyond that bankroll, " +
+                    "filled at displayed book depth with fees on both legs. " +
+                    "Kelly clips under \$5 are skipped, not rounded up. Real orders are manual only: Approve + typed REAL MONEY.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -779,7 +777,7 @@ fun SettingsContent(
             Text(
                 String.format(
                     Locale.US,
-                    "Paper Kelly fraction  %.2f  (0.50 = half-Kelly · Autopilot paper, shadow, and live · manual Approve stays \$10)",
+                    "Paper Kelly fraction  %.2f  (manual paper fills · AI Autopilot always uses half-Kelly · manual Approve stays \$10)",
                     s.paperKellyFraction
                 ),
                 style = MaterialTheme.typography.bodyMedium,
@@ -797,11 +795,17 @@ fun SettingsContent(
                 onValueChange = { viewModel?.setPaperBankrollDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Paper bankroll start (USD)") },
-                supportingText = { Text("Default $1,000. Used on Reset. Settled paper P&L updates the live bankroll.") },
+                supportingText = { Text("Default $10,000. Used on Reset. Settled paper P&L updates the bankroll. Reset archives paper history; nothing is deleted.") },
                 singleLine = true
             )
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text(String.format(Locale.US, "Reset paper book to $%.0f", s.paperBankrollStartUsd))
+                Text(String.format(Locale.US, "Reset paper book to $%,.0f", s.paperBankrollStartUsd))
+            }
+            OutlinedButton(
+                onClick = { viewModel?.resetPaperBookTo(SignalConstants.PAPER_START_USD) },
+                modifier = Modifier.height(44.dp)
+            ) {
+                Text(String.format(Locale.US, "Set paper bankroll to $%,.0f and reset", SignalConstants.PAPER_START_USD))
             }
 
             Section("D3 daily favourite (KXBTCD 5 PM ET)")

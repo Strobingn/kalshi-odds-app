@@ -252,8 +252,8 @@ object AutopilotMinStake {
 }
 
 /**
- * Live Autopilot sizes from the real Kalshi available balance. A missing or
- * stale balance means no bet — never a guess, never the settings bankroll.
+ * Freshness rule for the real Kalshi balance shown on manual tickets. A missing
+ * or stale balance is never labelled "live". (0.3.40: Autopilot is paper-only.)
  */
 object LiveBalancePolicy {
     const val FRESH_MS = 15L * 60L * 1000L

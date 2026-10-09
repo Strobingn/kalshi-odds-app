@@ -7,6 +7,7 @@ import com.dirk.kalshiodds.decision.ScalpBreakdown
 import com.dirk.kalshiodds.decision.ScalpParams
 import com.dirk.kalshiodds.decision.ScalpRule
 import com.dirk.kalshiodds.decision.ScalpState
+import com.dirk.kalshiodds.decision.ScalpStrategy
 import com.dirk.kalshiodds.decision.ScalpTicker
 import com.dirk.kalshiodds.decision.ScalpTrade
 import com.dirk.kalshiodds.decision.ScalpTuneState
@@ -30,7 +31,8 @@ class ReleaseGate0340ScalpTest {
     /** Primary-only book (no shadow variants) so the assertions are about one param set. */
     private fun book(variants: List<ScalpParams> = emptyList()): ScalpBook {
         val ids = AtomicInteger()
-        return ScalpBook(InMemoryScalpPersistence(), variants, InMemoryScalpTuneStore()) { "s${ids.incrementAndGet()}" }
+        val pin = ScalpTuneState(paramsByCoin = mapOf("BTC" to ScalpParams.CLASSIC.id))
+        return ScalpBook(InMemoryScalpPersistence(), variants, InMemoryScalpTuneStore(pin)) { "s${ids.incrementAndGet()}" }
     }
 
     @Test
@@ -42,7 +44,7 @@ class ReleaseGate0340ScalpTest {
 
     @Test
     fun entryNeedsExpectedMoveAboveSpreadPlusBothFees() {
-        val p = ScalpParams.DEFAULT.copy(minGap = 0.0)
+        val p = ScalpParams.CLASSIC.copy(minGap = 0.0)
         // fair 50¢, ask 48¢: move 2¢ < 1¢ spread + ~1.8¢ + ~1.8¢ fees → no entry even with gap threshold 0.
         val (sig, why) = ScalpRule.entrySignal(q(close - 600_000L, 0.47, 0.48), p)
         assertNull(sig)
@@ -60,7 +62,7 @@ class ReleaseGate0340ScalpTest {
 
     @Test
     fun explicitProfitTargetAndStop() {
-        val p = ScalpParams.DEFAULT // target +8¢, stop −6¢
+        val p = ScalpParams.CLASSIC // target +8¢, stop −6¢
         assertEquals(ScalpRule.ExitReason.PROFIT_TARGET, ScalpRule.exitSignal("YES", 0.35, q(close - 400_000L, 0.43, 0.44, spot = 99_990.0), p))
         assertEquals(ScalpRule.ExitReason.STOP, ScalpRule.exitSignal("YES", 0.35, q(close - 400_000L, 0.29, 0.30), p))
         assertNull(ScalpRule.exitSignal("YES", 0.35, q(close - 400_000L, 0.36, 0.37, spot = 100_050.0), p))
@@ -81,10 +83,13 @@ class ReleaseGate0340ScalpTest {
         // Cooldown: a fresh dip 10 s later does not re-enter …
         b.onQuote(q(t + 19_000L, 0.34, 0.35), true)
         assertEquals(1, b.snapshot().size)
-        // … but after 30 s it does: second round trip in the same window.
+        // … but after the 15 s cooldown it does: second fair-gap round trip in the same window.
         b.onQuote(q(t + 40_000L, 0.34, 0.35), true)
-        assertEquals(2, b.snapshot().size)
-        val per = ScalpBreakdown.roundTripsPerWindow(b.snapshot().map { if (it.state == ScalpState.PENDING_ENTRY) it.copy(state = ScalpState.CLOSED, netUsd = 0.0, contracts = 10) else it })
+        val fair = b.snapshot().filter { it.strategy == ScalpStrategy.FAIR_GAP }
+        assertEquals(2, fair.size)
+        // The 10¢ ask drop over 40 s also fires the dip-hunter alongside (separate strategy, same side allowed).
+        assertTrue(b.snapshot().any { it.strategy == ScalpStrategy.DIP_HUNTER && it.side == "YES" })
+        val per = ScalpBreakdown.roundTripsPerWindow(fair.map { if (it.state == ScalpState.PENDING_ENTRY) it.copy(state = ScalpState.CLOSED, netUsd = 0.0, contracts = 10) else it })
         assertEquals(2.0, per.avg, 1e-9)
     }
 
@@ -92,12 +97,13 @@ class ReleaseGate0340ScalpTest {
     fun shadowVariantsNeverShowAsPrimaryScalps() {
         val ids = AtomicInteger()
         val b = ScalpBook(InMemoryScalpPersistence(), ScalpParams.GRID, InMemoryScalpTuneStore()) { "v${ids.incrementAndGet()}" }
-        b.onQuote(q(close - 700_000L, 0.34, 0.35), true)
+        b.onQuote(q(close - 700_000L, 0.29, 0.30), true)
         assertTrue(b.allTrades().size > 1)
         assertEquals(1, b.snapshot().size)
-        assertTrue(b.snapshot().all { it.isPrimary && it.variantId == ScalpParams.DEFAULT.id })
+        assertTrue(b.snapshot().all { it.isPrimary && it.variantId == ScalpParams.seedFor("BTC").id })
         assertEquals(8, ScalpParams.GRID.size)
-        assertTrue(ScalpParams.DEFAULT in ScalpParams.GRID)
+        // Every coin's walk-forward seed is inside the tuner grid.
+        ScalpParams.COINS.forEach { assertTrue(ScalpParams.seedFor(it) in ScalpParams.GRID) }
     }
 
     // ---- tuner ----
@@ -115,7 +121,7 @@ class ReleaseGate0340ScalpTest {
     }
 
     private fun dataset(curFit: Double, curOos: Double, altFit: Double, altOos: Double): List<ScalpTrade> {
-        val cur = ScalpParams.DEFAULT
+        val cur = ScalpParams.seedFor("BTC")
         val alt = ScalpParams.GRID.first { it != cur }
         val out = ArrayList<ScalpTrade>()
         for (w in 0 until 20) {
@@ -130,7 +136,7 @@ class ReleaseGate0340ScalpTest {
 
     @Test
     fun tunerAdoptsOnlyWhenBetterOnLaterUnseenBlock() {
-        val alt = ScalpParams.GRID.first { it != ScalpParams.DEFAULT }
+        val alt = ScalpParams.GRID.first { it != ScalpParams.seedFor("BTC") }
         // Alt fits better AND wins out of sample → adopted, version bumps.
         val adopted = ScalpTuner.tune(dataset(-1.0, -0.5, 2.0, 1.0), ScalpTuneState(), 1L)
         assertEquals(alt.id, adopted.paramsFor("BTC").id)
@@ -139,19 +145,19 @@ class ReleaseGate0340ScalpTest {
         assertTrue(adopted.trials > 0)
         // Alt fits better but LOSES on the later block → current params kept, version unchanged.
         val kept = ScalpTuner.tune(dataset(-1.0, 0.5, 2.0, 0.2), ScalpTuneState(), 1L)
-        assertEquals(ScalpParams.DEFAULT.id, kept.paramsFor("BTC").id)
+        assertEquals(ScalpParams.seedFor("BTC").id, kept.paramsFor("BTC").id)
         assertEquals(0, kept.version)
         assertEquals(0.5, kept.oosCentsByCoin["BTC"]!!, 1e-9)
         // Deterministic.
         assertEquals(adopted, ScalpTuner.tune(dataset(-1.0, -0.5, 2.0, 1.0), ScalpTuneState(), 1L))
         // Other coins untouched with no data.
-        assertEquals(ScalpParams.DEFAULT.id, adopted.paramsFor("ETH").id)
+        assertEquals(ScalpParams.seedFor("ETH").id, adopted.paramsFor("ETH").id)
     }
 
     // ---- scorecard ----
     @Test
     fun scorecardBreaksDownByCoinHourAndTimeLeftAfterBothFees() {
-        val v = ScalpParams.DEFAULT
+        val v = ScalpParams.CLASSIC
         val trades = listOf(
             closed("BTC", 0, v, 3.0, true, 0),
             closed("BTC", 0, v, -2.0, true, 1),

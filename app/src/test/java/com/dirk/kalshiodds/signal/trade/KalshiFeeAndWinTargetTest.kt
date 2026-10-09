@@ -337,7 +337,7 @@ class KalshiFeeAndWinTargetTest {
                 bankrollUsd = 1_000.0
             )
         )!!
-        val book = com.dirk.kalshiodds.signal.paper.PaperBook(idFactory = { "ls" }, nowMs = { 1L })
+        val book = com.dirk.kalshiodds.signal.paper.PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "ls" }, nowMs = { 1L })
         val fill = book.manualFill(ticket)
         assertTrue(fill != null)
         assertEquals(ticket.contracts, fill!!.contracts)

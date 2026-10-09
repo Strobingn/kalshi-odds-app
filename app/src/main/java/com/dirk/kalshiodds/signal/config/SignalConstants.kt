@@ -36,7 +36,7 @@ object SignalConstants {
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
     /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
-    const val PAPER_START_USD = 1_000.0
+    const val PAPER_START_USD = 10_000.0
     /** Legacy $5 clip — unused for AI paper (Kelly). Kept so History restore still reads. */
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true

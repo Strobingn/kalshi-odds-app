@@ -77,9 +77,12 @@ class LadderAndRulesTest {
         assertFalse(StrategyLadder.status(StrategyLadder.Id.FAV15, paper, unsettled).eligibleForNext)
         val fav = StrategyLadder.status(StrategyLadder.Id.FAV15, paper, items(300) { if (it % 10 == 0) -3.0 else 0.6 })
         assertTrue(fav.eligibleForNext)
-        val top = StrategyLadder.status(StrategyLadder.Id.FAV15, StrategyLadder.Stage.LIMITED_LIVE, items(300) { 0.6 })
+        // 0.3.40: no live stage — shadow is the top.
+        val top = StrategyLadder.status(StrategyLadder.Id.FAV15, StrategyLadder.Stage.SHADOW, items(300) { 0.6 })
         assertFalse(top.eligibleForNext)
-        assertTrue(top.reason.contains("REAL MONEY"))
+        assertTrue(top.reason.contains("never sent"))
+        assertEquals(StrategyLadder.Stage.SHADOW, StrategyLadder.parseStage("LIMITED_LIVE"))
+        assertEquals(listOf("PAPER", "SHADOW"), StrategyLadder.Stage.values().map { it.name })
     }
 
     @Test

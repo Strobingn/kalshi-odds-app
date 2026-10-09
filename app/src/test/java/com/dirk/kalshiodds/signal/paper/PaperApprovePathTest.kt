@@ -114,7 +114,7 @@ class PaperApprovePathTest {
                 error("V2 client must not run in paper mode")
             }
         )
-        val book = PaperBook(idFactory = { "p1" }, nowMs = { 9L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "p1" }, nowMs = { 9L })
         val t = ticket(TicketKind.MANUAL, "KXBTC15M-X", 5, 1.0, 0.20)
         session.addManual(t)
         val out = PaperApprove.apply(session, book, t.id)
@@ -146,7 +146,7 @@ class PaperApprovePathTest {
         val session = TicketSession(
             placeOrder = { _, _ -> error("no live V2") }
         )
-        val book = PaperBook(idFactory = { "fill-${ticket.ticker}" }, nowMs = { 42L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "fill-${ticket.ticker}" }, nowMs = { 42L })
         session.addManual(ticket)
         val out = PaperApprove.apply(
             session = session,

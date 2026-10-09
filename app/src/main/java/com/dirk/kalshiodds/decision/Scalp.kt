@@ -40,7 +40,9 @@ object ScalpRule {
     const val BACKTEST_LABEL =
         "Backtest v2 (walk-forward, held-out Oct 2–8, net after both fees): BTC −2.93¢/contract 95% CI [−3.69, −2.16] n=1,177; " +
             "ETH −2.80¢ [−4.00, −1.64] n=458; SOL −3.16¢ [−4.49, −1.70] n=258. 24 grid trials; no coin or hour held up " +
-            "out of sample. Not proven — paper only."
+            "out of sample. Long history (Jan–Sep 2026, rolling weekly walk-forward): fair-gap −3.23¢ [−3.74, −2.68] 1/38 weeks " +
+            "positive; dip-hunter −4.44¢, momentum-sniper −4.77¢, extreme-reversion −2.53¢ (all CIs below 0). " +
+            "Not proven — paper only."
 
     const val CONTRACTS = 10
     const val MIN_GAP = 0.10
@@ -50,14 +52,20 @@ object ScalpRule {
     const val TAU_MAX_S = 840.0
     /** 0.3.40: hard exit at ≥ 60 s left — never hold into the final (settlement-averaging) minute. */
     const val TIME_STOP_S = 60.0
-    /** 0.3.40: re-entry cooldown after a scalp closes on the same market. */
-    const val REENTRY_COOLDOWN_MS = 30_000L
+    /** 0.3.40: re-entry cooldown after a scalp closes on the same market (per strategy variant). */
+    const val REENTRY_COOLDOWN_MS = 15_000L
+    /** 0.3.40 multi-strategy: look-back for dip / momentum triggers, and the minimum history needed. */
+    const val LOOKBACK_MS = 60_000L
+    const val MIN_LOOKBACK_MS = 20_000L
+    /** Extreme-reversion buys only the very cheap side. */
+    const val CHEAP_MIN = 0.02
+    const val CHEAP_MAX = 0.15
     const val ENTRY_LO = 0.10
     const val ENTRY_HI = 0.90
     const val SLIPPAGE = 0.01
     const val LATENCY_MS = 3_000L
     const val FRESH_BOOK_MS = 10_000L
-    const val MAX_ENTRIES_PER_MARKET = 8
+    const val MAX_ENTRIES_PER_MARKET = 12
     const val PROMOTION_ROUND_TRIPS = 300
 
     /** Fallback σ per √second (train medians, Binance 1 s) until the in-app estimator has 2 minutes of spot. */
@@ -166,7 +174,7 @@ object ScalpRule {
     data class Entry(val side: String, val ask: Double, val fair: Double, val gapAfterFee: Double)
 
     /** Entry signal at this quote, or a skip reason. Uses only this quote (no look-ahead). */
-    fun entrySignal(q: Quote, p: ScalpParams = ScalpParams.DEFAULT, sides: Collection<String> = listOf("YES", "NO")): Pair<Entry?, String> {
+    fun entrySignal(q: Quote, p: ScalpParams = ScalpParams.CLASSIC, sides: Collection<String> = listOf("YES", "NO")): Pair<Entry?, String> {
         if (!q.fresh()) return null to "stale book"
         val tau = q.tauS
         if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
@@ -192,6 +200,75 @@ object ScalpRule {
         return best to "enter"
     }
 
+    /** One past book view for a market (strategy look-back). Prices in dollars. */
+    data class Snap(val atMs: Long, val yesBid: Double?, val yesAsk: Double?, val fairYes: Double?) {
+        fun ask(side: String): Double? = if (side == "YES") yesAsk else yesBid?.let { 1.0 - it }
+        fun bid(side: String): Double? = if (side == "YES") yesBid else yesAsk?.let { 1.0 - it }
+        fun fair(side: String): Double? = fairYes?.let { if (side == "YES") it else 1.0 - it }
+    }
+
+    /**
+     * 0.3.40 multi-strategy entry. Same guards for every strategy (fresh book, entry window, spread ≤ 2¢,
+     * expected move > spread + entry fee + exit fee); the trigger differs. [recent] holds only books strictly
+     * before this quote (no look-ahead).
+     */
+    fun strategySignal(
+        q: Quote,
+        p: ScalpParams,
+        sides: Collection<String>,
+        recent: List<Snap>
+    ): Pair<Entry?, String> {
+        if (p.strategy == ScalpStrategy.FAIR_GAP) return entrySignal(q, p, sides)
+        if (!q.fresh()) return null to "stale book"
+        val tau = q.tauS
+        if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
+        val yb = q.yesBid ?: return null to "no bid"
+        val ya = q.yesAsk ?: return null to "no ask"
+        val spread = ya - yb
+        if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
+        val past = recent.filter { it.atMs in (q.nowMs - LOOKBACK_MS)..(q.nowMs - LATENCY_MS) }
+        val needHistory = p.strategy != ScalpStrategy.EXTREME_REVERSION
+        if (needHistory && (past.isEmpty() || q.nowMs - past.minOf { it.atMs } < MIN_LOOKBACK_MS)) return null to "not enough history"
+        data class Cand(val e: Entry, val move: Double, val cost: Double)
+        val cands = sides.mapNotNull { side ->
+            val ask = q.ask(side) ?: return@mapNotNull null
+            val bid = q.bid(side) ?: return@mapNotNull null
+            val fair = q.fair(side) ?: return@mapNotNull null
+            val move: Double = when (p.strategy) {
+                ScalpStrategy.DIP_HUNTER -> {
+                    if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+                    val ref = past.mapNotNull { it.ask(side) }.maxOrNull() ?: return@mapNotNull null
+                    val drop = ref - ask
+                    // Spot must not explain the drop: fair still at or above the ask.
+                    if (drop + 1e-9 < p.minGap || fair + 1e-9 < ask) return@mapNotNull null
+                    drop * 0.5 // half retrace
+                }
+                ScalpStrategy.MOMENTUM -> {
+                    if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+                    val refBid = past.mapNotNull { it.bid(side) }.minOrNull() ?: return@mapNotNull null
+                    val rise = bid - refBid
+                    val fairThen = past.minByOrNull { it.atMs }?.fair(side) ?: return@mapNotNull null
+                    // Spot confirmation: fair moved the same way by at least half the trigger; not paying far above fair.
+                    if (rise + 1e-9 < p.minGap || fair - fairThen + 1e-9 < p.minGap / 2 || ask > fair + 0.02 + 1e-9) return@mapNotNull null
+                    rise * 0.5 // continuation
+                }
+                ScalpStrategy.EXTREME_REVERSION -> {
+                    if (ask < CHEAP_MIN - 1e-9 || ask > CHEAP_MAX + 1e-9) return@mapNotNull null
+                    if (fair - ask + 1e-9 < p.minGap) return@mapNotNull null
+                    fair - ask
+                }
+                ScalpStrategy.FAIR_GAP -> return@mapNotNull null
+            }
+            val cost = spread + feePerContract(CONTRACTS, ask) + feePerContract(CONTRACTS, (ask + move).coerceIn(0.01, 0.99))
+            Cand(Entry(side, ask, fair, move - cost), move, cost)
+        }
+        val best = cands.maxByOrNull { it.e.gapAfterFee } ?: return null to "no ${p.strategy.label} trigger"
+        if (best.move <= best.cost + 1e-9) {
+            return null to String.format(Locale.US, "expected move %.1f¢ ≤ spread + both fees %.1f¢", best.move * 100, best.cost * 100)
+        }
+        return best.e to "enter"
+    }
+
     enum class ExitReason(val label: String) {
         GAP_CLOSED("take-profit: bid beats fair after fee"),
         TURN_DOWN("turn-down: fair fell below entry"),
@@ -202,7 +279,7 @@ object ScalpRule {
     }
 
     /** Exit decision for an open scalp at this quote, or null to keep holding. */
-    fun exitSignal(side: String, entry: Double, q: Quote, p: ScalpParams = ScalpParams.DEFAULT): ExitReason? {
+    fun exitSignal(side: String, entry: Double, q: Quote, p: ScalpParams = ScalpParams.CLASSIC): ExitReason? {
         if (q.tauS <= TIME_STOP_S) return ExitReason.TIME_STOP
         val bid = q.bid(side)
         val fair = q.fair(side)
@@ -216,10 +293,13 @@ object ScalpRule {
     }
 
     fun rulesText(): String =
-        "Scalp $VERSION (PAPER). Enter when the ask is below spot-implied fair by the coin's gap threshold after " +
+        "Scalp $VERSION (PAPER). Four strategies run side by side — " +
+            ScalpStrategy.values().joinToString("; ") { "${it.label}: ${it.blurb}" } +
+            " — each with one open scalp per market side, its own per-coin params and walk-forward tuning. " +
+            "Total open scalp cost is capped by the paper bankroll. Fair-gap: enter when the ask is below spot-implied fair by the coin's gap threshold after " +
             "the entry fee AND the expected move beats spread + both fees, inside the coin's time window, spread ≤ 2¢, " +
             "10 contracts, displayed depth only, fill on the next fresh book (≥ 3 s). Several round trips per window: " +
-            "one open scalp per market side, 30 s cooldown after an exit. Exit at the bid on the profit target, the stop, " +
+            "one open scalp per strategy per market side, 15 s cooldown after an exit. Exit at the bid on the profit target, the stop, " +
             "gap close or turn-down, and always by 60 s left. Per-coin params come from the walk-forward tuner. " +
             "Taker fee on both legs. $BACKTEST_LABEL"
 }
@@ -258,6 +338,7 @@ data class ScalpTrade(
     val variantId: String get() = ruleVersion.split('|').getOrNull(1) ?: ScalpParams.LEGACY_ID
     val isPrimary: Boolean get() = ruleVersion.split('|').getOrNull(2) != "S"
     val coin: String get() = ScalpParams.coinOf(ticker)
+    val strategy: ScalpStrategy get() = ScalpParams.byId(variantId)?.strategy ?: ScalpStrategy.FAIR_GAP
 
     /** Mark-to-bid P&L after the exit fee for what is still held. */
     fun unrealizedUsd(bid: Double?): Double? {
@@ -288,8 +369,10 @@ class InMemoryScalpPersistence : ScalpPersistence {
 class ScalpBook(
     private val store: ScalpPersistence = InMemoryScalpPersistence(),
     /** 0.3.40: shadow tuning variants run beside the primary params (paper only). */
-    private val variants: List<ScalpParams> = ScalpParams.GRID,
+    private val variants: List<ScalpParams> = ScalpParams.ALL_VARIANTS,
     private val tuneStore: ScalpTuneStore = InMemoryScalpTuneStore(),
+    /** Paper bankroll: total open primary scalp cost (entries + fees, pending included) never exceeds it. */
+    private val bankrollUsd: () -> Double = { com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD },
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
@@ -310,6 +393,18 @@ class ScalpBook(
     fun allTrades(): List<ScalpTrade> = _all.value
 
     fun paramsFor(coin: String): ScalpParams = _tune.value.paramsFor(coin)
+    fun paramsFor(coin: String, strategy: ScalpStrategy): ScalpParams = _tune.value.paramsFor(coin, strategy)
+
+    private val history = HashMap<String, ArrayDeque<ScalpRule.Snap>>()
+
+    /** Cost tied up in open primary scalps (pending entries reserve ask × clip + entry fee). */
+    fun openCostUsd(): Double = _trades.value.sumOf { t ->
+        when (t.state) {
+            ScalpState.PENDING_ENTRY -> t.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, t.signalAsk)
+            ScalpState.OPEN, ScalpState.PENDING_EXIT -> (t.entryPrice ?: 0.0) * t.remaining + t.entryFeeUsd
+            else -> 0.0
+        }
+    }
 
     fun openTickers(): Set<String> = _trades.value.filter {
         it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY
@@ -329,6 +424,14 @@ class ScalpBook(
         val changed = ArrayList<ScalpTrade>()
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) }
+        val primaryIds = primaries.map { it.id }.toSet()
+        val key = q.ticker.uppercase()
+        val hist = history.getOrPut(key) { ArrayDeque() }
+        val recent = hist.toList()
+        hist.addLast(ScalpRule.Snap(q.nowMs, q.yesBid, q.yesAsk, ScalpRule.fairYes(q.spot, q.strike, q.sigmaPerSec, q.tauS)))
+        while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > 2 * ScalpRule.LOOKBACK_MS) hist.removeFirst()
+        if (q.nowMs >= q.closeMs) history.remove(key)
         val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
         // Step every open scalp first (one per market side per variant).
         mineAll.filter { isActive(it) }.forEach { t ->
@@ -336,7 +439,9 @@ class ScalpBook(
             step(t, q, p)?.let { changed += it }
         }
         if (enabled) {
-            val run = (listOf(primary) + variants).distinctBy { it.id }
+            val run = (primaries + variants).distinctBy { it.id }
+            var openCost = openCostUsd() + changed.filter { it.isPrimary && it.state == ScalpState.PENDING_ENTRY && it.signalAtMs == q.nowMs }
+                .sumOf { it.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, it.signalAsk) }
             for (p in run) {
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
                 if (mine.count { it.state != ScalpState.NO_FILL } >= ScalpRule.MAX_ENTRIES_PER_MARKET) continue
@@ -346,9 +451,14 @@ class ScalpBook(
                 val openSides = mine.filter { isActive(it) }.map { it.side }.toSet()
                 val free = listOf("YES", "NO").filter { it !in openSides }
                 if (free.isEmpty()) continue
-                val (sig, _) = ScalpRule.entrySignal(q, p, free)
+                val (sig, _) = ScalpRule.strategySignal(q, p, free, recent)
                 if (sig != null) {
-                    val role = if (p.id == primary.id) "P" else "S"
+                    val role = if (p.id in primaryIds) "P" else "S"
+                    if (role == "P") {
+                        val cost = sig.ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, sig.ask)
+                        if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
+                        openCost += cost
+                    }
                     changed += ScalpTrade(
                         id = idFactory(),
                         ticker = q.ticker.uppercase(),
@@ -357,7 +467,7 @@ class ScalpBook(
                         signalAtMs = q.nowMs,
                         signalAsk = sig.ask,
                         fairAtSignal = sig.fair,
-                        note = String.format(Locale.US, "gap %.1f¢ after fee · %s", sig.gapAfterFee * 100, p.id),
+                        note = String.format(Locale.US, "%s · edge %.1f¢ after fees · %s", p.strategy.label, sig.gapAfterFee * 100, p.id),
                         ruleVersion = "${ScalpRule.VERSION}|${p.id}|$role"
                     )
                 }
