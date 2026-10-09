@@ -62,6 +62,7 @@ class KalshiTradeClient(
             val chosen = chooseHost(first) { activeFallback()?.createOrderV2(body) }
             mapV2(sized, clientOrderId, chosen)
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             throw softFailure(e)
         }
     }
@@ -77,8 +78,12 @@ class KalshiTradeClient(
             }
             if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
             val reduced = chosen.body()?.reducedBy
-            order.copy(error = "cancelled" + (reduced?.let { " (−$it)" } ?: ""))
+            val n = reduced?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
+                ?: throw IllegalStateException("Cancellation unconfirmed; reconcile order")
+            // Cancellation can race a fill. Fetch final exchange state before displaying it.
+            reconcile(order.copy(remainingCount = (order.remainingCount - n).coerceAtLeast(0.0)))
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             throw softFailure(e)
         }
     }
@@ -98,7 +103,7 @@ class KalshiTradeClient(
     }
 
     private fun shouldRetryOtherHost(code: Int): Boolean =
-        code == 404 || code == 410 || code >= 500
+        code == 404 || code == 410
 
     /**
      * Available cash for Live Approve sizing. Never logs the body.
@@ -191,13 +196,61 @@ class KalshiTradeClient(
     suspend fun listMarketPositions(): List<MarketPositionDto> {
         ensureKeys()
         return try {
-            val first = activePrimary().getPositions(countFilter = "position", limit = 200)
-            val chosen = chooseHost(first) { activeFallback()?.getPositions(countFilter = "position", limit = 200) }
-            if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
-            chosen.body()?.marketPositions.orEmpty()
+            val positions = mutableListOf<MarketPositionDto>()
+            val seen = mutableSetOf<String>()
+            var cursor: String? = null
+            do {
+                val first = activePrimary().getPositions(countFilter = "position", limit = 200, cursor = cursor)
+                val chosen = chooseHost(first) { activeFallback()?.getPositions(countFilter = "position", limit = 200, cursor = cursor) }
+                if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
+                val page = chosen.body() ?: error("Empty positions page")
+                positions.addAll(page.marketPositions)
+                cursor = page.cursor?.takeIf { it.isNotBlank() }
+                if (cursor != null && !seen.add(cursor)) error("Repeated positions cursor")
+            } while (cursor != null)
+            positions
+
         } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
             throw softFailure(e)
         }
+    }
+
+    fun accountKey(): String {
+        val identity = "${useDemo()}:${credentials().first}"
+        return java.security.MessageDigest.getInstance("SHA-256")
+            .digest(identity.toByteArray()).joinToString("") { "%02x".format(it) }
+    }
+
+    suspend fun reconcile(order: PlacedOrder): PlacedOrder {
+        ensureKeys()
+        val dto = if (order.orderId != null) {
+            val response = activePrimary().getOrder(order.orderId)
+            if (!response.isSuccessful) throw httpFailure(response.code(), response.errorBody()?.string())
+            response.body()?.order ?: error("Empty order state")
+        } else {
+            var cursor: String? = null
+            var found: com.dirk.kalshiodds.data.dto.OrderStateDto? = null
+            val seen = mutableSetOf<String>()
+            do {
+                val response = activePrimary().getOrders(order.ticket.ticker, cursor)
+                if (!response.isSuccessful) throw httpFailure(response.code(), response.errorBody()?.string())
+                val page = response.body() ?: error("Empty orders page")
+                found = page.orders.firstOrNull { it.clientOrderId == order.clientOrderId }
+                cursor = page.cursor?.takeIf { it.isNotBlank() }
+                if (cursor != null && !seen.add(cursor)) error("Repeated order cursor")
+            } while (found == null && cursor != null)
+            found ?: error("Submission still unknown; check Kalshi using client ID ${order.clientOrderId}")
+        }
+        require(dto.ticker == order.ticket.ticker &&
+            (dto.clientOrderId == null || dto.clientOrderId == order.clientOrderId)) { "Order identity mismatch" }
+        fun quantity(raw: String): Double = raw.toDouble().also { require(it.isFinite() && it >= 0) }
+        val filled = quantity(dto.fillCount)
+        val remaining = quantity(dto.remainingCount)
+        val fees = listOf(dto.makerFees, dto.takerFees).map { it?.toDoubleOrNull() }
+        return order.copy(orderId = dto.orderId, fillCount = filled, remainingCount = remaining,
+            status = dto.status, reconciledAtMs = System.currentTimeMillis(), error = null,
+            actualFeesUsd = if (fees.all { it != null && it.isFinite() && it >= 0 }) fees.sumOf { it!! } else null)
     }
 
     private fun v2Body(ticket: TradeTicket, clientOrderId: String): CreateOrderV2Request {
@@ -207,8 +260,9 @@ class KalshiTradeClient(
         val timeInForce = if (reduceOnly) {
             CreateOrderV2Request.TIME_IN_FORCE_IOC
         } else {
-            CreateOrderV2Request.TIME_IN_FORCE_GTC
+            ticket.limitOptions.timeInForce
         }
+        ticket.limitOptions.validate(System.currentTimeMillis(), reduceOnly)
         return CreateOrderV2Request(
             ticker = ticket.ticker,
             side = ticket.bookSide,
@@ -217,7 +271,10 @@ class KalshiTradeClient(
                 ?: String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
             timeInForce = timeInForce,
             clientOrderId = clientOrderId,
-            reduceOnly = reduceOnly
+            reduceOnly = reduceOnly,
+            postOnly = if (reduceOnly) false else ticket.limitOptions.postOnly,
+            expirationTime = if (reduceOnly) null else ticket.limitOptions.expirationTime,
+            cancelOrderOnPause = true
         )
     }
 
@@ -226,16 +283,27 @@ class KalshiTradeClient(
         clientOrderId: String,
         response: Response<CreateOrderV2Response>
     ): PlacedOrder {
-        if (!response.isSuccessful) throw httpFailure(response.code(), response.errorBody()?.string())
+        if (!response.isSuccessful) {
+            val failure = httpFailure(response.code(), response.errorBody()?.string())
+            if (response.code() in 400..499 && response.code() != 409 && response.code() != 408)
+                throw com.dirk.kalshiodds.signal.trade.OrderRejected(failure.message ?: "Order rejected")
+            throw failure
+        }
         val body = response.body() ?: throw IllegalStateException("Empty create-order response")
+        require(!body.orderId.isNullOrBlank()) { "Missing order ID; reconcile before retrying" }
+        val filled = body.fillCount?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
+            ?: error("Missing fill count; reconcile before retrying")
+        val remaining = body.remainingCount?.toDoubleOrNull()?.takeIf { it.isFinite() && it >= 0 }
+            ?: error("Missing remaining count; reconcile before retrying")
         return PlacedOrder(
             ticket = ticket,
             clientOrderId = body.clientOrderId ?: clientOrderId,
             orderId = body.orderId,
-            fillCount = body.fillCount.toDoubleOrZero(),
-            remainingCount = body.remainingCount.toDoubleOrZero(),
+            fillCount = filled,
+            remainingCount = remaining,
             averageFillPrice = body.averageFillPrice.toDoubleOrNullSafe(),
-            placedAtMs = body.tsMs ?: System.currentTimeMillis()
+            placedAtMs = body.tsMs ?: System.currentTimeMillis(),
+            status = if (remaining > 0 && !ticket.isSell && ticket.limitOptions.timeInForce == "good_till_canceled") "resting" else "executed"
         )
     }
 

@@ -31,6 +31,7 @@ data class CreateOrderV2Request(
     @SerialName("post_only") val postOnly: Boolean = false,
     /** Official Create Order V2 example is `false`. */
     @SerialName("cancel_order_on_pause") val cancelOrderOnPause: Boolean = false,
+    @SerialName("expiration_time") val expirationTime: Long? = null,
     @SerialName("reduce_only") val reduceOnly: Boolean = false
 ) {
     companion object {
@@ -71,4 +72,21 @@ data class KalshiErrorBody(
 @Serializable
 data class KalshiErrorEnvelope(
     val error: KalshiErrorBody? = null
+)
+
+@Serializable
+data class GetOrderResponse(val order: OrderStateDto)
+@Serializable
+data class GetOrdersResponse(val orders: List<OrderStateDto> = emptyList(), val cursor: String? = null)
+@Serializable
+data class OrderStateDto(
+    @SerialName("order_id") val orderId: String,
+    @SerialName("client_order_id") val clientOrderId: String? = null,
+    val ticker: String,
+    val status: String,
+    @SerialName("fill_count_fp") val fillCount: String,
+    @SerialName("remaining_count_fp") val remainingCount: String,
+    @SerialName("taker_fees_dollars") val takerFees: String? = null,
+    @SerialName("maker_fees_dollars") val makerFees: String? = null,
+    @SerialName("exchange_index") val exchangeIndex: Int? = null
 )

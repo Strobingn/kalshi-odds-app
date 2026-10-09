@@ -16,10 +16,10 @@ class AppVersionTest {
         assertEquals(BuildConfig.VERSION_NAME, AppVersion.versionName)
         assertEquals(BuildConfig.VERSION_CODE, AppVersion.versionCode)
         assertEquals(
-            "DipHunter GTP v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+            "Bitcoin Edge v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
             AppVersion.label
         )
-        assertTrue(AppVersion.label.startsWith("DipHunter GTP v"))
+        assertTrue(AppVersion.label.startsWith("Bitcoin Edge v"))
         assertTrue(AppVersion.label.endsWith("(${BuildConfig.VERSION_CODE})"))
     }
 }

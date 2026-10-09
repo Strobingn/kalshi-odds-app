@@ -15,7 +15,7 @@ object LiveSignalsPolicy {
     const val WAKELOCK_TAG = "diphunter:live-signals"
     const val WAKELOCK_TIMEOUT_MS = 3L * 60L * 60L * 1000L
 
-    const val NOTIFICATION_TITLE = "DipHunter GTP live signals"
+    const val NOTIFICATION_TITLE = "Bitcoin Edge live signals"
     const val CHANNEL_ONGOING = "diphunter_live_signals_ongoing"
     const val CHANNEL_LEGACY = "diphunter_live_signals"
 

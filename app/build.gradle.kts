@@ -13,13 +13,13 @@ android {
     defaultConfig {
         // Independent install from the original DipHunter app. Keep this ID
         // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        applicationId = "com.wildlifewhisperer.bitcoinedge.codex"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a
         // new APK updates this separate installation without version downgrades.
-        versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.0"
+        versionCode = 2_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
+        versionName = "1.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -88,7 +88,7 @@ android {
 }
 
 base {
-    archivesName.set("DipHunter")
+    archivesName.set("BitcoinEdge")
 }
 
 dependencies {
@@ -148,7 +148,7 @@ val expectedDebugCertSha256 =
 tasks.register("verifyDebugCert") {
     dependsOn("assembleDebug")
     doLast {
-        val apk = file("build/outputs/apk/debug/DipHunter-debug.apk")
+        val apk = file("build/outputs/apk/debug/BitcoinEdge-debug.apk")
         require(apk.isFile) { "missing $apk" }
         val apksigner = file("${System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")}/build-tools/35.0.0/apksigner")
         val bin = if (apksigner.isFile) apksigner else file("${System.getenv("ANDROID_HOME")}/build-tools/34.0.0/apksigner")
@@ -166,7 +166,7 @@ tasks.register("verifyDebugCert") {
 afterEvaluate {
     tasks.named("assembleDebug") {
         doLast {
-            val apk = file("build/outputs/apk/debug/DipHunter-debug.apk")
+            val apk = file("build/outputs/apk/debug/BitcoinEdge-debug.apk")
             if (!apk.isFile) return@doLast
             val home = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT") ?: return@doLast
             val apksigner = listOf("35.0.0", "34.0.0").map { file("$home/build-tools/$it/apksigner") }.firstOrNull { it.isFile }

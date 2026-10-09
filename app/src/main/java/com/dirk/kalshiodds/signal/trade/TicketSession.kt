@@ -23,9 +23,13 @@ class TicketSession(
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
     private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val loadWorking: (String) -> List<PlacedOrder> = { emptyList() },
+    private val saveWorking: (String, List<PlacedOrder>) -> Unit = { _, _ -> },
+    private val refreshOrder: suspend (PlacedOrder) -> PlacedOrder = { it },
     private val voidHoldMs: Long = VOID_HOLD_MS
 ) {
     private val mutex = Mutex()
+    private var account = ""
     private val _state = MutableStateFlow(TicketUiState())
     val state: StateFlow<TicketUiState> = _state.asStateFlow()
 
@@ -40,7 +44,7 @@ class TicketSession(
 
     /** Process start / ViewModel init. Leaves Idle. Never places. */
     fun onStart() {
-        _state.value = TicketUiState(phase = TicketPhase.Idle)
+        _state.value = TicketUiState(phase = TicketPhase.Idle, working = _state.value.working)
         voidedAtMs.clear()
         announcedVoidIds.clear()
         windowClosedNoticeCount = 0
@@ -272,13 +276,24 @@ class TicketSession(
             return _state.value
         }
         if (cur.phase is TicketPhase.Submitting) return cur
+        if (cur.working.any { it.ticket.ticker == ticket.ticker && it.status in setOf("unknown", "submitting") }) {
+            _state.update { it.copy(lastError = "Previous submission unknown; reconcile before another order on this market") }
+            return _state.value
+        }
 
         val clientOrderId = (cur.phase as? TicketPhase.AwaitingApprove)
             ?.clientOrderId
             ?.takeIf { it.isNotBlank() }
             ?: idFactory()
+        val pending = PlacedOrder(ticket, clientOrderId, null, 0.0, ticket.contracts.toDouble(), null, nowMs(),
+            status = "submitting")
+        try { saveWorking(account, cur.working + pending) } catch (e: Exception) {
+            _state.update { it.copy(lastError = e.message ?: "Journal write failed; order blocked") }
+            return _state.value
+        }
         _state.update {
             it.copy(
+                working = cur.working + pending,
                 phase = TicketPhase.Submitting(ticket, clientOrderId),
                 lastError = null
             )
@@ -317,14 +332,18 @@ class TicketSession(
                 TicketUiState(
                     phase = TicketPhase.Failed(ticket, msg, cur.proposals),
                     proposals = cur.proposals,
-                    working = cur.working,
-                    lastError = msg,
+                    working = if (err is OrderRejected) cur.working else
+                        cur.working + pending.copy(status = "unknown", error = "Submission unknown: $msg"),
+                    lastError = if (err is OrderRejected) msg else "Submission unknown: $msg. Reconcile before retrying.",
                     placementCount = cur.placementCount
                 )
             }
         )
         _state.value = next
-        return next
+        runCatching { saveWorking(account, next.working) }.onFailure {
+            _state.update { s -> s.copy(lastError = "Journal update failed; pending ID retained for recovery") }
+        }
+        return _state.value
     }
 
     suspend fun cancelWorking(orderId: String): TicketUiState = mutex.withLock {
@@ -337,7 +356,7 @@ class TicketSession(
                     it.copy(
                         phase = TicketPhase.Cancelled(updated, it.proposals),
                         working = it.working.filterNot { w -> w.orderId == orderId } + updated.copy(
-                            error = updated.error ?: "cancelled"
+                            error = updated.error
                         ),
                         lastError = null
                     )
@@ -347,7 +366,31 @@ class TicketSession(
                 _state.update { it.copy(lastError = humanError(err)) }
             }
         )
+        saveWorking(account, _state.value.working)
         return _state.value
+    }
+
+    suspend fun selectAccount(key: String) = mutex.withLock {
+        if (key != account) {
+            val restored = loadWorking(key).map {
+                if (it.status == "submitting") it.copy(status = "unknown", error = "Submission interrupted; reconciling") else it
+            }
+            account = key
+            _state.value = TicketUiState(working = restored)
+        }
+    }
+
+    suspend fun reconcileWorking() = mutex.withLock {
+        val cur = _state.value
+        val updated = cur.working.map { order ->
+            if (order.status !in setOf("unknown", "submitting", "acknowledged", "resting")) order
+            else try { refreshOrder(order) } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                order.copy(error = e.message ?: "Order sync failed")
+            }
+        }
+        saveWorking(account, updated)
+        _state.update { it.copy(working = updated) }
     }
 
     private fun confirmPhase(

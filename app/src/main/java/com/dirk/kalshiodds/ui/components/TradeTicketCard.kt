@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.ui.components
 
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -48,10 +50,12 @@ fun TradeTicketsSection(
     paperTradingEnabled: Boolean = false,
     homeMode: Boolean = false,
     listVisible: Boolean = true,
+    showDialog: Boolean = true,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
     onApprove: (String) -> Unit,
     onApproveSell: (String, Int, Double) -> Unit = { id, _, _ -> onApprove(id) },
+    onApproveLimit: (String, Int, Double, Boolean, String, Long) -> Unit = { id, _, _, _, _, _ -> onApprove(id) },
     onPaper: (String) -> Unit,
     onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
@@ -61,7 +65,7 @@ fun TradeTicketsSection(
     val proposals = tickets.proposals.sortedByDescending {
         if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
-    val working = tickets.working.filter { it.isResting && it.error?.startsWith("cancelled") != true }
+    val working = tickets.working.takeLast(20)
 
     if (listVisible) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (!homeMode) {
@@ -156,7 +160,7 @@ fun TradeTicketsSection(
     }
 
     val awaiting = tickets.phase as? TicketPhase.AwaitingApprove
-    if (awaiting != null) {
+    if (showDialog && awaiting != null) {
         BackHandler(enabled = true) { onCancelApprove() }
         ApproveTicketDialog(
             ticket = awaiting.ticket,
@@ -164,6 +168,7 @@ fun TradeTicketsSection(
             paperTradingEnabled = paperTradingEnabled,
             onApprove = { onApprove(awaiting.ticket.id) },
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
+            onApproveLimit = { count, price, post, tif, ttl -> onApproveLimit(awaiting.ticket.id, count, price, post, tif, ttl) },
             onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
             onDismiss = onCancelApprove
@@ -205,6 +210,7 @@ private fun ProposedTicketCard(
                         TicketKind.MANUAL -> "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
+                        TicketKind.SCALP -> "EXPERIMENTAL SCALP · PAPER"
                     } + " · " + TradeModeLabel.forApprove(
                         paperTradingEnabled = paperTradingEnabled,
                         liveCredentialsConfigured = credentialsConfigured,
@@ -407,7 +413,7 @@ private fun ProposedTicketCard(
 @Composable
 private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
     val colors = DipTheme.colors
-    val id = order.orderId ?: return
+    val id = order.orderId
     Column(
         Modifier
             .fillMaxWidth()
@@ -415,7 +421,7 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
             .padding(12.dp)
     ) {
         Text(
-            "Working limit · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(order.ticket.ticker)}",
+            "${order.status.uppercase()} · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(order.ticket.ticker)}",
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
             color = colors.accentBlue
@@ -428,12 +434,14 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
                 KalshiQuoteDisplay.formatPriceCents(order.ticket.limitPrice),
                 order.fillCount,
                 order.remainingCount,
-                id.take(8)
+                id?.take(8) ?: order.clientOrderId.take(8)
             ),
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
-        OutlinedButton(
+        order.error?.let { Text(it, color = colors.accentRed, style = MaterialTheme.typography.labelMedium) }
+        order.actualFeesUsd?.let { Text("Exchange fees $${String.format(Locale.US, "%.4f", it)}", color = colors.textSecondary) }
+        if (order.isResting && id != null) OutlinedButton(
             onClick = { onCancel(id) },
             modifier = Modifier.padding(top = 6.dp).height(44.dp)
         ) { Text("Cancel order") }
@@ -463,6 +471,7 @@ internal fun ApproveTicketDialog(
     paperTradingEnabled: Boolean = false,
     onApprove: () -> Unit,
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
+    onApproveLimit: (Int, Double, Boolean, String, Long) -> Unit = { _, _, _, _, _ -> onApprove() },
     onPaper: () -> Unit,
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
     onDismiss: () -> Unit
@@ -475,6 +484,13 @@ internal fun ApproveTicketDialog(
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
     }
+    var makerOnly by remember(ticket.id) { mutableStateOf(ticket.limitOptions.postOnly) }
+    var tif by remember(ticket.id) { mutableStateOf(ticket.limitOptions.timeInForce) }
+    var expiryText by remember(ticket.id) { mutableStateOf("0") }
+    val qty = countText.toIntOrNull() ?: 0
+    val px = (centsText.toDoubleOrNull() ?: Double.NaN) / 100.0
+    val validInput = qty > 0 && px.isFinite() && px in .001.. .999 &&
+        (!ticket.isSell || qty <= held) && (ticket.isSell || expiryText.toLongOrNull()?.let { it >= 0 } == true)
     AlertDialog(
         onDismissRequest = onDismiss,
                 title = {
@@ -487,7 +503,7 @@ internal fun ApproveTicketDialog(
             )
         },
         text = {
-            Column {
+            Column(Modifier.height(420.dp).verticalScroll(rememberScrollState())) {
                 Text(
                     when {
                         paperSell ->
@@ -497,9 +513,9 @@ internal fun ApproveTicketDialog(
                         ticket.isSell && ticket.blockedReason != null ->
                             com.dirk.kalshiodds.ui.PositionCopy.sellBlockedMessage(ticket.blockedReason)
                         ticket.isSell ->
-                            "Sells at the current bid. Leftover size is canceled."
+                            "Reduce-only IOC sell at your minimum price. Unfilled contracts are canceled."
                         else ->
-                            "This tap sends a real Kalshi order. Cancel leaves nothing resting."
+                            "Confirm sends your limit order. Canceling the sheet sends nothing."
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = if (paperSell) FontWeight.Normal else FontWeight.Bold,
@@ -565,23 +581,43 @@ internal fun ApproveTicketDialog(
                         modifier = Modifier.padding(top = 6.dp)
                     )
                 }
-                if (ticket.isSell && ticket.blockedReason == null) {
+                if (ticket.blockedReason == null) {
                     OutlinedTextField(
                         value = countText,
                         onValueChange = { countText = it.filter { ch -> ch.isDigit() }.take(6) },
-                        label = { Text("Contracts (max $held)") },
+                        label = { Text(if (ticket.isSell) "Contracts (max $held)" else "Contracts") },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     )
-                    if (paperSell) {
+                    if (true) {
                         OutlinedTextField(
                             value = centsText,
                             onValueChange = { centsText = it.filter { ch -> ch.isDigit() || ch == '.' }.take(6) },
-                            label = { Text("Limit ¢ (best bid)") },
+                            label = { Text(if (ticket.isSell) "Minimum sell price ¢" else "Maximum buy price ¢") },
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                         )
                     }
                 }
-                if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE) {
+                if (!ticket.isSell && ticket.blockedReason == null) {
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        androidx.compose.material3.Checkbox(checked = makerOnly, onCheckedChange = {
+                            makerOnly = it; if (it) tif = "good_till_canceled"
+                        })
+                        Text("Maker-only (may never fill)")
+                    }
+                    Row {
+                        listOf("GTC" to "good_till_canceled", "IOC" to "immediate_or_cancel", "FOK" to "fill_or_kill").forEach { (label, value) ->
+                            TextButton(onClick = { tif = value; if (value != "good_till_canceled") { makerOnly = false; expiryText = "0" } }) {
+                                Text(if (tif == value) "✓ $label" else label)
+                            }
+                        }
+                    }
+                    if (tif == "good_till_canceled") OutlinedTextField(
+                        value = expiryText, onValueChange = { expiryText = it.filter(Char::isDigit).take(7) },
+                        label = { Text("Expire in seconds (0 = until canceled)") })
+                    val debit = if (validInput) com.dirk.kalshiodds.signal.trade.LiveOrderSizer.allInUsd(qty, px) else 0.0
+                    Text(String.format(Locale.US, "Edited maximum debit: $%.2f · $5 cap; fees reserved conservatively", debit))
+                }
+                if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE || ticket.kind == TicketKind.SCALP) {
                     Text(
                         ticket.gateNote ?: "Hunter path · Approve still required — never auto-placed.",
                         style = MaterialTheme.typography.labelMedium,
@@ -596,21 +632,17 @@ internal fun ApproveTicketDialog(
                 onClick = {
                     if (ticket.isSell) {
                         val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
-                        val px = if (paperSell) {
-                            (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
-                        } else {
-                            ticket.limitPrice
-                        }
+                        val px = centsText.toDoubleOrNull()?.div(100.0) ?: ticket.limitPrice
                         if (paperSell) onPaperSell(qty, px) else onApproveSell(qty, px)
                     } else if (paperBuy) {
                         onPaper()
                     } else {
-                        onApprove()
+                        onApproveLimit(qty, px, makerOnly, tif, if (tif == "good_till_canceled") expiryText.toLongOrNull() ?: 0L else 0L)
                     }
                 },
                 enabled = when {
                     paperSell || paperBuy -> ticket.canPaper || ticket.contracts > 0 || ticket.blockedReason != null
-                    else -> credentialsConfigured && ticket.canApprove
+                    else -> credentialsConfigured && ticket.canApprove && validInput
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = SideColor.ofTicketSide(ticket.side, colors),

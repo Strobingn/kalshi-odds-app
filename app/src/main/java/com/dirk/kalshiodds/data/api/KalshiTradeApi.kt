@@ -38,6 +38,14 @@ interface KalshiTradeApi {
         @Query("cursor") cursor: String? = null
     ): Response<PositionsResponse>
 
+    // Order reads remain on the documented portfolio/orders endpoints.
+    @GET("portfolio/orders/{order_id}")
+    suspend fun getOrder(@Path("order_id") orderId: String): Response<com.dirk.kalshiodds.data.dto.GetOrderResponse>
+
+    @GET("portfolio/orders")
+    suspend fun getOrders(@Query("ticker") ticker: String, @Query("cursor") cursor: String? = null,
+        @Query("limit") limit: Int = 200): Response<com.dirk.kalshiodds.data.dto.GetOrdersResponse>
+
     @POST("portfolio/events/orders")
     suspend fun createOrderV2(@Body body: CreateOrderV2Request): Response<CreateOrderV2Response>
 

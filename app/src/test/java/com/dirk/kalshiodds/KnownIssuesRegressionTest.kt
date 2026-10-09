@@ -1752,6 +1752,9 @@ class KnownIssuesRegressionTest {
     )
 
     private class RecordingTradeApi : KalshiTradeApi {
+        override suspend fun getOrder(orderId: String): Response<com.dirk.kalshiodds.data.dto.GetOrderResponse> = error("Not configured")
+        override suspend fun getOrders(ticker: String, cursor: String?, limit: Int): Response<com.dirk.kalshiodds.data.dto.GetOrdersResponse> = error("Not configured")
+
         val creates = mutableListOf<CreateOrderV2Request>()
 
         override suspend fun createOrderV2(body: CreateOrderV2Request): Response<CreateOrderV2Response> {

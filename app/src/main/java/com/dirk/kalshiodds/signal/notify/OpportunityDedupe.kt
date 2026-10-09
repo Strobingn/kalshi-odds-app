@@ -21,6 +21,7 @@ object OpportunityDedupe {
         TicketKind.CONFIGURED -> "wintarget"
         TicketKind.MANUAL -> "manual"
         TicketKind.SELL -> "sell"
+        TicketKind.SCALP -> "scalp"
     }
 
     fun isOpportunity(ticket: TradeTicket): Boolean {

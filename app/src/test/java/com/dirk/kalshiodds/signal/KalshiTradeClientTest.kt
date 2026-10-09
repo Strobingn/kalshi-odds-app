@@ -48,7 +48,7 @@ class KalshiTradeClientTest {
         assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals("cid-1", body.clientOrderId)
         assertFalse(body.reduceOnly)
-        assertFalse(body.cancelOrderOnPause)
+        assertTrue(body.cancelOrderOnPause)
         assertEquals("good_till_canceled", body.timeInForce)
         assertEquals("taker_at_cross", body.selfTradePreventionType)
         assertEquals(KalshiTradeClient.V2_CREATE_PATH, "/trade-api/v2/portfolio/events/orders")
@@ -197,6 +197,9 @@ class KalshiTradeClientTest {
             CreateOrderV2Response(orderId = "x")
         )
     ) : KalshiTradeApi {
+        override suspend fun getOrder(orderId: String): Response<com.dirk.kalshiodds.data.dto.GetOrderResponse> = error("Not configured")
+        override suspend fun getOrders(ticker: String, cursor: String?, limit: Int): Response<com.dirk.kalshiodds.data.dto.GetOrdersResponse> = error("Not configured")
+
         val creates = mutableListOf<CreateOrderV2Request>()
 
         override suspend fun createOrderV2(body: CreateOrderV2Request): Response<CreateOrderV2Response> {

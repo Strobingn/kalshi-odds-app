@@ -14,11 +14,11 @@ import okhttp3.Request
 import org.json.JSONObject
 import java.io.File
 
-/** Checks the separate chat-GTP release and hands a verified package to Android. */
+/** Checks the separate Bitcoin Edge release and hands a verified package to Android. */
 object AppUpdater {
     private const val RELEASE_API =
-        "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases/tags/gtp-v1.0-chat-GTP"
-    private const val VERSION_BASE = 1_000_000
+        "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases/tags/bitcoin-edge-codex"
+    private const val VERSION_BASE = 2_000_000
 
     data class Asset(val url: String, val versionCode: Int)
 
@@ -30,34 +30,35 @@ object AppUpdater {
 
     fun parseAsset(releaseJson: String): Asset? {
         val arr = JSONObject(releaseJson).getJSONArray("assets")
+        var best: Asset? = null
         for (i in 0 until arr.length()) {
             val item = arr.getJSONObject(i)
             val name = item.optString("name")
-            if (!name.startsWith("DipHunter-GTP-") || !name.endsWith(".apk")) continue
+            if (!name.startsWith("BitcoinEdge-Codex-") || !name.endsWith(".apk")) continue
             val run = Regex("-(\\d+)\\.apk$").find(name)?.groupValues?.get(1)?.toIntOrNull()
                 ?: continue
             val url = item.optString("browser_download_url")
-            if (!url.startsWith("https://github.com/Strobingn/kalshi-odds-app/releases/download/")) continue
-            return Asset(url, VERSION_BASE + run)
+            if (!url.startsWith("https://github.com/Strobingn/kalshi-odds-app/releases/download/bitcoin-edge-codex/")) continue
+            if (best == null || VERSION_BASE + run > best.versionCode) best = Asset(url, VERSION_BASE + run)
         }
-        return null
+        return best
     }
 
     suspend fun checkAndDownload(context: Context): Result = withContext(Dispatchers.IO) {
         try {
             val http = OkHttpClient()
-            val request = Request.Builder().url(RELEASE_API).header("User-Agent", "DipHunter-GTP").build()
+            val request = Request.Builder().url(RELEASE_API).header("User-Agent", "BitcoinEdge-Codex").build()
             val release = http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) error("Release unavailable (HTTP ${response.code})")
                 response.body?.string() ?: error("Empty release")
             }
             val asset = parseAsset(release) ?: error("Release has no branch APK")
             if (asset.versionCode <= BuildConfig.VERSION_CODE) return@withContext Result.Current
-            val dest = File(context.cacheDir, "updates/DipHunter-GTP.apk")
+            val dest = File(context.cacheDir, "updates/BitcoinEdge-Codex.apk")
             dest.parentFile?.mkdirs()
-            val temp = File(dest.parentFile, "DipHunter-GTP.pending.apk")
+            val temp = File(dest.parentFile, "BitcoinEdge-Codex.pending.apk")
             try {
-                val get = Request.Builder().url(asset.url).header("User-Agent", "DipHunter-GTP").build()
+                val get = Request.Builder().url(asset.url).header("User-Agent", "BitcoinEdge-Codex").build()
                 http.newCall(get).execute().use { response ->
                     if (!response.isSuccessful) error("Download failed (HTTP ${response.code})")
                     val body = response.body ?: error("Empty APK")

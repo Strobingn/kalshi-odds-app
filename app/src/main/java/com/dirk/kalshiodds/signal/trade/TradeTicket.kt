@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.trade
 
+@kotlinx.serialization.Serializable
 enum class TicketKind {
     /** Settings stake (default $5) → ≥$100 max payout. */
     CONFIGURED,
@@ -10,13 +11,16 @@ enum class TicketKind {
     /** User tapped Buy on a market card / hero. */
     MANUAL,
     /** Sell / reduce a held YES or NO position. IoC reduce-only at the bid. */
-    SELL
+    SELL,
+    /** Experimental executable-quote bounce; paper evaluation until validated. */
+    SCALP
 }
 
 /**
  * One proposed (or working) approve-gated limit ticket.
  * Never submitted unless [TicketSession.approve] is called with this [id].
  */
+@kotlinx.serialization.Serializable
 data class TradeTicket(
     val id: String,
     val ticker: String,
@@ -74,7 +78,8 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    val limitOptions: LimitOptions = LimitOptions()
 ) {
     val displaySide: String get() = side.uppercase()
 
@@ -89,6 +94,7 @@ data class TradeTicket(
     fun matchesApproval(ticketId: String): Boolean = ticketId == id
 }
 
+@kotlinx.serialization.Serializable
 data class PlacedOrder(
     val ticket: TradeTicket,
     val clientOrderId: String,
@@ -97,7 +103,10 @@ data class PlacedOrder(
     val remainingCount: Double,
     val averageFillPrice: Double?,
     val placedAtMs: Long,
-    val error: String? = null
+    val error: String? = null,
+    val status: String = "acknowledged",
+    val reconciledAtMs: Long? = null,
+    val actualFeesUsd: Double? = null
 ) {
     val filledContracts: Int
         get() = kotlin.math.floor(fillCount + 1e-9).toInt().coerceAtLeast(0)
@@ -107,7 +116,7 @@ data class PlacedOrder(
 
     /** IoC reduce-only sells never rest — leftover size is canceled. */
     val isResting: Boolean
-        get() = !ticket.isSell && remainingCount > 1e-9 && orderId != null
+        get() = !ticket.isSell && remainingCount > 1e-9 && orderId != null && status !in setOf("canceled", "executed", "rejected")
 
     fun fillSummary(): String {
         val wanted = ticket.contracts

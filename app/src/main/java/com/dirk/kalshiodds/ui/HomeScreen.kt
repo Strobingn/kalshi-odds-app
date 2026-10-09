@@ -72,6 +72,7 @@ fun HomeScreen(
     onDismissTicket: (String) -> Unit,
     onApproveTicket: (String) -> Unit,
     onApproveSellTicket: (String, Int, Double) -> Unit,
+    onApproveLimitTicket: (String, Int, Double, Boolean, String, Long) -> Unit = { id, _, _, _, _, _ -> onApproveTicket(id) },
     onPaperTicket: (String) -> Unit,
     onPaperSellTicket: (String, Int, Double) -> Unit,
     onCancelApprove: () -> Unit,
@@ -219,6 +220,30 @@ fun HomeScreen(
                             }
                         }
                         item {
+                            Text("Bitcoin bounce research · all open-contract times", fontWeight = FontWeight.Bold)
+                            Text("BTC last-trade reversal 59.92%; VWAP check 43.9%. These are not Kalshi win rates. Experimental scalp entries use executable book quotes and the app's proxy fair model; live trades require Approve.", style = MaterialTheme.typography.labelMedium)
+                            Text(state.scalpSummary, style = MaterialTheme.typography.labelMedium)
+                        }
+                        item {
+                    TradeTicketsSection(
+                        tickets = state.tickets,
+                        credentialsConfigured = hasKey,
+                        paperTradingEnabled = state.settings.paperTradingEnabled,
+                        homeMode = true,
+                        listVisible = true,
+                        showDialog = false,
+                        onReview = onReviewTicket,
+                        onDismiss = onDismissTicket,
+                        onApprove = onApproveTicket,
+                        onApproveSell = onApproveSellTicket,
+                        onApproveLimit = onApproveLimitTicket,
+                        onPaper = onPaperTicket,
+                        onPaperSell = onPaperSellTicket,
+                        onCancelApprove = onCancelApprove,
+                        onCancelOrder = onCancelOrder
+                    )
+                        }
+                        item {
                             Text(
                                 HomeCopy.SIGNAL_HISTORY,
                                 style = MaterialTheme.typography.labelMedium,
@@ -239,6 +264,7 @@ fun HomeScreen(
                         onDismiss = onDismissTicket,
                         onApprove = onApproveTicket,
                         onApproveSell = onApproveSellTicket,
+                        onApproveLimit = onApproveLimitTicket,
                         onPaper = onPaperTicket,
                         onPaperSell = onPaperSellTicket,
                         onCancelApprove = onCancelApprove,

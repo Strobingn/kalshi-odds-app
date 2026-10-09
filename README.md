@@ -1,3 +1,23 @@
+# Bitcoin Edge — Codex branch
+
+Independent Android app: **Bitcoin Edge**, package `com.wildlifewhisperer.bitcoinedge.codex`, version 1.1.0, versionCode `2000000 + GitHub run number`. Source namespace remains `com.dirk.kalshiodds`. Install alongside existing DipHunter builds; it has separate app data and keys. Updates use only the `bitcoin-edge-codex` release and `BitcoinEdge-Codex-*.apk` assets, preserving the committed signing certificate.
+
+Entries and exits are evaluated across the complete exchange-open 15-minute contract. There is no 3–13 minute entry gate, 90-second holding limit, or forced late-window exit. Historical/model warmup and fresh liquidity checks still apply. No trades run merely because the app starts or a signal appears; real orders retain per-ticket Approve.
+
+Buy confirmation supports exact contract quantity, maximum outcome price (including NO→YES book conversion), maker-only, GTC/IOC/FOK, and optional GTC expiry (seconds, 0 = no expiry). Live buys retain the existing $5 all-in cap with conservative taker fee reservation, even for makers. This branch removes the settlement-profit minimum for manual limits. Live sells use user-selected minimum price with reduce-only IOC; they can partially fill or fill nothing, and cannot rest under Kalshi's V2 reduce-only rules. GTC limit buys persist at Kalshi independently of the app.
+
+The order journal saves client IDs before submission, survives restarts, separates accounts/demo, and polls exchange order state every 3 seconds while the app is active. Timeout/5xx/malformed responses remain unknown, block another order on that market, and are reconciled by client ID without resubmitting. Clear 4xx rejections can be corrected. Cancellation is followed by a read to reconcile concurrent fills. Positions paginate; a failed read no longer deletes known holdings. Fees shown as actual come from the order read; estimates remain conservative. Older unknown orders may require checking Kalshi if they move beyond its order-read historical cutoff.
+
+The experimental BTC bounce engine looks for ≥5¢ quote drops, ≥1¢ recovery, ≤2¢ spread, and ≥6¢ proxy model advantage with ≤3¢ model deterioration. It uses fresh book depth and replay sizes ≤0.5% bankroll / $5. Price exits are +8¢ / −6¢ or lost proxy fair advantage, with no holding timer. Scalp entries are paper-only because the research did not validate Kalshi execution profitability. Held BTC positions receive advisory reduce-only exit tickets that still require confirmation.
+
+Persistent quote replays use ask entries and depth-qualified bid exits, count conservative fees on both legs, leave missing quotes unresolved, and settle only using the repository's official settlement callback. They assume hypothetical instantaneous taker fills; queue, latency, slippage and adverse selection are unmeasured. Replay summaries are not live P&L or a calibrated predictor. The app's imported/on-device/digital fair model is a proxy, not an authenticated BRTI valuation. Maker fill profitability is not inferred from replay.
+
+Research context supplied in this conversation: 43,200 Massive BTC one-minute bars (Sep 9–Oct 8, 2026). Last-close shock fades reversed 59.92% out of sample; the minute-VWAP check reversed only 43.9%, undermining blind BTC-last-trade fading. These are underlying-price statistics, not Kalshi win rates, and do not establish profit. The strategy deliberately collects forward quote evidence instead of importing those percentages as probabilities.
+
+CI builds the isolated branch, runs limit/idempotency/recovery and existing execution/updater regressions, verifies the debug certificate, and publishes the APK only after those checks succeed.
+
+---
+
 # Kalshi Odds / Dip Hunter (Android)
 
 Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-market odds and fires **analysis-only** signal alerts.

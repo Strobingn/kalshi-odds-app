@@ -106,7 +106,7 @@ object TicketBuilder {
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
-            TicketKind.SELL -> ticket
+            TicketKind.SELL, TicketKind.SCALP -> ticket
         } ?: ticket
     }
 
@@ -386,7 +386,7 @@ object TicketBuilder {
 
         val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
         val bookSide = if (side == "YES") "bid" else "ask"
-        val minProfit = ctx.settings.minProfitIfWinUsd
+        val minProfit = if (kind == TicketKind.MANUAL) 0.0 else ctx.settings.minProfitIfWinUsd
         val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
         val blockedReason = if (belowMin) {
             LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
@@ -431,6 +431,7 @@ object TicketBuilder {
                     "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> SELL_IOC_NOTE
+                TicketKind.SCALP -> "Experimental quote bounce"
             },
             createdAtMs = ctx.nowMs,
             kind = kind,

@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 
 data class OddsUiState(
     val isLoading: Boolean = false,
+    val scalpSummary: String = "Quote replay collecting evidence",
     val snapshot: MarketsSnapshot? = null,
     val userMessage: String? = null,
     val pollLabel: String = "Polling ~750ms",
@@ -115,6 +116,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         ticketSession.onStart()
+        viewModelScope.launch {
+            while (isActive) {
+                if (_state.value.settings.tradingCredentialsConfigured()) {
+                    runCatching {
+                        withContext(Dispatchers.IO) { ticketSession.reconcileWorking() }
+                    }
+                }
+                delay(3000)
+            }
+        }
         _state.update { it.copy(paper = paperBook.snapshot()) }
         viewModelScope.launch {
             runCatching {
@@ -201,6 +212,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 prefs.settings.collectLatest { settings ->
                     hub.settings = settings
+                    ticketSession.selectAccount(container.tradeClient.accountKey())
                     _state.update { it.copy(settings = settings) }
                     publishSupportState()
                     scheduleRebuildTickets(immediate = true)
@@ -552,6 +564,29 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun approveLimitTicket(ticketId: String, count: Int, price: Double,
+                           makerOnly: Boolean, tif: String, expirySeconds: Long) {
+        viewModelScope.launch {
+            val snap = _state.value
+            val now = System.currentTimeMillis()
+            val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId } ?: return@launch
+            val market = snap.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker == ticket.ticker }
+            if (market == null || !MarketLifecycle.isCurrentWindow(market, now)) {
+                ticketSession.failSoft("Contract is not open"); return@launch
+            }
+            val result = runCatching {
+                val cash = withContext(Dispatchers.IO) { container.tradeClient.getCashUsd() }
+                val options = com.dirk.kalshiodds.signal.trade.LimitOptions(makerOnly, tif,
+                    if (expirySeconds > 0) now / 1000 + expirySeconds else null)
+                com.dirk.kalshiodds.signal.trade.LimitOrderEditor.edit(ticket, count, price, options, cash, now)
+            }
+            result.onSuccess { edited ->
+                ticketSession.revise(ticketId) { edited }
+                approveTicket(ticketId)
+            }.onFailure { ticketSession.failSoft(it.message ?: "Invalid limit") }
+        }
+    }
+
     fun approveSellTicket(ticketId: String, count: Int, price: Double) {
         viewModelScope.launch {
             val settings = _state.value.settings
@@ -796,7 +831,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ctx = ticketContext(s, now)
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        val tickets = TicketBuilder.proposeAll(live, ctx)
+        val scalpTickets = container.scalp.observe(live, ctx) { hub.hasFreshBook(it, now) }
+        val exitIds = scalpTickets.map { it.id }.toSet()
+        ticketSession.snapshot().proposals.filter { it.id.startsWith("scalp-exit-") && it.id !in exitIds }
+            .forEach { ticketSession.dismiss(it.id) }
+        _state.update { it.copy(scalpSummary = container.scalp.summary()) }
+        val tickets = TicketBuilder.proposeAll(live, ctx) + scalpTickets
         captureTicketForward(tickets, live, ctx, now)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {
@@ -869,7 +909,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun paperSized(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket): com.dirk.kalshiodds.signal.trade.TradeTicket {
-        if (ticket.isSell || !_state.value.settings.winTargetEnabled) return ticket
+        if (ticket.isSell || ticket.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP || !_state.value.settings.winTargetEnabled) return ticket
         val s = _state.value
         val market = s.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticket.ticker, true) }
             ?: return ticket
@@ -895,13 +935,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             val (rows, cash) = withContext(Dispatchers.IO) {
-                val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
+                val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrNull()
                 val cashUsd = runCatching { container.tradeClient.getCashUsd() }.getOrNull()
                 positions to cashUsd
             }
             if (cash != null) {
                 _state.update { it.copy(liveCashUsd = cash) }
             }
+            if (rows == null) return@launch
             val parsed = PositionParser.parseAll(rows)
             decoratePositions(parsed)
         }
@@ -951,8 +992,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (fresh == null) {
             return TicketBuilder.applySellQuote(ticket, count, bid = null)
         }
-        // Live sell always uses the fresh book bid. Never a stale or higher limit.
-        return TicketBuilder.applySellQuote(ticket, count, fresh, snap.settings.feeRate)
+        if (market == null || !MarketLifecycle.isCurrentWindow(market, ctx.nowMs)) {
+            return ticket.copy(blockedReason = "Contract is not open")
+        }
+        val minimum = KalshiPrice.usable(price) ?: return ticket.copy(blockedReason = "Invalid sell limit")
+        return TicketBuilder.applySellQuote(ticket, count, minimum, snap.settings.feeRate)
     }
 
     private fun sellMarketFallback(

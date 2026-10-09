@@ -77,6 +77,8 @@ class AppContainer(context: Context) {
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
     val paper = PaperBookStore(app)
+    private val scalpJournal = com.dirk.kalshiodds.signal.trade.ScalpJournal(app)
+    val scalp = com.dirk.kalshiodds.signal.trade.ScalpEngine(scalpJournal.load(), scalpJournal::save)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -97,6 +99,7 @@ class AppContainer(context: Context) {
         credentials = { tradingCredentials() },
         useDemo = { hub.settings.kalshiDemoEnabled }
     )
+    private val orderJournal = com.dirk.kalshiodds.signal.trade.OrderJournal(app)
     val tickets = TicketSession(
         placeOrder = { ticket, clientOrderId ->
             runCatching { tradeClient.createLimit(ticket, clientOrderId) }
@@ -104,7 +107,10 @@ class AppContainer(context: Context) {
         cancelOrder = { order ->
             runCatching { tradeClient.cancel(order) }
         },
-        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
+        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) },
+        loadWorking = orderJournal::load,
+        saveWorking = orderJournal::save,
+        refreshOrder = tradeClient::reconcile
     )
     val clock: Clock = Clock.System
     val repository = MarketRepository(
@@ -119,7 +125,10 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            scalp.settle(ticker, result)
+        },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)

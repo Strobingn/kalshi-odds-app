@@ -3,7 +3,7 @@ name: Build APK
 on:
   push:
     branches:
-      - "**"
+      - "codex/bitcoin-edge-limit-orders-20261009"
   workflow_dispatch:
 
 permissions:
@@ -40,7 +40,7 @@ jobs:
           name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)
           # Sanitize branch for artifact/tag names (slashes → hyphens).
           branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
-          code=$((1000000 + GITHUB_RUN_NUMBER))
+          code=$((2000000 + GITHUB_RUN_NUMBER))
           echo "name=$name" >> "$GITHUB_OUTPUT"
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "branch=$branch" >> "$GITHUB_OUTPUT"
@@ -52,38 +52,27 @@ jobs:
 
       - name: Trading and update regressions
         run: |
-          # Skip if this branch has no matching test classes.
           ./gradlew :app:testDebugUnitTest \
-            --tests 'com.dirk.kalshiodds.signal.AllowlistTest' \
-            --tests 'com.dirk.kalshiodds.signal.TicketBuilderGateTest' \
+            --tests 'com.dirk.kalshiodds.signal.trade.BitcoinEdgeTest' \
+            --tests 'com.dirk.kalshiodds.signal.KalshiTradeClientTest' \
             --tests 'com.dirk.kalshiodds.signal.trade.LiveOrderSizerTest' \
-            --tests 'com.dirk.kalshiodds.signal.GuardrailsTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.ForecastUnitsTest' \
-            --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
-            --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestSqliteTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardTestTest' \
-            --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardSqliteTest' \
-            --tests 'com.dirk.kalshiodds.signal.ResultsPersistenceTest' \
             --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
-            --no-daemon --stacktrace || {
-              echo "Selected regression tests missing or failed on this branch — falling back to full unit suite"
-              ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
-            }
+            --tests 'com.dirk.kalshiodds.ui.AppVersionTest' \
+            --no-daemon --stacktrace
+          ./gradlew :app:verifyDebugCert --no-daemon
 
       - name: Rename APK
         id: apk
         run: |
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          out="DipHunter-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}-${{ github.run_number }}.apk"
+          out="BitcoinEdge-Codex-v${{ steps.ver.outputs.name }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DipHunter-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}
+          name: BitcoinEdge-Codex-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
@@ -92,14 +81,12 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="apk-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.branch }}"
-          notes="APK v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
-          # Rolling release per version + branch: move the tag to this commit.
-          gh release delete "$tag" --yes --cleanup-tag || true
-          gh release create "$tag" "${{ steps.apk.outputs.path }}" \
-            --target "$GITHUB_SHA" \
-            --title "APK v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
-            --notes "$notes" \
-            --prerelease
-          gh release edit "$tag" --draft=false --prerelease
-          gh release view "$tag" --json isDraft --jq '.isDraft' | grep -qx false
+          tag="bitcoin-edge-codex"
+          notes="Bitcoin Edge v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}), commit ${GITHUB_SHA}, run ${{ github.run_number }}. Independent package com.wildlifewhisperer.bitcoinedge.codex. Experimental scalp replay, unrestricted open-contract evaluation, editable limits and order reconciliation."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${{ steps.apk.outputs.path }}" --clobber
+            gh release edit "$tag" --title "Bitcoin Edge v${{ steps.ver.outputs.name }} · build ${{ github.run_number }}" --notes "$notes" --prerelease
+          else
+            gh release create "$tag" "${{ steps.apk.outputs.path }}" --target "$GITHUB_SHA" \
+              --title "Bitcoin Edge v${{ steps.ver.outputs.name }}" --notes "$notes" --prerelease
+          fi

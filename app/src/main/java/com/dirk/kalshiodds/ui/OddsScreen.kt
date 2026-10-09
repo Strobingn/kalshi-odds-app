@@ -40,6 +40,7 @@ fun OddsScreen(
         onDismissTicket = { viewModel.dismissTicket(it) },
         onApproveTicket = { viewModel.approveTicket(it) },
         onApproveSellTicket = { id, count, price -> viewModel.approveSellTicket(id, count, price) },
+        onApproveLimitTicket = viewModel::approveLimitTicket,
         onPaperTicket = { viewModel.paperTicket(it) },
         onPaperSellTicket = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
         onCancelApprove = { viewModel.cancelTicketApprove() },
