@@ -223,10 +223,10 @@ class SignalPreferences(
     suspend fun updateKalshiDemo(value: Boolean) = edit { it[KEY_KALSHI_DEMO] = value }
     suspend fun updateAutoTradeEnabled(value: Boolean) = edit { it[KEY_AUTO_TRADE] = value }
     suspend fun updateAutoMaxStakeUsd(value: Double) = edit {
-        it[KEY_AUTO_MAX_STAKE] = value.coerceIn(1.0, SignalConstants.AUTO_STAKE_HARD_CAP_USD)
+        it[KEY_AUTO_MAX_STAKE] = value.coerceIn(5.0, SignalConstants.AUTO_STAKE_HARD_CAP_USD)
     }
     suspend fun updateAutoDailyLossLimitUsd(value: Double) = edit {
-        it[KEY_AUTO_DAILY_LOSS] = value.coerceIn(5.0, SignalConstants.AUTO_DAILY_LOSS_HARD_CAP_USD)
+        it[KEY_AUTO_DAILY_LOSS] = value.coerceIn(10.0, SignalConstants.AUTO_DAILY_LOSS_HARD_CAP_USD)
     }
 
     fun saveDemoCredentials(keyId: String, pem: String) {
