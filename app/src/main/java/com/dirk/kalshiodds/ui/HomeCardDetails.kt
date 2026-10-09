@@ -18,8 +18,8 @@ import kotlin.math.roundToInt
  * Details toggle; this object puts the dropped fields back.
  */
 object HomeCardDetails {
-    const val SECTION = "DIP HUNTER AI"
-    const val EDGE_TITLE = "Dip Hunter edge"
+    const val SECTION = "SCALPHUNTER-KIMI AI"
+    const val EDGE_TITLE = "scalpHunter-Kimi edge"
     const val MARKET_REF = "Kalshi market (reference)"
     const val LIVE_BOOK = "LIVE BOOK · UP / DOWN"
     const val DETAILS = "Details"
@@ -40,13 +40,13 @@ object HomeCardDetails {
      * v0.3.0-debug … v0.3.14-debug. [key] matches [Snapshot.lines].
      */
     val RESTORED_FIELDS: List<RestoredField> = listOf(
-        RestoredField("DIP HUNTER AI header", "v0.3.0-debug", "section"),
+        RestoredField("SCALPHUNTER-KIMI AI header", "v0.3.0-debug", "section"),
         RestoredField("AI YES / FV YES percent", "v0.3.0-debug", "aiYes"),
         RestoredField("AI NO / FV NO percent", "v0.3.0-debug", "aiNo"),
         RestoredField("Model reasons (aiNote)", "v0.3.0-debug", "reasons"),
         RestoredField("Confidence", "v0.3.0-debug", "confidence"),
         RestoredField("Signal strength (from confidence)", "v0.3.0-debug", "signalStrength"),
-        RestoredField("Dip Hunter edge (pp)", "v0.3.0-debug", "edge"),
+        RestoredField("scalpHunter-Kimi edge (pp)", "v0.3.0-debug", "edge"),
         RestoredField("Net EV / expected value", "v0.3.0-debug", "netEv"),
         RestoredField("Fee per contract", "v0.3.0-debug", "netEv"),
         RestoredField("Contracts max + sizing note", "v0.3.0-debug", "sizing"),
