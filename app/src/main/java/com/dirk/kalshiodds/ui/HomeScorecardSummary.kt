@@ -34,7 +34,7 @@ data class HomeScorecardSummary(
             paperPnlUsd: Double
         ): HomeScorecardSummary {
             val settled = ScorecardMetrics.settledScoredPicks(entries)
-                .filter { CryptoMarkets.isLiveTicker(it.ticker) }
+                .filter { CryptoMarkets.isScorecardTicker(it.ticker) }
             val ev = ScorecardMetrics.window(settled)
             val modelRows = settled.mapNotNull { row ->
                 val side = com.dirk.kalshiodds.signal.feedback.ForecastUnits.modelWinnerSide(row)

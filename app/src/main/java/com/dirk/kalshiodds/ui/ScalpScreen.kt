@@ -95,3 +95,49 @@ fun ScalpScreen(viewModel: DecisionViewModel, onBack: () -> Unit) {
         }
     }
 }
+
+/** 0.3.39: Scalp is the primary paper Autopilot strategy; Home shows a compact card for it. */
+object HomeScalpCopy {
+    const val TITLE = "Autopilot: Scalp (PAPER, always on)"
+
+    fun lines(trades: List<ScalpTrade>, paperOn: Boolean): List<String> {
+        val s = ScalpStats.summary(trades)
+        val status = if (paperOn) {
+            "Running whenever paper trading is on — no Kalshi orders."
+        } else {
+            "Paused: paper trading is off in Settings."
+        }
+        return listOf(
+            status,
+            String.format(
+                java.util.Locale.US,
+                "%d open · %d round trips · net %+.2f USD after both fees",
+                s.open, s.roundTrips, s.netUsd
+            ),
+            ScalpRule.BACKTEST_LABEL
+        )
+    }
+}
+
+@androidx.compose.runtime.Composable
+fun HomeScalpCard(lines: List<String>, onOpen: () -> Unit) {
+    val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
+    com.dirk.kalshiodds.ui.components.FieldCard {
+        androidx.compose.material3.Text(
+            HomeScalpCopy.TITLE,
+            style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
+            color = colors.textPrimary,
+            fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold
+        )
+        lines.forEach { line ->
+            androidx.compose.material3.Text(
+                line,
+                style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary
+            )
+        }
+        androidx.compose.material3.TextButton(onClick = onOpen) {
+            androidx.compose.material3.Text("Open Scalp")
+        }
+    }
+}

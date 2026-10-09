@@ -218,7 +218,9 @@ fun MarketCard(
                 color = colors.textSecondary
             )
 
-            LastMinutePlayBox(market = market, call = call, nowMs = clock)
+            if (!com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired) {
+                LastMinutePlayBox(market = market, call = call, nowMs = clock)
+            }
             Text(
                 text = when {
                     call.headline == BetCall.Headline.NO_BET && !call.noBetReason.isNullOrBlank() ->

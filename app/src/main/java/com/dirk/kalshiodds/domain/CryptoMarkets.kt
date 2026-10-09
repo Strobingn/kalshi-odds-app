@@ -3,13 +3,18 @@ package com.dirk.kalshiodds.domain
 import com.dirk.kalshiodds.data.api.KalshiApi
 
 /**
- * Home stays Bitcoin ([KalshiApi.SERIES_BTC]). Autopilot paper, shadow, and
- * limited live also watch ETH and SOL 15-minute markets. Daily, XRP, HYPE,
- * sports, and other series stay out. WTI and other non-crypto contracts stay rejected.
+ * 0.3.39: Home, live books, charts and manual bets cover BTC, ETH and SOL 15-minute
+ * markets again (restored from the pre-0.3.14 three-coin Home), plus their daily 5 PM ET
+ * series. XRP, HYPE, sports, and other series stay out. WTI and other non-crypto contracts
+ * stay rejected.
  */
 object CryptoMarkets {
-    /** Home card. Not the Autopilot watchlist. */
-    val DEFAULT_SERIES: List<String> = listOf(KalshiApi.SERIES_BTC)
+    /** Home cards, live WS books and charts: BTC, ETH, SOL 15m (0.3.39; was BTC-only since 0.3.14). */
+    val DEFAULT_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTC,
+        KalshiApi.SERIES_ETH,
+        KalshiApi.SERIES_SOL
+    )
 
     /** BTC, ETH, and SOL 15-minute markets. */
     val FIFTEEN_SERIES: List<String> = listOf(
@@ -33,6 +38,13 @@ object CryptoMarkets {
 
     fun isLiveTicker(ticker: String): Boolean =
         ticker.isNotBlank() && isLiveSeries(inferSeries(ticker))
+
+    /**
+     * The honest scorecard stays Bitcoin 15m only (its floors and history were built on BTC);
+     * 0.3.39 restores ETH/SOL views and bets, not their scorecard rows.
+     */
+    fun isScorecardTicker(ticker: String): Boolean =
+        ticker.trim().uppercase().startsWith(KalshiApi.SERIES_BTC)
 
     fun liveTickers(tickers: Iterable<String>): List<String> =
         tickers.map { it.trim() }.filter { it.isNotEmpty() && isLiveTicker(it) }.distinct()
@@ -92,8 +104,8 @@ object CryptoMarkets {
     }
 
     fun kindFor(ticker: String): SeriesKind = when (inferSeries(ticker)) {
-        KalshiApi.SERIES_ETH -> SeriesKind.ETH
-        KalshiApi.SERIES_SOL -> SeriesKind.SOL
+        KalshiApi.SERIES_ETH, KalshiApi.SERIES_ETHD -> SeriesKind.ETH
+        KalshiApi.SERIES_SOL, KalshiApi.SERIES_SOLD -> SeriesKind.SOL
         KalshiApi.SERIES_BTC, KalshiApi.SERIES_BTCD -> SeriesKind.BTC
         else -> SeriesKind.CRYPTO
     }

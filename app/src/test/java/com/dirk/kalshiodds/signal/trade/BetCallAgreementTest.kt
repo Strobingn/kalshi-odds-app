@@ -12,6 +12,10 @@ import org.junit.Test
 
 class BetCallAgreementTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     @Test
     fun betUpHeadlineMatchesTicketAndApproveSide() {
         val market = sample(yesAsk = 0.20, noAsk = 0.80, aiYes = 80.0, predicted = "YES", fire = "YES")

@@ -49,13 +49,13 @@ object LiveAutopilotGate {
             return Verdict(false, "Limited live is not the selected Autopilot mode")
         }
         if (!armed) {
-            return Verdict(false, "Limited live is off until you tap Approve and confirm REAL MONEY")
+            return Verdict(false, "Limited live is off until you tap Approve and type REAL MONEY")
         }
         if (!credentialsOk) {
             return Verdict(false, "Kalshi key missing — live Autopilot will not send")
         }
         if (failClosed) {
-            return Verdict(false, "Live Autopilot is stopped after an order error — no retry")
+            return Verdict(false, "Live Autopilot is backing off after an order error — resumes automatically")
         }
         if (alreadyAttempted) {
             return Verdict(false, "This client_order_id was already attempted")

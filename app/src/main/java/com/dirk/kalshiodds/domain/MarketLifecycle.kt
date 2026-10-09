@@ -80,11 +80,13 @@ object MarketLifecycle {
         nowMs: Long = System.currentTimeMillis()
     ): MarketUiModel? {
         val series = CryptoMarkets.inferSeries(tapped.ticker)
+        // 0.3.39: never fall back to another coin's markets — an ETH tap must never act on BTC.
         val pool = markets.filter { CryptoMarkets.inferSeries(it.ticker) == series }
-            .ifEmpty { markets }
         currentOpenWindow(pool, nowMs)?.let { return it }
-        val resolved = resolveLive(tapped, markets, nowMs)
-        return resolved.takeIf { isCurrentWindow(it, nowMs) }
+        val resolved = resolveLive(tapped, pool, nowMs)
+        return resolved.takeIf {
+            CryptoMarkets.inferSeries(it.ticker) == series && isCurrentWindow(it, nowMs)
+        }
     }
 
     fun currentWindow(markets: List<MarketUiModel>): MarketUiModel? {

@@ -90,6 +90,8 @@ class LiveSignalsService : Service() {
         if (metadataJob == null || metadataJob?.isActive != true) {
             metadataJob = scope.launch { runMetadataLoop() }
         }
+        // 0.3.39: host the process-scoped Autopilot (OddsViewModel) even with no Activity.
+        runCatching { KalshiOddsApp.from(this).ensureAutopilotHost() }
         if (rolloverJob == null || rolloverJob?.isActive != true) {
             rolloverJob = scope.launch {
                 runCatching {
@@ -193,9 +195,17 @@ class LiveSignalsService : Service() {
         val container = KalshiOddsApp.from(this).container
         val hub = container.hub
         hub.settings = settings
-        LiveSignalsKeepAlive.setEnabled(this, settings.liveSignalsEnabled)
+        // 0.3.39: stay up for Live signals OR always-on Autopilot (paper/scalp, or armed live).
+        val wanted = com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.serviceWanted(
+            liveSignalsEnabled = settings.liveSignalsEnabled,
+            paperTradingEnabled = settings.paperTradingEnabled,
+            aiPaperAutopilotEnabled = settings.aiPaperAutopilotEnabled,
+            liveMode = settings.autopilotModeEnum() == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE,
+            liveArmed = container.liveArm.armed
+        )
+        LiveSignalsKeepAlive.setEnabled(this, wanted)
         lastTickerCount = tickers.size
-        if (!settings.liveSignalsEnabled) {
+        if (!wanted) {
             explicitStop = true
             client?.stop()
             client = null
@@ -302,7 +312,8 @@ class LiveSignalsService : Service() {
         while (scope.isActive) {
             refreshWakeLock()
             val uiUp = LiveSignalsKeepAlive.isUiInForeground()
-            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp) {
+            val headless = com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.headlessDriving.get()
+            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp && !headless) {
                 runCatching {
                     val settings = container.hub.settings
                     runCatching { container.external.refreshIfStale() }.getOrNull()?.let {

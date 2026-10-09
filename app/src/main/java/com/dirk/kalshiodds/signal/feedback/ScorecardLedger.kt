@@ -173,7 +173,7 @@ object ScorecardLedger {
     )
 
     /** KXBTC15M only — same live-universe gate the rest of the app uses. */
-    fun isScorecardTicker(ticker: String): Boolean = CryptoMarkets.isLiveTicker(ticker)
+    fun isScorecardTicker(ticker: String): Boolean = CryptoMarkets.isScorecardTicker(ticker)
 
     fun isScorecardSeries(series: String): Boolean =
         series.trim().equals(KalshiApi.SERIES_BTC, ignoreCase = true)

@@ -125,6 +125,7 @@ object TicketBuilder {
 
     /** First last-minute fire on this window — sized at the $10 cap. */
     fun proposeLastMinute(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired) return null
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         val fired = market.lastMinute?.fired ?: return null

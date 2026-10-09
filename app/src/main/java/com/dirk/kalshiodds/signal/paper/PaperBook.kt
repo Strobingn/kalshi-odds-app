@@ -378,6 +378,7 @@ class PaperBook(
         market: MarketUiModel? = null,
         book: BookLevelSnapshot? = null
     ): PaperFill? {
+        if (com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired) return null
         if (!enabled) return null
         val ctx = com.dirk.kalshiodds.signal.trade.TicketBuilder.Context(
             settings = com.dirk.kalshiodds.signal.config.SignalSettings(),

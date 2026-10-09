@@ -13,14 +13,20 @@ import org.junit.Test
 
 class HomeMarketsTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     @Test
     fun currentWindowIsExactlyOneBtcCard() {
         val settings = HomeFixtures.settings(hasKey = true)
         val markets = listOf(HomeFixtures.noBetEth(), HomeFixtures.actionableBtc(), HomeFixtures.noBetSol())
-        val cards = HomeMarkets.coinCards(markets, HomeFixtures.NOW_MS)
+        // 0.3.39: Home has BTC, ETH and SOL; the BTC selector shows exactly the BTC card.
+        assertEquals(listOf(KalshiApi.SERIES_BTC, KalshiApi.SERIES_ETH, KalshiApi.SERIES_SOL), HomeMarkets.coinCards(markets, HomeFixtures.NOW_MS).map { it.series })
+        val cards = HomeMarkets.coinCards(markets, HomeFixtures.NOW_MS, HomeMarkets.Coin.BTC)
         assertEquals(listOf(KalshiApi.SERIES_BTC), cards.map { it.series })
-        assertEquals(listOf(KalshiApi.SERIES_BTC), CryptoMarkets.DEFAULT_SERIES)
-        assertEquals(listOf(KalshiApi.SERIES_BTC), HomeMarkets.CARD_SERIES)
+        assertEquals(listOf(KalshiApi.SERIES_BTC, KalshiApi.SERIES_ETH, KalshiApi.SERIES_SOL), CryptoMarkets.DEFAULT_SERIES)
+        assertEquals(listOf(KalshiApi.SERIES_BTC, KalshiApi.SERIES_ETH, KalshiApi.SERIES_SOL), HomeMarkets.CARD_SERIES)
         assertEquals(1, cards.size)
         assertEquals("KXBTC15M-25SEP181700-50", cards.single().market!!.ticker)
         assertTrue(cards.none { it.series.contains("SOL") || it.series.contains("ETH") })
@@ -50,8 +56,8 @@ class HomeMarketsTest {
         val ctx = TicketBuilder.Context(settings = settings, alertsPaused = false, nowMs = HomeFixtures.NOW_MS)
         val decisions = HomeMarkets.decisions(cards, ctx)
         assertTrue(decisions.values.all { !it.isActionable })
-        assertEquals(listOf(KalshiApi.SERIES_BTC), HomeMarkets.coinCards(markets, HomeFixtures.NOW_MS).map { it.series })
-        assertEquals(1, cards.size)
+        assertEquals(listOf(KalshiApi.SERIES_BTC), HomeMarkets.coinCards(markets, HomeFixtures.NOW_MS, HomeMarkets.Coin.BTC).map { it.series })
+        assertEquals(3, cards.size)
     }
 
     @Test
@@ -65,7 +71,8 @@ class HomeMarketsTest {
         )
         val cards = HomeMarkets.coinCards(
             listOf(HomeFixtures.actionableBtc(), HomeFixtures.noBetSol(), HomeFixtures.noBetEth(), hunter),
-            HomeFixtures.NOW_MS
+            HomeFixtures.NOW_MS,
+            HomeMarkets.Coin.BTC
         )
         assertEquals(1, cards.size)
         assertEquals(KalshiApi.SERIES_BTC, cards.single().series)
@@ -101,7 +108,8 @@ class HomeMarketsTest {
                 importedModelPp = 50.0 + edgePp
             )
 
-        fun assertBtc(cards: List<HomeMarkets.CoinCard>, expected: String?) {
+        fun assertBtc(all: List<HomeMarkets.CoinCard>, expected: String?) {
+            val cards = all.filter { it.series == KalshiApi.SERIES_BTC }
             assertEquals(listOf(KalshiApi.SERIES_BTC), cards.map { it.series })
             assertEquals(1, cards.size)
             assertEquals(expected, cards.single().market?.ticker)

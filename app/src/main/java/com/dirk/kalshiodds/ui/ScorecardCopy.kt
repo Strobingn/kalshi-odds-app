@@ -38,7 +38,7 @@ object ScorecardCopy {
         "Paper bankroll and settled P&L are the score. Hit rate is secondary. " +
             "Autopilot edge fills are separate from prediction-log favorites. " +
             "Regime slices use tags stored on each fill. No fitted holdout is stored."
-    const val LAST_MINUTE_TITLE = "Last-minute strategy"
+    const val LAST_MINUTE_TITLE = "Last-minute strategy (retired — history only)"
     const val LAST_MINUTE_SUBTITLE =
         com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE
     const val D3_TITLE = "D3 daily favourite"

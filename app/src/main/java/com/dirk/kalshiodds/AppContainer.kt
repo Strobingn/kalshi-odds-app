@@ -69,7 +69,13 @@ class AppContainer(context: Context) {
     )
     /** One-tap Stop latch and once-per-event trade notifications. */
     val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)
-    val stopLatch = com.dirk.kalshiodds.signal.paper.StopLatch()
+    /** 0.3.39: limited-live arming persists across restarts (SharedPreferences, no key material). */
+    val liveArm = com.dirk.kalshiodds.signal.paper.LiveAutopilotSession(
+        com.dirk.kalshiodds.signal.paper.SharedPrefsLiveArmStore(app)
+    )
+    /** 0.3.39: errors back off (30 s doubling to 10 min) and resume; they never disable Autopilot. */
+    val paperBackoff = com.dirk.kalshiodds.signal.paper.AutopilotBackoff()
+    val liveBackoff = com.dirk.kalshiodds.signal.paper.AutopilotBackoff()
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)

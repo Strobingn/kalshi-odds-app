@@ -16,6 +16,10 @@ import kotlin.math.ln
 
 class FlipCheckTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     @Test
     fun screenshotLotteryIsNoBetAndHasNoTicket() {
         val market = HomeFixtures.deadWindowLotteryBtc()

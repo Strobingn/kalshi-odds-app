@@ -213,8 +213,6 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         _state.value.settings.aiPaperAutopilotEnabled,
         v
     ) {
-        // Turning Autopilot back on is the only way to release the Home Stop latch.
-        if (v) container.stopLatch.release()
         prefs.updateAiPaperAutopilot(v)
     }
     fun setAutopilotMode(mode: com.dirk.kalshiodds.signal.paper.AutopilotMode) = track(

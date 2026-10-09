@@ -21,7 +21,9 @@ object RealMoneyTab {
         "Manual real orders only go out after you tap Approve and then confirm REAL MONEY. " +
             "Each manual order is capped at $10. Limited live Autopilot stays off until you arm it the same way. " +
             "After that it sends the same fee-aware Kelly size as paper when paper and shadow agree. " +
-            "Autopilot has no $10 or daily dollar cap. An order error stops it. There is no retry."
+            "Autopilot has no $10 or daily dollar cap. Arming persists across restarts until you disarm it here. " +
+            "An order error never disarms it: Autopilot backs off (30 s doubling to 10 min) and resumes. " +
+            "A failed order is never re-sent, and nothing is sent while the balance is unavailable."
 
     const val LIVE_BLURB =
         "REAL MONEY. Arming lets Autopilot send live Kalshi orders without another confirm, " +
@@ -170,12 +172,12 @@ object RealMoneyTab {
             if (armed) {
                 String.format(
                     Locale.US,
-                    "Limited live is armed this session. Kelly size, no dollar cap. Day sent $%.2f. " +
+                    "Limited live is armed (stays armed across restarts until you disarm). Kelly size, no dollar cap. Day sent $%.2f. " +
                         "Sends only when paper and shadow agree. BTC, ETH, and SOL 15m.",
                     dailySpentUsd
                 )
             } else {
-                "Limited live is selected and not armed. Tap Approve, then confirm REAL MONEY. " +
+                "Limited live is selected and not armed. Tap Approve, then type REAL MONEY. " +
                     "Nothing is sent until then. BTC, ETH, and SOL 15m."
             }
     }
@@ -189,7 +191,7 @@ object RealMoneyTab {
         mode != com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE ->
             "Limited live Autopilot is off."
         armed -> String.format(Locale.US, "Armed · day sent $%.2f · no dollar cap", dailySpentUsd)
-        approveTapped -> "Approve tapped. Confirm REAL MONEY to arm. This does not place an order."
+        approveTapped -> "Approve tapped. Type REAL MONEY to arm. This does not place an order."
         else -> "Not armed."
     }
 

@@ -19,6 +19,10 @@ import org.junit.Test
 
 class PaperFillSourceTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     @Test

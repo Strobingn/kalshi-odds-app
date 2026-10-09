@@ -44,7 +44,7 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private val oddsViewModel: OddsViewModel by viewModels()
+    private val oddsViewModel: OddsViewModel by lazy { KalshiOddsApp.from(application).oddsViewModel }
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
@@ -108,6 +108,7 @@ class MainActivity : ComponentActivity() {
                                     navigator.open(AppRoutes.SETTINGS)
                                 },
                                 onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                onOpenScalp = { navigator.open(AppRoutes.SCALP) },
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
@@ -221,6 +222,7 @@ class MainActivity : ComponentActivity() {
                                     viewModel = oddsViewModel,
                                     onOpenSettings = { navigator.open(AppRoutes.SETTINGS) },
                                     onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                    onOpenScalp = { navigator.open(AppRoutes.SCALP) },
                                     onOpenData = { navigator.open(AppRoutes.DATA) },
                                     onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                     onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
@@ -232,6 +234,7 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ChartDetailScreen(
                                     market = market,
+                                    book = oddsViewModel.orderBook(market.ticker),
                                     points = market.bidHistory.ifEmpty {
                                         market.oddsHistory.mapIndexed { i, mid ->
                                             com.dirk.kalshiodds.chart.BidPoint(

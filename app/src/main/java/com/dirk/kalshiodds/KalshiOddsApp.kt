@@ -100,7 +100,16 @@ class KalshiOddsApp : Application() {
         appScope.launch {
             runCatching {
                 container.preferences.settings
-                    .map { it.liveSignalsEnabled }
+                    .map {
+                        // 0.3.39: the service also stays up for always-on Autopilot.
+                        com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.serviceWanted(
+                            liveSignalsEnabled = it.liveSignalsEnabled,
+                            paperTradingEnabled = it.paperTradingEnabled,
+                            aiPaperAutopilotEnabled = it.aiPaperAutopilotEnabled,
+                            liveMode = it.autopilotModeEnum() == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE,
+                            liveArmed = container.liveArm.armed
+                        )
+                    }
                     .distinctUntilChanged()
                     .collect { enabled ->
                         LiveSignalsKeepAlive.setEnabled(this@KalshiOddsApp, enabled)
@@ -111,6 +120,25 @@ class KalshiOddsApp : Application() {
                     }
             }
         }
+    }
+
+    private val appViewModelStore = androidx.lifecycle.ViewModelStore()
+
+    /**
+     * 0.3.39 always-on Autopilot: OddsViewModel is process-scoped, not Activity-scoped, so
+     * Autopilot keeps running after the Activity is gone and is re-created headless by the
+     * foreground service after process death / reboot (START_STICKY, boot receiver, watchdog).
+     */
+    val oddsViewModel: com.dirk.kalshiodds.ui.OddsViewModel by lazy {
+        androidx.lifecycle.ViewModelProvider(
+            appViewModelStore,
+            androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(this)
+        )[com.dirk.kalshiodds.ui.OddsViewModel::class.java]
+    }
+
+    fun ensureAutopilotHost() {
+        if (isRobolectric()) return
+        oddsViewModel
     }
 
     private fun isRobolectric(): Boolean =

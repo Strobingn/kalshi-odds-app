@@ -65,6 +65,10 @@ import retrofit2.Response
  */
 class KnownIssuesRegressionTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     private val nowMs = 1_700_000_000_000L
     private val fakePem = "-----BEGIN PRIVATE KEY-----\n${"A".repeat(120)}\n-----END PRIVATE KEY-----"
 
@@ -595,6 +599,8 @@ class KnownIssuesRegressionTest {
         )
         val rollover = MarketRollover(
             clock = clock,
+            // This scenario lists Bitcoin windows only (ETH/SOL are covered by CoinRoutingTest).
+            watchedSeries = { listOf("KXBTC15M") },
             listOpen = { seriesTicker ->
                 listCalls.incrementAndGet()
                 if (lateEmpty) emptyList()
@@ -864,7 +870,8 @@ class KnownIssuesRegressionTest {
                 aiYesPercent = 50.0 + edge
             )
 
-        fun assertBtc(cards: List<HomeMarkets.CoinCard>, expected: String?) {
+        fun assertBtc(all: List<HomeMarkets.CoinCard>, expected: String?) {
+            val cards = all.filter { it.series == "KXBTC15M" }
             assertEquals(listOf("KXBTC15M"), cards.map { it.series })
             assertEquals(1, cards.size)
             assertEquals(expected, cards.single().market?.ticker)
@@ -1138,6 +1145,7 @@ class KnownIssuesRegressionTest {
         val calls = java.util.concurrent.atomic.AtomicInteger()
         val rollover = com.dirk.kalshiodds.signal.market.MarketRollover(
             clock = clock,
+            watchedSeries = { listOf("KXBTC15M") },
             listOpen = { series ->
                 calls.incrementAndGet()
                 if (throw429) {
@@ -1168,7 +1176,7 @@ class KnownIssuesRegressionTest {
         assertTrue(staleOpen.activeTickers.isEmpty())
         assertNull(rollover.successor("KXBTC15M", old, clock.nowMs(), close0, old[0]))
         val loading = paintHome(snap0, staleOpen, clock.nowMs())
-        val cards = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
+        val cards = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs(), HomeMarkets.Coin.BTC)
         assertEquals(listOf("KXBTC15M"), cards.map { it.series })
         assertEquals(1, cards.size)
         assertTrue(cards.all { it.market == null })
@@ -1223,7 +1231,7 @@ class KnownIssuesRegressionTest {
         val swapped = rollover.refreshFromRest()
         assertEquals(next.map { it.ticker }.toSet(), swapped.activeTickers)
         val painted = paintHome(loading, swapped, clock.nowMs())
-        val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs())
+        val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs(), HomeMarkets.Coin.BTC)
         assertEquals(next[0].ticker, after[0].market?.ticker)
         assertEquals(listOf("KXBTC15M"), after.map { it.series })
         assertEquals(1, after.size)
@@ -1295,6 +1303,7 @@ class KnownIssuesRegressionTest {
         var mode = "ok"
         val rollover = MarketRollover(
             clock = clock,
+            watchedSeries = { listOf("KXBTC15M") },
             listOpen = { series ->
                 when (mode) {
                     "empty" -> emptyList()
@@ -1337,7 +1346,7 @@ class KnownIssuesRegressionTest {
         )
         assertTrue(miss.nextWakeMs!! < close1)
         val loading = paintHome(snap0, miss, clock.nowMs())
-        val stuck = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs())
+        val stuck = HomeMarkets.coinCards(loading.allMarkets, clock.nowMs(), HomeMarkets.Coin.BTC)
         assertEquals(listOf("KXBTC15M"), stuck.map { it.series })
         assertEquals(1, stuck.size)
         assertTrue(stuck.single().loading)
@@ -1406,7 +1415,7 @@ class KnownIssuesRegressionTest {
         assertEquals(setOf(next.ticker), recovered.activeTickers)
         assertTrue(recovered.retrying.isEmpty())
         val painted = paintHome(loading, recovered, clock.nowMs())
-        val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs())
+        val after = HomeMarkets.coinCards(painted.allMarkets, clock.nowMs(), HomeMarkets.Coin.BTC)
         assertEquals(1, after.size)
         assertEquals("KXBTC15M", after.single().series)
         assertEquals(next.ticker, after.single().market?.ticker)
@@ -1494,11 +1503,12 @@ class KnownIssuesRegressionTest {
         assertTrue(home.contains("SIGNAL_HISTORY"))
         assertTrue(home.contains("onOpenSignalHistory"))
         assertFalse(HomeCopy.SHOWS_SIGNAL_LIST)
-        assertEquals(listOf("KXBTC15M"), HomeMarkets.CARD_SERIES)
-        assertEquals(listOf("KXBTC15M"), com.dirk.kalshiodds.domain.CryptoMarkets.DEFAULT_SERIES)
+        assertEquals(listOf("KXBTC15M", "KXETH15M", "KXSOL15M"), HomeMarkets.CARD_SERIES)
+        assertEquals(listOf("KXBTC15M", "KXETH15M", "KXSOL15M"), com.dirk.kalshiodds.domain.CryptoMarkets.DEFAULT_SERIES)
         val onlyBtc = HomeMarkets.coinCards(
             listOf(HomeFixtures.actionableBtc(), HomeFixtures.noBetSol(), HomeFixtures.noBetEth()),
-            HomeFixtures.NOW_MS
+            HomeFixtures.NOW_MS,
+            HomeMarkets.Coin.BTC
         )
         assertEquals(1, onlyBtc.size)
         assertEquals("KXBTC15M", onlyBtc.single().series)

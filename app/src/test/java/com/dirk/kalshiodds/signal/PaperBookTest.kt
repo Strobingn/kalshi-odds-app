@@ -22,6 +22,10 @@ private const val DEEP = 100_000
 
 class PaperBookTest {
 
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
+
     @Test
     fun startsAtOneThousandAndKellySizesAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
