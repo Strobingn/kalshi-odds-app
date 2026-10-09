@@ -44,6 +44,7 @@ class ForwardTestSqliteTest {
             // despite deleteDatabase, so make this v11 fixture explicit.
             db.execSQL("DROP INDEX IF EXISTS idx_forward_time")
             db.execSQL("DROP TABLE IF EXISTS forward_test")
+            db.execSQL("CREATE TABLE IF NOT EXISTS settled_windows (ticker TEXT PRIMARY KEY, result TEXT)")
             db.execSQL(
                 "CREATE TABLE forward_test (entry_key TEXT PRIMARY KEY, ticker TEXT NOT NULL, series TEXT NOT NULL, " +
                     "captured_at_ms INTEGER NOT NULL, model_yes REAL NOT NULL, market_yes REAL NOT NULL, " +
