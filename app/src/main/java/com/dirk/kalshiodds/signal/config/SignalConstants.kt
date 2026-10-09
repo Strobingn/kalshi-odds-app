@@ -216,23 +216,23 @@ object SignalConstants {
     /** Phrase the user must type to arm auto-trade. */
     const val AUTO_TRADE_CONFIRM_PHRASE = "AUTO"
 
-    /** Default per-order all-in cap for auto orders. */
-    const val DEFAULT_AUTO_MAX_STAKE_USD = 5.0
+    /** Default per-order all-in cap for auto orders (experiment: $50 clips). */
+    const val DEFAULT_AUTO_MAX_STAKE_USD = 50.0
 
     /** Hard cap for the auto per-order stake slider. */
-    const val AUTO_STAKE_HARD_CAP_USD = 50.0
+    const val AUTO_STAKE_HARD_CAP_USD = 250.0
 
     /** Default daily loss limit (estimated) — auto-trade pauses when hit. */
-    const val DEFAULT_AUTO_DAILY_LOSS_USD = 10.0
+    const val DEFAULT_AUTO_DAILY_LOSS_USD = 50.0
 
     /** Hard cap for the auto daily-loss slider. */
-    const val AUTO_DAILY_LOSS_HARD_CAP_USD = 50.0
+    const val AUTO_DAILY_LOSS_HARD_CAP_USD = 250.0
 
-    /** Max concurrent auto-opened positions. */
-    const val AUTO_MAX_OPEN_POSITIONS = 2
+    /** Max concurrent auto-opened positions (one per strategy scalper). */
+    const val AUTO_MAX_OPEN_POSITIONS = 4
 
     /** Max auto order attempts per calendar day (buys + sells). */
-    const val AUTO_MAX_DAILY_ORDERS = 12
+    const val AUTO_MAX_DAILY_ORDERS = 40
 
     /** Minimum gap between auto orders on the same market. */
     const val AUTO_COOLDOWN_MS = 120_000L
