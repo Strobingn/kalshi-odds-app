@@ -18,6 +18,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.signal.paper.EdgeExperiment
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import java.util.Locale
@@ -70,6 +71,39 @@ fun PaperBookCard(
                 }
             }
             Switch(checked = enabled, onCheckedChange = onToggle)
+        }
+        val verdict = EdgeExperiment.evaluate(paper)
+        if (enabled && !homeMode) {
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (verdict.edgeDetected) {
+                            colors.textPrimary.copy(alpha = 0.10f)
+                        } else {
+                            colors.textPrimary.copy(alpha = 0.06f)
+                        },
+                        RoundedCornerShape(10.dp)
+                    )
+                    .padding(10.dp)
+            ) {
+                Text(
+                    "AUTO-TRADE EXPERIMENT",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+                Text(
+                    verdict.verdictLine,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    verdict.detailLine,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)

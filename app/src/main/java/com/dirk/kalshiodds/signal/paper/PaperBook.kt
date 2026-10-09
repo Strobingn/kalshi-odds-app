@@ -108,10 +108,18 @@ class PaperBook(
      * Auto-log a $5 paper fill when an AI hunter / configured ticket would trade.
      * Manual live tickets are ignored — those need an explicit Paper tap.
      */
-    fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
+    fun considerTicket(
+        ticket: TradeTicket,
+        enabled: Boolean,
+        gateQuote: PaperAutoGate.Quote? = null
+    ): PaperFill? {
         if (!enabled) return null
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
+        if (!PaperAutoGate.passes(gateQuote)) {
+            PaperAutoGate.reason(gateQuote)?.let { rememberMessage(it) }
+            return null
+        }
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
         return fill(
             ticker = ticket.ticker,
@@ -129,9 +137,18 @@ class PaperBook(
         )
     }
 
-    fun considerAlert(alert: SignalAlert, ask: Double?, enabled: Boolean): PaperFill? {
+    fun considerAlert(
+        alert: SignalAlert,
+        ask: Double?,
+        enabled: Boolean,
+        gateQuote: PaperAutoGate.Quote? = null
+    ): PaperFill? {
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
+        if (!PaperAutoGate.passes(gateQuote)) {
+            PaperAutoGate.reason(gateQuote)?.let { rememberMessage(it) }
+            return null
+        }
         val px = KalshiPrice.usable(ask) ?: return null
         return fill(
             ticker = alert.ticker,
