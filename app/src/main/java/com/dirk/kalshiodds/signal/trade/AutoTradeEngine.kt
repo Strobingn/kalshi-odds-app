@@ -8,6 +8,23 @@ import java.util.Date
 import java.util.Locale
 
 /**
+ * The strategy scalpers that run in parallel when auto-trade is armed.
+ * Each watches a different ticket family and holds at most one open
+ * position, so up to [SignalConstants.AUTO_MAX_OPEN_POSITIONS] strategies
+ * ride at once — the Settings board shows which one is actually winning.
+ */
+enum class AutoStrategy(val label: String, val kinds: Set<TicketKind>) {
+    /** Bread-and-butter configured edge tickets. */
+    MOMENTUM("Momentum", setOf(TicketKind.CONFIGURED)),
+    /** Hunter prints ($1 can settle big). */
+    HUNTER("Hunter", setOf(TicketKind.HUNTER)),
+    /** Cheap long-shots where the AI beats implied after fees. */
+    VALUE("Value", setOf(TicketKind.HUNTER_VALUE)),
+    /** Whatever has the highest net EV right now, any family. */
+    BEST_EV("Best-EV", setOf(TicketKind.CONFIGURED, TicketKind.HUNTER, TicketKind.HUNTER_VALUE))
+}
+
+/**
  * Auto-trade risk cage.
  *
  * The AI may place real Kalshi orders only while armed in Settings (typed
@@ -19,8 +36,9 @@ import java.util.Locale
  */
 class AutoTradeStore(context: Context) {
 
-    /** One auto-opened live position awaiting an exit. */
+    /** One auto-opened live position awaiting an exit, tagged by strategy. */
     data class OpenPosition(
+        val strategy: String,
         val ticker: String,
         val side: String,
         val contracts: Int,
@@ -78,6 +96,19 @@ class AutoTradeStore(context: Context) {
             .apply()
     }
 
+    /** Per-strategy realized P&L (all-time since armed) for the leaderboard. */
+    fun noteStrategyRealized(strategy: String, deltaUsd: Double) = synchronized(lock) {
+        val key = KEY_PNL_PREFIX + strategy
+        val cur = java.lang.Double.longBitsToDouble(prefs.getLong(key, 0L))
+        prefs.edit()
+            .putLong(key, java.lang.Double.doubleToRawLongBits(cur + deltaUsd))
+            .apply()
+    }
+
+    fun strategyPnl(strategy: String): Double = synchronized(lock) {
+        java.lang.Double.longBitsToDouble(prefs.getLong(KEY_PNL_PREFIX + strategy, 0L))
+    }
+
     fun cooldownRemainingMs(ticker: String, nowMs: Long): Long = synchronized(lock) {
         val last = prefs.getLong(KEY_COOLDOWN_PREFIX + ticker, 0L)
         (last + SignalConstants.AUTO_COOLDOWN_MS - nowMs).coerceAtLeast(0L)
@@ -114,6 +145,32 @@ class AutoTradeStore(context: Context) {
         return "PAUSED — $paused\n$base"
     }
 
+    /**
+     * Multi-line Settings board: overall status plus one line per strategy
+     * scalper — its all-time auto P&L and what it is riding right now.
+     */
+    fun strategyBoard(nowMs: Long): String {
+        val open = openPositions()
+        val lines = mutableListOf(statusLine(nowMs))
+        for (strategy in AutoStrategy.entries) {
+            val pos = open.firstOrNull { it.strategy == strategy.name }
+            val riding = if (pos != null) {
+                String.format(
+                    Locale.US,
+                    "riding %s %s ×%d @ %.0f¢",
+                    pos.side,
+                    pos.ticker,
+                    pos.contracts,
+                    pos.entryPrice * 100.0
+                )
+            } else {
+                "flat"
+            }
+            lines.add("${strategy.label}: ${AutoTradeEngine.fmtSignedUsd(strategyPnl(strategy.name))} · $riding")
+        }
+        return lines.joinToString("\n")
+    }
+
     private fun rollDayLocked(nowMs: Long) {
         val day = DAY_FMT.format(Date(nowMs))
         if (prefs.getString(KEY_DAY, null) != day) {
@@ -128,16 +185,23 @@ class AutoTradeStore(context: Context) {
     private fun openPositionsLocked(): List<OpenPosition> =
         prefs.getStringSet(KEY_OPEN, emptySet()).orEmpty().mapNotNull { line ->
             val p = line.split("|")
-            if (p.size != 5) return@mapNotNull null
-            val contracts = p[2].toIntOrNull() ?: return@mapNotNull null
-            val entry = p[3].toDoubleOrNull() ?: return@mapNotNull null
-            val cost = p[4].toDoubleOrNull() ?: return@mapNotNull null
-            OpenPosition(p[0], p[1], contracts, entry, cost)
+            // v1 rows had no strategy tag (ticker|side|…); treat as untagged.
+            if (p.size == 5) {
+                val contracts = p[2].toIntOrNull() ?: return@mapNotNull null
+                val entry = p[3].toDoubleOrNull() ?: return@mapNotNull null
+                val cost = p[4].toDoubleOrNull() ?: return@mapNotNull null
+                return@mapNotNull OpenPosition("", p[0], p[1], contracts, entry, cost)
+            }
+            if (p.size != 6) return@mapNotNull null
+            val contracts = p[3].toIntOrNull() ?: return@mapNotNull null
+            val entry = p[4].toDoubleOrNull() ?: return@mapNotNull null
+            val cost = p[5].toDoubleOrNull() ?: return@mapNotNull null
+            OpenPosition(p[0], p[1], p[2], contracts, entry, cost)
         }
 
     private fun writeOpenLocked(list: List<OpenPosition>) {
         val lines = list.map {
-            "${it.ticker}|${it.side}|${it.contracts}|${it.entryPrice}|${it.costUsd}"
+            "${it.strategy}|${it.ticker}|${it.side}|${it.contracts}|${it.entryPrice}|${it.costUsd}"
         }.toSet()
         prefs.edit().putStringSet(KEY_OPEN, lines).apply()
     }
@@ -151,6 +215,7 @@ class AutoTradeStore(context: Context) {
         private const val KEY_PAUSED = "paused_reason"
         private const val KEY_OPEN = "open_positions"
         private const val KEY_COOLDOWN_PREFIX = "cooldown_"
+        private const val KEY_PNL_PREFIX = "strategy_pnl_"
     }
 }
 
@@ -178,6 +243,7 @@ object AutoTradeEngine {
         settings: SignalSettings,
         ordersToday: Int,
         openPositions: Int,
+        strategyBusy: Boolean,
         alreadyOpenOnTicker: Boolean,
         cooldownRemainingMs: Long,
         liveAsk: Double?,
@@ -198,6 +264,7 @@ object AutoTradeEngine {
         }
         if (ordersToday >= SignalConstants.AUTO_MAX_DAILY_ORDERS) return "daily order cap reached"
         if (openPositions >= SignalConstants.AUTO_MAX_OPEN_POSITIONS) return "max open auto positions"
+        if (strategyBusy) return "this scalper is already riding a position"
         if (alreadyOpenOnTicker) return "already holding an auto position on ${ticket.ticker}"
         if (cooldownRemainingMs > 0L) return "cooldown ${cooldownRemainingMs / 1000}s"
         if (estimatedDailyPnlUsd <= -settings.autoDailyLossLimitUsd) return "daily loss limit hit"
