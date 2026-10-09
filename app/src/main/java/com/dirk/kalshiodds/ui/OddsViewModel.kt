@@ -19,6 +19,7 @@ import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.exit.SwingExitEngine
+import com.dirk.kalshiodds.signal.trade.AutoStrategy
 import com.dirk.kalshiodds.signal.trade.AutoTradeEngine
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
@@ -1045,9 +1046,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Auto-trade entry. Runs only when armed in Settings; AutoTradeEngine
      * enforces the stake / position / daily-order / cooldown / loss-limit
-     * caps. Fires at most one buy per rebuild; manual Buy cards and paper
-     * tickets stay on their existing paths. The order itself goes through
-     * [TicketSession.autoApprove] — the same placement code as Approve.
+     * caps. Each [AutoStrategy] scalper holds at most one position, so up to
+     * four strategies ride in parallel and the Settings board shows which one
+     * wins. Manual Buy cards and paper tickets stay on their existing paths.
+     * Orders go through [TicketSession.autoApprove] — the same placement code
+     * as Approve.
      */
     private fun maybeAutoEnter(
         s: OddsUiState,
@@ -1082,56 +1085,74 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
             return
         }
-        val candidate = tickets
-            .filter { !it.isSell && !it.paperOnly && it.canApprove }
-            .filter { it.kind != com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL }
-            .maxByOrNull { it.netEvUsd ?: (it.netEdgePp ?: 0.0) }
-            ?: return
-        val liveAsk = marketsByTicker[candidate.ticker]?.let {
-            TicketBuilder.bestAsk(it, candidate.side, ctx)
+        // Gate every strategy synchronously (noteOrder starts the cooldown
+        // immediately, so a rebuild 750ms later cannot double-fire), then
+        // fire the approved entries sequentially.
+        val approved = mutableListOf<Pair<AutoStrategy, com.dirk.kalshiodds.signal.trade.TradeTicket>>()
+        for (strategy in AutoStrategy.entries) {
+            val openNow = store.openPositions()
+            val candidate = tickets
+                .filter { !it.isSell && !it.paperOnly && it.canApprove }
+                .filter { it.kind != com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL }
+                .filter { it.kind in strategy.kinds }
+                .maxByOrNull { it.netEvUsd ?: (it.netEdgePp ?: 0.0) }
+                ?: continue
+            val market = marketsByTicker[candidate.ticker] ?: continue
+            // Tickets are built at the $5 manual cap — grow the clip to the
+            // armed auto stake before gating, then stage it in the session so
+            // autoApprove places the resized ticket.
+            val resized = TicketBuilder.resizeForAuto(candidate, market, ctx, s.settings.autoMaxStakeUsd)
+            val liveAsk = TicketBuilder.bestAsk(market, resized.side, ctx)
+            val block = AutoTradeEngine.entryBlockReason(
+                armed = s.settings.autoTradeEnabled,
+                credentialsConfigured = s.settings.tradingCredentialsConfigured(),
+                pausedReason = store.pausedReason,
+                ticket = resized,
+                settings = s.settings,
+                ordersToday = store.ordersToday(now),
+                openPositions = openNow.size,
+                strategyBusy = openNow.any { it.strategy == strategy.name },
+                alreadyOpenOnTicker = openNow.any { it.ticker == resized.ticker },
+                cooldownRemainingMs = store.cooldownRemainingMs(resized.ticker, now),
+                liveAsk = liveAsk,
+                estimatedDailyPnlUsd = estDailyPnl
+            )
+            if (block != null) continue
+            ticketSession.revise(candidate.id) { resized }
+            store.noteOrder(resized.ticker, now)
+            approved += strategy to resized
         }
-        val block = AutoTradeEngine.entryBlockReason(
-            armed = s.settings.autoTradeEnabled,
-            credentialsConfigured = s.settings.tradingCredentialsConfigured(),
-            pausedReason = store.pausedReason,
-            ticket = candidate,
-            settings = s.settings,
-            ordersToday = store.ordersToday(now),
-            openPositions = openAuto.size,
-            alreadyOpenOnTicker = openAuto.any { it.ticker == candidate.ticker },
-            cooldownRemainingMs = store.cooldownRemainingMs(candidate.ticker, now),
-            liveAsk = liveAsk,
-            estimatedDailyPnlUsd = estDailyPnl
-        )
-        if (block != null) return
-        store.noteOrder(candidate.ticker, now)
+        if (approved.isEmpty()) return
         viewModelScope.launch {
-            ticketSession.autoApprove(candidate.id)
-            val after = ticketSession.snapshot()
-            val submitted = after.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted
-            if (submitted != null && submitted.order.ticket.id == candidate.id && submitted.order.error == null) {
-                store.noteSuccess()
-                val filled = submitted.order.filledContracts.takeIf { it > 0 } ?: candidate.contracts
-                val px = submitted.order.averageFillPrice ?: candidate.limitPrice
-                store.addOpenPosition(
-                    com.dirk.kalshiodds.signal.trade.AutoTradeStore.OpenPosition(
-                        ticker = candidate.ticker,
-                        side = candidate.side,
-                        contracts = filled,
-                        entryPrice = px,
-                        costUsd = px * filled
+            for ((strategy, candidate) in approved) {
+                ticketSession.autoApprove(candidate.id)
+                val after = ticketSession.snapshot()
+                val submitted = after.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted
+                if (submitted != null && submitted.order.ticket.id == candidate.id && submitted.order.error == null) {
+                    store.noteSuccess()
+                    val filled = submitted.order.filledContracts.takeIf { it > 0 } ?: candidate.contracts
+                    val px = submitted.order.averageFillPrice ?: candidate.limitPrice
+                    store.addOpenPosition(
+                        com.dirk.kalshiodds.signal.trade.AutoTradeStore.OpenPosition(
+                            strategy = strategy.name,
+                            ticker = candidate.ticker,
+                            side = candidate.side,
+                            contracts = filled,
+                            entryPrice = px,
+                            costUsd = px * filled
+                        )
                     )
-                )
-                _state.update {
-                    it.copy(
-                        userMessage = "Auto-trade bought ${candidate.side} ${candidate.ticker} ×$filled @ ${(px * 100).toInt()}¢"
-                    )
-                }
-            } else {
-                val errs = store.noteError()
-                if (errs >= com.dirk.kalshiodds.signal.config.SignalConstants.AUTO_MAX_CONSEC_ERRORS) {
-                    store.pausedReason = "order errors ×$errs"
-                    _state.update { it.copy(userMessage = "Auto-trade paused after repeated order errors") }
+                    _state.update {
+                        it.copy(
+                            userMessage = "Auto ${strategy.label} bought ${candidate.side} ${candidate.ticker} ×$filled @ ${(px * 100).toInt()}¢"
+                        )
+                    }
+                } else {
+                    val errs = store.noteError()
+                    if (errs >= com.dirk.kalshiodds.signal.config.SignalConstants.AUTO_MAX_CONSEC_ERRORS) {
+                        store.pausedReason = "order errors ×$errs"
+                        _state.update { it.copy(userMessage = "Auto-trade paused after repeated order errors") }
+                    }
                 }
             }
         }
@@ -1170,9 +1191,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         AutoTradeEngine.feeEstimate(entry.contracts, sellPx, s.settings.feeRate)
                     val pnl = sellPx * entry.contracts - entry.costUsd - fees
                     store.noteRealized(pnl, now)
+                    store.noteStrategyRealized(entry.strategy.ifBlank { "LEGACY" }, pnl)
+                    val label = AutoStrategy.entries.firstOrNull { it.name == entry.strategy }?.label
                     _state.update {
                         it.copy(
-                            userMessage = "Auto-trade sold ${ticket.side} ${ticket.ticker} — est. P&L ${AutoTradeEngine.fmtSignedUsd(pnl)}"
+                            userMessage = "Auto${label?.let { l -> " $l" } ?: ""} sold ${ticket.side} ${ticket.ticker} — est. P&L ${AutoTradeEngine.fmtSignedUsd(pnl)}"
                         )
                     }
                 } else {
