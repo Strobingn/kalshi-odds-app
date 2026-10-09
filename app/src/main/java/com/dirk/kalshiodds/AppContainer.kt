@@ -117,7 +117,8 @@ class AppContainer(context: Context) {
         bookLevels = { scoring.book.snapshotBook(it) },
         closeMs = { t ->
             scoring.book.closeTime(t) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(t)
-        }
+        },
+        onReset = { scalperStore.log.archive() }
     )
     val hub = SignalHub(
         scoring = scoring,

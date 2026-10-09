@@ -78,6 +78,23 @@ enum class ScalpStrategy(
     }
 }
 
+/**
+ * What the scalper saw when it sent a paper order. Saved with the order in
+ * the order log ([ScalpTradeLog]); it decides nothing.
+ */
+class ScalpContext(
+    /** Best bid / ask of the order's side and the sizes shown there (null without the book). */
+    val bid: Double?,
+    val ask: Double?,
+    val bidQty: Double?,
+    val askQty: Double?,
+    /** The side's price move over the last 10 s / 30 s, dollars. */
+    val move10: Double?,
+    val move30: Double?,
+    /** The model's inputs in [PrintGrid.FEATURES] order (ML scalper only). */
+    val features: FloatArray? = null
+)
+
 /** One paper scalp order as posted. Never a real order. */
 data class ScalpOrder(
     val id: Long,
@@ -97,7 +114,8 @@ data class ScalpOrder(
     /** Model output: expected cents per contract from the front of the queue. */
     val predictionCents: Double,
     /** [predictionCents] minus the queue penalty: what this order is expected to make where it sits. */
-    val expectedCents: Double
+    val expectedCents: Double,
+    val context: ScalpContext? = null
 ) {
     /** Queue bucket of a resting bid; buy-now entries have no entry queue. */
     val bucket: QueueBucket? get() = if (strategy.taker) null else QueueBucket.of(queueAhead, queueKnown)
@@ -212,7 +230,8 @@ class ScalperEngine(val config: Config = Config()) {
         queueAhead: Double?,
         predictionCents: Double,
         expectedCents: Double,
-        nowMs: Long
+        nowMs: Long,
+        context: ScalpContext? = null
     ): ScalpEvent.Posted? {
         require(!strategy.taker) { "${strategy.name} buys at the ask: use buyNow" }
         if (!price.isFinite() || price < config.minPrice - EPS || price > config.maxPrice + EPS) return null
@@ -230,7 +249,8 @@ class ScalperEngine(val config: Config = Config()) {
             queueKnown = known,
             postedAtMs = nowMs,
             predictionCents = predictionCents,
-            expectedCents = expectedCents
+            expectedCents = expectedCents,
+            context = context
         )
         byTicker.getOrPut(ticker) { ArrayList() }.add(Working(order))
         return ScalpEvent.Posted(order)
@@ -248,7 +268,8 @@ class ScalperEngine(val config: Config = Config()) {
         side: String,
         askPrice: Double,
         offerQueue: (side: String, price: Double) -> Double?,
-        nowMs: Long
+        nowMs: Long,
+        context: ScalpContext? = null
     ): List<ScalpEvent> {
         require(strategy.taker) { "${strategy.name} rests a bid: use post" }
         if (!askPrice.isFinite() || askPrice < config.minPrice - EPS || askPrice > config.maxPrice + EPS) return emptyList()
@@ -267,7 +288,8 @@ class ScalperEngine(val config: Config = Config()) {
             queueKnown = true,
             postedAtMs = nowMs,
             predictionCents = 0.0,
-            expectedCents = 0.0
+            expectedCents = 0.0,
+            context = context
         )
         val w = Working(order)
         w.filledAtMs = nowMs

@@ -210,7 +210,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val before = container.scalperStore.ledger.snapshot().stats(com.dirk.kalshiodds.signal.scalper.ScalperState.ALL).closed
         container.scalper.reset()
         track("paper_scalper_reset", before, 0) { }
-        _state.update { it.copy(credentialMessage = "Paper scalper record reset — no Kalshi orders") }
+        _state.update { it.copy(credentialMessage = "Paper scalper record reset — the trade files were archived, no Kalshi orders") }
     }
     fun resetLateFavorite() {
         val before = container.lateFavorite.ledger.snapshot().totals.settledBets

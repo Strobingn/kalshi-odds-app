@@ -19,6 +19,26 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.5 (Claude branch): scalper results screen, every paper order saved
+
+Home → Paper scalper card → **See full results, chart and every trade** (`ScalperResultsScreen`):
+
+- profit or loss after fees, dollars won against dollars lost, win and loss counts, average and biggest
+  win and loss, total fees paid;
+- a chart of the paper bankroll over time (it starts from a $1,000 reference; the scalper has no real balance);
+- breakdowns by strategy, by coin and by hour of the day;
+- every closed scalp, newest first, with its entry, exit, fees and net.
+
+Every paper order is now kept on the phone under `filesDir/scalper/` (`ScalpTradeLog`):
+`scalps_YYYY-MM-DD.csv` has one row per closed scalp; `scalp_orders_YYYY-MM-DD.csv.gz` has one row per
+order, filled or not, with the book the scalper saw, the price moves and the model's inputs. "Export all
+scalper data (zip)" on the results screen saves them all. "Reset paper scalper" archives the files instead
+of deleting them. A record made by 1.8.4 is replaced by a new one, because 1.8.4 kept no per-trade file
+and no won / lost / fee totals. Still paper only: no order path.
+
+The cloud recorder's files and the study's trade tape are now also kept in the `scalper-data` release
+(`export-recordings.yml`, `archive-tape.yml`, `record.yml`).
+
 ## 1.8.4 (Claude branch): paper scalper, aggressive, paper only
 
 Home card **Paper scalper · aggressive · PAPER ONLY** runs seven scalping strategies at once on the live Bitcoin window and scores each one: the ML scalper (a trained model picks calm moments to rest a bid and offer it 1¢ higher), and dip-hunter, momentum-sniper and extreme reversion, each in a buy-now form and a resting form. Both sides, several positions per strategy, 10 contracts an order, no caps, exits in 30–120 s. It holds no trade client and no credentials: nothing it does can reach Kalshi.

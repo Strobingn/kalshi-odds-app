@@ -85,7 +85,7 @@ data class OddsUiState(
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
     /** Paper scalper scoreboard. */
     val scalper: com.dirk.kalshiodds.signal.scalper.ScalperState =
-        com.dirk.kalshiodds.signal.scalper.ScalperState(),
+        com.dirk.kalshiodds.signal.scalper.ScalperState.fresh(),
     /** Paper scalper: (resting bids, open scalps) right now. */
     val scalperWorking: Pair<Int, Int> = 0 to 0
 )

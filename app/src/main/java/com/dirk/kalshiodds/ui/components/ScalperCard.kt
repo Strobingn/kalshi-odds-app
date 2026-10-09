@@ -5,9 +5,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
@@ -17,11 +19,11 @@ import com.dirk.kalshiodds.signal.scalper.ScalperSummary
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
 /**
- * Home card for the paper scalper. Read-only: no buttons, nothing here can
- * place an order. Toggle / reset live in Settings.
+ * Home card for the paper scalper. Its one button opens the results screen;
+ * nothing here can place an order. Toggle / reset live in Settings.
  */
 @Composable
-fun ScalperCard(summary: ScalperSummary) {
+fun ScalperCard(summary: ScalperSummary, onOpenResults: () -> Unit = {}) {
     val colors = DipTheme.colors
     Column(
         modifier = Modifier
@@ -50,6 +52,9 @@ fun ScalperCard(summary: ScalperSummary) {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
         }
         Text(summary.workingLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        OutlinedButton(onClick = onOpenResults, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+            Text("See full results, chart and every trade")
+        }
         Text(summary.note, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
     }
 }

@@ -23,11 +23,27 @@ data class ScalpStats(
     val targets: Int = 0,
     val stops: Int = 0,
     val timeouts: Int = 0,
-    val settled: Int = 0
+    val settled: Int = 0,
+    /** Closed scalps that lost money after fees (a scalp that nets exactly $0 is neither a win nor a loss). */
+    val losses: Int = 0,
+    /** Dollars made by the winners / given back by the losers, both after fees, both positive numbers. */
+    val wonUsd: Double = 0.0,
+    val lostUsd: Double = 0.0,
+    /** Taker fees charged on entries and exits. Already inside [pnlUsd]. */
+    val feesUsd: Double = 0.0,
+    val biggestWinUsd: Double = 0.0,
+    val biggestLossUsd: Double = 0.0
 ) {
     val winRate: Double? get() = if (closed > 0) wins.toDouble() / closed else null
     val perScalpUsd: Double? get() = if (closed > 0) pnlUsd / closed else null
+    val avgWinUsd: Double? get() = if (wins > 0) wonUsd / wins else null
+    val avgLossUsd: Double? get() = if (losses > 0) lostUsd / losses else null
+    val flat: Int get() = closed - wins - losses
 }
+
+/** Running paper P&L after the last scalp of a time bucket closed. */
+@Serializable
+data class CurvePoint(val tMs: Long, val pnlUsd: Double)
 
 @Serializable
 data class ScalpRow(
@@ -51,14 +67,36 @@ data class ScalperState(
     val groups: Map<String, ScalpStats> = emptyMap(),
     /** Newest first, capped at [ScalperLedger.MAX_RECENT]. */
     val recent: List<ScalpRow> = emptyList(),
-    val startedAtMs: Long? = null
+    val startedAtMs: Long? = null,
+    /**
+     * 1 = a record written by 1.8.4, which kept no won / lost / fee totals;
+     * [ScalperStore] starts a new record instead of mixing the two.
+     */
+    val version: Int = 1,
+    /** Running P&L over time, at most [ScalperLedger.MAX_CURVE] points (older points are thinned). */
+    val curve: List<CurvePoint> = emptyList(),
+    val curveBucketMs: Long = ScalperLedger.CURVE_BUCKET_MS
 ) {
     fun stats(key: String): ScalpStats = groups[key] ?: ScalpStats()
 
     companion object {
+        const val VERSION = 2
         const val ALL = "ALL"
         const val QUEUE_AWARE = "QUEUE_AWARE"
+        const val COIN_PREFIX = "COIN_"
+        const val HOUR_PREFIX = "HOUR_"
         fun bucketKey(b: QueueBucket): String = "Q_" + b.name
+        fun coinKey(coin: String): String = COIN_PREFIX + coin
+        fun hourKey(hour: Int): String = HOUR_PREFIX + hour
+
+        /** An empty record in the current format. */
+        fun fresh(): ScalperState = ScalperState(version = VERSION)
+
+        /** `KXBTC15M-26OCT091315-15` → `BTC`. */
+        fun coinOf(ticker: String): String {
+            val series = ticker.trim().uppercase(Locale.US).substringBefore('-')
+            return series.removePrefix("KX").removeSuffix("15M").ifBlank { series }
+        }
     }
 }
 
@@ -68,10 +106,18 @@ data class ScalperState(
  * close many times a minute. No Kalshi keys, no trade client, no order path.
  */
 class ScalperLedger(
-    initial: ScalperState = ScalperState(),
+    initial: ScalperState = ScalperState.fresh(),
     private val persist: (ScalperState) -> Unit = {},
     private val nowMs: () -> Long = { System.currentTimeMillis() },
-    private val persistEveryMs: Long = 15_000L
+    private val persistEveryMs: Long = 15_000L,
+    /** Every resolved order, for the on-disk log: closed scalps, and one order-file row per order. No I/O here. */
+    private val record: (trades: List<ScalpTrade>, orders: List<Pair<Long, String>>) -> Unit = { _, _ -> },
+    /** Stamp of this app start, written on every logged row. */
+    private val run: Long = 0L,
+    /** Hour of the day (0–23) a scalp closed in, on the phone's clock. */
+    private val hourOf: (Long) -> Int = { ms ->
+        java.time.Instant.ofEpochMilli(ms).atZone(java.time.ZoneId.systemDefault()).hour
+    }
 ) {
     private val lock = Any()
     private val _state = MutableStateFlow(initial)
@@ -87,6 +133,10 @@ class ScalperLedger(
             val groups = HashMap(cur.groups)
             var recent = cur.recent
             var started = cur.startedAtMs
+            var curve = cur.curve
+            var bucketMs = cur.curveBucketMs.coerceAtLeast(1L)
+            val trades = ArrayList<ScalpTrade>()
+            val orders = ArrayList<Pair<Long, String>>()
             for (e in events) {
                 when (e) {
                     is ScalpEvent.Posted -> {
@@ -94,19 +144,48 @@ class ScalperLedger(
                         bump(groups, e.order) { it.copy(posted = it.posted + 1) }
                     }
                     is ScalpEvent.Filled -> bump(groups, e.order) { it.copy(filled = it.filled + 1) }
-                    is ScalpEvent.Unfilled -> Unit
+                    is ScalpEvent.Unfilled -> {
+                        val at = nowMs()
+                        orders += at to ScalpTradeLog.orderRow(e.order, null, at, run)
+                    }
                     is ScalpEvent.Closed -> {
                         val c = e.scalp
-                        bump(groups, c.order) {
+                        val fees = c.order.entryFeeUsd + c.feeUsd
+                        val extra = listOf(
+                            ScalperState.coinKey(ScalperState.coinOf(c.order.ticker)),
+                            ScalperState.hourKey(hourOf(c.closedAtMs))
+                        )
+                        bump(groups, c.order, extra) {
                             it.copy(
                                 closed = it.closed + 1,
                                 wins = it.wins + (if (c.pnlUsd > 0.0) 1 else 0),
+                                losses = it.losses + (if (c.pnlUsd < 0.0) 1 else 0),
                                 pnlUsd = it.pnlUsd + c.pnlUsd,
+                                wonUsd = it.wonUsd + (if (c.pnlUsd > 0.0) c.pnlUsd else 0.0),
+                                lostUsd = it.lostUsd + (if (c.pnlUsd < 0.0) -c.pnlUsd else 0.0),
+                                feesUsd = it.feesUsd + fees,
+                                biggestWinUsd = maxOf(it.biggestWinUsd, c.pnlUsd),
+                                biggestLossUsd = maxOf(it.biggestLossUsd, -c.pnlUsd),
                                 targets = it.targets + (if (c.kind == ExitKind.TARGET) 1 else 0),
                                 stops = it.stops + (if (c.kind == ExitKind.STOP) 1 else 0),
                                 timeouts = it.timeouts + (if (c.kind == ExitKind.TIMEOUT) 1 else 0),
                                 settled = it.settled + (if (c.kind == ExitKind.SETTLED) 1 else 0)
                             )
+                        }
+                        trades += ScalpTrade.of(c, run)
+                        orders += c.closedAtMs to ScalpTradeLog.orderRow(c.order, c, c.closedAtMs, run)
+                        // One point per time bucket: the running total after the bucket's last scalp.
+                        val point = CurvePoint(c.closedAtMs, (groups[ScalperState.ALL] ?: ScalpStats()).pnlUsd)
+                        val last = curve.lastOrNull()
+                        curve = if (last != null && last.tMs / bucketMs == point.tMs / bucketMs) {
+                            curve.dropLast(1) + point
+                        } else {
+                            curve + point
+                        }
+                        if (curve.size > MAX_CURVE) {
+                            // Too many points to keep: halve the detail of the whole curve, never its end.
+                            bucketMs *= 2
+                            curve = curve.filterIndexed { i, _ -> i % 2 == 1 || i == curve.lastIndex }
                         }
                         val row = ScalpRow(
                             strategy = c.order.strategy.name,
@@ -122,8 +201,16 @@ class ScalperLedger(
                     }
                 }
             }
-            val next = ScalperState(groups = groups, recent = recent, startedAtMs = started)
+            val next = ScalperState(
+                groups = groups,
+                recent = recent,
+                startedAtMs = started,
+                version = ScalperState.VERSION,
+                curve = curve,
+                curveBucketMs = bucketMs
+            )
             _state.value = next
+            if (trades.isNotEmpty() || orders.isNotEmpty()) runCatching { record(trades, orders) }
             val now = nowMs()
             if (forcePersist || now - lastPersistMs >= persistEveryMs) {
                 lastPersistMs = now
@@ -135,14 +222,20 @@ class ScalperLedger(
     /** Clear the record. Paper only: nothing to unwind. */
     fun reset() {
         synchronized(lock) {
-            _state.value = ScalperState()
+            _state.value = ScalperState.fresh()
             lastPersistMs = nowMs()
-            runCatching { persist(ScalperState()) }
+            runCatching { persist(ScalperState.fresh()) }
         }
     }
 
-    private fun bump(groups: HashMap<String, ScalpStats>, order: ScalpOrder, f: (ScalpStats) -> ScalpStats) {
-        val keys = ArrayList<String>(4)
+    private fun bump(
+        groups: HashMap<String, ScalpStats>,
+        order: ScalpOrder,
+        extraKeys: List<String> = emptyList(),
+        f: (ScalpStats) -> ScalpStats
+    ) {
+        val keys = ArrayList<String>(6)
+        keys += extraKeys
         keys += ScalperState.ALL
         keys += order.strategy.name
         if (order.strategy == ScalpStrategy.ML_REST) {
@@ -154,6 +247,10 @@ class ScalperLedger(
 
     companion object {
         const val MAX_RECENT = 40
+
+        /** The P&L curve starts with one point a minute and halves its detail past [MAX_CURVE] points. */
+        const val CURVE_BUCKET_MS = 60_000L
+        const val MAX_CURVE = 720
     }
 }
 
@@ -175,7 +272,9 @@ class PaperScalper(
     private val topOfBook: (String) -> TopOfBook?,
     private val bookLevels: (String) -> BookLevelSnapshot?,
     private val closeMs: (String) -> Long?,
-    val engine: ScalperEngine = ScalperEngine()
+    val engine: ScalperEngine = ScalperEngine(),
+    /** Called after [reset]: the store archives the trade files. */
+    private val onReset: () -> Unit = {}
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -230,6 +329,7 @@ class PaperScalper(
     fun reset() {
         engine.clear()
         ledger.reset()
+        onReset()
     }
 
     private fun gridFor(ticker: String, nowMs: Long): PrintGrid? {
@@ -286,6 +386,12 @@ class PaperScalper(
             val queue = if (bookOk) realQty else null
             val d10 = grid.move(side, s, 10)
             val d30 = grid.move(side, s, 30)
+            val askQty = if (bookOk) (if (yes) top?.yesAskQty else top?.noAskQty)?.takeIf { it.isFinite() && it >= 0.0 } else null
+            // What this order saw, for the order log only.
+            fun seen(x: FloatArray?) = ScalpContext(
+                bid = bid, ask = ask, bidQty = queue, askQty = askQty,
+                move10 = d10.takeIf { !it.isNaN() }, move30 = d30.takeIf { !it.isNaN() }, features = x
+            )
             for (st in due) {
                 val fire = when (st) {
                     ScalpStrategy.ML_REST -> null
@@ -302,12 +408,14 @@ class PaperScalper(
                     val pred = m.predict(x)
                     if (pred < m.thetaCents) continue
                     val expected = m.expectedCents(pred, queue ?: engine.config.unknownQueue)
-                    engine.post(st, ticker, side, bid, queue, pred, expected, nowMs)?.let { events += it }
+                    engine.post(st, ticker, side, bid, queue, pred, expected, nowMs, seen(x))?.let { events += it }
                 } else if (fire) {
                     if (st.taker) {
-                        events += engine.buyNow(st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs)
+                        events += engine.buyNow(
+                            st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, seen(null)
+                        )
                     } else {
-                        engine.post(st, ticker, side, bid, queue, 0.0, 0.0, nowMs)?.let { events += it }
+                        engine.post(st, ticker, side, bid, queue, 0.0, 0.0, nowMs, seen(null))?.let { events += it }
                     }
                 }
             }
@@ -343,7 +451,18 @@ class ScalperStore(context: Context) {
         encodeDefaults = true
     }
 
-    val ledger: ScalperLedger = ScalperLedger(initial = load(), persist = { save(it) })
+    /** Every order on disk (`filesDir/scalper/`): the trade list, the export and the research data. */
+    val log: ScalpTradeLog = ScalpTradeLog(java.io.File(context.applicationContext.filesDir, ScalpTradeLog.DIR_NAME))
+
+    val ledger: ScalperLedger = ScalperLedger(
+        initial = load(),
+        persist = {
+            save(it)
+            log.flush()
+        },
+        record = { trades, orders -> log.add(trades, orders) },
+        run = log.run
+    )
 
     /** The trained model from assets, or null when it cannot be read (the fast strategies still run). */
     val model: ScalperModel? = runCatching {
@@ -351,8 +470,10 @@ class ScalperStore(context: Context) {
     }.getOrNull()
 
     private fun load(): ScalperState {
-        val raw = prefs.getString(KEY, null) ?: return ScalperState()
-        return runCatching { json.decodeFromString(ScalperState.serializer(), raw) }.getOrElse { ScalperState() }
+        val raw = prefs.getString(KEY, null) ?: return ScalperState.fresh()
+        val saved = runCatching { json.decodeFromString(ScalperState.serializer(), raw) }.getOrNull()
+        // A 1.8.4 record has no won / lost / fee totals and no trade file: start a new one.
+        return saved?.takeIf { it.version >= ScalperState.VERSION } ?: ScalperState.fresh()
     }
 
     private fun save(state: ScalperState) {

@@ -64,6 +64,7 @@ fun HomeScreen(
     onOpenSignalHistory: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit,
     onOpenArb: () -> Unit = {},
+    onOpenScalper: () -> Unit = {},
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
     onPaperSide: (MarketUiModel, String) -> Unit,
@@ -226,7 +227,8 @@ fun HomeScreen(
                         if (state.settings.scalperEnabled) {
                             item(key = "paper_scalper") {
                                 com.dirk.kalshiodds.ui.components.ScalperCard(
-                                    com.dirk.kalshiodds.signal.scalper.ScalperSummary.of(state.scalper, state.scalperWorking)
+                                    com.dirk.kalshiodds.signal.scalper.ScalperSummary.of(state.scalper, state.scalperWorking),
+                                    onOpenResults = onOpenScalper
                                 )
                             }
                         }

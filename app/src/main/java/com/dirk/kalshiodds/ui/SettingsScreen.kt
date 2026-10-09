@@ -796,8 +796,9 @@ fun SettingsContent(
             Text(
                 "Runs seven scalping strategies at once on paper: the ML scalper, dip-hunter, momentum-sniper and " +
                     "extreme reversion, the last three both buying at the ask and resting a bid. Several positions " +
-                    "at a time, no caps, exits in 30–120 s. Filled by real trade prints; scored on Home by strategy. " +
-                    "Needs Live signals on. Never sent to Kalshi.",
+                    "at a time, no caps, exits in 30–120 s. Filled by real trade prints; scored on Home by strategy, with " +
+                    "a full results screen (profit after fees, bankroll chart, every trade). Every order is saved " +
+                    "on the phone. Needs Live signals on. Never sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
