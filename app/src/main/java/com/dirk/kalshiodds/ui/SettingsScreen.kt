@@ -386,7 +386,7 @@ fun SettingsContent(
             Section("Watch series")
             Text(
                 "Bitcoin-only. scalpHunter-Kimi watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
-                style = MaterialTheme.typography.labelMedium,
+                style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
 
