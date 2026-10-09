@@ -50,7 +50,11 @@ data class SettingsUiState(
     val connectionTestMessage: String? = null,
     val connectionTestOk: Boolean = false,
     val lastOrderError: String? = null,
-    val lastOrderErrorAtMs: Long = 0L
+    val lastOrderErrorAtMs: Long = 0L,
+    val pendingAutoArm: Boolean = false,
+    val autoArmDraft: String = "",
+    val autoArmError: String? = null,
+    val autoStatusLine: String? = null
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -282,6 +286,57 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun cancelRaiseStake() {
         _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
+    }
+
+    /**
+     * Disarming writes immediately. Arming opens a typed-confirm dialog —
+     * auto-trade places REAL orders without an Approve tap, inside the
+     * AutoTradeEngine caps (stake, open positions, daily orders / loss).
+     */
+    fun requestAutoTradeToggle(enable: Boolean) {
+        if (!enable) {
+            viewModelScope.launch { prefs.updateAutoTradeEnabled(false) }
+            return
+        }
+        _state.update { it.copy(pendingAutoArm = true, autoArmDraft = "", autoArmError = null) }
+    }
+
+    fun setAutoArmDraft(text: String) = _state.update { it.copy(autoArmDraft = text, autoArmError = null) }
+
+    fun confirmAutoArm() {
+        if (_state.value.autoArmDraft.trim().uppercase() != SignalConstants.AUTO_TRADE_CONFIRM_PHRASE) {
+            _state.update {
+                it.copy(autoArmError = "Type ${SignalConstants.AUTO_TRADE_CONFIRM_PHRASE} to arm auto-trade")
+            }
+            return
+        }
+        viewModelScope.launch {
+            prefs.updateAutoTradeEnabled(true)
+            container.autoTrade.clearPause()
+        }
+        _state.update { it.copy(pendingAutoArm = false, autoArmDraft = "", autoArmError = null) }
+        refreshAutoStatus()
+    }
+
+    fun cancelAutoArm() {
+        _state.update { it.copy(pendingAutoArm = false, autoArmDraft = "", autoArmError = null) }
+    }
+
+    fun setAutoMaxStake(v: Double) = viewModelScope.launch { prefs.updateAutoMaxStakeUsd(v) }
+    fun setAutoDailyLoss(v: Double) = viewModelScope.launch { prefs.updateAutoDailyLossLimitUsd(v) }
+
+    /** Today’s order count / estimated P&L / open slots + pause reason. */
+    fun refreshAutoStatus() {
+        val armed = _state.value.settings.autoTradeEnabled
+        _state.update {
+            it.copy(
+                autoStatusLine = if (armed) {
+                    container.autoTrade.statusLine(System.currentTimeMillis())
+                } else {
+                    null
+                }
+            )
+        }
     }
 
     fun resumeAlerts() {
