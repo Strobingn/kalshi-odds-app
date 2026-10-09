@@ -34,6 +34,8 @@ data class DefaultSignalConfig(
     val resumeOnNewSession: Boolean = SignalConstants.DEFAULT_RESUME_ON_NEW_SESSION,
     val ticketsEnabled: Boolean = true,
     val paperTradingEnabled: Boolean = SignalConstants.DEFAULT_PAPER_TRADING,
+    val aiAutoScalp: Boolean = SignalConstants.DEFAULT_AI_AUTO_SCALP,
+    val aiAutoScalpLive: Boolean = SignalConstants.DEFAULT_AI_AUTO_SCALP_LIVE,
     val ticketStakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD,
     val ticketRespectGates: Boolean = SignalConstants.DEFAULT_TICKET_RESPECT_GATES,
     val heavyMlEnabled: Boolean = SignalConstants.DEFAULT_HEAVY_ML,

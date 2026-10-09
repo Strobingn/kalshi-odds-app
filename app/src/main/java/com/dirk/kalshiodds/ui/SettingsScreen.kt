@@ -714,6 +714,12 @@ fun SettingsContent(
                 color = colors.textSecondary
             )
             ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("AI auto-scalp (AI buys and sells on its own)", s.aiAutoScalp, { viewModel?.setAiAutoScalp(it) })
+            ToggleRow(
+                "AI auto-scalp with REAL money (live orders, no Approve tap)",
+                s.aiAutoScalpLive,
+                { viewModel?.setAiAutoScalpLive(it) }
+            )
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
