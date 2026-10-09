@@ -27,9 +27,9 @@ import retrofit2.Response
  * Limit orders only — never market. Fail-soft with a clear message.
  * PEM / secrets are never written to logs.
  *
- * Live buys are clipped at the $5 all-in cap ([LiveOrderSizer.enforce])
- * immediately before the V2 body is built, so a leftover $50 win-target
- * cannot resize a live order above $5.
+ * Live buys are clipped at an all-in cap ([LiveOrderSizer.enforce])
+ * immediately before the V2 body is built: the $5 manual cap, or the
+ * ticket's armed auto-trade cap ([TradeTicket.stakeCapUsd]) for auto orders.
  */
 class KalshiTradeClient(
     private val primary: KalshiTradeApi,
@@ -241,17 +241,21 @@ class KalshiTradeClient(
 
     private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
         if (ticket.isSell) return ticket
-        val clip = LiveOrderSizer.enforce(ticket)
+        // Manual / Approve tickets keep the $5 all-in cap. Auto-trade tickets
+        // carry their armed cap in stakeCapUsd (set only after the typed arm).
+        val cap = ticket.stakeCapUsd?.takeIf { it.isFinite() && it > 0.0 }
+            ?: LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+        val clip = LiveOrderSizer.enforce(ticket, capUsd = cap)
         if (!clip.ok) {
-            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
+            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the all-in cap")
         }
-        if (clip.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
+        if (clip.allInUsd > cap + 1e-9) {
             throw IllegalStateException(
                 String.format(
                     Locale.US,
                     "Live order all-in $%.2f exceeds the $%.2f cap",
                     clip.allInUsd,
-                    LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+                    cap
                 )
             )
         }
