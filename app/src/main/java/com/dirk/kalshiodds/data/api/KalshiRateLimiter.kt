@@ -47,8 +47,8 @@ class KalshiRateLimiter(
             // 0.3.44: our own token bucket said "wait" (synthetic 429). Honor exactly that short wait; never escalate
             // the exponential backoff — that is what turned brief local throttling into "retrying in 70s".
             if (local) {
-                val wait = (retryAfterMs ?: 1_000L).coerceIn(250L, 5_000L)
-                holdUntilMs = maxOf(holdUntilMs, nowMs() + wait)
+                // 0.3.45: no shared hold either — local waits never block other lanes or the UI.
+                val wait = (retryAfterMs ?: 250L).coerceIn(50L, 2_000L)
                 localThrottles++
                 return wait
             }
@@ -79,9 +79,9 @@ class KalshiRateLimiter(
     }
 
     companion object {
-        const val MIN_SPACING_MS = 200L
-        const val BASE_BACKOFF_MS = 1_000L
-        const val MAX_BACKOFF_MS = 60_000L
+        const val MIN_SPACING_MS = 50L
+        const val BASE_BACKOFF_MS = 500L
+        const val MAX_BACKOFF_MS = 15_000L
         const val JITTER_FRACTION = 0.20
     }
 }

@@ -28,6 +28,16 @@ import retrofit2.http.Query
  */
 interface KalshiTradeApi {
 
+    /** 0.3.45 https://docs.kalshi.com/api-reference/account/get-account-api-limits */
+    @GET("account/limits")
+    suspend fun getAccountLimits(): Response<kotlinx.serialization.json.JsonObject> =
+        throw UnsupportedOperationException("account/limits")
+
+    /** 0.3.45 https://docs.kalshi.com/api-reference/account/list-non-default-endpoint-costs */
+    @GET("account/endpoint_costs")
+    suspend fun getEndpointCosts(): Response<kotlinx.serialization.json.JsonObject> =
+        throw UnsupportedOperationException("account/endpoint_costs")
+
     @GET("portfolio/balance")
     suspend fun getBalance(): Response<GetBalanceResponse>
 

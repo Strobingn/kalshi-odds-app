@@ -124,7 +124,8 @@ class KalshiSessionTrafficTest {
             response(it, 200, """{"order_id":"x"}""")
         }
         val post = Request.Builder().url(ORDER).post("{}".toRequestBody("application/json".toMediaType())).build()
-        repeat(KalshiPollBudget.WRITE_BURST.toInt()) {
+        // 0.3.45: write burst = 90 % of the tier's write bucket (Basic 100 tokens → 9 orders).
+        repeat((KalshiTier.BASIC.writeCapacity * KalshiTokenBucket.TARGET_SHARE / KalshiTier.DEFAULT_COST).toInt()) {
             client.newCall(post).execute().close()
         }
         val sent = hits.get()

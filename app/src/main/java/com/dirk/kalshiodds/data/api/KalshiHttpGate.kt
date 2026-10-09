@@ -39,7 +39,7 @@ class KalshiHttpGate(
     }
 
     private fun interceptWrite(chain: Interceptor.Chain, request: Request): Response {
-        val wait = bucket.tryAcquireWrite()
+        val wait = bucket.tryAcquireWrite(KalshiEndpointCosts.costFor(request.method, request.url.encodedPath))
         if (wait != null) {
             return synthetic429(request, wait)
         }
@@ -72,7 +72,7 @@ class KalshiHttpGate(
                 mine.snap = snap
                 return snap.toResponse(request)
             }
-            val denied = awaitRead()
+            val denied = awaitRead(KalshiEndpointCosts.costFor(request.method, request.url.encodedPath))
             if (denied != null) {
                 local429.incrementAndGet()
                 val snap = Snap.from(synthetic429(request, denied))
@@ -87,6 +87,7 @@ class KalshiHttpGate(
                 real429.incrementAndGet()
                 bucket.noteRead429(snap.retryAfterMs())
             } else if (snap.code in 200..299) {
+                bucket.noteReadOk()
                 cache[key] = snap.copy(untilMs = nowMs() + cacheTtlMs)
             }
             mine.snap = snap
@@ -101,10 +102,10 @@ class KalshiHttpGate(
     }
 
     /** Null when a read may hit the network. Otherwise Retry-After milliseconds. */
-    private fun awaitRead(): Long? {
+    private fun awaitRead(cost: Double = KalshiTier.DEFAULT_COST): Long? {
         var slept = 0L
         while (true) {
-            val wait = bucket.reserveRead()
+            val wait = bucket.reserveRead(cost)
             if (wait == 0L) return null
             if (slept + wait > KalshiPollBudget.MAX_INLINE_WAIT_MS) return wait
             sleep(wait)
@@ -202,7 +203,7 @@ class KalshiHttpGate(
         val sinceMs: Long
     ) {
         val total: Long get() = perEndpoint.values.sum()
-        fun lines(): List<String> = listOf(
+        fun lines(): List<String> = KalshiRest.budgetLines() + listOf(
             String.format(java.util.Locale.US, "Kalshi REST: %d requests (%d in last 60 s = %.2f/s) · budget %.0f/s burst %.0f",
                 total, lastMinute, lastMinute / 60.0, KalshiPollBudget.READ_PER_SEC, KalshiPollBudget.READ_BURST),
             "429s: $real429 from Kalshi · $local429 local throttles · $cacheHits cache/dedupe hits"

@@ -1052,7 +1052,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val impliedClose = com.dirk.kalshiodds.signal.d3.D3Window.impliedCloseMs(now)
         val phase = com.dirk.kalshiodds.signal.d3.D3Window.phase(now, impliedClose)
         val interval = when (phase) {
-            com.dirk.kalshiodds.signal.d3.D3Phase.ACTIVE -> 15_000L
+            com.dirk.kalshiodds.signal.d3.D3Phase.ACTIVE -> 5_000L // 0.3.45
             com.dirk.kalshiodds.signal.d3.D3Phase.WAITING -> 60_000L
             com.dirk.kalshiodds.signal.d3.D3Phase.CLOSED -> 120_000L
         }
@@ -1252,9 +1252,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         positionJob?.cancel()
         positionJob = viewModelScope.launch {
             var lastFetch = 0L
+            var lastLimits = 0L
             while (isActive) {
                 val visible = com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
                 val now = System.currentTimeMillis()
+                // 0.3.45: size the global limiter to 90 % of the account's real tier (GET /account/limits), every 30 min.
+                if (now - lastLimits >= 30 * 60_000L && _state.value.settings.tradingCredentialsConfigured()) {
+                    lastLimits = now
+                    launch(Dispatchers.IO) { runCatching { container.tradeClient.refreshRateLimits() } }
+                }
                 if (visible && now - lastFetch >= KalshiPollBudget.POSITIONS_MS &&
                     com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.POSITIONS, loopOwner, now, 2 * KalshiPollBudget.POSITIONS_MS)) {
                     lastFetch = now
@@ -1836,13 +1842,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         /** ETH/SOL daily quotes are ledger-only; refresh every 2 min on the rate-limited lane. */
-        private const val OTHER_DAILY_MS = 120_000L
+        private const val OTHER_DAILY_MS = 5_000L // 0.3.45: daily cards every 5 s
         const val BASE_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val JITTER_MS = 250L
         const val MIN_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val INITIAL_BACKOFF_MS = 2_000L
         const val MAX_BACKOFF_MS = 60_000L
-        const val WS_METADATA_POLL_MS = 15_000L
+        const val WS_METADATA_POLL_MS = 3_000L // 0.3.45
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
     }
 }

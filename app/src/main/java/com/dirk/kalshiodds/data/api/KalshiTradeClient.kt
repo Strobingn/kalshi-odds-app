@@ -224,6 +224,16 @@ class KalshiTradeClient(
      * Available cash for Live Approve sizing. Never logs the body.
      * Returns null if the key cannot read `portfolio/balance`.
      */
+    /** 0.3.45: read the account's real rate-limit tier + endpoint costs and size the global limiter to 90 % of it. */
+    suspend fun refreshRateLimits(): KalshiTier? = runCatching {
+        val api = activePrimary()
+        val limits = api.getAccountLimits().takeIf { it.isSuccessful }?.body()?.let { KalshiRest.tierFromLimits(it) }
+        runCatching { api.getEndpointCosts().takeIf { it.isSuccessful }?.body() }.getOrNull()?.let {
+            val (d, m) = KalshiRest.costsFrom(it); KalshiEndpointCosts.apply(d, m)
+        }
+        limits?.also { KalshiRest.bucket.configure(it) }
+    }.getOrNull()
+
     suspend fun getCashUsd(): Double? {
         return when (val r = testConnection()) {
             is ConnectionTestResult.Ok -> r.cashUsd

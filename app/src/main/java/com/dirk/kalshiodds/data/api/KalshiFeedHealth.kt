@@ -8,6 +8,7 @@ class KalshiFeedHealth {
         private set
 
     fun note(error: Throwable, retryInMs: Long) {
+        if (KalshiRequestStatus.isLocalThrottle(error)) return // 0.3.45: local pacing is not a feed problem
         banner = KalshiRequestStatus.message(error, retryInMs)
     }
 
