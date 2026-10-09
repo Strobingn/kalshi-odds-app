@@ -78,6 +78,7 @@ fun SettingsScreen(
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.refreshBatteryStatus()
         viewModel.refreshLastOrderError()
+        viewModel.refreshAutoStatus()
     }
     SettingsContent(
         state = state,
@@ -385,7 +386,7 @@ fun SettingsContent(
             Section("Watch series")
             Text(
                 "Bitcoin-only. scalpHunter-Kimi watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
 
@@ -783,6 +784,60 @@ fun SettingsContent(
                 steps = 34
             )
 
+            Section("Auto-trade (real money)")
+            Text(
+                "Armed = the AI places REAL Kalshi orders by itself: it buys when a ticket passes " +
+                    "every filter, rides the move, and sells when the exit brain says it is turning down — " +
+                    "no Approve tap. Hard caps: stake ≤ your max below, " +
+                    "${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open positions, " +
+                    "${SignalConstants.AUTO_MAX_DAILY_ORDERS} orders/day, 2-minute cooldown per market, " +
+                    "and the daily loss limit pauses it. Every order is logged. " +
+                    "This can lose real money — watch it on the paper book first.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.accentOrange
+            )
+            ToggleRow(
+                "Auto-trade armed (AI places real orders)",
+                s.autoTradeEnabled,
+                { viewModel?.requestAutoTradeToggle(it) }
+            )
+            Text(
+                if (s.autoTradeEnabled) {
+                    state.autoStatusLine ?: "ARMED — auto orders active. Turn off anytime."
+                } else {
+                    "Off — every order still needs your Approve tap."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (s.autoTradeEnabled) colors.textPrimary else colors.textSecondary,
+                fontWeight = if (s.autoTradeEnabled) FontWeight.Bold else null
+            )
+            if (s.autoTradeEnabled) {
+                Text(
+                    String.format(Locale.US, "Auto max stake  $%.0f per order", s.autoMaxStakeUsd),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = s.autoMaxStakeUsd.toFloat().coerceIn(1f, 50f),
+                    onValueChange = { viewModel?.setAutoMaxStake(it.toDouble()) },
+                    valueRange = 1f..50f,
+                    steps = 48
+                )
+                Text(
+                    String.format(Locale.US, "Daily loss limit  $%.0f — auto-pauses when hit", s.autoDailyLossLimitUsd),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = s.autoDailyLossLimitUsd.toFloat().coerceIn(5f, 50f),
+                    onValueChange = { viewModel?.setAutoDailyLoss(it.toDouble()) },
+                    valueRange = 5f..50f,
+                    steps = 8
+                )
+            }
+
             Section("Legacy win-target (History / paper only)")
             Text(
                 "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
@@ -915,6 +970,38 @@ fun SettingsContent(
             },
             dismissButton = {
                 TextButton(onClick = { viewModel?.cancelRaiseStake() }) { Text("Keep $5 max") }
+            }
+        )
+    }
+
+    if (state.pendingAutoArm) {
+        AlertDialog(
+            onDismissRequest = { viewModel?.cancelAutoArm() },
+            title = { Text("Arm auto-trade?") },
+            text = {
+                Column {
+                    Text(
+                        "The AI will place REAL Kalshi orders without asking — buys and sells, " +
+                            "inside your caps. It can lose money. " +
+                            "Type ${SignalConstants.AUTO_TRADE_CONFIRM_PHRASE} to confirm."
+                    )
+                    OutlinedTextField(
+                        value = state.autoArmDraft,
+                        onValueChange = { viewModel?.setAutoArmDraft(it) },
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                        label = { Text("Type ${SignalConstants.AUTO_TRADE_CONFIRM_PHRASE}") },
+                        singleLine = true
+                    )
+                    state.autoArmError?.let {
+                        Text(it, color = colors.accentOrange, style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { viewModel?.confirmAutoArm() }) { Text("Arm auto-trade") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel?.cancelAutoArm() }) { Text("Cancel") }
             }
         )
     }
