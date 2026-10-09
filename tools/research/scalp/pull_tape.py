@@ -4,14 +4,15 @@ import numpy as np
 from kx import ts
 API="https://api.elections.kalshi.com/trade-api/v2"
 def get(url):
-    for a in range(60):
+    # 429s: short waits first (the limit is per second), growing to 5 s so a throttled runner keeps going
+    for a in range(200):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent":"research/1.0","Accept":"application/json"}), timeout=40) as r:
                 return json.load(r)
         except urllib.error.HTTPError as e:
-            time.sleep(0.05+random.random()*0.15 if e.code==429 else 0.5+a*0.3)
+            time.sleep(min(0.05*1.25**a,5.0)+random.random()*0.15 if e.code==429 else min(0.5+a*0.3,10.0))
         except Exception:
-            time.sleep(0.5+a*0.3)
+            time.sleep(min(0.5+a*0.3,10.0))
     raise RuntimeError(url)
 DIR=sys.argv[1]; DAYS=float(sys.argv[2]); W=int(sys.argv[3]) if len(sys.argv)>3 else 8
 lo=int(time.time()-DAYS*86400); cur=None; mk=[]
@@ -44,5 +45,9 @@ def one(m):
     with lock:
         n[0]+=1
         if n[0]%50==0: print(n[0],time.strftime("%H:%M:%S"),flush=True)
-with ThreadPoolExecutor(W) as ex: list(ex.map(one,mk))
-print("done",flush=True)
+def safe(m):
+    try: one(m); return 0
+    except Exception as e:
+        print("FAILED",m["ticker"],str(e)[:120],flush=True); return 1
+with ThreadPoolExecutor(W) as ex: bad=sum(ex.map(safe,mk))
+print("done",len(mk)-bad,"of",len(mk),flush=True)

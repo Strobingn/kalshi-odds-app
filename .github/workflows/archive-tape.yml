@@ -15,6 +15,7 @@ on:
     branches: [Claude]
     paths:
       - ".github/workflows/archive-tape.yml"
+      - "tools/research/scalp/pull_tape.py"
 
 permissions:
   contents: write
@@ -37,16 +38,19 @@ jobs:
       - name: Pull the tape
         run: |
           mkdir -p tape/raw
-          python3 -m pull_tape tape "${{ inputs.days || '24' }}" 6
+          python3 -m pull_tape tape "${{ inputs.days || '24' }}" 4
 
       - name: Pull 1-minute quotes and Coinbase closes
+        if: always()
         run: |
           mkdir -p minute && cd minute
           PYTHONPATH=../tools/research/scalp python3 -m pull_candles KXBTC15M 47 || echo "(candles failed)"
           PYTHONPATH=../tools/research/scalp python3 -m pull_cb 49 || echo "(coinbase failed)"
           ls -la
 
+      # Runs even when a pull stopped early: whatever was pulled is kept.
       - name: Store in the scalper-data release
+        if: always()
         run: |
           tag=scalper-data
           if ! gh release view "$tag" >/dev/null 2>&1; then
