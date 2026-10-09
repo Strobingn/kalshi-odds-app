@@ -55,7 +55,13 @@ object DecisionPipeline {
         val ensembleSpread: Double? = null,
         val imbalance: Double? = null,
         val feeRate: Double = 0.07,
-        val modelVersion: String = VERSION
+        val modelVersion: String = VERSION,
+        /**
+         * 0.3.41: bankroll the Kelly stake is sized on (free paper bankroll for Autopilot). When set, the
+         * pipeline sizes the chosen side and [TradeEligibility] enforces the $5 minimum (NO BET below it).
+         */
+        val stakeBankrollUsd: Double? = null,
+        val kellyFraction: Double = com.dirk.kalshiodds.signal.paper.PaperAutopilot.PAPER_AI_KELLY_FRACTION
     ) {
         val secondsRemaining: Double?
             get() = closeTimeMs?.let { (it - nowMs) / 1000.0 }
@@ -204,7 +210,9 @@ object DecisionPipeline {
                     ask = chosen.ask,
                     longshotValidated = chosen.longshotValidated,
                     pFill = chosen.pFill,
-                    expectedNetPerContract = chosen.expectedNetPerContract
+                    expectedNetPerContract = chosen.expectedNetPerContract,
+                    stakeUsd = kellyStakeUsd(input, chosen),
+                    enforceMinStake = input.stakeBankrollUsd != null
                 )
             )
         }
@@ -225,6 +233,24 @@ object DecisionPipeline {
             verdict = verdict,
             featuresHash = hash
         )
+    }
+
+    /**
+     * 0.3.41: the Kelly all-in stake for the chosen side (fees included, depth-capped, same sizer as paper
+     * Autopilot), or null when no bankroll was supplied. A non-positive Kelly sizes to $0 → below $5 → NO BET.
+     */
+    fun kellyStakeUsd(input: Input, chosen: SideQuote): Double? {
+        val bank = input.stakeBankrollUsd?.takeIf { it.isFinite() } ?: return null
+        val sized = com.dirk.kalshiodds.signal.paper.PaperKellySizer.size(
+            winProb = chosen.pWin,
+            ask = chosen.ask,
+            bankrollUsd = bank.coerceAtLeast(0.0),
+            kellyFraction = input.kellyFraction,
+            feeRate = input.feeRate,
+            depthContracts = chosen.depth,
+            capFullKelly = false
+        )
+        return if (sized.skip) 0.0 else sized.allInUsd
     }
 
     private fun sideQuote(

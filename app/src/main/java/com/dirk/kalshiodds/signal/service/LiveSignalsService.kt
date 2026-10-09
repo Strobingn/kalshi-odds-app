@@ -60,10 +60,13 @@ class LiveSignalsService : Service() {
     override fun onCreate() {
         super.onCreate()
         // Must be first: startForegroundService timeout is ~5–10s and a throw
-        // here is a process-killing RemoteServiceException.
+        // here is a process-killing RemoteServiceException. 0.3.41: nothing else runs on the
+        // main thread before it; the rest of the setup moves to a background dispatcher.
         promoteToForeground()
-        runCatching { acquireWakeLock() }
-        runCatching { bindRollover() }
+        scope.launch {
+            runCatching { acquireWakeLock() }
+            runCatching { bindRollover() }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -91,7 +94,8 @@ class LiveSignalsService : Service() {
             metadataJob = scope.launch { runMetadataLoop() }
         }
         // 0.3.39: host the process-scoped Autopilot (OddsViewModel) even with no Activity.
-        runCatching { KalshiOddsApp.from(this).ensureAutopilotHost() }
+        // 0.3.41: posted after this call returns, so it never delays startForeground.
+        android.os.Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this).ensureAutopilotHost() } }
         if (rolloverJob == null || rolloverJob?.isActive != true) {
             rolloverJob = scope.launch {
                 runCatching {
@@ -133,9 +137,12 @@ class LiveSignalsService : Service() {
         return START_NOT_STICKY
     }
 
+    @Volatile private var promoted = false
+
     private fun promoteToForeground() {
-        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
-            .getOrElse { SignalNotifier(this) }
+        // 0.3.41: minimal work — no container access (AppContainer/OddsViewModel stay out of this path).
+        // Re-run on every start command: each startForegroundService() must be answered by startForeground().
+        val notifier = SignalNotifier(applicationContext)
         val notification = runCatching { notifier.foregroundNotification() }.getOrNull() ?: return
         val types = LiveSignalsPolicy.foregroundServiceTypesToTry(Build.VERSION.SDK_INT)
         if (types.isEmpty()) {
@@ -143,6 +150,7 @@ class LiveSignalsService : Service() {
             try {
                 @Suppress("DEPRECATION")
                 startForeground(SignalNotifier.FG_NOTIFICATION_ID, notification)
+                promoted = true
                 foregroundFailed = false
             } catch (t: Throwable) {
                 Log.e(TAG, "startForeground failed: ${t.message}")
@@ -161,6 +169,7 @@ class LiveSignalsService : Service() {
                 )
                 foregroundTypeInUse = type
                 started = true
+                promoted = true
                 foregroundFailed = false
                 break
             } catch (t: Throwable) {

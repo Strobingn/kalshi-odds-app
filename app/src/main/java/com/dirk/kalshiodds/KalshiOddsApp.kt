@@ -62,7 +62,8 @@ class KalshiOddsApp : Application() {
         runCatching { SignalNotifier.ensureChannels(this) }
         runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
         runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
-        runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this) }
+        // 0.3.41: WorkManager init/enqueues off the main thread.
+        appScope.launch(Dispatchers.IO) { runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this@KalshiOddsApp) } }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
         // a throw in Service.onCreate kills the whole process mid-session too
@@ -70,8 +71,10 @@ class KalshiOddsApp : Application() {
         if (LiveSignalsPolicy.shouldPromoteFromApplicationOnCreate()) {
             LiveSignalsKeepAlive.ensureService(this)
         }
-        runCatching { MarketRefreshScheduler.enqueue(this) }
-        runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this) }
+        appScope.launch(Dispatchers.IO) {
+            runCatching { MarketRefreshScheduler.enqueue(this@KalshiOddsApp) }
+            runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this@KalshiOddsApp) }
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
