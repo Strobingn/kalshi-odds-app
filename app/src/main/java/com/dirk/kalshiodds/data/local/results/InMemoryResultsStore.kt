@@ -20,6 +20,8 @@ class InMemoryResultsStore(
     private val scorecards = ArrayDeque<ScorecardRow>()
     private val tickets = ArrayDeque<TicketAttemptRow>()
     private val odds = ArrayDeque<OddsMidRow>()
+    private val forward = LinkedHashMap<String, ForwardTestRow>()
+    private val ticketForwardRows = LinkedHashMap<String, TicketForwardRow>()
     private val settled = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.SettledWindowRow>()
     private val path = ArrayDeque<com.dirk.kalshiodds.data.local.archive.PricePathRow>()
     private val spot = ArrayDeque<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>()
@@ -67,6 +69,30 @@ class InMemoryResultsStore(
     @Synchronized
     override fun recentOddsMids(limit: Int): List<OddsMidRow> =
         odds.toList().takeLast(limit).asReversed()
+
+    @Synchronized
+    override fun insertForwardTests(rows: List<ForwardTestRow>) {
+        for (row in rows) forward.putIfAbsent(row.ticker, row)
+        while (forward.size > 5_000) forward.remove(forward.keys.first())
+    }
+
+    @Synchronized
+    override fun forwardTests(limit: Int): List<ForwardTestRow> = forward.values.toList()
+        .takeLast(limit.coerceIn(1, 5_000)).asReversed().map { row ->
+            row.copy(outcome = settled[row.ticker]?.result)
+        }
+
+    @Synchronized
+    override fun insertTicketForward(rows: List<TicketForwardRow>) {
+        for (row in rows) ticketForwardRows.putIfAbsent(row.ticker, row)
+        while (ticketForwardRows.size > 5_000) ticketForwardRows.remove(ticketForwardRows.keys.first())
+    }
+
+    @Synchronized
+    override fun ticketForward(limit: Int): List<TicketForwardRow> = ticketForwardRows.values.toList()
+        .takeLast(limit.coerceIn(1, 5_000)).asReversed().map { row ->
+            row.copy(outcome = settled[row.ticker]?.result)
+        }
 
     @Synchronized
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
@@ -121,7 +147,6 @@ class InMemoryResultsStore(
 
     fun paperFill(id: String): com.dirk.kalshiodds.signal.paper.PaperFill? = paperFills[id]
 
-    @Synchronized
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
     @Synchronized

@@ -8,18 +8,18 @@ import java.util.Locale
 import kotlin.math.floor
 
 /**
- * Final live-order size. Dirk's hard rule (0.3.16): real orders are at
- * most **$10 all-in including Kalshi fees**.
+ * Final live-order size. Dirk's hard rule: real orders are at most
+ * **$5 all-in including Kalshi fees**.
  *
- * Fee matches official rounding
- * (https://docs.kalshi.com/getting_started/fee_rounding) and the
- * last-minute research `all_in_cost`:
+ * Fee per the published quadratic schedule
+ * (https://kalshi.com/docs/kalshi-fee-schedule.pdf) and the
+ * user-specified rounding:
  *
- *     trade_fee = ceil_6dp(0.07 × count × P × (1 − P))
- *     all-in    = ceil_cent(count × P + trade_fee)
+ *     fee = ceil_cent(0.07 × count × P × (1 − P))
+ *     all-in = count × P + fee
  *
  * [count] is the largest integer with all-in ≤ [LIVE_ALL_IN_CAP_USD].
- * Profit if the side wins: `count × $1 − all-in`.
+ * Profit if the side wins: `count × $1 − count × P − fee`.
  * Never places an order.
  */
 object LiveOrderSizer {
@@ -44,13 +44,26 @@ object LiveOrderSizer {
         count: Int,
         price: Double,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
-    ): Double = KalshiFee.total(count, price, feeRate)
+    ): Double {
+        val n = count.coerceAtLeast(0)
+        if (n <= 0) return 0.0
+        val p = priceBd(price)
+        val raw = bd(feeRate).multiply(BigDecimal.valueOf(n.toLong()))
+            .multiply(p)
+            .multiply(BigDecimal.ONE.subtract(p))
+            .max(BigDecimal.ZERO)
+        return raw.setScale(2, RoundingMode.CEILING).toDouble()
+    }
 
     fun allInUsd(
         count: Int,
         price: Double,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
-    ): Double = KalshiFee.totalCost(count, price, feeRate)
+    ): Double {
+        val n = count.coerceAtLeast(0)
+        if (n <= 0) return 0.0
+        return positionBd(n, price).add(bd(feeUsd(n, price, feeRate))).toDouble()
+    }
 
     fun profitIfWinUsd(
         count: Int,
@@ -91,7 +104,7 @@ object LiveOrderSizer {
                 profitIfWinUsd = 0.0,
                 priceWire = "0.0000",
                 countWire = "0.00",
-                refusedReason = "No usable ask to size a $10 live order"
+                refusedReason = "No usable ask to size a $5 live order"
             )
         val n = maxCount(p, capUsd, feeRate)
         if (n < 1) {
@@ -127,9 +140,41 @@ object LiveOrderSizer {
         )
     }
 
+    /** Size a buy at the touch without assuming more contracts than the book shows. */
+    fun sizeWithinDepth(
+        price: Double,
+        visibleContracts: Int,
+        capUsd: Double = LIVE_ALL_IN_CAP_USD,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+    ): Clip {
+        val capped = size(price, capUsd, feeRate)
+        if (!capped.ok) return capped
+        val count = minOf(capped.count, visibleContracts.coerceAtLeast(0))
+        if (count == 0) return capped.copy(
+            count = 0,
+            countWire = "0.00",
+            feeUsd = 0.0,
+            positionUsd = 0.0,
+            allInUsd = 0.0,
+            profitIfWinUsd = 0.0,
+            refusedReason = "No whole contracts visible at the quoted ask"
+        )
+        val fee = feeUsd(count, capped.price, feeRate)
+        val position = positionBd(count, capped.price).toDouble()
+        val allIn = position + fee
+        return capped.copy(
+            count = count,
+            countWire = String.format(Locale.US, "%.2f", count.toDouble()),
+            feeUsd = fee,
+            positionUsd = position,
+            allInUsd = allIn,
+            profitIfWinUsd = count * SignalConstants.CONTRACT_SETTLEMENT_USD - allIn
+        )
+    }
+
     /**
      * Last-chance cap on the ticket that is about to hit HTTP.
-     * Never raises size. Refuses rather than send over the $10 all-in cap.
+     * Never raises size. Refuses rather than send over the $5 all-in cap.
      */
     fun enforce(
         ticket: TradeTicket,
@@ -178,11 +223,8 @@ object LiveOrderSizer {
         )
     }
 
-    /** 0.3.16: min-profit is off. Always false so leftover prefs cannot block. */
-    fun belowMinProfit(profitIfWinUsd: Double, minProfitUsd: Double): Boolean {
-        if (minProfitUsd <= 0.0) return false
-        return profitIfWinUsd + 1e-9 < minProfitUsd
-    }
+    fun belowMinProfit(profitIfWinUsd: Double, minProfitUsd: Double): Boolean =
+        profitIfWinUsd + 1e-9 < minProfitUsd
 
     fun belowMinProfitMessage(profitIfWinUsd: Double, minProfitUsd: Double): String =
         String.format(

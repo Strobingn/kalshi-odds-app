@@ -76,7 +76,50 @@ data class ResultsBundle(
     val tickets: List<TicketAttemptRow> = emptyList()
 )
 
+
+/** First qualifying live signal for a market, retained independently of rolling predictions. */
+data class ForwardTestRow(
+    val ticker: String,
+    val series: String,
+    val capturedAtMs: Long,
+    val modelYes: Double,
+    val marketYes: Double,
+    val side: String,
+    val bookAsk: Double?,
+    val sizeAtAsk: Double?,
+    val contracts: Int?,
+    val allInUsd: Double?,
+    val feeUsd: Double?,
+    val quoteQualified: Boolean,
+    val outcome: String? = null
+)
+
+/** First live, book-backed automatic ticket suggestion per market. Never an actual fill. */
+data class TicketForwardRow(
+    val ticker: String,
+    val series: String,
+    val capturedAtMs: Long,
+    val buildCode: Int,
+    val kind: String,
+    val modelSource: String,
+    val side: String,
+    val modelYes: Double,
+    val marketYes: Double,
+    val ask: Double,
+    val visibleContracts: Double,
+    val contracts: Int,
+    val allInUsd: Double,
+    val feeUsd: Double,
+    val feeRate: Double,
+    val modeledNetUsd: Double,
+    val outcome: String? = null
+)
+
 interface ResultsStore {
+    fun insertForwardTests(rows: List<ForwardTestRow>)
+    fun insertTicketForward(rows: List<TicketForwardRow>)
+    fun forwardTests(limit: Int = 5_000): List<ForwardTestRow>
+    fun ticketForward(limit: Int = 5_000): List<TicketForwardRow>
     fun insertSnapshots(rows: List<ScoredSnapshotRow>)
     fun insertAlert(row: AlertRow)
     fun insertScorecard(row: ScorecardRow)

@@ -17,7 +17,7 @@ object AppIdentity {
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"
 
     const val DB_RESULTS = "diphunter_results.db"
-    const val DB_VERSION = 6
+    const val DB_VERSION = 7
 
     const val PREFS_KEEPALIVE = "diphunter_keepalive"
     const val PREFS_PAPER = "diphunter_paper_book"
