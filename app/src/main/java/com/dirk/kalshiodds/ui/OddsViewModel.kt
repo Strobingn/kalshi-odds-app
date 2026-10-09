@@ -1594,7 +1594,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val coin = com.dirk.kalshiodds.signal.ws.CfBenchmarks.coinOf(id)
             val cb = ext.forSeries(coin)?.lastPrice != null
             val st = container.cfFeed.status(id, now, coinbaseAvailable = cb)
-            "$coin: ${st.detail}"
+            "$coin: ${st.detail}" + (container.cfFeed.latest(id)?.let { com.dirk.kalshiodds.signal.ws.CfBenchmarks.settlementExplainer(it) }?.let { "\n   $it" } ?: "")
         }
     }
 

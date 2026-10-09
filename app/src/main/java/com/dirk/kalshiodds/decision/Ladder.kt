@@ -102,7 +102,7 @@ object Fav15Rule {
         return Result.Enter(Signal(favSide, favAsk, clip))
     }
 
-    private fun cents(p: Double) = String.format(Locale.US, "%.0f¢", p * 100)
+    private fun cents(p: Double) = com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(p)
 }
 
 /**

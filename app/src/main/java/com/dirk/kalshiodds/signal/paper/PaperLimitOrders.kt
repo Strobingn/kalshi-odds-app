@@ -41,7 +41,9 @@ data class PaperOrder(
     val closeTimeMs: Long? = null,
     /** "manual" or the scalp strategy/variant id (tracked separately in its stats). */
     val source: String = SOURCE_MANUAL,
-    val note: String = ""
+    val note: String = "",
+    /** 0.3.43: displayed size already resting at or better than our limit on our side when the order started resting. */
+    val queueAheadAtPost: Double? = null
 ) {
     val remaining: Int get() = (quantity - filledQty).coerceAtLeast(0)
     val isOpen: Boolean get() = status == STATUS_OPEN && remaining > 0
@@ -136,7 +138,7 @@ interface PaperFillSink {
 class PaperBookFillSink(private val book: PaperBook) : PaperFillSink {
     override fun buy(order: PaperOrder, qty: Int, feeUsd: Double): Int =
         book.limitBuyFill(order.ticker, order.side, qty, order.limitPrice, feeUsd,
-            String.format(Locale.US, "Paper limit buy %s @ %.0f¢ · %s", order.displaySide, order.limitPrice * 100, PaperOrder.TOUCH_FILL_NOTE))
+            String.format(Locale.US, "Paper limit buy %s @ %s · %s", order.displaySide, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(order.limitPrice), PaperOrder.TOUCH_FILL_NOTE))
     override fun sell(order: PaperOrder, qty: Int, feeUsd: Double): Int =
         book.limitSellFill(order.ticker, order.side, qty, order.limitPrice, feeUsd)
     override fun held(ticker: String, side: String): Int = book.openContracts(ticker, side)
@@ -186,10 +188,13 @@ class PaperOrderBook(
             note = PaperOrder.TOUCH_FILL_NOTE
         )
         if (quote != null) order = fill(order, quote, maker = false, now)
+        if (quote != null && order.isOpen) {
+            order = order.copy(queueAheadAtPost = if (order.isBuy) quote.bidDepthAtOrAbove(px) else quote.askDepthAtOrBelow(px))
+        }
         save(order)
         val msg = String.format(
-            Locale.US, "PAPER %s LIMIT %s %s %d @ %.0f¢ · filled %d now (taker), %d resting · never Kalshi",
-            act, order.displaySide, order.ticker, quantity, px * 100, order.filledQty, order.remaining
+            Locale.US, "PAPER %s LIMIT %s %s %d @ %s · filled %d now (taker), %d resting · never Kalshi",
+            act, order.displaySide, order.ticker, quantity, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px), order.filledQty, order.remaining
         )
         Result(order, msg)
     }
@@ -205,7 +210,7 @@ class PaperOrderBook(
         // An edit that crosses the market fills immediately → taker.
         if (quote != null && next.isOpen) next = fill(next, quote, maker = false, nowMs())
         save(next)
-        Result(next, String.format(Locale.US, "Paper order edited: %d @ %.0f¢", next.quantity, next.limitPrice * 100))
+        Result(next, String.format(Locale.US, "Paper order edited: %d @ %s", next.quantity, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(next.limitPrice)))
     }
 
     fun cancel(id: String, reason: String = PaperOrder.STATUS_CANCELLED): Result = synchronized(lock) {

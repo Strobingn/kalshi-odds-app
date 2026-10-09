@@ -51,6 +51,28 @@ object ScalpData {
         val feesUsd: Double
     )
 
+    /**
+     * 0.3.43 maker-first variants vs taker, per strategy. Maker fee is $0 on these series, so the adverse-selection
+     * columns (side mid − entry at +30 s / +60 s) are what keep "fee-free" from becoming fake profit.
+     */
+    fun makerLines(all: List<ScalpTrade>): List<String> {
+        val done = all.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.netUsd != null }
+        fun avg(xs: List<Double>) = if (xs.isEmpty()) "—" else String.format(Locale.US, "%+.1f¢", xs.average() * 100)
+        return com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { s ->
+            listOf(true, false).map { mk ->
+                val rows = done.filter { it.strategy == s && it.isMaker == mk }
+                val fills = all.filter { it.strategy == s && it.isMaker == mk && it.entryAtMs != null }
+                val noFill = all.count { it.strategy == s && it.isMaker == mk && it.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL }
+                String.format(
+                    Locale.US, "%s %s: %d trips · net %s/ct · AS30 %s · AS60 %s · no-fill %d",
+                    s.label, if (mk) "maker" else "taker", rows.size,
+                    avg(rows.map { it.netUsd!! / it.contracts.coerceAtLeast(1) }),
+                    avg(fills.mapNotNull { it.adverse30 }), avg(fills.mapNotNull { it.adverse60 }), noFill
+                )
+            }
+        }
+    }
+
     fun closed(trades: List<ScalpTrade>): List<ScalpTrade> =
         trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null }.sortedBy { it.closedAtMs ?: it.signalAtMs }
 
@@ -120,11 +142,24 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
     val colors = DipTheme.colors
     val trades by viewModel.scalpTrades.collectAsState()
     val paperOrders by viewModel.paperOrders.collectAsState()
+    val scalpAll by viewModel.scalpAll.collectAsState()
     val s = ScalpData.summary(trades)
     val curve = ScalpData.equityCurve(trades)
     val rows = ScalpData.tripLines(trades)
     DecisionScaffold(ScalpData.TITLE, onBack) {
         item { Text("Scalping results only — paper, net after both Kalshi fees. Not part of the main scorecard.", color = colors.accentOrange, fontWeight = FontWeight.SemiBold) }
+        item {
+            DecisionCard {
+                Text("Maker-first vs taker (all variants, paper)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                ScalpData.makerLines(scalpAll).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+                Text(
+                    "Maker variants post at the bid / exit at the ask (maker fee $0). Strategy fills use a conservative queue model " +
+                        "(trade-through or estimated queue ahead consumed). AS30/AS60 = mid move after the fill; our earlier LIP study saw " +
+                        "6–15¢ adverse selection on one-legged resting fills, so fee-free is not free.",
+                    style = MaterialTheme.typography.labelSmall, color = colors.textSecondary
+                )
+            }
+        }
         item {
             com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
                 tickers = emptyList(), orders = paperOrders, showTicket = false,

@@ -23,6 +23,20 @@ object CfBenchmarks {
     val INDEX_IDS: List<String> = listOf(BTC, ETH, SOL)
     const val FRESH_MS = 15_000L
 
+    /**
+     * 0.3.43 Live settlement explainer. In the final minute the channel adds `last_60s_windowed_average_15min`
+     * (docs.kalshi.com/websockets/cfbenchmarks-value, checked 2026-10-09): Kalshi settles on that 60 s average, so
+     * the app shows it next to spot. Null outside the final minute.
+     */
+    fun settlementExplainer(tick: Tick): String? {
+        val fm = tick.finalMinuteAverage ?: return null
+        return String.format(
+            java.util.Locale.US,
+            "Settles on the 60 s average: %,.2f over %d prints (spot %,.2f) — one late print moves it only ~1/60",
+            fm.value, fm.windowSize, tick.value
+        )
+    }
+
     data class Average(
         val value: Double,
         val windowSize: Int,

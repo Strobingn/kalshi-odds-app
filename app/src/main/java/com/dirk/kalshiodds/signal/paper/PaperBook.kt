@@ -586,12 +586,12 @@ class PaperBook(
                     syncTail = tail,
                     lastMessage = String.format(
                         java.util.Locale.US,
-                        "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · %s",
+                        "PAPER %s %s · $%.2f · %d ct @ %s · %s",
                         row.displaySide,
                         row.ticker,
                         row.stakeUsd,
                         row.contracts,
-                        row.limitPrice * 100,
+                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(row.limitPrice),
                         source
                     )
                 )
@@ -828,7 +828,7 @@ class PaperBook(
                     stakeUsd = open.stakeUsd + n * px,
                     limitPrice = (open.limitPrice * open.contracts + px * n) / total,
                     updatedAtMs = nowMs(),
-                    note = open.note + String.format(java.util.Locale.US, " · +%d ct @ %.0f¢ limit", n, px * 100)
+                    note = open.note + String.format(java.util.Locale.US, " · +%d ct @ %s limit", n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px))
                 )
             } else {
                 newFill(ticker = ticker, side = want, stakeUsd = n * px, contracts = n, limitPrice = px, source = "paper-limit", note = note)
@@ -840,7 +840,7 @@ class PaperBook(
                     cashUsd = cur.cashUsd - n * px - fee,
                     fills = fills,
                     syncTail = tail,
-                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT BUY %s %s · %d ct @ %.0f¢ · fee $%.2f · never Kalshi", want, ticker, n, px * 100, fee)
+                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT BUY %s %s · %d ct @ %s · fee $%.2f · never Kalshi", want, ticker, n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px), fee)
                 )
             )
             return n
@@ -873,7 +873,7 @@ class PaperBook(
                 won = pnl >= 0.0,
                 pnlUsd = pnl,
                 updatedAtMs = nowMs(),
-                note = String.format(java.util.Locale.US, "Paper limit sell %d ct @ %.0f¢ · fee $%.2f · never sent to Kalshi", n, px * 100, fee)
+                note = String.format(java.util.Locale.US, "Paper limit sell %d ct @ %s · fee $%.2f · never sent to Kalshi", n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px), fee)
             )
             val leftover = if (remaining > 0) open.copy(contracts = remaining, stakeUsd = remaining * open.limitPrice) else null
             val nextFills = buildList {
@@ -888,7 +888,7 @@ class PaperBook(
                     fills = kept,
                     syncTail = tail,
                     lifetimeRealizedPnlUsd = nextLifetime(cur, pnl),
-                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT SELL %s %s · %d ct @ %.0f¢ · %+.2f · never Kalshi", want, ticker, n, px * 100, pnl)
+                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT SELL %s %s · %d ct @ %s · %+.2f · never Kalshi", want, ticker, n, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px), pnl)
                 )
             )
             return n
@@ -948,11 +948,11 @@ class PaperBook(
                     lifetimeRealizedPnlUsd = lifetime,
                     lastMessage = String.format(
                         java.util.Locale.US,
-                        "PAPER SELL %s %s · %d ct @ %.0f¢ · %+.2f · never Kalshi",
+                        "PAPER SELL %s %s · %d ct @ %s · %+.2f · never Kalshi",
                         sold.displaySide,
                         sold.ticker,
                         qty,
-                        px * 100,
+                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px),
                         pnl
                     )
                 )
@@ -1141,12 +1141,12 @@ class PaperBook(
                     syncTail = tail,
                     lastMessage = String.format(
                         java.util.Locale.US,
-                        "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · Kelly f=%.3f · %s",
+                        "PAPER %s %s · $%.2f · %d ct @ %s · Kelly f=%.3f · %s",
                         row.displaySide,
                         row.ticker,
                         row.stakeUsd,
                         row.contracts,
-                        row.limitPrice * 100,
+                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(row.limitPrice),
                         sized.kellyF,
                         source
                     )

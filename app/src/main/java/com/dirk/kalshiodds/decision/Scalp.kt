@@ -73,6 +73,11 @@ object ScalpRule {
     const val CF_LIMIT_TTL_MS = 1_000L
     const val CF_MAX_HOLD_MS = 90_000L
     const val CF_EXIT_BY_S = 90.0
+    /** 0.3.43 maker-first scalps. */
+    const val MAKER_ENTRY_TTL_MS = 30_000L
+    const val MAKER_EXIT_TTL_MS = 20_000L
+    /** Only half of a level's displayed shrink counts as queue consumed (the rest may be cancels). Conservative. */
+    const val QUEUE_CONSUME_SHARE = 0.5
 
     /** Fallback σ per √second (train medians, Binance 1 s) until the in-app estimator has 2 minutes of spot. */
     fun defaultSigmaPerSec(ticker: String): Double {
@@ -394,8 +399,18 @@ data class ScalpTrade(
     val closedAtMs: Long? = null,
     val netUsd: Double? = null,
     val note: String = "",
-    val ruleVersion: String = ScalpRule.VERSION
+    val ruleVersion: String = ScalpRule.VERSION,
+    /** 0.3.43 maker queue model (in memory): displayed size ahead of us at post time, and estimated consumed since. */
+    val queueAhead: Double? = null,
+    val queueConsumed: Double = 0.0,
+    val levelSize: Double? = null,
+    val restingLimit: Double? = null,
+    val restingSinceMs: Long? = null,
+    /** Adverse selection: side mid − entry price, 30 s / 60 s after the entry fill (dollars; negative = adverse). */
+    val adverse30: Double? = null,
+    val adverse60: Double? = null
 ) {
+    val isMaker: Boolean get() = ScalpParams.byId(variantId)?.maker == true
     val remaining: Int get() = contracts - soldContracts
     val entryCostUsd: Double get() = (entryPrice ?: 0.0) * contracts + entryFeeUsd
     val holdMs: Long? get() = entryAtMs?.let { e -> closedAtMs?.let { it - e } }
@@ -447,6 +462,8 @@ class ScalpBook(
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
     /** Primary scalps only (what the Scalp screen, stats and ladder use). */
     val trades: StateFlow<List<ScalpTrade>> = _trades.asStateFlow()
+    /** 0.3.43: primary + shadow (incl. maker-first variants), for the maker-vs-taker comparison. */
+    val all: StateFlow<List<ScalpTrade>> = _all.asStateFlow()
     private val vol = HashMap<String, SpotVol>()
     private val _marks = MutableStateFlow<Map<String, ScalpRule.Quote>>(emptyMap())
     /** Latest quote per ticker, for mark-to-bid P&L on screen. */
@@ -528,15 +545,22 @@ class ScalpBook(
                         if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
                         openCost += cost
                     }
+                    val makerBid = if (p.maker) q.bid(sig.side)?.takeIf { it > 0.0 } else null
+                    if (p.maker && makerBid == null) continue
                     changed += ScalpTrade(
                         id = idFactory(),
                         ticker = q.ticker.uppercase(),
                         side = sig.side,
                         state = ScalpState.PENDING_ENTRY,
                         signalAtMs = q.nowMs,
-                        signalAsk = sig.ask,
+                        signalAsk = makerBid ?: sig.ask,
+                        queueAhead = if (p.maker) q.bidSize(sig.side) ?: 0.0 else null,
+                        levelSize = if (p.maker) q.bidSize(sig.side) else null,
+                        restingLimit = makerBid,
+                        restingSinceMs = if (p.maker) q.nowMs else null,
                         fairAtSignal = sig.fair,
-                        note = String.format(Locale.US, "%s · edge %.1f¢ after fees · %s", p.strategy.label, sig.gapAfterFee * 100, p.id),
+                        note = String.format(Locale.US, "%s · edge %.1f¢ after fees · %s", p.strategy.label, sig.gapAfterFee * 100, p.id) +
+                            (if (p.maker) String.format(Locale.US, " · maker post @ %s, queue ahead %.0f", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(makerBid!!), q.bidSize(sig.side) ?: 0.0) else ""),
                         ruleVersion = "${ScalpRule.VERSION}|${p.id}|$role"
                     )
                 }
@@ -558,17 +582,101 @@ class ScalpBook(
         next
     }
 
-    private fun step(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
+    private fun step(t0: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
+        val marked = markAdverse(t0, q)
+        val t = marked ?: t0
+        val out = stepInner(t, q, p)
+        return out ?: marked
+    }
+
+    /** 0.3.43: record side mid − entry 30 s and 60 s after the entry fill (adverse selection), once each. */
+    private fun markAdverse(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) return null
+        val e = t.entryAtMs ?: return null
+        val px = t.entryPrice ?: return null
+        val bid = q.bid(t.side) ?: return null
+        val ask = q.ask(t.side) ?: return null
+        val mid = (bid + ask) / 2.0
+        val age = q.nowMs - e
+        return when {
+            t.adverse30 == null && age >= 30_000L -> (mid - px).let { t.copy(adverse30 = it, note = t.note + String.format(Locale.US, " · AS30 %+.1f¢", it * 100)) }
+            t.adverse60 == null && t.adverse30 != null && age >= 60_000L -> (mid - px).let { t.copy(adverse60 = it, note = t.note + String.format(Locale.US, " · AS60 %+.1f¢", it * 100)) }
+            else -> null
+        }
+    }
+
+    /**
+     * 0.3.43 conservative maker queue model for STRATEGY resting orders (manual paper limits keep the exact-touch rule):
+     * fills only on a trade-through (the opposite side crosses our price, or our whole level is wiped) or once the
+     * estimated queue ahead is consumed (only [ScalpRule.QUEUE_CONSUME_SHARE] of each level shrink counts).
+     * [buy]: resting bid at [limit] on [side]. Returns (filled, updated trade).
+     */
+    private fun makerQueueStep(t: ScalpTrade, q: ScalpRule.Quote, limit: Double, buy: Boolean): Pair<Boolean, ScalpTrade> {
+        val ourBest = if (buy) q.bid(t.side) else q.ask(t.side)
+        val opp = if (buy) q.ask(t.side) else q.bid(t.side)
+        val oppCrossed = opp != null && (if (buy) opp < limit - 1e-9 else opp > limit + 1e-9)
+        val levelWiped = ourBest != null && (if (buy) ourBest < limit - 1e-9 else ourBest > limit + 1e-9)
+        if (oppCrossed || levelWiped) return true to t
+        if (ourBest == null || kotlin.math.abs(ourBest - limit) > 1e-9) return false to t
+        val size = (if (buy) q.bidSize(t.side) else q.askSize(t.side)) ?: 0.0
+        val prev = t.levelSize ?: size
+        val consumed = t.queueConsumed + (prev - size).coerceAtLeast(0.0) * ScalpRule.QUEUE_CONSUME_SHARE
+        val next = t.copy(queueConsumed = consumed, levelSize = size)
+        return (consumed + 1e-9 >= (t.queueAhead ?: 0.0) && (t.queueAhead ?: 0.0) > 0.0) to next
+    }
+
+    private fun fillMakerEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (q.bookAtMs <= t.signalAtMs) return null
+        val limit = t.restingLimit ?: t.signalAsk
+        if (q.nowMs - t.signalAtMs > ScalpRule.MAKER_ENTRY_TTL_MS || q.nowMs >= q.closeMs || !q.fresh()) {
+            return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; maker entry cancelled: unfilled / stale")
+        }
+        val (filled, next) = makerQueueStep(t, q, limit, buy = true)
+        if (!filled) return next.takeIf { it != t }
+        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(ScalpRule.CONTRACTS, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
+        return next.copy(
+            state = ScalpState.OPEN, contracts = ScalpRule.CONTRACTS, entryPrice = limit, entryFeeUsd = fee, entryAtMs = q.nowMs,
+            restingLimit = null, note = "${t.note}; maker fill @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit)} (queue model)"
+        )
+    }
+
+    private fun fillMakerExit(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        val limit = t.restingLimit ?: return fillExit(t, q)
+        val since = t.restingSinceMs ?: t.exitDecidedAtMs ?: q.nowMs
+        // Fall back to a taker exit at the bid when the maker exit has not filled in time or the window is ending.
+        if (q.nowMs - since > ScalpRule.MAKER_EXIT_TTL_MS || q.tauS <= ScalpRule.TIME_STOP_S) {
+            return t.copy(restingLimit = null, exitReason = "${t.exitReason} (maker exit unfilled → taker)")
+        }
+        if (!q.fresh() || q.nowMs >= q.closeMs) return null
+        val (filled, next) = makerQueueStep(t, q, limit, buy = false)
+        if (!filled) return next.takeIf { it != t }
+        val n = t.remaining
+        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(n, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
+        return close(next.copy(soldContracts = t.soldContracts + n, proceedsUsd = t.proceedsUsd + n * limit, exitFeeUsd = t.exitFeeUsd + fee, restingLimit = null),
+            q.nowMs, "${t.exitReason} (maker exit)")
+    }
+
+    private fun stepInner(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
         return when (t.state) {
-            ScalpState.PENDING_ENTRY -> if (p.strategy == ScalpStrategy.CF_REPRICE) fillRestingLimitEntry(t, q) else fillEntry(t, q)
+            ScalpState.PENDING_ENTRY -> when {
+                p.maker -> fillMakerEntry(t, q)
+                p.strategy == ScalpStrategy.CF_REPRICE -> fillRestingLimitEntry(t, q)
+                else -> fillEntry(t, q)
+            }
             ScalpState.OPEN -> {
                 if (q.nowMs >= q.closeMs) return null
                 val reason = (if (p.strategy == ScalpStrategy.CF_REPRICE)
                     ScalpRule.cfRepriceExit(t.side, t.entryPrice ?: return null, t.entryAtMs, q, p)
                 else ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q, p)) ?: return null
-                t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason.label)
+                val urgent = reason == ScalpRule.ExitReason.STOP || reason == ScalpRule.ExitReason.TIME_STOP || reason == ScalpRule.ExitReason.CF_EXIT_BY_CLOSE
+                val makerAsk = if (p.maker && !urgent) q.ask(t.side) else null
+                t.copy(
+                    state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason.label,
+                    restingLimit = makerAsk, restingSinceMs = makerAsk?.let { q.nowMs },
+                    queueAhead = makerAsk?.let { q.askSize(t.side) ?: 0.0 }, queueConsumed = 0.0, levelSize = makerAsk?.let { q.askSize(t.side) }
+                )
             }
-            ScalpState.PENDING_EXIT -> fillExit(t, q)
+            ScalpState.PENDING_EXIT -> if (t.restingLimit != null) fillMakerExit(t, q) else fillExit(t, q)
             else -> null
         }
     }
@@ -579,7 +687,7 @@ class ScalpBook(
         val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: $why") }
         if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
         val ask = q.ask(t.side) ?: return miss("no ask")
-        if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %.0f¢", ask * 100))
+        if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %s", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(ask)))
         val size = q.askSize(t.side) ?: 0.0
         if (size + 1e-9 < ScalpRule.CONTRACTS) return miss("displayed size ${size.toInt()} < ${ScalpRule.CONTRACTS}")
         return t.copy(
@@ -612,7 +720,7 @@ class ScalpBook(
             entryPrice = t.signalAsk,
             entryFeeUsd = ScalpRule.orderFee(n, t.signalAsk),
             entryAtMs = q.nowMs,
-            note = "${t.note}; resting limit filled $n ct @ ${String.format(Locale.US, "%.0f¢", t.signalAsk * 100)} (touch fill, optimistic vs queue)"
+            note = "${t.note}; resting limit filled $n ct @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(t.signalAsk)} (touch fill, optimistic vs queue)"
         )
     }
 

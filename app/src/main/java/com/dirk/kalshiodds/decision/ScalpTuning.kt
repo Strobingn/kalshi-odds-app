@@ -44,7 +44,12 @@ data class ScalpParams(
     /** Entry window: seconds left to close. */
     val tauMinS: Double,
     val tauMaxS: Double = 840.0,
-    val strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP
+    val strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP,
+    /**
+     * 0.3.43 maker-first variant: post-only resting entry at the bid and resting exit at the ask (maker fee $0 on
+     * these quadratic series). Conservative queue model + adverse-selection logging. Tracked separately (own id).
+     */
+    val maker: Boolean = false
 ) {
     /** Fair-gap ids keep the 0.3.40 format (g14-t12-…); other strategies are prefixed ("dip-g06-…"). */
     val id: String
@@ -52,7 +57,7 @@ data class ScalpParams(
             Locale.US, "g%02d-t%02d-s%02d-d%02d-w%03d",
             Math.round(minGap * 100), Math.round(target * 100), Math.round(stop * 100),
             Math.round(turnDown * 100), Math.round(tauMinS)
-        )
+        ) + (if (maker) "-mk" else "")
 
     fun label(): String {
         val trigger = when (strategy) {
@@ -134,10 +139,15 @@ data class ScalpParams(
         }
 
         /** Everything the book runs as paper variants: 8 fair-gap + 12 strategy variants. */
-        val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID
+        val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
+
+        /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */
+        val MAKER_VARIANTS: List<ScalpParams> by lazy {
+            (SEEDS.values + STRATEGY_SEEDS.values).distinctBy { it.id }.map { it.copy(maker = true) }
+        }
 
         fun byId(id: String): ScalpParams? =
-            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC).firstOrNull { it.id == id }
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS).firstOrNull { it.id == id }
 
         fun coinOf(ticker: String): String {
             val u = ticker.uppercase()

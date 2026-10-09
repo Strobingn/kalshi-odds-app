@@ -272,6 +272,7 @@ private fun ProposedTicketCard(
             ticket.feeUsd?.let {
                 TicketMetricRow("Fee", String.format(Locale.US, "$%.2f", it))
             }
+            FeeExplainer(ticket.contracts, ticket.limitPrice, com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE)
             Text(
                 ticket.sizingNote,
                 style = MaterialTheme.typography.labelMedium,
@@ -579,6 +580,7 @@ internal fun ApproveTicketDialog(
                         "Fee",
                         String.format(Locale.US, "$%.2f", shown.feeUsd ?: 0.0)
                     )
+                    FeeExplainer(shown.contracts, shown.limitPrice, feeRate)
                     TicketMetricRow(
                         "Expected proceeds",
                         String.format(Locale.US, "$%.2f", shown.stakeUsd)
@@ -590,6 +592,7 @@ internal fun ApproveTicketDialog(
                         "Fee",
                         String.format(Locale.US, "$%.2f", shown.feeUsd ?: 0.0)
                     )
+                    FeeExplainer(shown.contracts, shown.limitPrice, feeRate)
                     TicketMetricRow(
                         "Total cost",
                         String.format(Locale.US, "$%.2f", shown.allInUsd ?: shown.stakeUsd)
@@ -748,4 +751,16 @@ private fun TicketMetricRow(label: String, value: String) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
+}
+
+
+/** 0.3.43: every ticket shows the expected fee as 7% × (1 − P) of stake. */
+@androidx.compose.runtime.Composable
+internal fun FeeExplainer(contracts: Int, price: Double, feeRate: Double) {
+    if (contracts <= 0) return
+    androidx.compose.material3.Text(
+        com.dirk.kalshiodds.signal.trade.KalshiFee.expectedFeeLine(contracts, price, feeRate),
+        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+        color = com.dirk.kalshiodds.ui.theme.DipTheme.colors.textSecondary
+    )
 }

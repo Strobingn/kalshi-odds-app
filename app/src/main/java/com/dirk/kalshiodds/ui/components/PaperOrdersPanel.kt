@@ -31,10 +31,11 @@ import java.util.Locale
 /** 0.3.43 copy for paper limit orders (pure, tested). */
 object PaperOrderCopy {
     fun line(o: PaperOrder): String = String.format(
-        Locale.US, "%s %s %s · %d/%d @ %.0f¢ · %s%s",
-        o.action, o.displaySide, o.ticker, o.filledQty, o.quantity, o.limitPrice * 100, o.status,
+        Locale.US, "%s %s %s · %d/%d @ %s · %s%s",
+        o.action, o.displaySide, o.ticker, o.filledQty, o.quantity, com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(o.limitPrice), o.status,
         if (o.feesUsd > 0) String.format(Locale.US, " · fees $%.2f", o.feesUsd) else ""
-    ) + if (o.source != PaperOrder.SOURCE_MANUAL) " · ${o.source}" else ""
+    ) + (o.queueAheadAtPost?.let { String.format(Locale.US, " · queue ahead at post %.0f", it) } ?: "") +
+        if (o.source != PaperOrder.SOURCE_MANUAL) " · ${o.source}" else ""
 
     const val FOOTNOTE = PaperOrder.TOUCH_FILL_NOTE + " Immediate fills pay the taker fee; resting fills pay the series maker fee ($0 for these crypto series). Unfilled orders auto-cancel at window close. Paper only — never sent to Kalshi."
 }
