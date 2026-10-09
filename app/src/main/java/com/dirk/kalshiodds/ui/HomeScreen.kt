@@ -60,6 +60,7 @@ fun HomeScreen(
     onOpenScorecard: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSignalHistory: () -> Unit = onOpenHistory,
+    onOpenScalp: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit,
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
@@ -226,6 +227,16 @@ fun HomeScreen(
                                 modifier = Modifier
                                     .padding(top = 4.dp, bottom = 4.dp)
                                     .clickable(onClick = onOpenSignalHistory)
+                            )
+                        }
+                        item {
+                            Text(
+                                "Scalping",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = colors.textSecondary,
+                                modifier = Modifier
+                                    .padding(top = 4.dp, bottom = 4.dp)
+                                    .clickable(onClick = onOpenScalp)
                             )
                         }
                     }

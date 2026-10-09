@@ -646,7 +646,45 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun logScalpFill(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket?, paper: Boolean) {
+        val t = ticket ?: return
+        if (t.kind != com.dirk.kalshiodds.signal.trade.TicketKind.SCALP &&
+            t.kind != com.dirk.kalshiodds.signal.trade.TicketKind.SCALP_EXIT
+        ) return
+        val log = container.scalpLog
+        if (t.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP) {
+            log.recordEntry(
+                com.dirk.kalshiodds.signal.scalp.ScalpTrade(
+                    id = t.id,
+                    ticker = t.ticker,
+                    series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker),
+                    side = t.side,
+                    entryPrice = t.limitPrice ?: return,
+                    entryTimeMs = t.createdAtMs,
+                    contracts = t.contracts,
+                    costUsd = t.allInUsd ?: return,
+                    mode = if (paper) "PAPER" else "LIVE"
+                )
+            )
+        } else {
+            val open = log.openTrade(t.ticker) ?: return
+            val proceeds = t.stakeUsd
+            val fee = t.feeUsd ?: 0.0
+            val pnl = proceeds - fee - open.costUsd
+            log.recordExit(
+                id = open.id,
+                exitPrice = t.limitPrice ?: return,
+                exitTimeMs = System.currentTimeMillis(),
+                proceedsUsd = proceeds,
+                feeUsd = fee,
+                pnlUsd = pnl,
+                outcome = "SOLD"
+            )
+        }
+    }
+
     private fun applyPaperBuy(ticketId: String) {
+        val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
         val outcome = com.dirk.kalshiodds.signal.paper.PaperApprove.apply(
             session = ticketSession,
             book = paperBook,
@@ -656,6 +694,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 runCatching { container.resultsWriter.enqueueTicket(row) }
             }
         )
+        if (outcome.ok) runCatching { logScalpFill(ticket, paper = true) }
         _state.update {
             it.copy(
                 userMessage = if (outcome.ok) outcome.message else outcome.visibleReason,

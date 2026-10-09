@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
@@ -875,5 +876,38 @@ class ScalpTicketTest {
         val m = scalpMarket(mid = 0.70, spotReturn1m = 0.002)
         val all = TicketBuilder.proposeAll(listOf(m), ctx(at(4)))
         assertTrue(all.any { it.kind == TicketKind.SCALP })
+    }
+}
+
+class ScalpExitTest {
+    @Test
+    fun scalpExitLocksProfitAtChosenPrice() {
+        val m = market(passed = true, muted = false, ask = 0.60, volume = 5_000.0)
+            .copy(yesBid = 0.58, yesAsk = 0.60)
+        val pos = LivePosition(
+            ticker = m.ticker, side = "YES", contracts = 8.0, exposureUsd = 4.50,
+            avgCost = 0.5625
+        )
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        val t = TicketBuilder.proposeScalpExit(m, pos, ctx, limitPrice = 0.64)!!
+        assertEquals(TicketKind.SCALP_EXIT, t.kind)
+        assertEquals(0.64, t.limitPrice!!, 1e-9)
+        assertEquals(8, t.contracts)
+        assertTrue("locks a positive profit", t.profitIfWinUsd!! > 0.0)
+        assertTrue(t.reduceOnly)
+        assertTrue(t.gateNote!!.contains("Approve still required"))
+    }
+
+    @Test
+    fun scalpExitSkipsWhenPriceBelowCostOrThinProfit() {
+        val m = market(passed = true, muted = false, ask = 0.60, volume = 5_000.0)
+            .copy(yesBid = 0.58, yesAsk = 0.60)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
+        // selling below cost never surfaces
+        val losing = LivePosition(ticker = m.ticker, side = "YES", contracts = 8.0, exposureUsd = 6.00, avgCost = 0.75)
+        assertNull(TicketBuilder.proposeScalpExit(m, losing, ctx, limitPrice = 0.60))
+        // tiny profit below the $0.25 target does not surface
+        val thin = LivePosition(ticker = m.ticker, side = "YES", contracts = 1.0, exposureUsd = 0.59, avgCost = 0.59)
+        assertNull(TicketBuilder.proposeScalpExit(m, thin, ctx, limitPrice = 0.61))
     }
 }

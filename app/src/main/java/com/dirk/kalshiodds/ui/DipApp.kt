@@ -24,7 +24,8 @@ fun DipApp(
     data: @Composable () -> Unit,
     history: @Composable () -> Unit,
     signalHistory: @Composable () -> Unit,
-    chart: @Composable () -> Unit
+    chart: @Composable () -> Unit,
+    scalp: @Composable () -> Unit = {}
 ) {
     BackHandler(enabled = navigator.canPop && !sheetOpen) {
         navigator.back()
@@ -39,6 +40,7 @@ fun DipApp(
         AppRoutes.HISTORY -> history()
         AppRoutes.SIGNAL_HISTORY -> signalHistory()
         AppRoutes.CHART -> chart()
+        AppRoutes.SCALP -> scalp()
         else -> home()
     }
 }

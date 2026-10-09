@@ -56,7 +56,13 @@ object TicketBuilder {
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
         val scalps = live.mapNotNull { proposeScalp(it, ctx) }
-        return (hunter + value + configured + scalps)
+        val exits = live.mapNotNull { market ->
+            val held = ctx.positions.firstOrNull { p ->
+                p.ticker.equals(market.ticker, true) && p.contracts >= 1.0
+            } ?: return@mapNotNull null
+            proposeScalpExit(market, held, ctx)
+        }
+        return (hunter + value + configured + scalps + exits)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
@@ -142,6 +148,82 @@ object TicketBuilder {
         )
     }
 
+    /**
+     * Scalp exit: propose a profit-taking sell for a held scalp position at
+     * [limitPrice] (default +5c over average cost, maker-style resting ask -
+     * never crosses down to the bid). The owner can also call this with any
+     * price to sell whenever they want; the market does not have to finish.
+     * Backtested note: hold-to-settlement beat early exits on 7 days of live
+     * data (+0.88/bet vs +0.76 for take-profit), so exits are offered, not
+     * forced - the ticket only appears when the held position is in profit.
+     */
+    fun proposeScalpExit(
+        market: MarketUiModel,
+        position: LivePosition,
+        ctx: Context,
+        limitPrice: Double? = null,
+        profitTargetUsd: Double = SCALP_EXIT_PROFIT_TARGET_USD
+    ): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val held = PositionParser.heldContracts(position)
+        if (held <= 0) return null
+        val avg = position.avgCost ?: return null
+        val ask = bestAsk(market, position.side, ctx) ?: return null
+        val requested = KalshiPrice.usable(limitPrice)
+            ?: KalshiPrice.usable((avg + SCALP_EXIT_TICKS_UP).coerceAtMost(0.99))
+        if (requested == null) return null
+        // Only offer the exit when it locks a profit above the target;
+        // a resting ask above the executable ask would never fill.
+        if (requested < avg + 1e-9) return null
+        if (ask - requested > SCALP_EXIT_MAX_ASK_DRIFT) return null
+        val proceeds = held * requested
+        val fee = KalshiFee.total(held, requested, ctx.settings.feeRate)
+        val profit = proceeds - fee - position.exposureUsd
+        if (profit < profitTargetUsd - 1e-9) return null
+        val yesLimit = if (position.side == "YES") requested else (1.0 - requested)
+        val bookSide = if (position.side == "YES") "ask" else "bid"
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = position.side,
+            bookSide = bookSide,
+            stakeUsd = proceeds,
+            limitPrice = requested,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = held,
+            estimatedFillUsd = proceeds,
+            maxPayoutUsd = proceeds,
+            estimatedAvgFill = requested,
+            title = market.title,
+            sizingNote = String.format(
+                java.util.Locale.US,
+                "sell %d ct @ %.1f¢ · locks +$%.2f · resting ask",
+                held, requested * 100.0, profit
+            ),
+            gateNote = String.format(
+                java.util.Locale.US,
+                "Scalp exit · sell %d ct @ %.1f¢ · profit +$%.2f · Approve still required",
+                held, requested * 100.0, profit
+            ),
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.SCALP_EXIT,
+            reduceOnly = true,
+            heldContracts = held,
+            feeUsd = fee,
+            allInUsd = proceeds,
+            profitIfWinUsd = profit,
+            impliedChance = requested,
+            winTargetUsd = profit,
+            winTargetCapped = true,
+            winTargetNote = String.format(
+                java.util.Locale.US,
+                "locks +$%.2f profit now · market does not need to finish",
+                profit
+            )
+        )
+    }
+
     /** Cheap hunter tickets still require positive modeled value after costs. */
     fun proposeHunter(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
@@ -187,6 +269,7 @@ object TicketBuilder {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
             TicketKind.SCALP -> proposeScalp(market, ctx)
+            TicketKind.SCALP_EXIT -> ticket
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
             TicketKind.SELL -> ticket
@@ -532,6 +615,7 @@ object TicketBuilder {
                     "Manual buy · $5 all-in cap including fees · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SCALP -> "Scalp · spot confirms the favorite · Approve still required"
+                TicketKind.SCALP_EXIT -> "Scalp exit · lock profit now · Approve still required"
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
             createdAtMs = ctx.nowMs,
@@ -586,6 +670,10 @@ object TicketBuilder {
     /** Aggressive scalp entries: spot-confirmed side, 20-99c. */
     const val SCALP_MIN_ENTRY = 0.20
     const val SCALP_MAX_ENTRY = 0.99
+    /** Scalp exit defaults: rest +5c over cost, never more than 3c above the ask. */
+    const val SCALP_EXIT_TICKS_UP = 0.05
+    const val SCALP_EXIT_MAX_ASK_DRIFT = 0.03
+    const val SCALP_EXIT_PROFIT_TARGET_USD = 0.25
 
 
     /** Rank the two actual buys independently; a hero direction is not an order price. */

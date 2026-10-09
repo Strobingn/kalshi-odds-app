@@ -76,6 +76,7 @@ class AppContainer(context: Context) {
         results = resultsWriter
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
+    val scalpLog = com.dirk.kalshiodds.signal.scalp.ScalpTradeLog(app).also { it.load() }
     val paper = PaperBookStore(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
