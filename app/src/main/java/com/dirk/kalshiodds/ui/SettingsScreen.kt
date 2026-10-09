@@ -349,7 +349,7 @@ fun SettingsContent(
 
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “scalpHunter-Kimi live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -365,7 +365,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Dip Hunter battery usage to Unrestricted. This never auto-trades.",
+                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set scalpHunter-Kimi battery usage to Unrestricted. This never auto-trades.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -384,7 +384,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Bitcoin-only. scalpHunter-Kimi watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
@@ -491,7 +491,7 @@ fun SettingsContent(
                 onValueChange = { viewModel?.setBankrollDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Bankroll (USD)") },
-                supportingText = { Text("Used only to compute “N contracts max”.") },
+                supportingText = { Text("Used only to compute “N contracts max".") },
                 singleLine = true
             )
             ToggleRow("Kelly sizing (off = fixed fraction)", s.useKelly, { viewModel?.setUseKelly(it) })
