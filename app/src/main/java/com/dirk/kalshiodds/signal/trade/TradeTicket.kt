@@ -74,7 +74,12 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /**
+     * All-in cap for the final pre-HTTP size check. Null = the standard $5
+     * manual cap. Auto-trade stamps its armed cap here so bigger clips pass.
+     */
+    val stakeCapUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
