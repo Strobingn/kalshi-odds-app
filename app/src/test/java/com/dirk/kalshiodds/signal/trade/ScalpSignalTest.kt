@@ -18,8 +18,18 @@ class ScalpSignalTest {
     )
 
     @Test fun selectorUsesAiFairValueWithoutAnEntryGate() {
-        assertEquals("YES", ScalpSignal.candidate(market(0.01, -0.9, -0.9).copy(aiYesPercent = 51.0)).side)
-        assertEquals("NO", ScalpSignal.candidate(market(0.99, 0.9, 0.9).copy(aiYesPercent = 49.0)).side)
+        assertEquals("YES", ScalpSignal.candidate(market(0.01, -0.9, -0.9).copy(aiYesPercent = 51.0), openedAt).side)
+        assertEquals("NO", ScalpSignal.candidate(market(0.99, 0.9, 0.9).copy(aiYesPercent = 49.0), openedAt).side)
+    }
+
+    @Test fun settlementAwareDirectionWinsOverRawAiFallback() {
+        val candidate = ScalpSignal.candidate(
+            market(0.90, 0.02, 0.04).copy(aiYesPercent = 95.0, predictedSide = "NO"),
+            openedAt + 4 * 60_000L
+        )
+        assertEquals("NO", candidate.side)
+        assertEquals("settlement-aware engine", candidate.selectedFrom)
+        assertEquals(660L, candidate.timeToCloseSec)
     }
 
     @Test fun ticketCanOpenOutsideTheOldTimeAndSpotFilters() {

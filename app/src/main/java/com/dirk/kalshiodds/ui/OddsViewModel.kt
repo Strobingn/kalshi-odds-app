@@ -861,7 +861,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         nowMs: Long
     ) {
         ticketForwardLogged.retainAll(live.map { it.ticker }.toSet())
-        for (ticket in tickets.filter { it.canApprove }.sortedByDescending { it.netEvUsd ?: Double.NEGATIVE_INFINITY }) {
+        for (ticket in tickets.filter {
+            it.canApprove || (it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP && it.canPaper)
+        }.sortedByDescending { it.netEvUsd ?: Double.NEGATIVE_INFINITY }) {
             if (ticket.ticker in ticketForwardLogged ||
                 !com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(ticket.ticker) ||
                 !hub.hasFreshBook(ticket.ticker, nowMs)) continue

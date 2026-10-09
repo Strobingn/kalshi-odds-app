@@ -20,7 +20,8 @@ object TicketForwardTest {
         atMs: Long,
         buildCode: Int
     ): TicketForwardRow? {
-        if (!ticket.canApprove || ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
+        val recordable = ticket.canApprove || (ticket.kind == TicketKind.SCALP && ticket.canPaper)
+        if (!recordable || ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL ||
             ticket.ticker.isBlank() || ticket.side !in setOf("YES", "NO") ||
             atMs <= 0L || buildCode <= 0 || modelSource.isBlank() ||
             !feeRate.isFinite() || feeRate < 0.0 || ticket.contracts < 1) return null
@@ -39,7 +40,7 @@ object TicketForwardTest {
         val fee = ticket.feeUsd?.takeIf { it.isFinite() && it >= 0.0 } ?: return null
         if (abs(allIn - LiveOrderSizer.allInUsd(ticket.contracts, ask, feeRate)) > 1e-6 ||
             abs(fee - LiveOrderSizer.feeUsd(ticket.contracts, ask, feeRate)) > 1e-6 ||
-            allIn > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) return null
+            (ticket.kind != TicketKind.SCALP && allIn > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9)) return null
         val expected = modelSide * ticket.contracts - allIn
         if (ticket.netEvUsd?.let { !it.isFinite() || abs(it - expected) > 1e-6 } != false) return null
         return TicketForwardRow(
@@ -58,7 +59,12 @@ object TicketForwardTest {
             allInUsd = allIn,
             feeUsd = fee,
             feeRate = feeRate,
-            modeledNetUsd = expected
+            modeledNetUsd = expected,
+            strategyVersion = ticket.strategyVersion,
+            strategyDecisionSource = ticket.strategyDecisionSource,
+            spotReturn1m = ticket.strategySpotReturn1m,
+            spotReturn5m = ticket.strategySpotReturn5m,
+            timeToCloseSec = ticket.strategyTimeToCloseSec
         )
     }
 
@@ -109,8 +115,9 @@ object TicketForwardTest {
     fun csv(rows: List<TicketForwardRow>): String {
         val header = "ticker,series,captured_at_ms,build_code,kind,model_source,side,model_yes," +
             "market_yes,ask,visible_contracts,contracts,all_in_usd,fee_usd,fee_rate,modeled_net_usd," +
+            "strategy_version,strategy_decision_source,spot_return_1m,spot_return_5m,time_to_close_sec," +
             "outcome,quoted_proxy_pnl_usd"
-        fun number(v: Double): String = String.format(Locale.US, "%.6f", v)
+        fun number(v: Double?): String = v?.let { String.format(Locale.US, "%.6f", it) }.orEmpty()
         fun safe(raw: String?): String {
             val value = raw.orEmpty()
             val guarded = if (value.firstOrNull()?.let { it in "=+-@\t" } == true) "'$value" else value
@@ -121,7 +128,9 @@ object TicketForwardTest {
             listOf(safe(r.ticker), safe(r.series), r.capturedAtMs.toString(), r.buildCode.toString(),
                 safe(r.kind), safe(r.modelSource), safe(r.side), number(r.modelYes), number(r.marketYes),
                 number(r.ask), number(r.visibleContracts), r.contracts.toString(), number(r.allInUsd),
-                number(r.feeUsd), number(r.feeRate), number(r.modeledNetUsd), safe(r.outcome),
+                number(r.feeUsd), number(r.feeRate), number(r.modeledNetUsd), safe(r.strategyVersion),
+                safe(r.strategyDecisionSource), number(r.spotReturn1m), number(r.spotReturn5m),
+                r.timeToCloseSec?.toString().orEmpty(), safe(r.outcome),
                 y?.let { number(proxyPnl(r, it)) }.orEmpty()
             ).joinToString(",")
         }).joinToString("\n", postfix = "\n")

@@ -14,6 +14,12 @@ import org.junit.Test
 class TicketForwardTestTest {
     private val book = BookLevelSnapshot(yes = listOf(0.03 to 200.0), no = listOf(0.96 to 40.0))
     private val clip = LiveOrderSizer.sizeWithinDepth(0.04, 40)
+    private val fullDepthBook = BookLevelSnapshot(yes = listOf(0.03 to 300.0), no = listOf(0.96 to 300.0))
+    private val fullDepthClip = LiveOrderSizer.sizeWithinDepth(
+        0.04,
+        300,
+        LiveOrderSizer.allInUsd(300, 0.04)
+    )
 
     private fun ticket() = TradeTicket(
         id = "proposal", ticker = "KXBTC15M-FWD", side = "YES", bookSide = "bid",
@@ -43,6 +49,35 @@ class TicketForwardTestTest {
         assertNull(TicketForwardTest.capture(ticket(), book.copy(yes = listOf(0.05 to 200.0)), "AI", 0.07, 1L, 1))
         assertNull(TicketForwardTest.capture(ticket().copy(feeUsd = 0.0), book, "AI", 0.07, 1L, 1))
         assertNull(TicketForwardTest.capture(ticket().copy(kind = TicketKind.MANUAL), book, "AI", 0.07, 1L, 1))
+    }
+
+    @Test fun recordsUnrestrictedPaperScalpAtFullVisibleDepth() {
+        val scalp = ticket().copy(
+            ticker = "KXBTC15M-SCALP",
+            kind = TicketKind.SCALP,
+            paperOnly = true,
+            stakeUsd = fullDepthClip.allInUsd,
+            limitPrice = 0.04,
+            contracts = fullDepthClip.count,
+            estimatedFillUsd = fullDepthClip.allInUsd,
+            maxPayoutUsd = fullDepthClip.count.toDouble(),
+            estimatedAvgFill = 0.04,
+            modelChance = 0.15,
+            netEvUsd = 0.15 * fullDepthClip.count - fullDepthClip.allInUsd,
+            feeUsd = fullDepthClip.feeUsd,
+            allInUsd = fullDepthClip.allInUsd,
+            visibleContracts = 300,
+            strategyVersion = "scalp-v2-settlement-aware",
+            strategyDecisionSource = "settlement-aware engine",
+            strategySpotReturn1m = 0.001,
+            strategySpotReturn5m = 0.002,
+            strategyTimeToCloseSec = 600L
+        )
+        val row = TicketForwardTest.capture(scalp, fullDepthBook, "on-device AI", 0.07, 1L, 1)!!
+        assertTrue(row.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD)
+        assertEquals(300, row.contracts)
+        assertEquals("scalp-v2-settlement-aware", row.strategyVersion)
+        assertEquals(600L, row.timeToCloseSec)
     }
 
     @Test fun firstSuggestionIsImmutableAndOnlySettledRowsCount() {

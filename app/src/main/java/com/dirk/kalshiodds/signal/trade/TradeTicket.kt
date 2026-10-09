@@ -76,7 +76,15 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /** Versioned paper-strategy formula used to choose this side, if any. */
+    val strategyVersion: String? = null,
+    /** Human-readable source of the strategy's selected direction. */
+    val strategyDecisionSource: String? = null,
+    /** Frozen public spot features for paper-strategy evaluation. */
+    val strategySpotReturn1m: Double? = null,
+    val strategySpotReturn5m: Double? = null,
+    val strategyTimeToCloseSec: Long? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

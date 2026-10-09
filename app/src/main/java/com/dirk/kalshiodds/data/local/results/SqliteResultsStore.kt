@@ -159,6 +159,11 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                     put("contracts", r.contracts); put("all_in_usd", r.allInUsd)
                     put("fee_usd", r.feeUsd); put("fee_rate", r.feeRate)
                     put("modeled_net_usd", r.modeledNetUsd)
+                    put("strategy_version", r.strategyVersion)
+                    put("strategy_decision_source", r.strategyDecisionSource)
+                    put("spot_return_1m", r.spotReturn1m)
+                    put("spot_return_5m", r.spotReturn5m)
+                    put("time_to_close_sec", r.timeToCloseSec)
                 }
                 w.insertWithOnConflict(TABLE_TICKET_FORWARD, null, v, SQLiteDatabase.CONFLICT_IGNORE)
             }
@@ -183,7 +188,13 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 modelYes = c.dbl("model_yes"), marketYes = c.dbl("market_yes"), ask = c.dbl("ask"),
                 visibleContracts = c.dbl("visible_contracts"), contracts = c.intOrNull("contracts") ?: 0,
                 allInUsd = c.dbl("all_in_usd"), feeUsd = c.dbl("fee_usd"), feeRate = c.dbl("fee_rate"),
-                modeledNetUsd = c.dbl("modeled_net_usd"), outcome = c.strOrNull("outcome")
+                modeledNetUsd = c.dbl("modeled_net_usd"),
+                strategyVersion = c.strOrNull("strategy_version"),
+                strategyDecisionSource = c.strOrNull("strategy_decision_source"),
+                spotReturn1m = c.dblOrNull("spot_return_1m"),
+                spotReturn5m = c.dblOrNull("spot_return_5m"),
+                timeToCloseSec = c.longOrNull("time_to_close_sec"),
+                outcome = c.strOrNull("outcome")
             ))
         }
         return out
@@ -1048,6 +1059,10 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             if (oldVersion < 7) createTicketForwardTable(db)
             if (oldVersion < 8) createSettlementIndexTable(db)
             if (oldVersion in 6..8) addForwardResearchColumns(db)
+            // v7–v9 already have the pre-SCALP ticket-forward table. Older
+            // databases get the current table above, so adding again would
+            // duplicate columns on upgrade.
+            if (oldVersion in 7..9) addTicketForwardScalpColumns(db)
         }
 
         private fun createForwardTable(db: SQLiteDatabase) {
@@ -1066,11 +1081,18 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
 
         private fun addForwardResearchColumns(db: SQLiteDatabase) {
-            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN settlement_yes REAL")
-            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN final_minute_samples INTEGER")
-            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN final_minute_average_usd REAL")
-            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN required_remaining_average_usd REAL")
-            db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN expected_net_per_contract_usd REAL")
+            // Some historical v6 fixtures already contain this table's newer
+            // columns. SQLite has no ADD COLUMN IF NOT EXISTS, so make the
+            // upgrade idempotent instead of making the app fail to open.
+            listOf(
+                "settlement_yes REAL",
+                "final_minute_samples INTEGER",
+                "final_minute_average_usd REAL",
+                "required_remaining_average_usd REAL",
+                "expected_net_per_contract_usd REAL"
+            ).forEach { column ->
+                runCatching { db.execSQL("ALTER TABLE $TABLE_FORWARD ADD COLUMN $column") }
+            }
         }
 
         private fun createTicketForwardTable(db: SQLiteDatabase) {
@@ -1081,10 +1103,24 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                     side TEXT NOT NULL, model_yes REAL NOT NULL, market_yes REAL NOT NULL,
                     ask REAL NOT NULL, visible_contracts REAL NOT NULL, contracts INTEGER NOT NULL,
                     all_in_usd REAL NOT NULL, fee_usd REAL NOT NULL, fee_rate REAL NOT NULL,
-                    modeled_net_usd REAL NOT NULL
+                    modeled_net_usd REAL NOT NULL,
+                    strategy_version TEXT, strategy_decision_source TEXT,
+                    spot_return_1m REAL, spot_return_5m REAL, time_to_close_sec INTEGER
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_ticket_forward_time ON $TABLE_TICKET_FORWARD(captured_at_ms)")
+        }
+
+        private fun addTicketForwardScalpColumns(db: SQLiteDatabase) {
+            listOf(
+                "strategy_version TEXT",
+                "strategy_decision_source TEXT",
+                "spot_return_1m REAL",
+                "spot_return_5m REAL",
+                "time_to_close_sec INTEGER"
+            ).forEach { column ->
+                runCatching { db.execSQL("ALTER TABLE $TABLE_TICKET_FORWARD ADD COLUMN $column") }
+            }
         }
 
         private fun createSettlementIndexTable(db: SQLiteDatabase) {
@@ -1210,7 +1246,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 9
+        const val DB_VERSION = 10
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
@@ -1247,6 +1283,10 @@ private fun Cursor.strOrNull(col: String): String? {
     val i = getColumnIndex(col)
     if (i < 0 || isNull(i)) return null
     return getString(i)
+}
+private fun Cursor.longOrNull(col: String): Long? {
+    val i = getColumnIndex(col)
+    return if (i < 0 || isNull(i)) null else getLong(i)
 }
 private fun Cursor.long(col: String): Long {
     val i = getColumnIndex(col)

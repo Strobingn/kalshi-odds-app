@@ -107,7 +107,7 @@ object TicketBuilder {
      */
     fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled || !MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val scalp = ScalpSignal.candidate(market)
+        val scalp = ScalpSignal.candidate(market, ctx.nowMs)
         return buildTicket(
             market = market,
             side = scalp.side,
@@ -116,7 +116,8 @@ object TicketBuilder {
             minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
             kind = TicketKind.SCALP,
             requireGates = false,
-            explicitGateNote = scalp.note()
+            explicitGateNote = scalp.note(),
+            strategy = scalp
         )
     }
 
@@ -342,7 +343,8 @@ object TicketBuilder {
         minPayoutUsd: Double,
         kind: TicketKind,
         requireGates: Boolean,
-        explicitGateNote: String? = null
+        explicitGateNote: String? = null,
+        strategy: ScalpSignal.Candidate? = null
     ): TradeTicket? {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         if (requireGates) {
@@ -504,7 +506,12 @@ object TicketBuilder {
             },
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
-            visibleContracts = quoted?.toInt()
+            visibleContracts = quoted?.toInt(),
+            strategyVersion = strategy?.let { ScalpSignal.FORMULA_VERSION },
+            strategyDecisionSource = strategy?.selectedFrom,
+            strategySpotReturn1m = strategy?.spotReturn1m,
+            strategySpotReturn5m = strategy?.spotReturn5m,
+            strategyTimeToCloseSec = strategy?.timeToCloseSec
         )
     }
 

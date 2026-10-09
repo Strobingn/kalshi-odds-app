@@ -120,6 +120,12 @@ data class TicketForwardRow(
     val feeUsd: Double,
     val feeRate: Double,
     val modeledNetUsd: Double,
+    /** Version and frozen inputs for post-settlement SCALP analysis. */
+    val strategyVersion: String? = null,
+    val strategyDecisionSource: String? = null,
+    val spotReturn1m: Double? = null,
+    val spotReturn5m: Double? = null,
+    val timeToCloseSec: Long? = null,
     val outcome: String? = null
 )
 
