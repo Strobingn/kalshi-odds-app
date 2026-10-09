@@ -67,6 +67,17 @@ object ScalpRule {
     const val FRESH_BOOK_MS = 10_000L
     const val MAX_ENTRIES_PER_MARKET = 12
     const val PROMOTION_ROUND_TRIPS = 300
+    /** 0.3.43 CF-reprice. */
+    const val CF_MAX_AGE_MS = 2_000L
+    const val CF_MIN_NET_EXIT = 0.02
+    const val CF_LIMIT_TTL_MS = 1_000L
+    const val CF_MAX_HOLD_MS = 90_000L
+    const val CF_EXIT_BY_S = 90.0
+    /** 0.3.43 maker-first scalps. */
+    const val MAKER_ENTRY_TTL_MS = 30_000L
+    const val MAKER_EXIT_TTL_MS = 20_000L
+    /** Only half of a level's displayed shrink counts as queue consumed (the rest may be cancels). Conservative. */
+    const val QUEUE_CONSUME_SHARE = 0.5
 
     /** Fallback σ per √second (train medians, Binance 1 s) until the in-app estimator has 2 minutes of spot. */
     fun defaultSigmaPerSec(ticker: String): Double {
@@ -125,9 +136,18 @@ object ScalpRule {
         val yesAskSize: Double?,
         val spot: Double?,
         val strike: Double?,
-        val sigmaPerSec: Double?
+        val sigmaPerSec: Double?,
+        /** 0.3.43 CF-reprice: CF Benchmarks settlement-aware price (running final-minute avg when inside it). */
+        val cfSpot: Double? = null,
+        /** Age of the latest CF tick (ms). Null = no CF feed → CF-reprice is NO TRADE. */
+        val cfAgeMs: Long? = null,
+        /** True when the orderbook for this ticker had a sequence gap and has not been re-snapshotted. */
+        val bookGap: Boolean = false
     ) {
         val tauS: Double get() = (closeMs - nowMs) / 1000.0
+        fun cfFresh(): Boolean = cfSpot != null && cfAgeMs != null && cfAgeMs in 0..CF_MAX_AGE_MS
+        fun cfFair(side: String): Double? = if (!cfFresh()) null else
+            fairYes(cfSpot, strike, sigmaPerSec, tauS)?.let { if (side == "YES") it else 1.0 - it }
         fun fresh(): Boolean = nowMs - bookAtMs in 0..FRESH_BOOK_MS
         fun ask(side: String): Double? = if (side == "YES") yesAsk else yesBid?.let { 1.0 - it }
         fun askSize(side: String): Double? = if (side == "YES") yesAskSize else yesBidSize
@@ -219,6 +239,7 @@ object ScalpRule {
         recent: List<Snap>
     ): Pair<Entry?, String> {
         if (p.strategy == ScalpStrategy.FAIR_GAP) return entrySignal(q, p, sides)
+        if (p.strategy == ScalpStrategy.CF_REPRICE) return cfRepriceSignal(q, p, sides)
         if (!q.fresh()) return null to "stale book"
         val tau = q.tauS
         if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
@@ -257,7 +278,7 @@ object ScalpRule {
                     if (fair - ask + 1e-9 < p.minGap) return@mapNotNull null
                     fair - ask
                 }
-                ScalpStrategy.FAIR_GAP -> return@mapNotNull null
+                ScalpStrategy.FAIR_GAP, ScalpStrategy.CF_REPRICE -> return@mapNotNull null
             }
             val cost = spread + feePerContract(CONTRACTS, ask) + feePerContract(CONTRACTS, (ask + move).coerceIn(0.01, 0.99))
             Cand(Entry(side, ask, fair, move - cost), move, cost)
@@ -269,7 +290,58 @@ object ScalpRule {
         return best.e to "enter"
     }
 
+    /**
+     * 0.3.43 CF-reprice entry. Filters: CF tick ≤ 2 s old (else NO TRADE — never Coinbase), no orderbook seq gap,
+     * fresh book, 3–13 min left, spread ≤ 2¢. Enter when CF fair − executable ask − entry fee ≥ minGap (6¢) AND
+     * the predicted net exit (sell at CF fair after the exit fee) ≥ 2¢. Sizing: 10 contracts, displayed depth only.
+     */
+    fun cfRepriceSignal(q: Quote, p: ScalpParams, sides: Collection<String>): Pair<Entry?, String> {
+        if (q.cfSpot == null || q.cfAgeMs == null) return null to "NO TRADE — no CF Benchmarks feed"
+        if (!q.cfFresh()) return null to "NO TRADE — CF tick ${q.cfAgeMs} ms old (> 2 s)"
+        if (q.bookGap) return null to "NO TRADE — orderbook seq gap"
+        if (!q.fresh()) return null to "stale book"
+        val tau = q.tauS
+        if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
+        val yb = q.yesBid ?: return null to "no bid"
+        val ya = q.yesAsk ?: return null to "no ask"
+        val spread = ya - yb
+        if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
+        val best = sides.mapNotNull { side ->
+            val ask = q.ask(side) ?: return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+            val fair = q.cfFair(side) ?: return@mapNotNull null
+            val entryFee = feePerContract(CONTRACTS, ask)
+            Entry(side, ask, fair, fair - ask - entryFee)
+        }.maxByOrNull { it.gapAfterFee } ?: return null to "no CF fair value"
+        if (best.gapAfterFee + 1e-9 < p.minGap) {
+            return null to String.format(Locale.US, "CF gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
+        }
+        val netExit = best.gapAfterFee - feePerContract(CONTRACTS, best.fair.coerceIn(0.01, 0.99))
+        if (netExit + 1e-9 < CF_MIN_NET_EXIT) {
+            return null to String.format(Locale.US, "predicted net exit %.1f¢ under 2¢", netExit * 100)
+        }
+        return best to "enter"
+    }
+
+    /** 0.3.43 CF-reprice exits: TP / stop / 90 s hold / mandatory exit by 90 s left / gap gone (Kalshi repriced). */
+    fun cfRepriceExit(side: String, entry: Double, entryAtMs: Long?, q: Quote, p: ScalpParams): ExitReason? {
+        if (q.tauS <= CF_EXIT_BY_S) return ExitReason.CF_EXIT_BY_CLOSE
+        if (entryAtMs != null && q.nowMs - entryAtMs >= CF_MAX_HOLD_MS) return ExitReason.CF_TIME
+        val bid = q.bid(side)
+        if (bid != null && bid > 0.0) {
+            if (bid - entry >= p.target - 1e-12) return ExitReason.PROFIT_TARGET
+            if (bid <= entry - p.stop + 1e-12) return ExitReason.STOP
+        }
+        val fair = q.cfFair(side)
+        val ask = q.ask(side)
+        if (fair != null && ask != null && fair - ask <= p.turnDown + 1e-12) return ExitReason.CF_GAP_GONE
+        return null
+    }
+
     enum class ExitReason(val label: String) {
+        CF_EXIT_BY_CLOSE("mandatory exit: 90 s left"),
+        CF_TIME("time exit: 90 s hold"),
+        CF_GAP_GONE("early exit: CF gap disappeared"),
         GAP_CLOSED("take-profit: bid beats fair after fee"),
         TURN_DOWN("turn-down: fair fell below entry"),
         PROFIT_TARGET("profit target hit"),
@@ -293,7 +365,7 @@ object ScalpRule {
     }
 
     fun rulesText(): String =
-        "Scalp $VERSION (PAPER). Four strategies run side by side — " +
+        "Scalp $VERSION (PAPER). Five strategies run side by side — " +
             ScalpStrategy.values().joinToString("; ") { "${it.label}: ${it.blurb}" } +
             " — each with one open scalp per market side, its own per-coin params and walk-forward tuning. " +
             "Total open scalp cost is capped by the paper bankroll. Fair-gap: enter when the ask is below spot-implied fair by the coin's gap threshold after " +
@@ -327,8 +399,18 @@ data class ScalpTrade(
     val closedAtMs: Long? = null,
     val netUsd: Double? = null,
     val note: String = "",
-    val ruleVersion: String = ScalpRule.VERSION
+    val ruleVersion: String = ScalpRule.VERSION,
+    /** 0.3.43 maker queue model (in memory): displayed size ahead of us at post time, and estimated consumed since. */
+    val queueAhead: Double? = null,
+    val queueConsumed: Double = 0.0,
+    val levelSize: Double? = null,
+    val restingLimit: Double? = null,
+    val restingSinceMs: Long? = null,
+    /** Adverse selection: side mid − entry price, 30 s / 60 s after the entry fill (dollars; negative = adverse). */
+    val adverse30: Double? = null,
+    val adverse60: Double? = null
 ) {
+    val isMaker: Boolean get() = ScalpParams.byId(variantId)?.maker == true
     val remaining: Int get() = contracts - soldContracts
     val entryCostUsd: Double get() = (entryPrice ?: 0.0) * contracts + entryFeeUsd
     val holdMs: Long? get() = entryAtMs?.let { e -> closedAtMs?.let { it - e } }
@@ -380,6 +462,8 @@ class ScalpBook(
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
     /** Primary scalps only (what the Scalp screen, stats and ladder use). */
     val trades: StateFlow<List<ScalpTrade>> = _trades.asStateFlow()
+    /** 0.3.43: primary + shadow (incl. maker-first variants), for the maker-vs-taker comparison. */
+    val all: StateFlow<List<ScalpTrade>> = _all.asStateFlow()
     private val vol = HashMap<String, SpotVol>()
     private val _marks = MutableStateFlow<Map<String, ScalpRule.Quote>>(emptyMap())
     /** Latest quote per ticker, for mark-to-bid P&L on screen. */
@@ -449,7 +533,9 @@ class ScalpBook(
                 val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
                 if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
                 val openSides = mine.filter { isActive(it) }.map { it.side }.toSet()
-                val free = listOf("YES", "NO").filter { it !in openSides }
+                // 0.3.43 CF-reprice: one direction per market (no YES and NO at once).
+                val free = if (p.strategy == ScalpStrategy.CF_REPRICE && openSides.isNotEmpty()) emptyList()
+                    else listOf("YES", "NO").filter { it !in openSides }
                 if (free.isEmpty()) continue
                 val (sig, _) = ScalpRule.strategySignal(q, p, free, recent)
                 if (sig != null) {
@@ -459,15 +545,22 @@ class ScalpBook(
                         if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
                         openCost += cost
                     }
+                    val makerBid = if (p.maker) q.bid(sig.side)?.takeIf { it > 0.0 } else null
+                    if (p.maker && makerBid == null) continue
                     changed += ScalpTrade(
                         id = idFactory(),
                         ticker = q.ticker.uppercase(),
                         side = sig.side,
                         state = ScalpState.PENDING_ENTRY,
                         signalAtMs = q.nowMs,
-                        signalAsk = sig.ask,
+                        signalAsk = makerBid ?: sig.ask,
+                        queueAhead = if (p.maker) q.bidSize(sig.side) ?: 0.0 else null,
+                        levelSize = if (p.maker) q.bidSize(sig.side) else null,
+                        restingLimit = makerBid,
+                        restingSinceMs = if (p.maker) q.nowMs else null,
                         fairAtSignal = sig.fair,
-                        note = String.format(Locale.US, "%s · edge %.1f¢ after fees · %s", p.strategy.label, sig.gapAfterFee * 100, p.id),
+                        note = String.format(Locale.US, "%s · edge %.1f¢ after fees · %s", p.strategy.label, sig.gapAfterFee * 100, p.id) +
+                            (if (p.maker) String.format(Locale.US, " · maker post @ %s, queue ahead %.0f", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(makerBid!!), q.bidSize(sig.side) ?: 0.0) else ""),
                         ruleVersion = "${ScalpRule.VERSION}|${p.id}|$role"
                     )
                 }
@@ -489,15 +582,101 @@ class ScalpBook(
         next
     }
 
-    private fun step(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
+    private fun step(t0: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
+        val marked = markAdverse(t0, q)
+        val t = marked ?: t0
+        val out = stepInner(t, q, p)
+        return out ?: marked
+    }
+
+    /** 0.3.43: record side mid − entry 30 s and 60 s after the entry fill (adverse selection), once each. */
+    private fun markAdverse(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) return null
+        val e = t.entryAtMs ?: return null
+        val px = t.entryPrice ?: return null
+        val bid = q.bid(t.side) ?: return null
+        val ask = q.ask(t.side) ?: return null
+        val mid = (bid + ask) / 2.0
+        val age = q.nowMs - e
+        return when {
+            t.adverse30 == null && age >= 30_000L -> (mid - px).let { t.copy(adverse30 = it, note = t.note + String.format(Locale.US, " · AS30 %+.1f¢", it * 100)) }
+            t.adverse60 == null && t.adverse30 != null && age >= 60_000L -> (mid - px).let { t.copy(adverse60 = it, note = t.note + String.format(Locale.US, " · AS60 %+.1f¢", it * 100)) }
+            else -> null
+        }
+    }
+
+    /**
+     * 0.3.43 conservative maker queue model for STRATEGY resting orders (manual paper limits keep the exact-touch rule):
+     * fills only on a trade-through (the opposite side crosses our price, or our whole level is wiped) or once the
+     * estimated queue ahead is consumed (only [ScalpRule.QUEUE_CONSUME_SHARE] of each level shrink counts).
+     * [buy]: resting bid at [limit] on [side]. Returns (filled, updated trade).
+     */
+    private fun makerQueueStep(t: ScalpTrade, q: ScalpRule.Quote, limit: Double, buy: Boolean): Pair<Boolean, ScalpTrade> {
+        val ourBest = if (buy) q.bid(t.side) else q.ask(t.side)
+        val opp = if (buy) q.ask(t.side) else q.bid(t.side)
+        val oppCrossed = opp != null && (if (buy) opp < limit - 1e-9 else opp > limit + 1e-9)
+        val levelWiped = ourBest != null && (if (buy) ourBest < limit - 1e-9 else ourBest > limit + 1e-9)
+        if (oppCrossed || levelWiped) return true to t
+        if (ourBest == null || kotlin.math.abs(ourBest - limit) > 1e-9) return false to t
+        val size = (if (buy) q.bidSize(t.side) else q.askSize(t.side)) ?: 0.0
+        val prev = t.levelSize ?: size
+        val consumed = t.queueConsumed + (prev - size).coerceAtLeast(0.0) * ScalpRule.QUEUE_CONSUME_SHARE
+        val next = t.copy(queueConsumed = consumed, levelSize = size)
+        return (consumed + 1e-9 >= (t.queueAhead ?: 0.0) && (t.queueAhead ?: 0.0) > 0.0) to next
+    }
+
+    private fun fillMakerEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (q.bookAtMs <= t.signalAtMs) return null
+        val limit = t.restingLimit ?: t.signalAsk
+        if (q.nowMs - t.signalAtMs > ScalpRule.MAKER_ENTRY_TTL_MS || q.nowMs >= q.closeMs || !q.fresh()) {
+            return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; maker entry cancelled: unfilled / stale")
+        }
+        val (filled, next) = makerQueueStep(t, q, limit, buy = true)
+        if (!filled) return next.takeIf { it != t }
+        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(ScalpRule.CONTRACTS, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
+        return next.copy(
+            state = ScalpState.OPEN, contracts = ScalpRule.CONTRACTS, entryPrice = limit, entryFeeUsd = fee, entryAtMs = q.nowMs,
+            restingLimit = null, note = "${t.note}; maker fill @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit)} (queue model)"
+        )
+    }
+
+    private fun fillMakerExit(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        val limit = t.restingLimit ?: return fillExit(t, q)
+        val since = t.restingSinceMs ?: t.exitDecidedAtMs ?: q.nowMs
+        // Fall back to a taker exit at the bid when the maker exit has not filled in time or the window is ending.
+        if (q.nowMs - since > ScalpRule.MAKER_EXIT_TTL_MS || q.tauS <= ScalpRule.TIME_STOP_S) {
+            return t.copy(restingLimit = null, exitReason = "${t.exitReason} (maker exit unfilled → taker)")
+        }
+        if (!q.fresh() || q.nowMs >= q.closeMs) return null
+        val (filled, next) = makerQueueStep(t, q, limit, buy = false)
+        if (!filled) return next.takeIf { it != t }
+        val n = t.remaining
+        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.makerFee(n, limit, com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(t.ticker))
+        return close(next.copy(soldContracts = t.soldContracts + n, proceedsUsd = t.proceedsUsd + n * limit, exitFeeUsd = t.exitFeeUsd + fee, restingLimit = null),
+            q.nowMs, "${t.exitReason} (maker exit)")
+    }
+
+    private fun stepInner(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
         return when (t.state) {
-            ScalpState.PENDING_ENTRY -> fillEntry(t, q)
+            ScalpState.PENDING_ENTRY -> when {
+                p.maker -> fillMakerEntry(t, q)
+                p.strategy == ScalpStrategy.CF_REPRICE -> fillRestingLimitEntry(t, q)
+                else -> fillEntry(t, q)
+            }
             ScalpState.OPEN -> {
                 if (q.nowMs >= q.closeMs) return null
-                val reason = ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q, p) ?: return null
-                t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason.label)
+                val reason = (if (p.strategy == ScalpStrategy.CF_REPRICE)
+                    ScalpRule.cfRepriceExit(t.side, t.entryPrice ?: return null, t.entryAtMs, q, p)
+                else ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q, p)) ?: return null
+                val urgent = reason == ScalpRule.ExitReason.STOP || reason == ScalpRule.ExitReason.TIME_STOP || reason == ScalpRule.ExitReason.CF_EXIT_BY_CLOSE
+                val makerAsk = if (p.maker && !urgent) q.ask(t.side) else null
+                t.copy(
+                    state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason.label,
+                    restingLimit = makerAsk, restingSinceMs = makerAsk?.let { q.nowMs },
+                    queueAhead = makerAsk?.let { q.askSize(t.side) ?: 0.0 }, queueConsumed = 0.0, levelSize = makerAsk?.let { q.askSize(t.side) }
+                )
             }
-            ScalpState.PENDING_EXIT -> fillExit(t, q)
+            ScalpState.PENDING_EXIT -> if (t.restingLimit != null) fillMakerExit(t, q) else fillExit(t, q)
             else -> null
         }
     }
@@ -508,7 +687,7 @@ class ScalpBook(
         val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: $why") }
         if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
         val ask = q.ask(t.side) ?: return miss("no ask")
-        if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %.0f¢", ask * 100))
+        if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %s", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(ask)))
         val size = q.askSize(t.side) ?: 0.0
         if (size + 1e-9 < ScalpRule.CONTRACTS) return miss("displayed size ${size.toInt()} < ${ScalpRule.CONTRACTS}")
         return t.copy(
@@ -517,6 +696,31 @@ class ScalpBook(
             entryPrice = ask,
             entryFeeUsd = ScalpRule.orderFee(ScalpRule.CONTRACTS, ask),
             entryAtMs = q.nowMs
+        )
+    }
+
+    /**
+     * 0.3.43 CF-reprice resting limit entry at the signal ask (touch-fill paper rule, PaperLimitFill): fills at exactly
+     * the limit as soon as a later book shows ask ≤ limit, up to the displayed depth (partial allowed); cancelled
+     * unfilled after [ScalpRule.CF_LIMIT_TTL_MS]. Touch fills are slightly optimistic vs real queue priority.
+     */
+    private fun fillRestingLimitEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (q.bookAtMs <= t.signalAtMs) return null
+        val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled: $why") }
+        if (q.nowMs - t.signalAtMs > ScalpRule.CF_LIMIT_TTL_MS) return miss("unfilled after 1 s")
+        if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
+        val ask = q.ask(t.side) ?: return null
+        val n = com.dirk.kalshiodds.signal.paper.PaperLimitFill.touchFillQty(
+            limit = t.signalAsk, best = ask, depth = q.askSize(t.side), remaining = ScalpRule.CONTRACTS, buy = true
+        )
+        if (n <= 0) return null
+        return t.copy(
+            state = ScalpState.OPEN,
+            contracts = n,
+            entryPrice = t.signalAsk,
+            entryFeeUsd = ScalpRule.orderFee(n, t.signalAsk),
+            entryAtMs = q.nowMs,
+            note = "${t.note}; resting limit filled $n ct @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(t.signalAsk)} (touch fill, optimistic vs queue)"
         )
     }
 

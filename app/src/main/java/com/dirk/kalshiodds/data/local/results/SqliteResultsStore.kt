@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * a process kill. Writes are serialized by SQLite; callers should use
  * [AsyncResultsWriter] so scoring never blocks.
  */
-class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink, com.dirk.kalshiodds.decision.ScalpPersistence {
+class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink, com.dirk.kalshiodds.decision.ScalpPersistence, com.dirk.kalshiodds.signal.paper.PaperOrderPersistence {
     private val db = Helper(context.applicationContext)
 
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -978,6 +978,38 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         )
     }
 
+    private val paperOrderJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    override fun upsertPaperOrder(order: com.dirk.kalshiodds.signal.paper.PaperOrder) {
+        val v = android.content.ContentValues().apply {
+            put("id", order.id)
+            put("ticker", order.ticker)
+            put("status", order.status)
+            put("source", order.source)
+            put("created_at_ms", order.createdAtMs)
+            put("updated_at_ms", order.updatedAtMs)
+            put("json", paperOrderJson.encodeToString(com.dirk.kalshiodds.signal.paper.PaperOrder.serializer(), order))
+        }
+        db.writableDatabase.insertWithOnConflict(
+            com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.TABLE, null, v, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun loadPaperOrders(): List<com.dirk.kalshiodds.signal.paper.PaperOrder> {
+        val out = ArrayList<com.dirk.kalshiodds.signal.paper.PaperOrder>()
+        runCatching {
+            db.readableDatabase.query(
+                com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.TABLE, arrayOf("json"), null, null, null, null, "created_at_ms DESC", "2000"
+            ).use { c ->
+                while (c.moveToNext()) {
+                    runCatching { paperOrderJson.decodeFromString(com.dirk.kalshiodds.signal.paper.PaperOrder.serializer(), c.getString(0)) }
+                        .getOrNull()?.let { out += it }
+                }
+            }
+        }
+        return out
+    }
+
     override fun loadScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpTrade>()
         db.readableDatabase.query(
@@ -1191,6 +1223,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             createPendingOrdersTable(db)
             createLedgerTable(db)
             createScalpTable(db)
+            createPaperOrderTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -1204,6 +1237,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             if (oldVersion < 6) createPaperFillTable(db)
             if (oldVersion < 7) createLedgerTable(db)
             if (oldVersion < 8) createScalpTable(db)
+            if (oldVersion < 9) createPaperOrderTable(db)
             applyPaperFillColumns(db)
         }
 
@@ -1212,6 +1246,15 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             applyPaperFillColumns(db)
             createPendingOrdersTable(db)
             createScalpTable(db)
+            createPaperOrderTable(db)
+        }
+
+        private fun createPaperOrderTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.upgradeSql(
+                com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.FROM_VERSION
+            )) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createScalpTable(db: SQLiteDatabase) {
@@ -1367,7 +1410,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 8
+        const val DB_VERSION = 9
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

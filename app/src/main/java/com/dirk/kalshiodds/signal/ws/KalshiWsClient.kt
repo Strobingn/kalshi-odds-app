@@ -33,6 +33,8 @@ class KalshiWsClient(
     private val onBookDelta: (KalshiWsMessages.Parsed.OrderbookDelta) -> Unit = {},
     private val onLifecycle: (ticker: String, eventType: String) -> Unit = { _, _ -> },
     private val onCf: (CfBenchmarks.Tick) -> Unit = {},
+    /** 0.3.43: a real orderbook seq gap on a sid — books for these tickers are invalid until re-snapshot. */
+    private val onBookGap: (List<String>) -> Unit = {},
     private val jitter: () -> Long = { (0L..200L).random() },
     private val httpClient: OkHttpClient = defaultClient(),
     private val urls: List<String> = KalshiWsAuth.WS_URLS
@@ -57,6 +59,7 @@ class KalshiWsClient(
     private val subscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
     private var cfCommandId: Int = -1
     private var cfSid: Int? = null
+    private val bookSeq = OrderbookSequencer()
 
     fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
         this.keyId = keyId
@@ -139,6 +142,19 @@ class KalshiWsClient(
         onLog("subscribe id=$cfId channel=${CfBenchmarks.CHANNEL} indexes=${CfBenchmarks.INDEX_IDS}")
     }
 
+    /** 0.3.43: invalidate every book on the sid and ask Kalshi for fresh snapshots (no reconnect needed). */
+    private fun onSeqGap(ws: WebSocket, sid: Int?, ticker: String, seq: Int?) {
+        val tickers = marketTickers.ifEmpty { listOf(ticker) }
+        com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("WS_BOOK", ticker, "seq", null,
+            com.dirk.kalshiodds.signal.debug.PriceDebugLog.GAP, sid = sid, seq = seq)
+        onLog("orderbook seq gap sid=$sid seq=$seq → get_snapshot ${tickers.size} tickers")
+        runCatching { onBookGap(tickers) }
+        if (sid == null) { resubscribe(); return }
+        val id = msgId.getAndIncrement()
+        runCatching { ws.send(KalshiWsMessages.updateSubscription(id, sid, "get_snapshot", tickers)) }
+            .onFailure { resubscribe() }
+    }
+
     private fun scheduleReconnect() {
         if (!running.get()) return
         reconnectJob?.cancel()
@@ -164,6 +180,7 @@ class KalshiWsClient(
             runCatching {
                 backoffMs = INITIAL_BACKOFF_MS
                 subscribedSids.clear()
+                bookSeq.reset()
                 val host = webSocket.request().url.toString()
                 onLog("ws open $host")
                 onState(State(connected = true, reconnecting = false, host = host, detail = null))
@@ -191,11 +208,34 @@ class KalshiWsClient(
                 is KalshiWsMessages.Parsed.OrderbookSnapshot -> {
                     if (!CryptoMarkets.isCryptoTicker(parsed.ticker)) return
                     Log.d(TAG, "book snapshot ticker=${parsed.ticker} yes=${parsed.yesLevels.size} no=${parsed.noLevels.size} seq=${parsed.seq}")
+                    when (bookSeq.accept(parsed.sid, parsed.seq)) {
+                        OrderbookSequencer.Verdict.STALE -> {
+                            com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("WS_BOOK", parsed.ticker, "snapshot", null,
+                                com.dirk.kalshiodds.signal.debug.PriceDebugLog.DUPLICATE, sid = parsed.sid, seq = parsed.seq)
+                            return
+                        }
+                        OrderbookSequencer.Verdict.GAP -> onSeqGap(webSocket, parsed.sid, parsed.ticker, parsed.seq)
+                        OrderbookSequencer.Verdict.APPLY -> Unit
+                    }
+                    // A snapshot is a full book: always applied (also after a gap).
                     runCatching { onBookSnapshot(parsed) }
                 }
                 is KalshiWsMessages.Parsed.OrderbookDelta -> {
                     if (!CryptoMarkets.isCryptoTicker(parsed.ticker)) return
                     Log.d(TAG, "book delta ticker=${parsed.ticker} side=${parsed.side} px=${parsed.price} d=${parsed.delta} seq=${parsed.seq}")
+                    when (bookSeq.accept(parsed.sid, parsed.seq)) {
+                        OrderbookSequencer.Verdict.STALE -> {
+                            com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("WS_BOOK", parsed.ticker, "delta", parsed.price,
+                                com.dirk.kalshiodds.signal.debug.PriceDebugLog.DUPLICATE, parsed.exchangeTsMs, parsed.sid, parsed.seq)
+                            return
+                        }
+                        OrderbookSequencer.Verdict.GAP -> {
+                            // Missed messages: this delta is not safe to apply on top of the stale book.
+                            onSeqGap(webSocket, parsed.sid, parsed.ticker, parsed.seq)
+                            return
+                        }
+                        OrderbookSequencer.Verdict.APPLY -> Unit
+                    }
                     runCatching { onBookDelta(parsed) }
                 }
                 is KalshiWsMessages.Parsed.Subscribed -> {

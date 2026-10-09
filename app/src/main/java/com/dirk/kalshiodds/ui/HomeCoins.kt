@@ -28,7 +28,7 @@ object CoinViewCopy {
         else -> "Bitcoin daily 5 PM ET"
     }
 
-    fun cents(p: Double?): String = p?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—"
+    fun cents(p: Double?): String = p?.let { com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(it) } ?: "—" // 0.3.43: 0.1¢ when sub-cent
 
     fun dailyLine(q: D3Quote): String {
         val strike = q.strikeUsd?.let { String.format(Locale.US, "$%,.2f", it) } ?: (q.subtitle ?: q.ticker)

@@ -23,8 +23,13 @@ fun OddsScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val scalpTrades by viewModel.scalpTrades.collectAsStateWithLifecycle()
+    val paperOrders by viewModel.paperOrders.collectAsStateWithLifecycle()
     HomeScreen(
         state = state,
+        paperOrders = paperOrders,
+        onSubmitPaperOrder = viewModel::submitPaperOrder,
+        onEditPaperOrder = viewModel::editPaperOrder,
+        onCancelPaperOrder = viewModel::cancelPaperOrder,
         scalpLines = HomeScalpCopy.lines(scalpTrades, state.settings.paperTradingEnabled),
         onOpenScalp = onOpenScalp,
         onBuyDaily = { q, side -> viewModel.buyDaily(q, side) },

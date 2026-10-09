@@ -229,6 +229,23 @@ fun DataScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Sync now") }
 
+            Section("Price debug log")
+            Text(
+                "Every contract price input with its source (WS ticker / trade / orderbook, REST), Kalshi ts / sid / seq, field and what the app did with it (applied, dropped-stale, rest-suppressed-ws-fresh, seq-gap-resync, dropped-no-snapshot).",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            state.priceLogSummary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = viewModel::refreshPriceLog, modifier = Modifier.weight(1f).height(48.dp)) { Text("Refresh") }
+                Button(onClick = viewModel::exportPriceLog, modifier = Modifier.weight(1f).height(48.dp)) { Text("Export CSV") }
+                OutlinedButton(onClick = viewModel::clearPriceLog, modifier = Modifier.weight(1f).height(48.dp)) { Text("Clear") }
+            }
+            state.priceLogLines.forEach {
+                Text(it, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = colors.textSecondary)
+            }
+            state.priceLogNote?.let { Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium) }
+
             Section("Prediction ledger")
             Text(
                 state.cfFeedLine ?: "CF Benchmarks feed is off until Live signals connect with your Kalshi key. Coinbase is the fallback and is marked in the ledger.",

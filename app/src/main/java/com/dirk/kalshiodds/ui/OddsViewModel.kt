@@ -1366,9 +1366,72 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker),
                 sigmaPerSec = sigma
             ) ?: return@forEach
-            container.scalp.onQuote(q, enabled = s.paperTradingEnabled)
+            // 0.3.43 CF-reprice inputs: CF Benchmarks settlement-aware price + tick age (no Coinbase fallback),
+            // and whether the book is waiting on a re-snapshot after a seq gap.
+            val cfId = com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series)
+            val cfTick = cfId?.let { container.cfFeed.latest(it) }
+            val qq = q.copy(
+                cfSpot = cfId?.let { container.cfFeed.settlementPrice(it, now, q.tauS) },
+                cfAgeMs = cfTick?.ageMs(now),
+                bookGap = !hub.scoring.book.hasSnapshot(market.ticker)
+            )
+            container.scalp.onQuote(qq, enabled = s.paperTradingEnabled)
         }
     }
+
+    /**
+     * 0.3.43 paper limit orders: depth from the live WS book (every level at or better than the limit), else the
+     * displayed top of book from the REST/WS quote. Never Kalshi.
+     */
+    private fun paperSideQuote(ticker: String, side: String): com.dirk.kalshiodds.signal.paper.PaperSideQuote? {
+        val book = hub.scoring.book.snapshotBook(ticker)?.takeIf { hub.scoring.book.hasSnapshot(ticker) }
+        if (book != null) return com.dirk.kalshiodds.signal.paper.PaperSideQuote.fromBook(side, book.yes, book.no)
+        val m = _state.value.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticker, true) } ?: return null
+        val q = m.withLiveQuote(hub.scoring.book.lastTick(m.ticker))
+        return if (side.equals("NO", true)) {
+            com.dirk.kalshiodds.signal.paper.PaperSideQuote.top(q.noAsk, null, q.noBid, null)
+        } else {
+            com.dirk.kalshiodds.signal.paper.PaperSideQuote.top(q.yesAsk, q.yesAskSize, q.yesBid, null)
+        }
+    }
+
+    private fun runPaperOrders(live: List<MarketUiModel>) {
+        val book = container.paperOrders
+        val now = container.clock.nowMs()
+        book.expire(now)
+        val tickers = book.open().map { it.ticker }.toSet()
+        tickers.forEach { t -> book.onQuote(t, { side -> paperSideQuote(t, side) }, now) }
+    }
+
+    /** Manual paper ticket: MARKET (taker at the ask/bid, depth-capped) or LIMIT (rests until the market reaches it). */
+    fun submitPaperOrder(ticker: String, side: String, action: String, limitCents: Double?, quantity: Int, market: Boolean) {
+        val m = _state.value.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticker, true) }
+        val want = if (side.equals("NO", true) || side.equals("DOWN", true)) "NO" else "YES"
+        val q = paperSideQuote(ticker, want)
+        val buy = !action.equals("SELL", true)
+        val px = if (market) (if (buy) q?.bestAsk else q?.bestBid) else limitCents?.div(100.0)
+        if (px == null) {
+            _state.update { it.copy(userMessage = "Paper ${if (market) "market" else "limit"} order: no ${if (buy) "ask" else "bid"} on $ticker") }
+            return
+        }
+        val r = container.paperOrders.submit(ticker, want, if (buy) "BUY" else "SELL", px, quantity, m?.closeTimeEpochMs, q)
+        // A market order never rests: cancel any unfilled remainder right away.
+        if (market) r.order?.takeIf { it.isOpen }?.let { container.paperOrders.cancel(it.id) }
+        _state.update { it.copy(userMessage = r.message) }
+    }
+
+    fun editPaperOrder(id: String, limitCents: Double?, quantity: Int?) {
+        val o = container.paperOrders.orders.value.firstOrNull { it.id == id } ?: return
+        val r = container.paperOrders.edit(id, limitCents?.div(100.0), quantity, paperSideQuote(o.ticker, o.side))
+        _state.update { it.copy(userMessage = r.message) }
+    }
+
+    fun cancelPaperOrder(id: String) {
+        val r = container.paperOrders.cancel(id)
+        _state.update { it.copy(userMessage = r.message) }
+    }
+
+    val paperOrders get() = container.paperOrders.orders
 
     /** Cancel one resting real-money order from the Home open-bets list. Needs typed REAL MONEY. */
     fun cancelRestingOrder(orderId: String, ticker: String?, typed: String) {
@@ -1419,6 +1482,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val assessments = assessForLedger(live, s)
         if (s.paperTradingEnabled) runFav15Ladder(live)
         runScalp(live, s)
+        runCatching { runPaperOrders(live) }
         if (!s.paperTradingEnabled || !s.aiPaperAutopilotEnabled) return
         val mode = s.autopilotModeEnum()
         paperBook.configure(
@@ -1530,7 +1594,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val coin = com.dirk.kalshiodds.signal.ws.CfBenchmarks.coinOf(id)
             val cb = ext.forSeries(coin)?.lastPrice != null
             val st = container.cfFeed.status(id, now, coinbaseAvailable = cb)
-            "$coin: ${st.detail}"
+            "$coin: ${st.detail}" + (container.cfFeed.latest(id)?.let { com.dirk.kalshiodds.signal.ws.CfBenchmarks.settlementExplainer(it) }?.let { "\n   $it" } ?: "")
         }
     }
 

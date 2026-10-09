@@ -13,7 +13,12 @@ enum class ScalpStrategy(val code: String, val label: String, val blurb: String)
     FAIR_GAP("fair", "Fair-gap", "ask below spot-implied fair by the gap threshold"),
     DIP_HUNTER("dip", "Dip-hunter", "mean reversion: buy after the ask drops fast while spot fair holds"),
     MOMENTUM("momo", "Momentum-sniper", "buy into a strong bid rise when spot fair confirms the move"),
-    EXTREME_REVERSION("xrev", "Extreme-reversion", "buy the very cheap side (≤ 15¢) when it overshoots below spot fair");
+    EXTREME_REVERSION("xrev", "Extreme-reversion", "buy the very cheap side (≤ 15¢) when it overshoots below spot fair"),
+    /**
+     * 0.3.43 delayed repricing: fair value from the CF Benchmarks index (60 s settlement-average aware, τeff);
+     * NO TRADE when the CF tick is older than 2 s (never Coinbase).
+     */
+    CF_REPRICE("cfr", "CF-reprice", "Kalshi lags the CF Benchmarks index: buy when CF fair − ask − entry fee ≥ 6¢ and the predicted net exit ≥ 2¢");
 
     companion object {
         fun ofCode(code: String?): ScalpStrategy? = values().firstOrNull { it.code == code }
@@ -39,7 +44,12 @@ data class ScalpParams(
     /** Entry window: seconds left to close. */
     val tauMinS: Double,
     val tauMaxS: Double = 840.0,
-    val strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP
+    val strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP,
+    /**
+     * 0.3.43 maker-first variant: post-only resting entry at the bid and resting exit at the ask (maker fee $0 on
+     * these quadratic series). Conservative queue model + adverse-selection logging. Tracked separately (own id).
+     */
+    val maker: Boolean = false
 ) {
     /** Fair-gap ids keep the 0.3.40 format (g14-t12-…); other strategies are prefixed ("dip-g06-…"). */
     val id: String
@@ -47,7 +57,7 @@ data class ScalpParams(
             Locale.US, "g%02d-t%02d-s%02d-d%02d-w%03d",
             Math.round(minGap * 100), Math.round(target * 100), Math.round(stop * 100),
             Math.round(turnDown * 100), Math.round(tauMinS)
-        )
+        ) + (if (maker) "-mk" else "")
 
     fun label(): String {
         val trigger = when (strategy) {
@@ -55,6 +65,7 @@ data class ScalpParams(
             ScalpStrategy.DIP_HUNTER -> "drop ≥ %.0f¢/60s"
             ScalpStrategy.MOMENTUM -> "rise ≥ %.0f¢/60s + spot"
             ScalpStrategy.EXTREME_REVERSION -> "ask ≤ 15¢ & fair gap ≥ %.0f¢"
+            ScalpStrategy.CF_REPRICE -> "CF fair − ask − fee ≥ %.0f¢ (CF ≤ 2 s old)"
         }
         return String.format(
             Locale.US, "$trigger · target +%.0f¢ · stop −%.0f¢ · turn-down %.0f¢ · enter %.0f–%d min left",
@@ -94,7 +105,9 @@ data class ScalpParams(
         val STRATEGY_SEEDS: Map<ScalpStrategy, ScalpParams> = mapOf(
             ScalpStrategy.DIP_HUNTER to ScalpParams(0.05, 0.08, 0.06, 0.10, 180.0, strategy = ScalpStrategy.DIP_HUNTER),
             ScalpStrategy.MOMENTUM to ScalpParams(0.04, 0.08, 0.06, 0.10, 180.0, strategy = ScalpStrategy.MOMENTUM),
-            ScalpStrategy.EXTREME_REVERSION to ScalpParams(0.12, 0.12, 0.08, 0.10, 120.0, strategy = ScalpStrategy.EXTREME_REVERSION)
+            ScalpStrategy.EXTREME_REVERSION to ScalpParams(0.12, 0.12, 0.08, 0.10, 120.0, strategy = ScalpStrategy.EXTREME_REVERSION),
+            // 0.3.43 owner spec: entry gap 6¢, TP +8¢, stop −6¢, 3–13 min left. turnDown = early exit when the gap is gone.
+            ScalpStrategy.CF_REPRICE to ScalpParams(0.06, 0.08, 0.06, 0.0, 180.0, tauMaxS = 780.0, strategy = ScalpStrategy.CF_REPRICE)
         )
 
         fun seedFor(coin: String, strategy: ScalpStrategy): ScalpParams =
@@ -119,13 +132,22 @@ data class ScalpParams(
             add4(ScalpStrategy.DIP_HUNTER, listOf(0.05, 0.08), listOf(Triple(0.06, 0.05, 0.10), Triple(0.08, 0.06, 0.10)), 180.0)
             add4(ScalpStrategy.MOMENTUM, listOf(0.04, 0.06), listOf(Triple(0.06, 0.04, 0.08), Triple(0.08, 0.06, 0.10)), 180.0)
             add4(ScalpStrategy.EXTREME_REVERSION, listOf(0.08, 0.12), listOf(Triple(0.08, 0.05, 0.06), Triple(0.12, 0.08, 0.10)), 120.0)
+            // 0.3.43 CF-reprice: 2 entry gaps × 2 exit profiles, window 3–13 min (walk-forward tuned like the others).
+            for (g in listOf(0.06, 0.08)) for (e in listOf(Triple(0.08, 0.06, 0.0), Triple(0.06, 0.04, 0.0))) {
+                add(ScalpParams(g, e.first, e.second, e.third, 180.0, tauMaxS = 780.0, strategy = ScalpStrategy.CF_REPRICE))
+            }
         }
 
         /** Everything the book runs as paper variants: 8 fair-gap + 12 strategy variants. */
-        val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID
+        val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
+
+        /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */
+        val MAKER_VARIANTS: List<ScalpParams> by lazy {
+            (SEEDS.values + STRATEGY_SEEDS.values).distinctBy { it.id }.map { it.copy(maker = true) }
+        }
 
         fun byId(id: String): ScalpParams? =
-            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC).firstOrNull { it.id == id }
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS).firstOrNull { it.id == id }
 
         fun coinOf(ticker: String): String {
             val u = ticker.uppercase()

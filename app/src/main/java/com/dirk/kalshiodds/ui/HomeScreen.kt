@@ -86,7 +86,12 @@ fun HomeScreen(
     onOpenScalp: () -> Unit = {},
     onBuyDaily: (com.dirk.kalshiodds.signal.d3.D3Quote, String) -> Unit = { _, _ -> },
     nowMs: Long = System.currentTimeMillis(),
-    versionLabel: String = AppVersion.label
+    versionLabel: String = AppVersion.label,
+    /** 0.3.43 paper limit orders. */
+    paperOrders: List<com.dirk.kalshiodds.signal.paper.PaperOrder> = emptyList(),
+    onSubmitPaperOrder: (String, String, String, Double?, Int, Boolean) -> Unit = { _, _, _, _, _, _ -> },
+    onEditPaperOrder: (String, Double?, Int?) -> Unit = { _, _, _ -> },
+    onCancelPaperOrder: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val mode = TradeModeLabel.forApprove(state.settings)
@@ -231,6 +236,21 @@ fun HomeScreen(
                         if (scalpLines.isNotEmpty()) {
                             item {
                                 HomeScalpCard(lines = scalpLines, onOpen = onOpenScalp)
+                            }
+                        }
+                        if (state.settings.paperTradingEnabled) {
+                            item(key = "paper-orders") {
+                                com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
+                                    tickers = com.dirk.kalshiodds.domain.MarketLifecycle
+                                        .tradable(state.snapshot?.allMarkets.orEmpty(), nowMs)
+                                        .filter { com.dirk.kalshiodds.domain.CryptoMarkets.isCryptoTicker(it.ticker) }
+                                        .sortedBy { it.closeTimeEpochMs ?: Long.MAX_VALUE }
+                                        .map { it.ticker },
+                                    orders = paperOrders,
+                                    onSubmit = onSubmitPaperOrder,
+                                    onEdit = onEditPaperOrder,
+                                    onCancel = onCancelPaperOrder
+                                )
                             }
                         }
                         item {

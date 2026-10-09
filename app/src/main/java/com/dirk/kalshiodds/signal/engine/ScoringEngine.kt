@@ -202,6 +202,19 @@ class ScoringEngine(
         seq: Int? = null
     ): LocalOrderBook? = book.applyDelta(ticker, price, delta, side, seq)
 
+    /** 0.3.43: quote fields from the merged per-ticker tick; event fields from the incoming tick. */
+    internal fun mergedForScoring(incoming: MarketTick, merged: MarketTick?): MarketTick {
+        if (merged == null || !merged.ticker.equals(incoming.ticker, ignoreCase = true)) return incoming
+        return merged.copy(
+            source = incoming.source,
+            receiveElapsedNanos = incoming.receiveElapsedNanos,
+            tradeSize = incoming.tradeSize,
+            takerSide = incoming.takerSide,
+            closeTimeEpochMs = incoming.closeTimeEpochMs ?: merged.closeTimeEpochMs,
+            floorStrike = incoming.floorStrike ?: merged.floorStrike
+        )
+    }
+
     fun score(tick: MarketTick, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Score? {
         return try {
             scoreUnchecked(tick, settings, nowMs)
@@ -217,7 +230,8 @@ class ScoringEngine(
         }
     }
 
-    private fun scoreUnchecked(tick: MarketTick, rawSettings: SignalSettings, nowMs: Long): Score? {
+    private fun scoreUnchecked(rawTick: MarketTick, rawSettings: SignalSettings, nowMs: Long): Score? {
+        var tick = rawTick
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return null
         if (!rawSettings.isWatchedTicker(tick.ticker)) return null
         var settings = com.dirk.kalshiodds.signal.ml.HeavyMlGuard.apply(rawSettings)
@@ -236,6 +250,9 @@ class ScoringEngine(
         val modelSpot = spotFeat?.takeIf { it.modelUsable }?.lastPrice
         modelSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
+        // 0.3.43: score / display the merged per-ticker quote, never a raw trade print (bid = ask = trade)
+        // or a stale/suppressed update. Trade size / taker side / latency come from the incoming tick.
+        tick = mergedForScoring(rawTick, book.lastTick(rawTick.ticker))
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
         val mid01 = tick.mid01 ?: return null
