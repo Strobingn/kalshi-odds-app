@@ -322,7 +322,10 @@ class LiveSignalsService : Service() {
             refreshWakeLock()
             val uiUp = LiveSignalsKeepAlive.isUiInForeground()
             val headless = com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.headlessDriving.get()
-            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp && !headless) {
+            // 0.3.44: hand the markets loop straight back to the UI loop.
+            if (uiUp || headless) com.dirk.kalshiodds.data.api.KalshiPollLoops.release(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.MARKETS, "service")
+            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp && !headless &&
+                com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.MARKETS, "service", leaseMs = 2 * LiveSignalsPolicy.METADATA_INTERVAL_MS)) {
                 runCatching {
                     val settings = container.hub.settings
                     runCatching { container.external.refreshIfStale() }.getOrNull()?.let {

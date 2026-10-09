@@ -60,6 +60,7 @@ class KalshiWsClient(
     private var cfCommandId: Int = -1
     private var cfSid: Int? = null
     private val bookSeq = OrderbookSequencer()
+    private val resnapshotGate = com.dirk.kalshiodds.data.api.ResnapshotGate()
 
     fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
         this.keyId = keyId
@@ -144,7 +145,12 @@ class KalshiWsClient(
 
     /** 0.3.43: invalidate every book on the sid and ask Kalshi for fresh snapshots (no reconnect needed). */
     private fun onSeqGap(ws: WebSocket, sid: Int?, ticker: String, seq: Int?) {
-        val tickers = marketTickers.ifEmpty { listOf(ticker) }
+        // 0.3.44: resnapshot only the gapped market, at most once per 30 s per market (dedupe + cooldown).
+        val tickers = resnapshotGate.allow(listOf(ticker), System.currentTimeMillis())
+        if (tickers.isEmpty()) {
+            onLog("orderbook seq gap sid=$sid on $ticker — resnapshot cooldown, skipped")
+            return
+        }
         com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("WS_BOOK", ticker, "seq", null,
             com.dirk.kalshiodds.signal.debug.PriceDebugLog.GAP, sid = sid, seq = seq)
         onLog("orderbook seq gap sid=$sid seq=$seq → get_snapshot ${tickers.size} tickers")

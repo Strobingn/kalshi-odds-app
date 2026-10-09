@@ -88,7 +88,8 @@ class D3MarketClient(
             val retry = if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(e)) {
                 rateLimiter?.onFailure(
                     com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(e),
-                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(e)
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(e),
+                local = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isLocalThrottle(e)
                 ) ?: 1_000L
             } else {
                 0L

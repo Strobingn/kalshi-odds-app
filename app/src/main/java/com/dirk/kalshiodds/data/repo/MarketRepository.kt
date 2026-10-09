@@ -276,7 +276,8 @@ class MarketRepository(
         val retry = if (KalshiRequestStatus.shouldBackoff(e)) {
             rateLimiter?.onFailure(
                 KalshiRequestStatus.httpCode(e),
-                KalshiRequestStatus.retryAfterMs(e)
+                KalshiRequestStatus.retryAfterMs(e),
+                local = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isLocalThrottle(e)
             ) ?: KalshiRequestStatus.retryAfterMs(e) ?: 1_000L
         } else {
             0L

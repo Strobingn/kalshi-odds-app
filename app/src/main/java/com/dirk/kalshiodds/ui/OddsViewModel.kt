@@ -114,6 +114,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     val scalpTrades = container.scalp.trades
 
     private var pollJob: Job? = null
+    /** 0.3.44 poll-loop lease owner id (unique per ViewModel instance). */
+    private val loopOwner = "vm@" + Integer.toHexString(System.identityHashCode(this))
     private var ticketRebuildJob: Job? = null
     private var scoreOverlayJob: Job? = null
     private val overlayThrottle = OverlayThrottle<Map<String, ScoringEngine.Score>>(
@@ -495,6 +497,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     }
                 } else {
                     com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.headlessDriving.set(false)
+                }
+                // 0.3.44: one markets loop per process (this VM, another VM instance, or the service).
+                if (!com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.MARKETS, loopOwner)) {
+                    delay(nextDelayMs())
+                    continue
                 }
                 try {
                     if (_state.value.snapshot == null) {
@@ -1023,6 +1030,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     delay(5_000)
                     continue
                 }
+                if (!com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.D3, loopOwner)) {
+                    delay(5_000); continue
+                }
                 runCatching { tickD3(lastMarketFetch).also { lastMarketFetch = it } }
                 .onFailure { t ->
                     if (t is CancellationException) throw t
@@ -1245,7 +1255,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             while (isActive) {
                 val visible = com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
                 val now = System.currentTimeMillis()
-                if (visible && now - lastFetch >= KalshiPollBudget.POSITIONS_MS) {
+                if (visible && now - lastFetch >= KalshiPollBudget.POSITIONS_MS &&
+                    com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.POSITIONS, loopOwner, now, 2 * KalshiPollBudget.POSITIONS_MS)) {
                     lastFetch = now
                     refreshPositions()
                 }

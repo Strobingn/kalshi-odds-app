@@ -229,6 +229,10 @@ fun DataScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Sync now") }
 
+            Section("Kalshi request counters")
+            Text("Every Kalshi REST call this process made, by endpoint, plus 429s (from Kalshi vs our own limiter) and which loop owns each poll type. Refresh with the price log Refresh button.",
+                style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+            state.requestLines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
             Section("Price debug log")
             Text(
                 "Every contract price input with its source (WS ticker / trade / orderbook, REST), Kalshi ts / sid / seq, field and what the app did with it (applied, dropped-stale, rest-suppressed-ws-fresh, seq-gap-resync, dropped-no-snapshot).",
