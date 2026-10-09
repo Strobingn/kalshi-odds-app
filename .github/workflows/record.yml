@@ -2,7 +2,8 @@ name: Cloud recorder (Claude)
 
 # Records Kalshi 15m crypto books/trades/settlements + Coinbase spot at ~1 s
 # (tools/research/cloud_recorder.py, same format as the phone's recorder),
-# keeps them in the Actions cache (key claude-recordings-*), then reruns the lag and
+# keeps them in the Actions cache (key claude-recordings-*) and copies each day into the
+# "scalper-data" release, then reruns the lag and
 # maker studies on everything recorded so far. Each run re-dispatches itself,
 # so recording continues back to back until a run is started with chain=false.
 
@@ -66,6 +67,22 @@ jobs:
         with:
           path: rec
           key: claude-recordings-${{ github.run_id }}
+
+      # Permanent, downloadable copy: the days this run wrote go into the
+      # "scalper-data" release (no APK in it, so the app's updater ignores it).
+      - name: Copy this run's days into the scalper-data release
+        if: always()
+        run: |
+          tag=scalper-data
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_REF_NAME" --prerelease \
+              --title "Scalper data (recordings and study files)" \
+              --notes "Data only, no app. Cloud recorder files, one per UTC day. Format: tools/research/recordings.py."
+          fi
+          mapfile -t files < <(find rec -maxdepth 1 -type f \( -name '*.csv.gz' -o -name '*.csv' \) -mmin -420)
+          if [ ${#files[@]} -gt 0 ]; then
+            gh release upload "$tag" "${files[@]}" --clobber || echo "(release upload failed)"
+          fi
 
       - name: Lag study + maker sim
         if: always()

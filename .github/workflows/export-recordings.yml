@@ -1,0 +1,59 @@
+name: Export recordings (Claude)
+
+# The cloud recorder keeps its files in the Actions cache, which cannot be
+# downloaded. This copies the newest saved cache out twice:
+#   - as a workflow artifact "claude-recordings" (90 days), and
+#   - into the release "scalper-data" (kept until deleted), one file per day.
+# The release carries no APK, so the app's updater ignores it.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [Claude]
+    paths:
+      - ".github/workflows/export-recordings.yml"
+
+permissions:
+  contents: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Restore the newest recordings
+        uses: actions/cache/restore@v4
+        with:
+          path: rec
+          key: claude-recordings-export-${{ github.run_id }}
+          restore-keys: claude-recordings-
+
+      - name: Show recordings
+        run: mkdir -p rec && ls -la rec && du -sh rec
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claude-recordings
+          path: rec
+          retention-days: 90
+          compression-level: 0
+
+      - name: Copy into the scalper-data release
+        run: |
+          tag=scalper-data
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --target "$GITHUB_REF_NAME" --prerelease \
+              --title "Scalper data (recordings and study files)" \
+              --notes "Data only, no app. Cloud recorder files (1-second Kalshi 15-minute books, every public trade, settlements, Coinbase spot), one file per UTC day, plus the files the scalping study was run on. Format: tools/research/recordings.py."
+          fi
+          shopt -s nullglob
+          files=(rec/*.csv.gz rec/*.csv)
+          if [ ${#files[@]} -gt 0 ]; then
+            gh release upload "$tag" "${files[@]}" --clobber
+          fi
