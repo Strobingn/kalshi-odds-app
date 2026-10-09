@@ -31,6 +31,55 @@ def test_trade_row_dollars_and_cents() -> None:
     assert c.trade_row({"ticker": "K"}) is None
 
 
+def test_trade_row_keeps_part_contracts() -> None:
+    t = {"ticker": "K", "created_time": "2026-09-21T12:00:00Z", "yes_price_dollars": "0.4700", "count_fp": "17.93",
+         "taker_side": "yes"}
+    assert c.trade_row(t)[3] == 17.93
+
+
+def test_depth_row_best_levels_first() -> None:
+    body = {"orderbook_fp": {"yes_dollars": [["0.4400", "500"], ["0.4500", "10.5"], ["0.4600", "3"]],
+                             "no_dollars": [["0.5100", "7"]]}}
+    assert c.depth_row(TS, "KXBTC15M-X", body) == [TS, "KXBTC15M-X", "0.46:3|0.45:10|0.44:500", "0.51:7"]
+    assert c.depth_row(TS, "X", None) is None
+    assert c.depth_row(TS, "X", {"orderbook_fp": {"yes_dollars": [], "no_dollars": []}}) is None
+    many = {"orderbook_fp": {"yes_dollars": [[f"0.{i:02d}00", "1"] for i in range(10, 60)], "no_dollars": []}}
+    assert len(c.depth_row(TS, "X", many)[2].split("|")) == c.DEPTH_LEVELS
+
+
+def test_new_trades_pages_until_known_and_never_repeats() -> None:
+    def trade(i: int) -> dict:
+        return {"trade_id": f"t{i}", "ticker": "K", "created_time": "2026-09-21T12:00:00Z",
+                "yes_price_dollars": "0.5000", "count_fp": "1.00", "taker_side": "yes"}
+    seen: set = set()
+    calls = []
+
+    def pages(ids):
+        for chunk in ids:
+            calls.append(len(chunk))
+            yield [trade(i) for i in chunk]
+
+    # 2,300 new trades: two full pages and a short one, all read.
+    rows = c.new_trades(pages([range(0, 1000), range(1000, 2000), range(2000, 2300)]), seen, set())
+    assert len(rows) == 2300 and calls == [1000, 1000, 300]
+    # The next poll overlaps: the first page has 5 new trades, the second is all known, so paging stops there.
+    calls.clear()
+    rows = c.new_trades(pages([list(range(2300, 2305)) + list(range(0, 995)), range(995, 1995), range(1995, 2300)]), seen, set())
+    assert len(rows) == 5 and calls == [1000, 1000]
+    # Ids of the previous generation are not written again.
+    assert c.new_trades(pages([range(0, 10)]), set(), seen) == []
+
+
+def test_sink_writes_depth_header() -> None:
+    import gzip
+    with tempfile.TemporaryDirectory() as d:
+        s = c.Sink(Path(d))
+        s.add("depth", TS, [TS, "KXBTC15M-X", "0.46:3", "0.51:7"])
+        s.flush()
+        text = gzip.open(Path(d) / f"depth_{c.day_of(TS)}.csv.gz", "rt").read().splitlines()
+        assert text == ["ts_ms,ticker,yes_levels,no_levels", f"{TS},KXBTC15M-X,0.46:3,0.51:7"]
+
+
 def test_sink_roundtrip_multi_member() -> None:
     with tempfile.TemporaryDirectory() as d:
         s = c.Sink(Path(d))
