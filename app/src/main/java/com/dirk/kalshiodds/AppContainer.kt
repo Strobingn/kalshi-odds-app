@@ -120,7 +120,15 @@ class AppContainer(context: Context) {
         },
         onReset = { scalperStore.log.archive() }
     )
+    /** Paper limit orders resting against the real book, filled by real trades. Never orders. */
+    val paperLimits: com.dirk.kalshiodds.signal.limit.PaperLimitBook by lazy {
+        com.dirk.kalshiodds.signal.limit.PaperLimitBook(
+            paper = paper.book,
+            levels = { scoring.book.snapshotBook(it) }
+        )
+    }
     val hub = SignalHub(
+        paperLimits = { paperLimits },
         scoring = scoring,
         notifier = notifier,
         logStore = logStore,
@@ -211,6 +219,7 @@ class AppContainer(context: Context) {
         extraOpenTickers = {
             paper.book.openTickers() + lateFavorite.ledger.openTickers() + flowFade.ledger.openTickers() +
                 centBetter.ledger.openTickers() + clearLead.ledger.openTickers() + scalper.openTickers() +
+                paperLimits.openTickers() +
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
@@ -221,6 +230,7 @@ class AppContainer(context: Context) {
             centBetter.ledger.settle(ticker, result)
             clearLead.ledger.settle(ticker, result)
             scalper.settle(ticker, result)
+            paperLimits.closeTicker(ticker)
             recorder.onSettled(ticker, result)
         },
         onCalibration = { hub.applyCalibration(it) },

@@ -82,8 +82,13 @@ data class TradeTicket(
     val visibleContracts: Int? = null,
     /** Kalshi `post_only`: rejected instead of crossing the book, so never a taker order. */
     val postOnly: Boolean = false,
-    /** Resting buys are cancelled this long after they are accepted, if unfilled. */
-    val restingCancelAfterMs: Long? = null
+    /** Resting orders are cancelled this long after they are accepted, if unfilled. */
+    val restingCancelAfterMs: Long? = null,
+    /**
+     * When a resting limit order must be gone (epoch ms). Sent to Kalshi as
+     * the order's `expiration_time`, so it ends there even if the app is closed.
+     */
+    val expiresAtMs: Long? = null
 ) {
     val displaySide: String get() = side.uppercase()
 
@@ -114,9 +119,9 @@ data class PlacedOrder(
     val unfilledContracts: Int
         get() = (ticket.contracts - filledContracts).coerceAtLeast(0)
 
-    /** IoC reduce-only sells never rest — leftover size is canceled. */
+    /** IoC reduce-only sells never rest — leftover size is canceled. A post-only limit sell does rest. */
     val isResting: Boolean
-        get() = !ticket.isSell && remainingCount > 1e-9 && orderId != null
+        get() = (!ticket.isSell || ticket.postOnly) && remainingCount > 1e-9 && orderId != null
 
     fun fillSummary(): String {
         val wanted = ticket.contracts

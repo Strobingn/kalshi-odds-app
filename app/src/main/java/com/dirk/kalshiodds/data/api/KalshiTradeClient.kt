@@ -200,8 +200,10 @@ class KalshiTradeClient(
         }
     }
 
-    private fun v2Body(ticket: TradeTicket, clientOrderId: String): CreateOrderV2Request {
-        val reduceOnly = ticket.reduceOnly || ticket.isSell
+    internal fun v2Body(ticket: TradeTicket, clientOrderId: String): CreateOrderV2Request {
+        // A post-only limit sell rests in the book, so it cannot be reduce-only (Kalshi allows that
+        // only with immediate-or-cancel). Its size is capped at the held contracts when it is built.
+        val reduceOnly = (ticket.reduceOnly || ticket.isSell) && !ticket.postOnly
         // Official Create Order V2: reduce_only is rejected unless TIF is IoC.
         // https://docs.kalshi.com/api-reference/orders/create-order-v2
         val timeInForce = if (reduceOnly) {
@@ -218,7 +220,9 @@ class KalshiTradeClient(
             timeInForce = timeInForce,
             clientOrderId = clientOrderId,
             postOnly = ticket.postOnly && !reduceOnly,
-            reduceOnly = reduceOnly
+            reduceOnly = reduceOnly,
+            // Resting orders end on Kalshi's side at their time, even if the app is closed (whole seconds, rounded up).
+            expirationTime = ticket.expiresAtMs?.takeIf { !reduceOnly && ticket.postOnly }?.let { (it + 999L) / 1000L }
         )
     }
 

@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.data.dto
 
+import kotlinx.serialization.EncodeDefault
+import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -31,7 +33,14 @@ data class CreateOrderV2Request(
     @SerialName("post_only") val postOnly: Boolean = false,
     /** Official Create Order V2 example is `false`. */
     @SerialName("cancel_order_on_pause") val cancelOrderOnPause: Boolean = false,
-    @SerialName("reduce_only") val reduceOnly: Boolean = false
+    @SerialName("reduce_only") val reduceOnly: Boolean = false,
+    /**
+     * Optional Unix time in **seconds** when a resting order expires. Left out
+     * of the JSON when null. Not allowed with `immediate_or_cancel`.
+     */
+    @OptIn(ExperimentalSerializationApi::class)
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    @SerialName("expiration_time") val expirationTime: Long? = null
 ) {
     companion object {
         const val TIME_IN_FORCE_GTC = "good_till_canceled"

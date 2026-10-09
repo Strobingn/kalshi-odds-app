@@ -263,7 +263,9 @@ class PaperBook(
         wantContracts: Int,
         source: String,
         note: String,
-        winTargetUsd: Double? = null
+        winTargetUsd: Double? = null,
+        /** A resting (limit) fill: no taker fee. */
+        maker: Boolean = false
     ): PaperBuy.Outcome {
         if (CryptoMarkets.isRetiredTicker(ticker)) {
             return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
@@ -281,7 +283,7 @@ class PaperBook(
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
-            val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px)
+            val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px, if (maker) 0.0 else SignalConstants.DEFAULT_FEE_RATE)
             if (qty < 1) {
                 val msg = String.format(
                     java.util.Locale.US,
@@ -295,7 +297,7 @@ class PaperBook(
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
             val stake = qty * px
-            val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(qty, px)
+            val fees = if (maker) 0.0 else com.dirk.kalshiodds.signal.trade.KalshiFee.total(qty, px)
             val debit = stake + fees
             val row = PaperFill(
                 id = idFactory(),

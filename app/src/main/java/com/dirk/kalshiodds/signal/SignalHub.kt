@@ -61,6 +61,8 @@ class SignalHub(
     private val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     /** Paper scalper: every scalping strategy at once, on paper. Never orders. */
     private val scalper: com.dirk.kalshiodds.signal.scalper.PaperScalper? = null,
+    /** Paper limit orders the user placed: filled by the same real trade prints. Never orders. */
+    private val paperLimits: (() -> com.dirk.kalshiodds.signal.limit.PaperLimitBook?)? = null,
     tickDispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
         Thread(r, "diphunter-ticks").apply { priority = Thread.NORM_PRIORITY + 1; isDaemon = true }
     }.asCoroutineDispatcher()
@@ -206,6 +208,17 @@ class SignalHub(
                 flowWindow.onTrade(tick.ticker, tick.takerSide, tick.tradeSize, now)
             }
         }
+        runCatching {
+            val limits = paperLimits?.invoke()
+            if (limits != null) {
+                val now = System.currentTimeMillis()
+                // Expiry and the book's bound first, then the print.
+                limits.onClock(tick.ticker, now)
+                if (tick.source == TickSource.WS_TRADE) {
+                    limits.onTrade(tick.ticker, tick.takerSide, tick.lastPrice, tick.tradeSize, now)
+                }
+            }
+        }.onFailure { CrashBreadcrumb.record("paper limit ${tick.ticker}", it) }
         val paperScalper = scalper
         if (paperScalper != null && settings.scalperEnabled) {
             runCatching {

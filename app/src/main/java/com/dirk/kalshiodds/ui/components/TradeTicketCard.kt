@@ -56,7 +56,9 @@ fun TradeTicketsSection(
     onPaper: (String) -> Unit,
     onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
-    onCancelOrder: (String) -> Unit
+    onCancelOrder: (String) -> Unit,
+    /** The limit-order editor's host; null hides the LIMIT ORDER / LIMIT SELL buttons. */
+    limitHost: com.dirk.kalshiodds.signal.limit.LimitHost? = null
 ) {
     val colors = DipTheme.colors
     val proposals = tickets.proposals.sortedByDescending {
@@ -106,7 +108,9 @@ fun TradeTicketsSection(
             }
             is TicketPhase.Submitted -> {
                 Text(
-                    if (phase.order.ticket.isSell) {
+                    if (phase.order.ticket.isSell && phase.order.ticket.postOnly) {
+                        "Limit sell resting · ${com.dirk.kalshiodds.signal.limit.PaperLimitBook.describe(phase.order.ticket)} · order ${phase.order.orderId ?: "pending id"}"
+                    } else if (phase.order.ticket.isSell) {
                         phase.order.fillSummary()
                     } else {
                         "Limit resting · ${com.dirk.kalshiodds.ui.SignalCopy.callLabel(phase.order.ticket.side)} ${com.dirk.kalshiodds.ui.WindowLabel.of(phase.order.ticket.ticker)} · order ${phase.order.orderId ?: "pending id"}"
@@ -168,7 +172,8 @@ fun TradeTicketsSection(
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
             onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
-            onDismiss = onCancelApprove
+            onDismiss = onCancelApprove,
+            limitHost = limitHost
         )
     }
 }
@@ -468,9 +473,26 @@ internal fun ApproveTicketDialog(
     onRest: (() -> Unit)? = null,
     onPaper: () -> Unit,
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    limitHost: com.dirk.kalshiodds.signal.limit.LimitHost? = null
 ) {
     val colors = DipTheme.colors
+    var limitMode by remember(ticket.id) { mutableStateOf(false) }
+    // A limit order needs a tradable window; a sell blocked only because nobody is bidding can still rest.
+    val canLimit = limitHost != null && !ticket.postOnly &&
+        com.dirk.kalshiodds.signal.trade.RestingBid.allowedFor(ticket.ticker) &&
+        com.dirk.kalshiodds.signal.limit.LimitOrder.canRest(ticket)
+    if (limitMode && limitHost != null) {
+        LimitOrderDialog(
+            ticket = ticket,
+            host = limitHost,
+            credentialsConfigured = credentialsConfigured,
+            paperTradingEnabled = paperTradingEnabled,
+            onBack = { limitMode = false },
+            onDismiss = onDismiss
+        )
+        return
+    }
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
     val paperSell = ticket.paperOnly && ticket.isSell
     val paperBuy = false
@@ -635,7 +657,10 @@ internal fun ApproveTicketDialog(
         },
         dismissButton = {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (!ticket.isSell && !ticket.postOnly && !paperBuy && !paperTradingEnabled && credentialsConfigured && onRest != null &&
+                if (canLimit) {
+                    // Opens the editor (it starts one step better than the best bid / ask). Places nothing.
+                    TextButton(onClick = { limitMode = true }) { Text(if (ticket.isSell) "LIMIT SELL" else "LIMIT ORDER") }
+                } else if (!ticket.isSell && !ticket.postOnly && !paperBuy && !paperTradingEnabled && credentialsConfigured && onRest != null &&
                     com.dirk.kalshiodds.signal.trade.RestingBid.allowedFor(ticket.ticker)
                 ) {
                     TextButton(

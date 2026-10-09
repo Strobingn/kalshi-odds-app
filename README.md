@@ -19,6 +19,35 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.7 (Claude branch): limit orders at your own price, paper and real
+
+Buy UP / Buy DOWN (or Sell on a position) → **LIMIT ORDER** / **LIMIT SELL** on the confirm sheet opens an
+editor (`LimitOrderDialog`, rules in `signal/limit/LimitOrder.kt`): pick the price (1¢ steps from 10¢ to
+90¢, 0.1¢ outside), the contracts and how long the order may rest (30 s, 2 min, 5 min, or until 30 s
+before the close). It shows the best bid and ask, the size already resting at your price, and the cost
+and payout if it fills.
+
+- **Resting, post-only.** Kalshi rejects the order instead of letting it cross, so it never pays the taker
+  fee. A price at or through the other side is refused in the editor ("use Buy").
+- **Paper** (`PaperLimitBook`): the order waits against the real book and fills only from real trade
+  prints, after the size ahead of it has traded (or a print goes through its price). The size ahead can
+  only shrink as the live book shows fewer contracts at that price. No fee. Needs Live signals on. Paper
+  resting orders are dropped if the app restarts.
+- **Real**: sent only by the editor's REAL MONEY button, through the same Approve path, $5 all-in cap and
+  daily cap as every live buy. Every resting order carries Kalshi's `expiration_time`, so it ends on
+  Kalshi's side even if the app is closed; the app cancels it 2 s earlier when it is running.
+- **Limit sells** rest above the bid for no more than is held. Kalshi allows reduce-only only on
+  immediate-or-cancel orders, so a resting sell is not reduce-only: while one rests on a window the app
+  will not send another sell there.
+- **Limit orders resting** (Home card): every real and paper resting order with its Cancel. Before this
+  version a resting real order could not be cancelled from the screen.
+- The min-profit-if-win setting switches off the buy-now ticket above about 31¢; a limit order at your own
+  price is not held to it, and the editor says so.
+
+Not checked against Kalshi: this build was unit tested (request shape, caps, expiry, paper fills) but no
+real or demo order was sent from here. A limit order does not jump the queue: see sections G–I of the
+scalping write-up for what joining the best price did on recorded books.
+
 ## 1.8.6 (Claude branch): the scalper card shows real-order-book history
 
 The figures in brackets on the Paper scalper card were "22 days of trade prints, back of the queue to

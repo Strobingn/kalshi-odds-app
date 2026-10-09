@@ -344,7 +344,18 @@ class TicketSession(
                 }
             },
             onFailure = { err ->
-                _state.update { it.copy(lastError = humanError(err)) }
+                val msg = humanError(err)
+                if (isOrderGone(msg)) {
+                    // Kalshi no longer has it: it filled or expired there. It is not resting, and nothing is released.
+                    _state.update {
+                        it.copy(
+                            working = it.working.filterNot { w -> w.orderId == orderId } + order.copy(error = ORDER_GONE),
+                            lastError = "That order is no longer open on Kalshi: it filled or expired. Check Positions."
+                        )
+                    }
+                } else {
+                    _state.update { it.copy(lastError = msg) }
+                }
             }
         )
         return _state.value
@@ -429,6 +440,14 @@ class TicketSession(
         const val WINDOW_CLOSED = TicketBuilder.WINDOW_CLOSED
         const val WINDOW_CLOSED_NOTICE = "That window closed. Nothing was sent."
         const val VOID_HOLD_MS = 5_000L
+
+        /** Marks a working order Kalshi no longer has. Starts with "cancelled" so every resting list drops it. */
+        const val ORDER_GONE = "cancelled or filled on Kalshi"
+
+        fun isOrderGone(message: String): Boolean {
+            val m = message.lowercase()
+            return m.contains("http 404") || m.contains("not_found") || m.contains("not found")
+        }
 
         fun ticketKey(t: TradeTicket): String =
             "${t.ticker}|${t.side}|${t.kind}|${t.stakeUsd}"

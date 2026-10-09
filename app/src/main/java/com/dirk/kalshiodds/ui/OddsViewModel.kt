@@ -87,7 +87,9 @@ data class OddsUiState(
     val scalper: com.dirk.kalshiodds.signal.scalper.ScalperState =
         com.dirk.kalshiodds.signal.scalper.ScalperState.fresh(),
     /** Paper scalper: (resting bids, open scalps) right now. */
-    val scalperWorking: Pair<Int, Int> = 0 to 0
+    val scalperWorking: Pair<Int, Int> = 0 to 0,
+    /** Paper limit orders resting right now. */
+    val paperLimits: List<com.dirk.kalshiodds.signal.limit.PaperLimitOrder> = emptyList()
 )
 
 /**
@@ -170,6 +172,23 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.paperLimits.state.collect { resting ->
+                    _state.update { it.copy(paperLimits = resting) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            // Paper limit orders expire by the clock even when no tick arrives for their window.
+            runCatching {
+                while (isActive) {
+                    delay(1_000L)
+                    val now = container.clock.nowMs()
+                    container.paperLimits.openTickers().forEach { container.paperLimits.onClock(it, now) }
                 }
             }
         }
@@ -666,9 +685,151 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
 
+    /** The limit-order editor's view of the app. Only [LimitHost.place] can send anything. */
+    val limitHost: com.dirk.kalshiodds.signal.limit.LimitHost = object : com.dirk.kalshiodds.signal.limit.LimitHost {
+        override fun quote(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket) = limitQuote(ticket.ticker, ticket.side)
+
+        override fun queueAhead(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, price: Double): Double? =
+            runCatching { container.paperLimits.queueAhead(ticket, price) }.getOrNull()
+
+        override fun check(
+            ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, price: Double, contracts: Int, cancelAfterMs: Long, paper: Boolean
+        ): String? = buildLimit(ticket, price, contracts, cancelAfterMs, paper).exceptionOrNull()?.message
+
+        override fun place(ticketId: String, price: Double, contracts: Int, cancelAfterMs: Long, paper: Boolean) =
+            placeLimit(ticketId, price, contracts, cancelAfterMs, paper)
+
+        override fun cancelPaper(orderId: String) {
+            if (container.paperLimits.cancel(orderId)) {
+                _state.update { it.copy(userMessage = container.paperLimits.lastMessage) }
+            }
+        }
+
+        override val tradeFeedOn: Boolean get() = _state.value.settings.liveSignalsEnabled
+    }
+
+    /** Live best bid / ask and the sizes shown for [side] on [ticker]: the book first, then the last quotes. */
+    private fun limitQuote(ticker: String, side: String): com.dirk.kalshiodds.signal.limit.LimitOrder.Quote {
+        val want = if (side.equals("NO", true)) "NO" else "YES"
+        val yes = want == "YES"
+        val s = _state.value
+        val top = runCatching { container.scoring.book.topOfBook(ticker) }.getOrNull()?.takeIf { !it.isEmpty() }
+        val market = s.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(ticker, true) }
+        val ctx = ticketContext(s, container.clock.nowMs())
+        val bid = KalshiPrice.usable(if (yes) top?.yesBid else top?.noBid)
+            ?: market?.let { TicketBuilder.freshBestBid(it, want, ctx) }
+        val ask = KalshiPrice.usable(if (yes) top?.yesAsk else top?.noAsk)
+            ?: market?.let { TicketBuilder.bestAsk(it, want, ctx) }
+        return com.dirk.kalshiodds.signal.limit.LimitOrder.Quote(
+            bid = bid,
+            ask = ask,
+            bidQty = if (yes) top?.yesBidQty else top?.noBidQty,
+            askQty = if (yes) top?.yesAskQty else top?.noAskQty
+        )
+    }
+
+    private fun limitOnPaper(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, paper: Boolean): Boolean =
+        paper || ticket.paperOnly || _state.value.settings.paperTradingEnabled
+
+    private fun buildLimit(
+        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, price: Double, contracts: Int, cancelAfterMs: Long, paper: Boolean
+    ): Result<com.dirk.kalshiodds.signal.trade.TradeTicket> {
+        val s = _state.value
+        val closeMs = s.snapshot?.allMarkets?.firstOrNull { it.ticker.equals(ticket.ticker, true) }?.closeTimeEpochMs
+            ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(ticket.ticker)
+        return com.dirk.kalshiodds.signal.limit.LimitOrder.build(
+            ticket = ticket,
+            price = price,
+            contracts = contracts,
+            quote = limitQuote(ticket.ticker, ticket.side),
+            cancelAfterMs = cancelAfterMs,
+            closeMs = closeMs,
+            nowMs = container.clock.nowMs(),
+            paper = limitOnPaper(ticket, paper)
+        )
+    }
+
+    /**
+     * Rest a limit order at the user's price. Paper: onto the paper limit
+     * book, filled later by real trades. Real: a post-only order through the
+     * same approve gate, daily cap and $5 cap as every live buy, with an end
+     * time Kalshi enforces. Called only from the editor's confirm buttons.
+     */
+    fun placeLimit(ticketId: String, price: Double, contracts: Int, cancelAfterMs: Long, paper: Boolean) {
+        viewModelScope.launch {
+            val base = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
+            if (base == null) {
+                ticketSession.failSoft("Limit order ignored — no matching ticket")
+                return@launch
+            }
+            val limit = buildLimit(base, price, contracts, cancelAfterMs, paper).getOrElse {
+                ticketSession.failSoft(it.message ?: "Cannot place this limit order")
+                return@launch
+            }
+            if (limitOnPaper(base, paper)) {
+                val placed = container.paperLimits.place(limit, container.clock.nowMs())
+                val msg = container.paperLimits.lastMessage ?: "Paper limit order"
+                if (placed.isSuccess) {
+                    runCatching {
+                        container.resultsWriter.enqueueTicket(
+                            com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
+                                ticker = limit.ticker,
+                                side = limit.side,
+                                stakeUsd = limit.stakeUsd,
+                                approved = true,
+                                result = "paper limit resting",
+                                createdAtMs = System.currentTimeMillis(),
+                                note = msg
+                            )
+                        )
+                    }
+                    ticketSession.dismiss(ticketId)
+                }
+                ticketSession.failSoft(msg)
+                _state.update { it.copy(userMessage = msg) }
+                return@launch
+            }
+            if (!_state.value.settings.tradingCredentialsConfigured()) {
+                ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before sending a real order")
+                return@launch
+            }
+            if (limit.isSell && restingSellOn(limit.ticker)) {
+                ticketSession.failSoft(RESTING_SELL_FIRST)
+                return@launch
+            }
+            ticketSession.revise(ticketId) { limit }
+            approveLiveWithinCap(ticketId, limit)
+            // Say what happened: the confirm sheet is gone by now.
+            val after = ticketSession.snapshot()
+            val msg = when (val phase = after.phase) {
+                is com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted -> {
+                    val o = phase.order
+                    "REAL limit ${com.dirk.kalshiodds.signal.limit.PaperLimitBook.describe(o.ticket)} is on Kalshi" +
+                        (if (o.filledContracts > 0) " · ${o.filledContracts} filled already" else " · resting")
+                }
+                is com.dirk.kalshiodds.signal.trade.TicketPhase.Failed -> phase.error
+                else -> after.lastError
+            }
+            if (msg != null) _state.update { it.copy(userMessage = msg) }
+        }
+    }
+
+    /** True while a real limit sell is resting on [ticker]: a second sell could sell more than is held. */
+    private fun restingSellOn(ticker: String): Boolean =
+        ticketSession.snapshot().working.any {
+            it.ticket.isSell && it.isResting && it.error?.startsWith("cancelled") != true &&
+                (it.ticket.expiresAtMs ?: Long.MAX_VALUE) > container.clock.nowMs() &&
+                it.ticket.ticker.equals(ticker, true)
+        }
+
     fun approveSellTicket(ticketId: String, count: Int, price: Double) {
         viewModelScope.launch {
             val settings = _state.value.settings
+            val selling = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
+            if (selling != null && restingSellOn(selling.ticker)) {
+                ticketSession.failSoft(RESTING_SELL_FIRST)
+                return@launch
+            }
             if (!settings.tradingCredentialsConfigured()) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
                 return@launch
@@ -1199,6 +1360,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     companion object {
+        const val RESTING_SELL_FIRST = "A limit sell is already resting on this window: cancel it first"
         const val BASE_POLL_MS = 750L
         const val JITTER_MS = 250L
         const val MIN_POLL_MS = 500L
