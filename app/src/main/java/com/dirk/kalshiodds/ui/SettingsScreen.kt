@@ -491,7 +491,7 @@ fun SettingsContent(
                 onValueChange = { viewModel?.setBankrollDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Bankroll (USD)") },
-                supportingText = { Text("Used only to compute “N contracts max".") },
+                supportingText = { Text("Used only to compute “N contracts max”.") },
                 singleLine = true
             )
             ToggleRow("Kelly sizing (off = fixed fraction)", s.useKelly, { viewModel?.setUseKelly(it) })
