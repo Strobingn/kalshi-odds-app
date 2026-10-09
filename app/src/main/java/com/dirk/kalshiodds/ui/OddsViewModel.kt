@@ -19,6 +19,7 @@ import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.exit.SwingExitEngine
+import com.dirk.kalshiodds.signal.trade.AutoTradeEngine
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.chart.ChartWindowService
@@ -817,6 +818,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
         }
+        if (s.settings.autoTradeEnabled) {
+            runCatching { maybeAutoEnter(s, tickets, live, ctx, now) }
+        }
         refreshPositionMarks()
     }
 
@@ -1033,7 +1037,155 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             applyPaperBuy(ticket.id)
             "Exit brain · ${decision.reason}: sold paper $side $ticker — ${decision.note}"
         } else {
+            if (!paper) maybeAutoSell(ticket, s, now)
             "Exit brain · ${decision.reason}: sell $side $ticker — ${decision.note}"
+        }
+    }
+
+    /**
+     * Auto-trade entry. Runs only when armed in Settings; AutoTradeEngine
+     * enforces the stake / position / daily-order / cooldown / loss-limit
+     * caps. Fires at most one buy per rebuild; manual Buy cards and paper
+     * tickets stay on their existing paths. The order itself goes through
+     * [TicketSession.autoApprove] — the same placement code as Approve.
+     */
+    private fun maybeAutoEnter(
+        s: OddsUiState,
+        tickets: List<com.dirk.kalshiodds.signal.trade.TradeTicket>,
+        live: List<MarketUiModel>,
+        ctx: TicketBuilder.Context,
+        now: Long
+    ) {
+        val store = container.autoTrade
+        val marketsByTicker = live.associateBy { it.ticker }
+        val portfolioTickers = s.positions.map { it.ticker }.toSet()
+        // Settled markets vanish from the portfolio AND the tradable list.
+        // Drop their entries so the position cap frees up. Settlement P&L is
+        // not knowable locally, so removals are P&L-neutral on purpose.
+        if (marketsByTicker.isNotEmpty() && portfolioTickers.isNotEmpty()) {
+            for (pos in store.openPositions()) {
+                val goneEverywhere = pos.ticker !in portfolioTickers && pos.ticker !in marketsByTicker
+                if (goneEverywhere) store.removeOpenPosition(pos.ticker, pos.side)
+            }
+        }
+        val openAuto = store.openPositions()
+        val estDailyPnl = store.realizedToday(now) + openAuto.sumOf { pos ->
+            val m = marketsByTicker[pos.ticker]
+            val mark = m?.let { TicketBuilder.bestBid(it, pos.side, ctx) } ?: pos.entryPrice
+            (mark - pos.entryPrice) * pos.contracts -
+                AutoTradeEngine.feeEstimate(pos.contracts, pos.entryPrice, s.settings.feeRate)
+        }
+        if (estDailyPnl <= -s.settings.autoDailyLossLimitUsd) {
+            if (store.pausedReason == null) {
+                store.pausedReason = "daily loss limit (est. ${AutoTradeEngine.fmtSignedUsd(estDailyPnl)})"
+                _state.update { it.copy(userMessage = "Auto-trade paused — daily loss limit hit") }
+            }
+            return
+        }
+        val candidate = tickets
+            .filter { !it.isSell && !it.paperOnly && it.canApprove }
+            .filter { it.kind != com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL }
+            .maxByOrNull { it.netEvUsd ?: (it.netEdgePp ?: 0.0) }
+            ?: return
+        val liveAsk = marketsByTicker[candidate.ticker]?.let {
+            TicketBuilder.bestAsk(it, candidate.side, ctx)
+        }
+        val block = AutoTradeEngine.entryBlockReason(
+            armed = s.settings.autoTradeEnabled,
+            credentialsConfigured = s.settings.tradingCredentialsConfigured(),
+            pausedReason = store.pausedReason,
+            ticket = candidate,
+            settings = s.settings,
+            ordersToday = store.ordersToday(now),
+            openPositions = openAuto.size,
+            alreadyOpenOnTicker = openAuto.any { it.ticker == candidate.ticker },
+            cooldownRemainingMs = store.cooldownRemainingMs(candidate.ticker, now),
+            liveAsk = liveAsk,
+            estimatedDailyPnlUsd = estDailyPnl
+        )
+        if (block != null) return
+        store.noteOrder(candidate.ticker, now)
+        viewModelScope.launch {
+            ticketSession.autoApprove(candidate.id)
+            val after = ticketSession.snapshot()
+            val submitted = after.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted
+            if (submitted != null && submitted.order.ticket.id == candidate.id && submitted.order.error == null) {
+                store.noteSuccess()
+                val filled = submitted.order.filledContracts.takeIf { it > 0 } ?: candidate.contracts
+                val px = submitted.order.averageFillPrice ?: candidate.limitPrice
+                store.addOpenPosition(
+                    com.dirk.kalshiodds.signal.trade.AutoTradeStore.OpenPosition(
+                        ticker = candidate.ticker,
+                        side = candidate.side,
+                        contracts = filled,
+                        entryPrice = px,
+                        costUsd = px * filled
+                    )
+                )
+                _state.update {
+                    it.copy(
+                        userMessage = "Auto-trade bought ${candidate.side} ${candidate.ticker} ×$filled @ ${(px * 100).toInt()}¢"
+                    )
+                }
+            } else {
+                val errs = store.noteError()
+                if (errs >= com.dirk.kalshiodds.signal.config.SignalConstants.AUTO_MAX_CONSEC_ERRORS) {
+                    store.pausedReason = "order errors ×$errs"
+                    _state.update { it.copy(userMessage = "Auto-trade paused after repeated order errors") }
+                }
+            }
+        }
+    }
+
+    /**
+     * Auto-trade exit: when armed, swing-exit SELL tickets fire without the
+     * Approve tap (paper exits already auto-execute). Exits are never blocked
+     * by the pause state — cutting a position is the safe direction.
+     */
+    private fun maybeAutoSell(
+        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
+        s: OddsUiState,
+        now: Long
+    ) {
+        if (!s.settings.autoTradeEnabled) return
+        val store = container.autoTrade
+        val block = AutoTradeEngine.sellBlockReason(
+            credentialsConfigured = s.settings.tradingCredentialsConfigured(),
+            ticket = ticket,
+            ordersToday = store.ordersToday(now),
+            cooldownRemainingMs = store.cooldownRemainingMs(ticket.ticker, now)
+        )
+        if (block != null) return
+        store.noteOrder(ticket.ticker, now)
+        viewModelScope.launch {
+            ticketSession.autoApprove(ticket.id)
+            val after = ticketSession.snapshot()
+            val submitted = after.phase as? com.dirk.kalshiodds.signal.trade.TicketPhase.Submitted
+            if (submitted != null && submitted.order.ticket.id == ticket.id && submitted.order.error == null) {
+                store.noteSuccess()
+                val entry = store.removeOpenPosition(ticket.ticker, ticket.side)
+                val sellPx = submitted.order.averageFillPrice ?: ticket.limitPrice
+                if (entry != null) {
+                    val fees = AutoTradeEngine.feeEstimate(entry.contracts, entry.entryPrice, s.settings.feeRate) +
+                        AutoTradeEngine.feeEstimate(entry.contracts, sellPx, s.settings.feeRate)
+                    val pnl = sellPx * entry.contracts - entry.costUsd - fees
+                    store.noteRealized(pnl, now)
+                    _state.update {
+                        it.copy(
+                            userMessage = "Auto-trade sold ${ticket.side} ${ticket.ticker} — est. P&L ${AutoTradeEngine.fmtSignedUsd(pnl)}"
+                        )
+                    }
+                } else {
+                    _state.update {
+                        it.copy(userMessage = "Auto-trade sold ${ticket.side} ${ticket.ticker}")
+                    }
+                }
+            } else {
+                val errs = store.noteError()
+                if (errs >= com.dirk.kalshiodds.signal.config.SignalConstants.AUTO_MAX_CONSEC_ERRORS) {
+                    store.pausedReason = "order errors ×$errs"
+                }
+            }
         }
     }
 
