@@ -194,6 +194,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setLateFavorite(v: Boolean) = track("late_favorite", _state.value.settings.lateFavoriteEnabled, v) {
         prefs.updateLateFavorite(v)
     }
+    fun setClearLead(v: Boolean) = track("clear_lead", _state.value.settings.clearLeadEnabled, v) {
+        prefs.updateClearLead(v)
+    }
+    fun resetClearLead() {
+        val before = container.clearLead.ledger.snapshot().totals.settledBets
+        container.clearLead.ledger.reset()
+        track("clear_lead_reset", before, 0) { }
+        _state.update { it.copy(credentialMessage = "Clear-lead paper record reset — no Kalshi orders") }
+    }
     fun resetLateFavorite() {
         val before = container.lateFavorite.ledger.snapshot().totals.settledBets
         container.lateFavorite.ledger.reset()

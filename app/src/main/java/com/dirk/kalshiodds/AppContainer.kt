@@ -106,6 +106,8 @@ class AppContainer(context: Context) {
     val flowFade = com.dirk.kalshiodds.signal.flowfade.FlowFadeStore(app)
     /** Paper-only 1¢-better resting bid (maker_sim improve rule). Never orders. */
     val centBetter = com.dirk.kalshiodds.signal.centbetter.CentBetterStore(app)
+    /** Paper record of the clear-lead rule (Dirk's "bet the way Bitcoin is going"). Never orders. */
+    val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadStore(app)
     val hub = SignalHub(
         scoring = scoring,
         notifier = notifier,
@@ -113,7 +115,8 @@ class AppContainer(context: Context) {
         results = resultsWriter,
         lateFavorite = lateFavorite.ledger,
         flowFade = flowFade.ledger,
-        centBetter = centBetter.ledger
+        centBetter = centBetter.ledger,
+        clearLead = clearLead.ledger
     )
 
     /**
@@ -194,7 +197,7 @@ class AppContainer(context: Context) {
         logStore = logStore,
         extraOpenTickers = {
             paper.book.openTickers() + lateFavorite.ledger.openTickers() + flowFade.ledger.openTickers() +
-                centBetter.ledger.openTickers() +
+                centBetter.ledger.openTickers() + clearLead.ledger.openTickers() +
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
@@ -203,6 +206,7 @@ class AppContainer(context: Context) {
             lateFavorite.ledger.settle(ticker, result)
             flowFade.ledger.settle(ticker, result)
             centBetter.ledger.settle(ticker, result)
+            clearLead.ledger.settle(ticker, result)
             recorder.onSettled(ticker, result)
         },
         onCalibration = { hub.applyCalibration(it) },
@@ -212,6 +216,7 @@ class AppContainer(context: Context) {
             lateFavorite.ledger.settleFromLog(logStore.readAll())
             flowFade.ledger.settleFromLog(logStore.readAll())
             centBetter.ledger.settleFromLog(logStore.readAll())
+            clearLead.ledger.settleFromLog(logStore.readAll())
             val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
                 logStore.readAll(),
                 feeRate = hub.settings.feeRate

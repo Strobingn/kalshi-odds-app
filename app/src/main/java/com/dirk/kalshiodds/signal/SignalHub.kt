@@ -57,6 +57,8 @@ class SignalHub(
     private val flowFade: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     /** Paper-only "1¢ better" resting bid (maker_sim improve rule); logs, never orders. */
     private val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
+    /** Paper record of the clear-lead rule; logs, never orders. */
+    private val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     tickDispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
         Thread(r, "diphunter-ticks").apply { priority = Thread.NORM_PRIORITY + 1; isDaemon = true }
     }.asCoroutineDispatcher()
@@ -386,6 +388,44 @@ class SignalHub(
         maybeLateFavorite(tick, scored)
         maybeFlowFade(tick, scored)
         maybeCentBetter(tick, scored)
+        maybeClearLead(tick, scored)
+    }
+
+    /**
+     * Paper record of the clear-lead rule
+     * ([com.dirk.kalshiodds.signal.trend.ClearLeadRule]): the first moment in
+     * a window the engine's score says Bitcoin is clearly ahead, log a $5 buy
+     * of that side at the ask. Logs to [clearLead]; there is no path from
+     * here to an order.
+     */
+    private fun maybeClearLead(tick: MarketTick, scored: ScoringEngine.Score) {
+        val ledger = clearLead ?: return
+        if (!settings.clearLeadEnabled) return
+        val side = scored.clearLeadSide ?: return
+        val bp = scored.clearLeadBp ?: return
+        val tte = scored.tteSeconds ?: return
+        if (!CryptoMarkets.isLiveTicker(tick.ticker) || ledger.hasEntry(tick.ticker)) return
+        runCatching {
+            // Asks come from the book when it has them: a trade tick carries only the print price.
+            val top = scoring.book.topOfBook(tick.ticker)
+            val quoted = tick.source != TickSource.WS_TRADE
+            val yesBid = top?.yesBid ?: tick.yesBid.takeIf { quoted }
+            val noBid = top?.noBid ?: tick.noBid.takeIf { quoted }
+            val yesAsk = KalshiPrice.usable(top?.yesAsk ?: tick.yesAsk.takeIf { quoted })
+                ?: KalshiPrice.impliedAskFromOppositeBid(noBid)
+            val noAsk = KalshiPrice.usable(top?.noAsk ?: tick.noAsk.takeIf { quoted })
+                ?: KalshiPrice.impliedAskFromOppositeBid(yesBid)
+            val decision = com.dirk.kalshiodds.signal.trend.ClearLeadRule.decide(
+                ticker = tick.ticker,
+                nowMs = System.currentTimeMillis(),
+                signal = com.dirk.kalshiodds.signal.trend.ClearLeadRule.Signal(side, bp, tte),
+                yesAsk = yesAsk,
+                noAsk = noAsk
+            ) ?: return
+            ledger.record(decision)?.let {
+                Log.d(TAG, "clearlead paper ${it.ticker} ${it.side} @ ${it.ask} bp=${it.z} tte=${it.tteSeconds}")
+            }
+        }.onFailure { CrashBreadcrumb.record("clearlead ${tick.ticker}", it) }
     }
 
     /**

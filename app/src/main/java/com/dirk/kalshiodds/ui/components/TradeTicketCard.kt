@@ -204,7 +204,7 @@ private fun ProposedTicketCard(
                     when (ticket.kind) {
                         TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
                         TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
-                        TicketKind.MANUAL -> "MANUAL BUY"
+                        TicketKind.MANUAL -> if (ticket.clearLead) "CLEAR LEAD · YOUR RULE" else "MANUAL BUY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
                     } + " · " + TradeModeLabel.forApprove(

@@ -48,6 +48,13 @@ data class SignalSettings(
     val spotStreamEnabled: Boolean = SignalConstants.DEFAULT_SPOT_STREAM,
     /** Settings → "Late-favorite paper tracker". Paper only, never orders. */
     val lateFavoriteEnabled: Boolean = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
+    /**
+     * Settings → "Clear lead rule". Dirk's rule: bet the side Bitcoin is
+     * clearly ahead on (minutes 3–10, 0.10–0.20% from the start price).
+     * Drives the BET headline and its $5 ticket, and logs every window to
+     * its own paper record. Approve is still required.
+     */
+    val clearLeadEnabled: Boolean = true,
     /** Research recorder (filesDir/recordings) while Live signals runs. */
     val recordMarketData: Boolean = true,
     val debounceMs: Long = 10_000L,
@@ -189,6 +196,7 @@ class SignalPreferences(
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
     suspend fun updateSpotStream(value: Boolean) = edit { it[KEY_SPOT_STREAM] = value }
     suspend fun updateLateFavorite(value: Boolean) = edit { it[KEY_LATE_FAVORITE] = value }
+    suspend fun updateClearLead(value: Boolean) = edit { it[KEY_CLEAR_LEAD] = value }
     suspend fun updateRecordMarketData(value: Boolean) = edit { it[KEY_RECORD_MARKET_DATA] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
         it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)
@@ -403,6 +411,7 @@ class SignalPreferences(
             spotStreamEnabled = this[KEY_SPOT_STREAM] ?: SignalConstants.DEFAULT_SPOT_STREAM,
             lateFavoriteEnabled = this[KEY_LATE_FAVORITE]
                 ?: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
+            clearLeadEnabled = this[KEY_CLEAR_LEAD] ?: true,
             recordMarketData = this[KEY_RECORD_MARKET_DATA] ?: true,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
             minConfidence = this[KEY_MIN_CONF] ?: def.minConfidence,
@@ -481,6 +490,7 @@ class SignalPreferences(
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
         private val KEY_SPOT_STREAM = booleanPreferencesKey("spot_stream_enabled")
         private val KEY_LATE_FAVORITE = booleanPreferencesKey("late_favorite_enabled")
+        private val KEY_CLEAR_LEAD = booleanPreferencesKey("clear_lead_enabled")
         private val KEY_RECORD_MARKET_DATA = booleanPreferencesKey("record_market_data")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
         private val KEY_MIN_CONF = doublePreferencesKey("min_confidence")

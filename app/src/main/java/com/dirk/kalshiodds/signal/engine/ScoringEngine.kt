@@ -145,7 +145,15 @@ class ScoringEngine(
         val modelEdgeQualified: Boolean = true,
         /** A loaded model that beats the market ([com.dirk.kalshiodds.prediction.EdgeModel.beatsMarket]) produced [fairValuePp]. */
         val modelBacked: Boolean = false,
-        val blendWeight: Double? = null
+        val blendWeight: Double? = null,
+        /**
+         * [com.dirk.kalshiodds.signal.trend.ClearLeadRule]: the side Bitcoin
+         * is clearly ahead on right now ("YES" / "NO"), or null when the rule
+         * is not on. Independent of the model and of the sit-out switch.
+         */
+        val clearLeadSide: String? = null,
+        /** Signed distance of spot from the start price in basis points while the rule is on. */
+        val clearLeadBp: Double? = null
     )
 
     data class BlendWeights(
@@ -634,6 +642,8 @@ class ScoringEngine(
         // had to come from the Coinbase tape.
         val fairSpot = cf?.value ?: spotFeat?.lastPrice
         val cfExact = cf != null && (!inFinalMinute || cfFinalAvg != null)
+        // Dirk's rule: the side Bitcoin is clearly ahead on, minutes 3-10.
+        val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadRule.signal(tteSec, fairSpot, strikeUsd)
         val digitalFairPp = if (fairSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
                 spot = fairSpot,
@@ -909,7 +919,9 @@ class ScoringEngine(
             importedModelPp = importedModelPp,
             modelEdgeQualified = modelEdgeQualified,
             modelBacked = loaded?.beatsMarket == true,
-            blendWeight = importedBlendW
+            blendWeight = importedBlendW,
+            clearLeadSide = clearLead?.side,
+            clearLeadBp = clearLead?.distanceBp
         )
     }
 

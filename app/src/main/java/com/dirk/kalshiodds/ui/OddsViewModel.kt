@@ -79,6 +79,9 @@ data class OddsUiState(
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
     /** Paper-only 1¢-better resting bid tracker. */
     val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
+    /** Paper record of the clear-lead rule (same ledger type). */
+    val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState()
 )
 
@@ -183,6 +186,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 container.centBetter.ledger.state.collect { cb ->
                     _state.update { it.copy(centBetter = cb) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.clearLead.ledger.state.collect { cl ->
+                    _state.update { it.copy(clearLead = cl) }
                 }
             }
         }
@@ -893,9 +903,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
         val tickets = TicketBuilder.proposeAll(live, ctx)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
+        // The clear-lead ticket is built on demand by the Buy button, so it is
+        // not in the proposal list; it still gets the heads-up notification.
+        val clearLeadTickets = live.mapNotNull { TicketBuilder.proposeClearLead(it, ctx) }
         runCatching {
             container.opportunities.consider(
-                tickets = tickets,
+                tickets = tickets + clearLeadTickets,
                 enabled = s.settings.opportunityAlertsEnabled && s.settings.notificationsEnabled,
                 quiet = s.settings.opportunityQuiet
             )

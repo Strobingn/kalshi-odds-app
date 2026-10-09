@@ -26,8 +26,9 @@ class OffsetEdgeModelScoringTest {
     @Test
     fun zeroWeightOffsetModelFairIsTheMid() {
         val engine = engine(model(kind = "offset_logistic"))
-        val score = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)
-        assertNotNull(score)
+        val scored = engine.score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)
+        assertNotNull(scored)
+        val score = scored!!
         assertEquals("anchored output is recorded", 41.0, score.importedModelPp!!, 1e-4)
         // No holdout win: the decision fair stays on the market, which this
         // zero-weight model also reproduces.
@@ -54,7 +55,9 @@ class OffsetEdgeModelScoringTest {
         val modelPp = 100.0 / (1.0 + kotlin.math.exp(-(kotlin.math.ln(0.41 / 0.59) + 0.4)))
         val expected = 0.75 * 41.0 + 0.25 * modelPp
         assertEquals(expected, score.fairValuePp, 1e-2)
-        assertEquals("YES", score.predictedSide)
+        // 0.75 × 41 + 0.25 × 50.9 ≈ 43.5: pulled toward the model but still under 50, so the likely winner is DOWN.
+        assertTrue(score.fairValuePp < 50.0)
+        assertEquals("NO", score.predictedSide)
     }
 
     @Test

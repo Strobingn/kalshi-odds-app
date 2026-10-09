@@ -67,6 +67,11 @@ data class TradeTicket(
     val allInUsd: Double? = null,
     val belowMinProfit: Boolean = false,
     val minProfitIfWinUsd: Double? = null,
+    /**
+     * Built on the clear-lead rule ([com.dirk.kalshiodds.signal.trend.ClearLeadRule]).
+     * These buys are favourites at 60–95¢, so the min-profit-if-win gate does not apply.
+     */
+    val clearLead: Boolean = false,
     val winTargetUsd: Double? = null,
     val winTargetCapped: Boolean = false,
     val winTargetNote: String? = null,

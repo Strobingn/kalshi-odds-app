@@ -19,6 +19,23 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.2 (Claude branch): Clear lead, Dirk's rule
+
+The app now bets the way Bitcoin is going, once it is clearly ahead. When Bitcoin is 0.10–0.20% from the window's start price between minute 3 and minute 10, the Bitcoin card says **BET UP** or **BET DOWN** on the side Bitcoin is on, and Buy opens a $5 all-in ticket on that side. Approve is still required and the $5 cap and daily cap are unchanged.
+
+- **Why that band.** Over 4,264 settled windows (2026-08-24 → 10-08), betting the side Bitcoin is on won 75.7% of the time at an average 75.2¢, −0.6¢ per contract after the fee. The 0.10–0.20% band in minutes 3–10 came out ahead in both halves: +2.0¢ per contract [+0.0, +3.9] in the first 23 days and +0.9¢ [−1.3, +2.8] in the last 23, about +8¢ per $5 bet overall. A lead, not proof. Write-up: [`docs/clear-lead-2026-10-09.md`](docs/clear-lead-2026-10-09.md); tool: `tools/research/clear_lead_study.py`.
+- **Nothing else gates it.** The rule does not use the model, so the sit-out switch does not silence it. Its tickets are 60–95¢ buys, so the $10 min-profit-if-win setting (which allows nothing above 31¢) does not apply to its side. Every other ticket keeps its gates.
+- **Paper record.** Home card **Clear lead (your rule) · PAPER RECORD** logs the first call in every window as a $5 buy at the ask and settles it, approved or not. About 1,000 settled windows are needed before the record means anything.
+- **Switch.** Settings → **Clear lead rule**, with a reset for the record.
+
+| Control | Code | Test |
+|---------|------|------|
+| The rule | `ClearLeadRule.signal` | `ClearLeadTest.distanceBandIsTenInclusiveToTwentyExclusive`, `timeBandIsMinuteThreeToMinuteTen` |
+| Engine → card | `ScoringEngine.Score.clearLeadSide` → `MarketUiModel.withSignalScore` | `ClearLeadTest.engineScoreCarriesTheCallIntoTheMarketModel` |
+| Headline and ticket | `BetCall.clearLeadCall` → `TicketBuilder.proposeClearLead` → `proposeManual` | `ClearLeadTest.headlineIsBetUpWithAnApprovableEightyCentTicket`, `theBuyButtonBuildsTheSameTicketAndTheOtherSideKeepsItsGate` |
+| Not silenced by sit-out | `BetCall.decide` | `ClearLeadTest.sitOutDoesNotSilenceTheRuleButTheSettingDoes` |
+| Paper record | `SignalHub.maybeClearLead` → `ClearLeadRule.decide` → `LateFavoriteLedger.record` | `ClearLeadTest.ledgerRecordsOncePerWindowAndSettles` |
+
 ## 1.3 (Claude branch, Bitcoin Claude)
 
 **No way of betting this market came out positive.** A study of Kalshi's own public trade history (952 settled `KXBTC15M` windows, 33.3M trades, 2026-09-24 → 2026-10-04) found that buying at the ask lost 1.01¢ per contract (−2.1% of stake, 95% CI [−1.14, −0.87]), almost all of it the fee. Resting orders earned +0.29¢ per fill only at the front of the queue and lost 0.9–1.5¢ behind the 2,000–10,000 contracts that normally sit at the best bid. Full write-up: [`docs/tape-study-2026-10-04.md`](docs/tape-study-2026-10-04.md). 1.3 does not add a live strategy; it shows the cost, limits the damage, and paper-tests the one lead that turned up.

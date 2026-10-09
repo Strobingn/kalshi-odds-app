@@ -38,6 +38,9 @@ object BetCall {
         if (!ctx.settings.ticketsEnabled) {
             return none("Trade tickets are off in Settings")
         }
+        // Dirk's clear-lead rule calls the side on its own: it does not use the
+        // model, so the model's sit-out and edge gates do not apply to it.
+        clearLeadCall(market, ctx)?.let { return it }
         if (ctx.settings.isSittingOut()) {
             return none(ctx.settings.autoTuneNote.ifBlank { "The model hasn't beaten Kalshi's prices in testing." })
         }
@@ -74,6 +77,28 @@ object BetCall {
             ?: tickets.firstOrNull()?.gateNote?.takeIf { ev == null }
             ?: "No side clears edge after fees, the $5 all-in cap, and the min-profit setting"
         return none(reason)
+    }
+
+    /**
+     * BET UP / BET DOWN from the clear-lead rule, or null when the rule is
+     * not on for [market] or its ticket cannot be approved right now.
+     */
+    fun clearLeadCall(market: MarketUiModel, ctx: TicketBuilder.Context): Decision? {
+        val ticket = TicketBuilder.proposeClearLead(market, ctx) ?: return null
+        val ask = KalshiPrice.usable(ticket.limitPrice) ?: return null
+        if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isPlaceholder(ask)) return null
+        val bid = if (ticket.side.equals("NO", true)) market.noBid else market.yesBid
+        if (com.dirk.kalshiodds.signal.engine.QuoteSanity.isCrossed(bid, ask)) return null
+        return Decision(
+            headline = if (ticket.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,
+            side = ticket.side,
+            ticket = ticket,
+            ask = ask,
+            profitIfWinUsd = ticket.profitIfWinUsd,
+            allInUsd = ticket.estimatedFillUsd,
+            contracts = ticket.contracts,
+            noBetReason = null
+        )
     }
 
     fun decide(market: MarketUiModel, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Decision =

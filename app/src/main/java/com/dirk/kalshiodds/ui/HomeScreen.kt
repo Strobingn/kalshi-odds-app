@@ -223,6 +223,14 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        if (state.settings.clearLeadEnabled) {
+                            item(key = "clear_lead") {
+                                com.dirk.kalshiodds.ui.components.FlowFadeCard(
+                                    state.clearLead,
+                                    summary = com.dirk.kalshiodds.signal.trend.ClearLeadSummary.of(state.clearLead)
+                                )
+                            }
+                        }
                         if (state.settings.lateFavoriteEnabled) {
                             item(key = "late_favorite") {
                                 LateFavoriteCard(state.lateFavorite)

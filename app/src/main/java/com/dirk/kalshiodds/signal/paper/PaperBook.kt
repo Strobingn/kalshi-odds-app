@@ -503,7 +503,8 @@ class PaperBook(
                     won == true -> fill.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
                     else -> 0.0
                 }
-                val pnl = payout - fill.stakeUsd - (if (outcome == "void") 0.0 else fill.feeUsd)
+                // A void refunds the stake and the fee: nothing won, nothing lost.
+                val pnl = if (outcome == "void") 0.0 else payout - fill.stakeUsd - fill.feeUsd
                 cash += payout
                 fill.copy(
                     settled = true,
