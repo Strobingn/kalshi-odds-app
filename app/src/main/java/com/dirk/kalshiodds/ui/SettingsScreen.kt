@@ -792,6 +792,18 @@ fun SettingsContent(
             OutlinedButton(onClick = { viewModel?.resetClearLead() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset clear-lead record")
             }
+            ToggleRow("Paper scalper (aggressive, paper only)", s.scalperEnabled, { viewModel?.setScalper(it) })
+            Text(
+                "Runs seven scalping strategies at once on paper: the ML scalper, dip-hunter, momentum-sniper and " +
+                    "extreme reversion, the last three both buying at the ask and resting a bid. Several positions " +
+                    "at a time, no caps, exits in 30–120 s. Filled by real trade prints; scored on Home by strategy. " +
+                    "Needs Live signals on. Never sent to Kalshi.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedButton(onClick = { viewModel?.resetScalper() }, modifier = Modifier.height(44.dp)) {
+                Text("Reset paper scalper")
+            }
             ToggleRow("Late-favorite paper tracker", s.lateFavoriteEnabled, { viewModel?.setLateFavorite(it) })
             Text(
                 "Logs a \$5 paper bet on the side spot is on with ≤5 min left, |z| ≥ 1.5 and ask 80–97¢. " +

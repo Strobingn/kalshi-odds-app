@@ -223,6 +223,13 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        if (state.settings.scalperEnabled) {
+                            item(key = "paper_scalper") {
+                                com.dirk.kalshiodds.ui.components.ScalperCard(
+                                    com.dirk.kalshiodds.signal.scalper.ScalperSummary.of(state.scalper, state.scalperWorking)
+                                )
+                            }
+                        }
                         if (state.settings.clearLeadEnabled) {
                             item(key = "clear_lead") {
                                 com.dirk.kalshiodds.ui.components.FlowFadeCard(

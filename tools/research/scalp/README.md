@@ -23,6 +23,12 @@ python3 -m verify_b tape 40                # loop-based second implementation
 python3 -m build_ml tape ml_data.npz 2
 python3 -m train_ml
 python3 -m queue_ml tape
+
+# E. the model the app ships, its queue penalty and the parity fixture; the fast strategies
+python3 -m train_compact                   # scalper_model.json
+python3 -m export_app_model tape           # adds the queue penalty; writes scalper_parity.json
+#   -> app/src/main/assets/scalper_model.json, app/src/test/resources/scalper_parity.json
+python3 -m strat_bt tape
 ```
 
 `DESIGN.md` holds both designs as they were fixed before scoring.

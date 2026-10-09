@@ -82,7 +82,12 @@ data class OddsUiState(
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
     /** Paper record of the clear-lead rule (same ledger type). */
     val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
-        com.dirk.kalshiodds.signal.latefav.LateFavoriteState()
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
+    /** Paper scalper scoreboard. */
+    val scalper: com.dirk.kalshiodds.signal.scalper.ScalperState =
+        com.dirk.kalshiodds.signal.scalper.ScalperState(),
+    /** Paper scalper: (resting bids, open scalps) right now. */
+    val scalperWorking: Pair<Int, Int> = 0 to 0
 )
 
 /**
@@ -193,6 +198,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 container.clearLead.ledger.state.collect { cl ->
                     _state.update { it.copy(clearLead = cl) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                // The scoreboard changes many times a second while scalps close: show it once a second.
+                while (isActive) {
+                    val sc = container.scalperStore.ledger.snapshot()
+                    val working = container.scalper.working()
+                    if (sc !== _state.value.scalper || working != _state.value.scalperWorking) {
+                        _state.update { it.copy(scalper = sc, scalperWorking = working) }
+                    }
+                    delay(1_000L)
                 }
             }
         }

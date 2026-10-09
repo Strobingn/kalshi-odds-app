@@ -55,6 +55,11 @@ data class SignalSettings(
      * its own paper record. Approve is still required.
      */
     val clearLeadEnabled: Boolean = true,
+    /**
+     * Settings → "Paper scalper". Runs every scalping strategy at once on
+     * paper ([com.dirk.kalshiodds.signal.scalper.PaperScalper]). Never orders.
+     */
+    val scalperEnabled: Boolean = true,
     /** Research recorder (filesDir/recordings) while Live signals runs. */
     val recordMarketData: Boolean = true,
     val debounceMs: Long = 10_000L,
@@ -197,6 +202,7 @@ class SignalPreferences(
     suspend fun updateSpotStream(value: Boolean) = edit { it[KEY_SPOT_STREAM] = value }
     suspend fun updateLateFavorite(value: Boolean) = edit { it[KEY_LATE_FAVORITE] = value }
     suspend fun updateClearLead(value: Boolean) = edit { it[KEY_CLEAR_LEAD] = value }
+    suspend fun updateScalper(value: Boolean) = edit { it[KEY_SCALPER] = value }
     suspend fun updateRecordMarketData(value: Boolean) = edit { it[KEY_RECORD_MARKET_DATA] = value }
     suspend fun updateMinConfidence(value: Double) = edit {
         it[KEY_MIN_CONF] = value.coerceIn(0.20, 0.85)
@@ -412,6 +418,7 @@ class SignalPreferences(
             lateFavoriteEnabled = this[KEY_LATE_FAVORITE]
                 ?: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
             clearLeadEnabled = this[KEY_CLEAR_LEAD] ?: true,
+            scalperEnabled = this[KEY_SCALPER] ?: true,
             recordMarketData = this[KEY_RECORD_MARKET_DATA] ?: true,
             debounceMs = this[KEY_DEBOUNCE] ?: def.debounceMs,
             minConfidence = this[KEY_MIN_CONF] ?: def.minConfidence,
@@ -491,6 +498,7 @@ class SignalPreferences(
         private val KEY_SPOT_STREAM = booleanPreferencesKey("spot_stream_enabled")
         private val KEY_LATE_FAVORITE = booleanPreferencesKey("late_favorite_enabled")
         private val KEY_CLEAR_LEAD = booleanPreferencesKey("clear_lead_enabled")
+        private val KEY_SCALPER = booleanPreferencesKey("paper_scalper_enabled")
         private val KEY_RECORD_MARKET_DATA = booleanPreferencesKey("record_market_data")
         private val KEY_DEBOUNCE = longPreferencesKey("debounce_ms")
         private val KEY_MIN_CONF = doublePreferencesKey("min_confidence")

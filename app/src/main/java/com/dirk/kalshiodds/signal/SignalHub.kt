@@ -59,6 +59,8 @@ class SignalHub(
     private val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
     /** Paper record of the clear-lead rule; logs, never orders. */
     private val clearLead: com.dirk.kalshiodds.signal.latefav.LateFavoriteLedger? = null,
+    /** Paper scalper: every scalping strategy at once, on paper. Never orders. */
+    private val scalper: com.dirk.kalshiodds.signal.scalper.PaperScalper? = null,
     tickDispatcher: CoroutineDispatcher = Executors.newSingleThreadExecutor { r ->
         Thread(r, "diphunter-ticks").apply { priority = Thread.NORM_PRIORITY + 1; isDaemon = true }
     }.asCoroutineDispatcher()
@@ -203,6 +205,18 @@ class SignalHub(
                 }
                 flowWindow.onTrade(tick.ticker, tick.takerSide, tick.tradeSize, now)
             }
+        }
+        val paperScalper = scalper
+        if (paperScalper != null && settings.scalperEnabled) {
+            runCatching {
+                val now = System.currentTimeMillis()
+                if (tick.source == TickSource.WS_TRADE) {
+                    paperScalper.onTrade(tick.ticker, tick.takerSide, tick.lastPrice, tick.tradeSize, now)
+                } else {
+                    // Quotes moving with no trade still stop out and time out open scalps.
+                    paperScalper.onClock(tick.ticker, now)
+                }
+            }.onFailure { CrashBreadcrumb.record("scalper ${tick.ticker}", it) }
         }
         val centLedger = centBetter
         if (tick.source == TickSource.WS_TRADE && centLedger != null) {

@@ -203,6 +203,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         track("clear_lead_reset", before, 0) { }
         _state.update { it.copy(credentialMessage = "Clear-lead paper record reset — no Kalshi orders") }
     }
+    fun setScalper(v: Boolean) = track("paper_scalper", _state.value.settings.scalperEnabled, v) {
+        prefs.updateScalper(v)
+    }
+    fun resetScalper() {
+        val before = container.scalperStore.ledger.snapshot().stats(com.dirk.kalshiodds.signal.scalper.ScalperState.ALL).closed
+        container.scalper.reset()
+        track("paper_scalper_reset", before, 0) { }
+        _state.update { it.copy(credentialMessage = "Paper scalper record reset — no Kalshi orders") }
+    }
     fun resetLateFavorite() {
         val before = container.lateFavorite.ledger.snapshot().totals.settledBets
         container.lateFavorite.ledger.reset()

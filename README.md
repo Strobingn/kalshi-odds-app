@@ -19,7 +19,25 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
-## Scalping study, 2026-10-09 (no app change)
+## 1.8.4 (Claude branch): paper scalper, aggressive, paper only
+
+Home card **Paper scalper · aggressive · PAPER ONLY** runs seven scalping strategies at once on the live Bitcoin window and scores each one: the ML scalper (a trained model picks calm moments to rest a bid and offer it 1¢ higher), and dip-hunter, momentum-sniper and extreme reversion, each in a buy-now form and a resting form. Both sides, several positions per strategy, 10 contracts an order, no caps, exits in 30–120 s. It holds no trade client and no credentials: nothing it does can reach Kalshi.
+
+- **Real fills, real queue.** Orders are filled by the public trade prints. A resting order fills only when a print trades through its price or the size shown ahead of it plus its own size has traded at its price. Buy-now entries and stop / time-out exits pay the exact taker fee.
+- **Scoreboard.** P&L, scalps and win rate per strategy, with what the strategy did on 22 days of history beside it. For the ML scalper, also the split by queue ahead and the orders its queue penalty says should pay.
+- **What history says** ([`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md) sections E and F): the buy-now strategies lost 3.1–3.7¢ a contract on all 22 days; the resting versions were about zero at the front of the queue; the ML scalper made +0.35¢ at the front (99% interval [+0.24, +0.47]) and lost past about 250 contracts ahead.
+- Needs Live signals on (the trade prints and the book). Settings → **Paper scalper** turns it off and resets the record.
+
+| Control | Code | Test |
+|---------|------|------|
+| Features from trade prints | `PrintGrid.features` | `ScalperParityTest.featuresRebuiltFromPrintsMatchThePythonStudy` |
+| Model in the app | `ScalperModel.predict` (`assets/scalper_model.json`) | `ScalperParityTest.modelOutputsMatchThePythonStudy` |
+| Fills, exits, fees | `ScalperEngine.onTrade` / `onClock` / `settle` | `ScalperEngineTest.restingBidFillsOnlyAfterTheQueueAndItsOwnSizeHaveTraded`, `stopSellsAtTheBidAndPaysTheTakerFee`, `buyNowStopAndTimeOutPayBothFees` |
+| Strategies and cadence | `PaperScalper.decide` | `ScalperEngineTest.aSharpDropFiresTheDipHunterAndExtremeReversionOnThatSideAndMomentumOnTheOther`, `mlScalperPostsOnBothSidesEveryFiveSecondsFromTheRealBidAndQueue` |
+| Scoreboard | `ScalperLedger.apply` → `ScalperSummary.of` → `ScalperCard` | `ScalperEngineTest.scoreboardSplitsByStrategyAndByQueue` |
+| Feed | `SignalHub.ingestTick` → `PaperScalper.onTrade` / `onClock`; `AppContainer.onMarketSettled` → `settle` | `ScalperEngineTest.otherCoinsAndBadPrintsAreIgnored` |
+
+## Scalping study, 2026-10-09
 
 **A scalp on this market pays only from the front of the queue.** Buying at the ask and selling at the bid lost 1.6–4.3¢ a round trip under every rule tried (67 cells over 46 days of quotes and 22 days of the full trade tape), and a LightGBM model could rank those scalps but not find a positive group. Resting in and resting out earned +0.18¢ per order at the front of the queue and lost 2.9¢ at the back; a model that picks calm stretches raised the front-of-queue figure to +0.44¢ (99% interval [+0.36, +0.52], 7 of 7 test days). Break-even is about 250 contracts ahead; the usual queue is 2,000–10,000. Write-up: [`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md); tools: `tools/research/scalp/`.
 

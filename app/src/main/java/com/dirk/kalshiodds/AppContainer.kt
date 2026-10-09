@@ -108,6 +108,17 @@ class AppContainer(context: Context) {
     val centBetter = com.dirk.kalshiodds.signal.centbetter.CentBetterStore(app)
     /** Paper record of the clear-lead rule (Dirk's "bet the way Bitcoin is going"). Never orders. */
     val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadStore(app)
+    /** Paper scalper record and model (docs/scalping-2026-10-09.md). Never orders. */
+    val scalperStore = com.dirk.kalshiodds.signal.scalper.ScalperStore(app)
+    val scalper = com.dirk.kalshiodds.signal.scalper.PaperScalper(
+        model = scalperStore.model,
+        ledger = scalperStore.ledger,
+        topOfBook = { scoring.book.topOfBook(it) },
+        bookLevels = { scoring.book.snapshotBook(it) },
+        closeMs = { t ->
+            scoring.book.closeTime(t) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(t)
+        }
+    )
     val hub = SignalHub(
         scoring = scoring,
         notifier = notifier,
@@ -116,7 +127,8 @@ class AppContainer(context: Context) {
         lateFavorite = lateFavorite.ledger,
         flowFade = flowFade.ledger,
         centBetter = centBetter.ledger,
-        clearLead = clearLead.ledger
+        clearLead = clearLead.ledger,
+        scalper = scalper
     )
 
     /**
@@ -197,7 +209,7 @@ class AppContainer(context: Context) {
         logStore = logStore,
         extraOpenTickers = {
             paper.book.openTickers() + lateFavorite.ledger.openTickers() + flowFade.ledger.openTickers() +
-                centBetter.ledger.openTickers() + clearLead.ledger.openTickers() +
+                centBetter.ledger.openTickers() + clearLead.ledger.openTickers() + scalper.openTickers() +
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
@@ -207,6 +219,7 @@ class AppContainer(context: Context) {
             flowFade.ledger.settle(ticker, result)
             centBetter.ledger.settle(ticker, result)
             clearLead.ledger.settle(ticker, result)
+            scalper.settle(ticker, result)
             recorder.onSettled(ticker, result)
         },
         onCalibration = { hub.applyCalibration(it) },
