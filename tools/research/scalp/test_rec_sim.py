@@ -55,5 +55,5 @@ pnl, fs, kind = R.rest_scalp(up, D, "book", S=0.10); check("offer alone", pnl[0]
 up, dn = win([], {0: (.50, 100, .51, 200), 105: (.55, 100, .56, 200)})
 check("markout", R.take_markout(up, D, 10)[0], 0.55 - 0.51 - 0.018 - 0.018)
 check("hold yes", R.take_hold(up, D)[0], 1.0 - 0.51 - 0.018)
-check("hold down side", R.take_hold(dn, D)[0], 0.0 - 0.45 - 0.018)
+check("hold down side", R.take_hold(dn, D)[0], 0.0 - 0.50 - 0.018)
 print("ok", n, "checks")
