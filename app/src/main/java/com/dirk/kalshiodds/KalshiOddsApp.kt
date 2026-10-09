@@ -35,7 +35,10 @@ class KalshiOddsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         runCatching { CrashBreadcrumb.install(this) }
+        // 0.3.40 (owner): Autopilot/Scalp are paper-only — delete any persisted live arming (idempotent).
+        runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.deleteLegacyArming(this) }
         container = AppContainer(this)
+        appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->
             // SharedPreferences.apply() only — do not launch a coroutine
@@ -92,6 +95,7 @@ class KalshiOddsApp : Application() {
         }
         appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
+            runCatching { container.preferences.applyPaperBankrollReset0340IfNeeded(container.paper.book) }
             runCatching { container.preferences.applyPaperBankrollReset0328IfNeeded(container.paper.book) }
             runCatching { container.preferences.applyLastMinuteStakeIfNeeded() }
             runCatching { restorePersistedHistory() }
@@ -106,8 +110,6 @@ class KalshiOddsApp : Application() {
                             liveSignalsEnabled = it.liveSignalsEnabled,
                             paperTradingEnabled = it.paperTradingEnabled,
                             aiPaperAutopilotEnabled = it.aiPaperAutopilotEnabled,
-                            liveMode = it.autopilotModeEnum() == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE,
-                            liveArmed = container.liveArm.armed
                         )
                     }
                     .distinctUntilChanged()

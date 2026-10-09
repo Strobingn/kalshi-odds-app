@@ -49,10 +49,6 @@ class TradeEventNotifier(private val context: Context) {
         if (policy.firstTime(TradeEventPolicy.Kind.REAL_BET, clientOrderId)) post(1, "Real bet placed", line)
     }
 
-    fun errorStop(eventId: String, message: String) {
-        if (policy.firstTime(TradeEventPolicy.Kind.ERROR_STOP, eventId)) post(2, "Live Autopilot stopped on an error", message)
-    }
-
     /**
      * 0.3.39: once per backoff episode ([episodeId] = scope + episode start). Autopilot is NOT
      * turned off — it waits [waitMs] and resumes automatically.
@@ -64,12 +60,6 @@ class TradeEventNotifier(private val context: Context) {
                 "Autopilot error — backing off",
                 "$message. Retrying in ${(waitMs / 1000).coerceAtLeast(1)} s; Autopilot stays on."
             )
-        }
-    }
-
-    fun balance(needsBalance: Boolean, fresh: Boolean) {
-        if (policy.balanceChanged(needsBalance, fresh)) {
-            post(3, "Kalshi balance unavailable", "Live Autopilot will not send until a fresh balance loads.")
         }
     }
 

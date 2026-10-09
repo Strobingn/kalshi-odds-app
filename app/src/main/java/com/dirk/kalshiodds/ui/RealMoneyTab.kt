@@ -19,16 +19,11 @@ object RealMoneyTab {
     const val ADD_KEY = "Add Kalshi API key"
     const val EXPLAINER =
         "Manual real orders only go out after you tap Approve and then confirm REAL MONEY. " +
-            "Each manual order is capped at $10. Limited live Autopilot stays off until you arm it the same way. " +
-            "After that it sends the same fee-aware Kelly size as paper when paper and shadow agree. " +
-            "Autopilot has no $10 or daily dollar cap. Arming persists across restarts until you disarm it here. " +
-            "An order error never disarms it: Autopilot backs off (30 s doubling to 10 min) and resumes. " +
-            "A failed order is never re-sent, and nothing is sent while the balance is unavailable."
+            "Each manual order is capped at $10. Autopilot and Scalp are paper-only: they have no live mode, " +
+            "no armed state and no path to a Kalshi order."
 
-    const val LIVE_BLURB =
-        "REAL MONEY. Arming lets Autopilot send live Kalshi orders without another confirm, " +
-            "sized by fee-aware Kelly on the paper bankroll, only when paper and shadow pick the same side and price band. " +
-            "BTC, ETH, and SOL 15-minute markets. This tap does not place an order by itself."
+    /** 0.3.40: kept for copy tests; there is no live Autopilot to arm. */
+    const val LIVE_BLURB = "Autopilot is paper-only. Only manual tickets (Approve + REAL MONEY) can place real orders."
 
     const val DEMO_TITLE = "Kalshi demo environment"
     const val DEMO_EXPLANATION =
@@ -73,8 +68,6 @@ object RealMoneyTab {
         val shadowBankrollLabel: String = "",
         val liveStatus: String = "",
         val liveError: String? = null,
-        val showLiveApprove: Boolean = false,
-        val showLiveConfirm: Boolean = false,
         val largeClipWarning: String? = null
     )
 
@@ -90,9 +83,6 @@ object RealMoneyTab {
         positions: List<LivePosition> = emptyList(),
         autopilotMode: com.dirk.kalshiodds.signal.paper.AutopilotMode =
             com.dirk.kalshiodds.signal.paper.AutopilotMode.PAPER,
-        liveArmed: Boolean = false,
-        liveApproveTapped: Boolean = false,
-        dailySpentUsd: Double = 0.0,
         shadowTickets: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList(),
         shadowBankrollUsd: Double = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD,
         shadowPnlUsd: Double = 0.0,
@@ -137,7 +127,7 @@ object RealMoneyTab {
             fills = fillLines,
             realPnlLabel = String.format(Locale.US, "Realized P&L (Kalshi, not paper) %+.2f", pnl),
             autopilotModeLabel = autopilotMode.label,
-            autopilotDetail = autopilotDetail(autopilotMode, liveArmed, dailySpentUsd),
+            autopilotDetail = autopilotDetail(autopilotMode),
             shadowLines = shadowTickets.take(8).map { ticket ->
                 ticket.summary() + "\n" + ticket.payloadJson
             },
@@ -147,52 +137,21 @@ object RealMoneyTab {
                 shadowBankrollUsd,
                 shadowPnlUsd
             ),
-            liveStatus = liveStatus(autopilotMode, liveArmed, liveApproveTapped, dailySpentUsd),
+            liveStatus = PAPER_ONLY_STATUS,
             liveError = liveError,
-            showLiveApprove = autopilotMode == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE &&
-                !liveArmed && !liveApproveTapped,
-            showLiveConfirm = autopilotMode == com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE &&
-                !liveArmed && liveApproveTapped,
             largeClipWarning = shadowTickets.maxOfOrNull { it.stakeUsd }?.let {
                 com.dirk.kalshiodds.signal.paper.AutopilotOrderSize.largeClipWarning(it)
             }
         )
     }
 
-    fun autopilotDetail(
-        mode: com.dirk.kalshiodds.signal.paper.AutopilotMode,
-        armed: Boolean,
-        dailySpentUsd: Double
-    ): String = when (mode) {
+    const val PAPER_ONLY_STATUS = "Autopilot and Scalp are paper-only — no live Autopilot, nothing to arm."
+
+    fun autopilotDetail(mode: com.dirk.kalshiodds.signal.paper.AutopilotMode): String = when (mode) {
         com.dirk.kalshiodds.signal.paper.AutopilotMode.PAPER ->
             "Paper Autopilot places simulated fills. It does not call Kalshi."
         com.dirk.kalshiodds.signal.paper.AutopilotMode.SHADOW ->
             "SHADOW — not submitted. The exact order is saved and settled only if it would have filled."
-        com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE ->
-            if (armed) {
-                String.format(
-                    Locale.US,
-                    "Limited live is armed (stays armed across restarts until you disarm). Kelly size, no dollar cap. Day sent $%.2f. " +
-                        "Sends only when paper and shadow agree. BTC, ETH, and SOL 15m.",
-                    dailySpentUsd
-                )
-            } else {
-                "Limited live is selected and not armed. Tap Approve, then type REAL MONEY. " +
-                    "Nothing is sent until then. BTC, ETH, and SOL 15m."
-            }
-    }
-
-    private fun liveStatus(
-        mode: com.dirk.kalshiodds.signal.paper.AutopilotMode,
-        armed: Boolean,
-        approveTapped: Boolean,
-        dailySpentUsd: Double
-    ): String = when {
-        mode != com.dirk.kalshiodds.signal.paper.AutopilotMode.LIVE ->
-            "Limited live Autopilot is off."
-        armed -> String.format(Locale.US, "Armed · day sent $%.2f · no dollar cap", dailySpentUsd)
-        approveTapped -> "Approve tapped. Type REAL MONEY to arm. This does not place an order."
-        else -> "Not armed."
     }
 
     private fun ticketLine(ticket: TradeTicket): String {

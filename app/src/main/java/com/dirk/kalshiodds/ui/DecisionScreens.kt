@@ -110,7 +110,7 @@ fun CalibrationReportScreen(viewModel: DecisionViewModel, onBack: () -> Unit) {
     }
 }
 
-/** Strategy ladder: paper → shadow → limited live. Promotion is gated; live orders still need Approve + REAL MONEY. */
+/** Strategy ladder: paper → shadow (never sent). No live stage; only manual Approve + REAL MONEY sends. */
 @Composable
 fun StrategyLadderScreen(viewModel: DecisionViewModel, onBack: () -> Unit) {
     val colors = DipTheme.colors

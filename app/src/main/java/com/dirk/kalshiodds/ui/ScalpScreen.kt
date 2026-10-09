@@ -19,7 +19,7 @@ object ScalpCopy {
     data class Line(val key: String, val text: String, val positive: Boolean?)
 
     const val TITLE = "Scalp (PAPER)"
-    const val BANNER = "PAPER ONLY — no Kalshi orders. Shadow and live scalping are not in this release."
+    const val BANNER = "PAPER ONLY — no Kalshi orders. 4 strategies side by side: fair-gap, dip-hunter, momentum-sniper, extreme-reversion."
 
     fun openLines(trades: List<ScalpTrade>, marks: Map<String, ScalpRule.Quote>): List<Line> =
         trades.filter { it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY }
@@ -32,8 +32,8 @@ object ScalpCopy {
                     ScalpState.PENDING_ENTRY -> String.format(Locale.US, "%s %s · signal @ %.0f¢ (fair %.0f¢) · waiting for next fresh book", t.ticker, t.side, t.signalAsk * 100, t.fairAtSignal * 100)
                     else -> String.format(
                         Locale.US,
-                        "%s %s ×%d · entry %.0f¢ · bid %s · fair %s · unrealized %s after exit fee%s",
-                        t.ticker, t.side, t.remaining, (t.entryPrice ?: 0.0) * 100,
+                        "%s · %s %s ×%d · entry %.0f¢ · bid %s · fair %s · unrealized %s after exit fee%s",
+                        t.strategy.label, t.ticker, t.side, t.remaining, (t.entryPrice ?: 0.0) * 100,
                         bid?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—",
                         fair?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—",
                         u?.let { String.format(Locale.US, "%+.2f USD", it) } ?: "—",
@@ -50,14 +50,34 @@ object ScalpCopy {
             } else {
                 String.format(
                     Locale.US,
-                    "%s %s ×%d · in %.0f¢ out avg %.1f¢ · fees $%.2f · net %+.2f USD · hold %ds · %s",
-                    t.ticker, t.side, t.contracts, (t.entryPrice ?: 0.0) * 100,
+                    "%s · %s %s ×%d · in %.0f¢ out avg %.1f¢ · fees $%.2f · net %+.2f USD · hold %ds · %s",
+                    t.strategy.label, t.ticker, t.side, t.contracts, (t.entryPrice ?: 0.0) * 100,
                     if (t.contracts > 0) t.proceedsUsd / t.contracts * 100 else 0.0,
                     t.entryFeeUsd + t.exitFeeUsd, t.netUsd ?: 0.0, ((t.holdMs ?: 0L) / 1000L).toInt(), t.exitReason ?: ""
                 )
             }
             Line(t.id, text, t.netUsd?.let { it > 0.0 })
         }
+
+    fun tuningLines(t: com.dirk.kalshiodds.decision.ScalpTuneState): List<String> {
+        val head = String.format(
+            Locale.US, "%s · walk-forward tuner · %d trials logged · %s",
+            t.versionLabel, t.trials,
+            if (t.lastRunAtMs > 0) "last run " + java.time.Instant.ofEpochMilli(t.lastRunAtMs)
+                .atZone(java.time.ZoneId.of("America/New_York")).toLocalDateTime().toString().replace('T', ' ').take(16) + " ET"
+            else "not run yet (needs ${com.dirk.kalshiodds.decision.ScalpTuner.RETUNE_EVERY} closed paper round trips)"
+        )
+        val coins = com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { st ->
+            com.dirk.kalshiodds.decision.ScalpParams.COINS.map { c ->
+                val k = com.dirk.kalshiodds.decision.ScalpParams.key(c, st)
+                val p = t.paramsFor(c, st)
+                val oos = t.oosCentsByCoin[k]?.let { String.format(Locale.US, "out-of-sample %+.2f¢/ct (n=%d)", it, t.oosNByCoin[k] ?: 0) }
+                    ?: "out-of-sample: not enough data yet"
+                "${st.label} $c: ${p.label()} · $oos"
+            }
+        }
+        return listOf(head) + coins + t.notes
+    }
 
     fun statsLines(s: ScalpStats.Summary): List<String> = listOf(
         String.format(Locale.US, "%d round trips · %d open · %d no-fills", s.roundTrips, s.open, s.noFills),
@@ -83,6 +103,18 @@ fun ScalpScreen(viewModel: DecisionViewModel, onBack: () -> Unit) {
                 Text("Stats", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                 ui.stats.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
                 Text("Ladder: ${ui.ladder}", style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+            }
+        }
+        item {
+            DecisionCard {
+                Text("Params (per coin)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                ui.tuning.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+            }
+        }
+        item {
+            DecisionCard {
+                Text("Scorecard", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                ui.breakdown.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
             }
         }
         item { Text("Open scalps (${ui.open.size})", fontWeight = FontWeight.SemiBold, color = colors.textPrimary) }
@@ -122,7 +154,7 @@ object HomeScalpCopy {
 @androidx.compose.runtime.Composable
 fun HomeScalpCard(lines: List<String>, onOpen: () -> Unit) {
     val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
-    com.dirk.kalshiodds.ui.components.FieldCard {
+    com.dirk.kalshiodds.ui.components.FieldCard(onClick = onOpen) {
         androidx.compose.material3.Text(
             HomeScalpCopy.TITLE,
             style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
@@ -137,7 +169,7 @@ fun HomeScalpCard(lines: List<String>, onOpen: () -> Unit) {
             )
         }
         androidx.compose.material3.TextButton(onClick = onOpen) {
-            androidx.compose.material3.Text("Open Scalp")
+            androidx.compose.material3.Text("Open Scalp Data")
         }
     }
 }

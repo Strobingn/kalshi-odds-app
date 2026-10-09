@@ -68,3 +68,6 @@ ml/parity_sample.last.json
 tools/backtest/cache/
 tools/backtest/**/__pycache__/
 tools/backtest/**/*.pyc
+
+# 0.3.40: release-gate unit tests live in a package named "release" — never ignore them.
+!app/src/test/java/com/dirk/kalshiodds/release/

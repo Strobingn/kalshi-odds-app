@@ -108,7 +108,7 @@ class MainActivity : ComponentActivity() {
                                     navigator.open(AppRoutes.SETTINGS)
                                 },
                                 onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
-                                onOpenScalp = { navigator.open(AppRoutes.SCALP) },
+                                onOpenScalp = { navigator.open(AppRoutes.SCALP_DATA) },
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
@@ -156,6 +156,13 @@ class MainActivity : ComponentActivity() {
                             },
                             AppRoutes.SCALP to {
                                 com.dirk.kalshiodds.ui.ScalpScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.SCALP_DATA to {
+                                com.dirk.kalshiodds.ui.ScalpDataScreen(
+                                    decisionViewModel,
+                                    onBack = { navigator.back() },
+                                    onOpenScalp = { navigator.open(AppRoutes.SCALP) }
+                                )
                             }
                         ),
                         realMoney = {
@@ -222,7 +229,7 @@ class MainActivity : ComponentActivity() {
                                     viewModel = oddsViewModel,
                                     onOpenSettings = { navigator.open(AppRoutes.SETTINGS) },
                                     onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
-                                    onOpenScalp = { navigator.open(AppRoutes.SCALP) },
+                                    onOpenScalp = { navigator.open(AppRoutes.SCALP_DATA) },
                                     onOpenData = { navigator.open(AppRoutes.DATA) },
                                     onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                     onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },

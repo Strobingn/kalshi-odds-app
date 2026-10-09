@@ -223,6 +223,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         prefs.updateAutopilotMode(mode.name)
     }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
+    /** 0.3.40: set the paper bankroll start to [usd] and reset the book there (history archived, not deleted). */
+    fun resetPaperBookTo(usd: Double) {
+        val v = usd.coerceIn(100.0, 1_000_000.0)
+        val before = container.paper.book.snapshot().cashUsd
+        viewModelScope.launch {
+            prefs.updatePaperBankrollStartUsd(v)
+            container.paper.book.configure(startUsd = v)
+            container.paper.book.reset(v)
+        }
+        track("paper_reset", before, v) { }
+        _state.update {
+            it.copy(
+                paperBankrollDraft = String.format(java.util.Locale.US, "%.0f", v),
+                credentialMessage = String.format(java.util.Locale.US, "Paper bankroll set to $%,.0f — prior paper fills archived, no Kalshi orders", v)
+            )
+        }
+    }
+
     fun resetPaperBook() {
         val start = _state.value.settings.paperBankrollStartUsd
         val before = container.paper.book.snapshot().cashUsd

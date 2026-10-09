@@ -3,7 +3,7 @@ package com.dirk.kalshiodds.signal.paper
 import com.dirk.kalshiodds.signal.config.SignalConstants
 
 /**
- * One fee-aware Kelly clip shared by paper, shadow, and limited live.
+ * One fee-aware Kelly clip shared by paper and shadow (0.3.40: no live Autopilot).
  * There is no dollar cap. Depth and the paper bankroll are the only limits.
  * A large clip is a warning in the UI, not a block.
  */

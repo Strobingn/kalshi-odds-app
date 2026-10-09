@@ -77,7 +77,9 @@ object PaperKellySizer {
         kellyFraction: Double = DEFAULT_KELLY_FRACTION,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
         depthContracts: Int? = null,
-        maxStakeUsd: Double? = null
+        maxStakeUsd: Double? = null,
+        /** 0.3.40: paper Autopilot (AI full control) sizes on true half-Kelly — no 10% full-Kelly cap. */
+        capFullKelly: Boolean = true
     ): Result {
         val px = KalshiPrice.usable(ask)
             ?: return Result(skip = true, reason = "Paper skip — unusable ask")
@@ -88,7 +90,7 @@ object PaperKellySizer {
             ?: return Result(skip = true, reason = "Paper skip — empty bankroll")
         val cost1 = KalshiFee.totalCost(1, px, feeRate)
         val rawF = fullKellyFromCost(p, cost1)
-        val f = if (rawF.isFinite() && rawF > 0.0) rawF.coerceAtMost(MAX_FULL_KELLY_F) else rawF
+        val f = if (capFullKelly && rawF.isFinite() && rawF > 0.0) rawF.coerceAtMost(MAX_FULL_KELLY_F) else rawF
         if (!f.isFinite() || f <= 0.0) {
             return Result(
                 skip = true,

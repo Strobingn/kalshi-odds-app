@@ -65,17 +65,18 @@ class AppContainer(context: Context) {
     /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
-            ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence()
+            ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),
+        tuneStore = com.dirk.kalshiodds.decision.SharedPrefsScalpTuneStore(app),
+        // 0.3.40: total open scalp cost ≤ free paper bankroll (cash not tied up in Autopilot paper bets).
+        bankrollUsd = {
+            runCatching { paper.book.snapshot().cashUsd }.getOrNull()
+                ?: com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+        }
     )
-    /** One-tap Stop latch and once-per-event trade notifications. */
+    /** Once-per-event trade notifications. */
     val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)
-    /** 0.3.39: limited-live arming persists across restarts (SharedPreferences, no key material). */
-    val liveArm = com.dirk.kalshiodds.signal.paper.LiveAutopilotSession(
-        com.dirk.kalshiodds.signal.paper.SharedPrefsLiveArmStore(app)
-    )
     /** 0.3.39: errors back off (30 s doubling to 10 min) and resume; they never disable Autopilot. */
     val paperBackoff = com.dirk.kalshiodds.signal.paper.AutopilotBackoff()
-    val liveBackoff = com.dirk.kalshiodds.signal.paper.AutopilotBackoff()
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)

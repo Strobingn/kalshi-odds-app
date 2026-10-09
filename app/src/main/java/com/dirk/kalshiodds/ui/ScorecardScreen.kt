@@ -213,6 +213,11 @@ fun ScorecardScreen(
                         )
                     }
                 }
+                view.resetMarker?.let { marker ->
+                    item {
+                        Text(marker, style = MaterialTheme.typography.labelMedium, color = colors.accentOrange)
+                    }
+                }
                 view.paperBankrollUsd?.let { roll ->
                     item {
                         Text(

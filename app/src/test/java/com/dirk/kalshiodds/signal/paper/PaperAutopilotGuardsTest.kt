@@ -25,27 +25,27 @@ class PaperAutopilotGuardsTest {
     }
 
     @Test
-    fun windowBudgetCapsEveryClipInTheWindow() {
-        val book = PaperBook(idFactory = { "w1" }, nowMs = { nowMs })
+    fun paperAiSizesHalfKellyOnBankrollWithoutWindowCap() {
+        // 0.3.40 owner decision: paper Autopilot has full sizing control — half-Kelly on the free
+        // paper bankroll; the old 5%-per-window budget no longer caps it.
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "w1" }, nowMs = { nowMs })
         val market = edge(yesAsk = 0.20, aiYes = 80.0)
         val first = enter(book, market)
         assertNotNull(first)
         val spent = book.snapshot().fills.sumOf { it.stakeUsd }
-        val free = PaperAutopilot.freeBankroll(book.snapshot()) + spent
-        val budget = PaperAutopilot.windowBudgetUsd(
-            free,
+        val oldBudget = PaperAutopilot.windowBudgetUsd(
+            1_000.0,
             PaperKellySizer.fullKelly(first!!.aiPct!! / 100.0, first.limitPrice)
         )
-        assertTrue("spent $spent budget $budget", spent <= budget + 0.05)
-        val moved = edge(yesAsk = 0.30, aiYes = 80.0)
-        assertNull(PaperAutopilot.consider(book, moved, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
-        assertTrue(book.snapshot().lastMessage!!.contains("budget"))
-        assertEquals(1, book.snapshot().fills.size)
+        assertTrue("spent $spent old budget $oldBudget", spent > oldBudget)
+        val expect = PaperKellySizer.size(first.aiPct!! / 100.0, 0.20, 1_000.0, 0.5, depthContracts = 100_000, capFullKelly = false)
+        assertEquals(expect.contracts, first.contracts)
+        assertTrue(spent <= 1_000.0)
     }
 
     @Test
     fun freeBankrollSubtractsOpenExposure() {
-        val book = PaperBook(idFactory = { "f1" }, nowMs = { nowMs })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "f1" }, nowMs = { nowMs })
         val parked = book.forceFill(
             ticker = "KXBTC15M-OPEN",
             side = "YES",
@@ -62,17 +62,14 @@ class PaperAutopilotGuardsTest {
         val market = edge(ticker = "KXBTC15M-NEXT", yesAsk = 0.25, aiYes = 80.0)
         val fill = enter(book, market)!!
         val anchored = PaperAutopilot.anchoredYes(0.80, 0.25)
-        val onFull = PaperKellySizer.size(anchored, 0.25, 1_000.0, 0.5, depthContracts = 100_000)
+        val onFull = PaperKellySizer.size(anchored, 0.25, 1_000.0, 0.5, depthContracts = 100_000, capFullKelly = false)
         val onFree = PaperKellySizer.size(
             anchored,
             0.25,
             PaperAutopilot.freeBankroll(snap),
             0.5,
             depthContracts = 100_000,
-            maxStakeUsd = PaperAutopilot.windowBudgetUsd(
-                PaperAutopilot.freeBankroll(snap),
-                PaperKellySizer.fullKelly(anchored, 0.25)
-            )
+            capFullKelly = false
         )
         assertTrue(onFull.contracts > onFree.contracts)
         assertEquals(onFree.contracts, fill.contracts)
@@ -80,8 +77,8 @@ class PaperAutopilotGuardsTest {
 
     @Test
     fun oppositeSideIsBlockedAfterAFill() {
-        val book = PaperBook(idFactory = { "o1" }, nowMs = { nowMs })
-        val yes = enter(book, edge(yesAsk = 0.20, aiYes = 80.0), depth = 3)
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "o1" }, nowMs = { nowMs })
+        val yes = enter(book, edge(yesAsk = 0.20, aiYes = 80.0), depth = 30) // ≥ \$5 floor (0.3.40)
         assertEquals("YES", yes!!.side)
         val no = edge(yesAsk = 0.75, aiYes = 30.0)
         assertNull(PaperAutopilot.consider(book, no, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
@@ -91,7 +88,7 @@ class PaperAutopilotGuardsTest {
 
     @Test
     fun minEdgeNeedsTwoConsecutiveEvaluations() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val thin = edge(yesAsk = 0.20, aiYes = 30.0)
         assertNull(PaperAutopilot.consider(book, thin, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
         assertTrue(book.snapshot().lastMessage!!.contains("4pp"))
@@ -104,7 +101,7 @@ class PaperAutopilotGuardsTest {
 
     @Test
     fun asksUnder10cOrOver90cAreBlocked() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val cheap = edge(yesAsk = 0.05, aiYes = 80.0)
         assertNull(PaperAutopilot.consider(book, cheap, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
         assertTrue(book.snapshot().lastMessage!!.contains("10"))
@@ -115,7 +112,7 @@ class PaperAutopilotGuardsTest {
 
     @Test
     fun lastSixtySecondsBlocksEntry() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val late = edge(yesAsk = 0.20, aiYes = 80.0).copy(closeTimeEpochMs = nowMs + 30_000L)
         assertNull(PaperAutopilot.consider(book, late, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
         assertTrue(book.snapshot().lastMessage!!.contains("60"))
@@ -124,7 +121,7 @@ class PaperAutopilotGuardsTest {
 
     @Test
     fun clampBindingSkipsTheWindow() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val clamped = edge(yesAsk = 0.40, aiYes = 98.0)
         assertNull(PaperAutopilot.consider(book, clamped, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))
         assertTrue(book.snapshot().lastMessage!!.contains("clamped"))
@@ -152,7 +149,7 @@ class PaperAutopilotGuardsTest {
     @Test
     fun lifetimePaperPnlSurvivesLedgerTrim() {
         val seq = java.util.concurrent.atomic.AtomicInteger()
-        val book = PaperBook(idFactory = { "p${seq.incrementAndGet()}" }, nowMs = { seq.get().toLong() })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "p${seq.incrementAndGet()}" }, nowMs = { seq.get().toLong() })
         val n = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_LEDGER_MAX + 5
         repeat(n) { i ->
             book.forceFill("KXBTC15M-L$i", "YES", 0.10, 1, "test", "n")

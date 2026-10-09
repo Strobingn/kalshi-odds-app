@@ -247,6 +247,11 @@ class SignalPreferences(
     suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
     suspend fun updatePaperTrading(value: Boolean) = edit { it[KEY_PAPER] = value }
     suspend fun updateAiPaperAutopilot(value: Boolean) = edit { it[KEY_AI_PAPER_AUTOPILOT] = value }
+    /** 0.3.40: Autopilot is paper-only — rewrite a stored legacy "LIVE" mode to PAPER. */
+    suspend fun migrateAutopilotModePaperOnly() = edit { prefs ->
+        com.dirk.kalshiodds.signal.paper.LiveOffMigration.rewriteMode(prefs[KEY_AUTOPILOT_MODE])?.let { prefs[KEY_AUTOPILOT_MODE] = it }
+    }
+
     suspend fun updateAutopilotMode(value: String) = edit {
         it[KEY_AUTOPILOT_MODE] = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(value).name
     }
@@ -418,6 +423,22 @@ class SignalPreferences(
         if (!due) return
         book.reset(com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD)
         edit { it[KEY_PAPER_RESET_0328] = true }
+    }
+
+    /**
+     * 0.3.40 one-time: paper bankroll → $10,000 (owner request). Existing books are archived by
+     * [PaperBook.reset] — no paper trade history is deleted — and the reset point is marked on the
+     * scorecard. A fresh install with no history just starts at $10,000 (no empty archive).
+     */
+    suspend fun applyPaperBankrollReset0340IfNeeded(book: com.dirk.kalshiodds.signal.paper.PaperBook) {
+        val prefs = app.signalDataStore.data.first()
+        if (prefs[KEY_PAPER_RESET_0340] == true) return
+        val target = com.dirk.kalshiodds.signal.paper.PaperBankrollReset0340.apply(book)
+        edit {
+            it[KEY_PAPER_START] = target
+            it[KEY_PAPER_RESET_0340] = true
+            it[KEY_PAPER_RESET_0328] = true
+        }
     }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
@@ -596,6 +617,7 @@ class SignalPreferences(
         private val KEY_UPDATE_CHECK_MS = longPreferencesKey("kashi_update_checked_at_ms")
         private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
         private val KEY_PAPER_RESET_0328 = booleanPreferencesKey("paper_bankroll_reset_v0328")
+        private val KEY_PAPER_RESET_0340 = booleanPreferencesKey("paper_bankroll_reset_v0340")
         private val KEY_STAKE_V0316 = booleanPreferencesKey("last_minute_stake_v0316")
 
         fun parseTickerList(text: String): List<String> =

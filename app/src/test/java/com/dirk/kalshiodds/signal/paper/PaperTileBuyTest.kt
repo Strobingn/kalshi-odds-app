@@ -16,7 +16,7 @@ class PaperTileBuyTest {
 
     @Test
     fun tapUsesTenDollarLiveAskMath() {
-        val book = PaperBook(idFactory = { "p31" }, nowMs = { 1L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "p31" }, nowMs = { 1L })
         val at31 = HomeFixtures.actionableBtc().copy(
             yesAsk = 0.31,
             yesBid = 0.30,
@@ -35,7 +35,7 @@ class PaperTileBuyTest {
         assertEquals(PaperTileBuy.SOURCE, book.snapshot().fills.single().source)
         assertEquals(990.25, book.snapshot().cashUsd, 1e-9)
 
-        val downBook = PaperBook(idFactory = { "p70" }, nowMs = { 1L })
+        val downBook = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "p70" }, nowMs = { 1L })
         val down = PaperTileBuy.place(downBook, at31, "NO")
         assertTrue(down.message, down.ok)
         assertEquals(13, down.contracts)
@@ -48,7 +48,7 @@ class PaperTileBuyTest {
 
     @Test
     fun noAskDisablesWithClearReasonAndWritesNothing() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val missing = HomeFixtures.actionableBtc().copy(
             yesAsk = null,
             noAsk = null,
@@ -94,7 +94,7 @@ class PaperTileBuyTest {
     @Test
     fun settlementUpdatesScorecardPaperPnl() {
         val ids = AtomicInteger()
-        val book = PaperBook(idFactory = { "s${ids.incrementAndGet()}" }, nowMs = { 2L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "s${ids.incrementAndGet()}" }, nowMs = { 2L })
         val market = HomeFixtures.actionableBtc().copy(
             yesAsk = 0.31,
             yesBid = 0.30,
@@ -116,7 +116,7 @@ class PaperTileBuyTest {
         assertTrue(after.line(), after.line().contains("paper +$20.25") || after.line() == HomeScorecardSummary.NO_SETTLED)
         assertEquals("paper +$20.25", ScorecardCopy.paperPnlLine(after.copy(settledCount = 1)))
 
-        val lossBook = PaperBook(idFactory = { "loss" }, nowMs = { 3L })
+        val lossBook = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "loss" }, nowMs = { 3L })
         assertTrue(PaperTileBuy.place(lossBook, market, "NO").ok)
         lossBook.settle(market.ticker, "yes")
         val lost = HomeScorecardSummary.of(emptyList(), lossBook.snapshot().liveRealizedPnlUsd)

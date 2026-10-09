@@ -67,6 +67,7 @@ class PaperAutopilotTest {
         val clock = AtomicLong(nowMs)
         val ids = AtomicInteger(0)
         val book = PaperBook(
+            initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), 
             idFactory = { "ap-${ids.incrementAndGet()}" },
             nowMs = { clock.get() }
         )
@@ -88,7 +89,7 @@ class PaperAutopilotTest {
 
     @Test
     fun kellySizesOnChangingBankroll() {
-        val book = PaperBook(idFactory = { "k1" }, nowMs = { nowMs })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "k1" }, nowMs = { nowMs })
         val firstMkt = edgeMarket(ticker = "KXBTC15M-WIN1-50", yesAsk = 0.25, aiYes = 80.0)
         val first = enter(book, firstMkt, nowMs)!!
         val afterOpen = book.snapshot().paperBankrollUsd
@@ -99,11 +100,12 @@ class PaperAutopilotTest {
         val secondMkt = edgeMarket(ticker = "KXBTC15M-WIN2-50", yesAsk = 0.25, aiYes = 80.0)
         val second = enter(book, secondMkt, nowMs + 1)!!
         val sizedOnNew = PaperKellySizer.size(
-            0.80,
+            second.aiPct!! / 100.0,
             0.25,
             bankrollUsd = afterWin,
             kellyFraction = 0.5,
-            depthContracts = DEEP
+            depthContracts = DEEP,
+            capFullKelly = false
         )
         assertEquals(sizedOnNew.contracts, second.contracts)
         assertTrue(second.stakeUsd > first.stakeUsd - 1e-6 || second.contracts >= first.contracts)
@@ -114,18 +116,27 @@ class PaperAutopilotTest {
 
     @Test
     fun depthCapLimitsContracts() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val m = edgeMarket(yesAsk = 0.25, aiYes = 80.0)
-        val fill = enter(book, m, nowMs, depth = 2)
+        // 0.3.40: 30 ct @ 25¢ clears the $5 floor; depth (not Kelly) still binds.
+        val fill = enter(book, m, nowMs, depth = 30)
         assertNotNull(fill)
-        assertEquals(2, fill!!.contracts)
+        assertEquals(30, fill!!.contracts)
         val uncapped = PaperKellySizer.size(0.80, 0.25, 1_000.0, depthContracts = DEEP)
-        assertTrue(uncapped.contracts > 2)
+        assertTrue(uncapped.contracts > 30)
+    }
+
+    @Test
+    fun depthCapUnderFiveDollarsIsNoBet() {
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
+        val m = edgeMarket(yesAsk = 0.25, aiYes = 80.0)
+        assertNull(enter(book, m, nowMs, depth = 2))
+        assertEquals(com.dirk.kalshiodds.decision.AutopilotMinStake.REASON, book.snapshot().lastMessage)
     }
 
     @Test
     fun flipChanceBlocksLotteryPrint() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val lottery = HomeFixtures.deadWindowLotteryBtc()
         val fill = PaperAutopilot.consider(
             book,
@@ -147,7 +158,7 @@ class PaperAutopilotTest {
 
     @Test
     fun toggleOffPlacesNoAiBets() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val m = edgeMarket()
         val off = settings.copy(aiPaperAutopilotEnabled = false)
         assertNull(PaperAutopilot.consider(book, m, off, nowMs, yesDepth = DEEP, noDepth = DEEP))
@@ -166,7 +177,7 @@ class PaperAutopilotTest {
                 error("live order must not run")
             }
         )
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val m = edgeMarket()
         val fill = enter(book, m, nowMs)
         assertNotNull(fill)
@@ -195,7 +206,7 @@ class PaperAutopilotTest {
         assertEquals("YES", m.primaryHeroSide)
         val picked = PaperAutopilot.pickSide(0.35, 0.80, 0.22)
         assertEquals("NO", picked!!.side)
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val fill = enter(book, m, nowMs, yesAsk = 0.80, noAsk = 0.22)
         assertNotNull(fill)
         assertEquals("NO", fill!!.side)
@@ -203,7 +214,7 @@ class PaperAutopilotTest {
 
     @Test
     fun scorecardListsEveryAiPaperBetSeparateFromManual() {
-        val book = PaperBook(idFactory = { "sc1" }, nowMs = { nowMs })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "sc1" }, nowMs = { nowMs })
         val fill = enter(book, edgeMarket(), nowMs)!!
         book.settle(fill.ticker, "yes")
         val manual = TradeTicket(
@@ -238,7 +249,7 @@ class PaperAutopilotTest {
 
     @Test
     fun staleRestAskDoesNotCreateBetWhenLiveBookHasNoSellers() {
-        val book = PaperBook()
+        val book = PaperBook(com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0))
         val m = edgeMarket(yesAsk = 0.20, aiYes = 80.0)
         val emptyYesSellers = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
             yes = listOf(0.18 to 40.0),
