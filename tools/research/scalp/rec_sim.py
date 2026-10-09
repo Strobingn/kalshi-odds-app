@@ -188,3 +188,37 @@ def take_hold(fr, D):
         lv = (~np.isnan(b)) & (~np.isnan(a)) & (b < a - EPS) & (a >= 0.10 - EPS) & (a <= 0.90 + EPS)
     p = np.where(lv, a, 0.5)
     return np.where(lv, fr.res - p - fee(p), NAN)
+
+
+def _take_entry(fr, D, delay, ioc):
+    """Entry price of a buy sent at the end of second D that reaches the book `delay` seconds later.
+    The snapshot of second D can be up to a second older than the prints of that second, so buying at
+    its ask is not possible; the order meets the book of the next snapshot. ioc=True: a limit at the
+    ask that was seen, cancelled if the ask has moved above it (no fill)."""
+    b = fr.bid[D]; a = fr.ask[D]; k = np.clip(D + delay, 0, 899); a1 = fr.ask[k]; b1 = fr.bid[k]
+    with np.errstate(invalid="ignore"):
+        lv = (~np.isnan(b)) & (~np.isnan(a)) & (b < a - EPS) & (a >= 0.10 - EPS) & (a <= 0.90 + EPS) & (D + delay < 900)
+        got = lv & (~np.isnan(a1)) & (~np.isnan(b1)) & (b1 < a1 - EPS) & (a1 > 0.0) & (a1 < 1.0)
+        if ioc: got &= a1 <= a + EPS
+    return lv, got, np.where(got, a1, 0.5)
+
+
+def take_markout_next(fr, D, K, delay=1, ioc=False):
+    """Buy at the ask one snapshot after the decision, sell at the book bid K s after that. Fees both ways.
+    Not live -> NaN; no fill (ioc, or no book) -> 0."""
+    lv, got, p = _take_entry(fr, D, delay, ioc)
+    out = np.full(len(D), NAN); open_ = got.copy(); D1 = D + delay
+    for h in range(K, K + 31):
+        k = D1 + h; inw = open_ & (k < 900)
+        if not inw.any(): break
+        x = fr.bid[np.clip(k, 0, 899)]; hit = inw & ~np.isnan(x)
+        out[hit] = x[hit] - p[hit] - fee(x[hit]) - fee(p[hit]); open_ &= ~hit
+    out[open_] = fr.res - p[open_] - fee(p[open_])
+    return np.where(lv, np.where(got, out, 0.0), NAN)
+
+
+def take_scalp_next(fr, D, mode, X, S, H, delay=1, ioc=False):
+    """Buy at the ask one snapshot after the decision, then offer X higher / stop S / time-out H."""
+    lv, got, p = _take_entry(fr, D, delay, ioc)
+    pnl, kind = exit_(fr, np.where(got, p, NAN), np.where(got, D + delay, -1), X, S, H, mode, entry_fee=np.where(got, fee(p), 0.0))
+    return np.where(lv, np.where(got, pnl, 0.0), NAN)

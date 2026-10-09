@@ -35,10 +35,12 @@ enum class ExitKind { TARGET, STOP, TIMEOUT, SETTLED }
  * [taker] strategies buy at the ask the moment the signal fires and pay the
  * fee; the others rest a bid and wait up to 20 s for it to fill.
  *
- * [historyCents] is what one scalp made on 1,992 settled windows
- * (2026-09-18 → 10-09, `tools/research/scalp/strat_bt.py`), offer filled at
- * the back of the queue / at the front. A fact about the past, shown on the
- * card; it gates nothing.
+ * [historyCents] is what one filled scalp made, in cents per contract, on
+ * seven days of recorded order books (2026-10-03 → 10-09, 577 windows,
+ * `tools/research/scalp/rec_g.py`): the real size displayed ahead of every
+ * resting order had to trade or leave before it filled. The earlier figures
+ * (22 days of trade prints, "front of the queue") assumed a place in line no
+ * new order gets. A fact about the past, shown on the card; it gates nothing.
  */
 enum class ScalpStrategy(
     val label: String,
@@ -50,24 +52,24 @@ enum class ScalpStrategy(
     val cadenceSeconds: Int,
     /** Positions this strategy may have working at once, per side, per window. */
     val maxPerSide: Int,
-    val historyCents: Pair<Double, Double>
+    val historyCents: Double
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
-    ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.02 to 0.35),
+    ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
 
     /** The side's price fell 2¢ or more in 10 s: buy the dip now. */
-    DIP_HUNTER("Dip-hunter · buy now", true, 0.02, 0.02, 30_000L, 2, 6, -3.68 to -3.27),
+    DIP_HUNTER("Dip-hunter · buy now", true, 0.02, 0.02, 30_000L, 2, 6, -3.86),
 
     /** The side's price rose 2¢ or more in 10 s: buy the move now. */
-    MOMENTUM_SNIPER("Momentum-sniper · buy now", true, 0.02, 0.02, 30_000L, 2, 6, -3.49 to -3.07),
+    MOMENTUM_SNIPER("Momentum-sniper · buy now", true, 0.02, 0.02, 30_000L, 2, 6, -3.29),
 
     /** The side's price fell 6¢ or more in 30 s: buy the snap-back now. */
-    EXTREME_REVERSION("Extreme reversion · buy now", true, 0.03, 0.03, 60_000L, 2, 6, -3.67 to -3.26),
+    EXTREME_REVERSION("Extreme reversion · buy now", true, 0.03, 0.03, 60_000L, 2, 6, -3.88),
 
     /** Same three signals with a resting bid instead of paying the ask. */
-    DIP_HUNTER_REST("Dip-hunter · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.25 to 0.00),
-    MOMENTUM_SNIPER_REST("Momentum-sniper · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.13 to 0.06),
-    EXTREME_REVERSION_REST("Extreme reversion · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.25 to -0.01);
+    DIP_HUNTER_REST("Dip-hunter · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.44),
+    MOMENTUM_SNIPER_REST("Momentum-sniper · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.20),
+    EXTREME_REVERSION_REST("Extreme reversion · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.44);
 
     companion object {
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */

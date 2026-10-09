@@ -19,6 +19,12 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.6 (Claude branch): the scalper card shows real-order-book history
+
+The figures in brackets on the Paper scalper card were "22 days of trade prints, back of the queue to
+front". They are now what a filled scalp of each kind made on 7 days of recorded order books with the
+real queue counted (all negative, see below). No trading logic changed.
+
 ## 1.8.5 (Claude branch): scalper results screen, every paper order saved
 
 Home → Paper scalper card → **See full results, chart and every trade** (`ScalperResultsScreen`):
@@ -37,7 +43,13 @@ of deleting them. A record made by 1.8.4 is replaced by a new one, because 1.8.4
 and no won / lost / fee totals. Still paper only: no order path.
 
 The cloud recorder's files and the study's trade tape are now also kept in the `scalper-data` release
-(`export-recordings.yml`, `archive-tape.yml`, `record.yml`).
+(`export-recordings.yml`, `archive-tape.yml`, `record.yml`), and the recorder keeps 15 book levels a side.
+
+**Real order books** ([`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md) sections G–I): on 7
+days of recorded books with the real size ahead counted, every rule the paper scalper runs lost on every
+day (ML scalper −1.6¢ per order sent, resting signals about −2¢, buy-now about −3.5¢), a model given the
+book and one-second Bitcoin found nothing worth trading, and a short queue turned out to be the worst
+place to join. The card's figures in brackets are these numbers now.
 
 ## 1.8.4 (Claude branch): paper scalper, aggressive, paper only
 

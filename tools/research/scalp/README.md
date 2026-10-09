@@ -32,3 +32,18 @@ python3 -m strat_bt tape
 ```
 
 `DESIGN.md` holds both designs as they were fixed before scoring.
+
+## Real order books (docs/scalping-2026-10-09.md sections G-I)
+
+The recordings are in the GitHub release `scalper-data` (`gh release download scalper-data -D rec`).
+
+```
+pip install scipy
+python3 -m test_rec_sim                               # 31 hand-built checks of the simulator
+python3 rec_build.py rec recwin tape                  # per-window book + spot + complete tape
+python3 -m rec_rows recwin rows.npz 2                 # features and outcomes, one row a second
+python3 -m rec_g rows.npz <repo>/app/src/main/assets/scalper_model.json    # G: shipped model, real queue
+python3 -m rec_h rows.npz h.json book all 2           # H: book + spot model, leave one day out
+python3 -m rec_h rows.npz i.json take_m10_next all 2  # I: taker targets (also take22_next, take_m30_next, take_m10_ioc)
+python3 -m rec_markout recwin                         # what the takers in the tape made
+```

@@ -499,10 +499,14 @@ data class ScalperSummary(
 ) {
     companion object {
         const val TITLE = "Paper scalper · aggressive · PAPER ONLY"
+
+        /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
+        const val QUEUE_AWARE_HISTORY = "−1.73¢"
         const val NOTE =
             "Seven strategies at once on real trade prints, 10 contracts each, no caps. Resting orders fill only " +
                 "after the queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee. " +
-                "History in brackets is cents per contract over 22 days (back of the queue to front). " +
+                "In brackets: what a filled scalp of that kind made per contract on 7 days of recorded order " +
+                "books, real queue counted. " +
                 "Needs Live signals on. Never sends an order."
 
         fun of(state: ScalperState, working: Pair<Int, Int> = 0 to 0): ScalperSummary {
@@ -517,7 +521,7 @@ data class ScalperSummary(
                         .thenBy { it.first.ordinal }
                 )
                 .map { (st, s) ->
-                    val hist = String.format(Locale.US, " [%+.2f to %+.2f¢]", st.historyCents.first, st.historyCents.second)
+                    val hist = String.format(Locale.US, " [history %+.2f¢]", st.historyCents)
                     if (s.closed == 0) {
                         "${st.label}: no scalps yet$hist"
                     } else {
@@ -530,7 +534,10 @@ data class ScalperSummary(
                 emptyList()
             } else {
                 val aware = state.stats(ScalperState.QUEUE_AWARE)
-                listOf("ML scalper, only orders expected to pay where they sat in the queue: ${money(aware.pnlUsd)} · ${aware.closed}${pct(aware)}") +
+                listOf(
+                    "ML scalper, only orders expected to pay where they sat in the queue: ${money(aware.pnlUsd)} · " +
+                        "${aware.closed}${pct(aware)} [history $QUEUE_AWARE_HISTORY]"
+                ) +
                     QueueBucket.values().mapNotNull { b ->
                         val s = state.stats(ScalperState.bucketKey(b))
                         if (s.closed == 0) null else "ML scalper, ${b.label}: ${money(s.pnlUsd)} · ${s.closed}${pct(s)}"

@@ -226,14 +226,14 @@ class ScalperEngineTest {
         assertEquals(ScalpStrategy.values().size, copy.strategyLines.size)
         assertEquals(
             "strategies that traded come first, best on top",
-            "Dip-hunter · buy now: −$0.34 · 1 (0% won) · −$0.34 each [-3.68 to -3.27¢]",
+            "Dip-hunter · buy now: −$0.34 · 1 (0% won) · −$0.34 each [history -3.86¢]",
             copy.strategyLines[0]
         )
         assertEquals(
-            "ML scalper · resting: −$0.58 · 2 (50% won) · −$0.29 each [-2.02 to +0.35¢]",
+            "ML scalper · resting: −$0.58 · 2 (50% won) · −$0.29 each [history -2.01¢]",
             copy.strategyLines[1]
         )
-        assertEquals("Momentum-sniper · buy now: no scalps yet [-3.49 to -3.07¢]", copy.strategyLines[2])
+        assertEquals("Momentum-sniper · buy now: no scalps yet [history -3.29¢]", copy.strategyLines[2])
         assertTrue(copy.queueLines.first(), copy.queueLines.first().contains("+$0.10 · 1 (100% won)"))
         assertTrue(copy.queueLines.any { it.startsWith("ML scalper, 0–100 ahead: +$0.10") })
         assertTrue(copy.workingLine, copy.workingLine.startsWith("Working now: 2 resting bids · 1 open scalps"))

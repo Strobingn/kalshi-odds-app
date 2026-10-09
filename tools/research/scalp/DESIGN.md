@@ -165,3 +165,15 @@ cents per contract after fees (taker fee rounded up per 10-contract order):
 Four targets, so only a 99% day-resampled interval above zero counts.
 Context, nothing fitted: how far the book mid moves in the taker's favour 1/5/10/30/60 s after every
 public trade, weighted by contracts, and what those trades made held to settlement, before and after the fee.
+
+### Part I correction (2026-10-09, after the first Part I run)
+
+The first run scored take_m10 at +1.9c and take22_book at +0.35c. That is not a result: the book snapshot of
+a second can be up to a second older than the trade prints of the same second, which the features see, so
+"buy at that snapshot's ask" buys at a price that is already gone. Fixed before looking at anything else:
+a buy decided at the end of second s meets the book of the NEXT snapshot (second s+1) and the exit clock
+starts there. Targets rerun with that entry: take_m5_next, take_m10_next, take_m30_next, take_m60_next,
+take22_next (market orders: pay whatever the ask is one second later) and take_m10_ioc (a limit at the ask
+that was seen; no fill, scored 0, if the ask has moved above it). Six targets: 99% interval required.
+The same staleness cannot help the resting-bid targets of Parts G and H (their fills come from later
+prints), and can only hurt them.
