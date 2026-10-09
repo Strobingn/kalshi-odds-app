@@ -25,6 +25,10 @@ import kotlinx.coroutines.withContext
 import java.io.InputStreamReader
 
 data class DataUiState(
+    /** 0.3.43: Price debug log (WS/REST price inputs and what was applied / dropped). */
+    val priceLogLines: List<String> = emptyList(),
+    val priceLogSummary: String? = null,
+    val priceLogNote: String? = null,
     val stats: DataStats = DataStats(),
     val settings: DataHubSettings = DataHubSettings(),
     val importSummary: ImportSummary? = null,
@@ -333,6 +337,33 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(message = result) }
             refreshStats()
         }
+    }
+
+    fun refreshPriceLog() {
+        val log = com.dirk.kalshiodds.signal.debug.PriceDebugLog
+        val counts = log.countByVerdict().entries.sortedByDescending { it.value }
+            .joinToString(" · ") { "${it.key} ${it.value}" }
+        _state.update {
+            it.copy(
+                priceLogLines = log.recent(40).asReversed().map(log::line),
+                priceLogSummary = "${log.size()} entries (last ${log.CAPACITY} kept)" + if (counts.isNotEmpty()) " — $counts" else ""
+            )
+        }
+    }
+
+    fun exportPriceLog() {
+        viewModelScope.launch {
+            val csv = com.dirk.kalshiodds.signal.debug.PriceDebugLog.csv()
+            val result = withContext(Dispatchers.IO) {
+                com.dirk.kalshiodds.data.local.results.ResultsFileExport.write(getApplication(), csv, namePrefix = "price-debug-log")
+            }
+            _state.update { it.copy(priceLogNote = result.message) }
+        }
+    }
+
+    fun clearPriceLog() {
+        com.dirk.kalshiodds.signal.debug.PriceDebugLog.clear()
+        refreshPriceLog()
     }
 
     fun exportLedger() {

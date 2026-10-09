@@ -118,6 +118,9 @@ class TickBookMathTest {
         val ticker = "KXSOL15M-GAP"
         ticks.applySnapshot(ticker, listOf(0.40 to 10.0), listOf(0.55 to 10.0), seq = 4)
         assertTrue(ticks.imbalance(ticker) != null)
+        // 0.3.43: seq is per sid (OrderbookSequencer); on a real gap the client invalidates the books.
+        ticks.invalidateBooks(listOf(ticker))
+        assertNull(ticks.imbalance(ticker))
         assertNull(ticks.applyDelta(ticker, 0.40, 1.0, "yes", seq = 9))
         assertNull(ticks.imbalance(ticker))
         ticks.applySnapshot(ticker, listOf(0.41 to 8.0), listOf(0.56 to 8.0), seq = 10)

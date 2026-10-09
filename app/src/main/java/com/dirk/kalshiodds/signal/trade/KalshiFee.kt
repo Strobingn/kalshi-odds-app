@@ -54,6 +54,26 @@ object KalshiFee {
 
     const val TAKER_COEFFICIENT = 0.07
     const val MAKER_COEFFICIENT = 0.0175
+
+    /**
+     * 0.3.43: series on Kalshi's Maker Fees table (maker M = 1). KXBTC15M / KXETH15M / KXSOL15M and the daily
+     * crypto series are not listed, so a resting (maker) paper fill pays $0 there.
+     */
+    val MAKER_FEE_SERIES: Set<String> = emptySet()
+
+    fun makerMultiplier(series: String): Double = if (series.uppercase() in MAKER_FEE_SERIES) 1.0 else 0.0
+
+    /** Maker fee for one fill: round_up_cent(M × 0.0175 × C × P × (1 − P)); $0 when M = 0. */
+    fun makerFee(contracts: Int, price: Double, series: String): Double {
+        val m = makerMultiplier(series)
+        if (contracts <= 0 || m <= 0.0) return 0.0
+        val p = price.coerceIn(0.0, 1.0)
+        return ceilCent(m * MAKER_COEFFICIENT * contracts * p * (1.0 - p))
+    }
+
+    /** Taker fee for one fill (dollars, rounded up to the cent). */
+    fun takerFee(contracts: Int, price: Double, feeRate: Double = SignalConstants.DEFAULT_FEE_RATE): Double =
+        if (contracts <= 0) 0.0 else total(contracts, price, feeRate)
     const val NON_DIRECT_BALANCE_PRECISION_USD = 0.01
 
     fun clipPrice(price: Double): Double =

@@ -65,22 +65,60 @@ class TickBook(private val maxPoints: Int = 80) {
         val pulse: LocalOrderBook.Pulse? = null
     )
 
+    /** 0.3.43: last Kalshi `ts` accepted per ticker from the WS ticker channel (monotonic guard). */
+    private val tickerTsByTicker = HashMap<String, Long>()
+    /** 0.3.43: receive time (elapsed nanos) of the last WS quote per ticker; REST cannot override a fresh one. */
+    private val wsQuoteAtNanos = HashMap<String, Long>()
+    /** 0.3.43: tickers that received an orderbook snapshot since the last invalidation. */
+    private val snapshotted = HashSet<String>()
+
+    /**
+     * 0.3.43 out-of-order guard, per full market ticker. Returns the reason to drop, or null to accept.
+     *  - WS ticker with Kalshi ts older than the last accepted ts for the same ticker → stale.
+     *  - REST quote while a WS quote for the same ticker arrived within [REST_WS_GRACE_NANOS] → suppressed
+     *    (REST polls are slower snapshots and used to overwrite newer WS prices).
+     */
+    @Synchronized
+    fun staleReason(tick: MarketTick): String? {
+        return when (tick.source) {
+            TickSource.WS_TICKER -> {
+                val ts = tick.exchangeTsMs ?: return null
+                val last = tickerTsByTicker[tick.ticker] ?: return null
+                if (ts < last) com.dirk.kalshiodds.signal.debug.PriceDebugLog.STALE else null
+            }
+            TickSource.REST -> {
+                val ws = wsQuoteAtNanos[tick.ticker] ?: return null
+                val age = tick.receiveElapsedNanos - ws
+                if (age in 0 until REST_WS_GRACE_NANOS) com.dirk.kalshiodds.signal.debug.PriceDebugLog.REST_SUPPRESSED else null
+            }
+            else -> null
+        }
+    }
+
     @Synchronized
     fun push(tick: MarketTick, nowMs: Long = System.currentTimeMillis()): Point? {
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return last(tick.ticker)
-        val completed = com.dirk.kalshiodds.domain.ConsistentQuote.completeTick(tick)
-        lastTickByTicker[tick.ticker] = mergeLastTick(lastTickByTicker[tick.ticker], completed)
         tick.closeTimeEpochMs?.let { closeByTicker[tick.ticker] = it }
         tick.openInterest?.let { oiByTicker[tick.ticker] = it }
         tick.volume?.let { volumeByTicker[tick.ticker] = it }
-        val mid = tick.mid01
-        if (mid != null) {
-            lastMidBySeries[tick.series] = mid
-            pushSeriesMid(tick.series, nowMs, mid)
+        val stale = staleReason(tick)
+        logTick(tick, stale ?: com.dirk.kalshiodds.signal.debug.PriceDebugLog.APPLIED, nowMs)
+        if (stale != null) return last(tick.ticker)
+        val completed = com.dirk.kalshiodds.domain.ConsistentQuote.completeTick(tick)
+        lastTickByTicker[tick.ticker] = mergeLastTick(lastTickByTicker[tick.ticker], completed)
+        if (tick.source == TickSource.WS_TICKER) {
+            tick.exchangeTsMs?.let { tickerTsByTicker[tick.ticker] = maxOf(it, tickerTsByTicker[tick.ticker] ?: it) }
+            wsQuoteAtNanos[tick.ticker] = tick.receiveElapsedNanos
         }
+        // 0.3.43: the series / sparkline / chart use the MERGED quote for this ticker, never a raw trade
+        // print (WS trade ticks carry yesBid = yesAsk = trade price) or a dropped stale quote.
+        val merged = lastTickByTicker[tick.ticker] ?: completed
+        val mid = merged.mid01
+        if (mid != null) noteSeriesMid(tick.ticker, tick.series, nowMs, mid)
         // Order-book-derived ticks refresh last mid / meta but do not pollute
         // the velocity / volume-flow series (those stay ticker/trade/REST).
-        recordBid(tick, nowMs)
+        // 0.3.43: trade prints (bid = ask = trade price) never enter the bid/ask chart history.
+        if (tick.source != TickSource.WS_TRADE) recordBid(tick, nowMs)
         if (tick.source == TickSource.WS_ORDERBOOK) return last(tick.ticker)
         if (mid == null) return last(tick.ticker)
         val q = byTicker.getOrPut(tick.ticker) { ArrayDeque() }
@@ -96,6 +134,53 @@ class TickBook(private val maxPoints: Int = 80) {
         while (q.size > maxPoints) q.removeFirst()
         return point
     }
+
+    private fun logTick(tick: MarketTick, verdict: String, nowMs: Long) {
+        val src = tick.source.name
+        com.dirk.kalshiodds.signal.debug.PriceDebugLog.record(src, tick.ticker, "yes_bid", tick.yesBid, verdict, tick.exchangeTsMs, wallMs = nowMs)
+        com.dirk.kalshiodds.signal.debug.PriceDebugLog.record(src, tick.ticker, "yes_ask", tick.yesAsk, verdict, tick.exchangeTsMs, wallMs = nowMs)
+        if (tick.source == TickSource.WS_TRADE) {
+            com.dirk.kalshiodds.signal.debug.PriceDebugLog.record(src, tick.ticker, "trade", tick.lastPrice, verdict, tick.exchangeTsMs, wallMs = nowMs)
+        }
+    }
+
+    /**
+     * 0.3.43: the per-series mid (used for cross-coin leaders) only follows the series' CURRENT window —
+     * the open ticker with the earliest close. A late tick for the previous window (or a pre-listed next
+     * window) after rollover no longer moves the series mid.
+     */
+    private fun noteSeriesMid(ticker: String, series: String, nowMs: Long, mid: Double) {
+        if (!isCurrentWindow(ticker, series, nowMs)) {
+            com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("SERIES", ticker, "mid", mid,
+                com.dirk.kalshiodds.signal.debug.PriceDebugLog.OTHER_WINDOW, wallMs = nowMs)
+            return
+        }
+        lastMidBySeries[series] = mid
+        pushSeriesMid(series, nowMs, mid)
+    }
+
+    @Synchronized
+    fun isCurrentWindow(ticker: String, series: String, nowMs: Long): Boolean {
+        val close = closeByTicker[ticker] ?: return true
+        if (close <= nowMs) return false
+        val current = closeByTicker.entries
+            .filter { (t, c) -> c > nowMs && CryptoMarkets.inferSeries(t) == series }
+            .minOfOrNull { it.value } ?: return true
+        return close == current
+    }
+
+    /** 0.3.43: seq gap on the sid — books for [tickers] are unusable until a fresh snapshot arrives. */
+    @Synchronized
+    fun invalidateBooks(tickers: Collection<String>) {
+        for (t in tickers) {
+            books[t]?.clear()
+            bookAtMs.remove(t)
+            snapshotted.remove(t)
+        }
+    }
+
+    @Synchronized
+    fun hasSnapshot(ticker: String): Boolean = ticker in snapshotted
 
     @Synchronized
     fun series(ticker: String): List<Point> = byTicker[ticker]?.toList().orEmpty()
@@ -424,15 +509,17 @@ class TickBook(private val maxPoints: Int = 80) {
     ): LocalOrderBook? {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val book = books.getOrPut(ticker) { LocalOrderBook() }
-        book.replaceSnapshot(yesLevels, noLevels, seq)
+        // 0.3.43: seq is per sid (checked in OrderbookSequencer), never per ticker.
+        book.replaceSnapshot(yesLevels, noLevels, null)
+        snapshotted += ticker
         bookAtMs[ticker] = System.currentTimeMillis()
+        com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("WS_BOOK", ticker, "snapshot_mid", book.mid01(),
+            com.dirk.kalshiodds.signal.debug.PriceDebugLog.APPLIED, seq = seq)
         tickFromBook(ticker, 0L)?.let { fromBook ->
             lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
         }
         book.mid01()?.let { mid ->
-            val series = CryptoMarkets.inferSeries(ticker)
-            lastMidBySeries[series] = mid
-            pushSeriesMid(series, System.currentTimeMillis(), mid)
+            noteSeriesMid(ticker, CryptoMarkets.inferSeries(ticker), System.currentTimeMillis(), mid)
         }
         return book
     }
@@ -450,20 +537,21 @@ class TickBook(private val maxPoints: Int = 80) {
         seq: Int? = null
     ): LocalOrderBook? {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
-        val book = books.getOrPut(ticker) { LocalOrderBook() }
-        if (!book.applyDelta(price, delta, side, seq)) {
-            book.clear()
-            bookAtMs.remove(ticker)
+        // 0.3.43: never build a book from deltas alone (missed/invalidated snapshot → wild one-level books).
+        if (ticker !in snapshotted) {
+            com.dirk.kalshiodds.signal.debug.PriceDebugLog.record("WS_BOOK", ticker, "delta", price,
+                com.dirk.kalshiodds.signal.debug.PriceDebugLog.NO_SNAPSHOT, seq = seq)
             return null
         }
+        val book = books.getOrPut(ticker) { LocalOrderBook() }
+        // seq continuity is enforced per sid upstream (OrderbookSequencer); not per ticker.
+        book.applyDelta(price, delta, side, null)
         bookAtMs[ticker] = System.currentTimeMillis()
         tickFromBook(ticker, 0L)?.let { fromBook ->
             lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
         }
         book.mid01()?.let { mid ->
-            val series = CryptoMarkets.inferSeries(ticker)
-            lastMidBySeries[series] = mid
-            pushSeriesMid(series, System.currentTimeMillis(), mid)
+            noteSeriesMid(ticker, CryptoMarkets.inferSeries(ticker), System.currentTimeMillis(), mid)
         }
         return book
     }
@@ -626,6 +714,7 @@ class TickBook(private val maxPoints: Int = 80) {
         nowMs: Long = System.currentTimeMillis()
     ): MarketTick? {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
+        if (ticker !in snapshotted) return null
         val book = books[ticker] ?: return null
         val bid = book.bestYesBid()
         val ask = book.bestYesAsk()
@@ -660,6 +749,9 @@ class TickBook(private val maxPoints: Int = 80) {
     }
 
     companion object {
+        /** 0.3.43: a REST poll cannot overwrite a WS quote younger than this (same ticker). */
+        const val REST_WS_GRACE_NANOS = 15_000_000_000L
+
         /** Last N ticks used for velocity / acceleration (user: 10–20). */
         const val VELOCITY_LOOKBACK = 16
 

@@ -67,6 +67,12 @@ object ScalpRule {
     const val FRESH_BOOK_MS = 10_000L
     const val MAX_ENTRIES_PER_MARKET = 12
     const val PROMOTION_ROUND_TRIPS = 300
+    /** 0.3.43 CF-reprice. */
+    const val CF_MAX_AGE_MS = 2_000L
+    const val CF_MIN_NET_EXIT = 0.02
+    const val CF_LIMIT_TTL_MS = 1_000L
+    const val CF_MAX_HOLD_MS = 90_000L
+    const val CF_EXIT_BY_S = 90.0
 
     /** Fallback σ per √second (train medians, Binance 1 s) until the in-app estimator has 2 minutes of spot. */
     fun defaultSigmaPerSec(ticker: String): Double {
@@ -125,9 +131,18 @@ object ScalpRule {
         val yesAskSize: Double?,
         val spot: Double?,
         val strike: Double?,
-        val sigmaPerSec: Double?
+        val sigmaPerSec: Double?,
+        /** 0.3.43 CF-reprice: CF Benchmarks settlement-aware price (running final-minute avg when inside it). */
+        val cfSpot: Double? = null,
+        /** Age of the latest CF tick (ms). Null = no CF feed → CF-reprice is NO TRADE. */
+        val cfAgeMs: Long? = null,
+        /** True when the orderbook for this ticker had a sequence gap and has not been re-snapshotted. */
+        val bookGap: Boolean = false
     ) {
         val tauS: Double get() = (closeMs - nowMs) / 1000.0
+        fun cfFresh(): Boolean = cfSpot != null && cfAgeMs != null && cfAgeMs in 0..CF_MAX_AGE_MS
+        fun cfFair(side: String): Double? = if (!cfFresh()) null else
+            fairYes(cfSpot, strike, sigmaPerSec, tauS)?.let { if (side == "YES") it else 1.0 - it }
         fun fresh(): Boolean = nowMs - bookAtMs in 0..FRESH_BOOK_MS
         fun ask(side: String): Double? = if (side == "YES") yesAsk else yesBid?.let { 1.0 - it }
         fun askSize(side: String): Double? = if (side == "YES") yesAskSize else yesBidSize
@@ -219,6 +234,7 @@ object ScalpRule {
         recent: List<Snap>
     ): Pair<Entry?, String> {
         if (p.strategy == ScalpStrategy.FAIR_GAP) return entrySignal(q, p, sides)
+        if (p.strategy == ScalpStrategy.CF_REPRICE) return cfRepriceSignal(q, p, sides)
         if (!q.fresh()) return null to "stale book"
         val tau = q.tauS
         if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
@@ -257,7 +273,7 @@ object ScalpRule {
                     if (fair - ask + 1e-9 < p.minGap) return@mapNotNull null
                     fair - ask
                 }
-                ScalpStrategy.FAIR_GAP -> return@mapNotNull null
+                ScalpStrategy.FAIR_GAP, ScalpStrategy.CF_REPRICE -> return@mapNotNull null
             }
             val cost = spread + feePerContract(CONTRACTS, ask) + feePerContract(CONTRACTS, (ask + move).coerceIn(0.01, 0.99))
             Cand(Entry(side, ask, fair, move - cost), move, cost)
@@ -269,7 +285,58 @@ object ScalpRule {
         return best.e to "enter"
     }
 
+    /**
+     * 0.3.43 CF-reprice entry. Filters: CF tick ≤ 2 s old (else NO TRADE — never Coinbase), no orderbook seq gap,
+     * fresh book, 3–13 min left, spread ≤ 2¢. Enter when CF fair − executable ask − entry fee ≥ minGap (6¢) AND
+     * the predicted net exit (sell at CF fair after the exit fee) ≥ 2¢. Sizing: 10 contracts, displayed depth only.
+     */
+    fun cfRepriceSignal(q: Quote, p: ScalpParams, sides: Collection<String>): Pair<Entry?, String> {
+        if (q.cfSpot == null || q.cfAgeMs == null) return null to "NO TRADE — no CF Benchmarks feed"
+        if (!q.cfFresh()) return null to "NO TRADE — CF tick ${q.cfAgeMs} ms old (> 2 s)"
+        if (q.bookGap) return null to "NO TRADE — orderbook seq gap"
+        if (!q.fresh()) return null to "stale book"
+        val tau = q.tauS
+        if (tau < p.tauMinS || tau > p.tauMaxS) return null to "outside entry window"
+        val yb = q.yesBid ?: return null to "no bid"
+        val ya = q.yesAsk ?: return null to "no ask"
+        val spread = ya - yb
+        if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
+        val best = sides.mapNotNull { side ->
+            val ask = q.ask(side) ?: return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+            val fair = q.cfFair(side) ?: return@mapNotNull null
+            val entryFee = feePerContract(CONTRACTS, ask)
+            Entry(side, ask, fair, fair - ask - entryFee)
+        }.maxByOrNull { it.gapAfterFee } ?: return null to "no CF fair value"
+        if (best.gapAfterFee + 1e-9 < p.minGap) {
+            return null to String.format(Locale.US, "CF gap %.1f¢ under %.0f¢", best.gapAfterFee * 100, p.minGap * 100)
+        }
+        val netExit = best.gapAfterFee - feePerContract(CONTRACTS, best.fair.coerceIn(0.01, 0.99))
+        if (netExit + 1e-9 < CF_MIN_NET_EXIT) {
+            return null to String.format(Locale.US, "predicted net exit %.1f¢ under 2¢", netExit * 100)
+        }
+        return best to "enter"
+    }
+
+    /** 0.3.43 CF-reprice exits: TP / stop / 90 s hold / mandatory exit by 90 s left / gap gone (Kalshi repriced). */
+    fun cfRepriceExit(side: String, entry: Double, entryAtMs: Long?, q: Quote, p: ScalpParams): ExitReason? {
+        if (q.tauS <= CF_EXIT_BY_S) return ExitReason.CF_EXIT_BY_CLOSE
+        if (entryAtMs != null && q.nowMs - entryAtMs >= CF_MAX_HOLD_MS) return ExitReason.CF_TIME
+        val bid = q.bid(side)
+        if (bid != null && bid > 0.0) {
+            if (bid - entry >= p.target - 1e-12) return ExitReason.PROFIT_TARGET
+            if (bid <= entry - p.stop + 1e-12) return ExitReason.STOP
+        }
+        val fair = q.cfFair(side)
+        val ask = q.ask(side)
+        if (fair != null && ask != null && fair - ask <= p.turnDown + 1e-12) return ExitReason.CF_GAP_GONE
+        return null
+    }
+
     enum class ExitReason(val label: String) {
+        CF_EXIT_BY_CLOSE("mandatory exit: 90 s left"),
+        CF_TIME("time exit: 90 s hold"),
+        CF_GAP_GONE("early exit: CF gap disappeared"),
         GAP_CLOSED("take-profit: bid beats fair after fee"),
         TURN_DOWN("turn-down: fair fell below entry"),
         PROFIT_TARGET("profit target hit"),
@@ -293,7 +360,7 @@ object ScalpRule {
     }
 
     fun rulesText(): String =
-        "Scalp $VERSION (PAPER). Four strategies run side by side — " +
+        "Scalp $VERSION (PAPER). Five strategies run side by side — " +
             ScalpStrategy.values().joinToString("; ") { "${it.label}: ${it.blurb}" } +
             " — each with one open scalp per market side, its own per-coin params and walk-forward tuning. " +
             "Total open scalp cost is capped by the paper bankroll. Fair-gap: enter when the ask is below spot-implied fair by the coin's gap threshold after " +
@@ -449,7 +516,9 @@ class ScalpBook(
                 val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
                 if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
                 val openSides = mine.filter { isActive(it) }.map { it.side }.toSet()
-                val free = listOf("YES", "NO").filter { it !in openSides }
+                // 0.3.43 CF-reprice: one direction per market (no YES and NO at once).
+                val free = if (p.strategy == ScalpStrategy.CF_REPRICE && openSides.isNotEmpty()) emptyList()
+                    else listOf("YES", "NO").filter { it !in openSides }
                 if (free.isEmpty()) continue
                 val (sig, _) = ScalpRule.strategySignal(q, p, free, recent)
                 if (sig != null) {
@@ -491,10 +560,12 @@ class ScalpBook(
 
     private fun step(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
         return when (t.state) {
-            ScalpState.PENDING_ENTRY -> fillEntry(t, q)
+            ScalpState.PENDING_ENTRY -> if (p.strategy == ScalpStrategy.CF_REPRICE) fillRestingLimitEntry(t, q) else fillEntry(t, q)
             ScalpState.OPEN -> {
                 if (q.nowMs >= q.closeMs) return null
-                val reason = ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q, p) ?: return null
+                val reason = (if (p.strategy == ScalpStrategy.CF_REPRICE)
+                    ScalpRule.cfRepriceExit(t.side, t.entryPrice ?: return null, t.entryAtMs, q, p)
+                else ScalpRule.exitSignal(t.side, t.entryPrice ?: return null, q, p)) ?: return null
                 t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason.label)
             }
             ScalpState.PENDING_EXIT -> fillExit(t, q)
@@ -517,6 +588,31 @@ class ScalpBook(
             entryPrice = ask,
             entryFeeUsd = ScalpRule.orderFee(ScalpRule.CONTRACTS, ask),
             entryAtMs = q.nowMs
+        )
+    }
+
+    /**
+     * 0.3.43 CF-reprice resting limit entry at the signal ask (touch-fill paper rule, PaperLimitFill): fills at exactly
+     * the limit as soon as a later book shows ask ≤ limit, up to the displayed depth (partial allowed); cancelled
+     * unfilled after [ScalpRule.CF_LIMIT_TTL_MS]. Touch fills are slightly optimistic vs real queue priority.
+     */
+    private fun fillRestingLimitEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (q.bookAtMs <= t.signalAtMs) return null
+        val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled: $why") }
+        if (q.nowMs - t.signalAtMs > ScalpRule.CF_LIMIT_TTL_MS) return miss("unfilled after 1 s")
+        if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
+        val ask = q.ask(t.side) ?: return null
+        val n = com.dirk.kalshiodds.signal.paper.PaperLimitFill.touchFillQty(
+            limit = t.signalAsk, best = ask, depth = q.askSize(t.side), remaining = ScalpRule.CONTRACTS, buy = true
+        )
+        if (n <= 0) return null
+        return t.copy(
+            state = ScalpState.OPEN,
+            contracts = n,
+            entryPrice = t.signalAsk,
+            entryFeeUsd = ScalpRule.orderFee(n, t.signalAsk),
+            entryAtMs = q.nowMs,
+            note = "${t.note}; resting limit filled $n ct @ ${String.format(Locale.US, "%.0f¢", t.signalAsk * 100)} (touch fill, optimistic vs queue)"
         )
     }
 

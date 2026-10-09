@@ -802,6 +802,99 @@ class PaperBook(
     /**
      * Simulated sell of an open paper fill at the ticket's bid. Never hits Kalshi.
      */
+    /**
+     * 0.3.43 paper LIMIT order buy fill (PaperOrderBook): [qty] contracts at exactly [price], [feeUsd] = taker fee for
+     * an immediate fill or the series maker fee for a resting fill. Adds to an open same-side fill on the ticker
+     * (volume-weighted price) or opens a new one. Cash-capped. Never calls Kalshi.
+     */
+    fun limitBuyFill(ticker: String, side: String, qty: Int, price: Double, feeUsd: Double, note: String): Int {
+        if (qty <= 0) return 0
+        val want = if (side.equals("NO", true)) "NO" else "YES"
+        val px = KalshiPrice.usable(price) ?: return 0
+        synchronized(lock) {
+            val cur = _state.value
+            val perCt = px + feeUsd / qty
+            val n = minOf(qty, floor((cur.cashUsd + 1e-9) / perCt).toInt())
+            if (n <= 0) {
+                publish(cur.copy(lastMessage = "Paper limit fill skipped on $ticker — not enough paper cash"))
+                return 0
+            }
+            val fee = feeUsd * n / qty
+            val open = cur.fills.firstOrNull { !it.settled && it.ticker.equals(ticker, true) && it.side.equals(want, true) }
+            val row = if (open != null) {
+                val total = open.contracts + n
+                open.copy(
+                    contracts = total,
+                    stakeUsd = open.stakeUsd + n * px,
+                    limitPrice = (open.limitPrice * open.contracts + px * n) / total,
+                    updatedAtMs = nowMs(),
+                    note = open.note + String.format(java.util.Locale.US, " · +%d ct @ %.0f¢ limit", n, px * 100)
+                )
+            } else {
+                newFill(ticker = ticker, side = want, stakeUsd = n * px, contracts = n, limitPrice = px, source = "paper-limit", note = note)
+            }
+            val rest = cur.fills.filterNot { it.id == row.id }
+            val (fills, tail) = retainLedger(cur, listOf(row) + rest)
+            publish(
+                cur.copy(
+                    cashUsd = cur.cashUsd - n * px - fee,
+                    fills = fills,
+                    syncTail = tail,
+                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT BUY %s %s · %d ct @ %.0f¢ · fee $%.2f · never Kalshi", want, ticker, n, px * 100, fee)
+                )
+            )
+            return n
+        }
+    }
+
+    /** Contracts held in the open paper fill for [ticker]/[side] (0 when none). */
+    fun openContracts(ticker: String, side: String): Int =
+        _state.value.fills.filter { !it.settled && it.ticker.equals(ticker, true) && it.side.equals(side, true) }.sumOf { it.contracts }
+
+    /** 0.3.43 paper LIMIT order sell fill: [qty] at exactly [price] minus [feeUsd]. Returns contracts sold. */
+    fun limitSellFill(ticker: String, side: String, qty: Int, price: Double, feeUsd: Double): Int {
+        val want = if (side.equals("NO", true)) "NO" else "YES"
+        val px = KalshiPrice.usable(price) ?: return 0
+        synchronized(lock) {
+            val cur = _state.value
+            val open = cur.fills.firstOrNull { !it.settled && it.ticker.equals(ticker, true) && it.side.equals(want, true) } ?: return 0
+            val n = minOf(qty, open.contracts)
+            if (n <= 0) return 0
+            val fee = if (qty > 0) feeUsd * n / qty else 0.0
+            val proceeds = n * px - fee
+            val pnl = proceeds - n * open.limitPrice
+            val remaining = open.contracts - n
+            val sold = open.copy(
+                id = if (remaining > 0) idFactory() else open.id,
+                settled = true,
+                contracts = n,
+                stakeUsd = n * open.limitPrice,
+                outcome = "sell",
+                won = pnl >= 0.0,
+                pnlUsd = pnl,
+                updatedAtMs = nowMs(),
+                note = String.format(java.util.Locale.US, "Paper limit sell %d ct @ %.0f¢ · fee $%.2f · never sent to Kalshi", n, px * 100, fee)
+            )
+            val leftover = if (remaining > 0) open.copy(contracts = remaining, stakeUsd = remaining * open.limitPrice) else null
+            val nextFills = buildList {
+                leftover?.let { add(it) }
+                add(sold)
+                cur.fills.filterNot { it.id == open.id }.forEach { add(it) }
+            }
+            val (kept, tail) = retainLedger(cur, nextFills)
+            publish(
+                cur.copy(
+                    cashUsd = cur.cashUsd + proceeds,
+                    fills = kept,
+                    syncTail = tail,
+                    lifetimeRealizedPnlUsd = nextLifetime(cur, pnl),
+                    lastMessage = String.format(java.util.Locale.US, "PAPER LIMIT SELL %s %s · %d ct @ %.0f¢ · %+.2f · never Kalshi", want, ticker, n, px * 100, pnl)
+                )
+            )
+            return n
+        }
+    }
+
     fun sell(ticket: TradeTicket): PaperFill? {
         if (!ticket.canPaper || !ticket.isSell) return null
         val want = if (ticket.side.equals("NO", true)) "NO" else "YES"

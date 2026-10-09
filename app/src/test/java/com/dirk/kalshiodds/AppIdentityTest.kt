@@ -38,8 +38,8 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(57, BuildConfig.VERSION_CODE)
-        assertEquals("0.3.42", BuildConfig.VERSION_NAME)
+        assertEquals(58, BuildConfig.VERSION_CODE)
+        assertEquals("0.3.43", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertTrue(AppVersion.label.startsWith("${AppIdentity.LABEL} v"))
@@ -54,8 +54,8 @@ class AppIdentityTest {
         assertTrue(gradle.contains("namespace = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("versionCode = 57"))
-        assertTrue(gradle.contains("versionName = \"0.3.42\""))
+        assertTrue(gradle.contains("versionCode = 58"))
+        assertTrue(gradle.contains("versionName = \"0.3.43\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
@@ -74,7 +74,7 @@ class AppIdentityStorageAuditTest {
         assertEquals(AppIdentity.DB_RESULTS, SqliteResultsStore.DB_NAME)
         assertEquals(AppIdentity.DB_VERSION, SqliteResultsStore.DB_VERSION)
         assertEquals(8, com.dirk.kalshiodds.data.local.paper.PaperFillSchema.VERSION)
-        assertEquals(AppIdentity.DB_VERSION, com.dirk.kalshiodds.data.local.paper.PaperFillSchema.VERSION)
+        assertEquals(AppIdentity.DB_VERSION, com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.VERSION) // 0.3.43 v9
         assertEquals(AppIdentity.PREFS_KEEPALIVE, LiveSignalsPolicy.PREFS_NAME)
         assertEquals("diphunter_paper_book", AppIdentity.PREFS_PAPER)
         assertEquals("diphunter_last_minute", AppIdentity.PREFS_LAST_MINUTE)

@@ -263,7 +263,7 @@ class ReleaseGate0338Test {
         assertFalse(sql.contains("ALTER"))
         assertFalse(sql.contains("DELETE"))
         assertTrue(ScalpSchema.upgradeSql(8).isEmpty())
-        assertEquals(8, com.dirk.kalshiodds.AppIdentity.DB_VERSION)
+        assertTrue(com.dirk.kalshiodds.AppIdentity.DB_VERSION >= 8) // 0.3.43 added paper_orders (v9), still additive
     }
 
     @Test

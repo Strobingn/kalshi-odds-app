@@ -62,6 +62,14 @@ class AppContainer(context: Context) {
         longshot = com.dirk.kalshiodds.decision.LongshotResidual.loadAsset(app)
     ).also { it.refitIfDue() }
     val ladder = com.dirk.kalshiodds.decision.LadderStore(app)
+    /** 0.3.43 paper limit orders (paper_orders in the results DB). Fills hit the paper ledger only — never Kalshi. */
+    val paperOrders: com.dirk.kalshiodds.signal.paper.PaperOrderBook by lazy {
+        com.dirk.kalshiodds.signal.paper.PaperOrderBook(
+            store = (resultsImpl as? com.dirk.kalshiodds.signal.paper.PaperOrderPersistence)
+                ?: com.dirk.kalshiodds.signal.paper.InMemoryPaperOrderPersistence(),
+            sink = com.dirk.kalshiodds.signal.paper.PaperBookFillSink(paper.book)
+        )
+    }
     /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
     val scalp = com.dirk.kalshiodds.decision.ScalpBook(
         (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)

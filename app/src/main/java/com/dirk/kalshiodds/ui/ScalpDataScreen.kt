@@ -119,11 +119,18 @@ object ScalpData {
 fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScalp: () -> Unit) {
     val colors = DipTheme.colors
     val trades by viewModel.scalpTrades.collectAsState()
+    val paperOrders by viewModel.paperOrders.collectAsState()
     val s = ScalpData.summary(trades)
     val curve = ScalpData.equityCurve(trades)
     val rows = ScalpData.tripLines(trades)
     DecisionScaffold(ScalpData.TITLE, onBack) {
         item { Text("Scalping results only — paper, net after both Kalshi fees. Not part of the main scorecard.", color = colors.accentOrange, fontWeight = FontWeight.SemiBold) }
+        item {
+            com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
+                tickers = emptyList(), orders = paperOrders, showTicket = false,
+                onSubmit = { _, _, _, _, _, _ -> }, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder
+            )
+        }
         item {
             DecisionCard {
                 Text("Summary", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
