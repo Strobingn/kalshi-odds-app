@@ -71,7 +71,8 @@ class AppIdentityStorageAuditTest {
         assertEquals(AppIdentity.DB_RESULTS, SqliteResultsStore.DB_NAME)
         assertEquals(AppIdentity.DB_VERSION, SqliteResultsStore.DB_VERSION)
         assertEquals(6, com.dirk.kalshiodds.data.local.paper.PaperFillSchema.VERSION)
-        assertEquals(7, AppIdentity.DB_VERSION)
+        // v8: forward-test tables (forward_tests, ticket_forward) added on this branch.
+        assertEquals(8, AppIdentity.DB_VERSION)
         assertEquals(AppIdentity.DB_VERSION, SqliteResultsStore.DB_VERSION)
         assertEquals(AppIdentity.PREFS_KEEPALIVE, LiveSignalsPolicy.PREFS_NAME)
         assertEquals("diphunter_paper_book", AppIdentity.PREFS_PAPER)

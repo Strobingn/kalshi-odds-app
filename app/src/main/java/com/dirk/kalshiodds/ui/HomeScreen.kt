@@ -60,6 +60,8 @@ fun HomeScreen(
     onOpenScorecard: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSignalHistory: () -> Unit = onOpenHistory,
+    onOpenScalp: () -> Unit = {},
+    scalpViewModel: ScalpViewModel? = null,
     onOpenChart: (MarketUiModel) -> Unit,
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
@@ -193,6 +195,11 @@ fun HomeScreen(
                                 scorecard = state.scorecardSummary,
                                 onOpenScorecard = onOpenScorecard
                             )
+                        }
+                        if (scalpViewModel != null) {
+                            item {
+                                ScalpHomeCard(viewModel = scalpViewModel, onOpen = onOpenScalp)
+                            }
                         }
                         val keyedCoins = LazyListKeys.keyed(coinCards) { it.series }
                         items(keyedCoins, key = { it.key }) { row ->

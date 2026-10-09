@@ -66,7 +66,9 @@ class SignalHub(
         }
     )
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
+    private val lastBookScoredMs = ConcurrentHashMap<String, Long>()
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
+    private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
@@ -86,6 +88,13 @@ class SignalHub(
     val scores: StateFlow<Map<String, ScoringEngine.Score>> = _scores.asStateFlow()
 
     fun latestScores(): Map<String, ScoringEngine.Score> = _scores.value
+
+    /** A live book score, rather than an old cached quote after a WS gap. */
+    fun hasFreshBook(ticker: String, nowMs: Long, maxAgeMs: Long = 3_000L): Boolean {
+        val last = lastBookScoredMs[ticker] ?: return false
+        return wsLive && _status.value.state == WsConnectionState.CONNECTED &&
+            nowMs >= last && nowMs - last <= maxAgeMs
+    }
 
     fun applyCalibration(state: Calibrator.State) {
         scoring.calibration = state
@@ -289,6 +298,7 @@ class SignalHub(
         if (!BookScoreGate.shouldPublish(ticker, now, lastBookPublishMs)) return
         val tick = scoring.book.tickFromBook(ticker, receiveElapsedNanos) ?: return
         val scored = runCatching { scoring.score(tick, settings) }.getOrNull() ?: return
+        lastBookScoredMs[ticker] = now
         _scores.update { it + (ticker to scored) }
         persistScore(tick, scored)
         persistOddsMid(ticker, scored.marketMidPp)
@@ -347,6 +357,33 @@ class SignalHub(
 
     private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
         val now = System.currentTimeMillis()
+        val forwardWriter = results
+        if (forwardWriter != null && tick.source == TickSource.WS_ORDERBOOK &&
+            CryptoMarkets.isLiveTicker(tick.ticker) && scored.passedFilter &&
+            kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp() &&
+            forwardLoggedTickers.add(tick.ticker)) {
+            val logged = runCatching {
+                val side = SignalStance.resolve(
+                    storedSide = scored.predictedSide,
+                    modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                    marketYes = scored.marketMidPp,
+                    fairYes = scored.fairValuePp
+                ).storedSide
+                val row = com.dirk.kalshiodds.signal.feedback.ForwardTest.capture(
+                    ticker = tick.ticker,
+                    series = tick.series,
+                    atMs = now,
+                    modelYes = scored.fairValuePp / 100.0,
+                    marketYes = scored.marketMidPp / 100.0,
+                    side = side,
+                    book = scoring.book.snapshotBook(tick.ticker),
+                    feeRate = settings.feeRate
+                ) ?: return@runCatching false
+                forwardWriter.enqueueForwardTest(row)
+                true
+            }.getOrDefault(false)
+            if (!logged) forwardLoggedTickers.remove(tick.ticker)
+        }
         runCatching {
             results?.enqueueSnapshot(
                 ScoredSnapshotRow(

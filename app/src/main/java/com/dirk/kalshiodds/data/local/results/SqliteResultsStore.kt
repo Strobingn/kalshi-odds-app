@@ -14,6 +14,11 @@ import android.database.sqlite.SQLiteOpenHelper
 class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
     private val db = Helper(context.applicationContext)
 
+    /** Test-only hygiene: release the SQLite connection so the DB file can be deleted. */
+    fun close() {
+        db.close()
+    }
+
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
         if (rows.isEmpty()) return
         val w = db.writableDatabase
@@ -61,6 +66,21 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             w.endTransaction()
         }
     }
+
+    override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
+        query(TABLE_SNAP, limit) { cursorToSnap(it) }
+
+    override fun recentAlerts(limit: Int): List<AlertRow> =
+        query(TABLE_ALERT, limit) { cursorToAlert(it) }
+
+    override fun recentScorecards(limit: Int): List<ScorecardRow> =
+        query(TABLE_CARD, limit) { cursorToCard(it) }
+
+    override fun recentTickets(limit: Int): List<TicketAttemptRow> =
+        query(TABLE_TICKET, limit) { cursorToTicket(it) }
+
+    override fun recentOddsMids(limit: Int): List<OddsMidRow> =
+        query(TABLE_ODDS, limit) { cursorToOdds(it) }
 
     override fun insertForwardTests(rows: List<ForwardTestRow>) {
         if (rows.isEmpty()) return
@@ -147,21 +167,6 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
         return out
     }
-
-    override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
-        query(TABLE_SNAP, limit) { cursorToSnap(it) }
-
-    override fun recentAlerts(limit: Int): List<AlertRow> =
-        query(TABLE_ALERT, limit) { cursorToAlert(it) }
-
-    override fun recentScorecards(limit: Int): List<ScorecardRow> =
-        query(TABLE_CARD, limit) { cursorToCard(it) }
-
-    override fun recentTickets(limit: Int): List<TicketAttemptRow> =
-        query(TABLE_TICKET, limit) { cursorToTicket(it) }
-
-    override fun recentOddsMids(limit: Int): List<OddsMidRow> =
-        query(TABLE_ODDS, limit) { cursorToOdds(it) }
 
     override fun exportBundle(limit: Int): ResultsBundle = ResultsBundle(
         snapshots = recentSnapshots(limit),
@@ -458,7 +463,6 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             w.endTransaction()
         }
     }
-
 
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
@@ -1003,6 +1007,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createArchiveTables(db)
             createHistoryTables(db)
             createChartTickTable(db)
+            createPaperFillTable(db)
             createForwardTable(db)
             createTicketForwardTable(db)
         }
@@ -1015,14 +1020,9 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             }
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
-            if (oldVersion < 6) createForwardTable(db)
-            if (oldVersion < 7) createTicketForwardTable(db)
-        }
-
-        private fun createPaperFillTable(db: SQLiteDatabase) {
-            for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)) {
-                db.execSQL(sql)
-            }
+            if (oldVersion < 6) createPaperFillTable(db)
+            if (oldVersion < 7) createForwardTable(db)
+            if (oldVersion < 8) createTicketForwardTable(db)
         }
 
         private fun createForwardTable(db: SQLiteDatabase) {
@@ -1049,6 +1049,12 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 )
             """.trimIndent())
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_ticket_forward_time ON $TABLE_TICKET_FORWARD(captured_at_ms)")
+        }
+
+        private fun createPaperFillTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)) {
+                db.execSQL(sql)
+            }
         }
 
         private fun createChartTickTable(db: SQLiteDatabase) {
@@ -1159,7 +1165,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 7
+        const val DB_VERSION = 8
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

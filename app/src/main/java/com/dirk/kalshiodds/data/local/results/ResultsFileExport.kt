@@ -21,9 +21,11 @@ data class ExportResult(
  * user can open it after a crash. Never throws.
  */
 object ResultsFileExport {
-    fun write(context: Context, csv: String, nowMs: Long = System.currentTimeMillis()): ExportResult {
+    fun write(context: Context, csv: String, nowMs: Long = System.currentTimeMillis(),
+              prefix: String = "diphunter-results"): ExportResult {
+        require(prefix.matches(Regex("[a-z0-9-]+"))) { "Invalid export name" }
         val stamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date(nowMs))
-        val name = "diphunter-results-$stamp.csv"
+        val name = "$prefix-$stamp.csv"
         val local = runCatching {
             val dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS)
                 ?: File(context.filesDir, "export")

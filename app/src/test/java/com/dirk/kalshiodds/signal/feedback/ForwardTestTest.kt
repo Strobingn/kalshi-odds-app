@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.feedback
 
 import com.dirk.kalshiodds.data.local.results.InMemoryResultsStore
 import com.dirk.kalshiodds.data.local.archive.SettledWindowRow
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -10,7 +11,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ForwardTestTest {
-    @Test fun quotedDepthMustCoverTheWholeFiveDollarClip() {
+    @Test fun quotedDepthMustCoverTheWholeAllInCapClip() {
         val thin = ForwardTest.capture(
             "KXBTC15M-A", "KXBTC15M", 1L, 0.75, 0.54, "YES",
             BookLevelSnapshot(yes = listOf(0.50 to 40.0), no = listOf(0.44 to 2.0)), 0.07
@@ -23,7 +24,7 @@ class ForwardTestTest {
             BookLevelSnapshot(yes = listOf(0.50 to 40.0), no = listOf(0.44 to 20.0)), 0.07
         )!!
         assertTrue(deep.quoteQualified)
-        assertTrue(deep.allInUsd!! <= 5.0)
+        assertTrue(deep.allInUsd!! <= SignalConstants.LIVE_ALL_IN_CAP_USD + 1e-9)
         val crossed = ForwardTest.capture(
             "KXBTC15M-A", "KXBTC15M", 1L, 0.75, 0.54, "YES",
             BookLevelSnapshot(yes = listOf(0.70 to 40.0), no = listOf(0.44 to 20.0)), 0.07

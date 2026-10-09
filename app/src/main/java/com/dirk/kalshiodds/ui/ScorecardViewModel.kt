@@ -29,7 +29,11 @@ data class ScorecardUi(
     val exportMessage: String? = null,
     val sitOut: Boolean = false,
     val autoTuneNote: String = "",
-    val modelNote: String? = null
+    val modelNote: String? = null,
+    val forwardTest: com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary =
+        com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary(),
+    val ticketForward: com.dirk.kalshiodds.signal.feedback.TicketForwardTest.Summary =
+        com.dirk.kalshiodds.signal.feedback.TicketForwardTest.Summary()
 ) {
     companion object {
         val EMPTY = ScorecardUi(ScorecardCopy.EMPTY)
@@ -78,17 +82,56 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
+    fun exportForwardTest() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val csv = com.dirk.kalshiodds.signal.feedback.ForwardTest.csv(
+                        container.resultsStore.forwardTests()
+                    )
+                    ResultsFileExport.write(getApplication(), csv, prefix = "diphunter-forward-test")
+                }.getOrElse {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
+                }
+            }
+            _exportMessage.value = result.message
+        }
+    }
+
+    fun exportTicketForward() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val csv = com.dirk.kalshiodds.signal.feedback.TicketForwardTest.csv(
+                        container.resultsStore.ticketForward()
+                    )
+                    ResultsFileExport.write(getApplication(), csv, prefix = "diphunter-ticket-forward")
+                }.getOrElse {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
+                }
+            }
+            _exportMessage.value = result.message
+        }
+    }
+
     val snapshot: StateFlow<ScorecardUi> = combine(
         container.logStore.entriesFlow,
         container.paper.book.state,
         container.lastMinuteStore.state,
         container.guardrailStore.stateFlow,
-        combine(_exportMessage, _modelNote, container.adapterStore.stateFlow) { export, note, adapter ->
+        combine(_exportMessage, _modelNote, container.adapterStore.stateFlow,
+            container.resultsWriter.forwardRevision) { export, note, adapter, _ ->
             Triple(export, note, adapter)
         }
     ) { entries, paper, lastMinute, guard, notes ->
         val settings = container.hub.settings
-        val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
+        val (windows, forwardRows, ticketRows) = withContext(Dispatchers.IO) {
+            Triple(
+                runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() },
+                runCatching { container.resultsStore.forwardTests() }.getOrElse { emptyList() },
+                runCatching { container.resultsStore.ticketForward() }.getOrElse { emptyList() }
+            )
+        }
         ScorecardUi(
             view = ScorecardCopy.of(entries, paper, windows, lastMinutePicks = lastMinute.picks),
             metrics = ScorecardMetrics.compute(
@@ -109,7 +152,9 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             exportMessage = notes.first,
             sitOut = settings.isSittingOut(),
             autoTuneNote = settings.autoTuneNote,
-            modelNote = notes.second
+            modelNote = notes.second,
+            forwardTest = com.dirk.kalshiodds.signal.feedback.ForwardTest.summarize(forwardRows),
+            ticketForward = com.dirk.kalshiodds.signal.feedback.TicketForwardTest.summarize(ticketRows)
         )
     }.stateIn(
         viewModelScope,

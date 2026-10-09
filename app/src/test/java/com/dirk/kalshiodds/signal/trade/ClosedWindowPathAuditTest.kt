@@ -48,7 +48,8 @@ class ClosedWindowPathAuditTest {
             "com/dirk/kalshiodds/data/api/KalshiTradeClient.kt",
             "com/dirk/kalshiodds/ui/OddsViewModel.kt"
         )
-        val files = hits.map { it.path }.toSet()
+        // Windows walks yield '\' separators; normalize so the audit is platform-neutral.
+        val files = hits.map { it.path.replace('\\', '/') }.toSet()
         assertEquals(
             "Unexpected WINDOW_CLOSED / MARKET_CLOSED files: ${files - expected}",
             expected,
