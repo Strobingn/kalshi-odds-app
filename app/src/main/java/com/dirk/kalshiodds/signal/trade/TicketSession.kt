@@ -10,12 +10,14 @@ import kotlinx.coroutines.sync.withLock
 /**
  * Approve-gated ticket state machine.
  *
- * **Non-negotiable:** [placeOrder] is invoked only from [approve] after an
- * explicit in-app Approve for **that** ticket id. [onStart], [replaceProposals],
- * [openApprove], [dismiss], and [failSoft] never submit.
+ * [placeOrder] is invoked from exactly two places:
+ *  - [approve] — after an explicit in-app Approve tap for **that** ticket id;
+ *  - [autoApprove] — auto-trade, reachable only when the user armed it in
+ *    Settings and every AutoTradeEngine cap passed (attempt rows are labelled
+ *    AUTO-TRADE so the log distinguishes them).
  *
- * There is no background auto-fire, no set-and-forget loop, and no order
- * on process start ([TicketPhase.Idle]).
+ * [onStart], [replaceProposals], [openApprove], [dismiss], and [failSoft]
+ * never submit. No order on process start ([TicketPhase.Idle]).
  */
 class TicketSession(
     private val placeOrder: suspend (ticket: TradeTicket, clientOrderId: String) -> Result<PlacedOrder>,
@@ -298,6 +300,83 @@ class TicketSession(
                     createdAtMs = System.currentTimeMillis(),
                     clientOrderId = clientOrderId,
                     note = "Approve-gated — never unsupervised"
+                )
+            )
+        }
+        val next = result.fold(
+            onSuccess = { ack ->
+                val working = cur.working + ack
+                TicketUiState(
+                    phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == ticket.id }),
+                    proposals = cur.proposals.filterNot { it.id == ticket.id },
+                    working = working,
+                    lastError = ack.error,
+                    placementCount = cur.placementCount + 1
+                )
+            },
+            onFailure = { err ->
+                val msg = humanError(err)
+                TicketUiState(
+                    phase = TicketPhase.Failed(ticket, msg, cur.proposals),
+                    proposals = cur.proposals,
+                    working = cur.working,
+                    lastError = msg,
+                    placementCount = cur.placementCount
+                )
+            }
+        )
+        _state.value = next
+        return next
+    }
+
+
+    /**
+     * Auto-trade entry point: identical placement path as [approve] (same
+     * Submitting / Submitted / Failed transitions, same attempt logging),
+     * but invoked by the auto-trade engine instead of a human tap. Callers
+     * must have passed every AutoTradeEngine gate first.
+     */
+    suspend fun autoApprove(ticketId: String): TicketUiState = mutex.withLock {
+        val cur = _state.value
+        val ticket = cur.proposals.firstOrNull { it.matchesApproval(ticketId) } ?: run {
+            _state.update {
+                it.copy(lastError = "Auto order skipped — ticket no longer valid")
+            }
+            return _state.value
+        }
+        if (!ticket.canApprove) {
+            _state.update {
+                it.copy(
+                    lastError = ticket.blockedReason
+                        ?: "Auto order skipped — ticket blocked (no silent fire)"
+                )
+            }
+            return _state.value
+        }
+        if (cur.phase is TicketPhase.Submitting) return cur
+
+        val clientOrderId = idFactory()
+        _state.update {
+            it.copy(
+                phase = TicketPhase.Submitting(ticket, clientOrderId),
+                lastError = null
+            )
+        }
+        val result = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
+        runCatching {
+            onAttempt?.invoke(
+                com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
+                    ticker = ticket.ticker,
+                    side = ticket.side,
+                    stakeUsd = ticket.stakeUsd,
+                    approved = true,
+                    result = result.fold(
+                        onSuccess = { ack -> ack.error ?: ack.orderId ?: "submitted" },
+                        onFailure = { err -> humanError(err) }
+                    ),
+                    createdAtMs = System.currentTimeMillis(),
+                    clientOrderId = clientOrderId,
+                    note = "AUTO-TRADE — armed in Settings (caps enforced)"
                 )
             )
         }

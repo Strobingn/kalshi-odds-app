@@ -94,7 +94,10 @@ data class SignalSettings(
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false,
     val kalshiDemoEnabled: Boolean = false,
-    val demoCredentialsConfigured: Boolean = false
+    val demoCredentialsConfigured: Boolean = false,
+    val autoTradeEnabled: Boolean = SignalConstants.DEFAULT_AUTO_TRADE,
+    val autoMaxStakeUsd: Double = SignalConstants.DEFAULT_AUTO_MAX_STAKE_USD,
+    val autoDailyLossLimitUsd: Double = SignalConstants.DEFAULT_AUTO_DAILY_LOSS_USD
 ) {
     val credentialsConfigured: Boolean get() = apiKeyId.isNotBlank() && hasPrivateKey
 
@@ -218,6 +221,13 @@ class SignalPreferences(
     suspend fun updateTicketsEnabled(value: Boolean) = edit { it[KEY_TICKETS] = value }
     suspend fun updatePaperTrading(value: Boolean) = edit { it[KEY_PAPER] = value }
     suspend fun updateKalshiDemo(value: Boolean) = edit { it[KEY_KALSHI_DEMO] = value }
+    suspend fun updateAutoTradeEnabled(value: Boolean) = edit { it[KEY_AUTO_TRADE] = value }
+    suspend fun updateAutoMaxStakeUsd(value: Double) = edit {
+        it[KEY_AUTO_MAX_STAKE] = value.coerceIn(1.0, SignalConstants.AUTO_STAKE_HARD_CAP_USD)
+    }
+    suspend fun updateAutoDailyLossLimitUsd(value: Double) = edit {
+        it[KEY_AUTO_DAILY_LOSS] = value.coerceIn(5.0, SignalConstants.AUTO_DAILY_LOSS_HARD_CAP_USD)
+    }
 
     fun saveDemoCredentials(keyId: String, pem: String) {
         extras?.saveDemoCredentials(keyId, pem)
@@ -424,6 +434,9 @@ class SignalPreferences(
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem),
             kalshiDemoEnabled = this[KEY_KALSHI_DEMO] ?: false,
+            autoTradeEnabled = this[KEY_AUTO_TRADE] ?: SignalConstants.DEFAULT_AUTO_TRADE,
+            autoMaxStakeUsd = this[KEY_AUTO_MAX_STAKE] ?: SignalConstants.DEFAULT_AUTO_MAX_STAKE_USD,
+            autoDailyLossLimitUsd = this[KEY_AUTO_DAILY_LOSS] ?: SignalConstants.DEFAULT_AUTO_DAILY_LOSS_USD,
             demoCredentialsConfigured = extras?.hasDemoCredentials == true
         )
     }
@@ -464,6 +477,9 @@ class SignalPreferences(
         private val KEY_TICKETS = booleanPreferencesKey("tickets_enabled")
         private val KEY_PAPER = booleanPreferencesKey("paper_trading_enabled")
         private val KEY_KALSHI_DEMO = booleanPreferencesKey("kalshi_demo_enabled")
+        private val KEY_AUTO_TRADE = booleanPreferencesKey("auto_trade_enabled")
+        private val KEY_AUTO_MAX_STAKE = doublePreferencesKey("auto_max_stake_usd")
+        private val KEY_AUTO_DAILY_LOSS = doublePreferencesKey("auto_daily_loss_limit_usd")
         private val KEY_TICKET_STAKE = doublePreferencesKey("ticket_stake_usd")
         private val KEY_TICKET_GATES = booleanPreferencesKey("ticket_respect_gates")
         private val KEY_HUNTER_VALUE_STAKE = doublePreferencesKey("hunter_value_stake_usd")
