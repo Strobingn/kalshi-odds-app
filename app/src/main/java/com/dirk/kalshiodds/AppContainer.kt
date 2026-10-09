@@ -106,6 +106,7 @@ class AppContainer(context: Context) {
         },
         onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
     )
+    val autoTrade = com.dirk.kalshiodds.signal.trade.AutoTradeStore(app)
     val clock: Clock = Clock.System
     val repository = MarketRepository(
         context = app,
