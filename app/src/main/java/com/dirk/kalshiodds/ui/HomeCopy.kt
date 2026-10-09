@@ -21,7 +21,7 @@ import kotlin.math.roundToInt
  * or a ticket. Wired from [WiringAuditTest] so every line stays a real method.
  */
 object HomeCopy {
-    const val TITLE = "DipHunter GTP"
+    const val TITLE = "Chat Bitcoin"
     const val THIS_WINDOW = "This window"
     const val BUY_ANYWAY = "Buy anyway"
     const val NEED_20 = "need 20+ results"

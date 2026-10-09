@@ -7,7 +7,7 @@ enum class TicketKind {
     HUNTER,
     /** Long-shot hunter: ask ≤ ~20¢ and AI/fair beats implied after fees. */
     HUNTER_VALUE,
-    /** Paper-only early-window favorite/spot confirmation experiment. */
+    /** Paper-only, unrestricted entry and aggressive-exit scalping experiment. */
     SCALP,
     /** User tapped Buy on a market card / hero. */
     MANUAL,

@@ -11,8 +11,9 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
+        // Independent Chat Bitcoin installation. Keep this ID and the
+        // committed signing key stable: Android updates only install when both
+        // the package name and signing certificate match the installed APK.
         applicationId = "com.dirk.kalshiodds.chatgtp"
         minSdk = 26
         targetSdk = 35
@@ -88,7 +89,7 @@ android {
 }
 
 base {
-    archivesName.set("DipHunter")
+    archivesName.set("Chat-Bitcoin")
 }
 
 dependencies {
@@ -148,12 +149,23 @@ val expectedDebugCertSha256 =
 tasks.register("verifyDebugCert") {
     dependsOn("assembleDebug")
     doLast {
-        val apk = file("build/outputs/apk/debug/DipHunter-debug.apk")
+        val apk = file("build/outputs/apk/debug/Chat-Bitcoin-debug.apk")
         require(apk.isFile) { "missing $apk" }
-        val apksigner = file("${System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")}/build-tools/35.0.0/apksigner")
-        val bin = if (apksigner.isFile) apksigner else file("${System.getenv("ANDROID_HOME")}/build-tools/34.0.0/apksigner")
+        val sdkHome = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+            ?: error("ANDROID_HOME or ANDROID_SDK_ROOT is required to verify the APK certificate")
+        val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+        val toolName = if (isWindows) "apksigner.bat" else "apksigner"
+        val bin = listOf("35.0.0", "34.0.0")
+            .map { file("$sdkHome/build-tools/$it/$toolName") }
+            .firstOrNull { it.isFile }
+            ?: error("apksigner is not installed under $sdkHome/build-tools")
+        val command = if (isWindows) {
+            listOf("cmd", "/c", bin.absolutePath, "verify", "--print-certs", apk.absolutePath)
+        } else {
+            listOf(bin.absolutePath, "verify", "--print-certs", apk.absolutePath)
+        }
         val out = providers.exec {
-            commandLine(bin.absolutePath, "verify", "--print-certs", apk.absolutePath)
+            commandLine(*command.toTypedArray())
         }.standardOutput.asText.get()
         val digest = Regex("SHA-256 digest: ([0-9a-f]+)").find(out)?.groupValues?.get(1)
             ?: error("no SHA-256 in apksigner output:\n$out")
@@ -166,12 +178,19 @@ tasks.register("verifyDebugCert") {
 afterEvaluate {
     tasks.named("assembleDebug") {
         doLast {
-            val apk = file("build/outputs/apk/debug/DipHunter-debug.apk")
+            val apk = file("build/outputs/apk/debug/Chat-Bitcoin-debug.apk")
             if (!apk.isFile) return@doLast
             val home = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT") ?: return@doLast
-            val apksigner = listOf("35.0.0", "34.0.0").map { file("$home/build-tools/$it/apksigner") }.firstOrNull { it.isFile }
+            val isWindows = System.getProperty("os.name").lowercase().contains("windows")
+            val toolName = if (isWindows) "apksigner.bat" else "apksigner"
+            val apksigner = listOf("35.0.0", "34.0.0").map { file("$home/build-tools/$it/$toolName") }.firstOrNull { it.isFile }
                 ?: return@doLast
-            val proc = ProcessBuilder(apksigner.absolutePath, "verify", "--print-certs", apk.absolutePath)
+            val command = if (isWindows) {
+                listOf("cmd", "/c", apksigner.absolutePath, "verify", "--print-certs", apk.absolutePath)
+            } else {
+                listOf(apksigner.absolutePath, "verify", "--print-certs", apk.absolutePath)
+            }
+            val proc = ProcessBuilder(command)
                 .redirectErrorStream(true).start()
             val out = proc.inputStream.bufferedReader().readText()
             proc.waitFor()

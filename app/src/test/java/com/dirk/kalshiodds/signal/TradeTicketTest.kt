@@ -473,7 +473,7 @@ class TicketBuilderGateTest {
         // automatic live-ticket value gates. The live-capable kinds remain
         // absent when the modeled value does not clear costs.
         assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
-        assertTrue(tickets.single().kind == TicketKind.SCALP && tickets.single().paperOnly)
+        assertEquals(3, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
         assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
     }
 
@@ -517,7 +517,7 @@ class TicketBuilderGateTest {
         assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
         // SCALP must follow the scorer's settlement-aware resolved side, not
         // the stale imported residual that would buy the 0.1c DOWN leg.
-        assertEquals("YES", tickets.single { it.kind == TicketKind.SCALP }.side)
+        assertEquals("YES", tickets.single { it.strategyVersion == "scalp-v3-dip-hunter" }.side)
     }
 
     @Test

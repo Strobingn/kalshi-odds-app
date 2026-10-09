@@ -39,6 +39,8 @@ data class PaperFill(
     val exitFeeUsd: Double = 0.0,
     /** Highest executable bid seen while the AI-owned paper position was open. */
     val highWaterMarkPrice: Double = 0.0,
+    /** Version of the independent paper strategy that opened this fill. */
+    val strategyVersion: String? = null,
     val note: String,
     val winTargetUsd: Double? = null
 ) {
@@ -153,14 +155,14 @@ class PaperBook(
 
     /** Automatic paper execution at the currently visible touch liquidity. */
     fun considerUnboundedTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
-        if (!enabled || !ticket.canApprove) return null
+        if (!enabled || !ticket.canPaper) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
         val visible = ticket.visibleContracts?.takeIf { it > 0 } ?: return null
         val price = ticket.estimatedAvgFill.takeIf { it > 0.0 } ?: ticket.limitPrice
         val source = when (ticket.kind) {
             TicketKind.HUNTER -> "AI autopilot hunter"
             TicketKind.HUNTER_VALUE -> "AI autopilot long-shot"
-            TicketKind.SCALP -> "AI autopilot scalp"
+            TicketKind.SCALP -> "AI autopilot ${ticket.strategyVersion ?: "scalp"}"
             else -> "AI autopilot"
         }
         return unboundedFill(
@@ -170,7 +172,9 @@ class PaperBook(
             contracts = visible,
             source = source,
             note = "Unlimited-credit paper autopilot · visible touch liquidity only · never sent to Kalshi",
-            winTargetUsd = ticket.winTargetUsd
+            winTargetUsd = ticket.winTargetUsd,
+            strategyVersion = ticket.strategyVersion,
+            oneEntryPerTicker = ticket.kind == TicketKind.SCALP
         )
     }
 
@@ -523,6 +527,21 @@ class PaperBook(
         }
     }
 
+    /** Marks exactly one AI-owned fill; used when concurrent strategies share a ticker/side. */
+    fun updateAutoPositionHighWater(fillId: String, bid: Double): PaperFill? {
+        val px = KalshiPrice.usable(bid) ?: return null
+        synchronized(lock) {
+            val cur = _state.value
+            val open = cur.fills.firstOrNull { !it.settled && it.source.startsWith("AI ") && it.id == fillId }
+                ?: return null
+            val high = max(open.highWaterMarkPrice.takeIf { it > 0.0 } ?: open.limitPrice, px)
+            if (high <= open.highWaterMarkPrice + 1e-9) return open
+            val marked = open.copy(highWaterMarkPrice = high)
+            publish(cur.copy(fills = cur.fills.map { if (it.id == open.id) marked else it }))
+            return marked
+        }
+    }
+
     /** Automated exit for an AI-owned paper scalp. Never submits a Kalshi order. */
     fun autoSell(ticker: String, side: String, bid: Double, reason: String): PaperFill? =
         closeOpen(
@@ -532,6 +551,18 @@ class PaperBook(
             requestedContracts = Int.MAX_VALUE,
             note = "AI scalp exit · $reason · never sent to Kalshi",
             onlyAiOwned = true
+        )
+
+    /** Exits exactly one AI-owned paper position without affecting sibling strategy fills. */
+    fun autoSell(fillId: String, bid: Double, reason: String): PaperFill? =
+        closeOpen(
+            ticker = "",
+            side = "YES",
+            price = bid,
+            requestedContracts = Int.MAX_VALUE,
+            note = "AI scalp exit · $reason · never sent to Kalshi",
+            onlyAiOwned = true,
+            fillId = fillId
         )
 
     fun settle(ticker: String, result: String): List<PaperFill> {
@@ -674,7 +705,8 @@ class PaperBook(
         source: String,
         note: String,
         winTargetUsd: Double? = null,
-        oneEntryPerTicker: Boolean = false
+        oneEntryPerTicker: Boolean = false,
+        strategyVersion: String? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -688,14 +720,18 @@ class PaperBook(
             // must not turn the same visible touch into repeated full-depth
             // buys. This is not a stake cap: the first fill still uses all
             // visible touch liquidity with unlimited synthetic credit.
-            if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) {
+            if (cur.fills.any {
+                    !it.settled && it.ticker.equals(ticker, ignoreCase = true) &&
+                        (strategyVersion == null || it.strategyVersion == strategyVersion)
+                }) {
                 return null
             }
             // Once a trailing/model exit closes a paper experiment, do not
             // immediately buy the same 15-minute contract again on the next
             // score refresh. A fresh Kalshi ticker is the next experiment.
             if (oneEntryPerTicker && cur.fills.any {
-                    it.outcome == "sell" && it.ticker.equals(ticker, ignoreCase = true)
+                    it.outcome == "sell" && it.ticker.equals(ticker, ignoreCase = true) &&
+                        (strategyVersion == null || it.strategyVersion == strategyVersion)
                 }) return null
             val stake = quantity * px
             val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.total(quantity, px)
@@ -710,6 +746,7 @@ class PaperBook(
                 createdAtMs = nowMs(),
                 feeUsd = fee,
                 highWaterMarkPrice = px,
+                strategyVersion = strategyVersion,
                 note = "$note · fee ${fmt(fee)}",
                 winTargetUsd = winTargetUsd
             )
@@ -748,7 +785,8 @@ class PaperBook(
         price: Double,
         requestedContracts: Int,
         note: String,
-        onlyAiOwned: Boolean = false
+        onlyAiOwned: Boolean = false,
+        fillId: String? = null
     ): PaperFill? {
         val want = if (side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(price) ?: return null
@@ -757,8 +795,8 @@ class PaperBook(
             val open = cur.fills.firstOrNull {
                 !it.settled &&
                     (!onlyAiOwned || it.source.startsWith("AI ")) &&
-                    it.ticker.equals(ticker, ignoreCase = true) &&
-                    it.side.equals(want, ignoreCase = true)
+                    (fillId == null && it.ticker.equals(ticker, ignoreCase = true) && it.side.equals(want, ignoreCase = true) ||
+                        fillId != null && it.id == fillId)
             } ?: run {
                 if (!onlyAiOwned) publish(cur.copy(lastMessage = "Paper sell skip $ticker — no open $want fill"))
                 return null

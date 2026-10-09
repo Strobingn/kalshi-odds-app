@@ -69,14 +69,20 @@ jobs:
         id: apk
         run: |
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          out="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
+          out="Chat-Bitcoin-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
+          legacy="DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
+          # The currently installed DipHunter GTP updater filters by this
+          # historical filename. Ship an identical, signed compatibility
+          # asset once so it can download the renamed Chat Bitcoin APK.
+          cp "$src" "$legacy"
           echo "path=$out" >> "$GITHUB_OUTPUT"
+          echo "legacy_path=$legacy" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: DipHunter-GTP-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
+          name: Chat-Bitcoin-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
@@ -86,12 +92,12 @@ jobs:
         run: |
           set -euo pipefail
           tag="gtp-v${{ steps.ver.outputs.name }}-${{ github.ref_name }}"
-          notes="DipHunter GTP v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+          notes="Chat Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ github.ref_name }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
           # Rolling release per version + branch: move the tag to this commit.
           gh release delete "$tag" --yes --cleanup-tag || true
-          gh release create "$tag" "${{ steps.apk.outputs.path }}" \
+          gh release create "$tag" "${{ steps.apk.outputs.path }}" "${{ steps.apk.outputs.legacy_path }}" \
             --target "$GITHUB_SHA" \
-            --title "DipHunter GTP v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
+            --title "Chat Bitcoin v${{ steps.ver.outputs.name }} (${{ github.ref_name }})" \
             --notes "$notes" \
             --prerelease
           # GitHub can leave a freshly uploaded prerelease as a draft even

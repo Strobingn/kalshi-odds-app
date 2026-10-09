@@ -152,7 +152,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         try {
             for (r in rows) {
                 val v = ContentValues().apply {
-                    put("ticker", r.ticker); put("series", r.series); put("captured_at_ms", r.capturedAtMs)
+                    put("entry_key", r.entryKey); put("ticker", r.ticker); put("series", r.series); put("captured_at_ms", r.capturedAtMs)
                     put("build_code", r.buildCode); put("kind", r.kind); put("model_source", r.modelSource)
                     put("side", r.side); put("model_yes", r.modelYes); put("market_yes", r.marketYes)
                     put("ask", r.ask); put("visible_contracts", r.visibleContracts)
@@ -167,8 +167,8 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                 }
                 w.insertWithOnConflict(TABLE_TICKET_FORWARD, null, v, SQLiteDatabase.CONFLICT_IGNORE)
             }
-            w.execSQL("DELETE FROM $TABLE_TICKET_FORWARD WHERE ticker NOT IN " +
-                "(SELECT ticker FROM $TABLE_TICKET_FORWARD ORDER BY captured_at_ms DESC LIMIT $MAX_FORWARD)")
+            w.execSQL("DELETE FROM $TABLE_TICKET_FORWARD WHERE entry_key NOT IN " +
+                "(SELECT entry_key FROM $TABLE_TICKET_FORWARD ORDER BY captured_at_ms DESC LIMIT $MAX_FORWARD)")
             w.setTransactionSuccessful()
         } finally { w.endTransaction() }
     }
@@ -1063,12 +1063,13 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             // databases get the current table above, so adding again would
             // duplicate columns on upgrade.
             if (oldVersion in 7..9) addTicketForwardScalpColumns(db)
+            if (oldVersion < 11) migrateTicketForwardToMultiTrack(db)
         }
 
         private fun createForwardTable(db: SQLiteDatabase) {
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS $TABLE_FORWARD (
-                    ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
+                    entry_key TEXT PRIMARY KEY, ticker TEXT NOT NULL, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
                     model_yes REAL NOT NULL, market_yes REAL NOT NULL, side TEXT NOT NULL,
                     book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL,
                     fee_usd REAL, quote_qualified INTEGER NOT NULL,
@@ -1098,7 +1099,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         private fun createTicketForwardTable(db: SQLiteDatabase) {
             db.execSQL("""
                 CREATE TABLE IF NOT EXISTS $TABLE_TICKET_FORWARD (
-                    ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
+                    entry_key TEXT PRIMARY KEY, ticker TEXT NOT NULL, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
                     build_code INTEGER NOT NULL, kind TEXT NOT NULL, model_source TEXT NOT NULL,
                     side TEXT NOT NULL, model_yes REAL NOT NULL, market_yes REAL NOT NULL,
                     ask REAL NOT NULL, visible_contracts REAL NOT NULL, contracts INTEGER NOT NULL,
@@ -1121,6 +1122,32 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             ).forEach { column ->
                 runCatching { db.execSQL("ALTER TABLE $TABLE_TICKET_FORWARD ADD COLUMN $column") }
             }
+        }
+
+        /** v11: retain legacy rows while allowing parallel paper tracks per market. */
+        private fun migrateTicketForwardToMultiTrack(db: SQLiteDatabase) {
+            val legacy = "${TABLE_TICKET_FORWARD}_legacy_v10"
+            db.execSQL("DROP TABLE IF EXISTS $legacy")
+            db.execSQL("ALTER TABLE $TABLE_TICKET_FORWARD RENAME TO $legacy")
+            // ALTER TABLE keeps index names. Free the stable name before the
+            // replacement table recreates its captured-at index.
+            db.execSQL("DROP INDEX IF EXISTS idx_ticket_forward_time")
+            createTicketForwardTable(db)
+            db.execSQL("""
+                INSERT OR IGNORE INTO $TABLE_TICKET_FORWARD(
+                    entry_key, ticker, series, captured_at_ms, build_code, kind, model_source,
+                    side, model_yes, market_yes, ask, visible_contracts, contracts, all_in_usd,
+                    fee_usd, fee_rate, modeled_net_usd, strategy_version,
+                    strategy_decision_source, spot_return_1m, spot_return_5m, time_to_close_sec
+                )
+                SELECT ticker || '|' || COALESCE(strategy_version, kind), ticker, series,
+                    captured_at_ms, build_code, kind, model_source, side, model_yes, market_yes,
+                    ask, visible_contracts, contracts, all_in_usd, fee_usd, fee_rate,
+                    modeled_net_usd, strategy_version, strategy_decision_source,
+                    spot_return_1m, spot_return_5m, time_to_close_sec
+                FROM $legacy
+            """.trimIndent())
+            db.execSQL("DROP TABLE $legacy")
         }
 
         private fun createSettlementIndexTable(db: SQLiteDatabase) {
@@ -1246,7 +1273,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 10
+        const val DB_VERSION = 11
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

@@ -53,13 +53,13 @@ object TicketBuilder {
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
         // SCALP is a separate paper-only experiment. The legacy auto-tuner's
         // sitting-out state must not suppress collection of its evidence.
-        val scalps = live.mapNotNull { proposeScalp(it, ctx) }
+        val scalps = live.flatMap { proposeScalps(it, ctx) }
         if (ctx.settings.isSittingOut()) return scalps
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
         return (scalps + hunter + value + configured)
-            .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
+            .distinctBy { "${it.kind}|${it.ticker}|${it.side}|${it.strategyVersion.orEmpty()}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
 
@@ -106,19 +106,25 @@ object TicketBuilder {
      * executable ask gets one candidate. It is never eligible for live routing.
      */
     fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
-        if (!ctx.settings.ticketsEnabled || !MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val scalp = ScalpSignal.candidate(market, ctx.nowMs)
-        return buildTicket(
-            market = market,
-            side = scalp.side,
-            ctx = ctx,
-            stakeUsd = SignalConstants.HUNTER_STAKE_USD,
-            minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
-            kind = TicketKind.SCALP,
-            requireGates = false,
-            explicitGateNote = scalp.note(),
-            strategy = scalp
-        )
+        return proposeScalps(market, ctx).firstOrNull()
+    }
+
+    /** Three independent paper-only tracks can hold the same market concurrently. */
+    fun proposeScalps(market: MarketUiModel, ctx: Context): List<TradeTicket> {
+        if (!ctx.settings.ticketsEnabled || !MarketLifecycle.isTradable(market, ctx.nowMs)) return emptyList()
+        return ScalpSignal.candidates(market, ctx.nowMs).mapNotNull { scalp ->
+            buildTicket(
+                market = market,
+                side = scalp.side,
+                ctx = ctx,
+                stakeUsd = SignalConstants.HUNTER_STAKE_USD,
+                minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
+                kind = TicketKind.SCALP,
+                requireGates = false,
+                explicitGateNote = scalp.note(),
+                strategy = scalp
+            )
+        }
     }
 
     /** Rebuild the same kind of ticket (live $5 cap, not bankroll win-target). */
@@ -507,7 +513,7 @@ object TicketBuilder {
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
             visibleContracts = quoted?.toInt(),
-            strategyVersion = strategy?.let { ScalpSignal.FORMULA_VERSION },
+            strategyVersion = strategy?.formulaVersion,
             strategyDecisionSource = strategy?.selectedFrom,
             strategySpotReturn1m = strategy?.spotReturn1m,
             strategySpotReturn5m = strategy?.spotReturn5m,

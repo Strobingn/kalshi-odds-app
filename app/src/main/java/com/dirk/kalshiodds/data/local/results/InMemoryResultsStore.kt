@@ -97,7 +97,7 @@ class InMemoryResultsStore(
 
     @Synchronized
     override fun insertTicketForward(rows: List<TicketForwardRow>) {
-        for (row in rows) ticketForwardRows.putIfAbsent(row.ticker, row)
+        for (row in rows) ticketForwardRows.putIfAbsent(row.entryKey, row)
         while (ticketForwardRows.size > 5_000) ticketForwardRows.remove(ticketForwardRows.keys.first())
     }
 

@@ -127,7 +127,10 @@ data class TicketForwardRow(
     val spotReturn5m: Double? = null,
     val timeToCloseSec: Long? = null,
     val outcome: String? = null
-)
+) {
+    /** One forward observation per ticker and independent strategy track. */
+    val entryKey: String get() = "$ticker|${strategyVersion ?: kind}"
+}
 
 data class ResultsBundle(
     val snapshots: List<ScoredSnapshotRow> = emptyList(),

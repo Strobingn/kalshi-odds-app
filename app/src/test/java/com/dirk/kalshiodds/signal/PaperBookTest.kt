@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -188,6 +189,29 @@ class PaperBookTest {
         val nextWindowEntry = book.considerUnboundedTicket(ticket, enabled = true)
         assertTrue(nextWindowEntry != null)
         assertEquals(2_000, nextWindowEntry!!.contracts)
+    }
+
+    @Test
+    fun paperScalpTracksCanHoldTheSameTickerConcurrentlyAndExitIndependently() {
+        val book = PaperBook(idFactory = { "multi-${bookIds++}" }, nowMs = { 12L })
+        val base = hunterTicket(ticker = "KXBTC15M-MULTI").copy(
+            kind = TicketKind.SCALP,
+            paperOnly = true,
+            limitPrice = 0.40,
+            estimatedAvgFill = 0.40,
+            visibleContracts = 100
+        )
+        val dip = book.considerUnboundedTicket(base.copy(strategyVersion = "scalp-v3-dip-hunter"), enabled = true)!!
+        val momentum = book.considerUnboundedTicket(base.copy(strategyVersion = "scalp-v3-momentum-sniper"), enabled = true)!!
+        val reversal = book.considerUnboundedTicket(base.copy(strategyVersion = "scalp-v3-extreme-reversal"), enabled = true)!!
+
+        assertEquals(3, book.snapshot().openCount)
+        assertNull(book.considerUnboundedTicket(base.copy(strategyVersion = dip.strategyVersion), enabled = true))
+        assertNotNull(book.updateAutoPositionHighWater(momentum.id, 0.45))
+        assertNotNull(book.autoSell(momentum.id, 0.44, "test"))
+        assertEquals(2, book.snapshot().openCount)
+        assertTrue(!book.snapshot().fills.single { it.id == dip.id }.settled)
+        assertTrue(!book.snapshot().fills.single { it.id == reversal.id }.settled)
     }
 
     private var bookIds: Int = 0

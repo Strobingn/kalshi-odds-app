@@ -21,7 +21,7 @@ class PaperPositionManagerTest {
     }
 
     @Test
-    fun exitsAProfitableTwoCentRetraceFromPeak() {
+    fun exitsAProfitableHalfCentRetraceFromPeak() {
         val result = PaperPositionManager.decide(
             fill(high = 0.40), executableBid = 0.37, fairSideProbability = 0.45, nowMs = 10_000L
         )
@@ -37,6 +37,15 @@ class PaperPositionManagerTest {
         )
         assertNotNull(result)
         org.junit.Assert.assertTrue(result!!.reason.contains("model fair"))
+    }
+
+    @Test
+    fun exitsImmediatelyOnOneCentNetLoss() {
+        val result = PaperPositionManager.decide(
+            fill(high = 0.20), executableBid = 0.185, fairSideProbability = 0.90, nowMs = 1_000L
+        )
+        assertNotNull(result)
+        org.junit.Assert.assertTrue(result!!.reason.contains("loss cut"))
     }
 
     @Test

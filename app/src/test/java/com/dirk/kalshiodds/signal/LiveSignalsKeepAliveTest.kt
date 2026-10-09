@@ -144,7 +144,7 @@ class LiveSignalsKeepAliveTest {
         )
         assertEquals("diphunter_keepalive", LiveSignalsPolicy.PREFS_NAME)
         assertEquals("live_signals_enabled", LiveSignalsPolicy.PREFS_ENABLED_KEY)
-        assertEquals("DipHunter GTP live signals", LiveSignalsPolicy.NOTIFICATION_TITLE)
+        assertEquals("Chat Bitcoin live signals", LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertEquals("diphunter_live_signals_ongoing", LiveSignalsPolicy.CHANNEL_ONGOING)
         assertEquals(45_000L, LiveSignalsPolicy.METADATA_INTERVAL_MS)
         assertEquals(15L, LiveSignalsPolicy.WATCHDOG_PERIOD_MINUTES)

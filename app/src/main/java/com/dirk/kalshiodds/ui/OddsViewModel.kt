@@ -838,7 +838,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         paperBook.snapshot().fills.filter { !it.settled && it.source.startsWith("AI ") }.forEach { fill ->
             val market = markets[fill.ticker] ?: return@forEach
             val bid = TicketBuilder.freshBestBid(market, fill.side, context) ?: return@forEach
-            val marked = paperBook.updateAutoPositionHighWater(fill.ticker, fill.side, bid) ?: return@forEach
+            val marked = paperBook.updateAutoPositionHighWater(fill.id, bid) ?: return@forEach
             val fairSide = when (marked.side.uppercase()) {
                 "YES" -> market.aiYesPercent?.div(100.0)
                 "NO" -> market.aiNoPercent?.div(100.0)
@@ -850,7 +850,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 fairSideProbability = fairSide,
                 nowMs = nowMs
             ) ?: return@forEach
-            paperBook.autoSell(marked.ticker, marked.side, exit.bid, exit.reason)
+            paperBook.autoSell(marked.id, exit.bid, exit.reason)
         }
     }
 
@@ -860,11 +860,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         ctx: TicketBuilder.Context,
         nowMs: Long
     ) {
-        ticketForwardLogged.retainAll(live.map { it.ticker }.toSet())
+        ticketForwardLogged.removeIf { key -> key.substringBefore('|') !in live.map { it.ticker }.toSet() }
         for (ticket in tickets.filter {
             it.canApprove || (it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP && it.canPaper)
         }.sortedByDescending { it.netEvUsd ?: Double.NEGATIVE_INFINITY }) {
-            if (ticket.ticker in ticketForwardLogged ||
+            val forwardKey = "${ticket.ticker}|${ticket.strategyVersion ?: ticket.kind.name}"
+            if (forwardKey in ticketForwardLogged ||
                 !com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(ticket.ticker) ||
                 !hub.hasFreshBook(ticket.ticker, nowMs)) continue
             val market = live.firstOrNull { it.ticker == ticket.ticker } ?: continue
@@ -883,7 +884,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 buildCode = com.dirk.kalshiodds.BuildConfig.VERSION_CODE
             ) ?: continue
             container.resultsWriter.enqueueTicketForward(row)
-            ticketForwardLogged.add(ticket.ticker)
+            ticketForwardLogged.add(forwardKey)
         }
     }
 
