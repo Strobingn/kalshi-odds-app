@@ -42,7 +42,8 @@ fun ChartDetailScreen(
     points: List<BidPoint>,
     onBack: () -> Unit,
     onBuyYes: (MarketUiModel) -> Unit,
-    onBuyNo: (MarketUiModel) -> Unit
+    onBuyNo: (MarketUiModel) -> Unit,
+    book: com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? = null
 ) {
     val colors = DipTheme.colors
     Scaffold(
@@ -108,6 +109,7 @@ fun ChartDetailScreen(
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = 12.dp)
             )
+            OrderBookCard(book)
             UpDownBuyButtons(
                 market = market,
                 onBuyYes = { onBuyYes(market) },

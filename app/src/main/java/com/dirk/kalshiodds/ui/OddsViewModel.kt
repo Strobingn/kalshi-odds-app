@@ -91,7 +91,9 @@ data class OddsUiState(
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
     val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
-    val d3: com.dirk.kalshiodds.signal.d3.D3Snapshot = com.dirk.kalshiodds.signal.d3.D3Snapshot.EMPTY
+    val d3: com.dirk.kalshiodds.signal.d3.D3Snapshot = com.dirk.kalshiodds.signal.d3.D3Snapshot.EMPTY,
+    /** 0.3.39: daily 5 PM ET quotes keyed by series (KXBTCD / KXETHD / KXSOLD) for the Home daily views. */
+    val dailyQuotes: Map<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>> = emptyMap()
 )
 
 /**
@@ -893,6 +895,30 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * Window/Market closed. Missing asks become a disabled ticket card — never
      * a page-level "No ask to size" error. Never remaps a previous ticket.
      */
+    /**
+     * 0.3.39: manual Buy on a daily 5 PM ET strike (BTC/ETH/SOL). Same approve-gated ticket path as
+     * the 15m cards (Approve + typed REAL MONEY for live). Uses only that quote's own prices.
+     */
+    fun buyDaily(quote: com.dirk.kalshiodds.signal.d3.D3Quote, side: String) {
+        val s = _state.value
+        if (!s.settings.ticketsEnabled) {
+            ticketSession.failSoft("Turn on trade tickets in Settings to buy")
+            return
+        }
+        val now = container.clock.nowMs()
+        val market = com.dirk.kalshiodds.ui.HomeMarkets.dailyMarket(quote)
+        val ticket = TicketBuilder.proposeManual(market, side, ticketContext(s, now))
+        if (ticket == null) {
+            ticketSession.failSoft("Could not build a buy ticket — turn on trade tickets in Settings")
+            return
+        }
+        ticketSession.addManual(ticket)
+    }
+
+    /** 0.3.39: live order book for one ticker (WS book), for the chart screen. */
+    fun orderBook(ticker: String): com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? =
+        runCatching { hub.scoring.book.snapshotBook(ticker) }.getOrNull()
+
     fun buyMarket(market: MarketUiModel, side: String) {
         val s = _state.value
         if (!s.settings.ticketsEnabled) {
@@ -1053,6 +1079,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 lastOtherDailyFetchMs = now
             }
             runCatching { runDailyDecisions(daily, now) }
+            val shown = daily.filterValues { it.isNotEmpty() }
+            if (shown.isNotEmpty()) _state.update { it.copy(dailyQuotes = it.dailyQuotes + shown) }
         }
         val quotes = d3Quotes
         val settings = _state.value.settings

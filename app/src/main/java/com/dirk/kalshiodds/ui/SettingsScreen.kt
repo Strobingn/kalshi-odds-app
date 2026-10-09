@@ -421,7 +421,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Home shows Bitcoin. Autopilot also watches ETH and SOL 15-minute markets. XRP, HYPE, sports, and other series stay off.",
+                "Home shows BTC, ETH and SOL 15-minute and daily 5 PM markets (coin selector). XRP, HYPE, sports, and other series stay off.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )

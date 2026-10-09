@@ -234,6 +234,7 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ChartDetailScreen(
                                     market = market,
+                                    book = oddsViewModel.orderBook(market.ticker),
                                     points = market.bidHistory.ifEmpty {
                                         market.oddsHistory.mapIndexed { i, mid ->
                                             com.dirk.kalshiodds.chart.BidPoint(

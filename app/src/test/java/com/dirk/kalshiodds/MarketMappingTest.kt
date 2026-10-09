@@ -44,8 +44,9 @@ class MarketMappingTest {
 
 class CryptoMarketsTest {
     @Test
-    fun liveUniverseIsBitcoinOnly() {
-        assertEquals(listOf("KXBTC15M"), CryptoMarkets.DEFAULT_SERIES)
+    fun liveUniverseIsBtcEthSol() {
+        // 0.3.39 restores ETH and SOL to Home / live books / manual bets.
+        assertEquals(listOf("KXBTC15M", "KXETH15M", "KXSOL15M"), CryptoMarkets.DEFAULT_SERIES)
         assertEquals(listOf("KXBTC15M", "KXETH15M", "KXSOL15M"), CryptoMarkets.FIFTEEN_SERIES)
         assertEquals(
             listOf("KXBTC15M", "KXETH15M", "KXSOL15M", "KXBTCD", "KXETHD", "KXSOLD"),
@@ -53,8 +54,8 @@ class CryptoMarketsTest {
         )
         assertTrue(CryptoMarkets.isLiveSeries("KXBTC15M"))
         assertTrue(CryptoMarkets.isLiveTicker("KXBTC15M-26SEP231600-00"))
-        assertFalse(CryptoMarkets.isLiveTicker("KXETH15M-26SEP231645-45"))
-        assertFalse(CryptoMarkets.isLiveTicker("KXSOL15M-26SEP231645-45"))
+        assertTrue(CryptoMarkets.isLiveTicker("KXETH15M-26SEP231645-45"))
+        assertTrue(CryptoMarkets.isLiveTicker("KXSOL15M-26SEP231645-45"))
         assertTrue(CryptoMarkets.isAutopilotTicker("KXBTC15M-26SEP231600-00"))
         assertTrue(CryptoMarkets.isAutopilotTicker("KXETH15M-26SEP231645-45"))
         assertTrue(CryptoMarkets.isAutopilotTicker("KXSOL15M-26SEP231645-45"))
@@ -67,7 +68,9 @@ class CryptoMarketsTest {
         assertFalse(CryptoMarkets.isRetiredTicker("KXETH15M-X"))
         assertFalse(CryptoMarkets.isRetiredTicker("KXSOL15M-X"))
         assertFalse(CryptoMarkets.isRetiredTicker("KXBTC15M-X"))
-        assertEquals(listOf("KXBTC15M-A"), CryptoMarkets.liveTickers(listOf("KXBTC15M-A", "KXETH15M-B", "KXSOL15M-C")))
+        assertEquals(listOf("KXBTC15M-A", "KXETH15M-B", "KXSOL15M-C"), CryptoMarkets.liveTickers(listOf("KXBTC15M-A", "KXETH15M-B", "KXSOL15M-C", "KXXRP15M-D")))
+        assertTrue(CryptoMarkets.isScorecardTicker("KXBTC15M-A"))
+        assertFalse(CryptoMarkets.isScorecardTicker("KXETH15M-B"))
     }
 
     @Test

@@ -27,6 +27,7 @@ fun OddsScreen(
         state = state,
         scalpLines = HomeScalpCopy.lines(scalpTrades, state.settings.paperTradingEnabled),
         onOpenScalp = onOpenScalp,
+        onBuyDaily = { q, side -> viewModel.buyDaily(q, side) },
         onOpenSettings = onOpenSettings,
         onOpenApiKeySettings = onOpenApiKeySettings,
         onOpenScorecard = onOpenScorecard,

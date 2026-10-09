@@ -35,6 +35,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -82,6 +84,7 @@ fun HomeScreen(
     onCancelResting: (String, String, String) -> Unit = { _, _, _ -> },
     scalpLines: List<String> = emptyList(),
     onOpenScalp: () -> Unit = {},
+    onBuyDaily: (com.dirk.kalshiodds.signal.d3.D3Quote, String) -> Unit = { _, _ -> },
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
 ) {
@@ -89,7 +92,8 @@ fun HomeScreen(
     val mode = TradeModeLabel.forApprove(state.settings)
     val hasKey = state.settings.tradingCredentialsConfigured()
     val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
-    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs)
+    var coin by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(HomeMarkets.Coin.ALL) }
+    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs, coin)
     val windowMarkets = coinCards.mapNotNull { it.market }
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
@@ -230,6 +234,9 @@ fun HomeScreen(
                             }
                         }
                         item {
+                            HomeCoinSelector(selected = coin, onSelect = { coin = it })
+                        }
+                        item {
                             ThisWindowCard(
                                 market = best?.first,
                                 decision = best?.second,
@@ -261,6 +268,15 @@ fun HomeScreen(
                                         { onSellMarket(market) }
                                     },
                                     onOpenChart = { onOpenChart(market) }
+                                )
+                            }
+                        }
+                        HomeMarkets.dailySeries(coin).forEach { series ->
+                            item(key = "daily-$series") {
+                                HomeDailyCard(
+                                    series = series,
+                                    rows = HomeMarkets.dailyRows(state.dailyQuotes, series),
+                                    onBuy = onBuyDaily
                                 )
                             }
                         }
