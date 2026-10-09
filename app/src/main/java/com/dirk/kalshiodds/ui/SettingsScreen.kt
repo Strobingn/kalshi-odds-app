@@ -786,13 +786,15 @@ fun SettingsContent(
 
             Section("Auto-trade (real money)")
             Text(
-                "Armed = the AI places REAL Kalshi orders by itself: it buys when a ticket passes " +
-                    "every filter, rides the move, and sells when the exit brain says it is turning down — " +
-                    "no Approve tap. Hard caps: stake ≤ your max below, " +
-                    "${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open positions, " +
+                "Armed = FOUR strategy scalpers trade real Kalshi money in parallel — Momentum, " +
+                    "Hunter, Value, and Best-EV each place their own buys at the armed stake " +
+                    "(default $50 a clip, up to $250), ride the move, and sell when the exit brain " +
+                    "says it is turning down — no Approve tap. The board below shows each scalper's " +
+                    "P&L so you can see which model actually wins. Hard caps: stake ≤ your max below, " +
+                    "${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open positions (one per scalper), " +
                     "${SignalConstants.AUTO_MAX_DAILY_ORDERS} orders/day, 2-minute cooldown per market, " +
-                    "and the daily loss limit pauses it. Every order is logged. " +
-                    "This can lose real money — watch it on the paper book first.",
+                    "and the daily loss limit pauses everything. Every order is logged. " +
+                    "This can lose real money fast at these sizes.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.accentOrange
             )
@@ -819,10 +821,10 @@ fun SettingsContent(
                     fontWeight = FontWeight.SemiBold
                 )
                 Slider(
-                    value = s.autoMaxStakeUsd.toFloat().coerceIn(1f, 50f),
+                    value = s.autoMaxStakeUsd.toFloat().coerceIn(10f, 250f),
                     onValueChange = { viewModel?.setAutoMaxStake(it.toDouble()) },
-                    valueRange = 1f..50f,
-                    steps = 48
+                    valueRange = 10f..250f,
+                    steps = 23
                 )
                 Text(
                     String.format(Locale.US, "Daily loss limit  $%.0f — auto-pauses when hit", s.autoDailyLossLimitUsd),
@@ -831,10 +833,10 @@ fun SettingsContent(
                     fontWeight = FontWeight.SemiBold
                 )
                 Slider(
-                    value = s.autoDailyLossLimitUsd.toFloat().coerceIn(5f, 50f),
+                    value = s.autoDailyLossLimitUsd.toFloat().coerceIn(10f, 250f),
                     onValueChange = { viewModel?.setAutoDailyLoss(it.toDouble()) },
-                    valueRange = 5f..50f,
-                    steps = 8
+                    valueRange = 10f..250f,
+                    steps = 23
                 )
             }
 
