@@ -465,7 +465,8 @@ class PaperBook(
             meta = meta,
             allowMultipleOpen = true,
             bankrollUsd = bankrollUsd,
-            maxStakeUsd = maxStakeUsd
+            maxStakeUsd = maxStakeUsd,
+            minStakeUsd = com.dirk.kalshiodds.decision.AutopilotMinStake.USD
         )
     }
 
@@ -961,7 +962,9 @@ class PaperBook(
         meta: PaperFillMeta = PaperFillMeta(),
         allowMultipleOpen: Boolean = false,
         bankrollUsd: Double? = null,
-        maxStakeUsd: Double? = null
+        maxStakeUsd: Double? = null,
+        /** 0.3.40: Autopilot Kelly fills under this all-in (after depth/cash caps) are skipped, never rounded up. */
+        minStakeUsd: Double? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -1005,6 +1008,10 @@ class PaperBook(
             }
             val allIn = KalshiFee.totalCost(useQty, px, feeRate)
             val fee = KalshiFee.total(useQty, px, feeRate)
+            if (minStakeUsd != null && com.dirk.kalshiodds.decision.AutopilotMinStake.below(allIn)) {
+                publish(cur.copy(lastMessage = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON))
+                return null
+            }
             val row = newFill(
                 ticker = ticker,
                 side = want,

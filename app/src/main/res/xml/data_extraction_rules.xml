@@ -6,6 +6,8 @@
         <exclude domain="sharedpref" path="kalshi_signal_secrets_legacy.xml" />
         <exclude domain="sharedpref" path="diphunter_extra_secrets.xml" />
         <exclude domain="sharedpref" path="diphunter_extra_secrets_fallback.xml" />
+        <!-- 0.3.40: a restored backup must never re-arm live Autopilot -->
+        <exclude domain="sharedpref" path="kashi_live_autopilot_arm.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="kalshi_signal_secrets.xml" />
@@ -13,5 +15,7 @@
         <exclude domain="sharedpref" path="kalshi_signal_secrets_legacy.xml" />
         <exclude domain="sharedpref" path="diphunter_extra_secrets.xml" />
         <exclude domain="sharedpref" path="diphunter_extra_secrets_fallback.xml" />
+        <!-- 0.3.40: a restored backup must never re-arm live Autopilot -->
+        <exclude domain="sharedpref" path="kashi_live_autopilot_arm.xml" />
     </device-transfer>
 </data-extraction-rules>

@@ -27,7 +27,7 @@ class SizingAndPaperFeeTest {
         assertTrue(AutopilotMinStake.below(4.99))
         assertFalse(AutopilotMinStake.below(5.0))
         assertTrue(AutopilotMinStake.below(Double.NaN))
-        assertEquals("NO BET — Kelly stake under \$5 (skipped, not rounded up)", AutopilotMinStake.REASON)
+        assertEquals("NO BET — Kelly stake below \$5 minimum (skipped, not rounded up)", AutopilotMinStake.REASON)
     }
 
     @Test

@@ -81,7 +81,7 @@ class PaperAutopilotGuardsTest {
     @Test
     fun oppositeSideIsBlockedAfterAFill() {
         val book = PaperBook(idFactory = { "o1" }, nowMs = { nowMs })
-        val yes = enter(book, edge(yesAsk = 0.20, aiYes = 80.0), depth = 3)
+        val yes = enter(book, edge(yesAsk = 0.20, aiYes = 80.0), depth = 30) // ≥ \$5 floor (0.3.40)
         assertEquals("YES", yes!!.side)
         val no = edge(yesAsk = 0.75, aiYes = 30.0)
         assertNull(PaperAutopilot.consider(book, no, settings, nowMs, yesDepth = 100_000, noDepth = 100_000))

@@ -116,11 +116,20 @@ class PaperAutopilotTest {
     fun depthCapLimitsContracts() {
         val book = PaperBook()
         val m = edgeMarket(yesAsk = 0.25, aiYes = 80.0)
-        val fill = enter(book, m, nowMs, depth = 2)
+        // 0.3.40: 30 ct @ 25¢ clears the $5 floor; depth (not Kelly) still binds.
+        val fill = enter(book, m, nowMs, depth = 30)
         assertNotNull(fill)
-        assertEquals(2, fill!!.contracts)
+        assertEquals(30, fill!!.contracts)
         val uncapped = PaperKellySizer.size(0.80, 0.25, 1_000.0, depthContracts = DEEP)
-        assertTrue(uncapped.contracts > 2)
+        assertTrue(uncapped.contracts > 30)
+    }
+
+    @Test
+    fun depthCapUnderFiveDollarsIsNoBet() {
+        val book = PaperBook()
+        val m = edgeMarket(yesAsk = 0.25, aiYes = 80.0)
+        assertNull(enter(book, m, nowMs, depth = 2))
+        assertEquals(com.dirk.kalshiodds.decision.AutopilotMinStake.REASON, book.snapshot().lastMessage)
     }
 
     @Test

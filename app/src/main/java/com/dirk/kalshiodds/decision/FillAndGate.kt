@@ -247,7 +247,7 @@ object TradeEligibility {
 
 object AutopilotMinStake {
     const val USD = 5.0
-    const val REASON = "NO BET — Kelly stake under \$5 (skipped, not rounded up)"
+    const val REASON = "NO BET — Kelly stake below \$5 minimum (skipped, not rounded up)"
     fun below(allInUsd: Double): Boolean = !allInUsd.isFinite() || allInUsd + 1e-9 < USD
 }
 

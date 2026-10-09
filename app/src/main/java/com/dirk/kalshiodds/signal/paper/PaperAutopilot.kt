@@ -306,25 +306,6 @@ object PaperAutopilot {
         val budget = windowBudgetUsd(free, rawF)
         val room = budget - spentInWindow(paper.fills, market.ticker)
         val depth = if (picked.side.equals("NO", true)) noDepth else yesDepth
-        val kellyQuote = PaperKellySizer.size(
-            winProb = picked.winProb,
-            ask = picked.ask,
-            bankrollUsd = free,
-            kellyFraction = settings.paperKellyFraction,
-            feeRate = settings.feeRate,
-            depthContracts = null,
-            maxStakeUsd = room
-        )
-        if (kellyQuote.ok && com.dirk.kalshiodds.decision.AutopilotMinStake.below(kellyQuote.allInUsd)) {
-            return Decision(
-                skip = true,
-                reason = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON,
-                side = picked,
-                kellyF = kellyQuote.kellyF,
-                freeBankrollUsd = free,
-                maxStakeUsd = room
-            )
-        }
         val sized = PaperKellySizer.size(
             winProb = picked.winProb,
             ask = picked.ask,
@@ -342,6 +323,19 @@ object PaperAutopilot {
                 } else {
                     sized.reason ?: "Paper skip — Kelly ≤ 0 after fees"
                 },
+                side = picked,
+                kellyF = sized.kellyF,
+                freeBankrollUsd = free,
+                maxStakeUsd = room
+            )
+        }
+        // 0.3.40: the 0.3.37 "$5 floor" sized with depthContracts = null, which PaperKellySizer
+        // always skips ("unknown ask depth"), so the floor never fired. Check the real,
+        // depth-capped Kelly stake instead.
+        if (com.dirk.kalshiodds.decision.AutopilotMinStake.below(sized.allInUsd)) {
+            return Decision(
+                skip = true,
+                reason = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON,
                 side = picked,
                 kellyF = sized.kellyF,
                 freeBankrollUsd = free,
