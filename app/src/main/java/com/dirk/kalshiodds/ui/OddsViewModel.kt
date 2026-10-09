@@ -15,6 +15,7 @@ import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
+import com.dirk.kalshiodds.signal.paper.PaperAutoGate
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
@@ -812,7 +813,19 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            paperTickets.filter { it.canApprove }.forEach { ticket ->
+                val market = live.firstOrNull { it.ticker == ticket.ticker }
+                val quote = market?.let {
+                    PaperAutoGate.Quote(
+                        bestBid = TicketBuilder.bestBid(it, ticket.side, ctx),
+                        bestAsk = TicketBuilder.bestAsk(it, ticket.side, ctx),
+                        secondsLeft = it.closeTimeEpochMs?.let { c ->
+                            ((c - ctx.nowMs) / 1000L).coerceAtLeast(0L)
+                        }
+                    )
+                }
+                paperBook.considerTicket(ticket, enabled = true, gateQuote = quote)
+            }
         }
         refreshPositionMarks()
     }
@@ -998,10 +1011,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
             val market = markets[alert.ticker]
             if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
-            val ask = market?.let {
-                TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
+            val actx = ticketContext(s = _state.value, nowMs = now)
+            val ask = market?.let { TicketBuilder.bestAsk(it, alert.predictedSide, actx) }
+            val gateQuote = market?.let {
+                PaperAutoGate.Quote(
+                    bestBid = TicketBuilder.bestBid(it, alert.predictedSide, actx),
+                    bestAsk = ask,
+                    secondsLeft = it.closeTimeEpochMs?.let { c ->
+                        ((c - now) / 1000L).coerceAtLeast(0L)
+                    }
+                )
             }
-            paperBook.considerAlert(alert, ask, enabled = true)
+            paperBook.considerAlert(alert, ask, enabled = true, gateQuote = gateQuote)
         }
     }
 
