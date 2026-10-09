@@ -3,7 +3,6 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Test
 
 class ScalpSignalTest {
@@ -18,19 +17,26 @@ class ScalpSignalTest {
         status = "active", seriesLabel = "Bitcoin", spotReturn1m = r1, spotReturn5m = r5
     )
 
-    @Test fun favoriteAndSpotConfirmationCreateEarlyYesScalp() {
-        assertEquals("YES", ScalpSignal.candidate(market(0.62, 0.0002, 0.0008), openedAt + 6 * 60_000L)!!.side)
+    @Test fun selectorUsesAiFairValueWithoutAnEntryGate() {
+        assertEquals("YES", ScalpSignal.candidate(market(0.01, -0.9, -0.9).copy(aiYesPercent = 51.0)).side)
+        assertEquals("NO", ScalpSignal.candidate(market(0.99, 0.9, 0.9).copy(aiYesPercent = 49.0)).side)
     }
 
-    @Test fun disagreementOrWrongMinuteProducesNoScalp() {
-        assertNull(ScalpSignal.candidate(market(0.62, -0.0002, 0.0008), openedAt + 6 * 60_000L))
-        assertNull(ScalpSignal.candidate(market(0.62, 0.0002, 0.0008), openedAt + 8 * 60_000L))
+    @Test fun ticketCanOpenOutsideTheOldTimeAndSpotFilters() {
+        val now = openedAt + 14 * 60_000L
+        val ticket = TicketBuilder.proposeScalp(
+            market(0.49, -0.9, 0.9).copy(aiYesPercent = 50.0, yesAskSize = 12.0),
+            TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = now)
+        )!!
+        assertEquals(TicketKind.SCALP, ticket.kind)
+        assertEquals(12, ticket.contracts)
+        org.junit.Assert.assertFalse(ticket.modelEdge)
     }
 
     @Test fun ticketIsForcedToPaperEvenWhenItQualifies() {
-        val now = openedAt + 6 * 60_000L
+        val now = openedAt + 14 * 60_000L
         val ticket = TicketBuilder.proposeScalp(
-            market(0.62, 0.0002, 0.0008).copy(aiYesPercent = 95.0, aiNoPercent = 5.0),
+            market(0.62, -0.0002, -0.0008).copy(aiYesPercent = 5.0, aiNoPercent = 95.0, yesAskSize = 10.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = now)
         )!!
         assertEquals(TicketKind.SCALP, ticket.kind)

@@ -102,13 +102,12 @@ object TicketBuilder {
     }
 
     /**
-     * Early-window favorite/spot confirmation candidate. This is intentionally
-     * paper-only and still must clear the same executable after-fee model edge
-     * as any other automatic suggestion.
+     * Unrestricted paper experiment: each open market with a visible,
+     * executable ask gets one candidate. It is never eligible for live routing.
      */
     fun proposeScalp(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled || !MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        val scalp = ScalpSignal.candidate(market, ctx.nowMs) ?: return null
+        val scalp = ScalpSignal.candidate(market)
         return buildTicket(
             market = market,
             side = scalp.side,
@@ -370,11 +369,16 @@ object TicketBuilder {
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
-        // For automatic suggestions, the actual $5 clip must fit at the
-        // quoted touch. The payout check below can require a much smaller
-        // $1 clip, so passing it alone does not make the displayed size real.
+        // SCALP is a paper-only experiment. Its preview and fill use every
+        // whole contract visible at the current touch, without a bankroll or
+        // $5 clip cap. Other kinds retain the real-order cap.
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
-        val live = if (kind != TicketKind.MANUAL && liveBook != null) {
+        val live = if (kind == TicketKind.SCALP) {
+            val visible = kotlin.math.floor(quoted ?: 0.0).toInt()
+            if (visible < 1) return null
+            val cap = LiveOrderSizer.allInUsd(visible, ask, ctx.settings.feeRate)
+            LiveOrderSizer.sizeWithinDepth(ask, visible, cap, ctx.settings.feeRate)
+        } else if (kind != TicketKind.MANUAL && liveBook != null) {
             LiveOrderSizer.sizeWithinDepth(
                 ask,
                 kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
@@ -405,9 +409,9 @@ object TicketBuilder {
         val implied = live.price
         val netPer = model01?.let { it - live.allInUsd / live.count }
         val edge = netPer != null && netPer > AUTO_VALUE_MARGIN
-        // All automatic tickets need a buffer above the executable ask and
-        // the fee for the actual $5 clip. A cheap payoff is not itself edge.
-        if (kind != TicketKind.MANUAL && !edge) return null
+        // SCALP intentionally records unrestricted paper entries. Other
+        // automatic tickets still need a model edge above the executable ask.
+        if (kind != TicketKind.MANUAL && kind != TicketKind.SCALP && !edge) return null
 
         val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
         val bookSide = if (side == "YES") "bid" else "ask"
@@ -434,15 +438,26 @@ object TicketBuilder {
             netEvPerContract = netPer,
             netEdgePp = netPer?.times(100.0),
             title = market.title,
-            sizingNote = String.format(
-                java.util.Locale.US,
-                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · $5 cap",
-                live.count,
-                live.price * 100.0,
-                live.allInUsd,
-                live.feeUsd,
-                live.profitIfWinUsd
-            ),
+            sizingNote = if (kind == TicketKind.SCALP) {
+                String.format(
+                    java.util.Locale.US,
+                    "%d visible ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · unrestricted paper fill",
+                    live.count,
+                    live.price * 100.0,
+                    live.allInUsd,
+                    live.feeUsd
+                )
+            } else {
+                String.format(
+                    java.util.Locale.US,
+                    "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · $5 cap",
+                    live.count,
+                    live.price * 100.0,
+                    live.allInUsd,
+                    live.feeUsd,
+                    live.profitIfWinUsd
+                )
+            },
             gateNote = when (kind) {
                 TicketKind.HUNTER ->
                     "Hunter print ($1 can settle ≥$25) · live size is the $5 all-in cap · Approve still required"
@@ -472,13 +487,21 @@ object TicketBuilder {
             belowMinProfit = belowMin,
             minProfitIfWinUsd = minProfit,
             winTargetUsd = minProfit,
-            winTargetCapped = true,
-            winTargetNote = String.format(
-                java.util.Locale.US,
-                "≤$5 all-in · min profit $%.0f · wins $%.2f",
-                minProfit,
-                live.profitIfWinUsd
-            ),
+            winTargetCapped = kind != TicketKind.SCALP,
+            winTargetNote = if (kind == TicketKind.SCALP) {
+                String.format(
+                    java.util.Locale.US,
+                    "All visible touch liquidity · unrestricted paper credit · wins $%.2f",
+                    live.profitIfWinUsd
+                )
+            } else {
+                String.format(
+                    java.util.Locale.US,
+                    "≤$5 all-in · min profit $%.0f · wins $%.2f",
+                    minProfit,
+                    live.profitIfWinUsd
+                )
+            },
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
             visibleContracts = quoted?.toInt()
