@@ -67,5 +67,5 @@ class ResnapshotGate(private val cooldownMs: Long = COOLDOWN_MS) {
 
     @Synchronized fun reset() = lastAt.clear()
 
-    companion object { const val COOLDOWN_MS = 30_000L }
+    companion object { const val COOLDOWN_MS = 10_000L }
 }

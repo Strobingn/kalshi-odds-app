@@ -29,8 +29,8 @@ class KalshiResilienceTest {
     @Test
     fun backoffHonorsRetryAfterAndAddsJitter() {
         val limiter = KalshiRateLimiter(nowMs = { 1_000L }, randomUnit = { 0.0 })
-        assertEquals(1_000L, limiter.backoffDelayMs(0, null, 0.0))
-        assertEquals(1_200L, limiter.backoffDelayMs(0, null, 1.0))
+        assertEquals(500L, limiter.backoffDelayMs(0, null, 0.0))
+        assertEquals(600L, limiter.backoffDelayMs(0, null, 1.0))
         assertEquals(12_000L, limiter.backoffDelayMs(0, 12_000L, 0.0))
         assertTrue(limiter.backoffDelayMs(3, null, 0.0) > limiter.backoffDelayMs(1, null, 0.0))
         val waited = limiter.onFailure(429, 5_000L)

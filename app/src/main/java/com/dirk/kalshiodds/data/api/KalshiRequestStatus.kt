@@ -24,7 +24,7 @@ object KalshiRequestStatus {
     /** Gray status copy. Not an error color and not yellow. */
     fun isQuietStatus(message: String?): Boolean {
         if (message.isNullOrBlank()) return false
-        return isFeedBanner(message) || message.startsWith("Backing off")
+        return isFeedBanner(message) || message.startsWith("Backing off") || message == CATCHING_UP
     }
 
     fun isFeedBanner(message: String?): Boolean {
@@ -100,7 +100,11 @@ object KalshiRequestStatus {
         return seconds * 1_000L
     }
 
+    /** 0.3.45: shown (gray) while our own limiter paces a request. Never "Rate-limited" — that is only real Kalshi 429s. */
+    const val CATCHING_UP = "Updating…"
+
     fun message(error: Throwable, retryInMs: Long): String = when {
+        isLocalThrottle(error) -> CATCHING_UP
         isRateLimited(error) -> rateLimited(retryInMs)
         isServerError(error) -> unavailable(retryInMs)
         else -> OFFLINE

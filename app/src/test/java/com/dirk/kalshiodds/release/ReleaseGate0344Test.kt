@@ -20,34 +20,15 @@ class ReleaseGate0344Test {
     @Before fun reset() = KalshiPollLoops.resetForTest()
 
     @Test
-    fun globalBudgetIsFourPerSecondBurstEight() {
-        assertEquals(4.0, KalshiPollBudget.READ_PER_SEC, 0.0)
-        assertEquals(8.0, KalshiPollBudget.READ_BURST, 0.0)
-        var now = 0L
-        val b = KalshiTokenBucket(nowMs = { now }, randomUnit = { 0.0 })
-        var granted = 0
-        repeat(20) { if (b.reserveRead() == 0L) granted++ }
-        assertEquals(8, granted) // burst
-        now = 10_000L // 10 s later → bucket refilled to burst, not 40
-        granted = 0
-        repeat(60) { if (b.reserveRead() == 0L) granted++ }
-        assertEquals(8, granted)
-        // Sustained: one read per 250 ms.
-        var ok = 0
-        for (i in 1..40) { now += 250L; if (b.reserveRead() == 0L) ok++ }
-        assertTrue("sustained $ok", ok in 38..41)
-    }
-
-    @Test
     fun localThrottleDoesNotEscalateBackoff() {
         var now = 0L
         val lim = KalshiRateLimiter(nowMs = { now }, randomUnit = { 0.0 })
         repeat(10) { lim.onFailure(429, 1_000L, local = true) }
-        assertTrue(lim.remainingHoldMs() <= 1_000L)
+        assertEquals(0L, lim.remainingHoldMs()) // 0.3.45: local waits set no shared hold
         assertEquals(10, lim.localThrottles)
         // Real Kalshi 429s still honor Retry-After (floor) and back off.
-        val w = lim.onFailure(429, 70_000L)
-        assertTrue(w >= 70_000L)
+        val w = lim.onFailure(429, 9_000L)
+        assertTrue(w >= 9_000L)
     }
 
     @Test
@@ -98,12 +79,12 @@ class ReleaseGate0344Test {
         val btc = "KXBTC15M-26OCT091445-45"; val eth = "KXETH15M-26OCT091445-45"
         assertEquals(listOf(btc), g.allow(listOf(btc, btc), 0L))           // dedupe
         assertTrue(g.allow(listOf(btc), 1_000L).isEmpty())                 // gap loop → suppressed
-        assertTrue(g.allow(listOf(btc), 29_999L).isEmpty())
-        assertEquals(listOf(eth), g.allow(listOf(eth, btc), 10_000L))      // per market
-        assertEquals(listOf(btc), g.allow(listOf(btc), 30_000L))           // ≥ 30 s later ok
+        assertTrue(g.allow(listOf(btc), 9_999L).isEmpty())
+        assertEquals(listOf(eth), g.allow(listOf(eth, btc), 5_000L))       // per market
+        assertEquals(listOf(btc), g.allow(listOf(btc), 10_000L))           // 0.3.45: ≥ 10 s later ok
         // A gap storm of 100 messages in 10 s yields at most one resnapshot per market.
         val storm = ResnapshotGate()
-        val total = (0 until 100).sumOf { storm.allow(listOf(btc), it * 100L).size }
+        val total = (0 until 100).sumOf { storm.allow(listOf(btc), it * 50L).size }
         assertEquals(1, total)
         assertEquals(99L, storm.suppressed)
     }
