@@ -25,7 +25,7 @@ class LiveOrderGatesTest {
         )) {
             assertTrue(need, need in ids)
         }
-        assertEquals("$5 including fees", LiveOrderGates.defaultOf("live_all_in_cap"))
+        assertEquals("edge-sized (min $5) including fees", LiveOrderGates.defaultOf("live_all_in_cap"))
         assertEquals("$10", LiveOrderGates.defaultOf("min_profit_if_win"))
         assertEquals(5.0, LiveOrderGates.LIVE_ALL_IN, 1e-9)
         assertEquals(10.0, LiveOrderGates.MIN_PROFIT, 1e-9)

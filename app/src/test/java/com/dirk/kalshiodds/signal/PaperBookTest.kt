@@ -154,7 +154,7 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(20_000.0 - 8.0, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
     }
 

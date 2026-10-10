@@ -27,7 +27,9 @@ class NoBetMinProfitCopyTest {
     @Test
     fun screenshotWindowUsesTwentyWhenThatIsTheSetting() {
         val market = HomeFixtures.screenshotPhoneBtc()
-        val settings = SignalSettings(minProfitIfWinUsd = 20.0)
+        // Small bankroll keeps edge sizing at the $5 floor, so the $20
+        // min-profit gate still blocks this 34¢ window.
+        val settings = SignalSettings(minProfitIfWinUsd = 20.0, bankrollUsd = 20.0)
         val decision = BetCall.decide(market, settings, HomeFixtures.NOW_MS)
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         val line = HomeCopy.thisWindowHeadline(decision, market, HomeFixtures.NOW_MS)

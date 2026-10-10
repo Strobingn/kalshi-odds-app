@@ -124,8 +124,8 @@ class KalshiFeeAndWinTargetTest {
         assertTrue(ticket.gateNote!!.contains("Long-shot"))
         assertTrue(ticket.gateNote!!.contains("Approve still required"))
         assertFalse(ticket.gateNote!!.contains("$1 → $5") || ticket.gateNote!!.contains("$1→$5"))
-        assertTrue(ticket.contracts in 20..25)
-        assertTrue(ticket.stakeUsd in 4.0..5.0 + 1e-6)
+        assertTrue(ticket.contracts >= 20)
+        assertTrue(ticket.stakeUsd >= 5.0 - 1e-6)
         assertTrue((ticket.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
         assertTrue(ticket.winTargetCapped)
     }
@@ -143,7 +143,7 @@ class KalshiFeeAndWinTargetTest {
         )
         assertTrue(ticket != null)
         assertEquals(TicketKind.HUNTER_VALUE, ticket!!.kind)
-        assertTrue(ticket.stakeUsd in 4.0..5.0 + 1e-6)
+        assertTrue(ticket.stakeUsd >= 5.0 - 1e-6)
         assertTrue((ticket.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
         assertEquals(10.0, ticket.winTargetUsd!!, 1e-9)
     }
@@ -192,7 +192,7 @@ class KalshiFeeAndWinTargetTest {
         val hunter = TicketBuilder.proposeHunter(cheap, ctx)
         assertEquals(TicketKind.HUNTER, hunter!!.kind)
         assertEquals(10.0, hunter.winTargetUsd!!, 1e-9)
-        assertTrue(hunter.stakeUsd in 4.0..5.0 + 1e-6)
+        assertTrue(hunter.stakeUsd >= 5.0 - 1e-6)
         assertTrue((hunter.profitIfWinUsd ?: 0.0) + 1e-6 >= 10.0)
 
         val fiveCent = sample(yesAsk = 0.05, noAsk = 0.95, aiYes = 30.0).copy(predictedSide = "YES")

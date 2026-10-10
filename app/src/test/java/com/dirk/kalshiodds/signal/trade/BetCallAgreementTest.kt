@@ -35,14 +35,15 @@ class BetCallAgreementTest {
     }
 
     @Test
-    fun noBetWhenSixtyThreeCentsMissesMinProfit() {
+    fun edgeSizedSixtyThreeCentsWithModelEdgeIsActionable() {
         val market = sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 70.0, predicted = "YES")
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
         val decision = BetCall.decide(market, ctx)
-        assertEquals(BetCall.Headline.NO_BET, decision.headline)
-        assertNull(decision.side)
-        assertFalse(decision.isActionable)
-        assertTrue(decision.noBetReason!!.contains("below") || decision.noBetReason!!.contains("No side"))
+        // Edge sizing grew the clip past the $10 min profit that the flat $5
+        // cap used to leave on the floor at 63¢.
+        assertEquals(BetCall.Headline.BET_UP, decision.headline)
+        assertTrue(decision.isActionable)
+        assertTrue((decision.profitIfWinUsd ?: 0.0) >= 10.0 - 1e-6)
     }
 
     @Test
@@ -70,7 +71,8 @@ class BetCallAgreementTest {
     @Test
     fun sortPutsActionableFirst() {
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 70.0, "YES"), SignalSettings())) == 1)
+        // No model edge at 63¢ (AI 55%) — stays NO BET even edge-sized.
+        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 55.0, "YES"), SignalSettings())) == 1)
     }
 
     private fun sample(yesAsk: Double, noAsk: Double, aiYes: Double, predicted: String) = MarketUiModel(

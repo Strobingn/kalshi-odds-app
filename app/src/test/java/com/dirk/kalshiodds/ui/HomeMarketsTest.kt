@@ -38,7 +38,7 @@ class HomeMarketsTest {
     fun allNoBetKeepsTheBtcCard() {
         val settings = HomeFixtures.settings(hasKey = false)
         val markets = listOf(
-            HomeFixtures.actionableBtc().copy(yesAsk = 0.63, noAsk = 0.37, yesProbabilityPercent = 63.0, aiYesPercent = 70.0),
+            HomeFixtures.actionableBtc().copy(yesAsk = 0.63, noAsk = 0.37, yesProbabilityPercent = 63.0, aiYesPercent = 55.0),
             HomeFixtures.noBetEth(),
             HomeFixtures.noBetSol()
         )
