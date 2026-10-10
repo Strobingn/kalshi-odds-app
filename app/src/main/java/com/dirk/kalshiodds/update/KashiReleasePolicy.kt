@@ -24,7 +24,12 @@ object KashiReleasePolicy {
     const val PACKAGE_ID = "com.dirk.kalshiodds.kashi"
     const val CERT_SHA256 = "64e2a43a6897c4556a36b82ea31dc89550c65e56b053658e1438bdf3c4cc4608"
     const val APP_ID_MARKER = "app-id: com.dirk.kalshiodds.kashi"
-    const val RELEASES_URL = "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=30"
+    /** 0.3.48: 100 per page, up to [MAX_PAGES] pages, so other branches' releases can't push ours out of view. */
+    const val PER_PAGE = 100
+    const val MAX_PAGES = 3
+    const val RELEASES_URL = "https://api.github.com/repos/$OWNER/$REPO/releases?per_page=$PER_PAGE"
+
+    fun pageUrl(page: Int): String = "$RELEASES_URL&page=$page"
 
     val TAG: Regex = Regex("^v\\d+\\.\\d+\\.\\d+-debug$")
 
