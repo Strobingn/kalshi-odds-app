@@ -241,6 +241,24 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /** 0.3.46 'Reset paper bankroll to $20,000' — archives history and marks a new reset point. */
+    fun resetPaperBankrollTo20k() {
+        val v = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+        val before = container.paper.book.snapshot().cashUsd
+        viewModelScope.launch {
+            prefs.updatePaperBankrollStartUsd(v)
+            container.paper.book.configure(startUsd = v)
+            container.paper.resetTo20k()
+        }
+        track("paper_reset", before, v) { }
+        _state.update {
+            it.copy(
+                paperBankrollDraft = "20000",
+                credentialMessage = PaperResetCopy.DONE
+            )
+        }
+    }
+
     fun resetPaperBook() {
         val start = _state.value.settings.paperBankrollStartUsd
         val before = container.paper.book.snapshot().cashUsd

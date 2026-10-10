@@ -630,7 +630,7 @@ class DefaultConfigV22Test {
         assertEquals(SignalConstants.DEFAULT_MIN_PAYOUT_USD, 100.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_STAKE_USD, 1.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_MIN_PAYOUT_USD, 25.0, 1e-9)
-        assertEquals(SignalConstants.PAPER_START_USD, 10_000.0, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, 20_000.0, 1e-9)
         assertEquals(SignalConstants.PAPER_STAKE_USD, 5.0, 1e-9)
         assertEquals(SignalConstants.DEFAULT_KELLY_FRACTION, 0.25, 1e-9)
         assertEquals(SignalConstants.DEFAULT_PAPER_KELLY_FRACTION, 0.5, 1e-9)

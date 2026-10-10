@@ -159,12 +159,12 @@ class PaperBankrollPersistenceTest {
     fun migrateOldHundredDollarBookPreservesPnl() {
         val old = PaperBookState(startingUsd = 100.0, cashUsd = 215.0)
         val neu = PaperBookState.migrateStartUsd(old)
-        // 0.3.40: the $100 → start migration now lands on the $10,000 default.
-        assertEquals(10_000.0, neu.startingUsd, 1e-9)
-        assertEquals(10_115.0, neu.cashUsd, 1e-9)
+        // 0.3.40: the $100 → start migration now lands on the $20,000 default (0.3.46).
+        assertEquals(20_000.0, neu.startingUsd, 1e-9)
+        assertEquals(20_115.0, neu.cashUsd, 1e-9)
         val already = PaperBookState.migrateStartUsd(PaperBookState())
-        assertEquals(10_000.0, already.startingUsd, 1e-9)
-        assertEquals(10_000.0, already.cashUsd, 1e-9)
+        assertEquals(20_000.0, already.startingUsd, 1e-9)
+        assertEquals(20_000.0, already.cashUsd, 1e-9)
     }
 
     @Test
