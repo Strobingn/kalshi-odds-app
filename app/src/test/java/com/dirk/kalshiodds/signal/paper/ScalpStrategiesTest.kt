@@ -118,13 +118,12 @@ class ScalpStrategiesTest {
 
     @Test
     fun leaderboardRanksStrategiesBySettledPnl() {
-        val now = 5L
         val fills = listOf(
             fill("scalp lead lag", pnl = 30.0),
             fill("scalp lead lag", pnl = 10.0),
             fill("scalp t minus exit", pnl = -5.0),
             fill("AI hunter", pnl = 50.0),
-            fill("scalp book imbalance", settled = false)
+            fill("scalp book imbalance", pnl = null, settled = false)
         )
         val board = ScalpStrategies.leaderboard(fills)
         assertEquals(3, board.size)
@@ -136,7 +135,7 @@ class ScalpStrategiesTest {
     @Test
     fun considerScalpDedupesPerTickerAndStrategy() {
         val ids = java.util.concurrent.atomic.AtomicInteger()
-        val book = PaperBook(idFactory = { "s${ids.incrementAndGet()}" }, nowMs = { now })
+        val book = PaperBook(idFactory = { "s${ids.incrementAndGet()}" }, nowMs = { 5L })
         val signal = ScalpStrategies.Signal(
             kind = ScalpStrategies.Kind.LEAD_LAG,
             ticker = "KXBTC15M-T",
