@@ -9,6 +9,8 @@ data class ScalpTabState(
     val leaderAllTime: List<ScalpModels.Row> = emptyList(),
     val leaderWindow: List<ScalpModels.Row> = emptyList(),
     val leaderByCoin: Map<String, List<ScalpModels.Row>> = emptyMap(),
+    /** 0.3.51: per-coin six-model board for today (ET). */
+    val leaderTodayByCoin: Map<String, List<ScalpModels.Row>> = emptyMap(),
     val windows: List<ScalpModels.WindowRow> = emptyList(),
     val currentWindowKey: String? = null,
     val sliceUsd: Double = 0.0,

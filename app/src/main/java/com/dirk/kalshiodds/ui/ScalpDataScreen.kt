@@ -159,6 +159,8 @@ data class ScalpDataView(
     val curve: List<Double>,
     val makerLines: List<String>,
     val breakdown: List<String>,
+    /** 0.3.51: raw six-model detail moved here from the Scalp tab (all coins, per coin, per window). */
+    val modelLines: List<String> = emptyList(),
     val rows: List<LazyListKeys.Keyed<ScalpCopy.Line>>
 ) {
     companion object {
@@ -170,6 +172,7 @@ data class ScalpDataView(
                 curve = ScalpData.equityCurve(trades),
                 makerLines = runCatching { ScalpData.makerLines(all) }.getOrDefault(emptyList()),
                 breakdown = runCatching { ScalpBreakdown.lines(trades) }.getOrDefault(emptyList()),
+                modelLines = runCatching { ScalpTabCopy.detailLines(trades) }.getOrDefault(emptyList()),
                 // Keys: stable composite, de-duplicated (archive + current, maker/shadow rows, reused ids).
                 rows = LazyListKeys.keyed(ScalpData.tripLines(trades)) { "t|" + it.key }
             )
@@ -265,6 +268,12 @@ fun ScalpDataContent(
             DecisionCard {
                 Text("By strategy, coin and hour (ET)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
                 v.breakdown.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+            }
+        }
+        item {
+            DecisionCard {
+                Text("Six scalp models — full detail", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                v.modelLines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
             }
         }
         item { OutlinedButton(onClick = onOpenScalp) { Text("Scalp rules, params and open scalps") } }

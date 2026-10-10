@@ -85,8 +85,9 @@ object ScalpModels {
     }
 
     /** Leaderboard (all six models, best net first). [coin] null = all coins; [windowKey] null = all-time. */
-    fun leaderboard(trades: List<ScalpTrade>, coin: String? = null, windowKey: String? = null, bidFor: (ScalpTrade) -> Double? = { null }): List<Row> {
+    fun leaderboard(trades: List<ScalpTrade>, coin: String? = null, windowKey: String? = null, bidFor: (ScalpTrade) -> Double? = { null }, sinceMs: Long? = null): List<Row> {
         val byModel = trades.asSequence()
+            .filter { sinceMs == null || (it.closedAtMs ?: it.signalAtMs) >= sinceMs }
             .filter { coin == null || it.coin == coin }
             .filter { windowKey == null || it.windowKey == windowKey }
             .mapNotNull { t -> modelOf(t)?.let { it to t } }
@@ -109,6 +110,21 @@ object ScalpModels {
             val n = tagged.groupBy({ it.first }, { it.second }).mapValues { it.value.size }
             WindowRow(w, rows.firstNotNullOfOrNull { ScalpTicker.closeMs(it.ticker) }, net, n, net.maxByOrNull { it.value }?.key)
         }.sortedByDescending { it.closeMs ?: 0L }.take(limit)
+    }
+
+    /** Start of today in ET (for "today" P&L). */
+    fun startOfTodayEtMs(nowMs: Long): Long =
+        java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate()
+            .atStartOfDay(java.time.ZoneId.of("America/New_York")).toInstant().toEpochMilli()
+
+    /** "BTC 15m · 11:00 AM" (window end time, ET). */
+    fun chipLabel(ticker: String, closeMs: Long?): String {
+        val coin = ScalpParams.coinOf(ticker)
+        val end = (closeMs ?: ScalpTicker.closeMs(ticker))?.let {
+            java.time.Instant.ofEpochMilli(it).atZone(java.time.ZoneId.of("America/New_York"))
+                .format(java.time.format.DateTimeFormatter.ofPattern("h:mm a", java.util.Locale.US))
+        }
+        return if (end == null) "$coin 15m" else "$coin 15m · $end"
     }
 
     /** Current-window key of a ticker (same cluster as [ScalpTrade.windowKey]). */

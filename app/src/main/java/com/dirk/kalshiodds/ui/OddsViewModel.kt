@@ -223,7 +223,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             .filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
             .filter { (it.closeTimeEpochMs ?: Long.MAX_VALUE) > now }
             .sortedWith(compareBy({ it.closeTimeEpochMs ?: Long.MAX_VALUE }, { it.ticker }))
-            .map { ScalpTabMarket(it.ticker, com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker), it.closeTimeEpochMs, it.ticker) }
+            .map { ScalpTabMarket(it.ticker, com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker), it.closeTimeEpochMs, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(it.ticker, it.closeTimeEpochMs)) }
             .distinctBy { it.ticker }
         val sel = cur.selectedTicker?.takeIf { t -> markets.any { it.ticker == t } } ?: markets.firstOrNull { cur.coin == null || it.coin == cur.coin }?.ticker
         val wkey = sel?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) } ?: markets.firstOrNull()?.ticker?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) }
@@ -238,6 +238,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 leaderAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor),
                 leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor) }.orEmpty(),
                 leaderByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor) },
+                leaderTodayByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
+                    com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now))
+                },
                 windows = com.dirk.kalshiodds.decision.ScalpModels.perWindow(trades, cur.coin),
                 sliceUsd = com.dirk.kalshiodds.decision.ScalpModels.sliceUsd(runCatching { paperBook.snapshot().cashUsd }.getOrDefault(bankroll))
             )
