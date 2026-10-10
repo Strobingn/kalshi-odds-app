@@ -31,7 +31,7 @@ object LiveOrderGates {
         Gate("payout_gate_configured", "$5 → ≥$100 max payout (ask ≤5¢)", "Price too high for the $100 payout gate"),
         Gate("hunter_threshold", "$1 → ≥$25 (ask ≤~4¢)", "Ask is above the hunter $1→$25 print"),
         Gate("long_shot", "ask ≤20¢ and AI beats implied after fees", "Long-shot needs a cheap ask and a model edge"),
-        Gate("live_all_in_cap", "$5 including fees", "Cannot size a live order under the $5 all-in cap"),
+        Gate("live_all_in_cap", "edge-sized (min $5) including fees", "Cannot size a live order under the edge-sized all-in cap"),
         Gate("min_profit_if_win", "$10", "Profit if win is below the minimum — ticket disabled"),
         Gate("allowlist", "off until enough samples", "Series is muted by the allowlist"),
         Gate("confidence_filter", "min 0.45", "Confidence is below the Settings floor"),

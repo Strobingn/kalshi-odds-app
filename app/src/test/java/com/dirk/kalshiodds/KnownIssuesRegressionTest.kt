@@ -367,7 +367,7 @@ class KnownIssuesRegressionTest {
             )!!.winTargetNote.orEmpty()
             assertFalse(liveNote.contains("$50"))
             assertFalse(liveNote.contains("win target", ignoreCase = true))
-            assertTrue(liveNote.contains("$5 all-in"))
+            assertTrue(liveNote.contains("edge-sized all-in (min $5)"))
 
             val liveCopy = listOf(
                 HomeCopy.allInProfit(

@@ -7,7 +7,7 @@ import com.dirk.kalshiodds.signal.trade.TradeTicket
 /**
  * Explicit paper buy / sell. Isolated from Kalshi credentials, live cash,
  * and the V2 order client. Fills at the ticket's walked ask (or bid for
- * sells) and caps size to paper cash instead of failing silently.
+ * sells). Paper bets are uncapped — the book may go negative.
  */
 object PaperBuy {
 

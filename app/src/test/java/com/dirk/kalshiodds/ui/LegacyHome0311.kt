@@ -162,7 +162,7 @@ private fun LegacyCard(market: MarketUiModel, settings: SignalSettings, nowMs: L
         Text(
             buildString {
                 append("Ask $ask")
-                if (profit != null) append(String.format(java.util.Locale.US, "  ·  win $%.2f at $5 cap", profit))
+                if (profit != null) append(String.format(java.util.Locale.US, "  ·  win $%.2f edge-sized", profit))
                 call.noBetReason?.let { append("  ·  $it") }
             },
             style = MaterialTheme.typography.bodyMedium,

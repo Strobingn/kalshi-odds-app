@@ -30,7 +30,7 @@ class PaperArchiveTest {
         )
         book.reset()
         val snap = book.snapshot()
-        assertEquals(100.0, snap.cashUsd, 1e-9)
+        assertEquals(20_000.0, snap.cashUsd, 1e-9)
         assertTrue(snap.fills.isEmpty())
         assertEquals(1, snap.archived.size)
         assertEquals(1, snap.archived[0].fills.size)

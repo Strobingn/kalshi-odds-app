@@ -15,7 +15,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
 /**
- * Isolated paper book. Never calls Kalshi. $100 start / $5 per AI fill.
+ * Isolated paper book. Never calls Kalshi. $20,000 start / aggressive
+ * uncapped equity-fraction sizing that learns from each settled bet.
  */
 @Serializable
 data class PaperFill(
@@ -91,7 +92,7 @@ class PaperBook(
             )
             publish(
                 PaperBookState(
-                    lastMessage = "Paper book reset to $100 — prior run archived",
+                    lastMessage = "Paper book reset to $20,000 — prior run archived",
                     archived = cur.archived + archive
                 )
             )
@@ -177,10 +178,7 @@ class PaperBook(
         val stake = qty * px
         synchronized(lock) {
             val cur = _state.value
-            if (cur.cashUsd + 1e-9 < stake) {
-                rememberMessage("Paper skip $ticker — need ${fmt(stake)} (cash ${fmt(cur.cashUsd)})")
-                return null
-            }
+
             val row = PaperFill(
                 id = idFactory(),
                 ticker = ticker,
@@ -228,10 +226,19 @@ class PaperBook(
         val px = KalshiPrice.usable(ticket.estimatedAvgFill.takeIf { it > 0.0 } ?: ticket.limitPrice)
             ?: return PaperBuy.Outcome(ok = false, message = "No usable ask to paper-fill ${ticket.ticker}")
         val wantSide = if (ticket.side.equals("NO", true)) "NO" else "YES"
+        val cur = _state.value
+        val learned = AggressivePaperSizer.multiplier(
+            settledWins = cur.fills.count { it.won == true },
+            settledTotal = cur.fills.count { it.won != null },
+            pnlUsd = cur.fills.mapNotNull { it.pnlUsd }.sum()
+        )
         val wantQty = when {
             ticket.contracts > 0 -> ticket.contracts
             ticket.stakeUsd > 0.0 -> floor(ticket.stakeUsd / px).toInt()
-            else -> floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
+            else -> AggressivePaperSizer.contracts(
+                AggressivePaperSizer.stakeUsd(cur.equityUsd, learned),
+                px
+            )
         }
         return explicitFill(
             ticker = ticket.ticker,
@@ -273,16 +280,9 @@ class PaperBook(
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
-            val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px)
+            val qty = wantContracts.coerceAtLeast(0)
             if (qty < 1) {
-                val msg = String.format(
-                    java.util.Locale.US,
-                    "Paper cash %s cannot buy 1 ct @ %.1f¢ on %s (need %s with fees)",
-                    fmt(cur.cashUsd),
-                    px * 100,
-                    ticker,
-                    fmt(PaperBuy.costUsd(1, px))
-                )
+                val msg = "Paper skip $ticker — 0 contracts"
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
@@ -300,7 +300,6 @@ class PaperBook(
                 createdAtMs = nowMs(),
                 note = buildString {
                     append(note)
-                    if (capped) append(" · capped to paper cash")
                     if (fees > 0.0) append(String.format(java.util.Locale.US, " · fee $%.2f", fees))
                 },
                 winTargetUsd = winTargetUsd
@@ -308,13 +307,12 @@ class PaperBook(
             val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
             val msg = String.format(
                 java.util.Locale.US,
-                "PAPER %s %s · $%.2f · %d ct @ %.1f¢%s · fee $%.2f · never Kalshi",
+                "PAPER %s %s · $%.2f · %d ct @ %.1f¢ · fee $%.2f · never Kalshi",
                 row.displaySide,
                 row.ticker,
                 row.stakeUsd,
                 row.contracts,
                 row.limitPrice * 100,
-                if (capped) " · capped" else "",
                 fees
             )
             publish(
@@ -328,7 +326,6 @@ class PaperBook(
                 ok = true,
                 fill = row,
                 message = msg,
-                capped = capped,
                 contracts = qty,
                 stakeUsd = stake
             )
@@ -367,11 +364,6 @@ class PaperBook(
             }
             if (open != null) {
                 val msg = "Already have an open paper fill on $ticker (${open.displaySide} ${open.contracts} ct)"
-                publish(cur.copy(lastMessage = msg))
-                return PaperBuy.Outcome(ok = false, message = msg)
-            }
-            if (cur.cashUsd + 1e-9 < allInUsd) {
-                val msg = "Paper cash ${fmt(cur.cashUsd)} cannot cover ${fmt(allInUsd)}"
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
@@ -550,22 +542,24 @@ class PaperBook(
         synchronized(lock) {
             val cur = _state.value
             if (cur.fills.any { !it.settled && it.ticker.equals(ticker, ignoreCase = true) }) return null
-            val qty = contracts?.takeIf { it > 0 } ?: floor(SignalConstants.PAPER_STAKE_USD / px).toInt()
-            if (qty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
-                return null
-            }
-            val rawStake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)
-            val (cappedQty, _) = PaperBuy.capContracts(
-                want = if (stakeUsd != null && stakeUsd > 0.0) qty else qty,
-                cashUsd = cur.cashUsd,
-                price = px
+            val learned = AggressivePaperSizer.multiplier(
+                settledWins = cur.fills.count { it.won == true },
+                settledTotal = cur.fills.count { it.won != null },
+                pnlUsd = cur.fills.mapNotNull { it.pnlUsd }.sum()
             )
-            val useQty = if (rawStake > cur.cashUsd + 1e-9) cappedQty else qty
+            val explicitQty = contracts?.takeIf { it > 0 }
+            val explicitStake = stakeUsd?.takeIf { it > 0.0 }
+            val useQty = explicitQty
+                ?: explicitStake?.let { floor(it / px).toInt() }
+                ?: AggressivePaperSizer.contracts(
+                    AggressivePaperSizer.stakeUsd(cur.equityUsd, learned),
+                    px
+                )
             if (useQty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover ${fmt(rawStake)}"))
+                publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for the sized clip"))
                 return null
             }
+            val rawStake = explicitStake ?: (useQty * px)
             val stake = useQty * px
             val row = PaperFill(
                 id = idFactory(),

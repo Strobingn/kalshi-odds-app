@@ -84,7 +84,7 @@ object HomeCopy {
             return noBetHeadline(decision.noBetReason)
         }
         val profit = decision.profitIfWinUsd?.let { String.format(Locale.US, "$%.2f", it) } ?: "—"
-        return "${decision.label}  ${coinShort(market)}  · $5 wins $profit profit · ${closesIn(market.closeTimeEpochMs, nowMs)}"
+        return "${decision.label}  ${coinShort(market)}  · edge-sized wins $profit profit · ${closesIn(market.closeTimeEpochMs, nowMs)}"
     }
 
     fun closesIn(closeEpochMs: Long?, nowMs: Long): String {
@@ -262,7 +262,7 @@ object HomeCopy {
     fun allInProfit(decision: BetCall.Decision): String? {
         if (!decision.isActionable) return null
         val profit = decision.profitIfWinUsd ?: return null
-        return String.format(Locale.US, "$5 all-in → profit $%.2f if it wins", profit)
+        return String.format(Locale.US, "edge-sized (min $5) → profit $%.2f if it wins", profit)
     }
 
     fun primaryButtonLabel(mode: String, decision: BetCall.Decision): String {

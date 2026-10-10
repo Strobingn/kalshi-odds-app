@@ -17,7 +17,21 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.15**
+Package: `com.dirk.kalshiodds` · version **0.3.16**
+
+## 0.3.16
+
+- **Edge-sized live orders — the $5 fixed cap is now a floor, not a ceiling.** The AI sizes each live ticket by its own edge: quarter-Kelly on (model probability − ask) × bankroll (`LiveOrderSizer.edgeCapUsd`). A strong edge sizes bigger, no edge sizes at the $5 floor. Every ticket carries the cap it was sized against (`TradeTicket.sizingCapUsd`), and `KalshiTradeClient.enforceLiveCap` enforces that ticket cap — never the flat constant — as the last check before HTTP, bounded by the recorded bankroll.
+
+### Why caps at all
+
+Kelly is the growth-optimal bet size **only if the model probability is the true probability.** It is not — it is a noisy estimate. Uncapped full Kelly on an overconfident model grows the book for a while and then hands it back in one bad stretch. So the sizer keeps three bounds:
+
+1. **$5 all-in floor (`LIVE_ALL_IN_CAP_USD`).** A weak or absent edge never produces a real order larger than the old default — the change can only raise size, and only when the model actually beats the executable ask.
+2. **Quarter-Kelly (`DEFAULT_KELLY_FRACTION = 0.25`).** Estimation error makes full Kelly systematically oversize; quarter-Kelly gives up little growth and roughly quarters the drawdown.
+3. **Max 5% of bankroll per clip (`DEFAULT_MAX_BANKROLL_FRACTION`), and ≤25% of bankroll at the final client check.** Even a huge estimated edge cannot concentrate the book in one 15-minute window, and a malformed ticket cannot either.
+
+The paper book is deliberately **uncapped** — it is fake money and exists to measure the AI's raw edge: **$20,000 start** (`PAPER_START_USD`), **10% of paper equity per AI fill** (`PAPER_AGGRESSIVE_FRACTION`), with an unbounded learning multiplier (`AggressivePaperSizer`) that presses harder the more the settled record beats 50% wins and shrinks toward zero when it loses. Paper fills are never clipped to cash — the book may go negative — so aggressive sizing can never be silently watered down. If the AI's edge is real it shows up here first, at full size.
 
 ## 0.3.15
 
