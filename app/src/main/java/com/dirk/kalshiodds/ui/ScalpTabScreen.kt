@@ -147,7 +147,9 @@ fun ScalpTabContent(
     onPlace: (cents: Int, buy: Boolean, qty: Int) -> Unit = { _, _, _ -> },
     onCancel: (String) -> Unit = {},
     onReprice: (String, Int) -> Unit = { _, _ -> },
-    onSellOwnedAt: (Int) -> Unit = {}
+    onSellOwnedAt: (Int) -> Unit = {},
+    /** Previews only: hide the coin cards to render the ladder card in view. */
+    showCoinCards: Boolean = true
 ) {
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }
     var buyMode by remember { mutableStateOf(true) }
@@ -180,7 +182,7 @@ fun ScalpTabContent(
                 IconButton(onClick = { info = true }) { Icon(Icons.Outlined.Info, contentDescription = "How it works", tint = c.textSecondary) }
             }
         }
-        items(com.dirk.kalshiodds.decision.ScalpParams.COINS, key = { "coin-$it" }) { coin ->
+        if (showCoinCards) items(com.dirk.kalshiodds.decision.ScalpParams.COINS, key = { "coin-$it" }) { coin ->
             CoinCard(coin, st.leaderTodayByCoin[coin].orEmpty())
         }
         item(key = "ladder-card") {

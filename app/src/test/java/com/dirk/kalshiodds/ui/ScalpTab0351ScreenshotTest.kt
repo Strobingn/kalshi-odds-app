@@ -27,6 +27,8 @@ class ScalpTab0351ScreenshotTest {
 
     @Test fun scalpTabDarkHolding() = shot("scalp_tab_dark_holding", dark = true, held = 10, tall = false)
     @Test fun scalpTabDarkFlat() = shot("scalp_tab_dark_flat", dark = true, held = 0, tall = false)
+    @Test fun scalpTabLadderHolding() = shot("scalp_tab_ladder_holding", dark = true, held = 10, tall = true)
+    @Test fun scalpTabLadderFlat() = shot("scalp_tab_ladder_flat", dark = true, held = 0, tall = true)
     @Test fun scalpTabLight() = shot("scalp_tab_light", dark = false, held = 10, tall = false)
 
     private fun shot(name: String, dark: Boolean, held: Int, tall: Boolean) {
@@ -34,7 +36,7 @@ class ScalpTab0351ScreenshotTest {
             KalshiOddsTheme(darkTheme = dark, colorStyle = ColorStyles.CLASSIC) {
                 CompositionLocalProvider(LocalDipTabBar provides true) {
                     Column(Modifier.fillMaxSize()) {
-                        Box(Modifier.weight(1f)) { ScalpTabContent(st = ScalpTabFixtures.state(held)) }
+                        Box(Modifier.weight(1f)) { ScalpTabContent(st = ScalpTabFixtures.state(held), showCoinCards = !tall) }
                         DipBottomBar(current = AppRoutes.SCALP_TAB, onSelect = {})
                     }
                 }
@@ -62,7 +64,7 @@ object ScalpTabFixtures {
     ).sortedByDescending { if (it.roundTrips == 0) Double.NEGATIVE_INFINITY else it.netUsd }
 
     fun state(held: Int): ScalpTabState {
-        val close = 1_791_643_200_000L
+        val close = com.dirk.kalshiodds.decision.ScalpTicker.closeMs("KXBTC15M-26OCT101100-00")!!
         val tickers = listOf("KXBTC15M-26OCT101100-00", "KXETH15M-26OCT101100-00", "KXSOL15M-26OCT101100-00")
         val yesBids = (40..65).map { it / 100.0 to (500.0 + it * 37 % 900) }
         val noBids = (30..32).map { it / 100.0 to (1200.0 + it * 53 % 700) } + (5..29).map { it / 100.0 to (800.0 + it * 91 % 1500) }
@@ -79,5 +81,23 @@ object ScalpTabFixtures {
             bookAgeMs = 180L,
             secondsLeft = 757L
         )
+    }
+}
+
+/** Full-length render (same 1080 px width) so the ladder and sell row are visible in one image. */
+class ScalpTab0351TallScreenshotTest {
+    @get:Rule
+    val paparazzi = Paparazzi(
+        deviceConfig = DeviceConfig.PIXEL_6.copy(screenWidth = 1080, screenHeight = 5600, softButtons = false),
+        theme = "android:Theme.Material3.DayNight.NoActionBar",
+        maxPercentDifference = 1.0
+    )
+
+    @Test fun scalpTabTall() {
+        paparazzi.snapshot(name = "scalp_tab_tall") {
+            KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.CLASSIC) {
+                ScalpTabContent(st = ScalpTabFixtures.state(10))
+            }
+        }
     }
 }
