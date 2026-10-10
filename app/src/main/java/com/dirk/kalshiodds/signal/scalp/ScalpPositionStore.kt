@@ -70,6 +70,18 @@ class ScalpPositionStore(context: Context) : ScalpLedger {
         }
     }
 
+    /**
+     * Realized P&L over the whole cached trade history (bounded at
+     * [MAX_CACHE] rows — plenty for the paper bankroll estimate; a full
+     * reconciliation belongs to the stats screen, not the tick path).
+     */
+    override fun realizedPnlCentsTotal(): Long =
+        synchronized(cacheLock) {
+            cachedTrades
+                .filter { it.action == ACTION_EXIT }
+                .sumOf { (it.pnlCents ?: 0).toLong() }
+        }
+
     // ---- writes ------------------------------------------------------------
 
     /** Persist a fresh open position and refresh the cache. Returns the row. */

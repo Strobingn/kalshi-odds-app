@@ -24,6 +24,13 @@ interface ScalpLedger {
     /** Realized P&L cents of today's EXIT rows (negative when losing). */
     fun realizedPnlCentsToday(nowMs: Long): Long
 
+    /**
+     * Realized P&L cents across ALL cached EXIT rows — the running paper
+     * bankroll delta (seed + this = current bankroll). Default 0 keeps test
+     * fakes simple; the SQLite store sums its trade cache.
+     */
+    fun realizedPnlCentsTotal(): Long = 0L
+
     /** Persist a fresh open position; returns the stored row. */
     fun recordEnter(position: ScalpPosition, entryFeeCents: Int, clientOrderId: String?): ScalpPosition
 

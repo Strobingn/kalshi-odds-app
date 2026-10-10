@@ -335,7 +335,7 @@ class ScalpEngineTest {
         val state = h.engine.currentState()
         assertEquals("FLAT", state.state)
         assertTrue(state.aggressive)
-        assertEquals(3, state.strategyStates.size)
+        assertEquals(11, state.strategyStates.size)
         assertTrue(
             "all strategies flat, states=${state.strategyStates}",
             state.strategyStates.all { it.state == "FLAT" }

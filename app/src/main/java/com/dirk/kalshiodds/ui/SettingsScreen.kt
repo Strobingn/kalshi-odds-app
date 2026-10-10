@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.dirk.kalshiodds.ui
 
 import android.net.Uri
@@ -7,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -410,38 +413,51 @@ fun SettingsContent(
                     )
                 }
                 ToggleRow(
-                    "Aggression (3 strategies concurrently)",
+                    "Aggression (11 strategies concurrently)",
                     state.scalp.aggressive,
                     { viewModel?.setScalpAggressive(it) }
                 )
                 Text(
-                    "On: Dip Hunt + Momentum + Reversal run at once, up to " +
-                        "${state.scalp.maxOpenPositions} open positions, faster re-entry. " +
-                        "Off: single Dip Hunt with the conservative backtest profile. " +
-                        "The daily-loss breaker and kill switch apply either way.",
+                    "On: the full strategy roster runs at once — each holds one position, " +
+                        "up to ${state.scalp.maxOpenPositions} open total, trading the whole " +
+                        "window from open to close. Off: single Dip Hunt with the conservative " +
+                        "backtest profile. The daily-loss breaker and kill switch apply either way.",
                     style = MaterialTheme.typography.labelMedium,
                     color = colors.textSecondary
                 )
                 if (state.scalp.aggressive && state.scalpStatus.strategyStates.isNotEmpty()) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    Text(
+                        "Strategies — tap a chip to enable / disable it:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         for (st in state.scalpStatus.strategyStates) {
                             AssistChip(
-                                onClick = { },
+                                onClick = { viewModel?.setScalpStrategyEnabled(st.strategy.name, !st.enabled) },
                                 label = {
                                     Text(
                                         String.format(
                                             Locale.US,
                                             "%s · %s",
                                             st.strategy.label,
-                                            if (st.state == "IN_POSITION") {
-                                                "IN @ ${st.position?.entryPriceCents ?: "?"}¢"
-                                            } else {
-                                                "FLAT"
+                                            when {
+                                                !st.enabled -> "OFF"
+                                                st.state == "IN_POSITION" ->
+                                                    "IN @ ${st.position?.entryPriceCents ?: "?"}¢"
+                                                st.state == "WINDOW_CLOSED" -> "CLOSED"
+                                                else -> "FLAT"
                                             }
-                                        )
+                                        ),
+                                        color = if (st.enabled) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            colors.textSecondary
+                                        }
                                     )
                                 }
                             )

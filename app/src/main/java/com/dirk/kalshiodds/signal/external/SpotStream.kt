@@ -74,6 +74,21 @@ class SpotStream(
         )
     }
 
+    /**
+     * Spot return over the last [horizonMs] from the live ring alone
+     * (fraction, e.g. 0.0006 = 6bp). Null when the ring doesn't reach back
+     * that far — callers fall back to coarser features. Used by the
+     * scalper's SPOT_LEAD / OPEN_DRIVE strategies.
+     */
+    fun returnOver(asset: String, horizonMs: Long, nowMs: Long = clock()): Double? {
+        val ring = rings[asset.uppercase()] ?: return null
+        val last = ring.latest() ?: return null
+        if (nowMs - last.tMs > STALE_MS) return null
+        val base = ring.priceAt(nowMs - horizonMs) ?: return null
+        if (base <= 0.0) return null
+        return last.px / base - 1.0
+    }
+
     /** Parse one WebSocket frame. Public for tests. */
     fun ingest(text: String, nowMs: Long = clock()) {
         val o = runCatching { JSONObject(text) }.getOrNull() ?: return

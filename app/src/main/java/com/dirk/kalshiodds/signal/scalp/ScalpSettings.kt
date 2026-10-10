@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -41,7 +42,7 @@ data class ScalpSettings(
     /** False = paper fills (default). True = real Kalshi orders via [com.dirk.kalshiodds.data.api.KalshiTradeClient]. */
     val liveMode: Boolean = false,
     /** Max dollars spent per entry (position cost + entry fee). */
-    val maxStakeUsd: Double = 5.0,
+    val maxStakeUsd: Double = DEFAULT_MAX_STAKE_USD,
     /** Sell at the bid once it is this many cents above entry. Backtest: 6¢ is the only TP with any hope of clearing ~5–6¢ round-trip friction. */
     val takeProfitPp: Double = DEFAULT_TAKE_PROFIT_PP,
     /** Cut at the bid once it is this many cents below entry. Grid-optimal per the backtest; wider stops did not help. */
@@ -62,17 +63,28 @@ data class ScalpSettings(
      */
     val killSwitch: Boolean = false,
     /**
-     * Master aggression switch for this experiment branch. True = run three
-     * strategies concurrently (DIP_HUNT + MOMENTUM_SNIPER + EXTREME_REVERSAL),
-     * each holding up to one position, with the aggressive profile from
-     * [effective]. False = single DIP_HUNT with the conservative defaults
-     * above. The daily-loss breaker and kill switch are NOT relaxed either way.
+     * Master aggression switch for this experiment branch. True = run the
+     * full [ScalpStrategy] registry concurrently (each strategy one position,
+     * per-strategy TP/SL/hold/window defaults), with the aggressive profile
+     * from [effective]. False = single DIP_HUNT with the conservative
+     * defaults above. The daily-loss breaker and kill switch are NOT relaxed
+     * either way.
      */
     val aggressive: Boolean = true,
     /** Max concurrent open scalp positions across all strategies. */
-    val maxOpenPositions: Int = 3
+    val maxOpenPositions: Int = 12,
+    /**
+     * Per-strategy enable set for aggressive mode — strategy NAMES
+     * ([ScalpStrategy.name]) that may trade. EMPTY = all strategies on (the
+     * default). Strategies absent here are computed but never entered.
+     */
+    val enabledStrategies: Set<String> = emptySet()
 ) {
     val paper: Boolean get() = !liveMode
+
+    /** True when [strategy] may open positions under these settings. */
+    fun strategyEnabled(strategy: ScalpStrategy): Boolean =
+        enabledStrategies.isEmpty() || strategy.name in enabledStrategies
 
     /**
      * Resolve the settings the engine actually runs with. When [aggressive]
@@ -85,6 +97,11 @@ data class ScalpSettings(
     fun effective(): ScalpSettings {
         if (!aggressive) return this
         return copy(
+            maxStakeUsd = if (maxStakeUsd == DEFAULT_MAX_STAKE_USD) {
+                AGGRESSIVE_MAX_STAKE_USD
+            } else {
+                maxStakeUsd
+            },
             maxTradesPerHour = if (maxTradesPerHour == DEFAULT_MAX_TRADES_PER_HOUR) {
                 AGGRESSIVE_MAX_TRADES_PER_HOUR
             } else {
@@ -121,6 +138,7 @@ data class ScalpSettings(
     companion object {
         // Conservative declared defaults — the baseline effective() compares
         // against to detect "user never changed this".
+        const val DEFAULT_MAX_STAKE_USD = 5.0
         const val DEFAULT_MAX_TRADES_PER_HOUR = 2
         const val DEFAULT_WINDOW_SECONDS = 60
         const val DEFAULT_TAKE_PROFIT_PP = 6.0
@@ -128,13 +146,24 @@ data class ScalpSettings(
         const val DEFAULT_MAX_HOLD_MS = 480_000L
         const val DEFAULT_DIP_MIN_DROP_PP = 5.0
 
-        // Aggressive profile (bitcoin-swarm experiment branch).
-        const val AGGRESSIVE_MAX_TRADES_PER_HOUR = 20
+        // Aggressive profile (bitcoin-swarm experiment branch): 11 concurrent
+        // strategies trading the full window. One entry per strategy per
+        // window is the design intent behind the 60/h cap (4 windows/h × ~15)
+        // and the 12-open cap (one per strategy). The daily-loss breaker and
+        // kill switch are identical in both profiles — never relaxed.
+        const val AGGRESSIVE_MAX_STAKE_USD = 10.0
+        const val AGGRESSIVE_MAX_TRADES_PER_HOUR = 60
         const val AGGRESSIVE_WINDOW_SECONDS = 30
         const val AGGRESSIVE_TAKE_PROFIT_PP = 4.0
         const val AGGRESSIVE_STOP_LOSS_PP = 6.0
         const val AGGRESSIVE_MAX_HOLD_MS = 300_000L
         const val AGGRESSIVE_DIP_MIN_DROP_PP = 2.0
+
+        /** Fraction of the paper bankroll each entry may risk (aggressive). */
+        const val BANKROLL_FRACTION_PER_TRADE = 0.25
+
+        /** Paper bankroll seed (cents) for the stats display — aggressive. */
+        const val AGGRESSIVE_BANKROLL_SEED_CENTS = 100_000L
     }
 }
 
@@ -202,13 +231,18 @@ class ScalpSettingsStore(context: Context) {
     }
 
     suspend fun updateMaxOpenPositions(n: Int) {
-        app.scalpStore.edit { it[KEY_MAX_OPEN] = n.coerceIn(1, 5) }
+        app.scalpStore.edit { it[KEY_MAX_OPEN] = n.coerceIn(1, 12) }
+    }
+
+    /** Replace the per-strategy enable set. Empty = all strategies on. */
+    suspend fun updateEnabledStrategies(strategies: Set<String>) {
+        app.scalpStore.edit { it[KEY_STRATEGIES] = strategies }
     }
 
     private fun Preferences.toSettings() = ScalpSettings(
         enabled = this[KEY_ENABLED] ?: false,
         liveMode = this[KEY_LIVE] ?: false,
-        maxStakeUsd = this[KEY_STAKE] ?: 5.0,
+        maxStakeUsd = this[KEY_STAKE] ?: ScalpSettings.DEFAULT_MAX_STAKE_USD,
         takeProfitPp = this[KEY_TP] ?: ScalpSettings.DEFAULT_TAKE_PROFIT_PP,
         stopLossPp = this[KEY_SL] ?: ScalpSettings.DEFAULT_STOP_LOSS_PP,
         maxHoldMs = this[KEY_HOLD] ?: ScalpSettings.DEFAULT_MAX_HOLD_MS,
@@ -218,7 +252,8 @@ class ScalpSettingsStore(context: Context) {
         dipMinDropPp = this[KEY_DIP] ?: ScalpSettings.DEFAULT_DIP_MIN_DROP_PP,
         killSwitch = this[KEY_KILL] ?: false,
         aggressive = this[KEY_AGGRESSIVE] ?: true,
-        maxOpenPositions = this[KEY_MAX_OPEN] ?: 3
+        maxOpenPositions = this[KEY_MAX_OPEN] ?: 12,
+        enabledStrategies = this[KEY_STRATEGIES] ?: emptySet()
     )
 
     companion object {
@@ -235,5 +270,6 @@ class ScalpSettingsStore(context: Context) {
         private val KEY_KILL = booleanPreferencesKey("scalp_kill_switch")
         private val KEY_AGGRESSIVE = booleanPreferencesKey("scalp_aggressive")
         private val KEY_MAX_OPEN = intPreferencesKey("scalp_max_open_positions")
+        private val KEY_STRATEGIES = stringSetPreferencesKey("scalp_enabled_strategies")
     }
 }

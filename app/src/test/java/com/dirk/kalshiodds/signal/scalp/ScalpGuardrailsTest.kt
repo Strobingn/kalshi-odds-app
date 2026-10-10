@@ -72,9 +72,9 @@ class ScalpGuardrailsTest {
 
     @Test
     fun blocksWhenMaxOpenPositionsReached() {
-        // Default cap is 3 — two open is fine, the third concurrent entry is not.
-        assertNull(ScalpGuardrails.checkEnter(state(openPositionCount = 2), settings()))
-        val block = ScalpGuardrails.checkEnter(state(openPositionCount = 3), settings())
+        // Default cap is 12 (one slot per strategy in the 11-strategy swarm).
+        assertNull(ScalpGuardrails.checkEnter(state(openPositionCount = 11), settings()))
+        val block = ScalpGuardrails.checkEnter(state(openPositionCount = 12), settings())
         assertNotNull(block)
         assertTrue(block!!.contains("max open scalp positions"))
     }
@@ -111,9 +111,22 @@ class ScalpGuardrailsTest {
         assertEquals(5.0, s.stopLossPp, 1e-9)
         assertEquals(480_000L, s.maxHoldMs)
         assertEquals(5.0, s.dipMinDropPp, 1e-9)
-        // Aggression switch + concurrent-position cap (Task 2 additions).
+        // Aggression switch + concurrent-position cap (swarm: one per strategy).
         assertTrue(s.aggressive)
-        assertEquals(3, s.maxOpenPositions)
+        assertEquals(12, s.maxOpenPositions)
+        assertTrue(s.enabledStrategies.isEmpty()) // empty = all 11 strategies on
+        assertEquals(11, ScalpStrategy.values().size)
         assertTrue(s.paper)
+    }
+
+    @Test
+    fun strategyEnableSetIsRespected() {
+        // Empty set = everything on.
+        assertTrue(ScalpSettings().strategyEnabled(ScalpStrategy.PULSE_SNIPE))
+        // Explicit set gates exactly those strategies.
+        val s = ScalpSettings(enabledStrategies = setOf("DIP_HUNT", "FIFTY_FLIP"))
+        assertTrue(s.strategyEnabled(ScalpStrategy.DIP_HUNT))
+        assertTrue(s.strategyEnabled(ScalpStrategy.FIFTY_FLIP))
+        assertTrue(!s.strategyEnabled(ScalpStrategy.SPOT_LEAD))
     }
 }

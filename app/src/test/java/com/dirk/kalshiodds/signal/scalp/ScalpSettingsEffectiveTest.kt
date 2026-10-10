@@ -21,16 +21,21 @@ class ScalpSettingsEffectiveTest {
     @Test
     fun aggressiveDefaultsReplaceOnlyUntouchedFields() {
         val eff = ScalpSettings().effective() // aggressive = true, all defaults
-        assertEquals(20, eff.maxTradesPerHour)
+        assertEquals(60, eff.maxTradesPerHour)
         assertEquals(30, eff.windowSeconds)
         assertEquals(4.0, eff.takeProfitPp, 1e-9)
         assertEquals(6.0, eff.stopLossPp, 1e-9)
         assertEquals(300_000L, eff.maxHoldMs)
         assertEquals(2.0, eff.dipMinDropPp, 1e-9)
-        // Untouched by the profile — identical in both modes.
-        assertEquals(5.0, eff.maxStakeUsd, 1e-9)
+        // Untouched fields that now join the aggressive profile.
+        assertEquals(10.0, eff.maxStakeUsd, 1e-9)
+        // Identical in both modes — never relaxed.
         assertEquals(10.0, eff.maxDailyLossUsd, 1e-9)
-        assertEquals(3, eff.maxOpenPositions)
+        assertEquals(12, eff.maxOpenPositions)
+        // All 11 strategies on by default.
+        assertTrue(eff.enabledStrategies.isEmpty())
+        assertEquals(11, ScalpStrategy.values().size)
+        ScalpStrategy.values().forEach { assertTrue(eff.strategyEnabled(it)) }
     }
 
     @Test

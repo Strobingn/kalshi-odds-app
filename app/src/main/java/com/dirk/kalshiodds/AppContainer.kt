@@ -174,7 +174,21 @@ class AppContainer(context: Context) {
         liveExecutor = liveScalpExecutor,
         store = scalpLedger,
         scope = scalpScope,
-        onEvent = { event -> runCatching { onScalpEvent(event) } }
+        onEvent = { event -> runCatching { onScalpEvent(event) } },
+        // SPOT_LEAD / OPEN_DRIVE features: exact 15s spot return from the
+        // Coinbase WS ring, falling back to the REST snapshot's 1m return.
+        spotProvider = { series ->
+            val snap = external.refreshIfStale().forSeries(series)
+            if (snap == null) {
+                null
+            } else {
+                val asset = snap.asset.uppercase()
+                com.dirk.kalshiodds.signal.scalp.ScalpSpot(
+                    return15s = spotStream?.returnOver(asset, 15_000L),
+                    return1m = spotStream?.overlay(snap)?.spotReturn1m ?: snap.spotReturn1m
+                )
+            }
+        }
     )
     init {
         // Every scored tick (WS, REST, book-derived) feeds the scalper. The

@@ -156,6 +156,21 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setScalpMaxOpenPositions(n: Int) =
         viewModelScope.launch { container.scalpSettingsStore.updateMaxOpenPositions(n) }
 
+    /** Toggle one strategy in the aggressive-mode enable set (empty = all on). */
+    fun setScalpStrategyEnabled(name: String, enabled: Boolean) {
+        viewModelScope.launch {
+            val current = container.scalpSettingsStore.hydrate()
+            // An empty set means "all on" — materialize it so one toggle
+            // doesn't accidentally enable a previously-absent strategy.
+            val all = current.enabledStrategies.ifEmpty {
+                com.dirk.kalshiodds.signal.scalp.ScalpStrategy.values().map { it.name }.toSet()
+            }
+            container.scalpSettingsStore.updateEnabledStrategies(
+                if (enabled) all + name else all - name
+            )
+        }
+    }
+
     fun setScalpStake(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateMaxStakeUsd(v) }
     fun setScalpTakeProfitPp(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateTakeProfitPp(v) }
     fun setScalpStopLossPp(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateStopLossPp(v) }

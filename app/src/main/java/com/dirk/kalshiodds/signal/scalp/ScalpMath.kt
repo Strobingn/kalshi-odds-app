@@ -31,6 +31,8 @@ class ScalpMath(
     /** Immutable point-in-time features. Nulls mean "not enough data yet". */
     data class ScalpFeatures(
         val lastMidPp: Double?,
+        /** The mid print before [lastMidPp] (crossing detectors). */
+        val prevMidPp: Double? = null,
         val shortEmaPp: Double?,
         val longEmaPp: Double?,
         /** Slope of the newest samples, cents per second. */
@@ -39,6 +41,21 @@ class ScalpMath(
         val accelerationPpPerSec2: Double?,
         val windowMinPp: Double?,
         val windowMaxPp: Double?,
+        /**
+         * Volume-free VWAP proxy: uniform-weighted mean of mids over the
+         * window. The tick feed carries no per-print size, so true VWAP is
+         * unavailable — this is the documented stand-in (see
+         * [ScalpStrategy.VWAP_REVERT]).
+         */
+        val vwapPp: Double? = null,
+        /** Population std of mids in the window (quiet-regime detector). */
+        val midStdPp: Double? = null,
+        /**
+         * Least-squares slope over ALL samples in the window (cents/s) —
+         * the "dominant move over the window so far" for LATE_DRIFT /
+         * OPEN_DRIVE. Null with fewer than 2 samples.
+         */
+        val windowVelocityPpPerSec: Double? = null,
         /** shortEma − lastMid. Positive = price below the fast trend (a dip). */
         val dropFromShortEmaPp: Double?,
         /** Deepest (emaAtSample − mid) within the window — how far price ran
@@ -56,10 +73,12 @@ class ScalpMath(
     private val emaGaps = ArrayDeque<Double>()
     private var shortEma: Double? = null
     private var longEma: Double? = null
+    private var prevMid: Double? = null
 
     /** Feed one mid print. Prices outside 1..99¢ and non-finite are ignored. */
     fun onPrice(midPp: Double, nowMs: Long) {
         if (!midPp.isFinite() || midPp < 1.0 || midPp > 99.0) return
+        prevMid = samples.lastOrNull()?.midPp
         val prevEma = shortEma
         val a = shortEma
         shortEma = if (a == null) midPp else shortEmaAlpha * midPp + (1.0 - shortEmaAlpha) * a
@@ -76,6 +95,7 @@ class ScalpMath(
         emaGaps.clear()
         shortEma = null
         longEma = null
+        prevMid = null
     }
 
     fun snapshot(nowMs: Long? = null): ScalpFeatures {
@@ -89,14 +109,20 @@ class ScalpMath(
         val emaS = shortEma
         val emaL = longEma
         val span = if (pts.size >= 2) pts.last().nowMs - pts.first().nowMs else 0L
+        val mean = mids.takeIf { it.isNotEmpty() }?.average()
+        val midStd = mean?.let { m -> kotlin.math.sqrt(mids.sumOf { (it - m) * (it - m) } / mids.size) }
         return ScalpFeatures(
             lastMidPp = last,
+            prevMidPp = prevMid,
             shortEmaPp = emaS,
             longEmaPp = emaL,
             velocityPpPerSec = vel,
             accelerationPpPerSec2 = accel,
             windowMinPp = mids.minOrNull(),
             windowMaxPp = mids.maxOrNull(),
+            vwapPp = mean,
+            midStdPp = midStd,
+            windowVelocityPpPerSec = velocity(mids, times, WINDOW_VELOCITY_POINTS),
             dropFromShortEmaPp = if (emaS != null && last != null) emaS - last else null,
             maxDropFromShortEmaPp = emaGaps.maxOrNull(),
             dropFromWindowMaxPp = if (last != null) (mids.maxOrNull() ?: last) - last else null,
@@ -114,6 +140,9 @@ class ScalpMath(
     }
 
     companion object {
+        /** Cap for the whole-window velocity fit (bounds LSQ work on hot ticks). */
+        private const val WINDOW_VELOCITY_POINTS = 240
+
         /**
          * Least-squares slope (cents/second) over the newest [points]
          * samples. Null when fewer than 2 samples or the span is < 1 ms.

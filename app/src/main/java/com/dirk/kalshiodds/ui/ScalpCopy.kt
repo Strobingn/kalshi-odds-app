@@ -72,6 +72,7 @@ object ScalpCopy {
         ExitReason.STOP -> "STOP"
         ExitReason.TIMEOUT -> "TIMEOUT"
         ExitReason.MOMENTUM_FADE -> "MOMENTUM_FADE"
+        ExitReason.WINDOW_CLOSE -> "WINDOW_CLOSE"
     }
 
     private val hhMmUtc = ThreadLocal.withInitial {

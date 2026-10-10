@@ -81,6 +81,17 @@ class ScalpViewModel(app: Application) : AndroidViewModel(app) {
         val paired = ScalpStatsMath.pairRows(rows)
         val now = System.currentTimeMillis()
         val open = container.scalpLedger.openPositions()
+        // Aggressive experiment tracks a $1,000 paper bankroll; conservative
+        // keeps the $100 seed.
+        val seed = kotlinx.coroutines.runBlocking {
+            runCatching { container.scalpSettingsStore.hydrate().aggressive }.getOrDefault(true)
+        }.let { aggressive ->
+            if (aggressive) {
+                com.dirk.kalshiodds.signal.scalp.ScalpSettings.AGGRESSIVE_BANKROLL_SEED_CENTS
+            } else {
+                ScalpStatsMath.PAPER_START_BANKROLL_CENTS
+            }
+        }
         // Mark an open position to the live book mid so the bankroll endpoint
         // reflects unrealized P&L; the book may be absent (engine idle).
         val openMark = open.firstOrNull()?.let { pos ->
@@ -91,7 +102,7 @@ class ScalpViewModel(app: Application) : AndroidViewModel(app) {
         }
         return ScalpScreenState(
             loading = false,
-            stats = ScalpStatsMath.compute(paired, open = openMark, nowMs = now),
+            stats = ScalpStatsMath.compute(paired, open = openMark, nowMs = now, startBankrollCents = seed),
             trades = paired.sortedByDescending { it.exitTimeMs },
             openPositions = open,
             error = null

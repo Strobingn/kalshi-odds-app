@@ -125,10 +125,16 @@ object ScalpStatsMath {
     /** Paper bankroll the scalper starts from: $100.00. */
     const val PAPER_START_BANKROLL_CENTS = 10_000L
 
+    /**
+     * @param startBankrollCents paper bankroll seed for the running-balance
+     *   display. Default $100 (conservative profile); aggressive mode passes
+     *   [com.dirk.kalshiodds.signal.scalp.ScalpSettings.AGGRESSIVE_BANKROLL_SEED_CENTS].
+     */
     fun compute(
         trades: List<ClosedTrade>,
         open: OpenPositionMark? = null,
-        nowMs: Long = trades.maxOfOrNull { it.exitTimeMs } ?: 0L
+        nowMs: Long = trades.maxOfOrNull { it.exitTimeMs } ?: 0L,
+        startBankrollCents: Long = PAPER_START_BANKROLL_CENTS
     ): ScalpStats {
         val ordered = trades.sortedBy { it.exitTimeMs }
         val wins = ordered.filter { it.pnlCents > 0 }
@@ -142,12 +148,12 @@ object ScalpStatsMath {
         val lossCount = losses.size
         val tradeCount = ordered.size
 
-        // Bankroll: seed with the $100 paper stake, then running net after
-        // each exit. An open position appends a marked-to-market endpoint.
+        // Bankroll: seed, then running net after each exit. An open position
+        // appends a marked-to-market endpoint.
         val points = ArrayList<BankrollPoint>(tradeCount + 2)
         val startMs = ordered.firstOrNull()?.entryTimeMs ?: nowMs
-        points += BankrollPoint(startMs, PAPER_START_BANKROLL_CENTS)
-        var running = PAPER_START_BANKROLL_CENTS
+        points += BankrollPoint(startMs, startBankrollCents)
+        var running = startBankrollCents
         ordered.forEach { t ->
             running += t.pnlCents
             points += BankrollPoint(t.exitTimeMs, running)
