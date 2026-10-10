@@ -129,4 +129,15 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
         )
         return LadderUi(statuses = statuses, entries = entries)
     }
+
+    /** 0.3.46 'Reset paper bankroll to $20,000' on Scalp Data — same action as Settings. */
+    fun resetPaperBankrollTo20k() {
+        val v = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+        viewModelScope.launch {
+            runCatching { container.preferences.updatePaperBankrollStartUsd(v) }
+            container.paper.book.configure(startUsd = v)
+            container.paper.resetTo20k()
+        }
+    }
+
 }

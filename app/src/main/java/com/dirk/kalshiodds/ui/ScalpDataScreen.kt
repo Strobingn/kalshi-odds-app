@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
@@ -161,6 +162,12 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
             }
         }
         item {
+            var confirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+            androidx.compose.material3.OutlinedButton(onClick = {
+                if (confirm) { viewModel.resetPaperBankrollTo20k(); confirm = false } else confirm = true
+            }) { androidx.compose.material3.Text(if (confirm) PaperResetCopy.CONFIRM else PaperResetCopy.BUTTON) }
+        }
+        item {
             com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
                 tickers = emptyList(), orders = paperOrders, showTicket = false,
                 onSubmit = { _, _, _, _, _, _ -> }, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder
@@ -213,4 +220,11 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
                 color = when (row.positive) { true -> colors.up; false -> colors.down; null -> colors.textSecondary })
         }
     }
+}
+
+/** 0.3.46 shared copy for the $20,000 reset button (Settings + Scalp Data). */
+object PaperResetCopy {
+    const val BUTTON = "Reset paper bankroll to $20,000"
+    const val CONFIRM = "Tap again to reset — history is archived"
+    const val DONE = "Paper bankroll reset to $20,000 — prior paper fills archived, no Kalshi orders"
 }

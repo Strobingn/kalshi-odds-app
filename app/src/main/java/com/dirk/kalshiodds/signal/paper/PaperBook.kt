@@ -649,9 +649,18 @@ class PaperBook(
             return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — Bitcoin-only")
         }
         val want = if (side.equals("NO", true)) "NO" else "YES"
-        val px = KalshiPrice.usable(limitPrice)
+        val px0 = KalshiPrice.usable(limitPrice)
             ?: return PaperBuy.Outcome(ok = false, message = "Paper skip $ticker — unusable limit")
         synchronized(lock) {
+            // 0.3.46: market fills walk the displayed book (VWAP of consumed levels, capped at total depth).
+            val walked = walkBuy(ticker, want, wantContracts)
+            if (walked != null && walked.filled < 1) {
+                val msg = "Paper skip $ticker — no displayed ask depth"
+                publish(_state.value.copy(lastMessage = msg))
+                return PaperBuy.Outcome(ok = false, message = msg)
+            }
+            val px = walked?.vwap ?: px0
+            @Suppress("NAME_SHADOWING") val wantContracts = walked?.filled ?: wantContracts
             val cur = _state.value
             val open = cur.fills.firstOrNull {
                 !it.settled && it.ticker.equals(ticker, ignoreCase = true)
@@ -895,6 +904,18 @@ class PaperBook(
         }
     }
 
+    /**
+     * 0.3.46 displayed-depth source for paper MARKET fills: (ticker, side, buy) → levels best-first
+     * (asks ascending for buys, bids descending for sells), dollars × contracts. Null = unknown → top-of-book price.
+     */
+    @Volatile var depth: ((ticker: String, side: String, buy: Boolean) -> List<Pair<Double, Double>>?)? = null
+
+    private fun walkBuy(ticker: String, side: String, qty: Int): PaperBookWalk.Walk? =
+        runCatching { depth?.invoke(ticker, side, true) }.getOrNull()?.let { PaperBookWalk.walk(it, qty) }
+
+    private fun walkSell(ticker: String, side: String, qty: Int): PaperBookWalk.Walk? =
+        runCatching { depth?.invoke(ticker, side, false) }.getOrNull()?.let { PaperBookWalk.walk(it, qty) }
+
     fun sell(ticket: TradeTicket): PaperFill? {
         if (!ticket.canPaper || !ticket.isSell) return null
         val want = if (ticket.side.equals("NO", true)) "NO" else "YES"
@@ -909,9 +930,17 @@ class PaperBook(
                 publish(cur.copy(lastMessage = "Paper sell skip ${ticket.ticker} — no open $want fill"))
                 return null
             }
-            val qty = min(ticket.contracts, open.contracts).coerceAtLeast(0)
-            if (qty <= 0) return null
-            val proceeds = qty * px
+            val qty0 = min(ticket.contracts, open.contracts).coerceAtLeast(0)
+            if (qty0 <= 0) return null
+            // 0.3.46: walk the displayed bids (VWAP, capped at total bid depth).
+            val walked = walkSell(ticket.ticker, want, qty0)
+            if (walked != null && walked.filled < 1) {
+                publish(cur.copy(lastMessage = "Paper sell skip ${ticket.ticker} — no displayed bid depth"))
+                return null
+            }
+            val qty = walked?.filled ?: qty0
+            val sellPx = walked?.vwap ?: px
+            val proceeds = qty * sellPx
             val cost = qty * open.limitPrice
             val pnl = proceeds - cost
             val remaining = open.contracts - qty
@@ -922,7 +951,7 @@ class PaperBook(
                 won = pnl >= 0.0,
                 pnlUsd = pnl,
                 updatedAtMs = nowMs(),
-                note = "Paper sell $qty ct @ ${String.format(java.util.Locale.US, "%.1f¢", px * 100)} · never sent to Kalshi"
+                note = "Paper sell $qty ct @ ${String.format(java.util.Locale.US, "%.1f¢", sellPx * 100)} · never sent to Kalshi"
             )
             val leftover = if (remaining > 0) {
                 open.copy(
@@ -952,7 +981,7 @@ class PaperBook(
                         sold.displaySide,
                         sold.ticker,
                         qty,
-                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(px),
+                        com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(sellPx),
                         pnl
                     )
                 )
@@ -1107,8 +1136,16 @@ class PaperBook(
                 )
                 return null
             }
-            val allIn = KalshiFee.totalCost(useQty, px, feeRate)
-            val fee = KalshiFee.total(useQty, px, feeRate)
+            // 0.3.46: walk the displayed book for the sized clip (VWAP, capped at total depth).
+            val walked = walkBuy(ticker, want, useQty)
+            if (walked != null && walked.filled < 1) {
+                publish(cur.copy(lastMessage = "Paper skip $ticker — no displayed ask depth"))
+                return null
+            }
+            val qtyW = walked?.filled ?: useQty
+            val pxW = walked?.vwap ?: px
+            val allIn = KalshiFee.totalCost(qtyW, pxW, feeRate)
+            val fee = KalshiFee.total(qtyW, pxW, feeRate)
             if (minStakeUsd != null && com.dirk.kalshiodds.decision.AutopilotMinStake.below(allIn)) {
                 publish(cur.copy(lastMessage = com.dirk.kalshiodds.decision.AutopilotMinStake.REASON))
                 return null
@@ -1117,8 +1154,8 @@ class PaperBook(
                 ticker = ticker,
                 side = want,
                 stakeUsd = allIn,
-                contracts = useQty,
-                limitPrice = px,
+                contracts = qtyW,
+                limitPrice = pxW,
                 source = source,
                 note = buildString {
                     append(note)
@@ -1264,15 +1301,64 @@ class PaperBook(
  * The persisted one-time flag lives in SignalPreferences.applyPaperBankrollReset0340IfNeeded.
  */
 object PaperBankrollReset0340 {
+    /** Historical 0.3.40 target; 0.3.46 moves the default to $20,000 via [PaperBankrollReset0346]. */
+    const val TARGET = 10_000.0
     const val NOTE = "0.3.40: paper bankroll reset to \$10,000 — earlier paper fills archived, not deleted"
 
     /** @return the bankroll the book now starts at. */
-    fun apply(book: PaperBook, target: Double = SignalConstants.PAPER_START_USD): Double {
+    fun apply(book: PaperBook, target: Double = TARGET): Double {
         val cur = book.snapshot()
         val fresh = PaperBookState.rememberFills(cur).isEmpty() && cur.archived.isEmpty() &&
             kotlin.math.abs(cur.startingUsd - target) < 1e-6 && kotlin.math.abs(cur.cashUsd - target) < 1e-6
         if (!fresh) book.reset(target, NOTE)
         book.configure(startUsd = target)
         return target
+    }
+}
+
+
+/** 0.3.46 one-time paper bankroll reset to $20,000 (archive history, mark reset point; fresh installs untouched). */
+object PaperBankrollReset0346 {
+    const val NOTE = "0.3.46: paper bankroll reset to \$20,000 — earlier paper fills archived, not deleted"
+
+    fun apply(book: PaperBook, target: Double = SignalConstants.PAPER_START_USD): Double {
+        val cur = book.snapshot()
+        val fresh = PaperBookState.rememberFills(cur).isEmpty() &&
+            kotlin.math.abs(cur.startingUsd - target) < 1e-6 && kotlin.math.abs(cur.cashUsd - target) < 1e-6
+        if (!fresh) book.reset(target, NOTE)
+        book.configure(startUsd = target)
+        return target
+    }
+}
+
+/** 0.3.46: walk displayed levels (best first) for [qty] contracts → filled count and VWAP; capped at total depth. */
+object PaperBookWalk {
+    data class Walk(val filled: Int, val vwap: Double, val levelsUsed: Int)
+
+    fun walk(levels: List<Pair<Double, Double>>, qty: Int): Walk {
+        var left = qty
+        var cost = 0.0
+        var used = 0
+        for ((price, size) in levels) {
+            if (left <= 0) break
+            val take = minOf(left, kotlin.math.floor(size + 1e-9).toInt())
+            if (take <= 0) continue
+            cost += take * price
+            left -= take
+            used++
+        }
+        val filled = qty - left
+        return Walk(filled, if (filled > 0) cost / filled else 0.0, used)
+    }
+}
+
+/** 0.3.46: best-first executable levels for a side from a YES/NO bid book (dollars, contracts). */
+object PaperDepthLevels {
+    fun levels(side: String, buy: Boolean, yesBids: List<Pair<Double, Double>>, noBids: List<Pair<Double, Double>>): List<Pair<Double, Double>> {
+        val no = side.equals("NO", true)
+        val own = if (no) noBids else yesBids
+        val other = if (no) yesBids else noBids
+        return if (buy) other.filter { it.second > 0.0 }.map { (1.0 - it.first) to it.second }.sortedBy { it.first }
+        else own.filter { it.second > 0.0 }.sortedByDescending { it.first }
     }
 }

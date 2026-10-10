@@ -201,7 +201,7 @@ class PaperBookTest {
         assertEquals(1_000.0 /* 0.3.40: tests size on a $1,000 book; app default is $10,000 */ + snap.realizedPnlUsd, snap.paperBankrollUsd, 1e-6)
         assertEquals(snap.paperBankrollUsd, snap.cashUsd, 1e-6)
         book.reset()
-        assertEquals(10_000.0, book.snapshot().cashUsd, 1e-9) // reset() goes to the $10,000 default
+        assertEquals(20_000.0, book.snapshot().cashUsd, 1e-9) // reset() goes to the $20,000 default (0.3.46)
         assertTrue(book.snapshot().fills.isEmpty())
     }
 

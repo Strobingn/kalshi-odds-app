@@ -795,17 +795,17 @@ fun SettingsContent(
                 onValueChange = { viewModel?.setPaperBankrollDraft(it) },
                 modifier = Modifier.fillMaxWidth(),
                 label = { Text("Paper bankroll start (USD)") },
-                supportingText = { Text("Default $10,000. Used on Reset. Settled paper P&L updates the bankroll. Reset archives paper history; nothing is deleted.") },
+                supportingText = { Text("Default $20,000. Used on Reset. Settled paper P&L updates the bankroll. Reset archives paper history; nothing is deleted.") },
                 singleLine = true
             )
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text(String.format(Locale.US, "Reset paper book to $%,.0f", s.paperBankrollStartUsd))
             }
             OutlinedButton(
-                onClick = { viewModel?.resetPaperBookTo(SignalConstants.PAPER_START_USD) },
+                onClick = { viewModel?.resetPaperBankrollTo20k() },
                 modifier = Modifier.height(44.dp)
             ) {
-                Text(String.format(Locale.US, "Set paper bankroll to $%,.0f and reset", SignalConstants.PAPER_START_USD))
+                Text(PaperResetCopy.BUTTON)
             }
 
             Section("D3 daily favourite (KXBTCD 5 PM ET)")

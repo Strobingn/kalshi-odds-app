@@ -441,6 +441,20 @@ class SignalPreferences(
         }
     }
 
+    /**
+     * 0.3.46 one-time: paper bankroll → $20,000 (owner request). Same rules as 0.3.40: history archived by
+     * [PaperBook.reset] (archive timestamp = reset point on the scorecard); a fresh install just starts at $20,000.
+     */
+    suspend fun applyPaperBankrollReset0346IfNeeded(book: com.dirk.kalshiodds.signal.paper.PaperBook) {
+        val prefs = app.signalDataStore.data.first()
+        if (prefs[KEY_PAPER_RESET_0346] == true) return
+        val target = com.dirk.kalshiodds.signal.paper.PaperBankrollReset0346.apply(book)
+        edit {
+            it[KEY_PAPER_START] = target
+            it[KEY_PAPER_RESET_0346] = true
+        }
+    }
+
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         app.signalDataStore.edit(block)
     }
@@ -618,6 +632,7 @@ class SignalPreferences(
         private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
         private val KEY_PAPER_RESET_0328 = booleanPreferencesKey("paper_bankroll_reset_v0328")
         private val KEY_PAPER_RESET_0340 = booleanPreferencesKey("paper_bankroll_reset_v0340")
+        private val KEY_PAPER_RESET_0346 = booleanPreferencesKey("paper_bankroll_reset_v0346")
         private val KEY_STAKE_V0316 = booleanPreferencesKey("last_minute_stake_v0316")
 
         fun parseTickerList(text: String): List<String> =

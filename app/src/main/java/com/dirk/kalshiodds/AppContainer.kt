@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds
 
+import kotlinx.coroutines.launch
 import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiTradeClient
 import com.dirk.kalshiodds.data.api.NetworkModule
@@ -269,4 +270,13 @@ class AppContainer(context: Context) {
             )
         }
     }
+
+    init {
+        // 0.3.46: paper MARKET fills walk the live WS book (VWAP of consumed levels, capped at total displayed depth).
+        paper.book.depth = { ticker, side, buy ->
+            val b = scoring.book.snapshotBook(ticker)?.takeIf { scoring.book.hasSnapshot(ticker) }
+            if (b == null) null else com.dirk.kalshiodds.signal.paper.PaperDepthLevels.levels(side, buy, b.yes, b.no)
+        }
+    }
+
 }

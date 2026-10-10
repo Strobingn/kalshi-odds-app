@@ -37,9 +37,11 @@ class ReleaseGate0340BankrollAndScalpDataTest {
 
     @Test
     fun defaultPaperBankrollIsTenThousand() {
-        assertEquals(10_000.0, SignalConstants.PAPER_START_USD, 0.0)
-        assertEquals(10_000.0, PaperBookState().startingUsd, 0.0)
-        assertEquals(10_000.0, PaperBookState().cashUsd, 0.0)
+        // 0.3.46 moved the default to $20,000; the 0.3.40 migration keeps its historical $10,000 target.
+        assertEquals(10_000.0, PaperBankrollReset0340.TARGET, 0.0)
+        assertEquals(20_000.0, SignalConstants.PAPER_START_USD, 0.0)
+        assertEquals(20_000.0, PaperBookState().startingUsd, 0.0)
+        assertEquals(20_000.0, PaperBookState().cashUsd, 0.0)
     }
 
     @Test
@@ -67,10 +69,10 @@ class ReleaseGate0340BankrollAndScalpDataTest {
     @Test
     fun freshInstallStartsAtTenThousandWithoutAnEmptyArchive() {
         val book = PaperBook()
-        PaperBankrollReset0340.apply(book)
+        com.dirk.kalshiodds.signal.paper.PaperBankrollReset0346.apply(book)
         assertTrue(book.snapshot().archived.isEmpty())
         assertNull(ScorecardCopy.resetMarkerLine(book.snapshot()))
-        assertEquals(10_000.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(20_000.0, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
@@ -79,7 +81,7 @@ class ReleaseGate0340BankrollAndScalpDataTest {
         val prefs = SignalPreferences(ctx)
         val book = PaperBook(initial = PaperBookState(startingUsd = 1_000.0, cashUsd = 990.0, fills = listOf(fill("c", -10.0)), lifetimeRealizedPnlUsd = -10.0))
         prefs.applyPaperBankrollReset0340IfNeeded(book) // may be first run or already flagged by the app's own startup
-        assertEquals(10_000.0, prefs.settings.first().paperBankrollStartUsd, 1e-9)
+        assertTrue(prefs.settings.first().paperBankrollStartUsd in setOf(10_000.0, 20_000.0)) // 0.3.46 startup may already have bumped it
         val n = book.snapshot().archived.size
         prefs.applyPaperBankrollReset0340IfNeeded(book) // flagged now: never again
         assertEquals(n, book.snapshot().archived.size)
@@ -93,7 +95,7 @@ class ReleaseGate0340BankrollAndScalpDataTest {
         val src = listOf(java.io.File("app/src/main/java/com/dirk/kalshiodds/ui"), java.io.File("src/main/java/com/dirk/kalshiodds/ui"))
             .first { it.isDirectory }
         assertTrue(java.io.File(src, "SettingsViewModel.kt").readText().contains("fun resetPaperBookTo("))
-        assertTrue(java.io.File(src, "SettingsScreen.kt").readText().contains("resetPaperBookTo(SignalConstants.PAPER_START_USD)"))
+        assertTrue(java.io.File(src, "SettingsScreen.kt").readText().contains("resetPaperBankrollTo20k()"))
     }
 
     // ---- Scalp Data ----
