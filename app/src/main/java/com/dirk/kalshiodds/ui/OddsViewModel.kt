@@ -817,7 +817,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
             // Scalp strategies run in parallel, each on its own tagged ledger.
             live.forEach { m ->
-                com.dirk.kalshiodds.signal.paper.ScalpStrategies.evaluate(m, nowMs).forEach { signal ->
+                com.dirk.kalshiodds.signal.paper.ScalpStrategies.evaluate(m, now).forEach { signal ->
                     paperBook.considerScalp(signal, enabled = true)
                 }
             }
