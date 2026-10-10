@@ -8,8 +8,8 @@ import java.util.Locale
 import kotlin.math.floor
 
 /**
- * Final live-order size. Dirk's hard rule: real orders are at most
- * **$5 all-in including Kalshi fees**.
+ * Final live-order size. Orders are sized by the AI's edge: quarter-Kelly
+ * on (model probability − ask), floored at **$5 all-in including Kalshi fees**.
  *
  * Fee per the published quadratic schedule
  * (https://kalshi.com/docs/kalshi-fee-schedule.pdf) and the
@@ -25,6 +25,29 @@ import kotlin.math.floor
 object LiveOrderSizer {
 
     const val LIVE_ALL_IN_CAP_USD = SignalConstants.LIVE_ALL_IN_CAP_USD
+
+    /**
+     * Edge-driven all-in cap. Quarter-Kelly on the model-vs-ask edge times the
+     * bankroll, never below the $5 floor and never above the max-bankroll
+     * fraction. No model edge (or unusable inputs) keeps the $5 floor.
+     */
+    fun edgeCapUsd(
+        modelProb: Double?,
+        ask: Double,
+        bankrollUsd: Double,
+        kellyFraction: Double = SignalConstants.DEFAULT_KELLY_FRACTION,
+        maxFraction: Double = SignalConstants.DEFAULT_MAX_BANKROLL_FRACTION,
+        floorUsd: Double = LIVE_ALL_IN_CAP_USD
+    ): Double {
+        val p = modelProb?.takeIf { it.isFinite() && it in 0.0..1.0 } ?: return floorUsd
+        val price = KalshiPrice.usable(ask) ?: return floorUsd
+        val bankroll = bankrollUsd.takeIf { it.isFinite() && it > 0.0 } ?: return floorUsd
+        val full = com.dirk.kalshiodds.signal.sizing.PositionSizer.fullKelly(p, price)
+        if (full <= 0.0) return floorUsd
+        val frac = (full * kellyFraction.coerceIn(0.05, 1.0))
+            .coerceAtMost(maxFraction.coerceIn(0.005, 0.25))
+        return (frac * bankroll).coerceAtLeast(floorUsd)
+    }
 
     data class Clip(
         val count: Int,
@@ -104,7 +127,7 @@ object LiveOrderSizer {
                 profitIfWinUsd = 0.0,
                 priceWire = "0.0000",
                 countWire = "0.00",
-                refusedReason = "No usable ask to size a $5 live order"
+                refusedReason = "No usable ask to size a live order"
             )
         val n = maxCount(p, capUsd, feeRate)
         if (n < 1) {
@@ -174,7 +197,7 @@ object LiveOrderSizer {
 
     /**
      * Last-chance cap on the ticket that is about to hit HTTP.
-     * Never raises size. Refuses rather than send over the $5 all-in cap.
+     * Never raises size. Refuses rather than send over the ticket's all-in cap.
      */
     fun enforce(
         ticket: TradeTicket,

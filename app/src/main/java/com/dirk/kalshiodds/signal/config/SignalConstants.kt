@@ -36,7 +36,9 @@ object SignalConstants {
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
     /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
-    const val PAPER_START_USD = 100.0
+    const val PAPER_START_USD = 20_000.0
+    /** Aggressive paper mode: fraction of paper equity risked per AI fill. */
+    const val PAPER_AGGRESSIVE_FRACTION = 0.10
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
     const val PAPER_LEDGER_MAX = 40

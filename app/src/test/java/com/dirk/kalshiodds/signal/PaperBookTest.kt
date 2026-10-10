@@ -18,17 +18,18 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtOneHundredAndPapersFiveDollarAiFill() {
+    fun startsAtTwentyThousandAndPapersUncappedAggressiveAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(20_000.0, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
         assertEquals("AI hunter", fill.source)
-        assertEquals(125, fill.contracts) // floor(5 / 0.04)
-        assertEquals(5.0, fill.stakeUsd, 1e-9)
-        assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
-        assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
+        // 10% of $20k equity = $2,000 at 4¢ → 50,000 ct (no explicit size, no cap)
+        assertEquals(50_000, fill.contracts)
+        assertEquals(2_000.0, fill.stakeUsd, 1e-9)
+        assertEquals(18_000.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(2_000.0, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
     }
 
@@ -94,13 +95,13 @@ class PaperBookTest {
         assertEquals(0, snap.openCount)
         val win = snap.fills.first { it.ticker == "WIN-1" }
         assertEquals(true, win.won)
-        assertEquals(120.0, win.pnlUsd!!, 1e-9) // 125 * 1 - 5
+        assertEquals(48_000.0, win.pnlUsd!!, 1e-9) // 50,000 * 1 - 2,000
         val loss = snap.fills.first { it.ticker == "LOSS-1" }
         assertEquals(false, loss.won)
-        assertEquals(-5.0, loss.pnlUsd!!, 1e-9)
-        assertEquals(115.0, snap.realizedPnlUsd, 1e-9)
-        // cash: 100 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 215
-        assertEquals(215.0, snap.cashUsd, 1e-9)
+        assertEquals(-2_000.0, loss.pnlUsd!!, 1e-9)
+        assertEquals(46_000.0, snap.realizedPnlUsd, 1e-9)
+        // cash: 20,000 - 6,000 + 50,000 (win) + 0 (loss) + 2,000 (void refund) = 66,000
+        assertEquals(66_000.0, snap.cashUsd, 1e-9)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())

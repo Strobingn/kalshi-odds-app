@@ -35,8 +35,8 @@ class PaperApprovePathTest {
         assertEquals(1, snap.fills.size)
         assertFalse(snap.fills.single().settled)
         assertEquals(1, snap.openCount)
-        assertTrue(snap.cashUsd < 100.0)
-        assertTrue(100.0 - snap.cashUsd + 1e-9 >= out.stakeUsd)
+        assertTrue(snap.cashUsd < SignalConstantsStart)
+        assertTrue(SignalConstantsStart - snap.cashUsd + 1e-9 >= out.stakeUsd)
         assertEquals(out.contracts, snap.fills.single().contracts)
         assertEquals(1, history.size)
         assertTrue(history.single().approved)
@@ -70,22 +70,21 @@ class PaperApprovePathTest {
     }
 
     @Test
-    fun winTargetAbovePaperEquityCapsAndStillBooks() = runBlocking {
+    fun winTargetAbovePaperCashIsUncappedAndStillBooks() = runBlocking {
         val ticket = ticket(
             TicketKind.HUNTER_VALUE,
             "KXBTC15M-CAP",
-            contracts = 400,
-            stake = 160.0,
+            contracts = 60_000,
+            stake = 24_000.0,
             px = 0.40,
             win = 50.0
         )
         val (out, book, history) = runApprove(ticket)
         assertTrue(out.message, out.ok)
-        assertTrue(out.capped)
-        val (maxQty, _) = PaperBuy.capContracts(400, 100.0, 0.40)
-        assertEquals(maxQty, out.contracts)
-        assertTrue(out.contracts in 1..249)
-        assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
+        assertFalse(out.capped)
+        assertEquals(60_000, out.contracts)
+        assertEquals(24_000.0, out.stakeUsd, 1e-9)
+        assertTrue(book.snapshot().cashUsd < 0.0)
         assertEquals(1, book.snapshot().openCount)
         assertEquals(1, history.size)
         val bets = HistoryAssembler.bets(history, book.snapshot(), HistoryAssembler.SourceFilter.PAPER)
@@ -183,6 +182,6 @@ class PaperApprovePathTest {
     )
 
     companion object {
-        private const val SignalConstantsStart = 100.0
+        private const val SignalConstantsStart = 20_000.0
     }
 }

@@ -33,7 +33,7 @@ class PaperTileBuyTest {
         assertEquals(1, book.snapshot().fills.size)
         assertEquals("YES", book.snapshot().fills.single().side)
         assertEquals(PaperTileBuy.SOURCE, book.snapshot().fills.single().source)
-        assertEquals(90.25, book.snapshot().cashUsd, 1e-9)
+        assertEquals(20_000.0 - 9.75, book.snapshot().cashUsd, 1e-9)
 
         val downBook = PaperBook(idFactory = { "p70" }, nowMs = { 1L })
         val down = PaperTileBuy.place(downBook, at31, "NO")

@@ -189,7 +189,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         val before = container.paper.book.snapshot().cashUsd
         container.paper.book.reset()
         track("paper_reset", before, 100.0) { }
-        _state.update { it.copy(credentialMessage = "Paper book archived and reset to $100 — no Kalshi orders") }
+        _state.update { it.copy(credentialMessage = "Paper book archived and reset to $20,000 — no Kalshi orders") }
     }
 
     private fun track(key: String, old: Any?, new: Any?, block: suspend () -> Unit) {

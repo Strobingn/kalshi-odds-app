@@ -67,7 +67,7 @@ class HomeCopyTest {
         assertTrue(upCall.isActionable)
         val line = HomeCopy.thisWindowHeadline(upCall, up, nowMs)
         assertTrue(line.startsWith("BET UP  BTC"))
-        assertTrue(line.contains("\$5 wins"))
+        assertTrue(line.contains("edge-sized wins"))
         assertTrue(line.contains("closes in 6:12"))
 
         val dead = HomeFixtures.market(

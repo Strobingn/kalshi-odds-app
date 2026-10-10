@@ -79,7 +79,7 @@ object TicketBuilder {
 
     /**
      * Long-shot hunter: ask ≤ [SignalSettings.longShotMaxAsk] (default 20¢)
-     * **and** AI/fair beats implied by fees + margin. Sized at the $5 all-in
+     * **and** AI/fair beats implied by fees + margin. Sized from the AI's edge (min $5 all-in)
      * live cap. Approve still required.
      */
     fun proposeHunterValue(market: MarketUiModel, ctx: Context): TradeTicket? {
@@ -98,7 +98,7 @@ object TicketBuilder {
         }
     }
 
-    /** Rebuild the same kind of ticket (live $5 cap, not bankroll win-target). */
+    /** Rebuild the same kind of ticket (edge-sized live cap, not bankroll win-target). */
     fun resizeForBankroll(ticket: TradeTicket, market: MarketUiModel, ctx: Context): TradeTicket {
         if (ticket.isSell) return ticket
         return when (ticket.kind) {
@@ -349,19 +349,26 @@ object TicketBuilder {
         // quoted touch. The payout check below can require a much smaller
         // $1 clip, so passing it alone does not make the displayed size real.
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
+        val model01 = modelProb(market, side)
+        val capUsd = LiveOrderSizer.edgeCapUsd(
+            modelProb = model01,
+            ask = ask,
+            bankrollUsd = bankroll,
+            kellyFraction = ctx.settings.kellyFraction
+        )
         val live = if (kind != TicketKind.MANUAL && liveBook != null) {
             LiveOrderSizer.sizeWithinDepth(
                 ask,
                 kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
-                SignalConstants.LIVE_ALL_IN_CAP_USD,
+                capUsd,
                 ctx.settings.feeRate
             )
         } else {
-            LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            LiveOrderSizer.size(ask, capUsd, ctx.settings.feeRate)
         }
         if (!live.ok) {
             return if (kind == TicketKind.MANUAL) {
-                blocked(market, side, ctx, live.refusedReason ?: "Cannot size a $5 live order", stakeUsd)
+                blocked(market, side, ctx, live.refusedReason ?: "Cannot size a live order", stakeUsd)
             } else {
                 null
             }
@@ -376,12 +383,11 @@ object TicketBuilder {
         if (kind == TicketKind.CONFIGURED && !payoutCheck.ok) return null
         if (kind == TicketKind.HUNTER && !payoutCheck.ok) return null
 
-        val model01 = modelProb(market, side)
         val implied = live.price
         val netPer = model01?.let { it - live.allInUsd / live.count }
         val edge = netPer != null && netPer > AUTO_VALUE_MARGIN
         // All automatic tickets need a buffer above the executable ask and
-        // the fee for the actual $5 clip. A cheap payoff is not itself edge.
+        // the fee for the edge-sized clip. A cheap payoff is not itself edge.
         if (kind != TicketKind.MANUAL && !edge) return null
 
         val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
@@ -411,7 +417,7 @@ object TicketBuilder {
             title = market.title,
             sizingNote = String.format(
                 java.util.Locale.US,
-                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · $5 cap",
+                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · edge-sized (min $5)",
                 live.count,
                 live.price * 100.0,
                 live.allInUsd,
@@ -420,7 +426,7 @@ object TicketBuilder {
             ),
             gateNote = when (kind) {
                 TicketKind.HUNTER ->
-                    "Hunter print ($1 can settle ≥$25) · live size is the $5 all-in cap · Approve still required"
+                    "Hunter print ($1 can settle ≥$25) · live size is edge-sized (min $5 all-in) · Approve still required"
                 TicketKind.HUNTER_VALUE -> longShotNote(
                     ctx.settings.longShotMaxAsk,
                     implied,
@@ -428,7 +434,7 @@ object TicketBuilder {
                     minProfit
                 )
                 TicketKind.MANUAL ->
-                    "Manual buy · $5 all-in cap including fees · Approve still required"
+                    "Manual buy · edge-sized all-in including fees (min $5) · Approve still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
@@ -448,12 +454,13 @@ object TicketBuilder {
             winTargetCapped = true,
             winTargetNote = String.format(
                 java.util.Locale.US,
-                "≤$5 all-in · min profit $%.0f · wins $%.2f",
+                "edge-sized all-in (min $5) · min profit $%.0f · wins $%.2f",
                 minProfit,
                 live.profitIfWinUsd
             ),
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
+            sizingCapUsd = capUsd,
             visibleContracts = quoted?.toInt()
         )
     }
@@ -492,11 +499,25 @@ object TicketBuilder {
                 LiveOrderSizer.sizeWithinDepth(
                     ask,
                     kotlin.math.floor((quotedSize(market, side, liveBook) ?: 0.0) + 1e-9).toInt(),
-                    SignalConstants.LIVE_ALL_IN_CAP_USD,
+                    LiveOrderSizer.edgeCapUsd(
+                        modelProb = probability,
+                        ask = ask,
+                        bankrollUsd = ctx.bankrollUsd ?: ctx.settings.bankrollUsd,
+                        kellyFraction = ctx.settings.kellyFraction
+                    ),
                     ctx.settings.feeRate
                 )
             } else {
-                LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+                LiveOrderSizer.size(
+                    ask,
+                    LiveOrderSizer.edgeCapUsd(
+                        modelProb = probability,
+                        ask = ask,
+                        bankrollUsd = ctx.bankrollUsd ?: ctx.settings.bankrollUsd,
+                        kellyFraction = ctx.settings.kellyFraction
+                    ),
+                    ctx.settings.feeRate
+                )
             }
             if (!clip.ok) return@mapNotNull null
             side to (probability - clip.allInUsd / clip.count)
@@ -511,7 +532,7 @@ object TicketBuilder {
         val cap = String.format(java.util.Locale.US, "%.0f¢", maxAsk.coerceIn(0.05, 0.40) * 100.0)
         val mkt = implied?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         val ai = model?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · $5 all-in · min profit \$${fmt(targetProfitUsd)} · Approve still required"
+        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · edge-sized (min $5) · min profit \$${fmt(targetProfitUsd)} · Approve still required"
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.0f", v)

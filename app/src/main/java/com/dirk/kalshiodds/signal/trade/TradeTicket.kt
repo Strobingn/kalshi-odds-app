@@ -74,7 +74,9 @@ data class TradeTicket(
     val bankrollSource: String? = null,
     val bankrollUsd: Double? = null,
     /** Visible contracts at/under the limit (book or quoted size). */
-    val visibleContracts: Int? = null
+    val visibleContracts: Int? = null,
+    /** Edge-derived all-in cap this ticket was sized against (min $5). */
+    val sizingCapUsd: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

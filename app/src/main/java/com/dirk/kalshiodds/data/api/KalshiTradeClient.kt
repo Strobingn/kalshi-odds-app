@@ -241,17 +241,25 @@ class KalshiTradeClient(
 
     private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
         if (ticket.isSell) return ticket
-        val clip = LiveOrderSizer.enforce(ticket)
-        if (!clip.ok) {
-            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
+        val floorUsd = LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+        val wanted = (ticket.sizingCapUsd ?: floorUsd).coerceAtLeast(floorUsd)
+        val bankroll = ticket.bankrollUsd?.takeIf { it.isFinite() && it > 0.0 }
+        val capUsd = if (bankroll != null) {
+            wanted.coerceAtMost(kotlin.math.max(floorUsd, bankroll * 0.25) + 1e-9)
+        } else {
+            wanted
         }
-        if (clip.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
+        val clip = LiveOrderSizer.enforce(ticket, capUsd)
+        if (!clip.ok) {
+            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the all-in cap")
+        }
+        if (clip.allInUsd > capUsd + 1e-9) {
             throw IllegalStateException(
                 String.format(
                     Locale.US,
                     "Live order all-in $%.2f exceeds the $%.2f cap",
                     clip.allInUsd,
-                    LiveOrderSizer.LIVE_ALL_IN_CAP_USD
+                    capUsd
                 )
             )
         }

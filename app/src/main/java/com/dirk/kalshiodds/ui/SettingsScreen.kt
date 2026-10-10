@@ -706,8 +706,8 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
-                    "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
+                "Isolated from live money. Starts at \$20,000, auto-logs an aggressive uncapped equity-fraction simulated fill that learns from settled results when an AI hunter / LiveCall " +
+                    "signal would trade. Never calls Kalshi. Reset returns cash to \$20,000. The home-screen PAPER BOOK " +
                     "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
                     "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
@@ -715,7 +715,7 @@ fun SettingsContent(
             )
             ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper book to $100")
+                Text("Reset paper book to $20,000")
             }
 
             Section("Live Approve tickets (Kalshi V2)")
