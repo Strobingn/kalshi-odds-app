@@ -148,6 +148,10 @@ fun ScalpScreen(
         }
 
         item {
+            SizingDataCard(state = state, colors = colors)
+        }
+
+        item {
             Text(
                 "OPEN (${openFills.size})",
                 style = MaterialTheme.typography.labelMedium,
@@ -238,5 +242,137 @@ private fun ScalpFillRow(fill: PaperFill, colors: com.dirk.kalshiodds.ui.theme.D
             color = colors.textSecondary
         )
         Spacer(Modifier.height(2.dp))
+    }
+}
+
+@Composable
+private fun SizingDataCard(state: OddsUiState, colors: com.dirk.kalshiodds.ui.theme.DipPalette) {
+    val paper = state.paper
+    val settings = state.settings
+
+    // Paper learning sizer (AggressivePaperSizer)
+    val settledWins = paper.fills.count { it.won == true }
+    val settledTotal = paper.fills.count { it.won != null }
+    val realizedPnl = paper.fills.mapNotNull { it.pnlUsd }.sum()
+    val learned = com.dirk.kalshiodds.signal.paper.AggressivePaperSizer.multiplier(
+        settledWins = settledWins,
+        settledTotal = settledTotal,
+        pnlUsd = realizedPnl
+    )
+    val nextStake = com.dirk.kalshiodds.signal.paper.AggressivePaperSizer.stakeUsd(
+        paper.equityUsd, learned
+    )
+
+    // Live edge sizer (quarter-Kelly) evaluated at the home card's live ask,
+    // when a live BTC market is present.
+    val liveBtc = state.snapshot?.allMarkets?.firstOrNull {
+        com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(it.ticker)
+    }
+    val ask = liveBtc?.yesAsk
+    val modelPct = liveBtc?.aiYesPercent
+    val edgeCap = if (ask != null && modelPct != null) {
+        com.dirk.kalshiodds.signal.trade.LiveOrderSizer.edgeCapUsd(
+            modelProb = modelPct / 100.0,
+            ask = ask,
+            bankrollUsd = settings.bankrollUsd,
+            kellyFraction = settings.kellyFraction
+        )
+    } else {
+        null
+    }
+    val clip = edgeCap?.let {
+        com.dirk.kalshiodds.signal.trade.LiveOrderSizer.size(ask!!, it, settings.feeRate)
+    }
+
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .border(2.dp, colors.border, RoundedCornerShape(16.dp))
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            "SIZING ALGORITHMS",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textPrimary,
+            fontWeight = FontWeight.Bold
+        )
+
+        // Paper: uncapped learning equity-fraction
+        SizingRow("paper engine", "learning equity-fraction (uncapped)", colors)
+        SizingRow(
+            "settled record",
+            "$settledWins W / ${(settledTotal - settledWins).coerceAtLeast(0)} L of $settledTotal",
+            colors
+        )
+        SizingRow(
+            "realized P&L",
+            String.format(Locale.US, "%+.2f", realizedPnl),
+            colors
+        )
+        SizingRow(
+            "learning multiplier",
+            String.format(Locale.US, "%.2f\u00d7", learned),
+            colors
+        )
+        SizingRow(
+            "equity fraction",
+            String.format(Locale.US, "%.0f%% of equity", com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_AGGRESSIVE_FRACTION * 100.0),
+            colors
+        )
+        SizingRow(
+            "next AI stake",
+            String.format(Locale.US, "$%.2f", nextStake),
+            colors
+        )
+
+        // Live: quarter-Kelly edge sizing with $5 floor
+        SizingRow("live engine", "quarter-Kelly edge cap (min $5)", colors)
+        if (edgeCap != null && clip != null && clip.ok) {
+            SizingRow(
+                "BTC window",
+                "${"%.0f".format(modelPct!!)}% AI @ ${"%.0f".format(ask!! * 100)}\u00a2",
+                colors
+            )
+            SizingRow(
+                "edge cap",
+                String.format(Locale.US, "$%.2f (kelly %.0f%%)", edgeCap, settings.kellyFraction * 100.0),
+                colors
+            )
+            SizingRow(
+                "sized clip",
+                "${clip.count} ct \u00b7 all-in ${String.format(Locale.US, "$%.2f", clip.allInUsd)} \u00b7 fee ${String.format(Locale.US, "$%.2f", clip.feeUsd)}",
+                colors
+            )
+            SizingRow(
+                "profit if win",
+                String.format(Locale.US, "$%.2f", clip.profitIfWinUsd),
+                colors
+            )
+        } else {
+            SizingRow(
+                "sized clip",
+                if (edgeCap == null) "waiting for a live BTC window" else "no usable edge / ask",
+                colors
+            )
+        }
+    }
+}
+
+@Composable
+private fun SizingRow(label: String, value: String, colors: com.dirk.kalshiodds.ui.theme.DipPalette) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textPrimary,
+            fontWeight = FontWeight.SemiBold
+        )
     }
 }

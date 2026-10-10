@@ -35,7 +35,7 @@ Kelly is the growth-optimal bet size **only if the model probability is the true
 
 ### Six parallel paper scalpers + Scalp tab (0.3.17)
 
-The paper book now runs six strategies side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`). The app now has a persistent bottom navigation with a dedicated **Scalp tab**: strategy leaderboard (best settled P&L first), open fills with their exit rules, and the settled ledger:
+The paper book now runs six strategies side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`). The app now has a persistent bottom navigation with a dedicated **Scalp tab**: strategy leaderboard (best settled P&L first), open fills with their exit rules, the settled ledger, and a **SIZING ALGORITHMS** card showing both sizing engines live — the paper learning sizer (settled W/L record, realized P&L, learning multiplier, equity fraction, next AI stake) and the live quarter-Kelly edge sizer (current BTC window's AI% vs ask, edge cap, sized clip with count/all-in/fee, profit if win):
 
 1. **mid window reversal** — fades an early-window overreaction (ask stretched ≥12¢ from the AI's fair value in minutes 1–5); exits on the first 10–15¢ recovery.
 2. **t minus exit** — buys deep dips (≥5¢ under the AI, ask ≤40¢) with ≥4 minutes left; **hard time-stop at T−3:00**, never holds into the binary zone.
