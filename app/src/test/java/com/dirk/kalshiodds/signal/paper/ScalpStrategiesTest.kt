@@ -133,6 +133,27 @@ class ScalpStrategiesTest {
     }
 
     @Test
+    fun noScalpsFireInsideTheBinaryZone() {
+        // 2 minutes left: even a 1¢ collapsed ask with a model edge must not fire.
+        val now = close - 120_000L
+        val signals = ScalpStrategies.evaluate(market(yesAsk = 0.01, aiYes = 0.30), now)
+        assertTrue(signals.isEmpty())
+    }
+
+    @Test
+    fun noAutomaticTicketInsideTheBinaryZoneOnOneCentCollapse() {
+        val market = market(yesAsk = 0.01, aiYes = 0.30)
+        val ctx = com.dirk.kalshiodds.signal.trade.TicketBuilder.Context(
+            settings = com.dirk.kalshiodds.signal.config.SignalSettings(),
+            alertsPaused = false,
+            nowMs = close - 120_000L
+        )
+        assertNull(com.dirk.kalshiodds.signal.trade.TicketBuilder.propose(market, ctx))
+        assertNull(com.dirk.kalshiodds.signal.trade.TicketBuilder.proposeHunter(market, ctx))
+        assertNull(com.dirk.kalshiodds.signal.trade.TicketBuilder.proposeHunterValue(market, ctx))
+    }
+
+    @Test
     fun considerScalpDedupesPerTickerAndStrategy() {
         val ids = java.util.concurrent.atomic.AtomicInteger()
         val book = PaperBook(idFactory = { "s${ids.incrementAndGet()}" }, nowMs = { 5L })

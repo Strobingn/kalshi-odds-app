@@ -348,6 +348,14 @@ object TicketBuilder {
         // For automatic suggestions, the actual $5 clip must fit at the
         // quoted touch. The payout check below can require a much smaller
         // $1 clip, so passing it alone does not make the displayed size real.
+        // Binary zone: under MarketLifecycle.NO_AUTO_BET_MS the losing side
+        // collapses toward the 1¢ tick with no time to swing back — a
+        // dip there is real, not a discount. Refuse automatic tickets.
+        if (kind != TicketKind.MANUAL &&
+            com.dirk.kalshiodds.domain.MarketLifecycle.inNoAutoBetZone(market, ctx.nowMs)
+        ) {
+            return null
+        }
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
         val model01 = modelProb(market, side)
         // Only the AI's own tickets scale with its edge. A manual buy is the

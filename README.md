@@ -46,6 +46,8 @@ The paper book now runs six strategies side by side, each tagged on every fill a
 
 The learning multiplier (`AggressivePaperSizer`) feeds on all settled fills, so a strategy that wins presses its own sizing harder. One open fill per ticker **per strategy** — the strategies can hold the same window simultaneously.
 
+**Binary-zone guard:** in the last 3 minutes of a window (`MarketLifecycle.NO_AUTO_BET_MS`) no automatic ticket or scalp fires. A dip that late is real — there is no time left for it to swing back, and the losing side's ask has usually collapsed to the 1¢ tick. The AI will not propose those buys; manual taps remain possible.
+
 The paper book is deliberately **uncapped** — it is fake money and exists to measure the AI's raw edge: **$20,000 start** (`PAPER_START_USD`), **10% of paper equity per AI fill** (`PAPER_AGGRESSIVE_FRACTION`), with an unbounded learning multiplier (`AggressivePaperSizer`) that presses harder the more the settled record beats 50% wins and shrinks toward zero when it loses. Paper fills are never clipped to cash — the book may go negative — so aggressive sizing can never be silently watered down. If the AI's edge is real it shows up here first, at full size.
 
 ## 0.3.15

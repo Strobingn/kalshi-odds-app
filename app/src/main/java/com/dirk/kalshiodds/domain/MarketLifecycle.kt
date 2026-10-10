@@ -27,6 +27,20 @@ object MarketLifecycle {
         return false
     }
 
+    /**
+     * Inside this window before close, automatic AI tickets are refused: prices
+     * go binary, the losing side collapses toward the 1¢ tick, and a dip
+     * has no time left to swing back — any proposed cheap buy is near-certainly
+     * dead. Manual buys stay allowed.
+     */
+    const val NO_AUTO_BET_MS = 180_000L
+
+    /** True when less than [NO_AUTO_BET_MS] remains before close. */
+    fun inNoAutoBetZone(market: MarketUiModel, nowMs: Long): Boolean {
+        val close = market.closeTimeEpochMs ?: return false
+        return close - nowMs < NO_AUTO_BET_MS
+    }
+
     fun isTradable(market: MarketUiModel, nowMs: Long = System.currentTimeMillis()): Boolean {
         if (isClosed(market, nowMs)) return false
         val status = market.status?.trim()?.lowercase() ?: return true

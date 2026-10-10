@@ -73,6 +73,10 @@ object ScalpStrategies {
         val noAsk = KalshiPrice.usable(market.noAsk)
         val age = windowAgeMs(market, nowMs) ?: return out
         val left = msToClose(market, nowMs) ?: return out
+        // Binary zone: under MarketLifecycle.NO_AUTO_BET_MS a dip has no time
+        // to swing back and the losing side collapses to the 1¢ tick —
+        // no scalp fires.
+        if (left < com.dirk.kalshiodds.domain.MarketLifecycle.NO_AUTO_BET_MS) return out
 
         // 1. Mid-window reversal: early-window overreaction on the YES leg.
         // A big early move in the first 3-5 minutes that stretched the ask far
