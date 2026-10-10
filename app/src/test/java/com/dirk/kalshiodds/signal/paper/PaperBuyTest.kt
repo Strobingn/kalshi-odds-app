@@ -60,22 +60,22 @@ class PaperBuyTest {
     @Test
     fun paperBuyUsesRequestedSizeEvenWhenItExceedsStartingBalance() {
         val book = PaperBook()
-        // Force a requested stake above the $20k starting balance. Paper
+        // Force a requested stake above the $100k starting balance. Paper
         // credit remains synthetic and intentionally unrestricted.
         val out = PaperBuy.execute(
             book,
             ticket(
                 TicketKind.HUNTER_VALUE,
                 ticker = "KXBTC15M-CAP",
-                contracts = 55_000,
-                stake = 22_000.0,
+                contracts = 300_000,
+                stake = 120_000.0,
                 px = 0.40,
                 win = 50.0
             )
         )
         assertTrue(out.message, out.ok)
         assertFalse(out.capped)
-        assertEquals(55_000, out.contracts)
+        assertEquals(300_000, out.contracts)
         assertEquals(out.contracts * 0.40, out.stakeUsd, 1e-9)
         assertTrue(book.snapshot().cashUsd < 0.0)
     }

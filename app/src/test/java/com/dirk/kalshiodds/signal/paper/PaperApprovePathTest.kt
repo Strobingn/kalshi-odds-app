@@ -75,15 +75,15 @@ class PaperApprovePathTest {
         val ticket = ticket(
             TicketKind.HUNTER_VALUE,
             "KXBTC15M-CAP",
-            contracts = 55_000,
-            stake = 22_000.0,
+            contracts = 300_000,
+            stake = 120_000.0,
             px = 0.40,
             win = 50.0
         )
         val (out, book, history) = runApprove(ticket)
         assertTrue(out.message, out.ok)
         assertFalse(out.capped)
-        assertEquals(55_000, out.contracts)
+        assertEquals(300_000, out.contracts)
         assertTrue(book.snapshot().cashUsd < 0.0)
         assertEquals(1, book.snapshot().openCount)
         assertEquals(1, history.size)
