@@ -14,7 +14,7 @@ android {
         // Independent Chat Bitcoin installation. Keep this ID and the
         // committed signing key stable: Android updates only install when both
         // the package name and signing certificate match the installed APK.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        applicationId = "com.dirk.chatbitcoin"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a

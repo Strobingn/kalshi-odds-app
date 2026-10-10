@@ -66,17 +66,19 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
 
 ## `chat-GTP` separate install
 
-This branch builds **DipHunter GTP** with the independent Android application
-ID `com.dirk.kalshiodds.chatgtp` and a separate launcher icon. It installs
-alongside the original app and has its own local data and API-key settings.
+This branch builds **Chat Bitcoin** with the independent Android application
+ID `com.dirk.chatbitcoin` and a separate launcher icon. It installs alongside
+the original app and has its own local data and API-key settings.
 Each push to `chat-GTP` triggers the APK workflow and publishes the rolling
 `gtp-v1.0-chat-GTP` prerelease. Install future APKs from that same branch
 over this installation to keep its data: the signing certificate and package
 ID are stable and CI increases the version code for each new run. In **Settings
 → Check for app update**, the app checks that same branch release and downloads
 the next APK. Android asks for approval to install an update from this app;
-confirm it to update in place without removing local data. Never switch APKs
-signed with another certificate or a different application ID.
+confirm it to update in place without removing local data. The first Chat
+Bitcoin APK must be installed manually because its new application ID makes it
+a separate app; after that, use its in-app updater. Never switch APKs signed
+with another certificate or a different application ID.
 
 ### Edge-model refresh (`chat-GTP` only)
 

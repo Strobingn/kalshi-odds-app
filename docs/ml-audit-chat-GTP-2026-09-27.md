@@ -41,7 +41,7 @@ established.
 7. Buy tickets now prefer the current order-book ask to older tick and REST
    quotes; if a live book has no sellers for a side, a stale REST ask cannot
    create a ticket. A regression test covers both sides and the empty side.
-8. This app has its own ID (`com.dirk.kalshiodds.chatgtp`), launcher icon,
+8. This app has its own ID (`com.dirk.chatbitcoin`), launcher icon,
    local data, exports, and rolling branch APK release. The committed debug
    key and increasing CI version codes allow updates over the same install.
    Settings includes an in-app updater that checks the branch release,
