@@ -58,20 +58,20 @@ class ReleaseGate0339Test {
 
     @Test
     fun errorBacksOffAndResumesInsteadOfDisabling() {
-        assertEquals(30_000L, AutopilotBackoff.delayFor(1))
-        assertEquals(60_000L, AutopilotBackoff.delayFor(2))
-        assertEquals(480_000L, AutopilotBackoff.delayFor(5))
-        assertEquals(600_000L, AutopilotBackoff.delayFor(6))
-        assertEquals(600_000L, AutopilotBackoff.delayFor(40))
+        assertEquals(1_000L, AutopilotBackoff.delayFor(1)) // 0.3.49: 1 s doubling, cap 10 s
+        assertEquals(2_000L, AutopilotBackoff.delayFor(2))
+        assertEquals(8_000L, AutopilotBackoff.delayFor(4))
+        assertEquals(10_000L, AutopilotBackoff.delayFor(5))
+        assertEquals(10_000L, AutopilotBackoff.delayFor(40))
 
         val b = AutopilotBackoff()
         val wait = b.onError(1_000L, "HTTP 500")
-        assertEquals(30_000L, wait)
-        assertTrue(b.blocked(1_000L + 29_999L))
+        assertEquals(1_000L, wait)
+        assertTrue(b.blocked(1_000L + 999L))
         // After the wait it resumes on its own.
-        assertFalse(b.blocked(31_000L))
+        assertFalse(b.blocked(2_000L))
         // A second error in the same episode doubles; success resets.
-        assertEquals(60_000L, b.onError(31_000L, "HTTP 500"))
+        assertEquals(2_000L, b.onError(31_000L, "HTTP 500"))
         assertEquals(1_000L, b.episodeStartMs)
         b.onSuccess()
         assertFalse(b.blocked(31_001L))

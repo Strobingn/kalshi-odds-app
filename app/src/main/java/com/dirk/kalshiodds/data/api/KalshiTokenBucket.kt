@@ -65,6 +65,13 @@ class KalshiTokenBucket(
     private val spent = java.util.ArrayDeque<Pair<Long, Double>>()
     @Volatile var real429s: Int = 0
         private set
+    private val real429At = java.util.ArrayDeque<Long>()
+
+    /** 0.3.49: real Kalshi 429s in the last hour (Home status line). */
+    fun real429sLastHour(now: Long = nowMs()): Int = synchronized(lock) {
+        while (real429At.isNotEmpty() && now - real429At.first() > 3_600_000L) real429At.removeFirst()
+        real429At.size
+    }
 
     fun configure(next: KalshiTier) = synchronized(lock) {
         tier = next
@@ -136,6 +143,7 @@ class KalshiTokenBucket(
     fun noteRead429(retryAfterMs: Long?): Long {
         synchronized(lock) {
             real429s++
+            real429At.addLast(nowMs())
             droppedAtMs = nowMs()
             val wait = backoffDelayMs(readAttempt, retryAfterMs)
             readAttempt = (readAttempt + 1).coerceAtMost(8)

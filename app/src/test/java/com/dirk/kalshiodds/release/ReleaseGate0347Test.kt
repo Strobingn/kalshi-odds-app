@@ -116,7 +116,7 @@ class ReleaseGate0347Test {
     @Test fun crashHandlerPersistsAndAnnouncesOnce() {
         val ctx = ApplicationProvider.getApplicationContext<android.content.Context>()
         CrashLog.attach(ctx); CrashLog.clear(); CrashLog.attach(ctx)
-        val f = CrashLog.write("main", IllegalArgumentException("Key \"tX\" was already used"), "0.3.48", nowMs = 1_000L)
+        val f = CrashLog.write("main", IllegalArgumentException("Key \"tX\" was already used"), "0.3.49", nowMs = 1_000L)
         assertNotNull(f)
         assertEquals(1, CrashLog.files().size)
         assertTrue(CrashLog.headline(f!!).contains("IllegalArgumentException"))

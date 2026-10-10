@@ -293,7 +293,7 @@ class LiveSignalsService : Service() {
                         )
                     }
                 },
-                onCf = { tick -> runCatching { container.cfFeed.accept(tick) } },
+                onCf = { tick -> runCatching { container.cfFeed.acceptAndNotify(tick) } },
                 onBookGap = { tickers -> runCatching { hub.scoring.book.invalidateBooks(tickers) } },
                 onLog = { msg -> Log.d(TAG, msg) },
                 urls = com.dirk.kalshiodds.signal.ws.KalshiWsAuth.wsUrls(demo)

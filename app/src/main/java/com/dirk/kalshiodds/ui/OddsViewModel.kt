@@ -55,6 +55,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class OddsUiState(
+    /** 0.3.49 Home status line: WS state, last tick age, AI eval latency, REST delay, real 429s last hour. */
+    val feedStatus: String = "",
     val isLoading: Boolean = false,
     val snapshot: MarketsSnapshot? = null,
     val userMessage: String? = null,
@@ -138,7 +140,61 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var rolloverBound = false
     private var lastRecordedTicketError: String? = null
 
+    /** 0.3.49: event-driven eval (WS ticker / book delta / CF tick → debounced per market → AI + scalpers + Home). */
+    private val marketEvents = com.dirk.kalshiodds.signal.engine.MarketEventDebouncer(viewModelScope) { tickers -> onMarketEvents(tickers) }
+
+    private fun onMarketEvents(tickers: Set<String>) {
+        val snap = _state.value.snapshot ?: return
+        fun List<MarketUiModel>.live() = map { m -> if (m.ticker in tickers) m.withLiveQuote(hub.scoring.book.lastTick(m.ticker)) else m }
+        val next = snap.copy(btc = snap.btc.live(), eth = snap.eth.live(), sol = snap.sol.live(), extra = snap.extra.live())
+        _state.update { it.copy(snapshot = next) } // Home cards straight from the WS flow
+        val s = _state.value.settings
+        if (!s.paperTradingEnabled) return
+        val changed = next.allMarkets.filter { it.ticker in tickers }
+        if (changed.isNotEmpty()) runPaperAutopilot(changed)
+    }
+
+    private fun startEventDriven() {
+        hub.onMarketEvent = { t -> marketEvents.fire(t) }
+        container.cfFeed.onTick = { indexId ->
+            _state.value.snapshot?.allMarkets?.forEach { m ->
+                val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker)
+                if (com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series) == indexId) marketEvents.fire(m.ticker)
+            }
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                delay(com.dirk.kalshiodds.signal.engine.MarketEventDebouncer.EXIT_TIMER_MS)
+                // 1 s timer only for exits / time stops on open scalps + the status line.
+                runCatching {
+                    val s = _state.value.settings
+                    val live = _state.value.snapshot?.allMarkets.orEmpty()
+                    if (s.paperTradingEnabled && live.isNotEmpty()) {
+                        val open = container.scalp.openTickers()
+                        val withOpen = live.filter { it.ticker in open }
+                        if (withOpen.isNotEmpty()) runScalp(withOpen, s)
+                    }
+                }
+                _state.update { it.copy(feedStatus = feedStatusLine()) }
+            }
+        }
+    }
+
+    private fun feedStatusLine(now: Long = System.currentTimeMillis()): String {
+        val ws = _state.value.signalStatus.state == WsConnectionState.CONNECTED
+        val last = hub.lastWsEventAtMs
+        val age = if (last <= 0L) "—" else String.format(java.util.Locale.US, "%.1fs", (now - last) / 1000.0)
+        val bucket = com.dirk.kalshiodds.data.api.KalshiRest.bucket
+        val restMs = if (ws) WS_METADATA_POLL_MS else currentIntervalMs
+        val hold = bucket.readHoldRemainingMs()
+        return com.dirk.kalshiodds.signal.engine.FeedStatus.line(
+            wsConnected = ws, lastTickAge = age, evalMs = marketEvents.avgLatencyMs.takeIf { marketEvents.evals > 0 },
+            restDelayMs = restMs + hold, real429LastHour = bucket.real429sLastHour()
+        )
+    }
+
     init {
+        startEventDriven()
         ticketSession.onStart()
         _state.update { it.copy(paper = paperBook.snapshot()) }
         viewModelScope.launch {
@@ -519,13 +575,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         )
                     }
                 }
-                delay(
-                    if (headless) {
-                        max(nextDelayMs(), com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.BACKGROUND_POLL_MS)
-                    } else {
-                        nextDelayMs()
-                    }
-                )
+                // 0.3.49: no 5 s headless floor — AI/scalpers are event-driven off the WS; REST is backup only.
+                delay(nextDelayMs())
             }
         }
     }
@@ -551,11 +602,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun applyResult(result: MarketsSnapshot) {
+        // 0.3.49 root cause: this used to double the REST interval to 60 s on every rate-limited result (local
+        // throttles included) and only recover by ×0.8 per success — minutes of slow refresh after a WS drop.
+        // Now: wait exactly the shared bucket's hold (short, 0.3.45 design), capped at 8 s; success snaps back.
         if (result.rateLimited) {
-            currentIntervalMs = min(max(currentIntervalMs * 2, INITIAL_BACKOFF_MS), MAX_BACKOFF_MS)
+            val hold = com.dirk.kalshiodds.data.api.KalshiRest.bucket.readHoldRemainingMs()
+            currentIntervalMs = max(BASE_POLL_MS, hold).coerceAtMost(MAX_BACKOFF_MS)
         } else if (result.errorMessage == null) {
             val wsLive = _state.value.signalStatus.state == WsConnectionState.CONNECTED
-            currentIntervalMs = if (wsLive) WS_METADATA_POLL_MS else max((currentIntervalMs * 4) / 5, BASE_POLL_MS)
+            currentIntervalMs = if (wsLive) WS_METADATA_POLL_MS else BASE_POLL_MS
         }
         val wsConnected = _state.value.signalStatus.state == WsConnectionState.CONNECTED
         val pollLabel = when {
@@ -1847,7 +1902,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val JITTER_MS = 250L
         const val MIN_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val INITIAL_BACKOFF_MS = 2_000L
-        const val MAX_BACKOFF_MS = 60_000L
+        const val MAX_BACKOFF_MS = 8_000L // 0.3.49: was 60 s
         const val WS_METADATA_POLL_MS = 3_000L // 0.3.45
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
     }
