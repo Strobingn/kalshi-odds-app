@@ -60,22 +60,28 @@ object NetworkModule {
             return publicApi(demo)
         }
         val base = if (demo) KalshiApi.DEMO_TRADE_BASE_URL else KalshiApi.TRADE_BASE_URL
+        // 0.3.52: reuse one Retrofit per (host, key) — this used to build a fresh client + Retrofit on every poll.
+        val memoKey = base + "|" + creds.first + "|" + creds.second.hashCode()
+        synchronized(marketsMemo) { marketsMemo[memoKey]?.let { return it } }
         val client = okHttp.newBuilder()
             .addInterceptor(KalshiAuthInterceptor { creds })
             .build()
         return Retrofit.Builder()
             .baseUrl(base)
             .client(client)
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .addConverterFactory(StreamJsonConverterFactory(json, "application/json".toMediaType()))
             .build()
             .create(KalshiApi::class.java)
+            .also { api -> synchronized(marketsMemo) { if (marketsMemo.size >= 4) marketsMemo.clear(); marketsMemo[memoKey] = api } }
     }
+
+    private val marketsMemo = HashMap<String, KalshiApi>()
 
     private fun publicClient(baseUrl: String): KalshiApi =
         Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(okHttp)
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .addConverterFactory(StreamJsonConverterFactory(json, "application/json".toMediaType()))
             .build()
             .create(KalshiApi::class.java)
 
@@ -93,7 +99,7 @@ object NetworkModule {
         return Retrofit.Builder()
             .baseUrl(baseUrl)
             .client(client)
-            .addConverterFactory(json.asConverterFactory("application/json".toMediaType()))
+            .addConverterFactory(StreamJsonConverterFactory(json, "application/json".toMediaType()))
             .build()
             .create(KalshiTradeApi::class.java)
     }

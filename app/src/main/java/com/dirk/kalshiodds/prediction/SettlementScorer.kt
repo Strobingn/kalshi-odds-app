@@ -103,7 +103,8 @@ class SettlementScorer(
             val resp = resolveApi().getMarkets(
                 seriesTicker = series,
                 status = "settled",
-                limit = 200
+                // 0.3.52: newest settled first; 200 full market bodies per poll was ~MBs of JSON for a handful of tickers.
+                limit = (tickers.size + 12).coerceIn(12, 60)
             )
             val byTicker = resp.markets.associateBy { it.ticker.uppercase() }
             rateLimiter?.onSuccess()

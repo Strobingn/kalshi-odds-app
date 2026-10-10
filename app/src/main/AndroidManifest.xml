@@ -13,6 +13,7 @@
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 
     <application
+        android:largeHeap="true"
         android:name=".KalshiOddsApp"
         android:allowBackup="true"
         android:fullBackupContent="@xml/backup_rules"

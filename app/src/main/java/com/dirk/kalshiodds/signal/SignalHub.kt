@@ -116,6 +116,9 @@ class SignalHub(
         _watchTickers.value = tickers
         if (tickers.isNotEmpty()) {
             runCatching { scoring.book.pruneTo(tickers) }
+            // 0.3.52: per-ticker throttles/marks for closed windows were never dropped.
+            runCatching { scoring.pruneTo(tickers) }
+            listOf(lastBookPublishMs, lastOddsPersistMs, lastOddsMid, lastChartPersistMs).forEach { m -> m.keys.retainAll(tickers) }
             _scores.update { cur -> cur.filterKeys { it in tickers } }
         }
     }
