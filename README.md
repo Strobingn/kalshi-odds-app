@@ -17,7 +17,9 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.16**
+Package (code namespace): `com.dirk.kalshiodds` · version **0.3.16**
+
+**This is the `miss-bitcoin` branch.** Install ID on this branch: **`com.dirk.missbitcoin`** — it installs alongside the main app and `chat-GTP` builds as a third, separate app
 
 ## 0.3.16
 
