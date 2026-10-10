@@ -72,6 +72,8 @@ jobs:
               ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
             }
 
+      - name: Full unit suite (baseline probe)
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace --continue || true
       - name: Rename APK
         id: apk
         run: |
