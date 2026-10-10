@@ -271,6 +271,10 @@ internal fun AlgoCard(
                 modifier = Modifier.border(1.dp, if (holding) c.accentBlue else c.border, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 2.dp)
             )
         }
+        if (m == ScalpModels.Model.FORECAST_RIDE || m == ScalpModels.Model.FORECAST_FADE) {
+            Text("Horizon: " + com.dirk.kalshiodds.decision.ForecastScalp.horizonNote(), style = MaterialTheme.typography.labelSmall,
+                color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(if (traded) ScalpTabCopy.money(net) else "—", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,

@@ -165,7 +165,7 @@ class ReleaseGate0343PaperLimitTest {
         assertNull(ScalpRule.cfRepriceSignal(quote(0.50, 0.49, 100_000.0, 500L), cfr, listOf("YES", "NO")).first)
         // Outside 3–13 min.
         assertNull(ScalpRule.cfRepriceSignal(quote(0.50, 0.49, 100_300.0, 500L, tauS = 120.0), cfr, listOf("YES")).first)
-        assertNull(ScalpRule.cfRepriceSignal(quote(0.50, 0.49, 100_300.0, 500L, tauS = 800.0), cfr, listOf("YES")).first)
+        assertNotNull(ScalpRule.cfRepriceSignal(quote(0.50, 0.49, 100_300.0, 500L, tauS = 800.0), cfr, listOf("YES")).first) // 0.3.53: no warm-up, trades from the open
         // Spread > 2¢.
         assertNull(ScalpRule.cfRepriceSignal(quote(0.50, 0.46, 100_300.0, 500L), cfr, listOf("YES")).first)
     }

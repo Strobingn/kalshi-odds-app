@@ -1595,6 +1595,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bookGap = !hub.scoring.book.hasSnapshot(market.ticker)
             )
             container.scalp.onQuote(qq, enabled = s.paperTradingEnabled)
+            // 0.3.53 Forecast ride / fade: same quote + top-3 book sizes (recorder-identical features).
+            runCatching {
+                container.scalp.onForecastQuote(
+                    qq,
+                    top3Yes = book.yes.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                    top3No = book.no.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                    enabled = s.paperTradingEnabled
+                )
+            }
         }
     }
 
