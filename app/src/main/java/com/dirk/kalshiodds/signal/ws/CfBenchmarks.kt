@@ -129,6 +129,8 @@ object CfBenchmarks {
  */
 class CfBenchmarkStore {
     private val ticks = HashMap<String, CfBenchmarks.Tick>()
+    /** 0.3.49: CF tick → event-driven eval for that coin's markets. Called outside the lock. */
+    @Volatile var onTick: ((String) -> Unit)? = null
 
     @Synchronized
     fun accept(tick: CfBenchmarks.Tick) {
@@ -139,6 +141,11 @@ class CfBenchmarkStore {
             return
         }
         ticks[tick.indexId] = tick
+    }
+
+    fun acceptAndNotify(tick: CfBenchmarks.Tick) {
+        accept(tick)
+        runCatching { onTick?.invoke(tick.indexId) }
     }
 
     @Synchronized

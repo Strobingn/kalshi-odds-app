@@ -180,6 +180,15 @@ fun HomeScreen(
                         contentPadding = PaddingValues(16.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        if (state.feedStatus.isNotBlank()) {
+                            item(key = "feed-status") {
+                                androidx.compose.material3.Text(
+                                    state.feedStatus,
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
                         state.pauseBanner?.let { banner ->
                             item {
                                 Column(

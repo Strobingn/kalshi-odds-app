@@ -60,7 +60,7 @@ class KashiUpdatePagingTest {
         assertTrue(all.all { KashiReleasePolicy.TAG.matches(it.tag) })
         val r = c.check("0.3.47")
         assertTrue(r is UpdateCheck.Available && r.release.tag == "v0.3.48-debug")
-        assertEquals(UpdateCheck.UpToDate, c.check("0.3.48"))
+        assertEquals(UpdateCheck.UpToDate, c.check("0.3.49"))
     }
 
     @Test fun laterPageFailureKeepsEarlierResultsFirstPageFailureFails() {

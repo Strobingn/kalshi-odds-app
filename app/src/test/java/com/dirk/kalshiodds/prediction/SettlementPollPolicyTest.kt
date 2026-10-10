@@ -54,21 +54,15 @@ class SettlementPollPolicyTest {
 
     @Test
     fun backoffStepsThenCaps() {
+        // 0.3.49: 5/10/15 s, capped at 15 s (no 60 s waits).
         assertEquals(5_000L, SettlementPollPolicy.delayMs(0))
-        assertEquals(15_000L, SettlementPollPolicy.delayMs(1))
-        assertEquals(30_000L, SettlementPollPolicy.delayMs(2))
-        assertEquals(60_000L, SettlementPollPolicy.delayMs(3))
-        assertEquals(60_000L, SettlementPollPolicy.delayMs(8))
+        assertEquals(10_000L, SettlementPollPolicy.delayMs(1))
+        assertEquals(15_000L, SettlementPollPolicy.delayMs(2))
+        assertEquals(15_000L, SettlementPollPolicy.delayMs(8))
         val first = SettlementPollPolicy.afterMiss(SettlementPollPolicy.Schedule(), close)
         assertEquals(close + 5_000L, first.nextAttemptMs)
         val second = SettlementPollPolicy.afterMiss(first, first.nextAttemptMs)
-        assertEquals(first.nextAttemptMs + 15_000L, second.nextAttemptMs)
-        val third = SettlementPollPolicy.afterMiss(second, second.nextAttemptMs)
-        assertEquals(second.nextAttemptMs + 30_000L, third.nextAttemptMs)
-        val fourth = SettlementPollPolicy.afterMiss(third, third.nextAttemptMs)
-        assertEquals(third.nextAttemptMs + 60_000L, fourth.nextAttemptMs)
-        val fifth = SettlementPollPolicy.afterMiss(fourth, fourth.nextAttemptMs)
-        assertEquals(fourth.nextAttemptMs + 60_000L, fifth.nextAttemptMs)
+        assertEquals(first.nextAttemptMs + 10_000L, second.nextAttemptMs)
     }
 
     @Test

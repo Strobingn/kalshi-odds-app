@@ -36,7 +36,7 @@ object AlwaysOnAutopilot {
 }
 
 /**
- * Error backoff: 30 s, doubling, capped at 10 min. [onSuccess] resets.
+ * Error backoff: 1 s, doubling, capped at 10 s (0.3.49). [onSuccess] resets.
  * An "episode" starts at the first error after a success; alerts fire once per episode.
  */
 class AutopilotBackoff(
@@ -75,8 +75,9 @@ class AutopilotBackoff(
     fun blocked(nowMs: Long): Boolean = failures > 0 && nowMs < resumeAtMs
 
     companion object {
-        const val BASE_MS = 30_000L
-        const val MAX_MS = 10L * 60L * 1000L
+        // 0.3.49: was 30 s doubling to 10 min — one bad eval froze Autopilot for minutes.
+        const val BASE_MS = 1_000L
+        const val MAX_MS = 10_000L
 
         fun delayFor(failures: Int, baseMs: Long = BASE_MS, maxMs: Long = MAX_MS): Long {
             if (failures <= 0) return 0L

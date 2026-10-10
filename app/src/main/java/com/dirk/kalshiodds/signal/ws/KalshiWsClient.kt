@@ -52,6 +52,7 @@ class KalshiWsClient(
     private var reconnectJob: Job? = null
     private var hostIndex = 0
     private var backoffMs = INITIAL_BACKOFF_MS
+    private var reconnectAttempt = 0
     private var keyId: String = ""
     private var pem: String = ""
     @Volatile private var channels: List<String> = listOf("ticker", "orderbook_delta")
@@ -164,7 +165,9 @@ class KalshiWsClient(
     private fun scheduleReconnect() {
         if (!running.get()) return
         reconnectJob?.cancel()
-        val delayMs = (backoffMs + jitter().coerceAtLeast(0L)).coerceAtMost(MAX_BACKOFF_MS)
+        // 0.3.49: 0.5 s, 1 s, 2 s … cap 10 s, ±20 % jitter (was 1 s doubling to 30 s).
+        val delayMs = com.dirk.kalshiodds.signal.engine.WsReconnectSchedule.delayMs(reconnectAttempt, kotlin.random.Random.nextDouble(-1.0, 1.0))
+        reconnectAttempt = (reconnectAttempt + 1).coerceAtMost(10)
         backoffMs = min(backoffMs * 2, MAX_BACKOFF_MS)
         hostIndex += 1
         onState(
@@ -185,6 +188,7 @@ class KalshiWsClient(
         override fun onOpen(webSocket: WebSocket, response: Response) {
             runCatching {
                 backoffMs = INITIAL_BACKOFF_MS
+                reconnectAttempt = 0
                 subscribedSids.clear()
                 bookSeq.reset()
                 val host = webSocket.request().url.toString()
@@ -289,8 +293,8 @@ class KalshiWsClient(
 
     companion object {
         private const val TAG = "DipHunterTick"
-        const val INITIAL_BACKOFF_MS = 1_000L
-        const val MAX_BACKOFF_MS = 30_000L
+        const val INITIAL_BACKOFF_MS = com.dirk.kalshiodds.signal.engine.WsReconnectSchedule.INITIAL_MS
+        const val MAX_BACKOFF_MS = com.dirk.kalshiodds.signal.engine.WsReconnectSchedule.CAP_MS
 
         fun defaultClient(): OkHttpClient =
             OkHttpClient.Builder()

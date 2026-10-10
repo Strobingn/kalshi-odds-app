@@ -161,10 +161,20 @@ class SignalHub(
         }
     }
 
+    /** 0.3.49: event-driven AI/scalp eval + Home refresh — fired for every WS ticker/book event of a market. */
+    @Volatile var onMarketEvent: ((String) -> Unit)? = null
+    @Volatile var lastWsEventAtMs: Long = 0L
+
+    private fun marketEvent(ticker: String) {
+        lastWsEventAtMs = System.currentTimeMillis()
+        runCatching { onMarketEvent?.invoke(ticker) }
+    }
+
     fun ingestTick(tick: MarketTick) {
         if (tickMailbox.offer(tick.ticker, tick)) {
             tickScope.launch { drainTicks() }
         }
+        marketEvent(tick.ticker)
     }
 
     fun ingestBookSnapshot(
@@ -178,6 +188,7 @@ class SignalHub(
         if (!settings.isWatchedTicker(ticker)) return
         runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
         requestBookScore(ticker, receiveElapsedNanos)
+        marketEvent(ticker)
     }
 
     fun ingestBookDelta(
@@ -194,6 +205,7 @@ class SignalHub(
         // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
         runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }
         requestBookScore(ticker, receiveElapsedNanos)
+        marketEvent(ticker)
     }
 
     private fun requestBookScore(ticker: String, receiveElapsedNanos: Long) {

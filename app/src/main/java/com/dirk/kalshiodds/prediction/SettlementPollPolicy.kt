@@ -18,8 +18,9 @@ import retrofit2.HttpException
  */
 object SettlementPollPolicy {
 
-    val BACKOFF_MS: LongArray = longArrayOf(5_000L, 15_000L, 30_000L, 60_000L)
-    const val MAX_BACKOFF_MS = 60_000L
+    // 0.3.49: no 60 s waits anywhere — settlement retries step 5/10/15 s.
+    val BACKOFF_MS: LongArray = longArrayOf(5_000L, 10_000L, 15_000L)
+    const val MAX_BACKOFF_MS = 15_000L
     const val SERIES = "KXBTC15M"
     const val D3_SERIES = com.dirk.kalshiodds.signal.d3.D3Constants.SERIES
 
@@ -92,7 +93,7 @@ object SettlementPollPolicy {
         val wait = maxOf(delayMs(schedule.backoffIndex, retryAfterMs), retryAfterMs ?: 0L)
             .coerceAtLeast(BACKOFF_MS[0])
         return Schedule(
-            nextAttemptMs = nowMs + wait.coerceAtMost(MAX_BACKOFF_MS),
+            nextAttemptMs = nowMs + wait.coerceAtMost(maxOf(MAX_BACKOFF_MS, retryAfterMs ?: 0L)), // honor Kalshi Retry-After
             backoffIndex = nextIndex(schedule.backoffIndex)
         )
     }

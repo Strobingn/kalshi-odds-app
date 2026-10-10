@@ -81,7 +81,7 @@ class KalshiRateLimiter(
     companion object {
         const val MIN_SPACING_MS = 50L
         const val BASE_BACKOFF_MS = 500L
-        const val MAX_BACKOFF_MS = 15_000L
+        const val MAX_BACKOFF_MS = 8_000L // 0.3.49: same short cap as the token bucket
         const val JITTER_FRACTION = 0.20
     }
 }
