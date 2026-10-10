@@ -229,6 +229,12 @@ fun DataScreen(
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Sync now") }
 
+            Section("Memory")
+            val heapLine by androidx.compose.runtime.produceState(initialValue = com.dirk.kalshiodds.crash.HeapInfo.line()) {
+                while (true) { kotlinx.coroutines.delay(2_000); value = com.dirk.kalshiodds.crash.HeapInfo.line() }
+            }
+            Text(heapLine + " · GET cache ${com.dirk.kalshiodds.data.api.KalshiRest.gate.cacheEntries()} entries / ${com.dirk.kalshiodds.data.api.KalshiRest.gate.cacheBytes() shr 10} KB",
+                style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
             Section("Kalshi request counters")
             Text("Every Kalshi REST call this process made, by endpoint, plus 429s (from Kalshi vs our own limiter) and which loop owns each poll type. Refresh with the price log Refresh button.",
                 style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)

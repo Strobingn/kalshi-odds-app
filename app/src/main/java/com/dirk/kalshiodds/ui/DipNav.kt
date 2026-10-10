@@ -133,6 +133,7 @@ object DipNav {
     fun howToReach(route: String): String = when (route) {
         AppRoutes.HOME -> "Home tab"
         AppRoutes.SCALP_TAB -> "Scalp tab"
+        AppRoutes.SCALP_ALGO -> "Scalp tab → an algorithm"
         AppRoutes.SCORECARD -> "Scorecard tab"
         AppRoutes.LIVE -> "Live tab"
         AppRoutes.REAL_MONEY -> "Real Money tab"

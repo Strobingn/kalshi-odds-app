@@ -121,7 +121,7 @@ class MarketRepository(
     }
 
     suspend fun listOpen(series: String): List<MarketUiModel> {
-        val resp = resolveApi().getMarkets(seriesTicker = series, status = "open")
+        val resp = resolveApi().getMarkets(seriesTicker = series, status = "open", limit = OPEN_15M_LIMIT)
         val kind = when (series.uppercase()) {
             KalshiApi.SERIES_ETH -> SeriesKind.ETH
             KalshiApi.SERIES_SOL -> SeriesKind.SOL
@@ -198,13 +198,13 @@ class MarketRepository(
             val client = resolveApi()
             // A stored watch_btc=false must not blank Bitcoin.
             val btcDeferred = async {
-                client.getMarkets(KalshiApi.SERIES_BTC, status = "open")
+                client.getMarkets(KalshiApi.SERIES_BTC, status = "open", limit = OPEN_15M_LIMIT)
             }
             val ethDeferred = async {
-                if (watchEth) client.getMarkets(KalshiApi.SERIES_ETH, status = "open") else null
+                if (watchEth) client.getMarkets(KalshiApi.SERIES_ETH, status = "open", limit = OPEN_15M_LIMIT) else null
             }
             val solDeferred = async {
-                if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open") else null
+                if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open", limit = OPEN_15M_LIMIT) else null
             }
             val extrasDeferred = CryptoMarkets.liveTickers(extraTickers).map { ticker ->
                 async { fetchExtra(ticker) }
@@ -448,3 +448,6 @@ class MarketRepository(
         )
     }
 }
+
+/** 0.3.52: a 15m series has 1–2 open markets; never pull the default 100-market page every 1–3 s. */
+const val OPEN_15M_LIMIT = 10

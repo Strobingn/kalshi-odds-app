@@ -176,6 +176,12 @@ class ScoringEngine(
     private val tapeStreak = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val lastPrimarySide = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    /** 0.3.52: drop per-ticker state for markets no longer watched (closed windows). */
+    fun pruneTo(keep: Set<String>) {
+        if (keep.isEmpty()) return
+        listOf(lastAlertMs, lastBookScoreMs, tapeStreak, lastPrimarySide).forEach { m -> m.keys.retainAll(keep) }
+    }
+
     fun rememberMeta(
         ticker: String,
         closeTimeEpochMs: Long?,

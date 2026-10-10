@@ -117,7 +117,7 @@ object ScalpTabCopy {
 }
 
 @Composable
-fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpenScalpRules: () -> Unit) {
+fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpenScalpRules: () -> Unit, onOpenAlgo: (ScalpModels.Model) -> Unit = {}) {
     DisposableEffect(Unit) {
         viewModel.setScalpTabVisible(true)
         onDispose { viewModel.setScalpTabVisible(false) }
@@ -132,7 +132,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         onPlace = viewModel::ladderPlace,
         onCancel = viewModel::ladderCancel,
         onReprice = viewModel::ladderReprice,
-        onSellOwnedAt = viewModel::sellOwnedAt
+        onSellOwnedAt = viewModel::sellOwnedAt,
+        onOpenAlgo = onOpenAlgo
     )
 }
 
@@ -148,6 +149,7 @@ fun ScalpTabContent(
     onCancel: (String) -> Unit = {},
     onReprice: (String, Int) -> Unit = { _, _ -> },
     onSellOwnedAt: (Int) -> Unit = {},
+    onOpenAlgo: (ScalpModels.Model) -> Unit = {},
     /** Previews only: hide the coin cards to render the ladder card in view. */
     showCoinCards: Boolean = true
 ) {
@@ -180,6 +182,17 @@ fun ScalpTabContent(
                 Spacer(Modifier.weight(1f))
                 TextButton(onClick = onOpenScalpData) { Text("Scalp Data", maxLines = 1) }
                 IconButton(onClick = { info = true }) { Icon(Icons.Outlined.Info, contentDescription = "How it works", tint = c.textSecondary) }
+            }
+        }
+        if (showCoinCards) {
+            item(key = "algo-h") {
+                Text("Algorithms", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+            }
+            items(ScalpModels.ALL, key = { "algo-" + it.code }) { m ->
+                AlgoCard(m, st.algoAllTime[m], st.algoToday[m], st.algoByCoin[m].orEmpty()) { onOpenAlgo(m) }
+            }
+            item(key = "coins-h") {
+                Text("Leaders by coin", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
             }
         }
         if (showCoinCards) items(com.dirk.kalshiodds.decision.ScalpParams.COINS, key = { "coin-$it" }) { coin ->
@@ -236,6 +249,62 @@ fun ScalpTabContent(
             }
         }
         item(key = "end") { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+@Composable
+internal fun AlgoCard(
+    m: ScalpModels.Model, all: ScalpModels.Row?, today: ScalpModels.Row?, byCoin: Map<String, ScalpModels.Row>, onClick: () -> Unit
+) {
+    val c = DipTheme.colors
+    val net = all?.netUsd ?: 0.0
+    val traded = (all?.roundTrips ?: 0) > 0
+    FieldCard(onClick = onClick, accentColor = if (!traded) null else if (net >= 0) c.up else c.down) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text(m.label, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            val holding = all?.holding == true
+            Text(
+                if (holding) "Holding ${all!!.openContracts}" else "Running",
+                style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false,
+                color = if (holding) c.accentBlue else c.textSecondary,
+                modifier = Modifier.border(1.dp, if (holding) c.accentBlue else c.border, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(if (traded) ScalpTabCopy.money(net) else "—", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace, color = if (!traded) c.textSecondary else if (net >= 0) c.up else c.down, maxLines = 1)
+            Spacer(Modifier.width(10.dp))
+            Text("all-time · today " + (today?.takeIf { it.roundTrips > 0 }?.let { ScalpTabCopy.money(it.netUsd) } ?: "—"),
+                style = MaterialTheme.typography.labelMedium, color = c.textSecondary, maxLines = 1, modifier = Modifier.padding(bottom = 4.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        val r = all
+        StatPair("Won", r?.let { ScalpTabCopy.money(it.grossWinUsd) } ?: "—", "Lost", r?.let { ScalpTabCopy.money(it.grossLossUsd) } ?: "—")
+        StatPair("Wins / losses", r?.let { "${it.wins} / ${it.losses}" } ?: "—", "Win rate", ScalpTabCopy.pct(r?.winRate))
+        StatPair("Avg win", r?.avgWinUsd?.let { ScalpTabCopy.money(it) } ?: "—", "Avg loss", r?.avgLossUsd?.let { ScalpTabCopy.money(it) } ?: "—")
+        StatPair("Open", r?.let { "${it.openContracts} ct" } ?: "—", "Unrealized", r?.takeIf { it.open > 0 }?.let { ScalpTabCopy.money(it.unrealizedUsd) } ?: "—")
+        Spacer(Modifier.height(4.dp))
+        Text(
+            com.dirk.kalshiodds.decision.ScalpParams.COINS.joinToString("   ") { coin ->
+                val cr = byCoin[coin]
+                "$coin " + (cr?.takeIf { it.roundTrips > 0 }?.let { ScalpTabCopy.money(it.netUsd) } ?: "—")
+            },
+            style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+internal fun StatPair(l1: String, v1: String, l2: String, v2: String) {
+    val c = DipTheme.colors
+    Row(Modifier.fillMaxWidth().padding(vertical = 1.dp)) {
+        Text(l1, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = c.textSecondary, maxLines = 1)
+        Text(v1, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1, textAlign = TextAlign.End)
+        Spacer(Modifier.width(16.dp))
+        Text(l2, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = c.textSecondary, maxLines = 1)
+        Text(v2, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1, textAlign = TextAlign.End)
     }
 }
 
