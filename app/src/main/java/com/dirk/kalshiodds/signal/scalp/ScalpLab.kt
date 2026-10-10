@@ -149,6 +149,14 @@ class ScalpLab(
         }
     }
 
+    private fun profitable(pos: ScalpPosition, bid: Double): Boolean {
+        val px = KalshiPrice.usable(bid) ?: return false
+        val sellFee = KalshiFee.total(pos.contracts, px)
+        val proceeds = pos.contracts * px - sellFee
+        val cost = pos.stakeUsd + pos.feeUsd
+        return proceeds > cost + 0.009
+    }
+
     private fun mark(account: ScalpAccount, tape: ScalpTape): ScalpAccount {
         val pos = account.position ?: return account
         if (!pos.ticker.equals(tape.ticker, true)) return account
