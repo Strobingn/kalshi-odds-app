@@ -13,7 +13,7 @@ android {
     defaultConfig {
         // Independent install from the original DipHunter app. Keep this ID
         // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        applicationId = "com.dirk.missbitcoin"
         minSdk = 26
         targetSdk = 35
         // GitHub Actions run numbers increase with each branch push, so a
