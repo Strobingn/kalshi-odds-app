@@ -87,6 +87,19 @@ jobs:
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
+      - name: Legacy-bridge asset for pre-fix miss-bitcoin updaters
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Builds of miss-bitcoin cut before the updater fix check the old
+          # chat-GTP release for DipHunter-GTP-*.apk assets and can never see
+          # this branch's own release. Mirror the fresh APK there under the
+          # legacy name so those installs can self-update one last time.
+          set -euo pipefail
+          src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
+          gh release upload gtp-v1.0-chat-GTP "$src#DipHunter-GTP-v1.0-miss-bitcoin-legacy.apk" \
+            --repo "$GITHUB_REPOSITORY" --clobber || true
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
