@@ -52,12 +52,14 @@ data class ScalpParams(
     val maker: Boolean = false
 ) {
     /** Fair-gap ids keep the 0.3.40 format (g14-t12-…); other strategies are prefixed ("dip-g06-…"). */
-    val id: String
-        get() = (if (strategy == ScalpStrategy.FAIR_GAP) "" else strategy.code + "-") + String.format(
+    // 0.3.50: computed once per instance (was String.format on every access — hot in ScalpBook.onQuote).
+    val id: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        (if (strategy == ScalpStrategy.FAIR_GAP) "" else strategy.code + "-") + String.format(
             Locale.US, "g%02d-t%02d-s%02d-d%02d-w%03d",
             Math.round(minGap * 100), Math.round(target * 100), Math.round(stop * 100),
             Math.round(turnDown * 100), Math.round(tauMinS)
         ) + (if (maker) "-mk" else "")
+    }
 
     fun label(): String {
         val trigger = when (strategy) {

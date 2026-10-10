@@ -20,6 +20,7 @@ object DipNav {
 
     val tabLabel: Map<String, String> = mapOf(
         AppRoutes.HOME to "Home",
+        AppRoutes.SCALP_TAB to "Scalp",
         AppRoutes.SCORECARD to "Scorecard",
         AppRoutes.LIVE to "Live",
         AppRoutes.REAL_MONEY to "Real Money",
@@ -78,6 +79,13 @@ object DipNav {
             tab = false
         ),
         MoreDestination(
+            AppRoutes.SCALP_TAB,
+            "Records",
+            "Scalp tab",
+            "Six paper scalpers live: leaderboard, per-window winner, paper price ladder",
+            tab = true
+        ),
+        MoreDestination(
             AppRoutes.SCALP_DATA,
             "Records",
             "Scalp Data",
@@ -88,7 +96,7 @@ object DipNav {
             AppRoutes.SCALP,
             "Records",
             "Scalp (paper)",
-            "4 paper scalp strategies: rules, per-coin params, open scalps",
+            "6 paper scalp models: rules, per-coin params, open scalps",
             tab = false
         ),
         MoreDestination(
@@ -124,6 +132,7 @@ object DipNav {
 
     fun howToReach(route: String): String = when (route) {
         AppRoutes.HOME -> "Home tab"
+        AppRoutes.SCALP_TAB -> "Scalp tab"
         AppRoutes.SCORECARD -> "Scorecard tab"
         AppRoutes.LIVE -> "Live tab"
         AppRoutes.REAL_MONEY -> "Real Money tab"

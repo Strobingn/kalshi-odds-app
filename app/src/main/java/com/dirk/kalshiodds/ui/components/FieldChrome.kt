@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.History
@@ -258,6 +259,7 @@ fun FieldSyncLine(text: String, failed: Boolean, pending: Boolean, modifier: Mod
 
 private fun tabIcon(route: String): ImageVector = when (route) {
     AppRoutes.HOME -> Icons.Filled.Home
+    AppRoutes.SCALP_TAB -> Icons.Filled.ShowChart
     AppRoutes.SCORECARD -> Icons.Filled.Assessment
     AppRoutes.LIVE -> Icons.Filled.Receipt
     AppRoutes.REAL_MONEY -> Icons.Filled.AccountBalance
