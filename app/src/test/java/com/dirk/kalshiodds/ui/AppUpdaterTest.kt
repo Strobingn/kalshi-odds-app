@@ -9,17 +9,17 @@ class AppUpdaterTest {
     fun parsesBranchApkRunNumberIntoMonotonicVersion() {
         val raw = """{"assets":[
             {"name":"edge_model.json","browser_download_url":"https://github.com/other"},
-            {"name":"DipHunter-GTP-v1.0-chat-GTP-17.apk",
-             "browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/gtp-v1.0-chat-GTP/DipHunter-GTP-v1.0-chat-GTP-17.apk"}
+            {"name":"DipHunter-v1.0-miss-bitcoin-17.apk",
+             "browser_download_url":"https://github.com/Strobingn/kalshi-odds-app/releases/download/apk-v1.0-miss-bitcoin/DipHunter-v1.0-miss-bitcoin-17.apk"}
         ]}"""
         val asset = AppUpdater.parseAsset(raw)!!
         assertEquals(1_000_017, asset.versionCode)
-        assertEquals(true, asset.url.endsWith("chat-GTP-17.apk"))
+        assertEquals(true, asset.url.endsWith("miss-bitcoin-17.apk"))
     }
 
     @Test
     fun ignoresAssetsFromAnotherRepository() {
-        val raw = """{"assets":[{"name":"DipHunter-GTP-v1.0-chat-GTP-99.apk",
+        val raw = """{"assets":[{"name":"DipHunter-v1.0-miss-bitcoin-99.apk",
             "browser_download_url":"https://github.com/other/repo/releases/download/tag/app.apk"}]}"""
         assertNull(AppUpdater.parseAsset(raw))
     }
