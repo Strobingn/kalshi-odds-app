@@ -33,9 +33,9 @@ Kelly is the growth-optimal bet size **only if the model probability is the true
 2. **Quarter-Kelly (`DEFAULT_KELLY_FRACTION = 0.25`).** Estimation error makes full Kelly systematically oversize; quarter-Kelly gives up little growth and roughly quarters the drawdown.
 3. **Max 5% of bankroll per clip (`DEFAULT_MAX_BANKROLL_FRACTION`), and ≤25% of bankroll at the final client check.** Even a huge estimated edge cannot concentrate the book in one 15-minute window, and a malformed ticket cannot either.
 
-### Six parallel paper scalpers (0.3.17)
+### Six parallel paper scalpers + Scalp tab (0.3.17)
 
-The paper book now runs six strategies side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`), ranked on the PAPER BOOK card's SCALP LEADERBOARD (best settled P&L first):
+The paper book now runs six strategies side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`). The app now has a persistent bottom navigation with a dedicated **Scalp tab**: strategy leaderboard (best settled P&L first), open fills with their exit rules, and the settled ledger:
 
 1. **mid window reversal** — fades an early-window overreaction (ask stretched ≥12¢ from the AI's fair value in minutes 1–5); exits on the first 10–15¢ recovery.
 2. **t minus exit** — buys deep dips (≥5¢ under the AI, ask ≤40¢) with ≥4 minutes left; **hard time-stop at T−3:00**, never holds into the binary zone.

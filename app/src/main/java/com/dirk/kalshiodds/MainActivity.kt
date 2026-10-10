@@ -32,6 +32,7 @@ import com.dirk.kalshiodds.ui.DataScreen
 import com.dirk.kalshiodds.ui.DataViewModel
 import com.dirk.kalshiodds.ui.DipApp
 import com.dirk.kalshiodds.ui.OddsScreen
+import com.dirk.kalshiodds.ui.ScalpScreen
 import com.dirk.kalshiodds.ui.OddsViewModel
 import com.dirk.kalshiodds.ui.ScorecardScreen
 import com.dirk.kalshiodds.ui.ScorecardViewModel
@@ -128,6 +129,13 @@ class MainActivity : ComponentActivity() {
                             ScorecardScreen(
                                 viewModel = scorecardViewModel,
                                 onBack = { navigator.back() }
+                            )
+                        },
+                        scalp = {
+                            ScalpScreen(
+                                state = oddsState,
+                                onSetPaperTrading = { oddsViewModel.setPaperTrading(it) },
+                                onResetPaper = { oddsViewModel.resetPaperBook() }
                             )
                         },
                         data = {

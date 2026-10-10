@@ -1,5 +1,23 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.Assessment
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material3.Icon
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.sp
+
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 
@@ -21,6 +39,7 @@ fun DipApp(
     home: @Composable () -> Unit,
     settings: @Composable () -> Unit,
     scorecard: @Composable () -> Unit,
+    scalp: @Composable () -> Unit,
     data: @Composable () -> Unit,
     history: @Composable () -> Unit,
     signalHistory: @Composable () -> Unit,
@@ -32,13 +51,83 @@ fun DipApp(
     BackHandler(enabled = sheetOpen) {
         onCancelSheet()
     }
-    when (navigator.current) {
-        AppRoutes.SETTINGS -> settings()
-        AppRoutes.SCORECARD -> scorecard()
-        AppRoutes.DATA -> data()
-        AppRoutes.HISTORY -> history()
-        AppRoutes.SIGNAL_HISTORY -> signalHistory()
-        AppRoutes.CHART -> chart()
-        else -> home()
+    val palette = DipTheme.colors
+    val showBottomNavigation = navigator.current != AppRoutes.CHART
+    Scaffold(
+        containerColor = palette.bg,
+        bottomBar = {
+            if (showBottomNavigation) {
+                AppBottomNavigation(
+                    selectedRoute = navigator.current,
+                    onSelect = navigator::selectPrimary
+                )
+            }
+        }
+    ) { contentPadding ->
+        Box(Modifier.padding(contentPadding)) {
+            when (navigator.current) {
+                AppRoutes.SETTINGS -> settings()
+                AppRoutes.SCORECARD -> scorecard()
+                AppRoutes.SCALP -> scalp()
+                AppRoutes.DATA -> data()
+                AppRoutes.HISTORY -> history()
+                AppRoutes.SIGNAL_HISTORY -> signalHistory()
+                AppRoutes.CHART -> chart()
+                else -> home()
+            }
+        }
+    }
+}
+
+private data class BottomDestination(
+    val route: String,
+    val label: String,
+    val icon: ImageVector
+)
+
+private val bottomDestinations = listOf(
+    BottomDestination(AppRoutes.HOME, "Home", Icons.Default.Home),
+    BottomDestination(AppRoutes.SCORECARD, "Scorecard", Icons.Default.Assessment),
+    BottomDestination(AppRoutes.SCALP, "Scalp", Icons.AutoMirrored.Filled.ReceiptLong),
+    BottomDestination(AppRoutes.HISTORY, "Real", Icons.Default.AccountBalance),
+    BottomDestination(AppRoutes.DATA, "Data", Icons.AutoMirrored.Filled.FormatListBulleted),
+    BottomDestination(AppRoutes.SETTINGS, "More", Icons.Default.MoreHoriz)
+)
+
+@Composable
+private fun AppBottomNavigation(
+    selectedRoute: String,
+    onSelect: (String) -> Unit
+) {
+    val palette = DipTheme.colors
+    NavigationBar(
+        containerColor = palette.surface,
+        contentColor = palette.textPrimary,
+        tonalElevation = 0.dp
+    ) {
+        bottomDestinations.forEach { item ->
+            NavigationBarItem(
+                selected = item.route == selectedRoute,
+                onClick = { onSelect(item.route) },
+                icon = { Icon(item.icon, contentDescription = item.label) },
+                label = {
+                    Text(
+                        text = item.label,
+                        fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Clip
+                    )
+                },
+                alwaysShowLabel = true,
+                colors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = palette.accentBlue,
+                    selectedTextColor = palette.accentBlue,
+                    indicatorColor = palette.accentBlue.copy(alpha = 0.15f),
+                    unselectedIconColor = palette.textSecondary,
+                    unselectedTextColor = palette.textSecondary
+                )
+            )
+        }
     }
 }
