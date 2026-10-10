@@ -92,6 +92,29 @@ fun PaperBookCard(
                 color = colors.textSecondary
             )
         }
+        val scalps = com.dirk.kalshiodds.signal.paper.ScalpStrategies.leaderboard(paper.fills)
+        if (scalps.isNotEmpty()) {
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text(
+                    "SCALP LEADERBOARD",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.Bold
+                )
+                scalps.take(6).forEach { (kind, pnl) ->
+                    Text(
+                        String.format(
+                            Locale.US,
+                            "%-18s %+.2f",
+                            kind.name.lowercase().replace('_', ' '),
+                            pnl
+                        ),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                }
+            }
+        }
         paper.lastMessage?.let {
             Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold)
         }

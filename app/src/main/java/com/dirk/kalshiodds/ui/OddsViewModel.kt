@@ -812,7 +812,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 bankrollSource = "paper"
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
+            // Baseline: the edge-sized AI fill that was the most profitable
+            // path from the last build stays exactly as it was.
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            // Scalp strategies run in parallel, each on its own tagged ledger.
+            live.forEach { m ->
+                com.dirk.kalshiodds.signal.paper.ScalpStrategies.evaluate(m, nowMs).forEach { signal ->
+                    paperBook.considerScalp(signal, enabled = true)
+                }
+            }
         }
         refreshPositionMarks()
     }

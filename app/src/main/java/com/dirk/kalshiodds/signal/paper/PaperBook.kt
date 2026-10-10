@@ -109,6 +109,17 @@ class PaperBook(
      * Auto-log a $5 paper fill when an AI hunter / configured ticket would trade.
      * Manual live tickets are ignored — those need an explicit Paper tap.
      */
+    /**
+     * Paper-fill a scalp strategy signal. One open fill per ticker + strategy
+     * (the plain [considerTicket] dedupe is per ticker, which would starve
+     * the parallel scalp strategies). Uncapped, aggressive-sized like every
+     * paper bet.
+     */
+    fun considerScalp(signal: ScalpStrategies.Signal, enabled: Boolean): PaperFill? {
+        if (!enabled) return null
+        return fillScalp(signal)
+    }
+
     fun considerTicket(ticket: TradeTicket, enabled: Boolean): PaperFill? {
         if (!enabled) return null
         if (!ticket.canApprove) return null
@@ -523,6 +534,61 @@ class PaperBook(
         entries.forEach { e ->
             val o = e.outcome ?: return@forEach
             settle(e.ticker, o)
+        }
+    }
+
+    private fun fillScalp(signal: ScalpStrategies.Signal): PaperFill? {
+        if (CryptoMarkets.isRetiredTicker(signal.ticker)) return null
+        val px = KalshiPrice.usable(signal.ask) ?: return null
+        val want = if (signal.side.equals("NO", true)) "NO" else "YES"
+        synchronized(lock) {
+            val cur = _state.value
+            val already = cur.fills.any {
+                !it.settled &&
+                    it.ticker.equals(signal.ticker, ignoreCase = true) &&
+                    it.source.equals(signal.source, ignoreCase = true)
+            }
+            if (already) return null
+            val learned = AggressivePaperSizer.multiplier(
+                settledWins = cur.fills.count { it.won == true },
+                settledTotal = cur.fills.count { it.won != null },
+                pnlUsd = cur.fills.mapNotNull { it.pnlUsd }.sum()
+            )
+            val qty = AggressivePaperSizer.contracts(
+                AggressivePaperSizer.stakeUsd(cur.equityUsd, learned),
+                px
+            )
+            if (qty < 1) return null
+            val stake = qty * px
+            val row = PaperFill(
+                id = idFactory(),
+                ticker = signal.ticker,
+                side = want,
+                stakeUsd = stake,
+                contracts = qty,
+                limitPrice = px,
+                source = signal.source,
+                createdAtMs = nowMs(),
+                note = "${signal.reason} · ${signal.exitNote} · never sent to Kalshi"
+            )
+            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            publish(
+                cur.copy(
+                    cashUsd = cur.cashUsd - stake,
+                    fills = fills,
+                    lastMessage = String.format(
+                        java.util.Locale.US,
+                        "PAPER %s %s · $%.2f · %d ct @ %.0f¢ · %s",
+                        row.displaySide,
+                        row.ticker,
+                        row.stakeUsd,
+                        row.contracts,
+                        row.limitPrice * 100,
+                        row.source
+                    )
+                )
+            )
+            return row
         }
     }
 

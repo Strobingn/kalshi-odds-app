@@ -33,6 +33,19 @@ Kelly is the growth-optimal bet size **only if the model probability is the true
 2. **Quarter-Kelly (`DEFAULT_KELLY_FRACTION = 0.25`).** Estimation error makes full Kelly systematically oversize; quarter-Kelly gives up little growth and roughly quarters the drawdown.
 3. **Max 5% of bankroll per clip (`DEFAULT_MAX_BANKROLL_FRACTION`), and ≤25% of bankroll at the final client check.** Even a huge estimated edge cannot concentrate the book in one 15-minute window, and a malformed ticket cannot either.
 
+### Six parallel paper scalpers (0.3.17)
+
+The paper book now runs six strategies side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`), ranked on the PAPER BOOK card's SCALP LEADERBOARD (best settled P&L first):
+
+1. **mid window reversal** — fades an early-window overreaction (ask stretched ≥12¢ from the AI's fair value in minutes 1–5); exits on the first 10–15¢ recovery.
+2. **t minus exit** — buys deep dips (≥5¢ under the AI, ask ≤40¢) with ≥4 minutes left; **hard time-stop at T−3:00**, never holds into the binary zone.
+3. **book imbalance** — ask-side depth thinned to ≤25 contracts with a tight spread; exits on the first 2–4¢ move.
+4. **rollover gap** — in a fresh window's first 30s, fades stale pricing when the latest spot print is materially off the strike; exits as soon as the book reprices.
+5. **lead lag** — a fresh Binance/Coinbase tick ≥0.10% off the strike that Kalshi's ask hasn't reflected yet; exits within 2s of the book catching up.
+6. **AI edge (baseline)** — the always-on edge-sized AI fill from the last build, kept unchanged as the benchmark.
+
+The learning multiplier (`AggressivePaperSizer`) feeds on all settled fills, so a strategy that wins presses its own sizing harder. One open fill per ticker **per strategy** — the strategies can hold the same window simultaneously.
+
 The paper book is deliberately **uncapped** — it is fake money and exists to measure the AI's raw edge: **$20,000 start** (`PAPER_START_USD`), **10% of paper equity per AI fill** (`PAPER_AGGRESSIVE_FRACTION`), with an unbounded learning multiplier (`AggressivePaperSizer`) that presses harder the more the settled record beats 50% wins and shrinks toward zero when it loses. Paper fills are never clipped to cash — the book may go negative — so aggressive sizing can never be silently watered down. If the AI's edge is real it shows up here first, at full size.
 
 ## 0.3.15

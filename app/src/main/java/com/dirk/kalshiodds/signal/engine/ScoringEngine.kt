@@ -233,7 +233,10 @@ class ScoringEngine(
             }
         }
         val spotFeat = external.forSeries(tick.series)
-        spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
+        spotFeat?.lastPrice?.let {
+            book.noteSpot(tick.ticker, it, nowMs)
+            com.dirk.kalshiodds.signal.paper.ScalpStrategies.noteSpot(tick.ticker, it, nowMs)
+        }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
