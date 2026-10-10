@@ -20,9 +20,9 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtOneHundredAndPapersFiveDollarAiFill() {
+    fun startsAtTwentyThousandAndPapersFiveDollarAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
@@ -31,7 +31,7 @@ class PaperBookTest {
         assertEquals(5.0, fill.stakeUsd, 1e-9)
         val fee = KalshiFee.total(125, 0.04)
         assertEquals(fee, fill.feeUsd, 1e-9)
-        assertEquals(100.0 - 5.0 - fee, book.snapshot().cashUsd, 1e-6)
+        assertEquals(SignalConstants.PAPER_START_USD - 5.0 - fee, book.snapshot().cashUsd, 1e-6)
         assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
     }
@@ -160,7 +160,7 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(100.0 - fill.stakeUsd - fill.feeUsd, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - fill.stakeUsd - fill.feeUsd, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
     }
 
@@ -180,7 +180,7 @@ class PaperBookTest {
         assertTrue(first.feeUsd > 0.0)
         assertNull(duplicate)
         assertEquals(1, book.snapshot().fills.count { !it.settled })
-        assertTrue(book.snapshot().cashUsd < 0.0)
+        assertTrue(book.snapshot().cashUsd < SignalConstants.PAPER_START_USD)
 
         book.settle(ticket.ticker, "yes")
         assertEquals(1, book.snapshot().fills.count { it.settled })
@@ -212,6 +212,8 @@ class PaperBookTest {
         assertEquals(2, book.snapshot().openCount)
         assertTrue(!book.snapshot().fills.single { it.id == dip.id }.settled)
         assertTrue(!book.snapshot().fills.single { it.id == reversal.id }.settled)
+        assertNotNull(book.considerUnboundedTicket(base.copy(strategyVersion = momentum.strategyVersion), enabled = true))
+        assertEquals(3, book.snapshot().openCount)
     }
 
     private var bookIds: Int = 0

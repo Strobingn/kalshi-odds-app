@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.paper
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import org.junit.Assert.assertEquals
@@ -18,7 +19,7 @@ class PaperBuyTest {
         assertEquals(10, out.contracts)
         assertEquals(2.0, out.stakeUsd, 1e-9)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(10, 0.20)
-        assertEquals(100.0 - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
         assertTrue(out.message.contains("PAPER"))
     }
 
@@ -53,33 +54,30 @@ class PaperBuyTest {
         assertTrue(out.ok)
         assertEquals(20, out.contracts)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(20, 0.20)
-        assertEquals(100.0 - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
-    fun winTargetAbovePaperEquityCapsInsteadOfBlocking() {
+    fun paperBuyUsesRequestedSizeEvenWhenItExceedsStartingBalance() {
         val book = PaperBook()
-        // $50 target at 40¢ would want 200 ct / $80 — cash is $100 so this is under cash.
-        // Force a stake above cash: 400 ct @ 40¢ = $160.
+        // Force a requested stake above the $20k starting balance. Paper
+        // credit remains synthetic and intentionally unrestricted.
         val out = PaperBuy.execute(
             book,
             ticket(
                 TicketKind.HUNTER_VALUE,
                 ticker = "KXBTC15M-CAP",
-                contracts = 400,
-                stake = 160.0,
+                contracts = 55_000,
+                stake = 22_000.0,
                 px = 0.40,
                 win = 50.0
             )
         )
         assertTrue(out.message, out.ok)
-        assertTrue(out.capped)
-        val (maxQty, _) = PaperBuy.capContracts(400, 100.0, 0.40)
-        assertEquals(maxQty, out.contracts)
-        assertTrue(out.contracts in 1..249)
+        assertFalse(out.capped)
+        assertEquals(55_000, out.contracts)
         assertEquals(out.contracts * 0.40, out.stakeUsd, 1e-9)
-        assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
-        assertTrue(book.snapshot().cashUsd < 100.0 - out.stakeUsd + 1e-6)
+        assertTrue(book.snapshot().cashUsd < 0.0)
     }
 
     @Test
@@ -104,14 +102,12 @@ class PaperBuyTest {
     }
 
     @Test
-    fun capContractsMath() {
+    fun legacyCapContractsReturnsRequestedSizeForUnlimitedPaperCredit() {
         val (qty, capped) = PaperBuy.capContracts(400, 100.0, 0.40)
-        assertTrue(capped)
-        assertTrue(qty in 1..249)
-        assertTrue(PaperBuy.costUsd(qty, 0.40) <= 100.0 + 1e-9)
-        assertTrue(PaperBuy.costUsd(qty + 1, 0.40) > 100.0)
+        assertFalse(capped)
+        assertEquals(400, qty)
         val (none, _) = PaperBuy.capContracts(10, 0.01, 0.50)
-        assertEquals(0, none)
+        assertEquals(10, none)
     }
 
     @Test

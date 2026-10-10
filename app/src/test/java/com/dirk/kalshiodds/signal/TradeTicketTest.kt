@@ -723,12 +723,14 @@ class TicketBuilderGateTest {
     }
 
     @Test
-    fun ticketsDisabledYieldsNothing() {
+    fun disablingLiveTicketsStillLeavesTheThreePaperScalpTracks() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketsEnabled = false, ticketRespectGates = false),
             alertsPaused = false
         )
-        assertTrue(TicketBuilder.proposeAll(listOf(market(true, false, 0.03)), ctx).isEmpty())
+        val tickets = TicketBuilder.proposeAll(listOf(market(true, false, 0.03)), ctx)
+        assertEquals(3, tickets.size)
+        assertTrue(tickets.all { it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP })
     }
 }
 
@@ -746,7 +748,7 @@ class DefaultConfigV22Test {
         assertEquals(SignalConstants.DEFAULT_MIN_PAYOUT_USD, 100.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_STAKE_USD, 1.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_MIN_PAYOUT_USD, 25.0, 1e-9)
-        assertEquals(SignalConstants.PAPER_START_USD, 100.0, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, 20_000.0, 1e-9)
         assertEquals(SignalConstants.PAPER_STAKE_USD, 5.0, 1e-9)
         val paperCfg = com.dirk.kalshiodds.signal.config.DefaultSignalConfig.parse(
             """{"paperTradingEnabled":true}"""

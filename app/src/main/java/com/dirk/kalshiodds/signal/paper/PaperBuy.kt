@@ -7,7 +7,7 @@ import com.dirk.kalshiodds.signal.trade.TradeTicket
 /**
  * Explicit paper buy / sell. Isolated from Kalshi credentials, live cash,
  * and the V2 order client. Fills at the ticket's walked ask (or bid for
- * sells) and caps size to paper cash instead of failing silently.
+ * sells). Paper credit is synthetic and intentionally not cash-capped.
  */
 object PaperBuy {
 
@@ -56,8 +56,8 @@ object PaperBuy {
     }
 
     /**
-     * Cap [want] so contract cost + official taker fee fits in [cashUsd].
-     * Never returns a size that would overdraw the paper book.
+     * Legacy sizing helper retained for callers compiled against older builds.
+     * Paper credit is unrestricted, so it returns the requested quantity.
      */
     fun capContracts(
         want: Int,
@@ -65,11 +65,8 @@ object PaperBuy {
         price: Double,
         feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
     ): Pair<Int, Boolean> {
-        val px = com.dirk.kalshiodds.domain.KalshiPrice.clipLimit(price)
-        var qty = want.coerceAtLeast(0)
-        while (qty > 0 && costUsd(qty, px, feeRate) > cashUsd + 1e-9) {
-            qty--
-        }
-        return qty to (want > 0 && qty < want)
+        // Keep the parameters for binary/source compatibility. They are not
+        // financial limits in the paper-only experiment.
+        return want.coerceAtLeast(0) to false
     }
 }

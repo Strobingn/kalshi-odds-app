@@ -47,6 +47,7 @@ class BackNavigationTest {
                 home = { Text("HOME_SCREEN") },
                 settings = { Text("SETTINGS_SCREEN") },
                 scorecard = { Text("SCORECARD_SCREEN") },
+                scalp = { Text("SCALP_SCREEN") },
                 data = { Text("DATA_SCREEN") },
                 history = { Text("HISTORY_SCREEN") },
                 signalHistory = { Text("SIGNAL_HISTORY_SCREEN") },
@@ -57,6 +58,7 @@ class BackNavigationTest {
 
         val path = listOf(
             AppRoutes.SCORECARD to "SCORECARD_SCREEN",
+            AppRoutes.SCALP to "SCALP_SCREEN",
             AppRoutes.SIGNAL_HISTORY to "SIGNAL_HISTORY_SCREEN",
             AppRoutes.SETTINGS to "SETTINGS_SCREEN",
             AppRoutes.DATA to "DATA_SCREEN",
@@ -114,6 +116,7 @@ class BackNavigationTest {
                 home = { Text("HOME_SCREEN") },
                 settings = { Text("SETTINGS_SCREEN") },
                 scorecard = { Text("SCORECARD_SCREEN") },
+                scalp = { Text("SCALP_SCREEN") },
                 data = { Text("DATA_SCREEN") },
                 history = { Text("HISTORY_SCREEN") },
                 signalHistory = { Text("SIGNAL_HISTORY_SCREEN") },
@@ -154,6 +157,7 @@ class BackNavigationTest {
                 home = { Text(if (sell) "HOME_WITH_SELL_SHEET" else "HOME_SCREEN") },
                 settings = { Text("SETTINGS_SCREEN") },
                 scorecard = { Text("SCORECARD_SCREEN") },
+                scalp = { Text("SCALP_SCREEN") },
                 data = { Text("DATA_SCREEN") },
                 history = { Text("HISTORY_SCREEN") },
                 signalHistory = { Text("SIGNAL_HISTORY_SCREEN") },

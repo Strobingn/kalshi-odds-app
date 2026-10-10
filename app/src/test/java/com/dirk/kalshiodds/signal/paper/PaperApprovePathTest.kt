@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.signal.paper
 
 import com.dirk.kalshiodds.data.local.history.HistoryAssembler
 import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -35,8 +36,8 @@ class PaperApprovePathTest {
         assertEquals(1, snap.fills.size)
         assertFalse(snap.fills.single().settled)
         assertEquals(1, snap.openCount)
-        assertTrue(snap.cashUsd < 100.0)
-        assertTrue(100.0 - snap.cashUsd + 1e-9 >= out.stakeUsd)
+        assertTrue(snap.cashUsd < SignalConstants.PAPER_START_USD)
+        assertTrue(SignalConstants.PAPER_START_USD - snap.cashUsd + 1e-9 >= out.stakeUsd)
         assertEquals(out.contracts, snap.fills.single().contracts)
         assertEquals(1, history.size)
         assertTrue(history.single().approved)
@@ -70,22 +71,20 @@ class PaperApprovePathTest {
     }
 
     @Test
-    fun winTargetAbovePaperEquityCapsAndStillBooks() = runBlocking {
+    fun winTargetAboveStartingPaperBalanceStillBooksRequestedSize() = runBlocking {
         val ticket = ticket(
             TicketKind.HUNTER_VALUE,
             "KXBTC15M-CAP",
-            contracts = 400,
-            stake = 160.0,
+            contracts = 55_000,
+            stake = 22_000.0,
             px = 0.40,
             win = 50.0
         )
         val (out, book, history) = runApprove(ticket)
         assertTrue(out.message, out.ok)
-        assertTrue(out.capped)
-        val (maxQty, _) = PaperBuy.capContracts(400, 100.0, 0.40)
-        assertEquals(maxQty, out.contracts)
-        assertTrue(out.contracts in 1..249)
-        assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
+        assertFalse(out.capped)
+        assertEquals(55_000, out.contracts)
+        assertTrue(book.snapshot().cashUsd < 0.0)
         assertEquals(1, book.snapshot().openCount)
         assertEquals(1, history.size)
         val bets = HistoryAssembler.bets(history, book.snapshot(), HistoryAssembler.SourceFilter.PAPER)
@@ -131,8 +130,8 @@ class PaperApprovePathTest {
         assertEquals(1, snap.openCount)
         assertEquals(ticket.ticker, snap.fills.single().ticker)
         assertEquals(out.contracts, snap.fills.single().contracts)
-        assertTrue(snap.cashUsd < SignalConstantsStart)
-        val debit = SignalConstantsStart - snap.cashUsd
+        assertTrue(snap.cashUsd < SignalConstants.PAPER_START_USD)
+        val debit = SignalConstants.PAPER_START_USD - snap.cashUsd
         assertTrue(debit + 1e-9 >= out.stakeUsd)
         val bets = HistoryAssembler.bets(history, snap)
         assertTrue(bets.any { !it.live && it.ticker == ticket.ticker && it.result == "open" })
@@ -181,8 +180,4 @@ class PaperApprovePathTest {
         kind = kind,
         winTargetUsd = win
     )
-
-    companion object {
-        private const val SignalConstantsStart = 100.0
-    }
 }

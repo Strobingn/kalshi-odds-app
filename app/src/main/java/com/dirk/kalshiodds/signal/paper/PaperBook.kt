@@ -101,7 +101,7 @@ class PaperBook(
             )
             publish(
                 PaperBookState(
-                    lastMessage = "Paper book reset to $100 — prior run archived",
+                    lastMessage = "Paper book reset to $20,000 — prior run archived",
                     archived = cur.archived + archive
                 )
             )
@@ -110,12 +110,24 @@ class PaperBook(
 
     fun hydrate(next: PaperBookState) {
         synchronized(lock) {
-            _state.value = next
+            // Upgrade the old $100 seed without erasing the user's existing
+            // ledger or changing its historical P&L. New and reset books
+            // start at $20k; unlimited synthetic credit still permits a
+            // balance below zero during the paper-only experiment.
+            _state.value = if (next.startingUsd == 100.0) {
+                next.copy(
+                    startingUsd = SignalConstants.PAPER_START_USD,
+                    cashUsd = next.cashUsd + (SignalConstants.PAPER_START_USD - 100.0),
+                    lastMessage = "Paper starting balance migrated to $20,000 · unlimited synthetic credit · never Kalshi"
+                )
+            } else {
+                next
+            }
         }
     }
 
     /**
-     * Legacy cash-capped auto fill. Kept for historical imports and focused
+     * Legacy auto fill. Kept for historical imports and focused
      * unit tests; the active paper autopilot uses [considerUnboundedTicket].
      * Manual live tickets are ignored — those need an explicit Paper tap.
      */
@@ -173,8 +185,7 @@ class PaperBook(
             source = source,
             note = "Unlimited-credit paper autopilot · visible touch liquidity only · never sent to Kalshi",
             winTargetUsd = ticket.winTargetUsd,
-            strategyVersion = ticket.strategyVersion,
-            oneEntryPerTicker = ticket.kind == TicketKind.SCALP
+            strategyVersion = ticket.strategyVersion
         )
     }
 
@@ -195,7 +206,7 @@ class PaperBook(
             contracts = opportunity.visibleContracts,
             source = "AI ${opportunity.source}",
             note = "Unlimited-credit paper scalping · EV ${String.format(java.util.Locale.US, "%+.4f", opportunity.expectedNetPerContractUsd)} per contract · visible touch only · never sent to Kalshi",
-            oneEntryPerTicker = true
+            strategyVersion = null
         )
     }
 
@@ -226,7 +237,8 @@ class PaperBook(
     }
 
     /**
-     * Explicit paper buy used by [PaperBuy]. Caps to cash, reuses a ticker
+     * Explicit paper buy used by [PaperBuy]. Uses unrestricted synthetic
+     * credit, reuses a ticker
      * after the prior fill settled, and always writes [lastMessage].
      */
     internal fun forceFill(
@@ -254,10 +266,6 @@ class PaperBook(
         val stake = qty * px
         synchronized(lock) {
             val cur = _state.value
-            if (cur.cashUsd + 1e-9 < stake) {
-                rememberMessage("Paper skip $ticker — need ${fmt(stake)} (cash ${fmt(cur.cashUsd)})")
-                return null
-            }
             val row = PaperFill(
                 id = idFactory(),
                 ticker = ticker,
@@ -270,7 +278,7 @@ class PaperBook(
                 note = note,
                 winTargetUsd = winTargetUsd
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val fills = listOf(row) + cur.fills
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd - stake,
@@ -298,7 +306,8 @@ class PaperBook(
     }
 
     /**
-     * Explicit paper buy used by [PaperBuy]. Caps to cash, reuses a ticker
+     * Explicit paper buy used by [PaperBuy]. Uses unrestricted synthetic
+     * credit, reuses a ticker
      * after the prior fill settled, and always writes [lastMessage].
      */
     fun explicitBuy(ticket: TradeTicket): PaperBuy.Outcome {
@@ -350,15 +359,13 @@ class PaperBook(
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
-            val (qty, capped) = PaperBuy.capContracts(wantContracts, cur.cashUsd, px)
+            val qty = wantContracts.coerceAtLeast(0)
             if (qty < 1) {
                 val msg = String.format(
                     java.util.Locale.US,
-                    "Paper cash %s cannot buy 1 ct @ %.1f¢ on %s (need %s with fees)",
-                    fmt(cur.cashUsd),
+                    "Paper skip — 0 contracts requested @ %.1f¢ on %s",
                     px * 100,
-                    ticker,
-                    fmt(PaperBuy.costUsd(1, px))
+                    ticker
                 )
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
@@ -378,12 +385,11 @@ class PaperBook(
                 feeUsd = fees,
                 note = buildString {
                     append(note)
-                    if (capped) append(" · capped to paper cash")
                     if (fees > 0.0) append(String.format(java.util.Locale.US, " · fee $%.2f", fees))
                 },
                 winTargetUsd = winTargetUsd
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val fills = listOf(row) + cur.fills
             val msg = String.format(
                 java.util.Locale.US,
                 "PAPER %s %s · $%.2f · %d ct @ %.1f¢%s · fee $%.2f · never Kalshi",
@@ -392,7 +398,7 @@ class PaperBook(
                 row.stakeUsd,
                 row.contracts,
                 row.limitPrice * 100,
-                if (capped) " · capped" else "",
+                "",
                 fees
             )
             publish(
@@ -406,7 +412,7 @@ class PaperBook(
                 ok = true,
                 fill = row,
                 message = msg,
-                capped = capped,
+                capped = false,
                 contracts = qty,
                 stakeUsd = stake
             )
@@ -448,11 +454,6 @@ class PaperBook(
                 publish(cur.copy(lastMessage = msg))
                 return PaperBuy.Outcome(ok = false, message = msg)
             }
-            if (cur.cashUsd + 1e-9 < allInUsd) {
-                val msg = "Paper cash ${fmt(cur.cashUsd)} cannot cover ${fmt(allInUsd)}"
-                publish(cur.copy(lastMessage = msg))
-                return PaperBuy.Outcome(ok = false, message = msg)
-            }
             val row = PaperFill(
                 id = idFactory(),
                 ticker = ticker,
@@ -470,7 +471,7 @@ class PaperBook(
                     feeUsd
                 )
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val fills = listOf(row) + cur.fills
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd - allInUsd,
@@ -650,17 +651,7 @@ class PaperBook(
                 publish(cur.copy(lastMessage = "Paper skip $ticker — ask too high for a $5 clip"))
                 return null
             }
-            val rawStake = stakeUsd?.takeIf { it > 0.0 } ?: (qty * px)
-            val (cappedQty, _) = PaperBuy.capContracts(
-                want = if (stakeUsd != null && stakeUsd > 0.0) qty else qty,
-                cashUsd = cur.cashUsd,
-                price = px
-            )
-            val useQty = if (rawStake > cur.cashUsd + 1e-9) cappedQty else qty
-            if (useQty < 1) {
-                publish(cur.copy(lastMessage = "Paper skip $ticker — cash ${fmt(cur.cashUsd)} cannot cover ${fmt(rawStake)}"))
-                return null
-            }
+            val useQty = qty
             val stake = useQty * px
             val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(useQty, px)
             val row = PaperFill(
@@ -676,7 +667,7 @@ class PaperBook(
                 note = note,
                 winTargetUsd = winTargetUsd
             )
-            val fills = (listOf(row) + cur.fills).take(SignalConstants.PAPER_LEDGER_MAX)
+            val fills = listOf(row) + cur.fills
             publish(
                 cur.copy(
                     cashUsd = cur.cashUsd - stake - fees,
@@ -705,7 +696,6 @@ class PaperBook(
         source: String,
         note: String,
         winTargetUsd: Double? = null,
-        oneEntryPerTicker: Boolean = false,
         strategyVersion: String? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
@@ -726,13 +716,6 @@ class PaperBook(
                 }) {
                 return null
             }
-            // Once a trailing/model exit closes a paper experiment, do not
-            // immediately buy the same 15-minute contract again on the next
-            // score refresh. A fresh Kalshi ticker is the next experiment.
-            if (oneEntryPerTicker && cur.fills.any {
-                    it.outcome == "sell" && it.ticker.equals(ticker, ignoreCase = true) &&
-                        (strategyVersion == null || it.strategyVersion == strategyVersion)
-                }) return null
             val stake = quantity * px
             val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.total(quantity, px)
             val row = PaperFill(
@@ -830,7 +813,7 @@ class PaperBook(
                 leftover?.let { add(it) }
                 add(sold)
                 cur.fills.filterNot { it.id == open.id }.forEach { add(it) }
-            }.take(SignalConstants.PAPER_LEDGER_MAX)
+            }
             publish(cur.copy(
                 cashUsd = cur.cashUsd + netProceeds,
                 fills = nextFills,

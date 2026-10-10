@@ -707,17 +707,17 @@ fun SettingsContent(
             ToggleRow("Meta-label take/skip", s.metaLabelEnabled, { viewModel?.setMetaLabel(it) })
             ToggleRow("Synthetic path simulator", s.pathSimEnabled, { viewModel?.setPathSim(it) })
 
-            Section("Paper book (visible on home)")
+            Section("AI paper scalper")
             Text(
-                "Isolated from live money. AI autopilot takes the visible touch size when an AI hunter or LiveCall signal would trade, " +
-                    "with unlimited synthetic credit. It never calls Kalshi. Reset starts a fresh \$100 ledger; the home-screen PAPER BOOK " +
-                    "card is the ledger. Paper trading ON does not swallow Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
+                "Isolated from live money. The Scalp tab shows Dip Hunter, Momentum Sniper, and Extreme Reversal entries, exits, and full paper ledger. " +
+                    "Paper fills use the displayed touch quantity with unrestricted synthetic credit and never call Kalshi. Reset starts a fresh \$20,000 ledger. " +
+                    "Paper trading ON does not swallow Live Approve after a Kalshi key is saved — use the Paper button for manual simulated fills.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             ToggleRow("Paper autopilot (unlimited synthetic credit)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper book to $100")
+                Text("Reset paper book to $20,000")
             }
 
             Section("Live Approve tickets (Kalshi V2)")
@@ -840,7 +840,7 @@ fun SettingsContent(
 
             Section("Kalshi demo (play money)")
             Text(
-                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                "Separate from the local \$20,000 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
                     "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
                     "Paper Buy still works with no key and never hits this host.",
                 style = MaterialTheme.typography.labelMedium,

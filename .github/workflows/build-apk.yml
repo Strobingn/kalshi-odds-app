@@ -56,6 +56,7 @@ jobs:
             --tests 'com.dirk.kalshiodds.prediction.ModelActivationTest' \
             --tests 'com.dirk.kalshiodds.prediction.EdgeModelTest' \
             --tests 'com.dirk.kalshiodds.signal.PaperBookTest' \
+            --tests 'com.dirk.kalshiodds.signal.paper.PaperBuyTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.ForwardTestSqliteTest' \
             --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardTestTest' \

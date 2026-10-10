@@ -341,7 +341,7 @@ class KalshiFeeAndWinTargetTest {
         assertEquals(ticket.contracts, fill!!.contracts)
         assertEquals(ticket.contracts * ticket.limitPrice, fill.stakeUsd, 1e-6)
         val debit = fill.stakeUsd + KalshiFee.total(fill.contracts, fill.limitPrice)
-        assertTrue(abs(100.0 - debit - book.snapshot().cashUsd) < 1e-6)
+        assertTrue(abs(com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD - debit - book.snapshot().cashUsd) < 1e-6)
         assertTrue(fill.note.contains("win-target") || fill.note.contains("Paper"))
     }
 

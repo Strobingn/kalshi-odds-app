@@ -593,7 +593,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         createdAtMs = System.currentTimeMillis(),
                         key = "paper_reset",
                         oldValue = before.toString(),
-                        newValue = "100.0",
+                        newValue = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD.toString(),
                         snapshotJson = com.dirk.kalshiodds.data.local.history.SettingsRestore.snapshot(snap)
                     )
                 )

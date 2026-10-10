@@ -49,11 +49,12 @@ object TicketBuilder {
     }
 
     fun proposeAll(markets: List<MarketUiModel>, ctx: Context): List<TradeTicket> {
-        if (!ctx.settings.ticketsEnabled) return emptyList()
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
         // SCALP is a separate paper-only experiment. The legacy auto-tuner's
-        // sitting-out state must not suppress collection of its evidence.
+        // sitting-out state and the "Show live trade tickets" control must
+        // not suppress collection of its paper-only evidence.
         val scalps = live.flatMap { proposeScalps(it, ctx) }
+        if (!ctx.settings.ticketsEnabled) return scalps
         if (ctx.settings.isSittingOut()) return scalps
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
@@ -111,7 +112,7 @@ object TicketBuilder {
 
     /** Three independent paper-only tracks can hold the same market concurrently. */
     fun proposeScalps(market: MarketUiModel, ctx: Context): List<TradeTicket> {
-        if (!ctx.settings.ticketsEnabled || !MarketLifecycle.isTradable(market, ctx.nowMs)) return emptyList()
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return emptyList()
         return ScalpSignal.candidates(market, ctx.nowMs).mapNotNull { scalp ->
             buildTicket(
                 market = market,

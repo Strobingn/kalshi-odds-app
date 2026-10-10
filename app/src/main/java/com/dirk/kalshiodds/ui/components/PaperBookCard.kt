@@ -72,7 +72,7 @@ fun PaperBookCard(
             Switch(checked = enabled, onCheckedChange = onToggle)
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)
+            PaperStat("Synthetic", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)
             PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.accentOrange)
             val pnlColor = when {
                 paper.realizedPnlUsd > 0 -> colors.textPrimary
@@ -97,7 +97,7 @@ fun PaperBookCard(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper to $100")
+                Text("Reset paper to $20,000")
             }
             if (onViewHistory != null) {
                 OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {

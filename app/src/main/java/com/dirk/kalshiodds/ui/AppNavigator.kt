@@ -13,18 +13,19 @@ object AppRoutes {
     const val HOME = "odds"
     const val SETTINGS = "settings"
     const val SCORECARD = "scorecard"
+    const val SCALP = "scalp"
     const val DATA = "data"
     const val HISTORY = "history"
     const val SIGNAL_HISTORY = "signal-history"
     const val CHART = "chart"
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART
+        HOME, SETTINGS, SCORECARD, SCALP, DATA, HISTORY, SIGNAL_HISTORY, CHART
     )
 
     /** Destinations deliberately exposed in the persistent bottom navigation. */
     val PRIMARY: List<String> = listOf(
-        HOME, SCORECARD, SIGNAL_HISTORY, HISTORY, DATA, SETTINGS
+        HOME, SCORECARD, SCALP, HISTORY, DATA, SETTINGS
     )
 }
 
