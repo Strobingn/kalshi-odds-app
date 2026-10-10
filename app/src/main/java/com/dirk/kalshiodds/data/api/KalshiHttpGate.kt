@@ -88,7 +88,7 @@ class KalshiHttpGate(
                 bucket.noteRead429(snap.retryAfterMs())
             } else if (snap.code in 200..299) {
                 bucket.noteReadOk()
-                cache[key] = snap.copy(untilMs = nowMs() + cacheTtlMs)
+                putCache(key, snap.copy(untilMs = nowMs() + cacheTtlMs))
             }
             mine.snap = snap
             return snap.toResponse(request)
@@ -112,6 +112,29 @@ class KalshiHttpGate(
             slept += wait
         }
     }
+
+    /**
+     * 0.3.52 OOM root cause: entries were only evicted when the SAME URL was read again. Every URL that changes per call
+     * (trades?min_ts=…, cursors, per-window tickers, orderbook/{ticker}) left its whole response body in this map
+     * forever → hundreds of MB after hours of 1–3 s polling. Now: expired entries are swept on every put, bodies over
+     * [MAX_CACHE_BODY_BYTES] are never cached, and the map is capped by count and total bytes.
+     */
+    private fun putCache(key: String, snap: Snap) {
+        val now = nowMs()
+        cache.entries.removeIf { it.value.untilMs <= now }
+        if (snap.bytes.size > MAX_CACHE_BODY_BYTES) return
+        cache[key] = snap
+        var total = cache.values.sumOf { it.bytes.size.toLong() }
+        if (cache.size > MAX_CACHE_ENTRIES || total > MAX_CACHE_BYTES) {
+            for (e in cache.entries.sortedBy { it.value.untilMs }) {
+                if (cache.size <= MAX_CACHE_ENTRIES && total <= MAX_CACHE_BYTES) break
+                if (cache.remove(e.key, e.value)) total -= e.value.bytes.size
+            }
+        }
+    }
+
+    fun cacheEntries(): Int = cache.size
+    fun cacheBytes(): Long = cache.values.sumOf { it.bytes.size.toLong() }
 
     /** Drop cached GETs so the next read hits Kalshi. Writes call this on success. */
     fun clearReadCache() {
@@ -219,6 +242,9 @@ class KalshiHttpGate(
 
     companion object {
         const val LOCAL_HEADER = "X-Kashi-Local-Throttle"
+        const val MAX_CACHE_ENTRIES = 48
+        const val MAX_CACHE_BYTES = 4L * 1024 * 1024
+        const val MAX_CACHE_BODY_BYTES = 1024 * 1024
 
         /** "GET markets", "GET markets/{ticker}/orderbook", "GET portfolio/balance" … (tickers collapsed). */
         fun endpointKey(request: Request): String {
