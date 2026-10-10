@@ -54,8 +54,16 @@ object ScalpModels {
         val roiCi: ClusteredBootstrap.Ci?,
         val open: Int,
         val unrealizedUsd: Double,
-        val noFills: Int
-    )
+        val noFills: Int,
+        /** 0.3.52 algorithm cards. */
+        val grossWinUsd: Double = 0.0,
+        val grossLossUsd: Double = 0.0,
+        val losses: Int = 0,
+        val openContracts: Int = 0,
+        val feesUsd: Double = 0.0
+    ) {
+        val holding: Boolean get() = openContracts > 0
+    }
 
     fun row(model: Model, trades: List<ScalpTrade>, bidFor: (ScalpTrade) -> Double? = { null }, resamples: Int = 400): Row {
         val closed = trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null && it.netUsd.isFinite() }
@@ -80,7 +88,12 @@ object ScalpModels {
             roiCi = ci,
             open = active.size,
             unrealizedUsd = active.sumOf { t -> t.unrealizedUsd(bidFor(t))?.takeIf { it.isFinite() } ?: 0.0 },
-            noFills = trades.count { it.state == ScalpState.NO_FILL }
+            noFills = trades.count { it.state == ScalpState.NO_FILL },
+            grossWinUsd = wins.sumOf { it.netUsd!! },
+            grossLossUsd = losses.filter { it.netUsd!! < 0.0 }.sumOf { it.netUsd!! },
+            losses = losses.count { it.netUsd!! < 0.0 },
+            openContracts = active.filter { it.state != ScalpState.PENDING_ENTRY }.sumOf { it.remaining.coerceAtLeast(0) },
+            feesUsd = closed.sumOf { it.entryFeeUsd + it.exitFeeUsd }
         )
     }
 
@@ -94,6 +107,21 @@ object ScalpModels {
             .groupBy({ it.first }, { it.second })
         return ALL.map { m -> row(m, byModel[m].orEmpty(), bidFor) }
             .sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
+    }
+
+    /** All trades (primary) of one model, newest first. */
+    fun tradesOf(model: Model, trades: List<ScalpTrade>, limit: Int = 300): List<ScalpTrade> =
+        trades.asSequence().filter { modelOf(it) == model && it.state != ScalpState.NO_FILL }.take(limit).toList()
+
+    /** Cumulative net after fees over closed round trips, oldest → newest (bounded). */
+    fun equity(model: Model, trades: List<ScalpTrade>, maxPoints: Int = 400): List<Double> {
+        val closed = trades.filter { modelOf(it) == model && it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+            .sortedBy { it.closedAtMs ?: 0L }
+        var acc = 0.0
+        val pts = closed.map { acc += it.netUsd!!; acc }
+        if (pts.size <= maxPoints) return pts
+        val step = pts.size.toDouble() / maxPoints
+        return (0 until maxPoints).map { pts[(it * step).toInt()] } + pts.last()
     }
 
     /** Best model = highest net with at least one round trip (null when nobody has traded). */

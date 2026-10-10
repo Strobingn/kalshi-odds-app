@@ -238,6 +238,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 leaderAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor),
                 leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor) }.orEmpty(),
                 leaderByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor) },
+                algoAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor).associateBy { it.model },
+                algoToday = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now)).associateBy { it.model },
+                algoByCoin = byCoinPerModel(trades, bidFor, null),
+                algoTodayByCoin = byCoinPerModel(trades, bidFor, com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now)),
                 leaderTodayByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
                     com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now))
                 },
@@ -262,6 +266,40 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         }
         _scalpTab.value = next
+    }
+
+    private fun byCoinPerModel(
+        trades: List<com.dirk.kalshiodds.decision.ScalpTrade>, bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double?, since: Long?
+    ): Map<com.dirk.kalshiodds.decision.ScalpModels.Model, Map<String, com.dirk.kalshiodds.decision.ScalpModels.Row>> {
+        val perCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
+            com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = since).associateBy { it.model }
+        }
+        return com.dirk.kalshiodds.decision.ScalpModels.ALL.associateWith { m -> perCoin.mapValues { it.value.getValue(m) } }
+    }
+
+    // 0.3.52: one algorithm's own page (computed off Main).
+    private val _scalpAlgo = MutableStateFlow(ScalpAlgoDetail())
+    val scalpAlgo: StateFlow<ScalpAlgoDetail> = _scalpAlgo.asStateFlow()
+
+    fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
+        _scalpAlgo.value = ScalpAlgoDetail(model = model)
+        viewModelScope.launch(Dispatchers.Default) {
+            runCatching {
+                val now = container.clock.nowMs()
+                val trades = container.scalp.snapshot()
+                val marks = container.scalp.marks.value
+                val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
+                val mine = trades.filter { com.dirk.kalshiodds.decision.ScalpModels.modelOf(it) == model }
+                _scalpAlgo.value = ScalpAlgoDetail(
+                    model = model,
+                    allTime = com.dirk.kalshiodds.decision.ScalpModels.row(model, mine, bidFor),
+                    today = com.dirk.kalshiodds.decision.ScalpModels.row(model, mine.filter { (it.closedAtMs ?: it.signalAtMs) >= com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now) }, bidFor),
+                    byCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.row(model, mine.filter { it.coin == c }, bidFor) },
+                    trades = com.dirk.kalshiodds.decision.ScalpModels.tradesOf(model, mine),
+                    equity = com.dirk.kalshiodds.decision.ScalpModels.equity(model, mine)
+                )
+            }
+        }
     }
 
     /** Tap a ladder row: paper limit at exactly that price (fills on touch, depth-capped, auto-cancels at close). */

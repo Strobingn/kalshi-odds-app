@@ -180,8 +180,12 @@ class MainActivity : ComponentActivity() {
                                 com.dirk.kalshiodds.ui.ScalpTabScreen(
                                     viewModel = oddsViewModel,
                                     onOpenScalpData = { navigator.open(AppRoutes.SCALP_DATA) },
-                                    onOpenScalpRules = { navigator.open(AppRoutes.SCALP) }
+                                    onOpenScalpRules = { navigator.open(AppRoutes.SCALP) },
+                                    onOpenAlgo = { m -> oddsViewModel.openScalpAlgo(m); navigator.open(AppRoutes.SCALP_ALGO) }
                                 )
+                            },
+                            AppRoutes.SCALP_ALGO to {
+                                com.dirk.kalshiodds.ui.ScalpAlgoScreen(oddsViewModel, onBack = { navigator.back() })
                             },
                             AppRoutes.CRASH_LOG to {
                                 com.dirk.kalshiodds.ui.CrashLogScreen(onBack = { navigator.back() })
