@@ -88,6 +88,23 @@ class MainActivity : ComponentActivity() {
                     val navigator = rememberSaveable(saver = AppNavigator.Saver) { AppNavigator() }
                     var settingsFocusApiKey by rememberSaveable { mutableStateOf(false) }
                     var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
+                    // 0.3.47: announce the previous crash once (marker consumed on read).
+                    var crashNote by rememberSaveable {
+                        mutableStateOf(runCatching { com.dirk.kalshiodds.crash.CrashLog.consumePending()?.let { com.dirk.kalshiodds.crash.CrashLog.headline(it) } }.getOrNull())
+                    }
+                    crashNote?.let { note ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { crashNote = null },
+                            title = { androidx.compose.material3.Text("Crash log") },
+                            text = { androidx.compose.material3.Text(com.dirk.kalshiodds.ui.CrashLogCopy.announce(note)) },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = { crashNote = null; navigator.open(AppRoutes.CRASH_LOG) }) { androidx.compose.material3.Text("View") }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(onClick = { crashNote = null }) { androidx.compose.material3.Text("Dismiss") }
+                            }
+                        )
+                    }
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
                     val sheetOpen = oddsState.tickets.phase is TicketPhase.AwaitingApprove
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
@@ -158,6 +175,9 @@ class MainActivity : ComponentActivity() {
                             },
                             AppRoutes.SCALP to {
                                 com.dirk.kalshiodds.ui.ScalpScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.CRASH_LOG to {
+                                com.dirk.kalshiodds.ui.CrashLogScreen(onBack = { navigator.back() })
                             },
                             AppRoutes.SCALP_DATA to {
                                 com.dirk.kalshiodds.ui.ScalpDataScreen(

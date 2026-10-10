@@ -104,6 +104,13 @@ object DipNav {
             "Settings",
             "Keys, paper mode, and updates",
             tab = false
+        ),
+        MoreDestination(
+            AppRoutes.CRASH_LOG,
+            "App",
+            "Crash log",
+            "Saved crashes: view, share or export",
+            tab = false
         )
     )
 
@@ -130,6 +137,7 @@ object DipNav {
         AppRoutes.LADDER -> "More → Strategy ladder"
         AppRoutes.SCALP -> "More → Scalp (paper)"
         AppRoutes.SCALP_DATA -> "More → Scalp Data"
+        AppRoutes.CRASH_LOG -> "More → Crash log"
         else -> error("No path for $route")
     }
 
