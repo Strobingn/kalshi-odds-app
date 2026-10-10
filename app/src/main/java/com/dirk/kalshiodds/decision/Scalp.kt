@@ -417,8 +417,8 @@ data class ScalpTrade(
     /** Window cluster key shared by BTC/ETH/SOL markets that close together. */
     val windowKey: String get() = ticker.uppercase().substringAfter('-').substringBefore('-')
     /** 0.3.40: ruleVersion = "VERSION|variantId|P" (primary) or "…|S" (shadow tuning variant). Legacy rows are primary. */
-    val variantId: String get() = ruleVersion.split('|').getOrNull(1) ?: ScalpParams.LEGACY_ID
-    val isPrimary: Boolean get() = ruleVersion.split('|').getOrNull(2) != "S"
+    val variantId: String by lazy(LazyThreadSafetyMode.PUBLICATION) { ruleVersion.split('|').getOrNull(1) ?: ScalpParams.LEGACY_ID }
+    val isPrimary: Boolean by lazy(LazyThreadSafetyMode.PUBLICATION) { ruleVersion.split('|').getOrNull(2) != "S" }
     val coin: String get() = ScalpParams.coinOf(ticker)
     val strategy: ScalpStrategy get() = ScalpParams.byId(variantId)?.strategy ?: ScalpStrategy.FAIR_GAP
 
@@ -458,7 +458,7 @@ class ScalpBook(
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
-    private val _all = MutableStateFlow(store.loadScalps().sortedByDescending { it.signalAtMs })
+    private val _all = MutableStateFlow(ScalpMemory.bound(store.loadScalps().sortedByDescending { it.signalAtMs }))
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
     /** Primary scalps only (what the Scalp screen, stats and ladder use). */
     val trades: StateFlow<List<ScalpTrade>> = _trades.asStateFlow()
@@ -490,6 +490,15 @@ class ScalpBook(
         }
     }
 
+    /** Open cost of one model's primary scalps (its bankroll slice in use). */
+    fun openCostUsd(model: ScalpModels.Model): Double = _trades.value.filter { isActive(it) && ScalpModels.modelOf(it) == model }.sumOf(::activeCost)
+
+    private fun activeCost(t: ScalpTrade): Double = when (t.state) {
+        ScalpState.PENDING_ENTRY -> t.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, t.signalAsk)
+        ScalpState.OPEN, ScalpState.PENDING_EXIT -> (t.entryPrice ?: 0.0) * t.remaining + t.entryFeeUsd
+        else -> 0.0
+    }
+
     fun openTickers(): Set<String> = _trades.value.filter {
         it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY
     }.map { it.ticker.uppercase() }.toSet()
@@ -504,11 +513,14 @@ class ScalpBook(
     private fun isActive(t: ScalpTrade) = t.state != ScalpState.CLOSED && t.state != ScalpState.NO_FILL
 
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
-        _marks.value = _marks.value + (q.ticker.uppercase() to q)
+        _marks.value = (_marks.value + (q.ticker.uppercase() to q)).let { m ->
+            if (m.size <= ScalpMemory.MAX_TICKERS) m else m.filterValues { it.closeMs > q.nowMs - 60_000L || it.ticker.equals(q.ticker, true) }
+        }
         val changed = ArrayList<ScalpTrade>()
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) }
+        // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + ScalpModels.MAKER_DIP_PARAMS
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val hist = history.getOrPut(key) { ArrayDeque() }
@@ -516,6 +528,8 @@ class ScalpBook(
         hist.addLast(ScalpRule.Snap(q.nowMs, q.yesBid, q.yesAsk, ScalpRule.fairYes(q.spot, q.strike, q.sigmaPerSec, q.tauS)))
         while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > 2 * ScalpRule.LOOKBACK_MS) hist.removeFirst()
         if (q.nowMs >= q.closeMs) history.remove(key)
+        // 0.3.50: bounded — forget closed windows' history/marks (they used to accumulate forever).
+        if (history.size > ScalpMemory.MAX_TICKERS) history.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { history.remove(it) }
         val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
         // Step every open scalp first (one per market side per variant).
         mineAll.filter { isActive(it) }.forEach { t ->
@@ -524,6 +538,10 @@ class ScalpBook(
         }
         if (enabled) {
             val run = (primaries + variants).distinctBy { it.id }
+            // 0.3.50: per-model slice usage computed once per quote from active rows (was a full-ledger scan per candidate).
+            val sliceUsed = HashMap<ScalpModels.Model, Double>()
+            _trades.value.forEach { t -> if (isActive(t)) ScalpModels.modelOf(t)?.let { m -> sliceUsed[m] = (sliceUsed[m] ?: 0.0) + activeCost(t) } }
+            changed.forEach { t -> if (t.isPrimary && t.state == ScalpState.PENDING_ENTRY && t.signalAtMs == q.nowMs) ScalpModels.modelOf(t)?.let { m -> sliceUsed[m] = (sliceUsed[m] ?: 0.0) + activeCost(t) } }
             var openCost = openCostUsd() + changed.filter { it.isPrimary && it.state == ScalpState.PENDING_ENTRY && it.signalAtMs == q.nowMs }
                 .sumOf { it.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, it.signalAsk) }
             for (p in run) {
@@ -543,6 +561,11 @@ class ScalpBook(
                     if (role == "P") {
                         val cost = sig.ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, sig.ask)
                         if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
+                        // 0.3.50: each of the six models has its own bankroll slice (independent ledger).
+                        val model = ScalpModels.modelOf(p)
+                        val used = sliceUsed[model] ?: 0.0
+                        if (used + cost > ScalpModels.sliceUsd(bankrollUsd()) + 1e-9) continue
+                        sliceUsed[model] = used + cost
                         openCost += cost
                     }
                     val makerBid = if (p.maker) q.bid(sig.side)?.takeIf { it > 0.0 } else null
@@ -776,11 +799,11 @@ class ScalpBook(
         runCatching { store.upsertScalp(t) }
         val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
-        _all.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else listOf(t) + cur
+        _all.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else ScalpMemory.boundIfNeeded(listOf(t) + cur)
         if (t.isPrimary) {
             val pc = _trades.value
             val pi = pc.indexOfFirst { it.id == t.id }
-            _trades.value = if (pi >= 0) pc.toMutableList().also { it[pi] = t } else listOf(t) + pc
+            _trades.value = if (pi >= 0) pc.toMutableList().also { it[pi] = t } else ScalpMemory.boundIfNeeded(listOf(t) + pc)
         }
     }
 
@@ -842,4 +865,31 @@ object ScalpStats {
         trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null }.map {
             StrategyLadder.Item(cluster = it.windowKey, filled = true, settled = true, pnlUsd = it.netUsd!! / it.contracts.coerceAtLeast(1))
         }
+}
+
+
+/**
+ * 0.3.50: in-memory cap for the scalp ledger (the DB keeps every row). 0.3.49 kept every trade ever in RAM and
+ * re-copied the whole list on each save — with event-driven evals that grew without bound.
+ */
+object ScalpMemory {
+    const val MAX_CLOSED = 6_000
+    const val MAX_NO_FILL = 1_000
+    const val MAX_TICKERS = 48
+    /** Trim only when over by 5 % so a save is O(n) copy, not a trim every time. */
+    fun boundIfNeeded(list: List<ScalpTrade>): List<ScalpTrade> =
+        if (list.size > (MAX_CLOSED + MAX_NO_FILL) * 105 / 100) bound(list) else list
+
+    /** Keeps every active row, the newest [MAX_CLOSED] closed and newest [MAX_NO_FILL] no-fills; order preserved. */
+    fun bound(newestFirst: List<ScalpTrade>): List<ScalpTrade> {
+        var closed = 0
+        var nofill = 0
+        return newestFirst.filter {
+            when (it.state) {
+                ScalpState.CLOSED -> ++closed <= MAX_CLOSED
+                ScalpState.NO_FILL -> ++nofill <= MAX_NO_FILL
+                else -> true
+            }
+        }
+    }
 }

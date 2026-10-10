@@ -100,27 +100,33 @@ class ReleaseGate0340MultiStrategyTest {
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true) // fair-gap + dip-hunter both fire on YES
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true) // both fill
         b.onQuote(q(t + 36_000L, 0.34, 0.35), true) // same signal again: no second open per strategy/side
-        val open = b.snapshot().filter { it.state == ScalpState.OPEN }
+        // 0.3.50: the sixth model (maker-first dip) also runs as a primary; check the taker models here.
+        val open = b.snapshot().filter { it.state == ScalpState.OPEN && !it.isMaker }
         assertEquals(setOf(ScalpStrategy.FAIR_GAP, ScalpStrategy.DIP_HUNTER), open.map { it.strategy }.toSet())
-        assertEquals(2, b.snapshot().size)
+        assertEquals(2, b.snapshot().count { !it.isMaker })
         open.groupBy { it.strategy to it.side }.values.forEach { assertEquals(1, it.size) }
         assertTrue(open.all { it.isPrimary })
     }
 
     @Test
     fun totalOpenCostNeverExceedsPaperBankroll() {
-        // One 10-contract clip at 35¢ costs $3.50 + $0.16 fee; a $5 bankroll fits exactly one.
-        val b = book(bankroll = 5.0)
+        // One 10-contract clip at 35¢ costs $3.50 + $0.16 fee. 0.3.50: each of six models gets bankroll/6;
+        // a $5 bankroll (slice $0.83) fits none, $25 (slice $4.17) fits one clip per model.
         val t = close - 700_000L
+        val tiny = book(bankroll = 5.0)
+        tiny.onQuote(q(t, 0.44, 0.45), true)
+        tiny.onQuote(q(t + 30_000L, 0.34, 0.35), true)
+        assertEquals(0, tiny.snapshot().size)
+        val b = book(bankroll = 25.0)
         b.onQuote(q(t, 0.44, 0.45), true)
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true)
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true)
-        assertEquals(1, b.snapshot().size)
-        assertTrue(b.openCostUsd() <= 5.0 + 1e-9)
+        assertTrue(b.openCostUsd() <= 25.0 + 1e-9)
+        com.dirk.kalshiodds.decision.ScalpModels.ALL.forEach { assertTrue(b.openCostUsd(it) <= 25.0 / 6 + 1e-9) }
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(2, roomy.snapshot().size)
+        assertEquals(2, roomy.snapshot().count { !it.isMaker })
     }
 
     private fun closed(window: Int, variant: ScalpParams, cents: Double, i: Int): ScalpTrade {

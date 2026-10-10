@@ -141,17 +141,31 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var lastRecordedTicketError: String? = null
 
     /** 0.3.49: event-driven eval (WS ticker / book delta / CF tick → debounced per market → AI + scalpers + Home). */
-    private val marketEvents = com.dirk.kalshiodds.signal.engine.MarketEventDebouncer(viewModelScope) { tickers -> onMarketEvents(tickers) }
+    /**
+     * 0.3.50 crash fix: ONE background lane for every paper/AI/scalper evaluation (never Main). 0.3.49 ran the whole
+     * pipeline + its SQLite writes on Main every 150 ms of WS traffic → ANR / OOM kills after a few minutes.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val paperLane: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
+
+    /** 0.3.50: per-coin conflation (newest wins, one job per coin, bounded) instead of the 0.3.49 Main debouncer. */
+    private val marketEvents = com.dirk.kalshiodds.signal.engine.CoinEvalConflator(viewModelScope, paperLane) { _, tickers -> onMarketEvents(tickers) }
+    @Volatile private var lastHomeLiveMs = 0L
+    private val restPaperPending = java.util.concurrent.atomic.AtomicReference<List<MarketUiModel>?>(null)
 
     private fun onMarketEvents(tickers: Set<String>) {
         val snap = _state.value.snapshot ?: return
         fun List<MarketUiModel>.live() = map { m -> if (m.ticker in tickers) m.withLiveQuote(hub.scoring.book.lastTick(m.ticker)) else m }
         val next = snap.copy(btc = snap.btc.live(), eth = snap.eth.live(), sol = snap.sol.live(), extra = snap.extra.live())
-        _state.update { it.copy(snapshot = next) } // Home cards straight from the WS flow
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastHomeLiveMs >= HOME_LIVE_THROTTLE_MS) { // Home cards from the WS flow, ≤ 4 Hz recomposition
+            lastHomeLiveMs = nowMs
+            _state.update { it.copy(snapshot = next) }
+        }
         val s = _state.value.settings
         if (!s.paperTradingEnabled) return
         val changed = next.allMarkets.filter { it.ticker in tickers }
-        if (changed.isNotEmpty()) runPaperAutopilot(changed)
+        if (changed.isNotEmpty()) runPaperAutopilotNow(changed)
     }
 
     private fun startEventDriven() {
@@ -162,7 +176,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 if (com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series) == indexId) marketEvents.fire(m.ticker)
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(paperLane) {
             while (isActive) {
                 delay(com.dirk.kalshiodds.signal.engine.MarketEventDebouncer.EXIT_TIMER_MS)
                 // 1 s timer only for exits / time stops on open scalps + the status line.
@@ -178,6 +192,98 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 _state.update { it.copy(feedStatus = feedStatusLine()) }
             }
         }
+    }
+
+    // ---------------- 0.3.50 Scalp tab (paper only; computed on the paper lane, never Main) ----------------
+    private val _scalpTab = MutableStateFlow(ScalpTabState())
+    val scalpTab: StateFlow<ScalpTabState> = _scalpTab.asStateFlow()
+    @Volatile private var scalpTabVisible = false
+    @Volatile private var scalpTabBoardsAtMs = 0L
+    private var scalpTabJob: kotlinx.coroutines.Job? = null
+
+    fun setScalpTabVisible(visible: Boolean) {
+        scalpTabVisible = visible
+        if (visible && scalpTabJob?.isActive != true) {
+            scalpTabJob = viewModelScope.launch(Dispatchers.Default) {
+                while (isActive && scalpTabVisible) {
+                    runCatching { refreshScalpTab() }
+                    delay(SCALP_TAB_REFRESH_MS)
+                }
+            }
+        }
+    }
+
+    fun selectScalpCoin(coin: String?) { _scalpTab.update { it.copy(coin = coin) }; scalpTabBoardsAtMs = 0L }
+    fun selectScalpMarket(ticker: String) { _scalpTab.update { it.copy(selectedTicker = ticker) } }
+    fun selectScalpSide(side: String) { _scalpTab.update { it.copy(side = if (side.equals("NO", true)) "NO" else "YES") } }
+
+    private fun refreshScalpTab(now: Long = container.clock.nowMs()) {
+        val cur = _scalpTab.value
+        val markets = _state.value.snapshot?.allMarkets.orEmpty()
+            .filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
+            .filter { (it.closeTimeEpochMs ?: Long.MAX_VALUE) > now }
+            .sortedWith(compareBy({ it.closeTimeEpochMs ?: Long.MAX_VALUE }, { it.ticker }))
+            .map { ScalpTabMarket(it.ticker, com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker), it.closeTimeEpochMs, it.ticker) }
+            .distinctBy { it.ticker }
+        val sel = cur.selectedTicker?.takeIf { t -> markets.any { it.ticker == t } } ?: markets.firstOrNull { cur.coin == null || it.coin == cur.coin }?.ticker
+        val wkey = sel?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) } ?: markets.firstOrNull()?.ticker?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) }
+        val trades = container.scalp.snapshot()
+        val marks = container.scalp.marks.value
+        val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
+        var next = cur.copy(markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
+        if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS) {
+            scalpTabBoardsAtMs = now
+            val bankroll = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+            next = next.copy(
+                leaderAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor),
+                leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor) }.orEmpty(),
+                leaderByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor) },
+                windows = com.dirk.kalshiodds.decision.ScalpModels.perWindow(trades, cur.coin),
+                sliceUsd = com.dirk.kalshiodds.decision.ScalpModels.sliceUsd(runCatching { paperBook.snapshot().cashUsd }.getOrDefault(bankroll))
+            )
+        }
+        if (sel != null) {
+            val side = cur.side
+            val book = hub.scoring.book.snapshotBook(sel)
+            val orders = container.paperOrders.open().filter { it.ticker.equals(sel, true) && it.side.equals(side, true) }
+                .map { com.dirk.kalshiodds.decision.PriceLadder.Order(it.id, it.isBuy, it.limitPrice, it.remaining) }
+            val fill = runCatching { paperBook.snapshot().fills.firstOrNull { !it.settled && it.ticker.equals(sel, true) && it.side.equals(side, true) } }.getOrNull()
+            val close = markets.firstOrNull { it.ticker == sel }?.closeMs
+            next = next.copy(
+                ladder = com.dirk.kalshiodds.decision.PriceLadder.rows(side, book?.yes.orEmpty(), book?.no.orEmpty(), orders),
+                openOrders = orders,
+                heldContracts = runCatching { paperBook.openContracts(sel, side) }.getOrDefault(0),
+                heldEntry = fill?.limitPrice,
+                bookAgeMs = hub.scoring.book.bookAgeMs(sel, now),
+                secondsLeft = close?.let { ((it - now) / 1000L).coerceAtLeast(0L) }
+            )
+        }
+        _scalpTab.value = next
+    }
+
+    /** Tap a ladder row: paper limit at exactly that price (fills on touch, depth-capped, auto-cancels at close). */
+    fun ladderPlace(cents: Int, buy: Boolean, qty: Int) {
+        val st = _scalpTab.value
+        val t = st.selectedTicker ?: return
+        submitPaperOrder(t, st.side, if (buy) "BUY" else "SELL", cents.toDouble(), qty, market = false)
+        viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+    }
+
+    fun ladderCancel(id: String) { cancelPaperOrder(id); viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+
+    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+
+    /** One tap: sell everything held on the selected side at entry + [plusCents]. */
+    fun sellOwnedAt(plusCents: Int) {
+        val st = _scalpTab.value
+        val t = st.selectedTicker ?: return
+        val px = com.dirk.kalshiodds.decision.PriceLadder.exitPrice(st.heldEntry, plusCents)
+        if (st.heldContracts <= 0 || px == null) {
+            _state.update { it.copy(userMessage = "Paper: nothing held on ${if (st.side == "NO") "DOWN" else "UP"} $t") }
+            return
+        }
+        submitPaperOrder(t, st.side, "SELL", px * 100.0, st.heldContracts, market = false)
+        viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } }
     }
 
     private fun feedStatusLine(now: Long = System.currentTimeMillis()): String {
@@ -1530,7 +1636,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * Paper or shadow only (0.3.40 owner decision). There is no path from here to an order:
      * no trade client, no ticket session, no armed state.
      */
+    /** REST/alert paths: hand off to the paper lane, latest list wins (never queues behind itself). */
     private fun runPaperAutopilot(live: List<MarketUiModel>) {
+        if (restPaperPending.getAndSet(live) != null) return
+        viewModelScope.launch(paperLane) {
+            val batch = restPaperPending.getAndSet(null) ?: return@launch
+            runPaperAutopilotNow(batch)
+        }
+    }
+
+    private fun runPaperAutopilotNow(live: List<MarketUiModel>) {
         val now0 = container.clock.nowMs()
         val backoff = container.paperBackoff
         if (backoff.blocked(now0)) return
@@ -1905,5 +2020,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val MAX_BACKOFF_MS = 8_000L // 0.3.49: was 60 s
         const val WS_METADATA_POLL_MS = 3_000L // 0.3.45
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
+        const val HOME_LIVE_THROTTLE_MS = 250L
+        const val SCALP_TAB_REFRESH_MS = 500L
+        const val SCALP_TAB_BOARDS_MS = 3_000L
     }
 }

@@ -10,6 +10,7 @@ class DipNavTest {
         assertEquals(
             listOf(
                 AppRoutes.HOME,
+                AppRoutes.SCALP_TAB,
                 AppRoutes.SCORECARD,
                 AppRoutes.LIVE,
                 AppRoutes.REAL_MONEY,
@@ -19,7 +20,7 @@ class DipNavTest {
             DipNav.tabs
         )
         assertEquals(
-            listOf("Home", "Scorecard", "Live", "Real Money", "Data", "More"),
+            listOf("Home", "Scalp", "Scorecard", "Live", "Real Money", "Data", "More"),
             DipNav.tabs.map { DipNav.tabLabel.getValue(it) }
         )
     }

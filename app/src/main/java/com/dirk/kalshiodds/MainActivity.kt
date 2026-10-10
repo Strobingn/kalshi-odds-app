@@ -176,6 +176,13 @@ class MainActivity : ComponentActivity() {
                             AppRoutes.SCALP to {
                                 com.dirk.kalshiodds.ui.ScalpScreen(decisionViewModel, onBack = { navigator.back() })
                             },
+                            AppRoutes.SCALP_TAB to {
+                                com.dirk.kalshiodds.ui.ScalpTabScreen(
+                                    viewModel = oddsViewModel,
+                                    onOpenScalpData = { navigator.open(AppRoutes.SCALP_DATA) },
+                                    onOpenScalpRules = { navigator.open(AppRoutes.SCALP) }
+                                )
+                            },
                             AppRoutes.CRASH_LOG to {
                                 com.dirk.kalshiodds.ui.CrashLogScreen(onBack = { navigator.back() })
                             },

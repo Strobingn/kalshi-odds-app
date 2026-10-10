@@ -25,13 +25,15 @@ object AppRoutes {
     const val SCALP = "scalp"
     const val SCALP_DATA = "scalp-data"
     const val CRASH_LOG = "crash-log"
+    /** 0.3.50 Scalp tab (six paper models, leaderboard, price ladder). */
+    const val SCALP_TAB = "scalp-tab"
 
     /** FieldOps bottom bar, left to right. */
-    val TABS: List<String> = listOf(HOME, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
+    val TABS: List<String> = listOf(HOME, SCALP_TAB, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
 
     val ALL: List<String> = listOf(
         HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, REAL_MONEY, MORE,
-        CALIBRATION, LADDER, SCALP, SCALP_DATA, CRASH_LOG
+        CALIBRATION, LADDER, SCALP, SCALP_DATA, CRASH_LOG, SCALP_TAB
     )
 }
 
