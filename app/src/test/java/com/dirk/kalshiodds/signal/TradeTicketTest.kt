@@ -5,6 +5,7 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PayoutGate
+import com.dirk.kalshiodds.signal.trade.ScalpSignal
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
@@ -473,7 +474,7 @@ class TicketBuilderGateTest {
         // automatic live-ticket value gates. The live-capable kinds remain
         // absent when the modeled value does not clear costs.
         assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
-        assertEquals(3, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
+        assertEquals(ScalpSignal.Track.values().size, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
         assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
     }
 
@@ -723,13 +724,13 @@ class TicketBuilderGateTest {
     }
 
     @Test
-    fun disablingLiveTicketsStillLeavesTheThreePaperScalpTracks() {
+    fun disablingLiveTicketsStillLeavesAllEightPaperScalpTracks() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketsEnabled = false, ticketRespectGates = false),
             alertsPaused = false
         )
         val tickets = TicketBuilder.proposeAll(listOf(market(true, false, 0.03)), ctx)
-        assertEquals(3, tickets.size)
+        assertEquals(ScalpSignal.Track.values().size, tickets.size)
         assertTrue(tickets.all { it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP })
     }
 }
@@ -748,7 +749,7 @@ class DefaultConfigV22Test {
         assertEquals(SignalConstants.DEFAULT_MIN_PAYOUT_USD, 100.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_STAKE_USD, 1.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_MIN_PAYOUT_USD, 25.0, 1e-9)
-        assertEquals(SignalConstants.PAPER_START_USD, 20_000.0, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD, 100_000.0, 1e-9)
         assertEquals(SignalConstants.PAPER_STAKE_USD, 5.0, 1e-9)
         val paperCfg = com.dirk.kalshiodds.signal.config.DefaultSignalConfig.parse(
             """{"paperTradingEnabled":true}"""

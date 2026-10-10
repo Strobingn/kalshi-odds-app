@@ -12,9 +12,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,6 +45,7 @@ import java.util.Locale
 @Composable
 fun ScalpScreen(
     state: OddsUiState,
+    onBack: () -> Unit,
     onSetPaperTrading: (Boolean) -> Unit,
     onResetPaper: () -> Unit
 ) {
@@ -67,18 +72,27 @@ fun ScalpScreen(
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         item {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    "AI Scalp",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = colors.textPrimary,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    "Three concurrent paper-only strategies with an entry and exit ledger.",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = colors.textSecondary
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Home",
+                        tint = colors.accentBlue
+                    )
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "AI Scalp",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = colors.textPrimary,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Eight concurrent paper-only strategies on each 15-minute contract.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textSecondary
+                    )
+                }
             }
         }
 
@@ -100,7 +114,7 @@ fun ScalpScreen(
                     if (state.settings.paperTradingEnabled) {
                         "Waiting for an open BTC window with an executable displayed ask. This is a quote requirement, not a stake or time cap."
                     } else {
-                        "Paper autopilot is paused. Turn it on above to allow the three tracks to open paper positions."
+                        "Paper autopilot is paused. Turn it on above to allow all eight tracks to open paper positions."
                     }
                 )
             }
@@ -177,7 +191,7 @@ private fun ScalpControlCard(
                 )
                 Text(
                     if (state.settings.paperTradingEnabled) {
-                        "Dip Hunter, Momentum Sniper, and Extreme Reversal may fill independently."
+                        "All eight tracks may fill independently on the same 15-minute contract."
                     } else {
                         "No new paper positions will open until the autopilot is switched back on."
                     },
@@ -199,7 +213,7 @@ private fun ScalpControlCard(
             ScalpStat("P&L", signedMoney(realized), pnlColor(realized, colors))
         }
         Text(
-            "Paper only: $20,000 starting balance, unrestricted synthetic credit, and each fill uses the displayed touch quantity. No action on this tab can place a Kalshi order.",
+            "Paper only: \$100,000 starting balance, unrestricted synthetic credit, and each fill uses the displayed touch quantity. No action on this tab can place a Kalshi order.",
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
@@ -215,7 +229,7 @@ private fun ScalpControlCard(
             )
         }
         OutlinedButton(onClick = onResetPaper) {
-            Text("Reset paper to $20,000")
+            Text("Reset paper to \$100,000")
         }
     }
 }

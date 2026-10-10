@@ -594,7 +594,6 @@ class ScoringEngine(
                 netEvPositive = ev.netEv > 0.0
             )
         }
-        val combinedSpotLabel = listOfNotNull(spotLabel, dir.note).joinToString(" · ").ifBlank { null }
         val filter = SkipFilter.evaluate(
             confidence = confidence,
             spreadDollars = spread,
@@ -682,8 +681,8 @@ class ScoringEngine(
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
         // The learned blend loses to Kalshi's mid. Keep a strong spot lock
-        // until the last minute, then the 60s settlement average — the thing
-        // Kalshi actually pays — is allowed to call the side.
+        // until the five-minute settlement ramp, then the CF-index fair
+        // value — the thing Kalshi actually pays — is allowed to call side.
         run {
             val anchored = com.dirk.kalshiodds.signal.fair.WinningSide.fairYesPp(
                 marketPp = midPp,
@@ -691,8 +690,14 @@ class ScoringEngine(
                 tteSeconds = tteSec?.toDouble(),
                 modelPp = if (loaded?.beatsMarket == true) importedModelPp else null
             )
-            val settleDominates = digitalFairPp != null && (tteSec ?: 900L) <= 60L
-            if (dir.applied && !settleDominates) {
+            // Do not overwrite the Home forecast's settlement-derived fair
+            // value with a point-spot direction lock while its five-minute
+            // CF-index ramp is already active.
+            val settlementRampActive = com.dirk.kalshiodds.signal.fair.WinningSide.settlementRampActive(
+                settlePp = digitalFairPp,
+                tteSeconds = tteSec?.toDouble()
+            )
+            if (dir.applied && !settlementRampActive) {
                 fair = if (dir.side == "YES") maxOf(anchored, dir.fairPp) else minOf(anchored, dir.fairPp)
                 fair = fair.coerceIn(2.0, 98.0)
                 predictedSide = dir.side
@@ -724,6 +729,14 @@ class ScoringEngine(
                 netEvPositive = ev.netEv > 0.0
             )
         }
+        val directionalLockApplied = dir.applied &&
+            !com.dirk.kalshiodds.signal.fair.WinningSide.settlementRampActive(
+                settlePp = digitalFairPp,
+                tteSeconds = tteSec?.toDouble()
+            )
+        val combinedSpotLabel = listOfNotNull(spotLabel, dir.note?.takeIf { directionalLockApplied })
+            .joinToString(" · ")
+            .ifBlank { null }
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
             spotReturn5m = spotFeat?.spotReturn5m,
@@ -843,7 +856,7 @@ class ScoringEngine(
             metaNote = extOut?.meta?.note,
             pathSurvive = extOut?.path?.pSurvive,
             extendedNote = extOut?.note,
-            directionalLock = dir.applied,
+            directionalLock = directionalLockApplied,
             spotVsTargetUsd = dir.spotVsTargetUsd,
             spotUsd = settlementSpot,
             tapeTrend = tape.trend.name,

@@ -97,7 +97,7 @@ fun PaperBookCard(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper to $20,000")
+                Text("Reset paper to \$100,000")
             }
             if (onViewHistory != null) {
                 OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {

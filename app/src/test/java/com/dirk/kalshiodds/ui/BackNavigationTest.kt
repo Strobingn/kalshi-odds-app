@@ -131,6 +131,35 @@ class BackNavigationTest {
     }
 
     @Test
+    fun pressBackFromRootScalpTabReturnsHomeInsteadOfFinishing() {
+        val nav = AppNavigator()
+        rule.setContent {
+            DipApp(
+                navigator = nav,
+                sheetOpen = false,
+                onCancelSheet = {},
+                home = { Text("HOME_SCREEN") },
+                settings = { Text("SETTINGS_SCREEN") },
+                scorecard = { Text("SCORECARD_SCREEN") },
+                scalp = { Text("SCALP_SCREEN") },
+                data = { Text("DATA_SCREEN") },
+                history = { Text("HISTORY_SCREEN") },
+                signalHistory = { Text("SIGNAL_HISTORY_SCREEN") },
+                chart = { Text("CHART_SCREEN") }
+            )
+        }
+        rule.runOnIdle { nav.selectPrimary(AppRoutes.SCALP) }
+        rule.onNodeWithText("SCALP_SCREEN").assertExists()
+
+        rule.activity.onBackPressedDispatcher.onBackPressed()
+        rule.waitForIdle()
+
+        assertEquals(AppRoutes.HOME, nav.current)
+        assertFalse(rule.activity.isFinishing)
+        rule.onNodeWithText("HOME_SCREEN").assertExists()
+    }
+
+    @Test
     fun selectingBottomTabReplacesBackStack() {
         val nav = AppNavigator()
         nav.open(AppRoutes.CHART)

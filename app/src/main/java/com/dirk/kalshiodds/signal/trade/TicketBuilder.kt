@@ -110,7 +110,7 @@ object TicketBuilder {
         return proposeScalps(market, ctx).firstOrNull()
     }
 
-    /** Three independent paper-only tracks can hold the same market concurrently. */
+    /** Eight independent paper-only tracks can hold the same market concurrently. */
     fun proposeScalps(market: MarketUiModel, ctx: Context): List<TradeTicket> {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return emptyList()
         return ScalpSignal.candidates(market, ctx.nowMs).mapNotNull { scalp ->

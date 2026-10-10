@@ -58,9 +58,14 @@ fun TradeTicketsSection(
     onCancelOrder: (String) -> Unit
 ) {
     val colors = DipTheme.colors
-    val proposals = tickets.proposals.sortedByDescending {
-        if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
-    }
+    // Scalp has its own dedicated tab and ledger. Leaving its eight parallel
+    // paper candidates here makes the approval surface look like a stack of
+    // live limit orders even though none can be submitted to Kalshi.
+    val proposals = tickets.proposals
+        .filterNot { it.kind == TicketKind.SCALP }
+        .sortedByDescending {
+            if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
+        }
     val working = tickets.working.filter { it.isResting && it.error?.startsWith("cancelled") != true }
 
     if (listVisible) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -131,7 +136,7 @@ fun TradeTicketsSection(
         }
         if (proposals.isEmpty() && working.isEmpty() && visibleError == null) {
             Text(
-                "No pending tickets. Use Buy UP / Buy DOWN on a market, or Sell on Positions.",
+                "No approval-ready limit tickets. Use Buy UP / Buy DOWN on a market, or Sell on Positions.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary,
                 modifier = Modifier
@@ -200,11 +205,11 @@ private fun ProposedTicketCard(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(
                     when (ticket.kind) {
-                        TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
-                        TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
+                        TicketKind.HUNTER -> "LIMIT ORDER · Hunter"
+                        TicketKind.HUNTER_VALUE -> "LIMIT ORDER · Long-shot"
                         TicketKind.SCALP -> "PAPER SCALP · Experimental"
-                        TicketKind.MANUAL -> "MANUAL BUY"
-                        TicketKind.CONFIGURED -> "TICKET"
+                        TicketKind.MANUAL -> "LIMIT ORDER · Manual"
+                        TicketKind.CONFIGURED -> "LIMIT ORDER"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
                     } + " · " + TradeModeLabel.forApprove(
                         paperTradingEnabled = paperTradingEnabled,
@@ -269,9 +274,10 @@ private fun ProposedTicketCard(
             Spacer(Modifier.height(8.dp))
             TicketMetricRow("Stake needed", String.format(Locale.US, "$%.2f", ticket.stakeUsd))
             TicketMetricRow("Contracts", String.format(Locale.US, "%d", ticket.contracts))
+            TicketMetricRow("Limit price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
             TicketMetricRow(
-                "Avg price",
-                "${KalshiQuoteDisplay.formatPriceCents(ticket.estimatedAvgFill)}  (never market)"
+                "Expected fill",
+                "${KalshiQuoteDisplay.formatPriceCents(ticket.estimatedAvgFill)} · no market order"
             )
             ticket.visibleContracts?.let { vis ->
                 TicketMetricRow(

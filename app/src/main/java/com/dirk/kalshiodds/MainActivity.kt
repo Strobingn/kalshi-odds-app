@@ -134,6 +134,7 @@ class MainActivity : ComponentActivity() {
                         scalp = {
                             ScalpScreen(
                                 state = oddsState,
+                                onBack = { navigator.selectPrimary(AppRoutes.HOME) },
                                 onSetPaperTrading = oddsViewModel::setPaperTrading,
                                 onResetPaper = oddsViewModel::resetPaperBook
                             )

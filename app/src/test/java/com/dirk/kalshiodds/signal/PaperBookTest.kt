@@ -3,7 +3,9 @@ package com.dirk.kalshiodds.signal
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.paper.PaperBook
+import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.KalshiFee
+import com.dirk.kalshiodds.signal.trade.ScalpSignal
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
@@ -20,7 +22,7 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtTwentyThousandAndPapersFiveDollarAiFill() {
+    fun startsAtOneHundredThousandAndPapersFiveDollarAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
@@ -34,6 +36,17 @@ class PaperBookTest {
         assertEquals(SignalConstants.PAPER_START_USD - 5.0 - fee, book.snapshot().cashUsd, 1e-6)
         assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
+    }
+
+    @Test
+    fun hydrateMigratesTheOldTwentyThousandSeedWithoutErasingPnl() {
+        val book = PaperBook()
+
+        book.hydrate(PaperBookState(startingUsd = 20_000.0, cashUsd = 20_237.50))
+
+        assertEquals(100_000.0, book.snapshot().startingUsd, 1e-9)
+        assertEquals(100_237.50, book.snapshot().cashUsd, 1e-9)
+        assertTrue(book.snapshot().lastMessage!!.contains("migrated to \$100,000"))
     }
 
     @Test
@@ -201,19 +214,22 @@ class PaperBookTest {
             estimatedAvgFill = 0.40,
             visibleContracts = 100
         )
-        val dip = book.considerUnboundedTicket(base.copy(strategyVersion = "scalp-v3-dip-hunter"), enabled = true)!!
-        val momentum = book.considerUnboundedTicket(base.copy(strategyVersion = "scalp-v3-momentum-sniper"), enabled = true)!!
-        val reversal = book.considerUnboundedTicket(base.copy(strategyVersion = "scalp-v3-extreme-reversal"), enabled = true)!!
+        val fills = ScalpSignal.Track.values().associateWith { track ->
+            book.considerUnboundedTicket(base.copy(strategyVersion = track.formulaVersion), enabled = true)!!
+        }
+        val dip = fills.getValue(ScalpSignal.Track.DIP_HUNTER)
+        val momentum = fills.getValue(ScalpSignal.Track.MOMENTUM_SNIPER)
+        val reversal = fills.getValue(ScalpSignal.Track.EXTREME_REVERSAL)
 
-        assertEquals(3, book.snapshot().openCount)
+        assertEquals(ScalpSignal.Track.values().size, book.snapshot().openCount)
         assertNull(book.considerUnboundedTicket(base.copy(strategyVersion = dip.strategyVersion), enabled = true))
         assertNotNull(book.updateAutoPositionHighWater(momentum.id, 0.45))
         assertNotNull(book.autoSell(momentum.id, 0.44, "test"))
-        assertEquals(2, book.snapshot().openCount)
+        assertEquals(ScalpSignal.Track.values().size - 1, book.snapshot().openCount)
         assertTrue(!book.snapshot().fills.single { it.id == dip.id }.settled)
         assertTrue(!book.snapshot().fills.single { it.id == reversal.id }.settled)
         assertNotNull(book.considerUnboundedTicket(base.copy(strategyVersion = momentum.strategyVersion), enabled = true))
-        assertEquals(3, book.snapshot().openCount)
+        assertEquals(ScalpSignal.Track.values().size, book.snapshot().openCount)
     }
 
     private var bookIds: Int = 0

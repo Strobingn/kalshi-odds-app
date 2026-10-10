@@ -21,6 +21,17 @@ object WinningSide {
     const val SETTLE_RAMP_END_S = 30.0
     const val SETTLE_MAX_WEIGHT = 0.90
 
+    /**
+     * True only while a settlement-derived probability has non-zero weight.
+     * This keeps callers from overwriting the settlement ramp with a
+     * point-spot direction lock.
+     */
+    fun settlementRampActive(settlePp: Double?, tteSeconds: Double?): Boolean {
+        if (settlePp?.isFinite() != true) return false
+        val t = (tteSeconds ?: 900.0).takeIf { it.isFinite() }?.coerceAtLeast(0.0) ?: return false
+        return t < SETTLE_RAMP_START_S
+    }
+
     fun fairYesPp(
         marketPp: Double,
         settlePp: Double?,

@@ -32,7 +32,7 @@ class ScalpSignalTest {
         assertEquals(660L, candidate.timeToCloseSec)
     }
 
-    @Test fun threeIndependentTracksProduceConcurrentSidesWithoutEntryGates() {
+    @Test fun eightIndependentTracksProduceConcurrentSidesWithoutEntryGates() {
         val candidates = ScalpSignal.candidates(
             market(0.50, 0.004, 0.020).copy(predictedSide = "YES"),
             openedAt + 60_000L
@@ -41,11 +41,16 @@ class ScalpSignalTest {
             listOf(
                 "scalp-v3-dip-hunter",
                 "scalp-v3-momentum-sniper",
-                "scalp-v3-extreme-reversal"
+                "scalp-v3-extreme-reversal",
+                "scalp-v4-one-minute-reversal",
+                "scalp-v4-five-minute-trend",
+                "scalp-v4-fair-value-follower",
+                "scalp-v4-book-pressure",
+                "scalp-v4-market-favorite"
             ),
             candidates.map { it.formulaVersion }
         )
-        assertEquals(listOf("YES", "YES", "NO"), candidates.map { it.side })
+        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", "YES", "YES", "YES"), candidates.map { it.side })
     }
 
     @Test fun ticketCanOpenOutsideTheOldTimeAndSpotFilters() {
@@ -75,8 +80,8 @@ class ScalpSignalTest {
             market(0.50, -0.003, 0.010).copy(predictedSide = "YES", yesAskSize = 10.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = openedAt + 10_000L)
         )
-        assertEquals(3, tickets.size)
-        assertEquals(3, tickets.mapNotNull { it.strategyVersion }.toSet().size)
+        assertEquals(ScalpSignal.Track.values().size, tickets.size)
+        assertEquals(ScalpSignal.Track.values().size, tickets.mapNotNull { it.strategyVersion }.toSet().size)
         org.junit.Assert.assertTrue(tickets.all { it.paperOnly && it.canPaper && !it.canApprove })
     }
 }

@@ -36,10 +36,10 @@ object SignalConstants {
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
     /**
-     * Isolated paper book — never hits Kalshi. $20k is a legible starting
+     * Isolated paper book — never hits Kalshi. $100k is a legible starting
      * reference; paper execution itself may use unlimited synthetic credit.
      */
-    const val PAPER_START_USD = 20_000.0
+    const val PAPER_START_USD = 100_000.0
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
 

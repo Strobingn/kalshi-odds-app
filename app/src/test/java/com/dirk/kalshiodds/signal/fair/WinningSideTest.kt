@@ -36,4 +36,12 @@ class WinningSideTest {
         assertTrue(late > 80.0)
         assertEquals("YES", WinningSide.side(late))
     }
+
+    @Test
+    fun settlementRampIsActiveForTheWholeFiveMinuteFairValueWindow() {
+        assertTrue(WinningSide.settlementRampActive(settlePp = 55.0, tteSeconds = 299.0))
+        assertTrue(WinningSide.settlementRampActive(settlePp = 55.0, tteSeconds = 30.0))
+        org.junit.Assert.assertFalse(WinningSide.settlementRampActive(settlePp = 55.0, tteSeconds = 300.0))
+        org.junit.Assert.assertFalse(WinningSide.settlementRampActive(settlePp = null, tteSeconds = 30.0))
+    }
 }

@@ -9,7 +9,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
  * market and an executable displayed ask so the paper fill has a real quote.
  */
 object ScalpSignal {
-    const val FORMULA_VERSION = "scalp-v3-multi-track"
+    const val FORMULA_VERSION = "scalp-v4-eight-track"
 
     enum class Track(val formulaVersion: String, val label: String) {
         /** Existing settlement-aware forecast direction. */
@@ -17,7 +17,17 @@ object ScalpSignal {
         /** Follows the most recent one-minute public-spot direction. */
         MOMENTUM_SNIPER("scalp-v3-momentum-sniper", "Momentum Sniper"),
         /** Fades the five-minute public-spot direction. */
-        EXTREME_REVERSAL("scalp-v3-extreme-reversal", "Extreme Reversal")
+        EXTREME_REVERSAL("scalp-v3-extreme-reversal", "Extreme Reversal"),
+        /** Fades the most recent one-minute public-spot direction. */
+        ONE_MINUTE_REVERSAL("scalp-v4-one-minute-reversal", "1m Mean Reversion"),
+        /** Follows the five-minute public-spot direction. */
+        FIVE_MINUTE_TREND("scalp-v4-five-minute-trend", "5m Trend Rider"),
+        /** Uses the scored digital fair value before simpler probability fallbacks. */
+        FAIR_VALUE_FOLLOWER("scalp-v4-fair-value-follower", "Fair Value Follower"),
+        /** Uses the displayed best-bid imbalance as a separate book-only track. */
+        BOOK_PRESSURE("scalp-v4-book-pressure", "Book Pressure"),
+        /** Uses the displayed market midpoint as an explicit experimental baseline. */
+        MARKET_FAVORITE("scalp-v4-market-favorite", "Market Favorite")
     }
 
     data class Candidate(
@@ -54,7 +64,28 @@ object ScalpSignal {
             source = "5m public-spot reversal",
             fallback = market,
             nowMs = nowMs
-        )
+        ),
+        spotDirection(
+            track = Track.ONE_MINUTE_REVERSAL,
+            returnValue = market.spotReturn1m,
+            positiveSide = "NO",
+            negativeSide = "YES",
+            source = "1m public-spot reversal",
+            fallback = market,
+            nowMs = nowMs
+        ),
+        spotDirection(
+            track = Track.FIVE_MINUTE_TREND,
+            returnValue = market.spotReturn5m,
+            positiveSide = "YES",
+            negativeSide = "NO",
+            source = "5m public-spot trend",
+            fallback = market,
+            nowMs = nowMs
+        ),
+        fairValueFollower(market, nowMs),
+        bookPressure(market, nowMs),
+        marketFavorite(market, nowMs)
     )
 
     /** Compatibility selector for callers that request the primary Dip Hunter track. */
@@ -111,6 +142,81 @@ object ScalpSignal {
         return candidate(track, dip.side, "$source unavailable; ${dip.selectedFrom} fallback", fallback, nowMs)
     }
 
+    private fun fairValueFollower(market: MarketUiModel, nowMs: Long): Candidate {
+        val digitalFair = market.digitalFairPp?.takeIf { it.isFinite() }
+        if (digitalFair != null) {
+            return candidate(
+                track = Track.FAIR_VALUE_FOLLOWER,
+                side = if (digitalFair >= 50.0) "YES" else "NO",
+                source = "digital fair value (${formatPercent(digitalFair)})",
+                market = market,
+                nowMs = nowMs
+            )
+        }
+        val aiFair = market.aiYesPercent?.takeIf { it.isFinite() }
+        if (aiFair != null) {
+            return candidate(
+                track = Track.FAIR_VALUE_FOLLOWER,
+                side = if (aiFair >= 50.0) "YES" else "NO",
+                source = "AI fair value (${formatPercent(aiFair)})",
+                market = market,
+                nowMs = nowMs
+            )
+        }
+        val fallback = dipHunter(market, nowMs)
+        return candidate(
+            track = Track.FAIR_VALUE_FOLLOWER,
+            side = fallback.side,
+            source = "fair value unavailable; ${fallback.selectedFrom} fallback",
+            market = market,
+            nowMs = nowMs
+        )
+    }
+
+    private fun bookPressure(market: MarketUiModel, nowMs: Long): Candidate {
+        val yesBid = market.yesBid?.takeIf { it.isFinite() }
+        val noBid = market.noBid?.takeIf { it.isFinite() }
+        if (yesBid != null && noBid != null) {
+            val side = if (yesBid >= noBid) "YES" else "NO"
+            return candidate(
+                track = Track.BOOK_PRESSURE,
+                side = side,
+                source = "best-bid pressure (YES ${formatPrice(yesBid)} / NO ${formatPrice(noBid)})",
+                market = market,
+                nowMs = nowMs
+            )
+        }
+        val fallback = marketFavorite(market, nowMs)
+        return candidate(
+            track = Track.BOOK_PRESSURE,
+            side = fallback.side,
+            source = "best-bid pressure unavailable; ${fallback.selectedFrom} fallback",
+            market = market,
+            nowMs = nowMs
+        )
+    }
+
+    private fun marketFavorite(market: MarketUiModel, nowMs: Long): Candidate {
+        val yesMid = market.yesProbabilityPercent?.takeIf { it.isFinite() }
+        if (yesMid != null) {
+            return candidate(
+                track = Track.MARKET_FAVORITE,
+                side = if (yesMid >= 50.0) "YES" else "NO",
+                source = "displayed market midpoint (${formatPercent(yesMid)} YES)",
+                market = market,
+                nowMs = nowMs
+            )
+        }
+        val fallback = dipHunter(market, nowMs)
+        return candidate(
+            track = Track.MARKET_FAVORITE,
+            side = fallback.side,
+            source = "market midpoint unavailable; ${fallback.selectedFrom} fallback",
+            market = market,
+            nowMs = nowMs
+        )
+    }
+
     private fun candidate(
         track: Track,
         side: String,
@@ -130,4 +236,10 @@ object ScalpSignal {
 
     private fun formatReturn(value: Double): String =
         String.format(java.util.Locale.US, "%+.4f", value)
+
+    private fun formatPercent(value: Double): String =
+        String.format(java.util.Locale.US, "%.1f%%", value)
+
+    private fun formatPrice(value: Double): String =
+        String.format(java.util.Locale.US, "%.1f¢", value * 100.0)
 }

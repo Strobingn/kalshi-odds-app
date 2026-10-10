@@ -51,6 +51,12 @@ fun DipApp(
     BackHandler(enabled = navigator.canPop && !sheetOpen) {
         navigator.back()
     }
+    // Bottom-tab selection intentionally clears the back stack. Scalp is an
+    // audit/workbench screen, so a root-level system Back returns to Home
+    // rather than looking unresponsive or closing the app.
+    BackHandler(enabled = !navigator.canPop && navigator.current == AppRoutes.SCALP && !sheetOpen) {
+        navigator.selectPrimary(AppRoutes.HOME)
+    }
     BackHandler(enabled = sheetOpen) {
         onCancelSheet()
     }
