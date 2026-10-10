@@ -97,8 +97,13 @@ jobs:
           # legacy name so those installs can self-update one last time.
           set -euo pipefail
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          gh release upload gtp-v1.0-chat-GTP "$src#DipHunter-GTP-v1.0-miss-bitcoin-legacy.apk" \
-            --repo "$GITHUB_REPOSITORY" --clobber || true
+          # The legacy updater regex requires DipHunter-GTP-*-<run>.apk.
+          bridge="DipHunter-GTP-v1.0-miss-bitcoin-${{ github.run_number }}.apk"
+          cp "$src" "$bridge"
+          gh release delete-asset gtp-v1.0-chat-GTP DipHunter-debug.apk \
+            --repo "$GITHUB_REPOSITORY" --yes || true
+          gh release upload gtp-v1.0-chat-GTP "$bridge" \
+            --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Publish GitHub release
         env:
