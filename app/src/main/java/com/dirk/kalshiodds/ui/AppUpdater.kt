@@ -78,6 +78,21 @@ object AppUpdater {
         }
     }
 
+    /**
+     * Fallback for builds whose bundled updater cannot see the miss-bitcoin
+     * release (anything cut before the updater fix): opens the release page
+     * in the browser so the latest APK can always be side-loaded.
+     */
+    fun openReleasePage(context: Context): String {
+        val intent = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://github.com/Strobingn/kalshi-odds-app/releases/tag/apk-v1.0-miss-bitcoin")
+        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        runCatching { context.startActivity(intent) }
+            .onFailure { return "Open the Releases page on GitHub: apk-v1.0-miss-bitcoin" }
+        return "Release page opened — download the newest DipHunter-v1.0-miss-bitcoin APK and install it."
+    }
+
     /** Returns a message when the user needs to allow installs from this app. */
     fun showInstaller(context: Context, apk: File): String {
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {

@@ -164,6 +164,16 @@ fun SettingsContent(
                     }
                 }
             ) { Text(if (updateBusy) "Checking for update…" else "Check for app update") }
+            OutlinedButton(
+                enabled = !updateBusy,
+                onClick = {
+                    updateScope.launch {
+                        updateBusy = true
+                        updateMessage = AppUpdater.openReleasePage(context)
+                        updateBusy = false
+                    }
+                }
+            ) { Text("Open release page in browser") }
             updateMessage?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             }
