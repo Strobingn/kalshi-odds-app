@@ -25,22 +25,40 @@ class KashiUpdateClient(
     }
 ) {
     fun check(installedVersionName: String): UpdateCheck {
-        val body = try {
-            fetchText(KashiReleasePolicy.RELEASES_URL)
-        } catch (e: Exception) {
-            return UpdateCheck.Failed(KalshiRequestStatus.message(e, 0L))
-        }
         if (!KashiReleasePolicy.RELEASES_URL.contains("/releases?") ||
             KashiReleasePolicy.RELEASES_URL.contains("/releases/latest")
         ) {
             return UpdateCheck.Failed("Update check refused — wrong release endpoint")
         }
+        val releases = try {
+            listReleases()
+        } catch (e: Exception) {
+            return UpdateCheck.Failed(KalshiRequestStatus.message(e, 0L))
+        } ?: return UpdateCheck.Failed("Update check failed")
         val offer = try {
-            KashiReleasePolicy.choose(KashiReleasePolicy.parse(body), installedVersionName)
+            KashiReleasePolicy.choose(releases, installedVersionName)
         } catch (e: Exception) {
             return UpdateCheck.Failed("Update check failed")
         }
         return if (offer == null) UpdateCheck.UpToDate else UpdateCheck.Available(offer)
+    }
+
+    /**
+     * 0.3.48: pages 1..[KashiReleasePolicy.MAX_PAGES] (per_page=100), keeping only `v*-debug` tags. Stops early on a
+     * short page. Page 1 failing throws (check fails); a later page failing keeps what was already read.
+     * Returns null when page 1 is unparseable.
+     */
+    fun listReleases(): List<KashiReleasePolicy.Release>? {
+        val out = ArrayList<KashiReleasePolicy.Release>()
+        for (page in 1..KashiReleasePolicy.MAX_PAGES) {
+            val body = if (page == 1) fetchText(KashiReleasePolicy.pageUrl(page))
+            else runCatching { fetchText(KashiReleasePolicy.pageUrl(page)) }.getOrNull() ?: break
+            val parsed = runCatching { KashiReleasePolicy.parse(body) }.getOrNull()
+            if (parsed == null) { if (page == 1) return null else break }
+            out += parsed.filter { KashiReleasePolicy.TAG.matches(it.tag) }
+            if (parsed.size < KashiReleasePolicy.PER_PAGE) break
+        }
+        return out
     }
 
     /**
