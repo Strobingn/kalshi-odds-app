@@ -111,18 +111,18 @@ class ReleaseGate0340MultiStrategyTest {
     @Test
     fun totalOpenCostNeverExceedsPaperBankroll() {
         // One 10-contract clip at 35¢ costs $3.50 + $0.16 fee. 0.3.50: each of six models gets bankroll/6;
-        // a $5 bankroll (slice $0.83) fits none, $25 (slice $4.17) fits one clip per model.
+        // a $5 bankroll (slice $0.83) fits none, $40 (slice $5, eighths since 0.3.53) fits one clip per model.
         val t = close - 700_000L
         val tiny = book(bankroll = 5.0)
         tiny.onQuote(q(t, 0.44, 0.45), true)
         tiny.onQuote(q(t + 30_000L, 0.34, 0.35), true)
         assertEquals(0, tiny.snapshot().size)
-        val b = book(bankroll = 25.0)
+        val b = book(bankroll = 40.0)
         b.onQuote(q(t, 0.44, 0.45), true)
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true)
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true)
-        assertTrue(b.openCostUsd() <= 25.0 + 1e-9)
-        com.dirk.kalshiodds.decision.ScalpModels.ALL.forEach { assertTrue(b.openCostUsd(it) <= 25.0 / 6 + 1e-9) }
+        assertTrue(b.openCostUsd() <= 40.0 + 1e-9)
+        com.dirk.kalshiodds.decision.ScalpModels.ALL.forEach { assertTrue(b.openCostUsd(it) <= 40.0 / 8 + 1e-9) }
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)

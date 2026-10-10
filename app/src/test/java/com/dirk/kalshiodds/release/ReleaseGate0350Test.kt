@@ -144,10 +144,10 @@ class ReleaseGate0350Test {
     }
 
     @Test fun sixModelsWithSlices() {
-        assertEquals(6, ScalpModels.ALL.size)
+        assertEquals(8, ScalpModels.ALL.size)
         assertEquals(ScalpModels.Model.MAKER_DIP, ScalpModels.modelOf(ScalpModels.MAKER_DIP_PARAMS))
         assertTrue(ScalpModels.MAKER_DIP_PARAMS.maker)
-        assertEquals(20_000.0 / 6, ScalpModels.sliceUsd(20_000.0), 1e-9)
+        assertEquals(20_000.0 / 8, ScalpModels.sliceUsd(20_000.0), 1e-9)
         assertTrue(src("decision/Scalp.kt").contains("ScalpModels.MAKER_DIP_PARAMS"))
     }
 

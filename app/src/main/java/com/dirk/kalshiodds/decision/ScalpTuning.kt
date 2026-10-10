@@ -43,7 +43,7 @@ data class ScalpParams(
     val turnDown: Double,
     /** Entry window: seconds left to close. */
     val tauMinS: Double,
-    val tauMaxS: Double = 840.0,
+    val tauMaxS: Double = 900.0, // 0.3.53: was 840 (1-min warm-up); trade from the open
     val strategy: ScalpStrategy = ScalpStrategy.FAIR_GAP,
     /**
      * 0.3.43 maker-first variant: post-only resting entry at the bid and resting exit at the ask (maker fee $0 on
@@ -109,7 +109,7 @@ data class ScalpParams(
             ScalpStrategy.MOMENTUM to ScalpParams(0.04, 0.08, 0.06, 0.10, 180.0, strategy = ScalpStrategy.MOMENTUM),
             ScalpStrategy.EXTREME_REVERSION to ScalpParams(0.12, 0.12, 0.08, 0.10, 120.0, strategy = ScalpStrategy.EXTREME_REVERSION),
             // 0.3.43 owner spec: entry gap 6¢, TP +8¢, stop −6¢, 3–13 min left. turnDown = early exit when the gap is gone.
-            ScalpStrategy.CF_REPRICE to ScalpParams(0.06, 0.08, 0.06, 0.0, 180.0, tauMaxS = 780.0, strategy = ScalpStrategy.CF_REPRICE)
+            ScalpStrategy.CF_REPRICE to ScalpParams(0.06, 0.08, 0.06, 0.0, 180.0, tauMaxS = 900.0, strategy = ScalpStrategy.CF_REPRICE)
         )
 
         fun seedFor(coin: String, strategy: ScalpStrategy): ScalpParams =
@@ -136,7 +136,7 @@ data class ScalpParams(
             add4(ScalpStrategy.EXTREME_REVERSION, listOf(0.08, 0.12), listOf(Triple(0.08, 0.05, 0.06), Triple(0.12, 0.08, 0.10)), 120.0)
             // 0.3.43 CF-reprice: 2 entry gaps × 2 exit profiles, window 3–13 min (walk-forward tuned like the others).
             for (g in listOf(0.06, 0.08)) for (e in listOf(Triple(0.08, 0.06, 0.0), Triple(0.06, 0.04, 0.0))) {
-                add(ScalpParams(g, e.first, e.second, e.third, 180.0, tauMaxS = 780.0, strategy = ScalpStrategy.CF_REPRICE))
+                add(ScalpParams(g, e.first, e.second, e.third, 180.0, tauMaxS = 900.0, strategy = ScalpStrategy.CF_REPRICE))
             }
         }
 
@@ -246,7 +246,7 @@ object ScalpTuner {
     private fun perContract(t: ScalpTrade) = t.netUsd!! / t.contracts.coerceAtLeast(1)
 
     fun tune(all: List<ScalpTrade>, cur: ScalpTuneState, nowMs: Long): ScalpTuneState {
-        val closed = all.filter { it.state == ScalpState.CLOSED && it.netUsd != null && it.variantId != ScalpParams.LEGACY_ID }
+        val closed = all.filter { it.state == ScalpState.CLOSED && it.netUsd != null && it.variantId != ScalpParams.LEGACY_ID && !ForecastScalp.isForecast(it) }
         var adopted = false
         val params = cur.paramsByCoin.toMutableMap()
         val oos = HashMap<String, Double>()

@@ -49,7 +49,8 @@ object ScalpRule {
     const val TURN_DOWN = 0.10
     const val MAX_SPREAD = 0.02
     const val TAU_MIN_S = 300.0
-    const val TAU_MAX_S = 840.0
+    // 0.3.53: no start-of-window wait — every scalper may enter from the moment a 15m market opens.
+    const val TAU_MAX_S = 900.0
     /** 0.3.40: hard exit at ≥ 60 s left — never hold into the final (settlement-averaging) minute. */
     const val TIME_STOP_S = 60.0
     /** 0.3.40: re-entry cooldown after a scalp closes on the same market (per strategy variant). */
@@ -532,7 +533,7 @@ class ScalpBook(
         if (history.size > ScalpMemory.MAX_TICKERS) history.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { history.remove(it) }
         val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
         // Step every open scalp first (one per market side per variant).
-        mineAll.filter { isActive(it) }.forEach { t ->
+        mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) }.forEach { t ->
             val p = ScalpParams.byId(t.variantId) ?: primary
             step(t, q, p)?.let { changed += it }
         }
@@ -592,6 +593,86 @@ class ScalpBook(
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
         changed.filter { it.isPrimary }
+    }
+
+    // ---- 0.3.53 Forecast ride / fade (paper only) ----
+    private val fcHist = HashMap<String, ArrayDeque<ShortHorizonForecaster.Sample>>()
+
+    /**
+     * Feed one fresh book per market tick (same quote as [onQuote]) plus top-3 level sizes. Ride buys the side the
+     * forecast says rises; fade (exact mirror) buys the other side. Entry = resting limit at the ask, touch fill capped
+     * by displayed depth, cancelled after 2 s; exits sell at the bid capped by depth; taker fee on every fill.
+     */
+    fun onForecastQuote(q: ScalpRule.Quote, top3Yes: Double, top3No: Double, enabled: Boolean, nowHorizonS: Int? = null): List<ScalpTrade> = synchronized(lock) {
+        val yb = q.yesBid ?: return@synchronized emptyList()
+        val ya = q.yesAsk ?: return@synchronized emptyList()
+        if (ya <= yb) return@synchronized emptyList()
+        val key = q.ticker.uppercase()
+        val coin = ScalpParams.coinOf(q.ticker)
+        val horizon = nowHorizonS ?: ShortHorizonForecaster.horizonFor(coin)
+        val mid = (yb + ya) / 2
+        val sample = ShortHorizonForecaster.Sample(q.nowMs, mid, top3Yes, top3No)
+        val hist = fcHist.getOrPut(key) { ArrayDeque() }
+        val x = ShortHorizonForecaster.features(sample, hist, q.closeMs)
+        hist.addLast(sample)
+        while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > 200_000L) hist.removeFirst()
+        if (q.nowMs >= q.closeMs) fcHist.remove(key)
+        if (fcHist.size > ScalpMemory.MAX_TICKERS) fcHist.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { fcHist.remove(it) }
+        val pred = ShortHorizonForecaster.predict(coin, horizon, x) ?: return@synchronized emptyList()
+        val changed = ArrayList<ScalpTrade>()
+        for (ride in listOf(true, false)) {
+            val f = if (ride) pred else -pred
+            val vid = ForecastScalp.variantId(ride, horizon)
+            val prefix = if (ride) ForecastScalp.RIDE_PREFIX else ForecastScalp.FADE_PREFIX
+            val active = _all.value.firstOrNull { it.ticker == key && it.variantId.startsWith(prefix) && isActive(it) }
+            if (active != null) {
+                fcStep(active, q, f, horizon)?.let { changed += it }
+                continue
+            }
+            if (!enabled || q.nowMs >= q.closeMs || !q.fresh()) continue
+            val side = if (f > 0) "YES" else "NO"
+            val ask = q.ask(side) ?: continue
+            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS)) continue
+            val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
+            val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
+            if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
+            if (openCostUsd(model) + cost > ScalpModels.sliceUsd(bankrollUsd()) + 1e-9) continue
+            changed += ScalpTrade(
+                id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                signalAsk = ask, fairAtSignal = mid + f, restingLimit = ask, restingSinceMs = q.nowMs,
+                note = String.format(Locale.US, "%s · forecast %+.1f¢ over %s · %s", if (ride) "Forecast ride" else "Forecast fade",
+                    f * 100, ShortHorizonForecaster.horizonLabel(horizon), ShortHorizonForecaster.VERSION),
+                ruleVersion = "${ScalpRule.VERSION}|$vid|P"
+            )
+        }
+        changed.forEach { save(it) }
+        changed
+    }
+
+    private fun fcStep(t: ScalpTrade, q: ScalpRule.Quote, f: Double, horizon: Int): ScalpTrade? {
+        val sideF = if (t.side == "YES") f else -f
+        return when (t.state) {
+            ScalpState.PENDING_ENTRY -> {
+                val limit = t.restingLimit ?: t.signalAsk
+                if (q.nowMs - t.signalAtMs > ForecastScalp.ENTRY_LIMIT_TTL_MS || q.nowMs >= q.closeMs)
+                    return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled unfilled")
+                val n = com.dirk.kalshiodds.signal.paper.PaperLimitFill.touchFillQty(limit, q.ask(t.side), q.askSize(t.side), ScalpRule.CONTRACTS, buy = true)
+                if (n <= 0) null else t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = limit, entryFeeUsd = ScalpRule.orderFee(n, limit),
+                    entryAtMs = q.nowMs, restingLimit = null, note = "${t.note}; filled $n @ ${com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(limit)}")
+            }
+            ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
+                if (q.nowMs >= q.closeMs || !q.fresh()) return null
+                val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: return null
+                val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
+                    ?: ForecastScalp.wantsExit(sideF, bid, (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, horizon, q.tauS) ?: return null
+                val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
+                val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
+                if (n <= 0) return base
+                val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+                if (next.remaining <= 0) close(next, q.nowMs, reason) else next
+            }
+            else -> null
+        }
     }
 
     /** Re-tune when enough new closed round trips (all variants) have accumulated. Deterministic. */

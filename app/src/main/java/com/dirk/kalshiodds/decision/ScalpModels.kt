@@ -12,11 +12,15 @@ object ScalpModels {
         MOMENTUM("momo", "Momentum-sniper", ScalpStrategy.MOMENTUM.blurb),
         EXTREME_REVERSION("xrev", "Extreme-reversion", ScalpStrategy.EXTREME_REVERSION.blurb),
         CF_REPRICE("cfr", "CF-reprice", ScalpStrategy.CF_REPRICE.blurb),
-        MAKER_DIP("mkdip", "Maker dip-rebound", "maker-first: post a bid after a fast ask drop (fee $0 maker), sell the rebound resting at the ask; queue-modelled fills")
+        MAKER_DIP("mkdip", "Maker dip-rebound", "maker-first: post a bid after a fast ask drop (fee $0 maker), sell the rebound resting at the ask; queue-modelled fills"),
+        /** 0.3.53: buy the side the short-horizon forecaster says will rise, near 50¢; exit when the forecast turns. */
+        FORECAST_RIDE("fcride", "Forecast ride", "near 50¢ (40–60¢), buy the side the deterministic short-horizon forecast says rises by more than spread + both fees; hold while it keeps pointing up"),
+        /** 0.3.53: exact mirror of Forecast ride — trades against the forecast with the same band, exits, sizing and fees. */
+        FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: same band, exits, sizing and fees, but takes the side the forecast says falls")
     }
 
     val ALL: List<Model> = Model.values().toList()
-    const val COUNT = 6
+    val COUNT: Int get() = ALL.size
 
     /** Sixth model: the dip-hunter seed run maker-first (resting bid entry, resting ask exit). */
     val MAKER_DIP_PARAMS: ScalpParams = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER).copy(maker = true)
@@ -37,6 +41,8 @@ object ScalpModels {
     /** Model of a primary trade; null for shadow tuning variants. */
     fun modelOf(t: ScalpTrade): Model? {
         if (!t.isPrimary) return null
+        if (t.variantId.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
+        if (t.variantId.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
         val p = ScalpParams.byId(t.variantId) ?: return Model.FAIR_GAP
         return modelOf(p)
     }
@@ -214,4 +220,42 @@ object PriceLadder {
 
     val PRESET_SIZES = listOf(1, 5, 10, 25, 50)
     val EXIT_PRESETS_CENTS = listOf(1, 2, 3, 5, 10)
+}
+
+
+/** 0.3.53 Forecast ride / fade rule (paper only). Pure decisions; [ScalpBook.onForecastQuote] applies them. */
+object ForecastScalp {
+    const val RIDE_PREFIX = "fcride"
+    const val FADE_PREFIX = "fcfade"
+    const val BAND_LO = 0.40
+    const val BAND_HI = 0.60
+    const val MAX_SPREAD = 0.02
+    const val MIN_TAU_ENTRY_S = 60.0
+    const val EXIT_BEFORE_CLOSE_S = 30.0
+    const val TAKE_PROFIT = 0.90
+    const val HARD_FLIP = -0.03
+    const val ENTRY_LIMIT_TTL_MS = 2_000L
+    const val SAFETY = 0.005
+
+    fun isForecast(t: ScalpTrade): Boolean = t.variantId.startsWith(RIDE_PREFIX) || t.variantId.startsWith(FADE_PREFIX)
+    fun variantId(ride: Boolean, horizonS: Int) = (if (ride) RIDE_PREFIX else FADE_PREFIX) + "-h" + (if (horizonS < 0) "close" else horizonS.toString())
+
+    /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
+    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double): Boolean =
+        mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
+            move > spread + 2 * ScalpRule.orderFee(1, ask) + SAFETY
+
+    /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
+    fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double): String? = when {
+        bid >= TAKE_PROFIT - 1e-9 -> "take profit ≥ 90¢"
+        sideForecast < HARD_FLIP -> "forecast flipped hard"
+        sideForecast < ScalpRule.orderFee(1, bid) -> "forecast turned (move < exit fee)"
+        horizonS > 0 && heldS >= horizonS -> "horizon reached"
+        tauS < EXIT_BEFORE_CLOSE_S -> "exit before close"
+        else -> null
+    }
+
+    fun horizonNote(): String = ScalpParams.COINS.joinToString(" · ") { c ->
+        "$c " + ShortHorizonForecaster.horizonLabel(ShortHorizonForecaster.horizonFor(c))
+    } + " (" + ShortHorizonForecaster.VERSION + ")"
 }
