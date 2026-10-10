@@ -57,8 +57,8 @@ object ScalpData {
      * columns (side mid − entry at +30 s / +60 s) are what keep "fee-free" from becoming fake profit.
      */
     fun makerLines(all: List<ScalpTrade>): List<String> {
-        val done = all.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.netUsd != null }
-        fun avg(xs: List<Double>) = if (xs.isEmpty()) "—" else String.format(Locale.US, "%+.1f¢", xs.average() * 100)
+        val done = all.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.netUsd?.isFinite() == true }
+        fun avg(xs0: List<Double>) = xs0.filter { it.isFinite() }.let { xs -> if (xs.isEmpty()) "—" else String.format(Locale.US, "%+.1f¢", xs.average() * 100) }
         return com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { s ->
             listOf(true, false).map { mk ->
                 val rows = done.filter { it.strategy == s && it.isMaker == mk }
@@ -74,8 +74,11 @@ object ScalpData {
         }
     }
 
+    /** 0.3.47: rows shown per page in the round-trip list (rest behind "Show more"). */
+    const val PAGE = 200
+
     fun closed(trades: List<ScalpTrade>): List<ScalpTrade> =
-        trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null }.sortedBy { it.closedAtMs ?: it.signalAtMs }
+        trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }.sortedBy { it.closedAtMs ?: it.signalAtMs }
 
     fun summary(trades: List<ScalpTrade>): Summary {
         val c = closed(trades)
@@ -104,7 +107,7 @@ object ScalpData {
     /** Cumulative net after both fees, in close order (starts at 0). */
     fun equityCurve(trades: List<ScalpTrade>): List<Double> {
         var run = 0.0
-        return listOf(0.0) + closed(trades).map { run += it.netUsd!!; run }
+        return listOf(0.0) + closed(trades).mapNotNull { t -> t.netUsd?.takeIf { it.isFinite() } }.map { run += it; run }
     }
 
     private fun usd(v: Double?) = v?.let { String.format(Locale.US, "%+,.2f USD", it) } ?: "—"
@@ -140,19 +143,70 @@ object ScalpData {
 
 @Composable
 fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScalp: () -> Unit) {
-    val colors = DipTheme.colors
     val trades by viewModel.scalpTrades.collectAsState()
     val paperOrders by viewModel.paperOrders.collectAsState()
     val scalpAll by viewModel.scalpAll.collectAsState()
-    val s = ScalpData.summary(trades)
-    val curve = ScalpData.equityCurve(trades)
-    val rows = ScalpData.tripLines(trades)
+    ScalpDataContent(
+        trades = trades, scalpAll = scalpAll, paperOrders = paperOrders, onBack = onBack, onOpenScalp = onOpenScalp,
+        onReset = viewModel::resetPaperBankrollTo20k, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder
+    )
+}
+
+/** 0.3.47: everything derived off the main thread, once per data change. */
+data class ScalpDataView(
+    val summary: ScalpData.Summary,
+    val summaryLines: List<String>,
+    val curve: List<Double>,
+    val makerLines: List<String>,
+    val breakdown: List<String>,
+    val rows: List<LazyListKeys.Keyed<ScalpCopy.Line>>
+) {
+    companion object {
+        fun of(trades: List<ScalpTrade>, all: List<ScalpTrade>): ScalpDataView {
+            val s = ScalpData.summary(trades)
+            return ScalpDataView(
+                summary = s,
+                summaryLines = ScalpData.summaryLines(s),
+                curve = ScalpData.equityCurve(trades),
+                makerLines = runCatching { ScalpData.makerLines(all) }.getOrDefault(emptyList()),
+                breakdown = runCatching { ScalpBreakdown.lines(trades) }.getOrDefault(emptyList()),
+                // Keys: stable composite, de-duplicated (archive + current, maker/shadow rows, reused ids).
+                rows = LazyListKeys.keyed(ScalpData.tripLines(trades)) { "t|" + it.key }
+            )
+        }
+    }
+}
+
+@Composable
+fun ScalpDataContent(
+    trades: List<ScalpTrade>,
+    scalpAll: List<ScalpTrade>,
+    paperOrders: List<com.dirk.kalshiodds.signal.paper.PaperOrder>,
+    onBack: () -> Unit,
+    onOpenScalp: () -> Unit,
+    onReset: () -> Unit,
+    onEdit: (String, Double?, Int?) -> Unit,
+    onCancel: (String) -> Unit
+) {
+    val colors = DipTheme.colors
+    val view by androidx.compose.runtime.produceState<ScalpDataView?>(null, trades, scalpAll) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ScalpDataView.of(trades, scalpAll) }
+    }
+    var shown by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ScalpData.PAGE) }
+    val v = view
     DecisionScaffold(ScalpData.TITLE, onBack) {
+        if (v == null) {
+            item { Text("Loading scalp data…", color = colors.textSecondary) }
+            return@DecisionScaffold
+        }
+        val s = v.summary
+        val curve = v.curve
+        val rows = v.rows
         item { Text("Scalping results only — paper, net after both Kalshi fees. Not part of the main scorecard.", color = colors.accentOrange, fontWeight = FontWeight.SemiBold) }
         item {
             DecisionCard {
                 Text("Maker-first vs taker (all variants, paper)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                ScalpData.makerLines(scalpAll).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+                v.makerLines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
                 Text(
                     "Maker variants post at the bid / exit at the ask (maker fee $0). Strategy fills use a conservative queue model " +
                         "(trade-through or estimated queue ahead consumed). AS30/AS60 = mid move after the fill; our earlier LIP study saw " +
@@ -164,19 +218,19 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
         item {
             var confirm by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
             androidx.compose.material3.OutlinedButton(onClick = {
-                if (confirm) { viewModel.resetPaperBankrollTo20k(); confirm = false } else confirm = true
+                if (confirm) { onReset(); confirm = false } else confirm = true
             }) { androidx.compose.material3.Text(if (confirm) PaperResetCopy.CONFIRM else PaperResetCopy.BUTTON) }
         }
         item {
             com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
                 tickers = emptyList(), orders = paperOrders, showTicket = false,
-                onSubmit = { _, _, _, _, _, _ -> }, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder
+                onSubmit = { _, _, _, _, _, _ -> }, onEdit = onEdit, onCancel = onCancel
             )
         }
         item {
             DecisionCard {
                 Text("Summary", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                ScalpData.summaryLines(s).forEachIndexed { i, line ->
+                v.summaryLines.forEachIndexed { i, line ->
                     Text(
                         line, style = MaterialTheme.typography.bodySmall,
                         color = if (i == 0) (if (s.netUsd >= 0) colors.up else colors.down) else colors.textPrimary
@@ -210,14 +264,20 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
         item {
             DecisionCard {
                 Text("By strategy, coin and hour (ET)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-                ScalpBreakdown.lines(trades).forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+                v.breakdown.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
             }
         }
         item { OutlinedButton(onClick = onOpenScalp) { Text("Scalp rules, params and open scalps") } }
         item { Text("Every round trip (${rows.size}, newest first)", fontWeight = FontWeight.SemiBold, color = colors.textPrimary) }
-        items(rows, key = { "t" + it.key }) { row ->
+        items(rows.take(shown), key = { it.key }) { keyed ->
+            val row = keyed.value
             Text(row.text, style = MaterialTheme.typography.labelMedium,
                 color = when (row.positive) { true -> colors.up; false -> colors.down; null -> colors.textSecondary })
+        }
+        if (rows.size > shown) {
+            item(key = "more") {
+                OutlinedButton(onClick = { shown += ScalpData.PAGE }) { Text("Show ${minOf(ScalpData.PAGE, rows.size - shown)} more of ${rows.size - shown}") }
+            }
         }
     }
 }

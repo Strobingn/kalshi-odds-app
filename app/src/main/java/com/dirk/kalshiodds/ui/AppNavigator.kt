@@ -24,13 +24,14 @@ object AppRoutes {
     const val LADDER = "ladder"
     const val SCALP = "scalp"
     const val SCALP_DATA = "scalp-data"
+    const val CRASH_LOG = "crash-log"
 
     /** FieldOps bottom bar, left to right. */
     val TABS: List<String> = listOf(HOME, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
 
     val ALL: List<String> = listOf(
         HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, REAL_MONEY, MORE,
-        CALIBRATION, LADDER, SCALP, SCALP_DATA
+        CALIBRATION, LADDER, SCALP, SCALP_DATA, CRASH_LOG
     )
 }
 

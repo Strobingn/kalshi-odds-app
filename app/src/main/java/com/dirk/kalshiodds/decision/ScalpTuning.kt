@@ -146,8 +146,17 @@ data class ScalpParams(
             (SEEDS.values + STRATEGY_SEEDS.values).distinctBy { it.id }.map { it.copy(maker = true) }
         }
 
-        fun byId(id: String): ScalpParams? =
-            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS).firstOrNull { it.id == id }
+        /**
+         * 0.3.47: id → params index (first occurrence wins, same order as before). byId used to concatenate every grid
+         * and re-format every id per call; Scalp Data calls it per trade × filter, which froze the main thread.
+         */
+        private val BY_ID: Map<String, ScalpParams> by lazy {
+            val m = LinkedHashMap<String, ScalpParams>()
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS).forEach { m.putIfAbsent(it.id, it) }
+            m
+        }
+
+        fun byId(id: String): ScalpParams? = BY_ID[id]
 
         fun coinOf(ticker: String): String {
             val u = ticker.uppercase()
@@ -319,7 +328,7 @@ object ScalpBreakdown {
                 v.sumOf { it.netUsd!! / it.contracts.coerceAtLeast(1) } / v.size * 100.0)
         }.sortedBy { it.key }
 
-    private fun closed(trades: List<ScalpTrade>) = trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null }
+    private fun closed(trades: List<ScalpTrade>) = trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
 
     fun byCoin(trades: List<ScalpTrade>) = rows(closed(trades)) { it.coin }
     fun byStrategy(trades: List<ScalpTrade>) = rows(closed(trades)) { it.strategy.label }
