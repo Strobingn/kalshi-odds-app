@@ -28,6 +28,7 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlStore
 import com.dirk.kalshiodds.signal.ml.NewsPulseCache
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.paper.PaperBookStore
+import com.dirk.kalshiodds.signal.scalp.ScalpStore
 import com.dirk.kalshiodds.domain.Clock
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.market.MarketRollover
@@ -151,6 +152,8 @@ class AppContainer(context: Context) {
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
     val paper = PaperBookStore(app)
+    /** Fifteen paper scalps. No path to a live order. */
+    val scalp = ScalpStore(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -195,11 +198,13 @@ class AppContainer(context: Context) {
         extraOpenTickers = {
             paper.book.openTickers() + lateFavorite.ledger.openTickers() + flowFade.ledger.openTickers() +
                 centBetter.ledger.openTickers() +
+                scalp.lab.openTickers() +
                 recorder.pendingSettlementTickers()
         },
         onMarketSettled = { ticker, result ->
             syncLedger(ticker)
             paper.book.settle(ticker, result)
+            scalp.lab.settle(ticker, result)
             lateFavorite.ledger.settle(ticker, result)
             flowFade.ledger.settle(ticker, result)
             centBetter.ledger.settle(ticker, result)
@@ -209,6 +214,7 @@ class AppContainer(context: Context) {
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
             paper.book.settleFromLog(logStore.readAll())
+            scalp.lab.settleFromLog(logStore.readAll())
             lateFavorite.ledger.settleFromLog(logStore.readAll())
             flowFade.ledger.settleFromLog(logStore.readAll())
             centBetter.ledger.settleFromLog(logStore.readAll())

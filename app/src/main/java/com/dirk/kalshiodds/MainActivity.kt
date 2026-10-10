@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
                                 onOpenArb = { navigator.open(AppRoutes.ARB) },
+                                onOpenScalp = { navigator.selectPrimary(AppRoutes.SCALP) },
                                 onOpenChart = {
                                     chartTicker = it.ticker
                                     navigator.open(AppRoutes.CHART)
@@ -155,6 +156,12 @@ class MainActivity : ComponentActivity() {
                             com.dirk.kalshiodds.ui.SignalHistoryScreen(
                                 cards = com.dirk.kalshiodds.ui.signalHistoryCards(oddsState.recentAlerts),
                                 onBack = { navigator.back() }
+                            )
+                        },
+                        scalp = {
+                            com.dirk.kalshiodds.ui.ScalpScreen(
+                                state = oddsState.scalp,
+                                onReset = { oddsViewModel.resetScalpLab() }
                             )
                         },
                         chart = {

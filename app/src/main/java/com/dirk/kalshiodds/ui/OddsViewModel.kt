@@ -81,7 +81,10 @@ data class OddsUiState(
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
     /** Paper-only 1¢-better resting bid tracker. */
     val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
-        com.dirk.kalshiodds.signal.latefav.LateFavoriteState()
+        com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
+    /** Fifteen paper scalps. Never a live order. */
+    val scalp: com.dirk.kalshiodds.signal.scalp.ScalpLabState =
+        com.dirk.kalshiodds.signal.scalp.ScalpLabState()
 )
 
 /**
@@ -188,6 +191,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 container.centBetter.ledger.state.collect { cb ->
                     _state.update { it.copy(centBetter = cb) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                container.scalp.lab.state.collect { scalp ->
+                    _state.update { it.copy(scalp = scalp) }
                 }
             }
         }
@@ -682,6 +692,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { prefs.updatePaperTrading(enabled) }
     }
 
+    fun resetScalpLab() {
+        container.scalp.lab.reset()
+    }
+
     fun resetPaperBook() {
         val before = paperBook.snapshot().cashUsd
         val snap = _state.value.settings
@@ -891,6 +905,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value
         val now = container.clock.nowMs()
         val markets = s.snapshot?.allMarkets.orEmpty()
+        runCatching { container.scalp.lab.onMarkets(markets, now) }
         val live = MarketLifecycle.tradable(markets, now)
         val liveTickers = live.map { it.ticker }.toSet()
         val ctx = ticketContext(s, now)

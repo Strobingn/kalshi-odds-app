@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.ReceiptLong
 import androidx.compose.material.icons.filled.FormatListBulleted
+import androidx.compose.material.icons.filled.ShowChart
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -46,7 +47,8 @@ fun DipApp(
     history: @Composable () -> Unit,
     signalHistory: @Composable () -> Unit,
     chart: @Composable () -> Unit,
-    arb: @Composable () -> Unit = home
+    arb: @Composable () -> Unit = home,
+    scalp: @Composable () -> Unit = {}
 ) {
     BackHandler(enabled = navigator.canPop && !sheetOpen) {
         navigator.back()
@@ -76,6 +78,7 @@ fun DipApp(
                 AppRoutes.SIGNAL_HISTORY -> signalHistory()
                 AppRoutes.CHART -> chart()
                 AppRoutes.ARB -> arb()
+                AppRoutes.SCALP -> scalp()
                 else -> home()
             }
         }
@@ -89,12 +92,13 @@ private data class BottomDestination(
 )
 
 /**
- * Mirrors the compact, always-visible six-tab layout in the supplied design.
- * "Live" is the signal feed and "Real" opens the recorded-history screen;
- * neither tab places an order by itself.
+ * Mirrors the compact bottom-tab layout. Scalp is the 15-algorithm paper
+ * experiment. "Live" is the signal feed and "Real" opens recorded history.
+ * Neither tab places an order by itself.
  */
 private val bottomDestinations = listOf(
     BottomDestination(AppRoutes.HOME, "Home", Icons.Default.Home),
+    BottomDestination(AppRoutes.SCALP, "Scalp", Icons.Default.ShowChart),
     BottomDestination(AppRoutes.SCORECARD, "Scorecard", Icons.Default.Assessment),
     BottomDestination(AppRoutes.SIGNAL_HISTORY, "Live", Icons.Default.ReceiptLong),
     BottomDestination(AppRoutes.HISTORY, "Real", Icons.Default.AccountBalance),
@@ -123,7 +127,7 @@ private fun AppBottomNavigation(
                 label = {
                     Text(
                         text = item.label,
-                        fontSize = 10.sp,
+                        fontSize = 9.sp,
                         maxLines = 1,
                         softWrap = false,
                         overflow = TextOverflow.Clip

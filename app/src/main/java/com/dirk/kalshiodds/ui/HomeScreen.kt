@@ -64,6 +64,7 @@ fun HomeScreen(
     onOpenSignalHistory: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit,
     onOpenArb: () -> Unit = {},
+    onOpenScalp: (() -> Unit)? = null,
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
     onPaperSide: (MarketUiModel, String) -> Unit,
@@ -220,6 +221,20 @@ fun HomeScreen(
                                         { onSellMarket(market) }
                                     },
                                     onOpenChart = { onOpenChart(market) }
+                                )
+                            }
+                        }
+                        val openScalp = onOpenScalp
+                        if (openScalp != null) {
+                            item(key = "scalp_lab") {
+                                Text(
+                                    "Scalp lab · 15 algorithms",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = colors.accentBlue,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier
+                                        .padding(top = 4.dp)
+                                        .clickable { openScalp() }
                                 )
                             }
                         }
