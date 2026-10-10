@@ -74,7 +74,7 @@ class HomeCopyTest {
             ticker = "KXETH15M-WIN-40",
             seriesLabel = "Ethereum",
             yesAsk = 0.63,
-            aiYes = 55.0,
+            aiYes = 63.0,
             predicted = "YES",
             closeMs = nowMs + 372_000L
         )

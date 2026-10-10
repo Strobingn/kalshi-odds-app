@@ -593,7 +593,11 @@ class TicketBuilderGateTest {
         )
         val ticket = TicketBuilder.propose(m, ctx)
         assertTrue(ticket != null)
-        assertEquals(LiveOrderSizer.size(0.04, ticket!!.sizingCapUsd ?: 5.0).count, ticket.contracts)
+        // A live book is present: the clip is depth-clipped to the touch.
+        assertEquals(
+            LiveOrderSizer.sizeWithinDepth(0.04, 200, ticket!!.sizingCapUsd ?: 5.0).count,
+            ticket.contracts
+        )
     }
 
     @Test
@@ -670,7 +674,9 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertTrue(ticket!!.stakeUsd in 4.0..5.0 + 1e-6)
+        // Fixture model (15%) is far above the 4¢ ask, so the edge-sized
+        // cap can exceed the old $5 clip.
+        assertTrue(ticket!!.stakeUsd >= 4.0 - 1e-6)
         assertEquals(LiveOrderSizer.size(0.04, ticket.sizingCapUsd ?: 5.0).count, ticket.contracts)
         assertTrue(ticket.maxPayoutUsd >= 25.0)
         assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)

@@ -71,8 +71,8 @@ class BetCallAgreementTest {
     @Test
     fun sortPutsActionableFirst() {
         assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
-        // No model edge at 63¢ (AI 55%) — stays NO BET even edge-sized.
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 55.0, "YES"), SignalSettings())) == 1)
+        // No model edge on either side at 63¢ (AI 63%) — stays NO BET even edge-sized.
+        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 63.0, "YES"), SignalSettings())) == 1)
     }
 
     private fun sample(yesAsk: Double, noAsk: Double, aiYes: Double, predicted: String) = MarketUiModel(

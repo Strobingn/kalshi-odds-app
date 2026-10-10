@@ -350,12 +350,18 @@ object TicketBuilder {
         // $1 clip, so passing it alone does not make the displayed size real.
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
         val model01 = modelProb(market, side)
-        val capUsd = LiveOrderSizer.edgeCapUsd(
-            modelProb = model01,
-            ask = ask,
-            bankrollUsd = bankroll,
-            kellyFraction = ctx.settings.kellyFraction
-        )
+        // Only the AI's own tickets scale with its edge. A manual buy is the
+        // user's stake and keeps the flat all-in cap.
+        val capUsd = if (kind == TicketKind.MANUAL) {
+            SignalConstants.LIVE_ALL_IN_CAP_USD
+        } else {
+            LiveOrderSizer.edgeCapUsd(
+                modelProb = model01,
+                ask = ask,
+                bankrollUsd = bankroll,
+                kellyFraction = ctx.settings.kellyFraction
+            )
+        }
         val live = if (kind != TicketKind.MANUAL && liveBook != null) {
             LiveOrderSizer.sizeWithinDepth(
                 ask,
