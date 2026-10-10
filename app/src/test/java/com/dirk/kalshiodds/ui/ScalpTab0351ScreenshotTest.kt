@@ -69,7 +69,14 @@ object ScalpTabFixtures {
         val yesBids = (40..65).map { it / 100.0 to (500.0 + it * 37 % 900) }
         val noBids = (30..32).map { it / 100.0 to (1200.0 + it * 53 % 700) } + (5..29).map { it / 100.0 to (800.0 + it * 91 % 1500) }
         val orders = listOf(PriceLadder.Order("o1", true, 0.62, 5), PriceLadder.Order("o2", false, 0.72, 10))
+        val all = board(0).associateBy { it.model }.mapValues { (_, r) ->
+            if (r.roundTrips == 0) r else r.copy(grossWinUsd = 12.40, grossLossUsd = r.netUsd - 12.40, losses = r.roundTrips - r.wins, avgWinUsd = 0.62, avgLossUsd = -0.88)
+        }.toMutableMap()
+        all[ScalpModels.Model.FAIR_GAP] = all.getValue(ScalpModels.Model.FAIR_GAP).copy(open = 1, openContracts = 10, unrealizedUsd = 0.30)
         return ScalpTabState(
+            algoAllTime = all,
+            algoToday = all,
+            algoByCoin = all.mapValues { (_, r) -> mapOf("BTC" to r, "ETH" to r.copy(netUsd = r.netUsd / 2), "SOL" to r.copy(roundTrips = 0)) },
             leaderTodayByCoin = mapOf("BTC" to board(0), "ETH" to board(4), "SOL" to board(1)),
             markets = tickers.map { ScalpTabMarket(it, com.dirk.kalshiodds.decision.ScalpParams.coinOf(it), close, ScalpModels.chipLabel(it, close)) },
             selectedTicker = tickers[0],
@@ -98,6 +105,40 @@ class ScalpTab0351TallScreenshotTest {
             KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.CLASSIC) {
                 ScalpTabContent(st = ScalpTabFixtures.state(10))
             }
+        }
+    }
+}
+
+class ScalpAlgo0352ScreenshotTest {
+    @get:Rule
+    val paparazzi = Paparazzi(
+        deviceConfig = DeviceConfig.PIXEL_6.copy(screenWidth = 1080, screenHeight = 2340, softButtons = false),
+        theme = "android:Theme.Material3.DayNight.NoActionBar",
+        maxPercentDifference = 1.0
+    )
+
+    @Test fun algoCardsDark() {
+        paparazzi.snapshot(name = "scalp_algo_cards") {
+            KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.CLASSIC) { ScalpTabContent(st = ScalpTabFixtures.state(10)) }
+        }
+    }
+
+    @Test fun algoPageDark() {
+        val st = ScalpTabFixtures.state(10)
+        val m = ScalpModels.Model.EXTREME_REVERSION
+        val t0 = com.dirk.kalshiodds.decision.ScalpTicker.closeMs("KXBTC15M-26OCT101100-00")!! - 600_000L
+        val trades = (0 until 8).map { i ->
+            com.dirk.kalshiodds.decision.ScalpTrade(
+                "t$i", "KXBTC15M-26OCT101100-00", if (i % 2 == 0) "YES" else "NO", com.dirk.kalshiodds.decision.ScalpState.CLOSED,
+                t0 + i * 60_000L, 0.12, 0.2, contracts = 10, entryPrice = 0.12, entryFeeUsd = 0.08, entryAtMs = t0 + i * 60_000L + 300,
+                soldContracts = 10, proceedsUsd = if (i % 3 == 0) 0.9 else 1.6, exitFeeUsd = 0.07, closedAtMs = t0 + i * 60_000L + 40_000,
+                netUsd = if (i % 3 == 0) -0.45 else 0.25, exitReason = if (i % 3 == 0) "stop" else "target"
+            )
+        }
+        val d = ScalpAlgoDetail(m, st.algoAllTime[m], st.algoToday[m], st.algoByCoin[m].orEmpty(), trades,
+            trades.runningFold(0.0) { a, t -> a + t.netUsd!! }.drop(1))
+        paparazzi.snapshot(name = "scalp_algo_page") {
+            KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.CLASSIC) { ScalpAlgoContent(d) }
         }
     }
 }
