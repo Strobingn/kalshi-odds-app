@@ -136,6 +136,25 @@ class ScalperResultsTest {
     }
 
     @Test
+    fun aWriteThatFailsPartWayIsCutBackSoTheRetryDoesNotDuplicate() {
+        val dir = tmp.newFolder("partial-write")
+        val f = File(dir, "scalps_2026-10-01.csv").apply { writeText("header\nrow1\n") }
+        val boom = runCatching {
+            ScalpTradeLog.appendOrRollBack(f) {
+                it.appendText("row2\nro")
+                error("disk full")
+            }
+        }
+        assertTrue(boom.isFailure)
+        assertEquals("the half-written rows are gone", "header\nrow1\n", f.readText())
+        val fresh = File(dir, "orders_2026-10-01.csv.gz")
+        runCatching { ScalpTradeLog.appendOrRollBack(fresh) { it.writeText("x"); error("disk full") } }
+        assertFalse("a file the failed write created is removed", fresh.exists())
+        ScalpTradeLog.appendOrRollBack(f) { it.appendText("row2\n") }
+        assertEquals("header\nrow1\nrow2\n", f.readText())
+    }
+
+    @Test
     fun anArchiveThatCannotFinishPutsEveryFileBack() {
         val dir = tmp.newFolder("partial")
         val a = File(dir, "scalps_2026-10-01.csv").apply { writeText("a\n") }
