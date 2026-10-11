@@ -310,11 +310,13 @@ def usable(p: float | None) -> float | None:
 
 
 def historical_cutoff_ts() -> int:
-    """GET /historical/cutoff — markets settled before this live only under /historical."""
-    try:
-        body = http_get(f"{KALSHI}/historical/cutoff", limiter=KALSHI_LIMIT) or {}
-    except Exception:
-        return 0
+    """GET /historical/cutoff — markets settled before this live only under /historical.
+
+    0 when the API reports no cutoff (no historical tier). A failed request
+    raises instead: treating it as 0 would skip the historical listing, and
+    the run would prune and retrain on the recent markets alone.
+    """
+    body = http_get(f"{KALSHI}/historical/cutoff", limiter=KALSHI_LIMIT) or {}
     dt = parse_iso(body.get("market_settled_ts")) if isinstance(body, dict) else None
     return int(dt.timestamp()) if dt else 0
 
@@ -332,6 +334,8 @@ def _page(path: str, params: dict) -> Iterable[dict]:
         cursor = data.get("cursor")
         if not batch or not cursor:
             return
+    # Still a cursor after MAX_PAGES: a partial listing would look like markets leaving the window.
+    raise RuntimeError(f"{path} listing still had pages after {MAX_PAGES}")
 
 
 def fetch_settled(series: str, days: int, max_markets: int = 0, now: float | None = None) -> list[dict]:

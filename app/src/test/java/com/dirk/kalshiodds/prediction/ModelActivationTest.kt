@@ -29,6 +29,36 @@ class ModelActivationTest {
         assertTrue(d.reason.contains("Activated"))
     }
 
+    private fun modelWith(metrics: Map<String, Double>): EdgeModel {
+        val n = EdgeFeatures.SIZE
+        val zeros = List(n) { "0" }.joinToString(",")
+        val ones = List(n) { "1" }.joinToString(",")
+        val names = EdgeFeatures.NAMES.joinToString(",") { "\"$it\"" }
+        val base = mapOf("model_brier" to 0.18, "market_brier" to 0.22, "model_logloss" to 0.50, "market_logloss" to 0.58, "n_holdout" to 500.0)
+        val m = (base + metrics).entries.joinToString(",") { "\"${it.key}\": ${it.value}" }
+        return EdgeModel.parse(
+            """{"version": 1, "kind": "logistic", "feature_names": [$names], "weights": [$zeros], "bias": 0.0,
+                "mean": [$zeros], "std": [$ones], "metrics": {$m}}"""
+        )
+    }
+
+    @Test
+    fun aManifestlessModelIsJudgedOnItsEmbeddedBootstrap() {
+        fun decide(metrics: Map<String, Double>) = ModelActivation.decide(
+            EdgeModelManifest.fromModelMetrics(modelWith(metrics), "2026-10-11T00:00:00Z"), modelValid = true
+        )
+        val good = mapOf("sim_trades" to 240.0, "boot_ci_low" to 0.01, "boot_days" to 12.0)
+        assertTrue(decide(good).activate)
+        assertFalse("CI includes zero", decide(good + ("boot_ci_low" to -0.01)).activate)
+        assertFalse("one day of bets", decide(good + ("boot_days" to 1.0)).activate)
+        assertFalse("too few bets", decide(good + ("sim_trades" to 150.0)).activate)
+        assertFalse("a bootstrap without its day count fails closed", decide(good - "boot_days").activate)
+        // No bootstrap numbers at all (an older trainer): judged on the scores, as before.
+        assertEquals(null, EdgeModelManifest.fromModelMetrics(modelWith(emptyMap()), "2026-10-11T00:00:00Z").promotionEligible)
+        // The manifest's own flag still wins when it is embedded.
+        assertFalse(decide(good + ("promotion_eligible" to 0.0)).activate)
+    }
+
     @Test
     fun doesNotActivateWhenWorseThanMarket() {
         val m = EdgeModelManifest(

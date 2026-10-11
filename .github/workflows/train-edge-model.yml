@@ -8,10 +8,12 @@ name: Train edge model
 
 on:
   # GitHub schedules only run from the default branch, so the reliable
-  # retrain triggers here are pushes to this branch, manual runs, and
-  # repository_dispatch (a PAT or the main-branch bridge can fire this
-  # on a cron: gh api -X POST repos/{owner}/{repo}/dispatches
-  #   -f event_type=retrain-mis-bitcoin --field days=270).
+  # retrain triggers here are pushes to this branch and manual runs. The
+  # main-branch bridge (retrain-bridge.yml) starts this file at the
+  # Mis_bitcoin ref on a cron: gh api -X POST
+  #   repos/{owner}/{repo}/actions/workflows/train-edge-model.yml/dispatches
+  #   -f ref=Mis_bitcoin -f "inputs[days]=270".
+  # repository_dispatch below would run the default branch's copy instead.
   push:
     branches: [Mis_bitcoin]
     paths:
