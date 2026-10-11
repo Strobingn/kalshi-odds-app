@@ -35,7 +35,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +44,7 @@ import com.dirk.kalshiodds.signal.scalper.ArenaCharts
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
 import com.dirk.kalshiodds.signal.scalper.ScalpStrategy
 import com.dirk.kalshiodds.signal.scalper.ScalperResults
+import com.dirk.kalshiodds.ui.theme.ArenaColors
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import kotlin.math.abs
 import kotlin.math.max
@@ -59,51 +59,6 @@ import kotlin.math.max
  * dark and light surfaces. Text always wears the theme's text colours; a
  * coloured mark beside it carries identity.
  */
-internal object ArenaColors {
-    class Set(
-        val series: List<Color>,
-        val gain: Color,
-        val loss: Color,
-        val muted: Color,
-        val grid: Color,
-        val baseline: Color,
-        val shadeLight: Color,
-        val shadeDark: Color,
-        val surface: Color
-    )
-
-    @Composable
-    fun current(): Set {
-        val c = DipTheme.colors
-        val dark = c.surface.luminance() < 0.5f
-        return if (dark) {
-            Set(
-                series = listOf(Color(0xFF3987E5), Color(0xFFD95926), Color(0xFF199E70), Color(0xFFC98500)),
-                gain = Color(0xFF3987E5),
-                loss = Color(0xFFE66767),
-                muted = Color(0xFF898781),
-                grid = Color(0xFF2C2C2A),
-                baseline = Color(0xFF5A5A55),
-                shadeLight = Color(0xFF86B6EF),
-                shadeDark = Color(0xFF3987E5),
-                surface = c.surface
-            )
-        } else {
-            Set(
-                series = listOf(Color(0xFF2A78D6), Color(0xFFEB6834), Color(0xFF1BAF7A), Color(0xFFEDA100)),
-                gain = Color(0xFF2A78D6),
-                loss = Color(0xFFE34948),
-                muted = Color(0xFF898781),
-                grid = Color(0xFFE1E0D9),
-                baseline = Color(0xFFC3C2B7),
-                shadeLight = Color(0xFF86B6EF),
-                shadeDark = Color(0xFF1C5CAB),
-                surface = c.surface
-            )
-        }
-    }
-}
-
 /** A titled card. [subtitle] says what the chart answers. */
 @Composable
 internal fun ChartCard(title: String, subtitle: String, tag: String, content: @Composable () -> Unit) {
