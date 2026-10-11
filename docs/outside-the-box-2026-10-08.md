@@ -70,6 +70,47 @@ T-60 s / improve / margin 3¢: +$0.37 per fill, 99% CI [−2.08, +1.57]).
 
 Re-run when the recorder has ~3 more days (primary needs ≥ 30 fills).
 
+### Re-run 2026-10-11 (8 recording days, 704 markets per coin)
+
+Endgame maker run 38104151423 and pair maker run 38104152626, both on
+`Claude` @ `838c25c`, with recordings from 2026-10-03 to 2026-10-10 (the last
+day is partial, to 22:07 UTC).
+
+- **Primary hypothesis is now evaluable, and it fails.** Pooled, T-60 s /
+  improve / margin 3¢, maker fee 0.0175: 44 posts, **37 fills**, 51.4% won,
+  **−$0.85 per fill, 99% CI [−2.99, +1.31]**. The CI does not exclude 0, so
+  there is no edge. The cell that looked positive on 6 days (+$0.37) turned
+  negative with 3 more days. Every T-90 s and T-60 s cell is negative. The
+  T-30 s cells are positive (+$0.6 to +$1.7 per fill) but have 21–44 fills and
+  CIs about ±$5 wide, and choosing them after looking would be the
+  garden-of-forking-paths mistake.
+- **The settlement-aware fair loses to the book late in the window, on every
+  coin and at every horizon.** Pooled Brier score, fair vs YES mid: 90 s
+  0.062 vs 0.055; 60 s 0.050 vs 0.042; 30 s 0.044 vs 0.027; 15 s 0.082 vs
+  0.013. Fills priced 12–32¢ under the fair won only 31–62%. This
+  fair uses Coinbase plus a basis estimated at the open, not the CF index.
+  The finding is therefore "a Coinbase-based fair must not override the book
+  in the last 90 s", not a verdict on the app's CF-based fair. The cloud
+  recorder does not save the CF index (no `index_*` files in the cache), so
+  that fair cannot be tested here yet.
+- **The near-50/50 YES lean is weaker and not significant.** Pooled at T-30 s
+  (fair in [0.35, 0.65]): 60 markets over 8 days, YES won 61.7% (was 64% on
+  45 markets). E[Y − mid] is +8.1¢, 99% CI [−3.7¢, +16.3¢]. BTC alone: 20
+  markets, 60%. At T-15 s, 63% (46 markets), E[Y − mid] +1.0¢, CI
+  [−5.1¢, +9.9¢]. Filled NO bids still lose (pooled −$2.92 per fill, 99% CI
+  excludes 0, every coin), but that is the same lean seen through fills, plus
+  fill selection. It is not a separate edge. Status: **lead only**. Look again
+  after 20+ days, and check first whether BTC was trending up over the week.
+
+**Pair maker, re-run 2026-10-11.** It still loses. IS (6 days): the picked
+config, join / lock 1¢ / cancel 30 s / hold, made −$0.265 per episode.
+OOS (2 days, 3,382 episodes): **−$0.282 per episode, 99% CI [−0.330,
+−0.234]**. Locked pairs made +$172, the rest lost −$1,125, and one-leg
+markout was −6.8¢. The pre-registered decision is formally NOT EVALUABLE,
+because it needs at least 5 OOS days. The sign has been the same on every
+split, so do not spend more recorder time on this design. Every wider lock
+(2–3¢) and every improve config has 2–84 episodes, too few to read.
+
 ## Reversal study result, 2026-10-08 (90 days, 8,516 back-to-back KXBTC15M pairs)
 
 **The reversal is real, Kalshi already prices it, and it does not pay.**
