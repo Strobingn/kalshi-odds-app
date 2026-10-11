@@ -160,15 +160,24 @@ class ArenaStrategiesTest {
 
     @Test
     fun oneHugeWinIsNotALeadBeyondLuck() {
-        // 19 wins of 1¢, one of $20 and ten 50¢ losses: ahead, but almost all of it is one trade.
-        val won = 19 * 0.01 + 20.0
-        val s = ScalpStats(
-            closed = 30, wins = 20, losses = 10, pnlUsd = won - 5.0, wonUsd = won, lostUsd = 5.0,
-            pnlSqUsd = 19 * 0.01 * 0.01 + 400.0 + 10 * 0.25
-        )
+        // 19 wins of 1¢, one of $20 and ten 50¢ losses, each in its own window: ahead, but almost all of it is one trade.
+        val results = List(19) { 0.01 } + 20.0 + List(10) { -0.5 }
+        var s = ScalpStats()
+        results.forEachIndexed { i, p ->
+            s = s.copy(
+                closed = s.closed + 1, pnlUsd = s.pnlUsd + p,
+                wins = s.wins + (if (p > 0) 1 else 0), losses = s.losses + (if (p < 0) 1 else 0),
+                wonUsd = s.wonUsd + maxOf(p, 0.0), lostUsd = s.lostUsd + maxOf(-p, 0.0)
+            ).withWindowClose("KXBTC15M-W$i", p)
+        }
         assertEquals("within luck: no winner yet", ScalperResults.verdict(s))
-        // The class-average rebuild alone would have called it a lead.
-        assertEquals("ahead by more than luck so far", ScalperResults.verdict(s.copy(pnlSqUsd = 0.0)))
+        // The class-average rebuild (a record whose window sums miss closes) would have called it a lead.
+        assertEquals("ahead by more than luck so far", ScalperResults.verdict(s.copy(windowCloses = 0)))
+        // Totals from before the window sums plus one new close: the partial sums are not used.
+        val legacy = s.copy(windows = 0, winSqUsd = 0.0, winCrossUsd = 0.0, winN2 = 0.0, curTicker = "", curUsd = 0.0, curN = 0, windowCloses = 0)
+        val oneMore = legacy.copy(closed = legacy.closed + 1, pnlUsd = legacy.pnlUsd + 0.01, wins = legacy.wins + 1, wonUsd = legacy.wonUsd + 0.01)
+            .withWindowClose("KXBTC15M-NEW", 0.01)
+        assertEquals(ScalperResults.verdict(oneMore.copy(windows = 0)), ScalperResults.verdict(oneMore))
     }
 
     @Test
@@ -219,7 +228,7 @@ class ArenaStrategiesTest {
             windows.forEachIndexed { w, pnls ->
                 for (p in pnls) {
                     s = s.copy(
-                        closed = s.closed + 1, pnlUsd = s.pnlUsd + p, pnlSqUsd = s.pnlSqUsd + p * p,
+                        closed = s.closed + 1, pnlUsd = s.pnlUsd + p,
                         wins = s.wins + (if (p > 0) 1 else 0), losses = s.losses + (if (p < 0) 1 else 0),
                         wonUsd = s.wonUsd + maxOf(p, 0.0), lostUsd = s.lostUsd + maxOf(-p, 0.0)
                     ).withWindowClose("KXBTC15M-W$w", p)

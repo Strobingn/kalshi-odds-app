@@ -33,8 +33,6 @@ data class ScalpStats(
     val feesUsd: Double = 0.0,
     val biggestWinUsd: Double = 0.0,
     val biggestLossUsd: Double = 0.0,
-    /** Sum of each closed scalp's net squared, for the luck test's spread. 0 in records from before 1.9.2. */
-    val pnlSqUsd: Double = 0.0,
     /**
      * Per-window sums for the luck test, which clusters by market window: scalps in one window share
      * its outcome, so they are not independent. [windows] counts windows with a close; the
@@ -210,7 +208,6 @@ class ScalperLedger(
                                 wins = it.wins + (if (c.pnlUsd > 0.0) 1 else 0),
                                 losses = it.losses + (if (c.pnlUsd < 0.0) 1 else 0),
                                 pnlUsd = it.pnlUsd + c.pnlUsd,
-                                pnlSqUsd = it.pnlSqUsd + c.pnlUsd * c.pnlUsd,
                                 wonUsd = it.wonUsd + (if (c.pnlUsd > 0.0) c.pnlUsd else 0.0),
                                 lostUsd = it.lostUsd + (if (c.pnlUsd < 0.0) -c.pnlUsd else 0.0),
                                 feesUsd = it.feesUsd + fees,

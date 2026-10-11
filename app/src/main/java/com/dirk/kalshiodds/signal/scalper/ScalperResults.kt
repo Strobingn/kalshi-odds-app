@@ -114,9 +114,10 @@ object ScalperResults {
      * Is the result more than luck? Mean dollars per trade against two
      * standard errors. Scalps in one market window share its outcome, so the
      * error is clustered by window and needs [MIN_WINDOWS_FOR_VERDICT]
-     * windows. A record from before the window sums (1.9.2) uses the sum of
-     * squared results, and one from before that rebuilds the spread from the
-     * won / lost totals; both understate it.
+     * windows. Those sums count only closes since they were kept (1.9.2), so a
+     * record whose sums miss some closes rebuilds the spread from the won /
+     * lost totals instead (every win at the average win, every loss at the
+     * average loss), which understates it.
      */
     fun verdict(s: ScalpStats): String {
         val n = s.closed
@@ -137,7 +138,7 @@ object ScalperResults {
         } else {
             val aw = s.avgWinUsd ?: 0.0
             val al = s.avgLossUsd ?: 0.0
-            val second = if (s.pnlSqUsd > 0.0) s.pnlSqUsd / n else (s.wins * aw * aw + s.losses * al * al) / n
+            val second = (s.wins * aw * aw + s.losses * al * al) / n
             kotlin.math.sqrt(kotlin.math.max(second - mean * mean, 0.0) / n)
         }
         return when {
