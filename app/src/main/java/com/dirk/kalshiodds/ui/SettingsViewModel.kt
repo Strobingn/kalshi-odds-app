@@ -208,7 +208,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     }
     fun resetScalper() {
         val before = container.scalperStore.ledger.snapshot().stats(com.dirk.kalshiodds.signal.scalper.ScalperState.ALL).closed
-        container.scalper.reset()
+        if (!container.scalper.reset()) {
+            _state.update { it.copy(credentialMessage = "Paper scalper not reset: its trade files could not be archived. Nothing was changed; try again.") }
+            return
+        }
         track("paper_scalper_reset", before, 0) { }
         _state.update { it.copy(credentialMessage = "Paper scalper record reset — the trade files were archived, no Kalshi orders") }
     }

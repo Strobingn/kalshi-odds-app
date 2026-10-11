@@ -148,6 +148,40 @@ def test_window_from_market() -> None:
     assert (late.yes_bid, late.yes_ask) == (None, None)
 
 
+def test_pull_fails_when_candles_stay_unavailable() -> None:
+    import types
+    m = {"ticker": "KXBTC15M-X", "open_time": "2026-09-01T00:00:00Z", "close_time": "2026-09-01T00:15:00Z",
+         "floor_strike": 60000.5, "expiration_value": "60010.25", "result": "yes"}
+    calls = {"n": 0}
+
+    def flaky(series, ticker, a, b):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OSError("429")
+        return [{"end_period_ts": T0 + 60, "yes_bid": {"close_dollars": "0.47"}, "yes_ask": {"close_dollars": "0.50"}}]
+
+    def broken(series, ticker, a, b):
+        raise OSError("503")
+
+    import train_edge as real
+    fake = types.SimpleNamespace(fetch_settled=lambda s, d: [m], parse_iso=real.parse_iso,
+                                 candle_quote=real.candle_quote, usable=real.usable, fetch_candles=flaky)
+    saved = sys.modules.get("train_edge")
+    sys.modules["train_edge"] = fake
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            ws = rs.pull(30, workers=1)  # first try fails, the retry succeeds
+            assert [w.yes_ask for w in ws] == [0.50], ws
+            fake.fetch_candles = broken
+            try:
+                rs.pull(30, workers=1)
+                raise AssertionError("an incomplete pull must not return windows")
+            except RuntimeError as e:
+                assert "incomplete" in str(e)
+    finally:
+        sys.modules["train_edge"] = saved
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     for t in tests:

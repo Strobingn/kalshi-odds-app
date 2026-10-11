@@ -138,18 +138,29 @@ def pull(days: int, workers: int = 3) -> list[Window]:
     markets = te.fetch_settled(SERIES, days)
     print(f"{len(markets)} settled {SERIES} markets in {days} days", file=sys.stderr)
 
-    def one(m: dict) -> Window | None:
+    def one(m: dict) -> tuple[Window | None, bool]:
+        """(window, ok): ok is False when the candles could not be fetched."""
         ot, ct = te.parse_iso(m.get("open_time")), te.parse_iso(m.get("close_time"))
         if not ot or not ct:
-            return None
+            return None, True
         try:
             candles = te.fetch_candles(SERIES, m["ticker"], int(ot.timestamp()), int(ot.timestamp()) + 180)
         except Exception:
-            candles = []
-        return window_from_market(m, candles)
+            return None, False
+        return window_from_market(m, candles), True
 
     with ThreadPoolExecutor(max_workers=workers) as ex:
-        out = [w for w in ex.map(one, markets) if w is not None]
+        got = list(ex.map(one, markets))
+    out = [w for w, ok in got if ok and w is not None]
+    failed = [m for m, (_, ok) in zip(markets, got) if not ok]
+    if failed:
+        # One slow retry; a window left without its candles would sit in the flip-rate population and
+        # the OOS day split but not in the taker P&L, so the pull fails rather than report on a subset.
+        retry = [one(m) for m in failed]
+        still = sum(1 for _, ok in retry if not ok)
+        if still:
+            raise RuntimeError(f"{still} of {len(markets)} markets' candles could not be fetched; the pull is incomplete")
+        out += [w for w, _ in retry if w is not None]
     return sorted(out, key=lambda w: w.close_ts)
 
 

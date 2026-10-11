@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.ui.AppRoutes
 import com.dirk.kalshiodds.ui.arenaFeed
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -132,6 +133,25 @@ class ArenaStrategiesTest {
         for (sec in 75..78) second(s, sec, 0.51, 0.52)
         assertTrue(s.ledger.snapshot().stats(ScalpStrategy.BOUNCE.name).posted >= 1)
         assertEquals(1, s.engine.workingFor(ScalpStrategy.BOUNCE, t, "YES"))
+    }
+
+    @Test
+    fun aResetWhoseArchiveFailsChangesNothing() {
+        var archiveOk = false
+        val s = PaperScalper(
+            model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null },
+            closeMs = { 900_000L }, onReset = { archiveOk }
+        )
+        for (sec in 0..69) second(s, sec, 0.60, 0.61)
+        for (sec in 70..74) second(s, sec, 0.50, 0.51)
+        for (sec in 75..78) second(s, sec, 0.51, 0.52)
+        val posted = s.ledger.snapshot().stats(ScalperState.ALL).posted
+        assertTrue(posted >= 1)
+        assertFalse("the files stayed live, so the totals stay too", s.reset())
+        assertEquals(posted, s.ledger.snapshot().stats(ScalperState.ALL).posted)
+        archiveOk = true
+        assertTrue(s.reset())
+        assertEquals(0, s.ledger.snapshot().stats(ScalperState.ALL).posted)
     }
 
     @Test
