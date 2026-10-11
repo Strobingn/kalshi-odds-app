@@ -1,7 +1,7 @@
 package com.dirk.kalshiodds
 
 /**
- * Side-by-side install identity for Kashi's 0.3.16 build.
+ * Side-by-side install identity for the Bitcoin Swarm build.
  *
  * [APPLICATION_ID] is the Android package name (must differ from the
  * Claude-branch app, which keeps `com.dirk.kalshiodds`). The Kotlin
@@ -9,9 +9,9 @@ package com.dirk.kalshiodds
  * 0.3.15 so `adb run-as` can copy the old app's DB/prefs in.
  */
 object AppIdentity {
-    const val APPLICATION_ID = "com.dirk.kalshiodds.kashi"
+    const val APPLICATION_ID = "com.strobingn.bitcoinswarm"
     const val NAMESPACE = "com.dirk.kalshiodds"
-    const val LABEL = "DipHunter (Kashi)"
+    const val LABEL = "Bitcoin Swarm"
 
     /** No FileProvider is declared. If one is added, use this authority. */
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"

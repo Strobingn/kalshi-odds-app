@@ -19,7 +19,7 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.15**
+Kotlin namespace: `com.dirk.kalshiodds` · installable app: **Bitcoin Swarm** (`com.strobingn.bitcoinswarm`) · version **0.3.15**
 
 ## 0.3.18
 
