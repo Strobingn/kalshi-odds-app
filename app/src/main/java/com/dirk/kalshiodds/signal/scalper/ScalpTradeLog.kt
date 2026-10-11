@@ -149,16 +149,18 @@ class ScalpTradeLog(
      * disk; on a failed write the rows not yet written go back on the queue (none are lost) and it is false.
      */
     fun flushNow(): Boolean {
-        val trades: List<ScalpTrade>
-        val orders: List<Pair<Long, String>>
-        synchronized(lock) {
-            if (pendingTrades.isEmpty() && pendingOrders.isEmpty()) return true
-            trades = pendingTrades
-            orders = pendingOrders
-            pendingTrades = ArrayList()
-            pendingOrders = ArrayList()
-        }
         synchronized(fileLock) {
+            // Rows are taken off the queue only while holding the file lock, so a reset (which holds it
+            // too) never sees an empty queue while an earlier batch is still on its way to the files.
+            val trades: List<ScalpTrade>
+            val orders: List<Pair<Long, String>>
+            synchronized(lock) {
+                if (pendingTrades.isEmpty() && pendingOrders.isEmpty()) return true
+                trades = pendingTrades
+                orders = pendingOrders
+                pendingTrades = ArrayList()
+                pendingOrders = ArrayList()
+            }
             // One day file at a time; a day is only dropped from these once its rows are written.
             val tradeDays = LinkedHashMap(trades.groupBy { utcDay(it.closedAtMs) })
             val orderDays = LinkedHashMap(orders.groupBy { utcDay(it.first) })
@@ -193,8 +195,8 @@ class ScalpTradeLog(
                 return false
             }
             runCatching { enforceCapLocked() }
+            return true
         }
-        return true
     }
 
     /** UTC days that have a trade file, oldest first. */
@@ -256,9 +258,10 @@ class ScalpTradeLog(
      * stays where it is. True only when every live file is in the archive (or there was none).
      */
     fun archive(nowMs: Long = System.currentTimeMillis()): Boolean {
-        // Rows still queued must reach the files first, or a reset would drop them with the old record.
-        if (!flushNow()) return false
+        // Held from the flush to the last move, so no writer can add pre-reset rows in between.
         synchronized(fileLock) {
+            // Rows still queued must reach the files first, or a reset would drop them with the old record.
+            if (!flushNow()) return false
             cacheKey = null
             return runCatching {
                 val live = dir.listFiles()?.filter { it.isFile && isLogFile(it.name) }.orEmpty()
