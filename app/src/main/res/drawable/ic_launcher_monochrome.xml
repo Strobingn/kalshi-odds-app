@@ -4,16 +4,17 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+    <!-- Themed-icon silhouette: K + rising candlestick, white on transparent. -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M22,40 L38,40 L38,52 L52,70 L66,52 L66,40 L84,40 L84,48 L68,48 L52,82 L36,48 L22,48 Z" />
+        android:pathData="M28,26 h14 v18 L60,26 h14 L50,52 L74,82 h-14 L42,56 v26 h-14 z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M52,28 m-8,0 a8,8 0 1,0 16,0 a8,8 0 1,0 -16,0" />
-    <path
-        android:fillColor="#000000"
-        android:pathData="M52,28 m-3.5,0 a3.5,3.5 0 1,0 7,0 a3.5,3.5 0 1,0 -7,0" />
+        android:pathData="M81,34 h3 v10 h-3 z" />
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M50.5,26.5 h3 v3 h-3 z" />
+        android:pathData="M78,44 h9 v20 h-9 z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M81,64 h3 v10 h-3 z" />
 </vector>

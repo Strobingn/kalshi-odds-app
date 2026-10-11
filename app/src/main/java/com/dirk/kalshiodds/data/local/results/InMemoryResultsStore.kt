@@ -26,6 +26,7 @@ class InMemoryResultsStore(
     private val path = ArrayDeque<com.dirk.kalshiodds.data.local.archive.PricePathRow>()
     private val spot = ArrayDeque<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>()
     private val fills = LinkedHashMap<String, com.dirk.kalshiodds.data.importing.ImportedFill>()
+    private val paperFills = LinkedHashMap<String, com.dirk.kalshiodds.signal.paper.PaperFill>()
     private val cursors = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.BackfillCursorRow>()
     private val settingsChanges = ArrayDeque<com.dirk.kalshiodds.data.local.history.SettingsChange>()
     private val sessions = LinkedHashMap<String, com.dirk.kalshiodds.data.local.history.HistorySession>()
@@ -140,6 +141,12 @@ class InMemoryResultsStore(
     }
 
     @Synchronized
+    override fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>) {
+        for (r in rows) paperFills[r.id] = r
+    }
+
+    fun paperFill(id: String): com.dirk.kalshiodds.signal.paper.PaperFill? = paperFills[id]
+
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
 
     @Synchronized

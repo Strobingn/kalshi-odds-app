@@ -1,5 +1,26 @@
 {
-  "x": [0.4, 0.5, 0.42, 0.1, 0.02, 0.01, 0.04, 0.0, 0.3, 0.48],
-  "p": 0.578105233,
-  "note": "sigmoid(-0.25 + w·x) for ml/fixtures/edge_model.json (mean 0, std 1, Platt identity); clamped only if outside [0.02, 0.98]"
+  "inputs": {
+    "mid": 0.42,
+    "spread": 0.02,
+    "spot": 100050.0,
+    "strike": 100000.0,
+    "tte_seconds": 420.0,
+    "sigma_annual": 0.55,
+    "ret_1m": 0.0004,
+    "ret_5m": -0.0011,
+    "now_ms": 1790000123000
+  },
+  "x": [
+    0.7198363336317869,
+    0.24913004254110238,
+    0.0004,
+    -0.0011,
+    0.4666666666666667,
+    0.02,
+    -0.556960177295542,
+    -0.8305391988984736,
+    1.0
+  ],
+  "p": 0.510266473535539,
+  "note": "pipeline.edge_features + edge_predict on ml/fixtures/edge_model.json; EdgeModelTest pins the Kotlin twin to these numbers"
 }

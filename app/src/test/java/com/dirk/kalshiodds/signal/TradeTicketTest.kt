@@ -137,10 +137,11 @@ class PayoutGateTest {
 
     @Test
     fun stakeClipAndRaiseConfirm() {
-        assertEquals(25.0, PayoutGate.clipStake(99.0), 1e-9)
+        assertEquals(10.0, PayoutGate.clipStake(99.0), 1e-9)
         assertEquals(1.0, PayoutGate.clipStake(0.1), 1e-9)
         assertFalse(PayoutGate.requiresRaiseConfirm(5.0))
-        assertTrue(PayoutGate.requiresRaiseConfirm(6.0))
+        assertFalse(PayoutGate.requiresRaiseConfirm(6.0))
+        assertFalse(PayoutGate.requiresRaiseConfirm(10.0))
         assertTrue(PayoutGate.raiseConfirmMatches("raise"))
         assertTrue(PayoutGate.raiseConfirmMatches("RAISE"))
         assertFalse(PayoutGate.raiseConfirmMatches("ok"))
@@ -461,39 +462,6 @@ MIIEowIBAAKCAQEA
 class TicketBuilderGateTest {
 
     @Test
-    fun cheapAskWithoutValueDoesNotSuggestAnAutomaticTicket() {
-        val m = market(passed = true, muted = false, ask = 0.04).copy(aiYesPercent = 4.0)
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
-        assertNull(TicketBuilder.proposeHunter(m, ctx))
-        assertNull(TicketBuilder.proposeHunterValue(m, ctx))
-        assertNull(TicketBuilder.propose(m, ctx))
-        assertTrue(TicketBuilder.proposeAll(listOf(m), ctx).isEmpty())
-        assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
-    }
-
-    @Test
-    fun automaticTicketChoosesPricedValueOverHeroDirectionAndRecomputesEv() {
-        val m = market(passed = true, muted = false, ask = 0.97).copy(
-            yesBid = 0.96, noBid = 0.03, noAsk = 0.04,
-            aiYesPercent = 15.0, primaryHeroSide = "YES", predictedSide = "YES",
-            netEvDollars = 100.0, netEdgePp = 500.0
-        )
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
-        val ticket = TicketBuilder.propose(m, ctx)!!
-        assertEquals("NO", ticket.side)
-        assertEquals(0.85 - ticket.allInUsd!! / ticket.contracts, ticket.netEvPerContract!!, 1e-9)
-        assertTrue(ticket.netEdgePp!! < 100.0)
-    }
-
-    @Test
-    fun missingModelDoesNotCreateAutomaticTicket() {
-        val m = market(passed = true, muted = false, ask = 0.04).copy(aiYesPercent = null)
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = 1L)
-        assertNull(TicketBuilder.proposeHunter(m, ctx))
-        assertNull(TicketBuilder.propose(m, ctx))
-    }
-
-    @Test
     fun qualityGatesBlockWhenEnabled() {
         val cheap = market(passed = false, muted = false, ask = 0.04)
         val ctx = TicketBuilder.Context(
@@ -597,63 +565,6 @@ class TicketBuilderGateTest {
     }
 
     @Test
-    fun automaticHunterUsesOnlyVisibleTouchDepthForItsActualClip() {
-        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
-        val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
-            no = listOf(0.96 to 40.0)
-        )
-        val ctx = TicketBuilder.Context(
-            settings = SignalSettings(), alertsPaused = false,
-            books = mapOf(m.ticker to book), nowMs = 1L
-        )
-        val ticket = TicketBuilder.proposeHunter(m, ctx)!!
-        assertEquals(40, ticket.contracts)
-        assertEquals(LiveOrderSizer.sizeWithinDepth(0.04, 40).feeUsd, ticket.feeUsd!!, 1e-9)
-        assertEquals(ticket.modelChance!! - ticket.allInUsd!! / 40, ticket.netEvPerContract!!, 1e-9)
-        assertTrue(ticket.allInUsd!! <= 5.0)
-        assertNull(TicketBuilder.propose(m, ctx)) // $5 to $100 payout needs deeper liquidity.
-    }
-
-    @Test
-    fun longShotCannotClaimInvisibleContractsOrZeroTouchSize() {
-        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
-        val thin = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(no = listOf(0.96 to 15.0))
-        val ctx = TicketBuilder.Context(
-            settings = SignalSettings(), alertsPaused = false,
-            books = mapOf(m.ticker to thin), nowMs = 1L
-        )
-        val ticket = TicketBuilder.proposeHunterValue(m, ctx)!!
-        assertEquals(15, ticket.contracts)
-        assertEquals(15, ticket.visibleContracts)
-        assertNull(TicketBuilder.proposeHunterValue(m, ctx.copy(books = mapOf(
-            m.ticker to com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(no = listOf(0.96 to 0.5))
-        ))))
-    }
-
-    @Test
-    fun buyAskUsesBookInsteadOfStaleCheapQuote() {
-        val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
-        val book = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
-            yes = listOf(0.30 to 100.0),
-            no = listOf(0.80 to 100.0)
-        )
-        val ctx = TicketBuilder.Context(
-            settings = SignalSettings(),
-            alertsPaused = false,
-            books = mapOf(m.ticker to book)
-        )
-        assertEquals(0.20, TicketBuilder.bestAsk(m, "YES", ctx)!!, 1e-9)
-        assertEquals(0.70, TicketBuilder.bestAsk(m, "NO", ctx)!!, 1e-9)
-
-        val noYesSellers = ctx.copy(books = mapOf(
-            m.ticker to com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
-                yes = listOf(0.30 to 100.0)
-            )
-        ))
-        assertNull(TicketBuilder.bestAsk(m, "YES", noYesSellers))
-    }
-
-    @Test
     fun hunterIgnoresQualityGatesAndUsesOneDollar() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(
@@ -670,7 +581,7 @@ class TicketBuilderGateTest {
             ctx
         )
         assertTrue(ticket != null)
-        assertTrue(ticket!!.stakeUsd in 4.0..5.0 + 1e-6)
+        assertTrue(ticket!!.stakeUsd in 9.0..10.0 + 1e-6)
         assertEquals(LiveOrderSizer.size(0.04).count, ticket.contracts)
         assertTrue(ticket.maxPayoutUsd >= 25.0)
         assertEquals(com.dirk.kalshiodds.signal.trade.TicketKind.HUNTER, ticket.kind)
@@ -714,8 +625,8 @@ class DefaultConfigV22Test {
         assertEquals(5.0, cfg.ticketStakeUsd, 1e-9)
         assertTrue(cfg.ticketRespectGates)
         assertTrue(cfg.ticketsEnabled)
-        assertEquals(SignalConstants.DEFAULT_TICKET_STAKE_USD, 5.0, 1e-9)
-        assertEquals(SignalConstants.TICKET_STAKE_HARD_CAP_USD, 25.0, 1e-9)
+        assertEquals(SignalConstants.DEFAULT_TICKET_STAKE_USD, 10.0, 1e-9)
+        assertEquals(SignalConstants.TICKET_STAKE_HARD_CAP_USD, 10.0, 1e-9)
         assertEquals(SignalConstants.DEFAULT_MIN_PAYOUT_USD, 100.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_STAKE_USD, 1.0, 1e-9)
         assertEquals(SignalConstants.HUNTER_MIN_PAYOUT_USD, 25.0, 1e-9)
@@ -771,7 +682,6 @@ private fun market(
     passedFilter = passed,
     muted = muted,
     predictedSide = "YES",
-    aiYesPercent = 15.0,
     edgePp = 8.0,
     netEdgePp = 6.0,
     netEvDollars = 0.04

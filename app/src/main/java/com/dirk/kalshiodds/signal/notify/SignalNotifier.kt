@@ -70,8 +70,44 @@ class SignalNotifier(private val context: Context) {
         return postedAt
     }
 
-    fun foregroundNotification(text: String = context.getString(R.string.live_signals_fg_text)): Notification {
+    /**
+     * Scalper event notification — same HIGH-importance alerts channel as
+     * signal alerts, prefixed "Scalp:" by the caller. Guardrail-blocked
+     * events are deliberately NOT routed here (AppContainer filters them) so
+     * a throttled-out scalper cannot spam notifications.
+     */
+    fun notifyScalp(title: String, text: String, ticker: String? = null): Long {
         ensureChannels(context)
+        val postedAt = SystemClock.elapsedRealtimeNanos()
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            ticker?.let { putExtra(EXTRA_TICKER, it) }
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            title.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(ids.getAndIncrement(), notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS denied — same fail-soft as alert notifications
+        }
+        return postedAt
+    }
+
+    fun foregroundNotification(text: String = context.getString(R.string.live_signals_fg_text)): Notification {        ensureChannels(context)
         val open = PendingIntent.getActivity(
             context,
             1,
@@ -116,10 +152,37 @@ class SignalNotifier(private val context: Context) {
             .build()
     }
 
+    fun pausedNotification(): Notification {
+        ensureChannels(context)
+        val open = PendingIntent.getActivity(
+            context,
+            3,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                action = LiveSignalsPolicy.ACTION_RESUME
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val text = context.getString(R.string.live_signals_paused_text)
+        return NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(context.getString(R.string.live_signals_fg_title))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .setContentIntent(open)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+    }
+
     companion object {
         const val CHANNEL_ALERTS = "diphunter_signal_alerts"
         const val CHANNEL_FOREGROUND = LiveSignalsPolicy.CHANNEL_ONGOING
         const val FG_NOTIFICATION_ID = 1001
+        const val PAUSED_NOTIFICATION_ID = 1002
         const val EXTRA_TICKER = "signal_ticker"
 
         fun ensureChannels(context: Context) {

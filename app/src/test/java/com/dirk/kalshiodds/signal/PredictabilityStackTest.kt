@@ -303,7 +303,10 @@ class ScoringPredictabilityTest {
             hasDepth = true,
             hasCancel = true
         )!!
-        assertTrue(late.ai < early.ai)
+        // AI (MLP) and related-crypto are off until retrained / removed.
+        assertEquals(0.0, early.ai, 0.0)
+        assertEquals(0.0, late.ai, 0.0)
+        assertEquals(0.0, early.related, 0.0)
         assertTrue(late.velocity > early.velocity)
         assertTrue(late.imbalance > early.imbalance)
         assertTrue(late.leadLag < early.leadLag)

@@ -49,11 +49,15 @@ def main() -> None:
     p.add_argument("--cache", default=str(Path(__file__).parent / "cache"))
     p.add_argument("--skip-fetch", action="store_true")
     p.add_argument("--artifacts", default="/opt/cursor/artifacts")
+    p.add_argument("--edge-model", default=None, help="schema-2 edge_model.json to replay (default: blend only)")
     args = p.parse_args()
     cache = Path(args.cache)
     if not args.skip_fetch:
         print(run_fetch(cache, days=args.days))
-    result = run_sim(cache)
+    engine_kwargs = {}
+    if args.edge_model:
+        engine_kwargs["edge_model"] = json.loads(Path(args.edge_model).read_text())
+    result = run_sim(cache, engine_kwargs)
     meta = json.loads((cache / "meta.json").read_text()) if (cache / "meta.json").is_file() else {}
     run_report(result, ROOT, Path(args.artifacts), meta)
     write_sample_fixture(cache, Path(__file__).parent / "fixtures")

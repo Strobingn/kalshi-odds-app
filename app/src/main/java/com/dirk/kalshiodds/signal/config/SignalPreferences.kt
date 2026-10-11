@@ -234,6 +234,16 @@ class SignalPreferences(
             SignalConstants.TICKET_STAKE_HARD_CAP_USD
         )
     }
+
+    /** 0.3.16: $10 default/cap, wipe leftover min-profit so it cannot block. */
+    suspend fun applyLastMinuteStakeIfNeeded() {
+        app.signalDataStore.edit { prefs ->
+            if (prefs[KEY_STAKE_V0316] == true) return@edit
+            prefs[KEY_TICKET_STAKE] = SignalConstants.DEFAULT_TICKET_STAKE_USD
+            prefs[KEY_MIN_PROFIT] = 0.0
+            prefs[KEY_STAKE_V0316] = true
+        }
+    }
     suspend fun updateTicketRespectGates(value: Boolean) = edit { it[KEY_TICKET_GATES] = value }
     suspend fun updateHunterValueStakeUsd(value: Double) = edit {
         it[KEY_HUNTER_VALUE_STAKE] = value.coerceIn(1.0, 5.0)
@@ -392,7 +402,10 @@ class SignalPreferences(
             resumeOnNewSession = this[KEY_RESUME_SESSION] ?: def.resumeOnNewSession,
             ticketsEnabled = this[KEY_TICKETS] ?: def.ticketsEnabled,
             paperTradingEnabled = this[KEY_PAPER] ?: def.paperTradingEnabled,
-            ticketStakeUsd = this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd,
+            ticketStakeUsd = (this[KEY_TICKET_STAKE] ?: def.ticketStakeUsd).coerceIn(
+                SignalConstants.TICKET_STAKE_MIN_USD,
+                SignalConstants.TICKET_STAKE_HARD_CAP_USD
+            ),
             ticketRespectGates = this[KEY_TICKET_GATES] ?: def.ticketRespectGates,
             hunterValueStakeUsd = this[KEY_HUNTER_VALUE_STAKE] ?: SignalConstants.HUNTER_VALUE_STAKE_USD,
             hunterValuePayoutUsd = this[KEY_HUNTER_VALUE_PAYOUT] ?: SignalConstants.HUNTER_VALUE_PAYOUT_USD,
@@ -402,7 +415,7 @@ class SignalPreferences(
             winTargetUsd = this[KEY_WIN_TARGET_USD] ?: SignalConstants.DEFAULT_WIN_TARGET_USD,
             winTargetBankrollPct = this[KEY_WIN_TARGET_PCT] ?: SignalConstants.DEFAULT_WIN_TARGET_BANKROLL_PCT,
             winTargetAbsCapUsd = this[KEY_WIN_TARGET_ABS],
-            minProfitIfWinUsd = this[KEY_MIN_PROFIT] ?: SignalConstants.DEFAULT_MIN_PROFIT_IF_WIN_USD,
+            minProfitIfWinUsd = 0.0,
             heavyMlEnabled = this[KEY_HEAVY_ML] ?: def.heavyMlEnabled,
             sequenceModelEnabled = this[KEY_SEQ_MODEL] ?: def.sequenceModelEnabled,
             gbmEnabled = this[KEY_GBM] ?: def.gbmEnabled,
@@ -502,6 +515,7 @@ class SignalPreferences(
         private val KEY_META = booleanPreferencesKey("meta_label_enabled")
         private val KEY_PATH_SIM = booleanPreferencesKey("path_sim_enabled")
         private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
+        private val KEY_STAKE_V0316 = booleanPreferencesKey("last_minute_stake_v0316")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

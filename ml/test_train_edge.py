@@ -1,105 +1,93 @@
 #!/usr/bin/env python3
-"""No-look-ahead checks for ml/train_edge.py (stdlib only).
+"""Checks for ml/train_edge.py (stdlib only).
 
     python3 ml/test_train_edge.py
 """
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
 
 import train_edge as te  # noqa: E402
+import pipeline as pl  # noqa: E402  (train_edge puts tools/backtest on sys.path)
 
-OPEN = 1_790_000_000
-CLOSE = OPEN + 900
+OPEN_MS = 1_790_000_100_000 - (1_790_000_100_000 % 900_000)
+CLOSE_MS = OPEN_MS + 900_000
 STRIKE = 100.0
 
 
-def _candle(end_ts: int, mid: float) -> dict:
-    return {
-        "end_period_ts": end_ts,
-        "price": {"close_dollars": mid},
-        "yes_bid": {"close_dollars": mid - 0.01},
-        "yes_ask": {"close_dollars": mid + 0.01},
-    }
+def _bars(mid: float = 0.45) -> list[dict]:
+    return [
+        {"end_ts": OPEN_MS // 1000 + 60 * (i + 1), "yes_bid": {"close": mid - 0.01}, "yes_ask": {"close": mid + 0.01}}
+        for i in range(15)
+    ]
+
+
+def _spot(final_px: float) -> dict[int, float]:
+    """1m Coinbase closes keyed by bar start; flat ~99.9 then a last-minute print."""
+    start = OPEN_MS // 1000 - 90 * 60
+    idx = {start + 60 * i: 99.9 + 0.001 * (i % 3) for i in range(90 + 14)}
+    idx[CLOSE_MS // 1000 - 60] = final_px
+    return idx
 
 
 def _market() -> dict:
-    return {"close_time": "2026-09-20T00:15:00Z", "floor_strike": STRIKE}
-
-
-def _spot_rows(final_px: float) -> list[tuple[int, float]]:
-    # Flat-ish tape at 99.9 for the whole window, then a last-minute print.
-    rows = [(OPEN - 900 + 60 * i, 99.9 + 0.001 * (i % 3)) for i in range(29)]
-    rows.append((CLOSE - 60, final_px))
-    return rows
+    return {"ticker": "KXBTC15M-TEST", "open_ms": OPEN_MS, "close_ms": CLOSE_MS, "result": "yes", "floor_strike": STRIKE}
 
 
 class NoLookAheadTest(unittest.TestCase):
-    def setUp(self) -> None:
-        te_close = te.parse_iso(_market()["close_time"])
-        assert te_close is not None
-        self.close_ts = int(te_close.timestamp())
-        self.candles = [_candle(self.close_ts - 900 + 60 * (i + 1), 0.45) for i in range(15)]
+    def test_rows_ignore_spot_after_the_decision_minute(self) -> None:
+        up = te.market_rows(_market(), _bars(), _spot(110.0))
+        down = te.market_rows(_market(), _bars(), _spot(90.0))
+        self.assertEqual(len(up), 13)
+        # Minutes 1…13 are all decided before the settlement-minute bar closes.
+        self.assertEqual([r["x"] for r in up], [r["x"] for r in down])
+        # Spot ~99.9 below strike 100 → the digital sits below 50%.
+        gap = up[6]["x"][pl.EDGE_FEATURES.index("digital_gap")]
+        self.assertLess(gap + pl.logit(0.45), 0.0)
 
-    def test_mid_window_features_ignore_settlement_spot(self) -> None:
-        idx = 7
-        up = _spot_rows(final_px=110.0)
-        down = _spot_rows(final_px=90.0)
-        # Rebase spot rows onto this market's clock.
-        shift = self.close_ts - CLOSE
-        up = [(ts + shift, c) for ts, c in up]
-        down = [(ts + shift, c) for ts, c in down]
-        f_up = te.features_for(_market(), self.candles, up, idx)
-        f_down = te.features_for(_market(), self.candles, down, idx)
-        self.assertIsNotNone(f_up)
-        self.assertEqual(f_up, f_down, "features must not depend on spot after the decision minute")
-        # Spot below strike at decision time → digital fair below 0.5.
-        self.assertLess(f_up[te.FEATURE_NAMES.index("digital_fair")], 0.5)
 
-    def test_spot_known_at_excludes_unfinished_bar(self) -> None:
-        rows = [(0, 1.0), (60, 2.0), (120, 3.0)]
-        self.assertEqual(te.spot_known_at(rows, 120), [1.0, 2.0])
-        self.assertEqual(te.spot_known_at(rows, 179), [1.0, 2.0])
-        self.assertEqual(te.spot_known_at(rows, 180), [1.0, 2.0, 3.0])
+class OffsetModelTest(unittest.TestCase):
+    def test_zero_model_is_the_market(self) -> None:
+        n = len(pl.EDGE_FEATURES)
+        zero = {"weights": [0.0] * n, "bias": 0.0, "mean": [0.0] * n, "std": [1.0] * n}
+        x = pl.edge_features(0.37, 0.02, 101.0, 100.0, 300.0, 0.6, 0.001, 0.002, 1_790_000_000_000)
+        self.assertAlmostEqual(pl.edge_predict(zero, x, 0.37), 0.37, places=9)
 
-    def test_cross_asset_is_five_minute_return(self) -> None:
-        closes = [100.0, 101.0, 102.0, 103.0, 104.0, 110.0]
-        self.assertAlmostEqual(te.spot_return(closes, 5), 0.10)
-        self.assertEqual(te.spot_return(closes[:3], 5), 0.0)
+    def test_fit_recovers_planted_edge(self) -> None:
+        model = te.fit_model(te.fixture_rows(n_markets=300))
+        w = dict(zip(te.FEATURE_NAMES, model["weights"]))
+        self.assertGreater(w["digital_gap"], 0.1)
 
-    def test_no_profit_uses_no_midpoint(self) -> None:
-        pnl = te.simulated_pnl([0.10], [0.30], [0])
-        self.assertEqual(pnl["n"], 1)
-        self.assertAlmostEqual(pnl["pnl"], 1.0 - 0.70 - 0.07 * 0.70 * 0.30)
 
-    def test_fixture_manifest_cannot_claim_edge(self) -> None:
-        from tempfile import TemporaryDirectory
+class SafetyTest(unittest.TestCase):
+    def _run(self, *args: str) -> int:
+        return subprocess.run([sys.executable, str(HERE / "train_edge.py"), *args], capture_output=True, text=True).returncode
 
-        with TemporaryDirectory() as directory:
-            path = Path(directory) / "manifest.json"
-            te.write_manifest(
-                {"n_holdout": 180, "model_brier": 0.02, "market_brier": 0.18,
-                 "model_logloss": 0.1, "market_logloss": 0.5},
-                path,
-                fixture=True,
-            )
-            import json
-            manifest = json.loads(path.read_text(encoding="utf-8"))
-            self.assertEqual(manifest["data_source"], "synthetic_fixture")
+    def test_fixture_never_beats_market(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            out, man = Path(d) / "m.json", Path(d) / "man.json"
+            self.assertEqual(self._run("--fixture", "--out", str(out), "--manifest", str(man)), 0)
+            manifest = json.loads(man.read_text())
+            model = json.loads(out.read_text())
+            self.assertTrue(manifest["fixture"])
             self.assertFalse(manifest["beats_market"])
+            self.assertTrue(model["fixture"])
+            self.assertEqual(model["schema"], 2)
 
-    def test_time_of_day_matches_new_york_minutes(self) -> None:
-        market = _market()
-        end_ts = self.close_ts - 420
-        feats = te.features_for(market, [_candle(end_ts, 0.45)], [], 0)
-        self.assertIsNotNone(feats)
-        local = te.datetime.fromtimestamp(end_ts, te.ZoneInfo("America/New_York"))
-        expected = (local.hour * 60 + local.minute) / 1440
-        self.assertAlmostEqual(feats[te.FEATURE_NAMES.index("time_of_day")], expected)
+    def test_missing_data_fails_instead_of_faking(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "m.json"
+            rc = self._run("--cache", str(Path(d) / "empty"), "--out", str(out), "--manifest", str(Path(d) / "man.json"))
+            self.assertNotEqual(rc, 0)
+            self.assertFalse(out.exists())
 
 
 if __name__ == "__main__":

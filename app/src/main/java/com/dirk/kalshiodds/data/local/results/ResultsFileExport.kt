@@ -51,7 +51,7 @@ object ResultsFileExport {
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, name)
             put(MediaStore.Downloads.MIME_TYPE, "text/csv")
-            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DipHunter-GTP")
+            put(MediaStore.Downloads.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/DipHunter")
             put(MediaStore.Downloads.IS_PENDING, 1)
         }
         val resolver = context.contentResolver
@@ -60,6 +60,6 @@ object ResultsFileExport {
         values.clear()
         values.put(MediaStore.Downloads.IS_PENDING, 0)
         resolver.update(uri, values, null, null)
-        return "Downloads/DipHunter-GTP/$name"
+        return "Downloads/DipHunter/$name"
     }
 }

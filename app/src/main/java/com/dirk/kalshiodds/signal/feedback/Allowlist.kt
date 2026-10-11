@@ -75,7 +75,7 @@ object Allowlist {
         val start = nowMs - rollingDays * 86_400_000L
         val settled = entries.filter { e ->
             val ok = e.outcome.equals("yes", true) || e.outcome.equals("no", true)
-            ok && ForecastUnits.isScoredPick(e) && (e.settledAtMs ?: e.timestampMs) >= start
+            ok && (e.settledAtMs ?: e.timestampMs) >= start
         }
         if (settled.isEmpty()) {
             return State(floor = floor, ready = false)
@@ -119,9 +119,7 @@ object Allowlist {
         minSamples: Int,
         label: (String) -> String
     ): List<Bucket> = grouped.map { (key, rows) ->
-        // A NO BET has no picked side and must never count as a loss.
-        // Recompute hits because legacy stored scores may have scored its lean.
-        val hits = rows.count { ForecastUnits.hit(it) }
+        val hits = rows.count { it.score == 1 || (it.score == null && sideHit(it)) }
         val rate = if (rows.isEmpty()) 0.0 else hits.toDouble() / rows.size
         Bucket(
             key = key,
@@ -132,6 +130,15 @@ object Allowlist {
             muted = rows.size >= minSamples && rate < floor
         )
     }.sortedBy { it.key }
+
+    private fun sideHit(e: PredictionLogEntry): Boolean {
+        val predYes = when (e.predictedSide?.uppercase()) {
+            "YES" -> true
+            "NO" -> false
+            else -> e.predictedYes > 0.5
+        }
+        return predYes == e.outcome.equals("yes", true)
+    }
 
     fun normalizeRegime(raw: String?): String? {
         if (raw.isNullOrBlank()) return null

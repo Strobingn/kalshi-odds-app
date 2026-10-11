@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
  * Details toggle; this object puts the dropped fields back.
  */
 object HomeCardDetails {
-    const val SECTION = "DIP HUNTER AI"
+    const val SECTION = com.dirk.kalshiodds.signal.lastminute.LastMinuteConstants.AI_MODEL_BACKTEST_LABEL
     const val EDGE_TITLE = "Dip Hunter edge"
     const val MARKET_REF = "Kalshi market (reference)"
     const val LIVE_BOOK = "LIVE BOOK · UP / DOWN"
@@ -153,8 +153,10 @@ object HomeCardDetails {
     ): Snapshot = Snapshot(
         aiYesLabel = aiYesLabel(market),
         aiNoLabel = aiNoLabel(market),
-        aiYes = percentLabel(market.aiYesPercent),
-        aiNo = percentLabel(market.aiNoPercent),
+        aiYes = percentLabel(modelYesPercent(market) ?: market.aiYesPercent),
+        aiNo = percentLabel(
+            modelYesPercent(market)?.let { 100.0 - it } ?: market.aiNoPercent
+        ),
         mktYes = percentLabel(market.yesProbabilityPercent),
         mktNo = percentLabel(market.noProbabilityPercent),
         reasons = reasonsLine(market),
@@ -215,8 +217,12 @@ object HomeCardDetails {
         return "Signal strength $pct% ($band)"
     }
 
-    fun modelYesPercent(market: MarketUiModel): Double? =
-        SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+    fun modelYesPercent(market: MarketUiModel): Double? {
+        val capped = market.lastMinute?.flip?.cappedPUp?.let { it * 100.0 }
+            ?: market.lastMinute?.pUp?.let { it * 100.0 }
+        if (capped != null && capped.isFinite()) return capped
+        return SignalStance.homeModelYes(market.importedModelPp, market.aiYesPercent)
+    }
 
     /** Side with more than 50% model probability. 50% is not a pick. */
     fun likelySide(market: MarketUiModel): String? =

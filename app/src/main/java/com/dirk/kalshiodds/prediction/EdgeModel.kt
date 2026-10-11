@@ -5,208 +5,126 @@ import org.json.JSONObject
 import kotlin.math.exp
 import kotlin.math.ln
 
-/** Flat binary tree exported from the offline gradient booster. */
-data class EdgeTreeNode(
-    val feature: Int = -1,
-    val threshold: Double = 0.0,
-    val left: Int = -1,
-    val right: Int = -1,
-    val value: Double? = null
-)
-
-data class EdgeTree(val nodes: List<EdgeTreeNode>) {
-    fun predict(raw: FloatArray): Double {
-        var index = 0
-        repeat(nodes.size) {
-            val node = nodes[index]
-            node.value?.let { return it }
-            index = if (raw[node.feature].toDouble() <= node.threshold) node.left else node.right
-        }
-        error("Invalid tree: traversal did not reach a leaf")
-    }
-
-    fun validate(featureCount: Int) {
-        require(nodes.isNotEmpty() && nodes.size <= 64) { "invalid tree size" }
-        nodes.forEachIndexed { i, node ->
-            if (node.value != null) {
-                require(node.value.isFinite()) { "non-finite tree leaf" }
-            } else {
-                require(node.feature in 0 until featureCount && node.threshold.isFinite()) { "invalid tree split" }
-                require(node.left in (i + 1) until nodes.size && node.right in (i + 1) until nodes.size) {
-                    "invalid tree child"
-                }
-            }
-        }
-    }
-}
-
 /**
- * On-device logistic or bounded tree ensemble imported from offline training.
+ * Tiny on-device **market-offset** logistic from `ml/train_edge.py` (schema 2):
+ *
+ *     logit P(YES) = logit(mid) + bias + Σ w_i · (x_i − mean_i) / std_i
+ *
+ * With every weight and the bias at 0 it returns the Kalshi mid, so it can
+ * only move away from the market by what the trainer fitted on held-out data.
+ * Features: [EdgeFeatures] (Python twin: `tools/backtest/pipeline.edge_features`).
+ *
+ * Schema-1 models (absolute P(YES), trained with a UTC/local time-of-day mix-up
+ * and, before 0.3.8, on the settlement price) do not parse. Synthetic
+ * `"fixture": true` exports never parse either.
  */
 data class EdgeModel(
-    val version: Int,
+    val schema: Int,
     val kind: String,
     val featureNames: List<String>,
-    val weights: FloatArray,
-    val bias: Float,
-    val mean: FloatArray,
-    val std: FloatArray,
-    val plattA: Float = 1f,
-    val plattB: Float = 0f,
-    val blendWeight: Float = 0.35f,
-    val feeMargin: Float = 0.07f,
-    val confidenceMargin: Float = 0.03f,
-    val metrics: Map<String, Double> = emptyMap(),
-    val trees: List<EdgeTree> = emptyList(),
-    val baseScore: Double = 0.0,
-    val learningRate: Double = 0.05
+    val weights: DoubleArray,
+    val bias: Double,
+    val mean: DoubleArray,
+    val std: DoubleArray,
+    /** Minimum net EV per contract (dollars) at the ask before a side counts as an edge. */
+    val evMargin: Double = DEFAULT_EV_MARGIN,
+    val metrics: Map<String, Double> = emptyMap()
 ) {
     init {
-        require(kind == "logistic" || kind == "gbdt") { "unsupported model kind" }
         require(weights.size == featureNames.size) { "weights ${weights.size} != names ${featureNames.size}" }
         require(mean.size == weights.size && std.size == weights.size)
-        if (kind == "gbdt") {
-            require(featureNames == EdgeFeatures.NAMES) { "GBDT feature order differs from live app" }
-            require(trees.isNotEmpty() && trees.size <= 512) { "invalid tree count" }
-            require(baseScore.isFinite() && learningRate.isFinite() && learningRate > 0.0 &&
-                plattA.isFinite() && plattB.isFinite()) { "invalid GBDT calibration" }
-            trees.forEach { it.validate(featureNames.size) }
-        }
     }
 
-    fun predictYes(raw: FloatArray): Double {
-        val z = logit(raw)
-        val p = sigmoid(z)
-        val calibrated = if (plattA == 1f && plattB == 0f) {
-            p
-        } else {
-            val lp = logitFromProb(p)
-            sigmoid(plattA * lp + plattB)
-        }
-        return calibrated.coerceIn(0.02, 0.98)
+    /** Kept for existing labels (“Model market_offset v2”). */
+    val version: Int get() = schema
+
+    fun predictYes(raw: DoubleArray, marketMid: Double): Double {
+        val z = logitFromProb(marketMid) + offsetLogit(raw)
+        return sigmoid(z).coerceIn(P_MIN, P_MAX)
     }
 
-    fun logit(raw: FloatArray): Double {
-        if (kind == "gbdt") {
-            require(raw.size == featureNames.size && raw.all { it.isFinite() }) { "invalid GBDT features" }
-            var z = baseScore
-            for (tree in trees) z += learningRate * tree.predict(raw)
-            return z
-        }
-        val n = weights.size
+    /** bias + Σ w·z — the model's log-odds shift away from the market. */
+    fun offsetLogit(raw: DoubleArray): Double {
         var acc = bias
-        val lim = minOf(n, raw.size)
+        val lim = minOf(weights.size, raw.size)
         for (i in 0 until lim) {
-            val s = if (std[i] < 1e-6f) 1f else std[i]
+            val s = if (std[i] < 1e-9) 1.0 else std[i]
             acc += weights[i] * ((raw[i] - mean[i]) / s)
         }
-        return acc.toDouble()
-    }
-
-    /**
-     * Flag an edge only when |model − market| clears the official
-     * order-level taker fee (amortized at the $5 ticket) + [confidenceMargin].
-     */
-    fun qualifiesEdge(modelYes: Double, marketMid: Double, feeRate: Double = feeMargin.toDouble()): Boolean {
-        val m = marketMid.coerceIn(0.02, 0.98)
-        val gap = kotlin.math.abs(modelYes - m)
-        val fee = com.dirk.kalshiodds.signal.trade.KalshiFee.perContract(m, feeRate)
-        return gap > fee + confidenceMargin
-    }
-
-    fun blendWithMarket(modelYes: Double, marketMid: Double): Double {
-        val w = blendWeight.toDouble().coerceIn(0.0, 1.0)
-        return ((1.0 - w) * marketMid + w * modelYes).coerceIn(0.02, 0.98)
+        return acc
     }
 
     fun toJson(): String {
         val o = JSONObject()
-        o.put("version", version)
+        o.put("version", schema)
+        o.put("schema", schema)
         o.put("kind", kind)
+        o.put("fixture", false)
         o.put("feature_names", JSONArray(featureNames))
-        o.put("weights", jsonFloats(weights))
-        o.put("bias", bias.toDouble())
-        o.put("mean", jsonFloats(mean))
-        o.put("std", jsonFloats(std))
-        o.put("platt_a", plattA.toDouble())
-        o.put("platt_b", plattB.toDouble())
-        o.put("blend_weight", blendWeight.toDouble())
-        o.put("fee_margin", feeMargin.toDouble())
-        o.put("confidence_margin", confidenceMargin.toDouble())
-        if (kind == "gbdt") {
-            o.put("base_score", baseScore)
-            o.put("learning_rate", learningRate)
-            o.put("trees", JSONArray().apply {
-                trees.forEach { tree -> put(JSONObject().put("nodes", JSONArray().apply {
-                    tree.nodes.forEach { node ->
-                        put(if (node.value != null) JSONObject().put("value", node.value)
-                        else JSONObject().put("feature", node.feature).put("threshold", node.threshold)
-                            .put("left", node.left).put("right", node.right))
-                    }
-                })) }
-            })
-        }
+        o.put("weights", jsonDoubles(weights))
+        o.put("bias", bias)
+        o.put("mean", jsonDoubles(mean))
+        o.put("std", jsonDoubles(std))
+        o.put("ev_margin", evMargin)
         if (metrics.isNotEmpty()) {
             val m = JSONObject()
-            metrics.forEach { (k, v) -> m.put(k, v) }
+            metrics.forEach { (k, v) -> if (v.isFinite()) m.put(k, v) }
             o.put("metrics", m)
         }
         return o.toString()
     }
 
+    override fun equals(other: Any?): Boolean =
+        other is EdgeModel && other.toJson() == toJson()
+
+    override fun hashCode(): Int = toJson().hashCode()
+
     companion object {
+        const val SCHEMA = 2
+        const val KIND = "market_offset"
+        const val P_MIN = 0.005
+        const val P_MAX = 0.995
+        const val DEFAULT_EV_MARGIN = 0.02
+
         fun parse(raw: String): EdgeModel {
             val o = JSONObject(raw)
-            val names = stringList(o.getJSONArray("feature_names"))
-            val weights = floatArray(o.getJSONArray("weights"))
-            val mean = floatArray(o.getJSONArray("mean"))
-            val std = floatArray(o.getJSONArray("std"))
-            require(names.size == weights.size) { "feature_names / weights length mismatch" }
-            require(names.size == EdgeFeatures.SIZE) {
-                "expected ${EdgeFeatures.SIZE} features, got ${names.size}"
+            val schema = o.optInt("schema", o.optInt("version", 1))
+            require(schema == SCHEMA) {
+                "model schema $schema is retired — retrain with ml/train_edge.py (schema $SCHEMA)"
             }
+            val kind = o.optString("kind")
+            require(kind == KIND) { "model kind '$kind' is not '$KIND'" }
+            require(!o.optBoolean("fixture", false)) { "synthetic fixture model — not for live use" }
+            val names = stringList(o.getJSONArray("feature_names"))
+            require(names == EdgeFeatures.NAMES) {
+                "feature_names $names do not match this app (${EdgeFeatures.NAMES})"
+            }
+            val weights = doubles(o.getJSONArray("weights"))
+            val mean = doubles(o.getJSONArray("mean"))
+            val std = doubles(o.getJSONArray("std"))
+            require(names.size == weights.size) { "feature_names / weights length mismatch" }
+            val bias = o.optDouble("bias", 0.0)
+            require((weights + mean + std + bias).all { it.isFinite() }) { "non-finite weights" }
             val metrics = linkedMapOf<String, Double>()
             o.optJSONObject("metrics")?.let { m ->
                 val keys = m.keys()
                 while (keys.hasNext()) {
                     val k = keys.next()
-                    metrics[k] = m.optDouble(k)
+                    val v = m.optDouble(k, Double.NaN)
+                    if (v.isFinite()) metrics[k] = v
                 }
             }
-            val kind = o.optString("kind", "logistic")
-            val trees = if (kind == "gbdt") {
-                val arr = o.getJSONArray("trees")
-                require(arr.length() in 1..512)
-                (0 until arr.length()).map { i ->
-                    val nodes = arr.getJSONObject(i).getJSONArray("nodes")
-                    EdgeTree((0 until nodes.length()).map { j ->
-                        val node = nodes.getJSONObject(j)
-                        if (node.has("value")) EdgeTreeNode(value = node.getDouble("value"))
-                        else EdgeTreeNode(
-                            feature = node.getInt("feature"),
-                            threshold = node.getDouble("threshold"),
-                            left = node.getInt("left"), right = node.getInt("right")
-                        )
-                    })
-                }
-            } else emptyList()
             return EdgeModel(
-                version = o.optInt("version", 1),
+                schema = schema,
                 kind = kind,
                 featureNames = names,
                 weights = weights,
-                bias = o.optDouble("bias", 0.0).toFloat(),
+                bias = bias,
                 mean = mean,
                 std = std,
-                plattA = o.optDouble("platt_a", 1.0).toFloat(),
-                plattB = o.optDouble("platt_b", 0.0).toFloat(),
-                blendWeight = o.optDouble("blend_weight", 0.35).toFloat(),
-                feeMargin = o.optDouble("fee_margin", 0.07).toFloat(),
-                confidenceMargin = o.optDouble("confidence_margin", 0.03).toFloat(),
-                metrics = metrics,
-                trees = trees,
-                baseScore = o.optDouble("base_score", 0.0),
-                learningRate = o.optDouble("learning_rate", 0.05)
+                evMargin = o.optDouble("ev_margin", DEFAULT_EV_MARGIN).takeIf { it.isFinite() && it >= 0.0 }
+                    ?: DEFAULT_EV_MARGIN,
+                metrics = metrics
             )
         }
 
@@ -216,19 +134,19 @@ data class EdgeModel(
         }
 
         fun logitFromProb(p: Double): Double {
-            val q = p.coerceIn(1e-6, 1.0 - 1e-6)
+            val q = p.coerceIn(P_MIN, P_MAX)
             return ln(q / (1.0 - q))
         }
 
         private fun stringList(a: JSONArray): List<String> =
             (0 until a.length()).map { a.getString(it) }
 
-        private fun floatArray(a: JSONArray): FloatArray =
-            FloatArray(a.length()) { a.getDouble(it).toFloat() }
+        private fun doubles(a: JSONArray): DoubleArray =
+            DoubleArray(a.length()) { a.getDouble(it) }
 
-        private fun jsonFloats(xs: FloatArray): JSONArray {
+        private fun jsonDoubles(xs: DoubleArray): JSONArray {
             val a = JSONArray()
-            for (x in xs) a.put(x.toDouble())
+            for (x in xs) a.put(x)
             return a
         }
     }

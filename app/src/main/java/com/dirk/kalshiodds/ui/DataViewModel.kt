@@ -326,7 +326,7 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         val extra = man?.let {
             " · n=${it.nSamples} · Brier ${"%.3f".format(it.modelBrier)} vs mkt ${"%.3f".format(it.marketBrier)}"
         }.orEmpty()
-        return "Model ${m.kind} v${m.version} · blend ${"%.2f".format(m.blendWeight)}$extra"
+        return "Model ${m.kind} v${m.version} · EV margin ${"%.0f".format(m.evMargin * 100.0)}¢$extra"
     }
 
     private fun syncLine(s: DataHubSettings): String? {

@@ -18,7 +18,9 @@ object SignalCopy {
         val call: String,
         val modelLine: String,
         val outcome: String?,
-        val details: String?
+        val details: String?,
+        /** Ticker + id / timestamp — never display text. Used as a Lazy key. */
+        val stableKey: String = ""
     )
 
     fun callLabel(side: String?): String = when (SignalStance.normalizeSide(side)) {
@@ -69,7 +71,24 @@ object SignalCopy {
         )
     }
 
-    fun shouldNotify(alert: SignalAlert): Boolean = SignalStance.shouldNotify(resolve(alert))
+    fun shouldNotify(alert: SignalAlert): Boolean {
+        if (!SignalStance.shouldNotify(resolve(alert))) return false
+        val sideYes = !alert.predictedSide.equals("NO", true)
+        val model = (if (sideYes) alert.fairValuePp else 100.0 - alert.fairValuePp) / 100.0
+        val implied = (if (sideYes) alert.marketMidPp else 100.0 - alert.marketMidPp) / 100.0
+        if (model.isFinite() && implied.isFinite()) {
+            val px = implied.coerceIn(0.001, 0.999)
+            if (px + 1e-12 < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_ASK &&
+                model < com.dirk.kalshiodds.signal.flip.FlipCheck.CHEAP_FLIP_SUPPORT
+            ) {
+                return false
+            }
+            if (!com.dirk.kalshiodds.signal.flip.FlipCheck.beatsAllIn(model, px)) {
+                return false
+            }
+        }
+        return true
+    }
 
     fun outcomeLabel(settled: String?): String = when {
         settled.isNullOrBlank() -> "Pending"
@@ -97,7 +116,8 @@ object SignalCopy {
             call = resolved.call,
             modelLine = modelVsMarketLine(modelYes, marketYes, resolved.lineSide),
             outcome = outcomeLabel(settled),
-            details = mergeDetails(resolved.detailsExtra, details)
+            details = mergeDetails(resolved.detailsExtra, details),
+            stableKey = "$ticker:${closeEpochMs ?: 0}:${side ?: ""}"
         )
     }
 
@@ -114,7 +134,8 @@ object SignalCopy {
             call = resolved.call,
             modelLine = modelVsMarketLine(resolved.modelYes, resolved.marketYes, resolved.lineSide),
             outcome = outcomeLabel(settled),
-            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert))
+            details = mergeDetails(resolved.detailsExtra, detailsForAlert(alert)),
+            stableKey = "${alert.ticker}:${alert.id}:${alert.createdAtMs}"
         )
     }
 

@@ -353,16 +353,6 @@ class TickBook(private val maxPoints: Int = 80) {
     @Synchronized
     fun lastMid(series: String): Double? = lastMidBySeries[series]
 
-    /** Mean mid of other watched crypto series (never non-crypto). */
-    @Synchronized
-    fun relatedCryptoMid(series: String, watchedSeries: Set<String>): Double? {
-        val others = lastMidBySeries.filter { (key, _) ->
-            key != series && key in watchedSeries && CryptoMarkets.isCryptoTicker(key)
-        }
-        if (others.isEmpty()) return null
-        return others.values.average()
-    }
-
     @Synchronized
     fun closeTime(ticker: String): Long? = closeByTicker[ticker]
 

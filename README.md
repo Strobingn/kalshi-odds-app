@@ -2,6 +2,8 @@
 
 Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-market odds and fires **analysis-only** signal alerts.
 
+**Trading contract:** every manual / alert flow is **approve-gated** — nothing is sent to Kalshi without an explicit in-app Approve tap on that ticket. The ONE deliberate exception is the **experimental scalper** (`signal/scalp/`), which is **off by default, paper by default**, hard-capped ($10/trade all-in, re-enforced at order build), bound to the Live signals foreground service (no service = no scalping), and backed by a kill switch. A 2,100-combo backtest found every parameter set loses money after Kalshi taker fees — see `docs/scalping-params.md` before enabling anything beyond paper.
+
 **Default watchlist (Bitcoin-only):**
 
 | Series | Asset | Role |
@@ -17,7 +19,11 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.15**
+Kotlin namespace: `com.dirk.kalshiodds` · installable app: **Bitcoin Swarm** (`com.strobingn.bitcoinswarm`) · version **0.3.15**
+
+## 0.3.18
+
+- **Experimental scalper (opt-in, off by default).** New `signal/scalp/` module: dip-buy YES at the ask / sell the bounce at the bid with Kalshi taker fees netted out. This is the ONE non-approve-gated path in the app and it is fenced accordingly: master enable switch (default off), paper fills by default, live only behind an explicit confirm dialog that quotes the backtest, engine started/stopped strictly by the Live signals foreground service (no service = no scalping), guardrails (one position at a time, trades/hour, daily loss limit, kill switch), and the $10 all-in cap re-enforced inside `LiveScalpExecutor`. A 2,100-combination backtest (`docs/scalping-params.md`) found **every** parameter combination loses money after fees (best ≈ −4.6¢/contract/trade), so defaults are the least-bad combo (dip 5¢, TP 6¢, SL 5¢, 8-min hold, 2 trades/hour) and the feature ships disabled. Scalp Entered/Exited/Error events notify on the existing alerts channel prefixed `Scalp:`; guardrail-blocked events never notify. Settings → "Scalping (experimental)" controls everything plus a live status line.
 
 ## 0.3.15
 
@@ -63,24 +69,6 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
 | Candlestick backfill | `LiveWindowBackfill.candles` | `ChartWindowRestoreTest.parseDocAccurateCandlestickSample` |
 | Header / labels / buttons | `MarketQuoteView.of` | `MarketQuoteViewTest` + `ChartWindowRestoreTest.labelsHeaderButtonsShareOneQuoteSource` |
 | Payout multiple | `KalshiQuoteDisplay.multiplier` + `KalshiFee.payoutMultiple` | `MarketQuoteViewTest.oneCentAtFiveDollarsIsHandComputed93_46x` |
-
-## `chat-GTP` separate install
-
-This branch builds **DipHunter GTP** with the independent Android application
-ID `com.dirk.kalshiodds.chatgtp` and a separate launcher icon. It installs
-alongside the original app and has its own local data and API-key settings.
-Each push to `chat-GTP` triggers the APK workflow and publishes the rolling
-`gtp-v1.0-chat-GTP` prerelease. Install future APKs from that same branch
-over this installation to keep its data: the signing certificate and package
-ID are stable and CI increases the version code for each new run. In **Settings
-→ Check for app update**, the app checks that same branch release and downloads
-the next APK. Android asks for approval to install an update from this app;
-confirm it to update in place without removing local data. Never switch APKs
-signed with another certificate or a different application ID.
-
-The branch-only model workflow publishes `edge-model-chat-GTP` when manually
-dispatched on `chat-GTP`. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)
-for the current evidence and unresolved trading risks.
 
 ## 0.3.8
 
@@ -225,7 +213,7 @@ Android was treating Dip Hunter as a normal Activity: leaving the app or turning
 2. Allow the ongoing **“DipHunter live signals”** notification. Do not swipe it away or deny notification permission.
 3. Optional on aggressive OEMs: Settings → **Allow background** → set Dip Hunter battery usage to **Unrestricted**.
 
-The service restarts after process death (`START_STICKY`), after swipe-from-recents (`stopWithTask=false` + `onTaskRemoved`), after reboot / app update, and via a 15-minute WorkManager watchdog. Trading is unchanged: tickets still need an in-app **Approve**.
+The service restarts after process death (`START_STICKY`), after swipe-from-recents (`stopWithTask=false` + `onTaskRemoved`), after reboot / app update, and via a 15-minute WorkManager watchdog. Manual trading is unchanged: tickets still need an in-app **Approve**. The only non-approve-gated path is the experimental scalper, and its engine is started/stopped by this service — while the service is down the scalper cannot trade regardless of settings.
 
 ## Approve-gated tickets (v0.2.2)
 
@@ -368,6 +356,7 @@ app/src/main/java/com/dirk/kalshiodds/
     external/        Public Binance/Coinbase spot · vol · funding
     checklist/       Pre-trade checklist + copy text
     notify/          SignalNotifier (HIGH alerts + ongoing FGS)
+    scalp/           Experimental opt-in scalper (off/paper by default; the one non-approve-gated path)
     service/         LiveSignalsService + keep-alive / boot / battery prompt
     model/           MarketTick, SignalAlert, WsConnectionState
     SignalHub.kt     tick dispatcher → UI + notifications

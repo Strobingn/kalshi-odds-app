@@ -132,11 +132,19 @@ class SqliteMigrationTest {
         assertFalse(ArchiveSchema.isDestructive(ArchiveSchema.CREATE_SETTINGS))
         assertFalse(ArchiveSchema.isDestructive(ArchiveSchema.CREATE_SESSIONS))
         assertFalse(ChartTickSchema.isDestructive(ChartTickSchema.CREATE))
+        assertTrue(com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5).isNotEmpty())
+        assertTrue(
+            com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)
+                .none { com.dirk.kalshiodds.data.local.paper.PaperFillSchema.isDestructive(it) }
+        )
+        assertTrue(com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(6).isEmpty())
     }
 
     @Test
     fun upgradesNeverTouchCredentialColumns() {
-        val sql = ArchiveSchema.upgradeSql(ArchiveSchema.V036) + ChartTickSchema.upgradeSql(4)
+        val sql = ArchiveSchema.upgradeSql(ArchiveSchema.V036) +
+            ChartTickSchema.upgradeSql(4) +
+            com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)
         assertTrue(sql.isNotEmpty())
         assertTrue(
             sql.none {

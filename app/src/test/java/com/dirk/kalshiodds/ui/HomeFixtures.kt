@@ -193,8 +193,213 @@ object HomeFixtures {
         apiKeyId = if (hasKey) "key-id" else "",
         hasPrivateKey = hasKey,
         paperTradingEnabled = true,
-        ticketsEnabled = true
+        ticketsEnabled = true,
+        ticketStakeUsd = 10.0,
+        minProfitIfWinUsd = 0.0
     )
+
+    /**
+     * Phone screenshot on 0.3.16: 12s left, target $84,547, spot $84,559.28
+     * (+$29), UP bid 99.9¢, DOWN ask 0.1¢. Must be NO BET after the flip check.
+     */
+    fun deadWindowLotteryBtc(): MarketUiModel {
+        val close = NOW_MS + 12_000L
+        val snap = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-27SEP161500-00",
+                tauSec = 12,
+                x = kotlin.math.ln(84_559.28 / 84_547.0),
+                obsMean = kotlin.math.ln(84_559.28 / 84_547.0),
+                sigS = 1e-5,
+                upAsk = 0.999,
+                downAsk = 0.001,
+                nowMs = NOW_MS,
+                spotUsd = 84_559.28,
+                strikeUsd = 84_547.0,
+                spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+            )
+        )
+        return market(
+            ticker = "KXBTC15M-27SEP161500-00",
+            seriesLabel = "Bitcoin",
+            yesAsk = 0.999,
+            aiYes = 96.0,
+            predicted = "NO",
+            closeMs = close,
+            floorStrike = 84_547.0,
+            spotUsd = 84_559.28,
+            spotDelta = 29.0
+        ).copy(
+            yesBid = 0.999,
+            yesAsk = 0.999,
+            noBid = 0.0,
+            noAsk = 0.001,
+            lastPrice = 0.999,
+            yesProbabilityPercent = 99.9,
+            noProbabilityPercent = 0.1,
+            aiYesPercent = 96.0,
+            aiNoPercent = 4.0,
+            importedModelPp = snap.flip?.cappedPUp?.times(100.0) ?: snap.pUp?.times(100.0) ?: 96.0,
+            lastMinute = snap
+        )
+    }
+
+    /** Close window that stays BET-eligible: 40s left, $3 from target, 30¢ ask. */
+    fun closeWindowEligibleBtc(): MarketUiModel {
+        val close = NOW_MS + 40_000L
+        val snap = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-27SEP161515-15",
+                tauSec = 40,
+                x = kotlin.math.ln(84_550.0 / 84_547.0),
+                obsMean = kotlin.math.ln(84_549.0 / 84_547.0),
+                sigS = 8e-5,
+                upAsk = 0.30,
+                downAsk = 0.70,
+                nowMs = NOW_MS,
+                spotUsd = 84_550.0,
+                strikeUsd = 84_547.0,
+                spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+            )
+        )
+        return market(
+            ticker = "KXBTC15M-27SEP161515-15",
+            seriesLabel = "Bitcoin",
+            yesAsk = 0.30,
+            aiYes = 62.0,
+            predicted = "YES",
+            closeMs = close,
+            floorStrike = 84_547.0,
+            spotUsd = 84_550.0,
+            spotDelta = 3.0
+        ).copy(
+            yesBid = 0.29,
+            yesAsk = 0.30,
+            noBid = 0.69,
+            noAsk = 0.70,
+            lastPrice = 0.30,
+            yesProbabilityPercent = 30.0,
+            noProbabilityPercent = 70.0,
+            importedModelPp = snap.flip?.cappedPUp?.times(100.0) ?: snap.pUp?.times(100.0) ?: 62.0,
+            lastMinute = snap
+        )
+    }
+
+    fun lastMinuteWaitingBtc() = screenshotPhoneBtc().copy(
+        lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot(
+            phase = com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.WAITING,
+            tauSec = 200,
+            startsInMs = 140_000,
+            spotUsd = 84_140.0,
+            strikeUsd = 84_144.0,
+            spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+        )
+    )
+
+    fun lastMinuteLiveBtc() = screenshotPhoneBtc().copy(
+        yesAsk = 0.50,
+        noAsk = 0.50,
+        lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-26SEP251600-45",
+                tauSec = 20,
+                x = 0.0,
+                obsMean = 0.0,
+                sigS = 5e-4,
+                upAsk = 0.50,
+                downAsk = 0.50,
+                spotUsd = 84_140.0,
+                strikeUsd = 84_144.0,
+                spotSource = "BRTI composite (Coinbase, Kraken)"
+            )
+        )
+    )
+
+    fun lastMinuteFiredBtc() = screenshotPhoneBtc().copy(
+        yesAsk = 0.03,
+        noAsk = 0.97,
+        lastMinute = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+                ticker = "KXBTC15M-26SEP251600-45",
+                tauSec = 45,
+                x = 0.0006,
+                obsMean = 0.0004,
+                sigS = 5e-05,
+                upAsk = 0.03,
+                downAsk = 0.97,
+                nowMs = NOW_MS,
+                spotUsd = 84_180.0,
+                strikeUsd = 84_144.0,
+                spotSource = "BRTI composite (Coinbase, Kraken, Bitstamp, Gemini)"
+            )
+        )
+    )
+
+    fun lastMinuteFire(
+        ticker: String,
+        side: String,
+        yesAsk: Double,
+        noAsk: Double
+    ) = com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.evaluate(
+        com.dirk.kalshiodds.signal.lastminute.LastMinuteStrategy.Inputs(
+            ticker = ticker,
+            tauSec = if (side.equals("NO", true)) 30 else 45,
+            x = if (side.equals("NO", true)) -0.0003 else 0.0006,
+            obsMean = if (side.equals("NO", true)) -0.0002 else 0.0004,
+            sigS = if (side.equals("NO", true)) 4e-05 else 5e-05,
+            upAsk = yesAsk,
+            downAsk = noAsk,
+            nowMs = NOW_MS
+        )
+    )
+
+    fun withLastMinuteFire(market: MarketUiModel, side: String): MarketUiModel = market.copy(
+        lastMinute = lastMinuteFire(
+            market.ticker,
+            side,
+            market.yesAsk ?: 0.03,
+            market.noAsk ?: 0.97
+        )
+    )
+
+    fun lastMinuteTicket(): TradeTicket {
+        val market = lastMinuteFiredBtc()
+        return TicketBuilder.proposeLastMinute(
+            market,
+            TicketBuilder.Context(
+                settings = SignalSettings(),
+                alertsPaused = false,
+                nowMs = NOW_MS,
+                idFactory = { "lm-ticket" }
+            )
+        ) ?: error("last-minute fixture must fire a ticket")
+    }
+
+    fun lastMinuteScorecardUi(): ScorecardUi {
+        val pick = com.dirk.kalshiodds.signal.lastminute.LastMinutePick(
+            id = "lm1",
+            ticker = "KXBTC15M-26SEP251600-45",
+            side = "YES",
+            entryAsk = 0.03,
+            contracts = 312,
+            stakeUsd = 10.0,
+            feeUsd = 0.64,
+            winChance = 0.998,
+            evPerDollar = 30.1,
+            depthLimited = false,
+            createdAtMs = NOW_MS,
+            settled = true,
+            outcome = "yes",
+            won = true,
+            pnlUsd = 302.0
+        )
+        val base = sampleScorecardUi()
+        return base.copy(
+            view = base.view.copy(
+                lastMinute = ScorecardCopy.lastMinuteSection(listOf(pick))
+            )
+        )
+    }
 
     val SAMPLE_SCORECARD = HomeScorecardSummary(
         wins = 12,
@@ -363,7 +568,11 @@ object HomeFixtures {
         }
         return ScorecardUi(
             view = ScorecardCopy.of(entries, fills, paperPnlUsd = 0.0, windows = windows),
-            metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(entries),
+            metrics = com.dirk.kalshiodds.signal.feedback.ScorecardMetrics.compute(
+                entries,
+                fills = fills,
+                settledWindows = windows
+            ),
             allowlist = com.dirk.kalshiodds.signal.feedback.Allowlist.State(),
             adapter = com.dirk.kalshiodds.signal.feedback.OnlineAdapter.identity(),
             guardrails = com.dirk.kalshiodds.signal.feedback.Guardrails.identity(),

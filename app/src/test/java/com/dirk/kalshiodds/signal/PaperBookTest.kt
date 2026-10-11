@@ -25,6 +25,8 @@ class PaperBookTest {
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
         assertEquals("AI hunter", fill.source)
+        assertEquals(70.0, fill.aiPct!!, 1e-6)
+        assertEquals(com.dirk.kalshiodds.signal.paper.PaperPickSource.TICKET.label, fill.pickSource)
         assertEquals(125, fill.contracts) // floor(5 / 0.04)
         assertEquals(5.0, fill.stakeUsd, 1e-9)
         assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
@@ -174,6 +176,8 @@ class PaperBookTest {
         maxPayoutUsd = 25.0,
         estimatedAvgFill = 0.04,
         sizingNote = "hunter",
-        kind = TicketKind.HUNTER
+        kind = TicketKind.HUNTER,
+        modelChance = 0.70,
+        impliedChance = 0.04
     )
 }

@@ -50,7 +50,11 @@ data class SettingsUiState(
     val connectionTestMessage: String? = null,
     val connectionTestOk: Boolean = false,
     val lastOrderError: String? = null,
-    val lastOrderErrorAtMs: Long = 0L
+    val lastOrderErrorAtMs: Long = 0L,
+    val scalp: com.dirk.kalshiodds.signal.scalp.ScalpSettings = com.dirk.kalshiodds.signal.scalp.ScalpSettings(),
+    val scalpStatus: com.dirk.kalshiodds.signal.scalp.ScalpUiState = com.dirk.kalshiodds.signal.scalp.ScalpUiState(),
+    /** Live-mode confirmation dialog is showing. */
+    val pendingScalpLive: Boolean = false
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -101,7 +105,82 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 _state.update { it.copy(alertsPaused = g.paused, pauseReason = g.banner) }
             }
         }
+        // Experimental scalper: settings + a cheap status poll so the
+        // running / flat / in-position line stays fresh while this screen
+        // is open. currentState() is a synchronous in-memory read.
+        viewModelScope.launch {
+            container.scalpSettingsStore.settings.collect { s ->
+                _state.update { it.copy(scalp = s) }
+            }
+        }
+        viewModelScope.launch {
+            while (true) {
+                runCatching { container.scalpEngine.currentState() }.getOrNull()?.let { st ->
+                    _state.update { it.copy(scalpStatus = st) }
+                }
+                kotlinx.coroutines.delay(2_000L)
+            }
+        }
     }
+
+    // ---- Scalping (experimental) -------------------------------------------
+
+    fun setScalpEnabled(v: Boolean) = viewModelScope.launch { container.scalpSettingsStore.updateEnabled(v) }
+
+    /** Paper is selected directly; Live always goes through the confirm dialog. */
+    fun requestScalpLiveMode(v: Boolean) {
+        // Compile-time paper-only lock (bitcoin-swarm branch): the Live
+        // option is structurally disabled — never even open the dialog.
+        if (v && !com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled) {
+            viewModelScope.launch { container.scalpSettingsStore.updateLiveMode(false) }
+            return
+        }
+        if (!v) {
+            viewModelScope.launch { container.scalpSettingsStore.updateLiveMode(false) }
+        } else {
+            _state.update { it.copy(pendingScalpLive = true) }
+        }
+    }
+
+    fun confirmScalpLiveMode() {
+        _state.update { it.copy(pendingScalpLive = false) }
+        if (!com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled) return
+        viewModelScope.launch { container.scalpSettingsStore.updateLiveMode(true) }
+    }
+
+    fun cancelScalpLiveMode() = _state.update { it.copy(pendingScalpLive = false) }
+
+    fun setScalpAggressive(v: Boolean) =
+        viewModelScope.launch { container.scalpSettingsStore.updateAggressive(v) }
+
+    fun setScalpMaxOpenPositions(n: Int) =
+        viewModelScope.launch { container.scalpSettingsStore.updateMaxOpenPositions(n) }
+
+    /** Toggle one strategy in the aggressive-mode enable set (empty = all on). */
+    fun setScalpStrategyEnabled(name: String, enabled: Boolean) {
+        viewModelScope.launch {
+            val current = container.scalpSettingsStore.hydrate()
+            // An empty set means "all on" — materialize it so one toggle
+            // doesn't accidentally enable a previously-absent strategy.
+            val all = current.enabledStrategies.ifEmpty {
+                com.dirk.kalshiodds.signal.scalp.ScalpStrategy.values().map { it.name }.toSet()
+            }
+            container.scalpSettingsStore.updateEnabledStrategies(
+                if (enabled) all + name else all - name
+            )
+        }
+    }
+
+    fun setScalpStake(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateMaxStakeUsd(v) }
+    fun setScalpTakeProfitPp(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateTakeProfitPp(v) }
+    fun setScalpStopLossPp(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateStopLossPp(v) }
+    fun setScalpMaxHoldMinutes(min: Int) =
+        viewModelScope.launch { container.scalpSettingsStore.updateMaxHoldMs(min * 60_000L) }
+    fun setScalpTradesPerHour(n: Int) = viewModelScope.launch { container.scalpSettingsStore.updateMaxTradesPerHour(n) }
+    fun setScalpDailyLossUsd(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateMaxDailyLossUsd(v) }
+    fun setScalpDipMinDropPp(v: Double) = viewModelScope.launch { container.scalpSettingsStore.updateDipMinDropPp(v) }
+    fun setScalpKillSwitch(v: Boolean) = viewModelScope.launch { container.scalpSettingsStore.updateKillSwitch(v) }
+
 
     fun setBankrollDraft(text: String) {
         _state.update { it.copy(bankrollDraft = text) }
@@ -250,20 +329,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setPathSim(v: Boolean) = viewModelScope.launch { prefs.updatePathSim(v) }
 
     /**
-     * Lowering stake (or staying ≤ $5) writes immediately. Raising above the
-     * $5 soft cap opens a typed-confirm dialog. Hard cap is $25.
+     * 0.3.16: stake is $1–$10. Soft cap equals hard cap so RAISE is unused.
      */
     fun requestTicketStake(raw: Double) {
         val clipped = PayoutGate.clipStake(raw)
         val current = _state.value.settings.ticketStakeUsd
-        if (clipped <= current + 1e-9 || !PayoutGate.requiresRaiseConfirm(clipped)) {
-            track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
-            _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
-            return
-        }
-        _state.update {
-            it.copy(pendingRaiseStake = clipped, raiseDraft = "", raiseError = null)
-        }
+        track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
+        _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
     }
 
     fun setRaiseDraft(text: String) = _state.update { it.copy(raiseDraft = text, raiseError = null) }

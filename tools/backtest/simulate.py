@@ -122,6 +122,28 @@ def _returns(idx: dict[int, float], ts_sec: int) -> tuple[float | None, float | 
     return r1, r5, rvol, closes
 
 
+def spot_inputs(idx: dict[int, float], ts_sec: int) -> tuple[float | None, float | None, float | None, list[float]]:
+    """Spot, 1m / 5m returns and the closes used for σ, all known at ts_sec.
+
+    Same horizons the app uses (ExternalMarketFeatures): returns are exactly
+    60 s / 300 s back; σ uses the last SIGMA_BARS completed 1m bars.
+    """
+    from pipeline import SIGMA_BARS
+
+    m = ts_sec - (ts_sec % 60)
+    now = _spot_at(idx, m)
+    p1 = _spot_at(idx, m - 60)
+    p5 = _spot_at(idx, m - 300)
+    r1 = (now / p1 - 1.0) if now and p1 and p1 > 0 else None
+    r5 = (now / p5 - 1.0) if now and p5 and p5 > 0 else None
+    closes = []
+    for i in range(SIGMA_BARS, -1, -1):
+        px = _spot_at(idx, m - i * 60)
+        if px:
+            closes.append(px)
+    return now, r1, r5, closes
+
+
 def load_cache(cache: Path) -> tuple[list[dict], dict[str, list], dict[str, dict[int, float]]]:
     markets = [m for m in load_jsonl(cache / "markets.jsonl") if m.get("ticker")]
     candles = {}
@@ -136,27 +158,6 @@ def load_cache(cache: Path) -> tuple[list[dict], dict[str, list], dict[str, dict
         if p.is_file():
             spots[COIN[series]] = _spot_index(json.loads(p.read_text()))
     return markets, candles, spots
-
-
-def _related_mids(markets_by_close: dict, candles: dict, series: str, close_ms: int, now_sec: int) -> float | None:
-    others = []
-    for s, by_close in markets_by_close.items():
-        if s == series:
-            continue
-        # same 15m close, else nearest within 60s
-        hit = by_close.get(close_ms) or by_close.get(close_ms - 1000) or by_close.get(close_ms + 1000)
-        if not hit:
-            continue
-        rows = candles.get(hit["ticker"]) or []
-        mid = None
-        for r in rows:
-            if r["end_ts"] <= now_sec and r.get("mid") is not None:
-                mid = r["mid"]
-        if mid is not None:
-            others.append(mid)
-    if not others:
-        return None
-    return sum(others) / len(others)
 
 
 def decisions_for_market(m: dict, rows: list[dict], spots: dict[str, dict[int, float]], markets_by_close: dict, candles: dict, engine: DecisionEngine) -> list[Decision]:
@@ -213,9 +214,11 @@ def decisions_for_market(m: dict, rows: list[dict], spots: dict[str, dict[int, f
         mids.append(mid)
         times.append(now_ms)
         vols.append(cum_vol)
-        r1, r5, rvol, _ = _returns(spot_idx, now_sec)
-        spot = _spot_at(spot_idx, now_sec)
-        related = _related_mids(markets_by_close, candles, m["series"], close_ms, now_sec)
+        spot, r1, r5, closes = spot_inputs(spot_idx, now_sec)
+        _, _, rvol, _ = _returns(spot_idx, now_sec)
+        from pipeline import sigma_annual_from_closes
+
+        sigma = sigma_annual_from_closes(closes)
         d = engine.score_minute(
             ticker=m["ticker"],
             series=m["series"],
@@ -239,7 +242,7 @@ def decisions_for_market(m: dict, rows: list[dict], spots: dict[str, dict[int, f
             ret_1m=r1,
             ret_5m=r5,
             rvol15=rvol,
-            related_mid=related,
+            sigma_annual=sigma,
         )
         out.append(d)
     return out
@@ -767,7 +770,7 @@ def apply_rule(decisions_by_ticker: dict[str, list[Decision]], rule: dict, split
     return bets
 
 
-def run_sim(cache: Path) -> dict:
+def run_sim(cache: Path, engine_kwargs: dict | None = None) -> dict:
     markets, candles, spots = load_cache(cache)
     markets = [m for m in markets if m.get("result") in ("yes", "no") and m["ticker"] in candles]
     days = sorted({_day(m["close_ms"]) for m in markets if m.get("close_ms")})
@@ -776,7 +779,7 @@ def run_sim(cache: Path) -> dict:
     for m in markets:
         markets_by_close[m["series"]][int(m["close_ms"])] = m
 
-    engine = DecisionEngine()
+    engine = DecisionEngine(**(engine_kwargs or {}))
     # process in time order so related mids exist
     markets_sorted = sorted(markets, key=lambda m: (m.get("open_ms") or 0, m["ticker"]))
     decisions_by: dict[str, list[Decision]] = {}

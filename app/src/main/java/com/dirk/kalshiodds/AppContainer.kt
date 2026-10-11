@@ -55,11 +55,15 @@ class AppContainer(context: Context) {
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
+    val spotStream = com.dirk.kalshiodds.signal.external.SpotStream()
     val scoring = ScoringEngine(
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
         extended = ExtendedAiRuntime()
-    ).also { it.edgeModel = importedModel.current() }
+    ).also {
+        it.edgeModel = importedModel.currentOrBundled()
+        it.spotStream = spotStream
+    }
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,
@@ -68,7 +72,7 @@ class AppContainer(context: Context) {
         heavyStore = heavyStore,
         results = resultsWriter
     )
-    val external = ExternalMarketCache()
+    val external = ExternalMarketCache(stream = spotStream)
     val hub = SignalHub(
         scoring = scoring,
         notifier = notifier,
@@ -76,7 +80,67 @@ class AppContainer(context: Context) {
         results = resultsWriter
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
-    val paper = PaperBookStore(app)
+
+    // ---- Experimental scalper (the ONE non-approve-gated path) -------------
+    // Lifecycle is bound to LiveSignalsService: the service calls
+    // scalpEngine.start()/stop(); until start() runs the engine's `running`
+    // flag is false and onTick is a no-op beyond feature accumulation.
+    // Settings gate: enabled (default false) && !killSwitch; executor choice
+    // comes from settings.liveMode (default false = paper). The $10 live cap
+    // is re-enforced inside LiveScalpExecutor via LiveOrderSizer.
+    val scalpSettingsStore = com.dirk.kalshiodds.signal.scalp.ScalpSettingsStore(app)
+    val scalpLedger = com.dirk.kalshiodds.signal.scalp.ScalpPositionStore(app)
+    private val scalpScope = kotlinx.coroutines.CoroutineScope(
+        kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+    )
+
+    /** Most recent ticker the hub scored — the scalper's book lookup key. */
+    @Volatile
+    private var scalpBookTicker: String? = null
+
+    private fun scalpBook(): com.dirk.kalshiodds.signal.engine.LocalOrderBook? =
+        scalpBookTicker?.let { scoring.book.orderBook(it) }
+
+    private fun onScalpEvent(event: com.dirk.kalshiodds.signal.scalp.ScalpEvent) {
+        // Guardrail-blocked events never become notifications (anti-spam).
+        if (event is com.dirk.kalshiodds.signal.scalp.ScalpEvent.GuardrailBlocked) return
+        if (!hub.settings.notificationsEnabled) return
+        when (event) {
+            is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Entered -> {
+                val p = event.position
+                notifier.notifyScalp(
+                    title = "Scalp: entered ${p.ticker}",
+                    text = "Bought ${p.contracts} YES @ ${p.entryPriceCents}¢ " +
+                        "(${if (p.mode == com.dirk.kalshiodds.signal.scalp.ScalpMode.PAPER) "paper" else "LIVE"})",
+                    ticker = p.ticker
+                )
+            }
+            is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Exited -> {
+                val p = event.position
+                val pnl = event.pnlCents / 100.0
+                notifier.notifyScalp(
+                    title = "Scalp: exited ${p.ticker} ${if (pnl >= 0) "+" else "−"}$${"%.2f".format(pnl).removePrefix("-")}",
+                    text = "Sold ${p.contracts} YES @ ${p.exitPriceCents ?: "?"}¢ — ${event.reason.name.lowercase().replace('_', ' ')}",
+                    ticker = p.ticker
+                )
+            }
+            is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Error ->
+                notifier.notifyScalp(title = "Scalp: error", text = event.message)
+            else -> Unit
+        }
+    }
+
+    val paperScalpExecutor = com.dirk.kalshiodds.signal.scalp.PaperScalpExecutor(
+        bookProvider = { scalpBook() }
+    )
+
+    val paper = PaperBookStore(app) { fills ->
+        runCatching { archive.upsertPaperFills(fills) }
+    }
+    val lastMinuteStore = com.dirk.kalshiodds.signal.lastminute.LastMinuteStore(app)
+    val lastMinuteEngine = com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine(nowMs = { clock.nowMs() })
+    val brti = com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient()
+    val lastMinuteNotifier = com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -97,6 +161,45 @@ class AppContainer(context: Context) {
         credentials = { tradingCredentials() },
         useDemo = { hub.settings.kalshiDemoEnabled }
     )
+    val liveScalpExecutor = com.dirk.kalshiodds.signal.scalp.LiveScalpExecutor(
+        tradeClient = tradeClient,
+        onPlaced = { position, placed ->
+            scalpLedger.attachOrderIds(position.id, placed.clientOrderId, placed.orderId)
+        }
+    )
+    val scalpEngine = com.dirk.kalshiodds.signal.scalp.ScalpEngine(
+        settings = scalpSettingsStore.settings,
+        bookProvider = { scalpBook() },
+        paperExecutor = paperScalpExecutor,
+        liveExecutor = liveScalpExecutor,
+        store = scalpLedger,
+        scope = scalpScope,
+        onEvent = { event -> runCatching { onScalpEvent(event) } },
+        // SPOT_LEAD / OPEN_DRIVE features: exact 15s spot return from the
+        // Coinbase WS ring, falling back to the REST snapshot's 1m return.
+        spotProvider = { series ->
+            val snap = external.refreshIfStale().forSeries(series)
+            if (snap == null) {
+                null
+            } else {
+                val asset = snap.asset.uppercase()
+                com.dirk.kalshiodds.signal.scalp.ScalpSpot(
+                    return15s = spotStream?.returnOver(asset, 15_000L),
+                    return1m = spotStream?.overlay(snap)?.spotReturn1m ?: snap.spotReturn1m
+                )
+            }
+        }
+    )
+    init {
+        // Every scored tick (WS, REST, book-derived) feeds the scalper. The
+        // engine itself gates on enabled && !killSwitch && running, so this
+        // hook is inert unless the scalper is enabled AND the Live signals
+        // service has started the engine.
+        hub.scoredTickHook = { tick ->
+            scalpBookTicker = tick.ticker
+            scalpEngine.onTick(tick)
+        }
+    }
     val tickets = TicketSession(
         placeOrder = { ticket, clientOrderId ->
             runCatching { tradeClient.createLimit(ticket, clientOrderId) }
@@ -119,7 +222,10 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            lastMinuteStore.settle(ticker, result)
+        },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)

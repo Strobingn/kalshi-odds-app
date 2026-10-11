@@ -21,13 +21,22 @@ class ForwardTestSqliteTest {
                 sizeAtAsk = 20.0, contracts = 8, allInUsd = 4.57,
                 feeUsd = 0.09, quoteQualified = true
             )
-            SqliteResultsStore(context).insertForwardTests(listOf(first, first.copy(modelYes = 0.1)))
+            val store = SqliteResultsStore(context)
+            try {
+                store.insertForwardTests(listOf(first, first.copy(modelYes = 0.1)))
+            } finally {
+                store.close()
+            }
             val reopened = SqliteResultsStore(context)
-            reopened.upsertSettled(listOf(SettledWindowRow("KXBTC15M-FWD", "KXBTC15M", "yes")))
-            val row = reopened.forwardTests().single()
-            assertEquals(0.75, row.modelYes, 1e-9)
-            assertEquals("yes", row.outcome)
-            assertEquals(4.57, row.allInUsd!!, 1e-9)
+            try {
+                reopened.upsertSettled(listOf(SettledWindowRow("KXBTC15M-FWD", "KXBTC15M", "yes")))
+                val row = reopened.forwardTests().single()
+                assertEquals(0.75, row.modelYes, 1e-9)
+                assertEquals("yes", row.outcome)
+                assertEquals(4.57, row.allInUsd!!, 1e-9)
+            } finally {
+                reopened.close()
+            }
         } finally {
             context.deleteDatabase(SqliteResultsStore.DB_NAME)
         }

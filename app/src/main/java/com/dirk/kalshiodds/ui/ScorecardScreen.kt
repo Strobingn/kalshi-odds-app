@@ -137,12 +137,13 @@ fun ScorecardScreen(
                     )
                 }
             }
+            item { LastMinuteScorecardCard(view.lastMinute) }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }
                 ui.guardrails?.let { item { GuardBanner(it) } }
                 ui.allowlist?.let { item { MuteBanner(it) } }
-                item { HonestCard(metrics) }
+                item { HonestCard(metrics.honest) }
                 item { WindowCard("Today", metrics.daily) }
                 item { WindowCard("Rolling 7 days", metrics.rolling) }
                 item { WindowCard("All time", metrics.allTime) }
@@ -158,7 +159,8 @@ fun ScorecardScreen(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
-                items(snap.perSeries, key = { "series-${it.series}" }) { SeriesRow(it) }
+                val seriesKeyed = LazyListKeys.keyed(snap.perSeries) { "series-${it.series}" }
+                items(seriesKeyed, key = { it.key }) { row -> SeriesRow(row.value) }
             }
             if (snap != null) {
                 item {
@@ -192,6 +194,7 @@ fun ScorecardScreen(
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.CONF_TITLE) { view.byConfidence.forEach { BucketRow(it) } } }
+                item { SectionCard(ScorecardCopy.SOURCE_TITLE) { view.bySource.forEach { BucketRow(it) } } }
                 item {
                     Text(
                         ScorecardCopy.PICKS_TITLE,
@@ -199,11 +202,70 @@ fun ScorecardScreen(
                         color = colors.textPrimary
                     )
                 }
-                items(view.recent, key = { "${it.ticker}-${it.settledAtMs}-${it.line}" }) { pick ->
-                    SettledPickRow(pick)
+                val recentKeyed = LazyListKeys.keyed(view.recent) { "${it.ticker}:${it.settledAtMs}" }
+                items(recentKeyed, key = { it.key }) { row ->
+                    SettledPickRow(row.value)
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }
+        }
+    }
+}
+
+@Composable
+internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
+    val colors = DipTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.LAST_MINUTE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.LAST_MINUTE_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
+        Text(
+            if (section.settledCount <= 0) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.wonUsdLine(section.wonUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.lostUsdLine(section.lostUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.netPnlLine(section.pnlUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        if (section.picks.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.picks.take(40).forEach { pick ->
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pick.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
         }
     }
 }
@@ -304,6 +366,16 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
                 WinStat("Biggest win", m.biggestWinUsd?.let { ScorecardLedger.signedUsd(it) } ?: ScorecardCopy.EM_DASH)
                 LossStat("Biggest loss", m.biggestLossUsd?.let { ScorecardLedger.signedUsd(it) } ?: ScorecardCopy.EM_DASH)
             }
+            if (title == ScorecardCopy.AI_TITLE) {
+                ScorecardCopy.breakEvenWinRateLine(m)?.let { line ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textPrimary
+                    )
+                }
+            }
         }
     }
 }
@@ -333,18 +405,27 @@ private fun BucketRow(bucket: ScorecardCopy.Bucket) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            bucket.label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
-                colors.up
-            } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
-                colors.down
-            } else {
-                colors.textPrimary
-            },
-            fontWeight = FontWeight.SemiBold
-        )
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                bucket.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
+                    colors.up
+                } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
+                    colors.down
+                } else {
+                    colors.textPrimary
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+            bucket.note?.let { note ->
+                Text(
+                    note,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
+        }
         Text(
             if (bucket.settledCount <= 0) {
                 ScorecardCopy.EM_DASH
@@ -437,7 +518,7 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                     append(ScorecardLedger.signedUsd(row.pnlUsd))
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }
                     row.finalUsd?.let { append(String.format(Locale.US, " · final $%,.0f", it)) }
-                    append(" · ${row.source}")
+                    append(" · ${row.pickSource ?: row.source}")
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = if (won) colors.up else colors.down
@@ -591,9 +672,8 @@ private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
 }
 
 @Composable
-private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
+private fun HonestCard(h: ScorecardMetrics.Honest) {
     val colors = DipTheme.colors
-    val h = snapshot.honest
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -603,7 +683,7 @@ private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
         Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         if (!h.enoughData) {
             Text(
-                "${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled directional picks. ${snapshot.noBetCount} settled NO BET windows are excluded. Numbers below are provisional.",
+                "Not enough data yet — ${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled signals. Numbers below are provisional.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
                 fontWeight = FontWeight.SemiBold,
@@ -617,12 +697,6 @@ private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
                 color = colors.textPrimary
             )
         }
-        Text(
-            "One result per BTC 15-minute window, up to four per hour. The 100-pick check takes at least 25 hours if every window has a pick; abstentions take longer. Each 4-hour time bucket needs results across multiple days. ${snapshot.openCount} logged windows still await settlement.",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary,
-            modifier = Modifier.padding(top = 6.dp)
-        )
         Spacer(Modifier.height(8.dp))
         Text(
             HomeCopy.pickedSideLine(h.hits, h.n.takeIf { it > 0 }),
@@ -660,9 +734,7 @@ private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
         if (h.perCoin.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             Text("Per coin", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
-            h.perCoin.forEach { b ->
-                if (b.key == "BTC" || b.n > 0) BreakdownRow(b)
-            }
+            h.perCoin.forEach { b -> BreakdownRow(b) }
         }
         if (h.perTimeOfDay.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -714,6 +786,24 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
             color = colors.textPrimary,
             lineHeight = 28.sp
         )
+        if (stats.total > 0) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    ScorecardCopy.PICKED_SIDE_DIRECTION_NOTE,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                if (stats.pnlUsd != null) {
+                    SignedStat("Real paper P&L", ScorecardLedger.signedUsd(stats.pnlUsd), stats.pnlUsd)
+                }
+            }
+        }
         Text(
             "${stats.label} settled",
             style = MaterialTheme.typography.bodyMedium,
@@ -741,7 +831,11 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
             .background(colors.surface, RoundedCornerShape(16.dp))
             .padding(16.dp)
     ) {
-        Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.hypotheticalPolicyTitle(policy.stakeUsd),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
         Text(
             String.format(Locale.US, "If every alert @ $%.0f", policy.stakeUsd),
             fontSize = 20.sp,

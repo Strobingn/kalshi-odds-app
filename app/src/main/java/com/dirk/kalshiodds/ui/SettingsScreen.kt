@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.dirk.kalshiodds.ui
 
 import android.net.Uri
@@ -7,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -19,6 +22,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -37,10 +41,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -54,9 +55,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
-import kotlinx.coroutines.launch
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
@@ -104,9 +105,6 @@ fun SettingsContent(
     val colors = DipTheme.colors
     val s = state.settings
     val context = LocalContext.current
-    val updateScope = rememberCoroutineScope()
-    var updateBusy by remember { mutableStateOf(false) }
-    var updateMessage by remember { mutableStateOf<String?>(null) }
     val scroll = rememberScrollState()
     val apiKeyY = remember { mutableIntStateOf(0) }
     val clipboard = LocalClipboardManager.current
@@ -147,26 +145,6 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            OutlinedButton(
-                enabled = !updateBusy,
-                onClick = {
-                    updateScope.launch {
-                        updateBusy = true
-                        updateMessage = "Checking branch release…"
-                        updateMessage = when (val result = AppUpdater.checkAndDownload(context)) {
-                            AppUpdater.Result.Current -> "This app is up to date."
-                            is AppUpdater.Result.Failed -> result.reason
-                            is AppUpdater.Result.Ready -> runCatching {
-                                AppUpdater.showInstaller(context, result.apk)
-                            }.getOrElse { it.message ?: "Could not open Android installer" }
-                        }
-                        updateBusy = false
-                    }
-                }
-            ) { Text(if (updateBusy) "Checking for update…" else "Check for app update") }
-            updateMessage?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-            }
             Column(
                 modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
                 verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -349,7 +327,7 @@ fun SettingsContent(
 
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “${AppIdentity.LABEL}” notification — allow it. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -380,6 +358,167 @@ fun SettingsContent(
             )
             OutlinedButton(onClick = { BatteryExemption.openPrompt(context) }) {
                 Text(if (state.batteryUnrestricted) "Open battery settings" else "Allow background")
+            }
+
+            Section("Scalping (experimental)")
+            Text(
+                "The ONE auto-trading path in DipHunter — off by default, paper by default. " +
+                    "A backtest of 2,100 parameter combinations (docs/scalping-params.md) found that " +
+                    "EVERY combination lost money after Kalshi taker fees — the best still lost ≈4.6¢ " +
+                    "per contract per trade. This ships for paper tracking only. The engine runs only " +
+                    "while Live signals is running and only when enabled below.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            ToggleRow("Enable scalper", state.scalp.enabled, { viewModel?.setScalpEnabled(it) })
+            Text(
+                scalpStatusLine(state.scalpStatus),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (state.scalpStatus.running) colors.textPrimary else colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+            if (state.scalp.enabled) {
+                Text(
+                    "Execution mode",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    if (!state.scalp.liveMode) {
+                        Button(onClick = { viewModel?.requestScalpLiveMode(false) }) { Text("Paper (simulated)") }
+                        OutlinedButton(
+                            onClick = { viewModel?.requestScalpLiveMode(true) },
+                            enabled = com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled
+                        ) { Text("Live (real money)") }
+                    } else {
+                        OutlinedButton(onClick = { viewModel?.requestScalpLiveMode(false) }) { Text("Paper (simulated)") }
+                        Button(
+                            onClick = { viewModel?.requestScalpLiveMode(true) },
+                            enabled = com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled
+                        ) { Text("Live (real money)") }
+                    }
+                }
+                if (!com.dirk.kalshiodds.signal.scalp.scalpLiveTradingEnabled) {
+                    Text(
+                        "Live disabled on this build (paper-only experiment branch)",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.accentOrange
+                    )
+                } else if (!state.scalp.liveMode) {
+                    Text(
+                        "Paper fills are simulated at the live book — no Kalshi orders.",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                }
+                ToggleRow(
+                    "Aggression (11 strategies concurrently)",
+                    state.scalp.aggressive,
+                    { viewModel?.setScalpAggressive(it) }
+                )
+                Text(
+                    "On: the full strategy roster runs at once — each holds one position, " +
+                        "up to ${state.scalp.maxOpenPositions} open total, trading the whole " +
+                        "window from open to close. Off: single Dip Hunt with the conservative " +
+                        "backtest profile. The daily-loss breaker and kill switch apply either way.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+                if (state.scalp.aggressive && state.scalpStatus.strategyStates.isNotEmpty()) {
+                    Text(
+                        "Strategies — tap a chip to enable / disable it:",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        for (st in state.scalpStatus.strategyStates) {
+                            AssistChip(
+                                onClick = { viewModel?.setScalpStrategyEnabled(st.strategy.name, !st.enabled) },
+                                label = {
+                                    Text(
+                                        String.format(
+                                            Locale.US,
+                                            "%s · %s",
+                                            st.strategy.label,
+                                            when {
+                                                !st.enabled -> "OFF"
+                                                st.state == "IN_POSITION" ->
+                                                    "IN @ ${st.position?.entryPriceCents ?: "?"}¢"
+                                                st.state == "WINDOW_CLOSED" -> "CLOSED"
+                                                else -> "FLAT"
+                                            }
+                                        ),
+                                        color = if (st.enabled) {
+                                            MaterialTheme.colorScheme.onSurface
+                                        } else {
+                                            colors.textSecondary
+                                        }
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+                Text(
+                    String.format(Locale.US, "Max stake per entry  $%.0f  (cap $10 · Live $10 all-in re-enforced)", state.scalp.maxStakeUsd),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = state.scalp.maxStakeUsd.toFloat().coerceIn(1f, 10f),
+                    onValueChange = { viewModel?.setScalpStake(it.toDouble()) },
+                    valueRange = 1f..10f,
+                    steps = 8
+                )
+                StepperRow(
+                    label = "Take profit",
+                    valueText = String.format(Locale.US, "%.0f¢ above entry", state.scalp.takeProfitPp),
+                    onMinus = { viewModel?.setScalpTakeProfitPp(state.scalp.takeProfitPp - 1.0) },
+                    onPlus = { viewModel?.setScalpTakeProfitPp(state.scalp.takeProfitPp + 1.0) }
+                )
+                StepperRow(
+                    label = "Stop loss",
+                    valueText = String.format(Locale.US, "%.0f¢ below entry", state.scalp.stopLossPp),
+                    onMinus = { viewModel?.setScalpStopLossPp(state.scalp.stopLossPp - 1.0) },
+                    onPlus = { viewModel?.setScalpStopLossPp(state.scalp.stopLossPp + 1.0) }
+                )
+                StepperRow(
+                    label = "Max hold",
+                    valueText = String.format(Locale.US, "%d min", state.scalp.maxHoldMs / 60_000L),
+                    onMinus = { viewModel?.setScalpMaxHoldMinutes((state.scalp.maxHoldMs / 60_000L).toInt() - 1) },
+                    onPlus = { viewModel?.setScalpMaxHoldMinutes((state.scalp.maxHoldMs / 60_000L).toInt() + 1) }
+                )
+                StepperRow(
+                    label = "Max trades",
+                    valueText = String.format(Locale.US, "%d / hour", state.scalp.maxTradesPerHour),
+                    onMinus = { viewModel?.setScalpTradesPerHour(state.scalp.maxTradesPerHour - 1) },
+                    onPlus = { viewModel?.setScalpTradesPerHour(state.scalp.maxTradesPerHour + 1) }
+                )
+                Text(
+                    String.format(Locale.US, "Daily loss limit  $%.0f", state.scalp.maxDailyLossUsd),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.textPrimary,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Slider(
+                    value = state.scalp.maxDailyLossUsd.toFloat().coerceIn(1f, 100f),
+                    onValueChange = { viewModel?.setScalpDailyLossUsd(it.toDouble()) },
+                    valueRange = 1f..100f,
+                    steps = 19
+                )
+                StepperRow(
+                    label = "DIP threshold",
+                    valueText = String.format(Locale.US, "%.1f¢ below EMA", state.scalp.dipMinDropPp),
+                    onMinus = { viewModel?.setScalpDipMinDropPp(state.scalp.dipMinDropPp - 0.5) },
+                    onPlus = { viewModel?.setScalpDipMinDropPp(state.scalp.dipMinDropPp + 0.5) }
+                )
+                ToggleRow("Kill switch (manual — blocks all scalp entries)", state.scalp.killSwitch, { viewModel?.setScalpKillSwitch(it) })
             }
 
             Section("Watch series")
@@ -720,40 +859,28 @@ fun SettingsContent(
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Live Approve is \$5 all-in including Kalshi fees. Count is the largest integer with " +
-                    "count×price + fee ≤ \$5 (fee = ceil_cent(0.07×count×P×(1−P))). " +
-                    "Tickets below the min-profit-if-win setting (default \$10) stay disabled. " +
-                    "The \$100-payout long-shot (ask ≤5¢ / configured stake) is still its own option. " +
+                "The card pick is the last-minute BRTI strategy (final 60 s, EV/\$ ≥ 0.35, first fire per window). " +
+                    "Live Approve is \$10 all-in including Kalshi fees. Count is the largest integer with " +
+                    "count×price + fee ≤ your stake (default and cap \$10; you can pick less). " +
+                    "There is no min-profit-if-win gate — a cheap ticket is not blocked for low profit. " +
                     "Hunter still surfaces when \$1 can settle ≥\$25. Long-shot hunter still needs ask ≤20¢ " +
                     "and AI beating implied after fees. Paper fills never block Live. " +
-                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. No auto-fire.",
+                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. Approve + REAL MONEY still required. No auto-fire.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Text(
-                String.format(Locale.US, "Min profit if win  $%.0f", s.minProfitIfWinUsd),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Slider(
-                value = s.minProfitIfWinUsd.toFloat().coerceIn(0f, 50f),
-                onValueChange = { viewModel?.setMinProfitIfWinUsd(it.toDouble()) },
-                valueRange = 0f..50f,
-                steps = 49
-            )
             ToggleRow("Show live trade tickets", s.ticketsEnabled, { viewModel?.setTicketsEnabled(it) })
             Text(
-                String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),
+                String.format(Locale.US, "Max bet  $%.0f  (default $10 · cap $10)", s.ticketStakeUsd),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
-                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 25f),
+                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 10f),
                 onValueChange = { viewModel?.requestTicketStake(it.toDouble()) },
-                valueRange = 1f..25f,
-                steps = 23
+                valueRange = 1f..10f,
+                steps = 8
             )
             ToggleRow(
                 "Require skip filter / mute / streak-pause for tickets",
@@ -763,9 +890,8 @@ fun SettingsContent(
             Text(
                 String.format(
                     Locale.US,
-                    "Long-shot hunter  max ask ≤ %.0f¢  · $5 all-in · disabled if profit < $%.0f",
-                    s.longShotMaxAsk * 100.0,
-                    s.minProfitIfWinUsd
+                    "Long-shot hunter  max ask ≤ %.0f¢  · $10 all-in · no min-profit gate",
+                    s.longShotMaxAsk * 100.0
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
@@ -785,9 +911,9 @@ fun SettingsContent(
 
             Section("Legacy win-target (History / paper only)")
             Text(
-                "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
+                "Off for live. Live Approve always uses the \$10 all-in cap. Min-profit-if-win is removed. " +
                     "This leftover \$50 sizer is kept so History restore still reads old snapshots — " +
-                    "it can never resize a LIVE order above \$5 (the final order-build step clips again). " +
+                    "it can never resize a LIVE order above \$10 (the final order-build step clips again). " +
                     "Paper / History may still walk the ask book for a \$50 win target.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -883,9 +1009,30 @@ fun SettingsContent(
         }
     }
 
-    val pending = state.pendingRaiseStake
-    if (pending != null) {
+    if (state.pendingScalpLive) {
         AlertDialog(
+            onDismissRequest = { viewModel?.cancelScalpLiveMode() },
+            title = { Text("Enable LIVE scalping?") },
+            text = {
+                Text(
+                    "Backtest showed every parameter combination lost money after Kalshi " +
+                        "taker fees — the best lost ≈4.6¢ per contract per trade " +
+                        "(docs/scalping-params.md). Live mode places real Kalshi orders with " +
+                        "real money and the expected value is negative. Orders are hard-capped " +
+                        "at $10 per trade, and the scalper only runs while Live signals is on. " +
+                        "Enable anyway?"
+                )
+            },
+            confirmButton = {
+                Button(onClick = { viewModel?.confirmScalpLiveMode() }) { Text("Enable live (I accept)") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel?.cancelScalpLiveMode() }) { Text("Keep paper") }
+            }
+        )
+    }
+    val pending = state.pendingRaiseStake
+    if (pending != null) {        AlertDialog(
             onDismissRequest = { viewModel?.cancelRaiseStake() },
             title = { Text("Raise ticket stake?") },
             text = {
@@ -921,8 +1068,60 @@ fun SettingsContent(
 }
 
 @Composable
-private fun Section(title: String) {
-    Text(
+private fun StepperRow(
+    label: String,
+    valueText: String,
+    onMinus: () -> Unit,
+    onPlus: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(label, style = MaterialTheme.typography.bodyMedium)
+            Text(valueText, style = MaterialTheme.typography.labelMedium, color = DipTheme.colors.textSecondary)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            OutlinedButton(onClick = onMinus, modifier = Modifier.height(36.dp)) { Text("−") }
+            OutlinedButton(onClick = onPlus, modifier = Modifier.height(36.dp)) { Text("+") }
+        }
+    }
+}
+
+/** One-line status summary for the scalper settings section. */
+private fun scalpStatusLine(st: com.dirk.kalshiodds.signal.scalp.ScalpUiState): String {
+    val mode = if (st.liveMode) "LIVE" else "paper"
+    return buildString {
+        append("Status: ")
+        append(
+            when {
+                st.enabled && st.running -> "running ($mode)"
+                st.enabled -> "enabled — starts when Live signals runs"
+                else -> "off"
+            }
+        )
+        append(if (st.state == "IN_POSITION") " · IN POSITION" else " · flat")
+        st.openPosition?.let { append(" @ ${it.entryPriceCents}¢ × ${it.contracts}") }
+        st.lastEvent?.let { append(" · last: ${scalpEventLine(it)}") }
+    }
+}
+
+private fun scalpEventLine(e: com.dirk.kalshiodds.signal.scalp.ScalpEvent): String = when (e) {
+    is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Entered ->
+        "${e.position.strategy.name.lowercase()} entered ${e.position.ticker} @ ${e.position.entryPriceCents}¢"
+    is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Exited -> {
+        val pnlUsd = e.pnlCents / 100.0
+        "${e.position.strategy.name.lowercase()} exited " +
+            "${if (pnlUsd >= 0) "+" else "−"}$${"%.2f".format(kotlin.math.abs(pnlUsd))} (${e.reason.name.lowercase()})"
+    }
+    is com.dirk.kalshiodds.signal.scalp.ScalpEvent.GuardrailBlocked -> "blocked: ${e.reason}"
+    is com.dirk.kalshiodds.signal.scalp.ScalpEvent.Error -> "error: ${e.message}"
+}
+
+@Composable
+private fun Section(title: String) {    Text(
         title,
         style = MaterialTheme.typography.titleMedium,
         color = MaterialTheme.colorScheme.onBackground,

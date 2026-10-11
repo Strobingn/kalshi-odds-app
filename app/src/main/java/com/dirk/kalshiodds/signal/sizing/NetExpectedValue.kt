@@ -86,6 +86,87 @@ object NetExpectedValue {
     }
 
     /**
+     * Net EV per contract of buying [side] at its **real ask** (falls back to
+     * side-mid + half spread when the ask is missing or unusable):
+     *
+     *     net = p_side − ask − fee(ask)
+     *
+     * Python twin: `tools/backtest/pipeline.net_ev_at_ask`.
+     */
+    fun atAsk(
+        fairYes: Double,
+        side: String,
+        ask: Double?,
+        mid: Double,
+        spreadDollars: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Result {
+        val pYes = fairYes.coerceIn(0.005, 0.995)
+        val m = mid.coerceIn(0.02, 0.98)
+        val half = ((spreadDollars ?: 0.0).coerceAtLeast(0.0)) / 2.0
+        val yes = !side.equals("NO", ignoreCase = true)
+        val pSide = if (yes) pYes else 1.0 - pYes
+        val paid = (com.dirk.kalshiodds.domain.KalshiPrice.usable(ask) ?: ((if (yes) m else 1.0 - m) + half))
+            .coerceIn(com.dirk.kalshiodds.domain.KalshiPrice.MIN_TICK_DOLLARS, 0.99)
+        val fee = feePerContract(paid, feeRate, stakeUsd)
+        val gross = pSide - paid
+        val net = gross - fee
+        return Result(
+            side = if (yes) "YES" else "NO",
+            contractPrice = paid,
+            feePerContract = fee,
+            halfSpread = half,
+            grossEv = gross,
+            netEv = net,
+            netEdgePp = net * 100.0,
+            rawEdgePp = (pYes - m) * 100.0,
+            feeRate = feeRate
+        )
+    }
+
+    /**
+     * The side whose win chance clears its ask + fee by the most. This is the
+     * pick — never "the side more likely to win" (the favorite is already
+     * priced right; buying it by default lost 3.3% in the 2026-09-25 backtest).
+     * Python twin: `pipeline.best_side_ev`.
+     */
+    fun bestSide(
+        fairYes: Double,
+        yesAsk: Double?,
+        noAsk: Double?,
+        mid: Double,
+        spreadDollars: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Result {
+        val yes = atAsk(fairYes, "YES", yesAsk, mid, spreadDollars, feeRate, stakeUsd)
+        val no = atAsk(fairYes, "NO", noAsk, mid, spreadDollars, feeRate, stakeUsd)
+        return if (yes.netEv >= no.netEv) yes else no
+    }
+
+    /**
+     * The scored side: [bestSide] when it has positive net EV; otherwise the
+     * probability lean (fair ≥ 50% → YES) with its — negative — net EV, so a
+     * no-edge market never flips its displayed lean to the cheap side.
+     * Python twin: `pipeline.pick_side`.
+     */
+    fun pick(
+        fairYes: Double,
+        yesAsk: Double?,
+        noAsk: Double?,
+        mid: Double,
+        spreadDollars: Double?,
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
+    ): Result {
+        val best = bestSide(fairYes, yesAsk, noAsk, mid, spreadDollars, feeRate, stakeUsd)
+        if (best.netEv > 0.0) return best
+        val lean = if (fairYes >= 0.5) "YES" else "NO"
+        return atAsk(fairYes, lean, if (lean == "YES") yesAsk else noAsk, mid, spreadDollars, feeRate, stakeUsd)
+    }
+
+    /**
      * Order-level taker fee amortized over the contracts [stakeUsd] buys at [p].
      */
     fun feePerContract(

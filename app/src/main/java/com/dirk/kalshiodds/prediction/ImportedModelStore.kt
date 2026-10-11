@@ -4,6 +4,7 @@ import android.content.Context
 import java.io.File
 
 class ImportedModelStore(context: Context) {
+    private val assets = context.applicationContext.assets
     private val dir = context.applicationContext.filesDir
     private val file = File(dir, FILE_NAME)
     private val previousFile = File(dir, PREV_FILE_NAME)
@@ -14,17 +15,23 @@ class ImportedModelStore(context: Context) {
     fun current(): EdgeModel? {
         cached?.let { return it }
         if (!file.exists()) return null
-        // Releases published before provenance was recorded may contain
-        // settlement-look-ahead or synthetic training data. Manual imports
-        // have no manifest and remain an explicit user choice.
-        if (manifestFile.exists()) {
-            val manifest = currentManifest() ?: return null
-            if (!manifest.beatsMarket) return null
-        }
         val model = runCatching { EdgeModel.parse(file.readText()) }.getOrNull() ?: return null
         cached = model
         return model
     }
+
+    /**
+     * The imported/downloaded model, else the APK's bundled `edge_model.json`
+     * — but only when its bundled manifest passes [ModelActivation] (beats the
+     * mid out of sample with a CI above zero). Schema-1 files no longer parse.
+     */
+    fun currentOrBundled(): EdgeModel? = current() ?: bundled()
+
+    fun bundled(): EdgeModel? = runCatching {
+        val manifest = EdgeModelManifest.parse(assets.open(BUNDLED_MANIFEST).bufferedReader().use { it.readText() })
+        if (!ModelActivation.decide(manifest, modelValid = true).activate) return@runCatching null
+        EdgeModel.parse(assets.open(BUNDLED_MODEL).bufferedReader().use { it.readText() })
+    }.getOrNull()
 
     fun previous(): EdgeModel? {
         if (!previousFile.exists()) return null
@@ -53,8 +60,6 @@ class ImportedModelStore(context: Context) {
         file.writeText(model.toJson())
         if (manifest != null) {
             runCatching { manifestFile.writeText(manifest.toJson()) }
-        } else if (manifestFile.exists()) {
-            manifestFile.delete()
         }
         cached = model
         return model
@@ -83,5 +88,7 @@ class ImportedModelStore(context: Context) {
         const val FILE_NAME = "imported_edge_model.json"
         const val PREV_FILE_NAME = "imported_edge_model.prev.json"
         const val MANIFEST_FILE = "imported_edge_model.manifest.json"
+        const val BUNDLED_MODEL = "edge_model.json"
+        const val BUNDLED_MANIFEST = "edge_model_manifest.json"
     }
 }
