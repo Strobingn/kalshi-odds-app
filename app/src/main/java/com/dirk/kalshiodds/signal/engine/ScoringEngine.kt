@@ -620,11 +620,15 @@ class ScoringEngine(
             heavyOut.usedHeavy &&
             !heavyOut.uncertaintyPassed
         val extBlocked = extOut?.blockReason
-        val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
-            if (!barStd.isFinite() || barStd <= 0.0) null
-            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
+        fun annualize(barStd: Double?): Double? = barStd?.let {
+            if (!it.isFinite() || it <= 0.0) null
+            else (it * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
                 .coerceIn(0.01, 5.0)
         }
+        val sigmaAnnual = annualize(spotFeat?.realizedVol15m)
+        // An imported model's σ inputs use the trainer's estimator (REST 1m bars); the stream's σ only
+        // stands in when REST has none.
+        val modelSigmaAnnual = annualize(spotFeat?.trainerVol1m) ?: sigmaAnnual
         // Kalshi settles on the 60 s average of the index (ties YES). Inside
         // the last minute, the part of that average already printed comes
         // from the streamed tape.
@@ -670,7 +674,7 @@ class ScoringEngine(
                     spot = spotFeat?.lastPrice,
                     strike = strikeUsd,
                     tteSeconds = (tteSec ?: 900L).toDouble(),
-                    sigmaAnnual = sigmaAnnual,
+                    sigmaAnnual = modelSigmaAnnual,
                     marketMid = mid01,
                     imbalance = imb,
                     spread = spread,

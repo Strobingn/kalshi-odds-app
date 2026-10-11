@@ -139,6 +139,27 @@ def test_spot_guard() -> None:
     assert "/G" not in pm.Config("join", 0.03, 60, "hold").label()
 
 
+def test_guarded_completion_is_priced_when_the_imbalance_is_final() -> None:
+    # YES is guard-cancelled at 71 s with nothing filled; NO fills all 10 at 80 s. The pair is known to be
+    # one-sided at 80 s, so the completing YES buy uses the 80 s ask (0.50), not the 120 s ask (0.70).
+    sts = [OPEN + s * 1000 for s in (59, 70, 90)]
+    spx = [60000.0, 60000.0 * (1 - 6e-4), 60000.0]
+    book = [snap(t, 0.45, 0, 0.50, 0) if t <= 95 else snap(t, 0.65, 0, 0.70, 0) for t in range(0, 900, 5)]
+    trades = [trade(75, 0.45, 10, "no"), trade(80, 0.50, 10, "yes")]
+    m = ms.Market("KXBTC15M-G", CLOSE, 60000.0, "yes", book, trades, sts, spx)
+    res = pm.Result()
+    pm.simulate_market(m, pm.Config("join", 0.03, 60, "complete", 5.0), 0.0, res)
+    e = res.episodes[0]
+    assert (e.fy, e.fn, e.completed) == (0, 10, 10), (e.fy, e.fn, e.completed)
+    want = 10 - (ms.fill_cost(10, 0.50, 0.0) + ms.fill_cost(10, 0.50, pm.TAKER_FEE))
+    assert abs(e.pnl - want) < 1e-9, (e.pnl, want)
+    # resolve: a full leg is done at its last fill, anything else at its cancel
+    assert pm.resolve_ms(0, None, 71, 10, 80, 120) == 80
+    assert pm.resolve_ms(0, None, 120, 10, 50, 120) == 120
+    assert pm.resolve_ms(3, 65, 120, 10, 50, 120) == 120
+    assert ms.conservative_fill_ts("NO", 0.50, 10, 0.0, trades, OPEN, OPEN + 120_000)[2] == OPEN + 80_000
+
+
 def test_summary_split() -> None:
     res = pm.Result([
         pm.Episode("A", "2026-09-01", 0, 1, 0.45, 0.50, 10, 10, 0.50, 9.5, 10, 0, None),

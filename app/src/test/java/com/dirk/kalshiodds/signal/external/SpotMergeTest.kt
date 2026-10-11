@@ -34,6 +34,15 @@ class SpotMergeTest {
     }
 
     @Test
+    fun theModelKeepsTheTrainersVolatilityWhenTheStreamIsFresh() {
+        val live = warmBook().latest("BTC", now + 500L)!!
+        val merged = SpotMerge.merge(rest.copy(trainerVol1m = 0.0009), live)!!
+        assertEquals("the app's fair value takes the stream's σ", live.barStd1m!!, merged.realizedVol15m!!, 0.0)
+        assertEquals("the model's inputs keep the trainer's estimator", 0.0009, merged.trainerVol1m!!, 0.0)
+        assertNull(SpotMerge.merge(null, live)!!.trainerVol1m)
+    }
+
+    @Test
     fun freshStreamWinsOverRest() {
         val book = warmBook()
         val live = book.latest("BTC", now + 500L)!!

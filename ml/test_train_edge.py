@@ -253,6 +253,7 @@ class OffsetModelTest(unittest.TestCase):
             "sim_trades": 240.0,
             "boot_ci_low": -0.01,
             "boot_ci_high": 0.05,
+            "boot_days": 12.0,
         }
         with tempfile.TemporaryDirectory() as tmp:
             man = Path(tmp) / "manifest.json"
@@ -266,6 +267,14 @@ class OffsetModelTest(unittest.TestCase):
             te.write_manifest(metrics, man, synthetic=False)
             payload = json.loads(man.read_text())
         self.assertTrue(payload["promotion_eligible"])
+        # A positive CI from too few distinct days (one regime resampled) never promotes.
+        metrics["boot_days"] = 1.0
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertFalse(payload["promotion_eligible"])
+        metrics["boot_days"] = 12.0
         # Too few simulated trades can never promote.
         metrics["sim_trades"] = 150.0
         metrics["boot_ci_low"] = 0.05
@@ -357,13 +366,15 @@ class OffsetModelTest(unittest.TestCase):
 class ResumableCollectTest(unittest.TestCase):
     """A pull killed by the job timeout must keep every finished market."""
 
-    def _fake(self, markets, fail_after=None):
+    def _fake(self, markets, fail_after=None, spot_gap=None):
         calls = []
 
         def fetch_settled(series, days, per=0):
             return [dict(m) for m in markets] if series == te.SERIES[0] else []
 
-        def fetch_spot(product, start, end):
+        def fetch_spot(product, start, end, failed=None):
+            if spot_gap is not None and failed is not None:
+                failed.append(spot_gap)
             return []
 
         def fetch_candles(series, ticker, open_ts, close_ts):
@@ -426,6 +437,34 @@ class ResumableCollectTest(unittest.TestCase):
             self.assertEqual(calls, ["KXBTC15M-T3"])
             self.assertEqual(sorted(r.ticker for r in rows), ["KXBTC15M-T1", "KXBTC15M-T2", "KXBTC15M-T3"])
             self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T1", "KXBTC15M-T2", "KXBTC15M-T3"])
+
+    def test_markets_hit_by_a_spot_gap_wait_for_the_next_run(self) -> None:
+        # T0 closes on Sep 1, T1 on Sep 3. A failed spot chunk on Sep 1 must not cache T0 with empty spot features.
+        markets = [{"ticker": "KXBTC15M-T0", "close_time": "2026-09-01T00:15:00Z",
+                    "open_time": "2026-09-01T00:00:00Z", "result": "yes"},
+                   {"ticker": "KXBTC15M-T1", "close_time": "2026-09-03T00:15:00Z",
+                    "open_time": "2026-09-03T00:00:00Z", "result": "yes"}]
+        t0 = int(te.parse_iso(markets[0]["close_time"]).timestamp())
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            calls, fakes = self._fake(markets, spot_gap=(t0 - 3600, t0 - 600))
+            saved = self._patched(fakes)
+            try:
+                rows = te.collect(30, workers=1, progress=prog)
+                self.assertEqual(calls, ["KXBTC15M-T1"])
+                self.assertEqual([r.ticker for r in rows], ["KXBTC15M-T1"])
+                self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T1"])
+                # Spot is back: T0 is pulled now, T1 comes from the progress file.
+                calls2, fakes2 = self._fake(markets)
+                self._patched(fakes2)
+                rows2 = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(calls2, ["KXBTC15M-T0"])
+            self.assertEqual(sorted(r.ticker for r in rows2), ["KXBTC15M-T0", "KXBTC15M-T1"])
+        self.assertTrue(te.spot_complete(t0, [(t0 + 120, t0 + 900)]))
+        self.assertFalse(te.spot_complete(t0, [(t0 - te.SPOT_NEED_S, t0 - te.SPOT_NEED_S + 60)]))
 
     def test_truncated_progress_line_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:

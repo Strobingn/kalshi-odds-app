@@ -157,6 +157,9 @@ data class EdgeModel(
         /** KalshiPrice 0.1¢ tick: zero weights reproduce every usable mid. */
         const val DEFAULT_MID_CLIP = 0.001f
 
+        /** Feature counts of the earlier shipped contracts, padded on load. */
+        val LEGACY_SIZES = setOf(10, 11, 12)
+
         fun parse(raw: String): EdgeModel {
             val o = JSONObject(raw)
             var names = stringList(o.getJSONArray("feature_names"))
@@ -168,7 +171,8 @@ data class EdgeModel(
             // since get weight 0, mean 0 and std 1, so the model predicts exactly what it did before. Without
             // this, an upgrade would drop the imported model and its rollback copy until a new one is trained.
             val k = names.size
-            if (k < EdgeFeatures.SIZE && names == EdgeFeatures.NAMES.take(k) && mean.size == k && std.size == k) {
+            // Only the contracts that actually shipped: a truncated or hand-made file is still refused.
+            if (k in LEGACY_SIZES && k < EdgeFeatures.SIZE && names == EdgeFeatures.NAMES.take(k) && mean.size == k && std.size == k) {
                 names = EdgeFeatures.NAMES
                 weights = FloatArray(EdgeFeatures.SIZE) { if (it < k) weights[it] else 0f }
                 mean = FloatArray(EdgeFeatures.SIZE) { if (it < k) mean[it] else 0f }

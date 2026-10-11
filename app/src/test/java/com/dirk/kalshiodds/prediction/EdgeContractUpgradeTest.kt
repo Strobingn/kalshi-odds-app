@@ -36,6 +36,17 @@ class EdgeContractUpgradeTest {
     }
 
     @Test
+    fun aTruncatedPrefixIsRefusedNotPadded() {
+        // Two features is a prefix of the contract but never shipped: a damaged file, not an old model.
+        val two = """
+            {"version": 1, "kind": "logistic", "feature_names": ["dist_to_strike_vol","tte_frac"],
+             "weights": [0.2, -0.1], "bias": 0.0, "mean": [0,0], "std": [1,1]}
+        """.trimIndent()
+        assertTrue(runCatching { EdgeModel.parse(two) }.isFailure)
+        assertEquals(setOf(10, 11, 12), EdgeModel.LEGACY_SIZES)
+    }
+
+    @Test
     fun aModelWithOtherFeaturesIsStillRefused() {
         val other = legacy.replace("\"dist_to_strike_vol\"", "\"something_else\"")
         assertTrue(runCatching { EdgeModel.parse(other) }.isFailure)

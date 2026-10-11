@@ -37,6 +37,13 @@ data class AssetSpotFeatures(
      * trainer's prev_window_return). */
     val prevWindowReturn: Double? = null,
     val realizedVol15m: Double? = null,
+    /**
+     * σ of 1-minute log returns from the trainer's own estimator (60 finished
+     * bars, EWMA λ = 0.86, `realized_vol_annual`). The stream's σ replaces
+     * [realizedVol15m] for the app's own fair value, but an imported model
+     * was trained on this one, so its inputs keep it (REST only).
+     */
+    val trainerVol1m: Double? = null,
     val fundingRate: Double? = null,
     val lastPrice: Double? = null,
     val source: String = "none",
@@ -134,6 +141,7 @@ class ExternalMarketClient(
             spotReturn1m = ret1,
             spotReturn5m = ret5,
             realizedVol15m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
+            trainerVol1m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
             fundingRate = funding,
             lastPrice = last,
             source = "binance",
@@ -176,6 +184,7 @@ class ExternalMarketClient(
             spotReturn1m = ret1,
             spotReturn5m = ret5,
             realizedVol15m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
+            trainerVol1m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
             fundingRate = null,
             lastPrice = px,
             source = "coinbase",

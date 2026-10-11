@@ -109,10 +109,10 @@ object ScalperResults {
 
     /**
      * Is the result more than luck? Mean dollars per trade against two
-     * standard errors. The spread of results is rebuilt from the won / lost
-     * totals (every win taken at the average win, every loss at the average
-     * loss), which understates it, so this is a generous test: a strategy
-     * that fails it is certainly not proven.
+     * standard errors, from the sum of squared results. A record written
+     * before that sum was kept rebuilds the spread from the won / lost totals
+     * (every win at the average win, every loss at the average loss), which
+     * understates it.
      */
     fun verdict(s: ScalpStats): String {
         val n = s.closed
@@ -121,7 +121,7 @@ object ScalperResults {
         val mean = s.pnlUsd / n
         val aw = s.avgWinUsd ?: 0.0
         val al = s.avgLossUsd ?: 0.0
-        val second = (s.wins * aw * aw + s.losses * al * al) / n
+        val second = if (s.pnlSqUsd > 0.0) s.pnlSqUsd / n else (s.wins * aw * aw + s.losses * al * al) / n
         val se = kotlin.math.sqrt(kotlin.math.max(second - mean * mean, 0.0) / n)
         return when {
             mean - 2.0 * se > 0.0 -> "ahead by more than luck so far"

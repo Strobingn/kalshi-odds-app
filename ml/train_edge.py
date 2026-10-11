@@ -126,6 +126,8 @@ EV_MARGIN = 0.03
 FIRST_DECISION_MINUTE = 1
 LAST_DECISION_MINUTE = 13
 MIN_TRAIN_ROWS = 20
+# Distinct UTC days with a holdout bet before the bootstrap CI can promote a model.
+MIN_PROMOTION_DAYS = 5
 MAX_PAGES = 400
 
 
@@ -387,10 +389,13 @@ def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list
     return (hist or {}).get("candlesticks") or []
 
 
-def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
+def fetch_spot(product: str, start: int, end: int,
+               failed: list[tuple[int, int]] | None = None) -> list[tuple[int, float]]:
     """1-minute Coinbase closes as (bucket_start_ts, close), oldest first.
 
-    Pages 280 bars per request (the endpoint caps at 300).
+    Pages 280 bars per request (the endpoint caps at 300). A chunk that fails
+    is appended to [failed] as (start, end), so callers can tell a gap from a
+    quiet market.
     """
     span = 60 * 280
     by_ts: dict[int, float] = {}
@@ -407,12 +412,24 @@ def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
         except Exception as e:
             print(f"  spot {product} chunk failed: {e}", flush=True)
             data = []
+            if failed is not None:
+                failed.append((cursor, chunk_end))
         if isinstance(data, list):
             for r in data:
                 if r and len(r) >= 5:
                     by_ts[int(r[0])] = float(r[4])
         cursor = chunk_end
     return sorted(by_ts.items())
+
+
+# Spot history a market's rows read: its 15 minutes plus the lookback before the open.
+SPOT_NEED_S = 900 + 60 * (SPOT_LOOKBACK_BARS + 5)
+
+
+def spot_complete(close_ts: int, gaps: list[tuple[int, int]]) -> bool:
+    """True when no failed spot chunk overlaps the interval this market's features read."""
+    lo, hi = close_ts - SPOT_NEED_S, close_ts + 60
+    return not any(a < hi and b > lo for a, b in gaps)
 
 
 def spot_known_at(spot: list[tuple[int, float]], decision_ts: int, keep: int = SPOT_LOOKBACK_BARS) -> list[float]:
@@ -656,8 +673,17 @@ def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | 
         if not markets:
             continue
         closes = [int(parse_iso(m["close_time"]).timestamp()) for m in markets]
-        spot = fetch_spot(PRODUCT[series], min(closes) - 900 - 60 * (SPOT_LOOKBACK_BARS + 5), max(closes) + 60)
+        gaps: list[tuple[int, int]] = []
+        spot = fetch_spot(PRODUCT[series], min(closes) - SPOT_NEED_S, max(closes) + 60, gaps)
         print(f"  spot bars {len(spot)}", flush=True)
+        if gaps:
+            # A market whose spot interval hit a failed chunk would be cached with zero spot features
+            # forever: leave it out of this run (and of the progress file) so the next run retries it.
+            ok = [m for m in markets if spot_complete(int(parse_iso(m["close_time"]).timestamp()), gaps)]
+            print(f"  spot gaps {len(gaps)}: deferring {len(markets) - len(ok)} markets to the next run", flush=True)
+            markets = ok
+            if not markets:
+                continue
 
         def one(m: dict) -> list[Sample]:
             close_ts = int(parse_iso(m["close_time"]).timestamp())
@@ -1374,6 +1400,7 @@ def walk_forward_metrics(
         "boot_ci_high": boot["ci_high"],
         "boot_p_of_loss": boot["p_low"],
         "boot_markets": boot["n_boot_markets"],
+        "boot_days": boot["n_boot_markets"],
         "margin_curve": margin_curve(hold),  # type: ignore[arg-type]
     }
 
@@ -1432,6 +1459,7 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "boot_ci_low": metrics.get("boot_ci_low"),
         "boot_ci_high": metrics.get("boot_ci_high"),
         "boot_p_of_loss": metrics.get("boot_p_of_loss"),
+        "boot_days": metrics.get("boot_days"),
         "sim_trades": metrics.get("sim_trades"),
         # Synthetic (fixture) data never activates on a phone.
         "beats_market": (not synthetic) and n > 0 and model_brier < market_brier and model_ll < market_ll,
@@ -1445,6 +1473,9 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
             and model_ll < market_ll
             and float(metrics.get("sim_trades", 0) or 0) >= 200
             and float(metrics.get("boot_ci_low", 0.0) or 0.0) > 0.0
+            # The day-block CI is only a robustness check with several days to resample: one day's
+            # bets resample to a zero-width interval around that day's (single-regime) result.
+            and float(metrics.get("boot_days", 0) or 0) >= MIN_PROMOTION_DAYS
         ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
