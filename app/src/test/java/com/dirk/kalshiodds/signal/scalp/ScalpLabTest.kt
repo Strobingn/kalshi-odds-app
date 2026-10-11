@@ -141,6 +141,43 @@ class ScalpLabTest {
         assertNull(lab.snapshot().accounts.first { it.id == "late_squeeze" }.position)
     }
 
+    @Test
+    fun aStuckBookClosesTheOldWindowAndTradesTheNextOne() {
+        val lab = ScalpLab()
+        lab.onQuote(busyTape())
+        assertTrue(lab.snapshot().accounts.first { it.id == "all_in_cheap" }.position != null)
+        lab.onQuote(busyTape().copy(ticker = "KXBTC15M-NEXT"))
+        val next = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
+        assertTrue(next.trades >= 1)
+        assertEquals("KXBTC15M-NEXT", next.position?.ticker)
+        assertTrue(next.lastNote.contains("BUY") || next.lesson.contains("new one"))
+    }
+
+    @Test
+    fun settlementLossShrinksTheNextBet() {
+        val lab = ScalpLab()
+        lab.onQuote(busyTape())
+        val first = lab.snapshot().accounts.first { it.id == "slow_trail" }.position!!
+        assertEquals("YES", first.side)
+        lab.settle("KXBTC15M-TEST", "no")
+        val learned = lab.snapshot().accounts.first { it.id == "slow_trail" }
+        assertTrue(learned.settleLosses >= 1)
+        assertTrue(learned.sizeScale < 1.0)
+        assertTrue(learned.lesson.contains("settlement"))
+        lab.onQuote(busyTape().copy(ticker = "KXBTC15M-NEXT"))
+        val again = lab.snapshot().accounts.first { it.id == "slow_trail" }.position!!
+        assertTrue(again.stakeUsd < first.stakeUsd)
+    }
+
+    @Test
+    fun anIdleBookStillTakesTheEarlyCheapTrade() {
+        val lab = ScalpLab()
+        lab.onQuote(busyTape())
+        val late = lab.snapshot().accounts.first { it.id == "late_squeeze" }
+        assertTrue(late.position != null)
+        assertTrue(late.position!!.stakeUsd < 3_000.0)
+    }
+
     private fun busyTape(
         yesBid: Double = 0.19,
         yesAsk: Double = 0.20,

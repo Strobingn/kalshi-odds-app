@@ -51,8 +51,9 @@ fun ScalpScreen(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "15 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets its own size. " +
-                    "A book can go negative and keep trading. Nothing here is sent to Kalshi.",
+                "15 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper. " +
+                    "They sell the pop and can trade again in the same window. When the window rolls, they close the old contract and trade the new one. " +
+                    "A loss from sitting until settlement makes the next bet smaller. Nothing here is sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -134,6 +135,14 @@ private fun ScalpRow(rank: Int, account: ScalpAccount) {
             style = MaterialTheme.typography.labelMedium,
             color = colors.textPrimary
         )
+        if (account.lesson.isNotEmpty()) {
+            Text(
+                account.lesson,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.accentOrange,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
         Text(
             account.rule,
             style = MaterialTheme.typography.labelSmall,

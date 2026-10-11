@@ -359,7 +359,20 @@ object ScalpCatalog {
             if (prior == null) {
                 ScalpAccount(id = algo.id, name = algo.name, rule = algo.rule)
             } else {
-                prior.copy(name = algo.name, rule = algo.rule)
+                prior.copy(name = algo.name, rule = algo.rule).let { kept ->
+                    when {
+                        kept.settleLosses == 0 && kept.lastNote.contains("SETTLE LOSS") -> kept.copy(
+                            settleLosses = 1,
+                            sizeScale = 0.75,
+                            learnedExit = 0.04,
+                            lesson = "Already lost by waiting for settlement. Next bet is smaller and it sells the pop."
+                        )
+                        kept.lesson.isEmpty() && kept.lastNote.contains("SETTLE WIN") -> kept.copy(
+                            lesson = "Settled a winner. Treated as luck. Next time it sells the pop and trades again."
+                        )
+                        else -> kept
+                    }
+                }
             }
         }
     }

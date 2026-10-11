@@ -39,6 +39,17 @@ data class ScalpAccount(
     val wins: Int = 0,
     /** Equity samples, oldest first. Drawn on the scalp tab. */
     val curve: List<Double> = emptyList(),
+    /** 1.0 is the rule's size. Settlement losses cut it. Scalp wins raise it, never above 1. */
+    val sizeScale: Double = 1.0,
+    /** How far above entry a learned book will sell, even if its own rule is still holding. */
+    val learnedExit: Double = 0.04,
+    val settleLosses: Int = 0,
+    val scalpWins: Int = 0,
+    val lesson: String = "",
+    val trips: Int = 0,
+    val tripTicker: String = "",
+    val lastSellPx: Double = 0.0,
+    val lastSellTicker: String = "",
     val lastNote: String = "Flat. Waiting for a 15-minute quote."
 ) {
     /** Cash plus a bid mark of the open scalp. */
@@ -137,20 +148,61 @@ class ScalpLab(
 
     private fun step(account: ScalpAccount, tape: ScalpTape): ScalpAccount {
         val held = account.position
-        if (held != null && !held.ticker.equals(tape.ticker, true)) return account
-        val marked = mark(account, tape)
+        if (held != null && !held.ticker.equals(tape.ticker, true)) {
+            return stamp(trade(scratch(account, held), tape))
+        }
+        return stamp(trade(account, tape))
+    }
+
+    /**
+     * The rule fires first. Then the book applies what it has learned:
+     * sell a small pop, sell the give-back, and get out by minute 7
+     * so the same book can trade again instead of sitting until settlement.
+     */
+    private fun trade(account: ScalpAccount, tape: ScalpTape): ScalpAccount {
+        val marked = if (account.position?.ticker?.equals(tape.ticker, true) == true) mark(account, tape) else account
         val pos = marked.position
-        val intent = ScalpCatalog.ALL.first { it.id == marked.id }.decide(marked, tape)
-        val next = when (intent) {
+        val rule = ScalpCatalog.ALL.first { it.id == marked.id }.decide(marked, tape)
+        val intent = adapt(marked, tape, rule)
+        return when (intent) {
             is ScalpIntent.Buy -> if (pos == null) buy(marked, tape, intent) else marked
             is ScalpIntent.Sell -> {
                 if (pos == null || !pos.ticker.equals(tape.ticker, true)) marked
                 else if (intent.force || profitable(pos, ScalpCatalog.bid(tape, pos.side))) sell(marked, pos, tape)
                 else marked
             }
-            ScalpIntent.Hold -> marked
+            ScalpIntent.Hold -> {
+                if (pos != null) marked
+                else {
+                    val probe = learnedProbe(marked, tape)
+                    if (probe != null) buy(marked, tape, probe) else marked
+                }
+            }
         }
-        return stamp(next)
+    }
+
+    private fun adapt(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent): ScalpIntent {
+        val pos = account.position ?: return intent
+        if (!pos.ticker.equals(tape.ticker, true)) return intent
+        val bid = ScalpCatalog.bid(tape, pos.side)
+        val outOfTime = tape.elapsedMs >= SEVEN_MIN || tape.tteMs in 1..NINETY_SEC
+        if (outOfTime) return ScalpIntent.Sell(force = true)
+        val target = if (account.settleLosses > 0 || account.scalpWins > 0) account.learnedExit else 0.05
+        if (bid + 1e-9 >= pos.entry + target) return ScalpIntent.Sell(force = true)
+        if (pos.peakBid + 1e-9 >= pos.entry + 0.03 && pos.peakBid - bid + 1e-9 >= 0.02) {
+            return ScalpIntent.Sell(force = true)
+        }
+        return intent
+    }
+
+    /** A book whose own setup has not fired still takes the early cheap pop, up to 3 times a window. */
+    private fun learnedProbe(account: ScalpAccount, tape: ScalpTape): ScalpIntent.Buy? {
+        if (tape.elapsedMs >= SEVEN_MIN) return null
+        if (account.tripTicker == tape.ticker && account.trips >= 3) return null
+        val side = if (tape.yesAsk <= tape.noAsk) "YES" else "NO"
+        val px = if (side == "YES") tape.yesAsk else tape.noAsk
+        if (px >= 0.40) return null
+        return ScalpIntent.Buy(side, 0.10)
     }
 
     /** Keep a short equity line without rewriting the book on a 1¢ wiggle. */
@@ -182,13 +234,13 @@ class ScalpLab(
     private fun buy(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent.Buy): ScalpAccount {
         val side = if (intent.side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(if (side == "NO") tape.noAsk else tape.yesAsk) ?: return account
-        val fraction = intent.fraction.coerceIn(0.01, 1.0)
-        // Ahead of the start: bet a fraction of what's there. At or under it
-        // (including a negative book): still bet a fraction of the $20k.
-        // Paper only, so the debit is allowed to push cash below zero.
+        val fraction = (intent.fraction * account.sizeScale).coerceIn(0.01, 1.0)
         val bankroll = maxOf(account.cashUsd, ScalpCatalog.START_CASH)
         val budget = bankroll * fraction
         if (budget + 1e-9 < px) return account
+        if (account.lastSellTicker.equals(tape.ticker, true) && account.lastSellPx > 0.0 && px + 1e-9 >= account.lastSellPx) {
+            return account
+        }
         val qtyLong = floor(budget / px + 1e-9).toLong()
         if (qtyLong < 1L) return account
         val qty = qtyLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
@@ -206,9 +258,12 @@ class ScalpLab(
             lastBid = bid,
             openedAtMs = nowMs()
         )
+        val trips = if (account.tripTicker == tape.ticker) account.trips + 1 else 1
         return account.copy(
             cashUsd = account.cashUsd - stake - fee,
             position = pos,
+            trips = trips,
+            tripTicker = tape.ticker,
             lastNote = "BUY $side $qty ct @ ${cents(px)} · ${pct(fraction)} of ${moneyPlain(bankroll)}"
         )
     }
@@ -219,13 +274,41 @@ class ScalpLab(
         val proceeds = pos.contracts * bid
         val pnl = proceeds - sellFee - pos.stakeUsd - pos.feeUsd
         val win = pnl > 0.0
+        return learn(
+            account.copy(
+                cashUsd = account.cashUsd + proceeds - sellFee,
+                position = null,
+                realizedPnlUsd = account.realizedPnlUsd + pnl,
+                trades = account.trades + 1,
+                wins = account.wins + if (win) 1 else 0,
+                lastSellPx = bid,
+                lastSellTicker = pos.ticker,
+                lastNote = "SELL ${pos.side} @ ${cents(bid)} · ${money(pnl)}"
+            ),
+            pnl = pnl,
+            settled = false
+        )
+    }
+
+    /** The window rolled. Close the old contract at the last bid so this book can trade the new one. */
+    private fun scratch(account: ScalpAccount, pos: ScalpPosition): ScalpAccount {
+        val bid = KalshiPrice.usable(pos.lastBid) ?: pos.entry
+        val sellFee = KalshiFee.total(pos.contracts, bid)
+        val proceeds = pos.contracts * bid
+        val pnl = proceeds - sellFee - pos.stakeUsd - pos.feeUsd
+        val win = pnl > 0.0
         return account.copy(
             cashUsd = account.cashUsd + proceeds - sellFee,
             position = null,
             realizedPnlUsd = account.realizedPnlUsd + pnl,
             trades = account.trades + 1,
             wins = account.wins + if (win) 1 else 0,
-            lastNote = "SELL ${pos.side} @ ${cents(bid)} · ${money(pnl)}"
+            trips = 0,
+            tripTicker = "",
+            lastSellPx = 0.0,
+            lastSellTicker = "",
+            lesson = "Closed the last window at the bid so this book can trade the new one.",
+            lastNote = "SCRATCH ${pos.side} @ ${cents(bid)} · ${money(pnl)}"
         )
     }
 
@@ -246,13 +329,50 @@ class ScalpLab(
             "yes" -> if (won == true) "SETTLE WIN" else "SETTLE LOSS"
             else -> if (won == true) "SETTLE WIN" else "SETTLE LOSS"
         }
+        return learn(
+            account.copy(
+                cashUsd = account.cashUsd + payout,
+                position = null,
+                realizedPnlUsd = account.realizedPnlUsd + pnl,
+                trades = account.trades + 1,
+                wins = account.wins + if (pnl > 0.0) 1 else 0,
+                trips = 0,
+                tripTicker = "",
+                lastNote = "$label ${pos.side} · ${money(pnl)}"
+            ),
+            pnl = pnl,
+            settled = true
+        )
+    }
+
+    private fun learn(account: ScalpAccount, pnl: Double, settled: Boolean): ScalpAccount {
+        if (settled && pnl < 0.0) {
+            val scale = (account.sizeScale * 0.75).coerceIn(0.25, 1.0)
+            val exit = (account.learnedExit - 0.005).coerceIn(0.03, 0.06)
+            return account.copy(
+                sizeScale = scale,
+                learnedExit = exit,
+                settleLosses = account.settleLosses + 1,
+                lesson = "Lost by waiting for settlement. Next bet is ${pct(scale)} of the rule, and it sells ${cents(exit)} up instead of sitting."
+            )
+        }
+        if (settled) {
+            return account.copy(
+                lesson = "Settled a winner. Treated as luck. Next time it sells the pop and trades again."
+            )
+        }
+        if (pnl > 0.0) {
+            val scale = (account.sizeScale + 0.08).coerceIn(0.25, 1.0)
+            return account.copy(
+                sizeScale = scale,
+                scalpWins = account.scalpWins + 1,
+                lesson = "Sold the pop for a gain. Size stays ${pct(scale)} of the rule and it will take the next one."
+            )
+        }
+        val scale = (account.sizeScale * 0.9).coerceIn(0.25, 1.0)
         return account.copy(
-            cashUsd = account.cashUsd + payout,
-            position = null,
-            realizedPnlUsd = account.realizedPnlUsd + pnl,
-            trades = account.trades + 1,
-            wins = account.wins + if (pnl > 0.0) 1 else 0,
-            lastNote = "$label ${pos.side} · ${money(pnl)}"
+            sizeScale = scale,
+            lesson = "Scalp lost. Next bet is smaller, ${pct(scale)} of the rule."
         )
     }
 
@@ -330,5 +450,8 @@ class ScalpLab(
         private fun pct(fraction: Double): String = String.format(java.util.Locale.US, "%.0f%%", fraction * 100.0)
         private fun money(pnl: Double): String = String.format(java.util.Locale.US, "%+.2f", pnl)
         private fun moneyPlain(usd: Double): String = String.format(java.util.Locale.US, "$%.0f", usd)
+
+        private const val SEVEN_MIN = 7L * 60L * 1000L
+        private const val NINETY_SEC = 90L * 1000L
     }
 }
