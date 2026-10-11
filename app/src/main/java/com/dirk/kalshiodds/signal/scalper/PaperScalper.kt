@@ -326,8 +326,8 @@ class PaperScalper(
     private val bookLevels: (String) -> BookLevelSnapshot?,
     private val closeMs: (String) -> Long?,
     val engine: ScalperEngine = ScalperEngine(),
-    /** Called after [reset]: the store archives the trade files. */
-    private val onReset: () -> Unit = {}
+    /** Called first by [reset]: the store archives the trade files; false when that did not complete. */
+    private val onReset: () -> Boolean = { true }
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -378,11 +378,16 @@ class PaperScalper(
     @Synchronized
     fun working(): Pair<Int, Int> = engine.workingTotal()
 
+    /**
+     * Archive the trade files, then start a fresh record. When the archive does not complete, nothing
+     * is reset (the old rows would still show beside zeroed totals) and this returns false.
+     */
     @Synchronized
-    fun reset() {
+    fun reset(): Boolean {
+        if (!runCatching { onReset() }.getOrDefault(false)) return false
         engine.clear()
         ledger.reset()
-        onReset()
+        return true
     }
 
     private fun gridFor(ticker: String, nowMs: Long): PrintGrid? {
