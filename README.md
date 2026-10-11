@@ -19,6 +19,28 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.3 (claude/scalp-insights): an Execution section — how the orders are worked
+
+A sixth chip, **Execution**, looks at how each strategy gets in, not just what it made:
+
+- *Win often or win big?* The payoff map: each strategy at its win rate (across) and average win ÷ average loss
+  (up), dot size by trades. The dashed curve is break-even (payoff = losses ÷ wins); above it made money. A 30%
+  hitter can be fine if its wins are 3× its losses; a 70% hitter can lose if they are not.
+- *Pay the ask or wait?* The dip, momentum and extreme-reversion signals each run twice, buying now and resting
+  a bid. Side by side: result per contract after fees with ±2 standard-error whiskers, and how often the resting
+  half filled.
+- *How often bids fill.* Filled ÷ posted for every resting strategy.
+- *Fast fills, good fills?* Strategy × how long the resting bid waited (<1s … 1m+). Bids that fill instantly are
+  often the ones the market was leaving: adverse selection shows up as red on the left.
+- *Place in line.* Strategy × contracts ahead in the queue when posted (front … 1k+).
+- *Did the ML forecast hold?* The ML scalper's expected ¢ at posting, banded, against what its fills made, with
+  the "forecast was right" diagonal. Only filled bids count, so a gap is partly the fills being worse than the
+  average post.
+- **Overview** gains *Rank by day*: every strategy's place on running profit at the end of each of the last 14
+  days; the three leaders (or the one you follow) in colour. Drag to read a day.
+
+Numbers: `ArenaExec` (`ArenaExecTest`); drawing: `ui/ArenaExecViews.kt`. Paper only.
+
 ## 1.9.2 (claude/scalp-insights): an Edge section — is any of this skill?
 
 A fifth chip, **Edge**, asks the question the profit bars can't answer: is a strategy beating the market, or lucky?

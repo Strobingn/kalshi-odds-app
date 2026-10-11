@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.signal.scalper.ArenaCharts
 import com.dirk.kalshiodds.signal.scalper.ArenaEdge
+import com.dirk.kalshiodds.signal.scalper.ArenaExec
 import com.dirk.kalshiodds.signal.scalper.ArenaStats
 import com.dirk.kalshiodds.signal.scalper.LiveWindow
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
@@ -173,6 +174,7 @@ enum class ArenaSection(val label: String) {
     OVERVIEW("Overview"),
     STRATEGIES("Strategies"),
     EDGE("Edge"),
+    EXECUTION("Execution"),
     TIMING("Timing"),
     TRADES("Trades")
 }
@@ -262,6 +264,13 @@ fun ScalperResultsScreen(
     val rollingEdge = remember(chartTrades, edgeScope) { edgeScope?.let { ArenaEdge.rolling(chartTrades, it, ROLLING_TRADES) }.orEmpty() }
     val minuteGrid = remember(chartTrades) { ArenaEdge.byMinute(chartTrades) }
     val corrGrid = remember(chartTrades) { ArenaEdge.correlation(chartTrades) }
+    val payoffDots = remember(chartTrades) { ArenaExec.payoffMap(chartTrades) }
+    val twins = remember(chartTrades, state) { ArenaExec.twins(chartTrades, state) }
+    val fillRates = remember(state) { ArenaExec.fillRates(state) }
+    val waitGrid = remember(chartTrades) { ArenaExec.fillSpeed(chartTrades) }
+    val queueGrid = remember(chartTrades) { ArenaExec.queueDepth(chartTrades) }
+    val modelBands = remember(chartTrades) { ArenaExec.modelCheck(chartTrades) }
+    val rankRace = remember(chartTrades, today) { ArenaExec.rankRace(chartTrades, today) }
     Scaffold(
         containerColor = colors.bg,
         topBar = {
@@ -375,6 +384,13 @@ fun ScalperResultsScreen(
                             "CHART_RACE"
                         ) { EquityRaceChart(curves, selected) }
                     }
+                    item(key = "chart_rank") {
+                        ChartCard(
+                            "Rank by day",
+                            "Each strategy's place on running profit at the end of each day, last 14 days (your clock).",
+                            "CHART_RANK"
+                        ) { RankRaceChart(rankRace, selected) }
+                    }
                     item(key = "leaderboard") { Leaderboard(state, curveOf, selected, onSelect) }
                     item(key = "bankroll") {
                         ChartCard("Paper bankroll", "All 15 together, from a \$1,000 reference start.", "CHART_BANKROLL") {
@@ -466,6 +482,54 @@ fun ScalperResultsScreen(
                                 countNoun = "shared window"
                             )
                         }
+                    }
+                }
+                ArenaSection.EXECUTION -> {
+                    item(key = "chart_payoff") {
+                        ChartCard(
+                            "Win often or win big?",
+                            "Each strategy's win rate against its average win ÷ average loss. Above the curve made money.",
+                            "CHART_PAYOFF"
+                        ) { PayoffMapChart(payoffDots, selected) }
+                    }
+                    item(key = "chart_twins") {
+                        ChartCard(
+                            "Pay the ask or wait?",
+                            "The same three signals bought now and with a resting bid: result per contract after fees.",
+                            "CHART_TWINS"
+                        ) { TwinChart(twins) }
+                    }
+                    item(key = "chart_fill") {
+                        ChartCard("How often bids fill", "Share of each resting strategy's bids that filled.", "CHART_FILL") {
+                            FillRateChart(fillRates)
+                        }
+                    }
+                    item(key = "chart_wait") {
+                        ChartCard(
+                            "Fast fills, good fills?",
+                            "Resting bids: average result per contract by how long the bid waited to fill.",
+                            "CHART_WAIT"
+                        ) {
+                            HeatmapChart(waitGrid, { "filled ${ArenaExec.WAIT_LABELS[it]}" }, listOf("<1s", "20s", "1m+"), "WAIT")
+                        }
+                    }
+                    item(key = "chart_queue") {
+                        ChartCard(
+                            "Place in line",
+                            "Resting bids: average result per contract by the contracts ahead in the queue when posted.",
+                            "CHART_QUEUE"
+                        ) {
+                            HeatmapChart(
+                                queueGrid, { "${ArenaExec.QUEUE_LABELS[it]} ahead" }, listOf("front", "200", "1k+"), "QUEUE"
+                            )
+                        }
+                    }
+                    item(key = "chart_model") {
+                        ChartCard(
+                            "Did the ML forecast hold?",
+                            "The ML scalper's forecast when it posted against what its filled trades made, per contract.",
+                            "CHART_MODEL"
+                        ) { ModelCheckChart(modelBands) }
                     }
                 }
                 ArenaSection.TIMING -> {

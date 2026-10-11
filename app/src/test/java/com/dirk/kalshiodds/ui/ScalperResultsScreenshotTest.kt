@@ -87,7 +87,7 @@ class ScalperResultsScreenshotTest {
     fun darkOverviewRace() = snap("arena_dark_overview_race", true, 5, ArenaSection.OVERVIEW)
 
     @Test
-    fun darkOverviewDrawdown() = snap("arena_dark_overview_drawdown", true, 7, ArenaSection.OVERVIEW)
+    fun darkOverviewDrawdown() = snap("arena_dark_overview_drawdown", true, 8, ArenaSection.OVERVIEW)
 
     @Test
     fun darkStrategiesStatsAndPrice() = snap("arena_dark_strategies_stats_price", true, 3, ArenaSection.STRATEGIES)
@@ -106,6 +106,18 @@ class ScalperResultsScreenshotTest {
 
     @Test
     fun lightEdgeCalibrationAndFan() = snap("arena_light_edge_calibration_fan", false, 3, ArenaSection.EDGE)
+
+    @Test
+    fun darkExecutionPayoffAndTwins() = snap("arena_dark_execution_payoff_twins", true, 3, ArenaSection.EXECUTION)
+
+    @Test
+    fun darkExecutionFillsAndWait() = snap("arena_dark_execution_fill_wait", true, 5, ArenaSection.EXECUTION)
+
+    @Test
+    fun darkExecutionQueueAndModel() = snap("arena_dark_execution_queue_model", true, 7, ArenaSection.EXECUTION)
+
+    @Test
+    fun lightExecutionPayoffAndTwins() = snap("arena_light_execution_payoff_twins", false, 3, ArenaSection.EXECUTION)
 
     @Test
     fun darkTradesHistogram() = snap("arena_dark_trades_histogram", true, 3, ArenaSection.TRADES)
@@ -147,12 +159,15 @@ class ScalperResultsScreenshotTest {
         )
     }
 
-    private fun trade(st: ScalpStrategy, ticker: String, side: String, entry: Double, exit: Double, filled: Long, closed: Long, id: Long, kind: String = "TARGET") =
+    private fun trade(
+        st: ScalpStrategy, ticker: String, side: String, entry: Double, exit: Double, filled: Long, closed: Long, id: Long,
+        kind: String = "TARGET", posted: Long = filled, queue: Double = 0.0, expected: Double = 0.0
+    ) =
         ScalpTrade(
             closedAtMs = closed, run = 7L, id = id, strategy = st.name, ticker = ticker, side = side, contracts = 10,
             entry = entry, exit = exit, kind = kind, entryFeeUsd = 0.0, exitFeeUsd = 0.0,
-            pnlUsd = (exit - entry) * 10, postedAtMs = filled, filledAtMs = filled, queueAhead = 0.0, queueKnown = true,
-            predictionCents = 0.0, expectedCents = 0.0
+            pnlUsd = (exit - entry) * 10, postedAtMs = posted, filledAtMs = filled, queueAhead = queue, queueKnown = true,
+            predictionCents = expected, expectedCents = expected
         )
 
     /** Six trades on the live window plus ten days of history, so every grid has something in it. */
@@ -210,8 +225,18 @@ class ScalperResultsScreenshotTest {
                     out += trade(st, ticker, "YES", entry, exit, filled, close, 40_000L + w * 100 + i, kind = "SETTLED")
                 } else {
                     val loading = if (i % 3 == 0) -1.0 else 1.0
-                    val cents = (loading * 2 * factor + rnd.nextGaussian() * 2 + (if (i % 4 == 0) 0.6 else -0.4)).toInt()
-                    out += trade(st, ticker, "YES", 0.5, 0.5 + cents / 100.0, filled, filled + 40_000L, 40_000L + w * 100 + i)
+                    // Resting bids wait and queue; the quick fills and the deep queues do worse (adverse selection).
+                    val wait = if (st.taker) 0L else (rnd.nextDouble() * rnd.nextDouble() * 90_000).toLong()
+                    val queue = if (st.taker) 0.0 else Math.round(rnd.nextDouble() * rnd.nextDouble() * 1_500.0).toDouble()
+                    val expected = if (st == ScalpStrategy.ML_REST) rnd.nextDouble() * 3.0 - 0.3 else 0.0
+                    val skew = if (st.taker) 0.0 else (if (wait < 5_000) -0.8 else 0.4) - queue / 1_000.0
+                    val cents = (
+                        loading * 2 * factor + rnd.nextGaussian() * 2 + (if (i % 4 == 0) 0.6 else -0.4) + skew + 0.5 * expected
+                        ).toInt()
+                    out += trade(
+                        st, ticker, "YES", 0.5, 0.5 + cents / 100.0, filled, filled + 40_000L, 40_000L + w * 100 + i,
+                        posted = filled - wait, queue = queue, expected = expected
+                    )
                 }
             }
         }
