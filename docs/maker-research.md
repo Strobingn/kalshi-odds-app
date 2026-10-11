@@ -156,3 +156,21 @@ are swamped by one-legged fills.
 - The decision rule says NOT EVALUABLE (2 OOS days < 5), but the sign is
   not in doubt: retire the idea unless a fill-toxicity model (cancel the
   bid before it is picked off) can remove most of the 6¢ markout.
+
+### Spot guard result, 2026-10-08 (same 6 days)
+
+Cancelling a leg once Coinbase moves 2 / 5 / 10 bps against it (1 s cancel
+latency) barely helps. Best guard was 2 bps:
+
+| | no guard | G2 |
+|---|---|---|
+| IS $/episode (`join/L0.01/T30/hold`) | −0.283 | −0.263 |
+| OOS $/episode | −0.199, 99% CI [−0.312, −0.198] | −0.160, 99% CI [−0.312, −0.159] |
+| one-leg Δmid (IS) | −6.2¢ | −5.6¢ |
+
+5 and 10 bps almost never fire before the fill. By the time Coinbase has
+moved enough to say "this bid is about to be picked off", the taker has
+already hit it — Kalshi's book reacts to Coinbase within about a second
+(`ws_lag.py`), so a guard that waits for Coinbase plus a 1 s cancel is too
+slow. **The pair maker stays retired.** A fill-toxicity model would need a
+signal that leads Kalshi's own takers, not Coinbase.

@@ -110,6 +110,35 @@ def test_simulate_fills_and_sequencing() -> None:
     assert all(e.end_ms <= CLOSE - pm.CANCEL_BEFORE_CLOSE_MS for e in res.episodes)
 
 
+def test_spot_guard() -> None:
+    # spot 60,000 at the post (60 s), drops 6 bps at 70 s, recovers at 90 s
+    sts = [OPEN + s * 1000 for s in (59, 70, 90)]
+    spx = [60000.0, 60000.0 * (1 - 6e-4), 60000.0]
+    book = [snap(t, 0.45, 0, 0.50, 0) for t in range(0, 900, 5)]
+    trades = [trade(70.5, 0.45, 10, "no"),   # YES fill inside the 1 s cancel latency
+              trade(75, 0.45, 10, "no"),     # after the YES cancel took effect
+              trade(80, 0.50, 10, "yes")]    # NO fill (spot moved down = NO's way: no guard)
+    m = ms.Market("KXBTC15M-G", CLOSE, 60000.0, "no", book, trades, sts, spx)
+    t, end = OPEN + 60_000, OPEN + 120_000
+    assert pm.guard_cancel(m, "YES", t, end, 5.0) == OPEN + 71_000   # 70 s + 1 s latency
+    assert pm.guard_cancel(m, "NO", t, end, 5.0) == end              # spot never rose 5 bps
+    assert pm.guard_cancel(m, "YES", t, end, 10.0) == end            # 6 bps < 10 bps guard
+    assert pm.guard_cancel(m, "YES", t, end, 0.0) == end             # guard off
+    res_off, res_on = pm.Result(), pm.Result()
+    pm.simulate_market(m, pm.Config("join", 0.03, 60, "hold", 0.0), 0.0, res_off)
+    pm.simulate_market(m, pm.Config("join", 0.03, 60, "hold", 5.0), 0.0, res_on)
+    off, on = res_off.episodes[0], res_on.episodes[0]
+    assert (off.fy, off.fn) == (10, 10), (off.fy, off.fn)   # unguarded: both trades fill YES (capped at 10)
+    assert (on.fy, on.fn) == (10, 10)                       # guard fired, but the 70.5 s print beat the cancel
+    # with the in-latency print removed, the guard keeps the YES leg empty
+    m2 = ms.Market("KXBTC15M-G", CLOSE, 60000.0, "no", book, trades[1:], sts, spx)
+    r2 = pm.Result()
+    pm.simulate_market(m2, pm.Config("join", 0.03, 60, "hold", 5.0), 0.0, r2)
+    assert (r2.episodes[0].fy, r2.episodes[0].fn) == (0, 10)
+    assert "G5" in pm.Config("join", 0.03, 60, "hold", 5.0).label()
+    assert "/G" not in pm.Config("join", 0.03, 60, "hold").label()
+
+
 def test_summary_split() -> None:
     res = pm.Result([
         pm.Episode("A", "2026-09-01", 0, 1, 0.45, 0.50, 10, 10, 0.50, 9.5, 10, 0, None),
