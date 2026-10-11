@@ -213,11 +213,11 @@ private fun PnlLineChart(
         drawContext.canvas.nativeCanvas.apply {
             val paint = android.graphics.Paint().apply {
                 this.color = android.graphics.Color.argb(200, 160, 160, 160)
-                textSize = 10f * resources.displayMetrics.density
+                textSize = 24f
                 isAntiAlias = true
             }
-            drawText(String.format(Locale.US, "%+.0f", maxV), pad, 12f * resources.displayMetrics.density, paint)
-            drawText(String.format(Locale.US, "%+.0f", minV), pad, h, paint)
+            drawText(String.format(Locale.US, "%+.0f", maxV), pad, 28f, paint)
+            drawText(String.format(Locale.US, "%+.0f", minV), pad, h - 4f, paint)
         }
     }
 }
