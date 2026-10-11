@@ -209,6 +209,17 @@ def test_is_oos_report() -> None:
     # only 9 days → 3 OOS days: below the 5 needed, so not evaluable
     short = {k: pm.Result([e for e in v.episodes if e.day in days[:9]]) for k, v in results.items()}
     assert "NOT EVALUABLE" in pm.report(short, stats, 0.0, iters=200)
+    # 5 OOS days overall, but the picked config only posted on 2 of them: two day blocks are not enough
+    sparse_days = days[:10] + days[-2:]
+    sparse = {
+        (good, 0.0): _days_result({d: [0.5, 0.4, 0.6] * 3 for d in sparse_days}),
+        (bad, 0.0): _days_result({d: [-0.2] * 9 for d in days}),
+        (good, pm.STRESS_MAKER_FEE): _days_result({d: [0.3] * 9 for d in sparse_days}),
+        (bad, pm.STRESS_MAKER_FEE): _days_result({d: [-0.4] * 9 for d in days}),
+    }
+    text = pm.report(sparse, stats, 0.0, iters=200)
+    assert "OOS days: 5" in text and f"Picked on IS: `{good.label()}`" in text, text
+    assert "Decision: NOT EVALUABLE (2 OOS day(s) with episodes for this config, of 5" in text, text
 
 
 def test_end_to_end_fixture() -> None:

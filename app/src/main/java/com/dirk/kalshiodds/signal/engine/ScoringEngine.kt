@@ -667,7 +667,16 @@ class ScoringEngine(
         var importedModelPp: Double? = null
         var modelEdgeQualified = true
         var importedBlendW: Double? = null
-        val loaded = edgeModel
+        // The previous window's move (open − 15 min → open), parity with prev_window_return; null when
+        // the tape does not reach back that far (Live signals started inside the last ~20 minutes).
+        val prevWindowRet = if (edgeModel != null && close != null && settleAsset != null) {
+            runCatching { spotStream?.prevWindowReturn(settleAsset, close - 900_000L, nowMs) }.getOrNull()
+        } else {
+            null
+        }
+        // A model that weighs that move is not run on a made-up 0: the trainer almost always knew it.
+        // Older models padded to the contract carry weight 0 there and run as before.
+        val loaded = edgeModel?.takeUnless { prevWindowRet == null && it.weightOf("prev_window_return") != 0f }
         if (loaded != null) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
@@ -686,13 +695,7 @@ class ScoringEngine(
                     // model was trained on (ml/train_edge.py), not the
                     // settlement-average fair shown in the app.
                     digitalFair = null,
-                    // The previous window's move (open − 15 min → open), parity with
-                    // prev_window_return; null (→ 0, as in training) when it cannot be known.
-                    prevWindowReturn = if (close != null && settleAsset != null) {
-                        runCatching { spotStream?.prevWindowReturn(settleAsset, close - 900_000L, nowMs) }.getOrNull()
-                    } else {
-                        null
-                    },
+                    prevWindowReturn = prevWindowRet,
                     // Funding-settlement close (00/08/16 UTC): regime flag,
                     // parity with is_funding_hour.
                     isFundingHour = null  // EdgeFeatures derives it from close time

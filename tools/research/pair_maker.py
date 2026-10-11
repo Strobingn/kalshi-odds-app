@@ -384,8 +384,11 @@ def report(results: dict, stats: dict, maker_fee: float, iters: int = 2000, seed
     out.append("")
     s = oos[maker_fee]
     lo, hi = s.get("ci99", (float("nan"), float("nan")))
-    if len(oos_days) < MIN_OOS_DAYS_FOR_RULE or s.get("filled", 0) == 0 or math.isnan(lo):
-        verdict = f"NOT EVALUABLE ({len(oos_days)} OOS day(s); need ≥ {MIN_OOS_DAYS_FOR_RULE})."
+    # The day-block CI has as many blocks as days THIS config posted on, not as many as the OOS split has.
+    used = int(s.get("days", 0))
+    if used < MIN_OOS_DAYS_FOR_RULE or s.get("filled", 0) == 0 or math.isnan(lo):
+        verdict = (f"NOT EVALUABLE ({used} OOS day(s) with episodes for this config, of {len(oos_days)}; "
+                   f"need ≥ {MIN_OOS_DAYS_FOR_RULE}).")
     elif lo > 0:
         verdict = "PASS — OOS 99% CI of $/episode is above 0. Paper trade it next; it is not proven live."
     elif hi < 0:

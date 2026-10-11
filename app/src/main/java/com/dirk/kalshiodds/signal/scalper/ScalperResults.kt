@@ -92,6 +92,9 @@ object ScalperResults {
     /** Fewer closed trades than this and the order of the board is mostly luck. */
     const val MIN_TRADES_FOR_VERDICT = 30
 
+    /** Independent market windows the clustered luck test needs. */
+    const val MIN_WINDOWS_FOR_VERDICT = 10
+
     /**
      * All 15 strategies, best paper P&L first. Strategies that have closed a
      * trade come first; the ones still waiting for their signal follow in
@@ -109,20 +112,32 @@ object ScalperResults {
 
     /**
      * Is the result more than luck? Mean dollars per trade against two
-     * standard errors, from the sum of squared results. A record written
-     * before that sum was kept rebuilds the spread from the won / lost totals
-     * (every win at the average win, every loss at the average loss), which
-     * understates it.
+     * standard errors. Scalps in one market window share its outcome, so the
+     * error is clustered by window and needs [MIN_WINDOWS_FOR_VERDICT]
+     * windows. A record from before the window sums (1.9.2) uses the sum of
+     * squared results, and one from before that rebuilds the spread from the
+     * won / lost totals; both understate it.
      */
     fun verdict(s: ScalpStats): String {
         val n = s.closed
         if (n == 0) return "no trades yet"
         if (n < MIN_TRADES_FOR_VERDICT) return "$n of $MIN_TRADES_FOR_VERDICT trades needed to judge"
         val mean = s.pnlUsd / n
-        val aw = s.avgWinUsd ?: 0.0
-        val al = s.avgLossUsd ?: 0.0
-        val second = if (s.pnlSqUsd > 0.0) s.pnlSqUsd / n else (s.wins * aw * aw + s.losses * al * al) / n
-        val se = kotlin.math.sqrt(kotlin.math.max(second - mean * mean, 0.0) / n)
+        val se = if (s.windows > 0) {
+            val w = s.windows
+            if (w < MIN_WINDOWS_FOR_VERDICT) return "$w of $MIN_WINDOWS_FOR_VERDICT market windows needed to judge"
+            // Cluster-robust: Σ_w (S_w − n_w · mean)², with the window still collecting closes included.
+            val sq = s.winSqUsd + s.curUsd * s.curUsd
+            val cross = s.winCrossUsd + s.curUsd * s.curN
+            val n2 = s.winN2 + s.curN.toDouble() * s.curN
+            val num = sq - 2.0 * mean * cross + mean * mean * n2
+            kotlin.math.sqrt(kotlin.math.max(num, 0.0) * w / (w - 1.0)) / n
+        } else {
+            val aw = s.avgWinUsd ?: 0.0
+            val al = s.avgLossUsd ?: 0.0
+            val second = if (s.pnlSqUsd > 0.0) s.pnlSqUsd / n else (s.wins * aw * aw + s.losses * al * al) / n
+            kotlin.math.sqrt(kotlin.math.max(second - mean * mean, 0.0) / n)
+        }
         return when {
             mean - 2.0 * se > 0.0 -> "ahead by more than luck so far"
             mean + 2.0 * se < 0.0 -> "losing by more than luck"

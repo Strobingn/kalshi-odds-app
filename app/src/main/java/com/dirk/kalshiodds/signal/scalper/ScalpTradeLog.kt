@@ -231,17 +231,29 @@ class ScalpTradeLog(
         return n
     }
 
-    /** Reset: the live files move to `archive/<now>/` so the trade list starts empty and nothing is lost. */
-    fun archive(nowMs: Long = System.currentTimeMillis()) {
+    /**
+     * Reset: the live files move to `archive/<now>/` so the trade list starts empty and nothing is lost.
+     * A file that cannot be renamed is copied and only then removed; a file that can't be copied either
+     * stays where it is. True only when every live file is in the archive (or there was none).
+     */
+    fun archive(nowMs: Long = System.currentTimeMillis()): Boolean {
         flushNow()
         synchronized(fileLock) {
-            runCatching {
+            cacheKey = null
+            return runCatching {
                 val live = dir.listFiles()?.filter { it.isFile && isLogFile(it.name) }.orEmpty()
-                if (live.isEmpty()) return
-                val to = File(File(dir, ARCHIVE), nowMs.toString()).apply { mkdirs() }
-                for (f in live) if (!f.renameTo(File(to, f.name))) f.delete()
-                cacheKey = null
-            }
+                if (live.isEmpty()) return@runCatching true
+                val to = File(File(dir, ARCHIVE), nowMs.toString())
+                if (!to.isDirectory && !to.mkdirs()) return@runCatching false
+                var all = true
+                for (f in live) {
+                    val target = File(to, f.name)
+                    if (f.renameTo(target)) continue
+                    val copied = runCatching { f.copyTo(target, overwrite = false).length() == f.length() }.getOrDefault(false)
+                    if (copied) f.delete() else all = false
+                }
+                all
+            }.getOrDefault(false)
         }
     }
 

@@ -61,6 +61,19 @@ class OffsetEdgeModelScoringTest {
     }
 
     @Test
+    fun aModelThatWeighsThePreviousWindowWaitsUntilItIsKnown() {
+        // No spot tape reaching back to open − 15 min: the previous window's move is unknown.
+        val weighs = engine(model(kind = "offset_logistic", bias = 0.4, beats = true, prevWeight = 0.3))
+            .score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
+        assertEquals("not run on a made-up 0", null, weighs.importedModelPp)
+        assertFalse(weighs.modelBacked)
+        // A model with no weight on it (an older contract, padded) runs as before.
+        val ignores = engine(model(kind = "offset_logistic", bias = 0.4, beats = true))
+            .score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
+        assertNotNull(ignores.importedModelPp)
+    }
+
+    @Test
     fun legacyLogisticWithoutAHoldoutWinStaysOnTheMid() {
         val legacy = engine(model(kind = "logistic")).score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
         assertEquals(50.0, legacy.importedModelPp!!, 1e-4)
@@ -75,7 +88,7 @@ class OffsetEdgeModelScoringTest {
         return engine
     }
 
-    private fun model(kind: String, bias: Double = 0.0, beats: Boolean = false): EdgeModel = EdgeModel.parse(
+    private fun model(kind: String, bias: Double = 0.0, beats: Boolean = false, prevWeight: Double = 0.0): EdgeModel = EdgeModel.parse(
         """
         {
           "version": 2,
@@ -84,7 +97,7 @@ class OffsetEdgeModelScoringTest {
             "dist_to_strike_vol","tte_frac","market_mid","imbalance","spread",
             "momentum","realized_vol","cross_asset","time_of_day","digital_fair","prev_window_return","is_funding_hour","mid_squared"
           ],
-          "weights": [0,0,0,0,0,0,0,0,0,0,0,0,0],
+          "weights": [0,0,0,0,0,0,0,0,0,0,$prevWeight,0,0],
           "bias": $bias,
           "mean": [0,0,0,0,0,0,0,0,0,0,0,0,0],
           "std":  [1,1,1,1,1,1,1,1,1,1,1,1,1],
