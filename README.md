@@ -31,6 +31,24 @@ Bitcoin. It is the Claude 1.8.8 build plus:
 - **Not running?** The tab says why and fixes it in one tap: the arena needs **Live signals** on and a **Kalshi API
   key** saved (the trade feed is the authenticated WebSocket; REST has no trade prints). Live signals is off by
   default, which is why the 1.8.4–1.8.8 scalper showed nothing on a fresh install.
+- **Charts (Arena tab only).** Tap any strategy (in the profit bars or the leaderboard) to follow it; one
+  "Show all" resets.
+  - *Who is winning:* profit after fees per strategy, diverging around $0 (blue gain, red loss).
+  - *The race:* running profit of all 15 from the same $0 line over the last 3,000 closed trades; the top three
+    and the one you follow in colour, the rest grey; drag across to read every coloured line at one moment.
+  - *Leaderboard sparklines:* each strategy's running profit in one small line.
+  - *Paper bankroll:* one line with a light wash; drag to read any moment.
+  - *What one trade makes:* histogram of the result per contract after fees (2¢ bins, open ends for holds);
+    red bins lost money; all strategies or the one you follow.
+  - *Best and worst hours:* profit by hour of the day.
+  - *How trades end:* target / stopped / timed out / held to close, per strategy.
+  - *Win rate:* per strategy, with the 50% line.
+  - *What the fees take:* profit before and after the taker fee, per strategy (dumbbell).
+
+  Colours are the validated reference palette (blue/orange/aqua/yellow for the race and the exit mix; blue ↔ red
+  for gain / loss), stepped for the dark and the light theme and checked for colour-blind separation. Every chart
+  has a legend or labels, and every value is also in a list on the same screen. Numbers: `ArenaCharts`
+  (`ArenaChartsTest`); drawing: `ui/ArenaChartViews.kt` (`ScalperResultsScreenshotTest` renders each chart).
 - **Eight new strategies** next to the seven from 1.8.4, taken from the other branches' apps. They all run on the
   same live window, the same real trade prints, the same conservative fills (resting orders wait for the queue
   ahead) and the same taker fee, 10 contracts an order:

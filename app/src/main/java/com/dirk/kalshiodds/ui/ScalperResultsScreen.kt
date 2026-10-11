@@ -6,6 +6,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -40,6 +41,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
@@ -53,7 +55,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.KalshiOddsApp
+import com.dirk.kalshiodds.signal.scalper.ArenaCharts
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
+import com.dirk.kalshiodds.signal.scalper.ScalpStrategy
 import com.dirk.kalshiodds.signal.scalper.ScalpTrade
 import com.dirk.kalshiodds.signal.scalper.ScalperResults
 import com.dirk.kalshiodds.signal.scalper.ScalperState
@@ -64,6 +68,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 private const val PAGE = 200
+
+/** Closed trades the charts read (newest first from the trade file). */
+private const val CHART_TRADES = 3_000
 
 /**
  * "Scalper results": reads the paper scalper's record and its trade files.
@@ -108,6 +115,14 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
             delay(3_000L)
         }
     }
+    // The charts read a longer slice of the trade file, less often.
+    val chartTrades by produceState(emptyList<ScalpTrade>(), store) {
+        val s = store ?: return@produceState
+        while (true) {
+            value = withContext(Dispatchers.IO) { runCatching { s.log.recent(CHART_TRADES) }.getOrDefault(value) }
+            delay(10_000L)
+        }
+    }
     val saveZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri: Uri? ->
         val s = store
         if (uri != null && s != null) {
@@ -129,7 +144,8 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         onShowMore = { limit += PAGE },
         onExport = { saveZip.launch("strategy-arena-data.zip") },
         message = message,
-        feed = feed
+        feed = feed,
+        chartTrades = chartTrades
     )
 }
 
@@ -178,7 +194,9 @@ fun ScalperResultsScreen(
     onExport: () -> Unit = {},
     message: String? = null,
     listState: LazyListState = rememberLazyListState(),
-    feed: ArenaFeed? = null
+    feed: ArenaFeed? = null,
+    /** The longer slice of the trade file the charts draw from. */
+    chartTrades: List<ScalpTrade> = trades
 ) {
     val colors = DipTheme.colors
     val h = ScalperResults.headline(state)
@@ -186,6 +204,13 @@ fun ScalperResultsScreen(
     val strategies = ScalperResults.byStrategy(state)
     val coins = ScalperResults.byCoin(state)
     val hours = ScalperResults.byHour(state)
+    val board = ScalperResults.leaderboard(state)
+    var selectedName by rememberSaveable { mutableStateOf<String?>(null) }
+    val selected = ScalpStrategy.values().firstOrNull { it.name == selectedName }
+    val onSelect: (ScalpStrategy) -> Unit = { st -> selectedName = if (selectedName == st.name) null else st.name }
+    val curves = remember(chartTrades) { ArenaCharts.equityCurves(chartTrades) }
+    val curveOf = remember(curves) { curves.associateBy { it.strategy } }
+    val bins = remember(chartTrades, selected) { ArenaCharts.histogram(chartTrades, selected) }
     Scaffold(
         containerColor = colors.bg,
         topBar = {
@@ -245,7 +270,37 @@ fun ScalperResultsScreen(
                     )
                 }
             }
-            item(key = "leaderboard") { Leaderboard(state) }
+            item(key = "filter") {
+                // One filter for the whole screen: the selected strategy is lit in the race and fills the histogram.
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        if (selected == null) "Showing all 15 · tap a strategy to follow it" else "Following ${selected.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (selected != null) {
+                        OutlinedButton(onClick = { selectedName = null }, modifier = Modifier.height(40.dp)) { Text("Show all") }
+                    }
+                }
+            }
+            item(key = "chart_pnl") {
+                ChartCard("Who is winning", "Paper profit after fees per strategy, best on top. Tap one to follow it.", "CHART_PNL") {
+                    PnlBarsChart(board, selected, onSelect)
+                }
+            }
+            item(key = "chart_race") {
+                ChartCard(
+                    "The race",
+                    "Running profit of every strategy over the last ${chartTrades.size} closed trades, from the same \$0 line.",
+                    "CHART_RACE"
+                ) { EquityRaceChart(curves, selected) }
+            }
+            item(key = "leaderboard") { Leaderboard(state, curveOf, selected, onSelect) }
             item(key = "stats") {
                 Panel {
                     StatPair("Dollars won", ScalperResults.plainMoney(h.wonUsd), colors.up, "Dollars lost", ScalperResults.plainMoney(h.lostUsd), colors.down)
@@ -273,7 +328,7 @@ fun ScalperResultsScreen(
                 Panel {
                     Text("Paper bankroll over time", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                     if (bankroll.size >= 2) {
-                        BankrollChart(bankroll)
+                        ScrubLineChart(bankroll, ScalperResults.START_BANKROLL_USD) { ScalperResults.plainMoney(it) }
                     } else {
                         Text(
                             "The chart appears after the first scalp closes.",
@@ -281,6 +336,33 @@ fun ScalperResultsScreen(
                             color = colors.textSecondary
                         )
                     }
+                }
+            }
+            item(key = "chart_hist") {
+                ChartCard(
+                    "What one trade makes",
+                    "Result per contract after fees, ${selected?.label ?: "all strategies"}. Red bins lost money.",
+                    "CHART_HIST"
+                ) { HistogramChart(bins, selected?.label ?: "any strategy") }
+            }
+            item(key = "chart_hour") {
+                ChartCard("Best and worst hours", "Profit after fees by hour of the day, your clock.", "CHART_HOUR") {
+                    HourlyChart(ArenaCharts.hourly(state))
+                }
+            }
+            item(key = "chart_exit") {
+                ChartCard("How trades end", "Share of each strategy's trades that hit the target, were stopped, timed out or rode to the close.", "CHART_EXIT") {
+                    ExitMixChart(ArenaCharts.exitMix(state))
+                }
+            }
+            item(key = "chart_win") {
+                ChartCard("Win rate", "Share of each strategy's trades that made money after fees.", "CHART_WIN") {
+                    WinRateChart(ArenaCharts.winRates(state))
+                }
+            }
+            item(key = "chart_fees") {
+                ChartCard("What the fees take", "Profit before and after the taker fee, per strategy.", "CHART_FEES") {
+                    FeeDragChart(ArenaCharts.feeDrag(state))
                 }
             }
             item(key = "by_strategy") { Breakdown("By strategy", strategies) }
@@ -363,7 +445,12 @@ private fun Stat(label: String, value: String, color: Color, modifier: Modifier)
 
 /** All 15 strategies ranked by paper profit after fees, with whether each result is more than luck. */
 @Composable
-private fun Leaderboard(state: ScalperState) {
+private fun Leaderboard(
+    state: ScalperState,
+    curves: Map<ScalpStrategy, ArenaCharts.Curve> = emptyMap(),
+    selected: ScalpStrategy? = null,
+    onSelect: (ScalpStrategy) -> Unit = {}
+) {
     val colors = DipTheme.colors
     val board = ScalperResults.leaderboard(state)
     Panel {
@@ -371,8 +458,14 @@ private fun Leaderboard(state: ScalperState) {
         Text(ScalperResults.leaderLine(state), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
         board.forEach { r ->
             Row(
-                Modifier.fillMaxWidth().testTag("ARENA_ROW_${r.strategy.name}"),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Modifier
+                    .fillMaxWidth()
+                    .background(if (r.strategy == selected) colors.surfaceAlt else Color.Transparent, RoundedCornerShape(8.dp))
+                    .clickable { onSelect(r.strategy) }
+                    .padding(vertical = 2.dp)
+                    .testTag("ARENA_ROW_${r.strategy.name}"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text("#${r.rank}", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, modifier = Modifier.width(30.dp))
                 Column(Modifier.weight(1f)) {
@@ -385,6 +478,7 @@ private fun Leaderboard(state: ScalperState) {
                     Text(detail, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                     Text(r.verdict, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
                 }
+                Sparkline(curves[r.strategy])
                 Text(
                     if (r.stats.closed == 0) "–" else ScalperResults.money(r.stats.pnlUsd),
                     style = MaterialTheme.typography.bodyMedium,
@@ -449,47 +543,5 @@ private fun TradeRow(t: ScalpTrade) {
             fontWeight = FontWeight.SemiBold,
             color = pnlColor(t.pnlUsd)
         )
-    }
-}
-
-/** Bankroll line with the starting bankroll as a dashed reference. Time runs left to right, evenly by clock time. */
-@Composable
-private fun BankrollChart(points: List<CurvePoint>) {
-    val colors = DipTheme.colors
-    val start = ScalperResults.START_BANKROLL_USD
-    val lo = minOf(points.minOf { it.pnlUsd }, start)
-    val hi = maxOf(points.maxOf { it.pnlUsd }, start)
-    val pad = ((hi - lo) * 0.08).coerceAtLeast(0.5)
-    val minY = lo - pad
-    val spanY = (hi + pad - minY).coerceAtLeast(1e-6)
-    val t0 = points.first().tMs
-    val spanT = (points.last().tMs - t0).coerceAtLeast(1L)
-    val line = if (points.last().pnlUsd >= start) colors.up else colors.down
-    val ref = colors.textSecondary
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("High ${ScalperResults.plainMoney(hi)}", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-            Text("Now ${ScalperResults.plainMoney(points.last().pnlUsd)}", style = MaterialTheme.typography.labelMedium, color = line)
-        }
-        Canvas(Modifier.fillMaxWidth().height(160.dp).padding(vertical = 4.dp).testTag("BANKROLL_CHART")) {
-            fun x(t: Long) = size.width * ((t - t0).toFloat() / spanT.toFloat())
-            fun y(v: Double) = size.height * (1f - ((v - minY) / spanY).toFloat()).coerceIn(0f, 1f)
-            drawLine(
-                ref.copy(alpha = 0.5f), Offset(0f, y(start)), Offset(size.width, y(start)), strokeWidth = 1.dp.toPx(),
-                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 8f))
-            )
-            val path = Path()
-            points.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p.tMs), y(p.pnlUsd)) else path.lineTo(x(p.tMs), y(p.pnlUsd)) }
-            drawPath(path, line, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
-            drawCircle(line, radius = 3.5.dp.toPx(), center = Offset(x(points.last().tMs), y(points.last().pnlUsd)))
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text("Low ${ScalperResults.plainMoney(lo)}", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-            Text("Dashed line: the ${ScalperResults.plainMoney(start)} start", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(ScalperResults.timeLabel(points.first().tMs), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-            Text(ScalperResults.timeLabel(points.last().tMs), style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        }
     }
 }
