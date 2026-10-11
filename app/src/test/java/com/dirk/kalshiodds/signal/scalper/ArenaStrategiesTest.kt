@@ -286,6 +286,11 @@ class ArenaStrategiesTest {
         assertEquals(3, interleaved.windows)
         assertEquals(2, interleaved.prevN)
         assertEquals(5, interleaved.windowCloses)
+        // ...and one settling three windows late still joins W1.
+        val late = interleaved.withWindowClose("W4", 1.0).withWindowClose("W1", 1.0)
+        assertEquals(4, late.windows)
+        assertEquals(listOf("W1"), late.oldTickers.drop(1))
+        assertEquals(3, late.oldN.last())
         // A record whose window sums miss some closes (written before them) keeps the trade-level test.
         assertEquals(ScalperResults.verdict(paired.copy(windows = 0)), ScalperResults.verdict(paired.copy(windowCloses = 10)))
         // Many windows of steady wins still read as a lead.
