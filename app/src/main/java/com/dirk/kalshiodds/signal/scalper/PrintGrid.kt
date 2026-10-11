@@ -108,6 +108,31 @@ class PrintGrid(val openMs: Long) {
     }
 
     /**
+     * The lowest mid of [side] in the [lowW] seconds ending at [s] (its latest second if tied), and the
+     * highest mid in the [w] seconds ending at [s] that came no later than that low: a drop measured
+     * high first, then low. Null when either has no quote.
+     */
+    fun highThenLow(side: String, s: Int, w: Int, lowW: Int): Pair<Double, Double>? {
+        val yes = isYes(side)
+        val top = minOf(s, SECONDS - 1)
+        var low = Double.NaN
+        var lowAt = -1
+        for (i in max(s - lowW + 1, 0)..top) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            if (low.isNaN() || m <= low) { low = m; lowAt = i }
+        }
+        if (lowAt < 0) return null
+        var high = Double.NaN
+        for (i in max(s - w + 1, 0)..lowAt) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            if (high.isNaN() || m > high) high = m
+        }
+        return if (high.isNaN()) null else high to low
+    }
+
+    /**
      * Contracts takers bought on [side] over the [w] seconds ending at [s]
      * (a taker buying NO is a print with taker side "no").
      */

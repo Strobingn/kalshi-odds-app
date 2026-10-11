@@ -123,7 +123,9 @@ object ScalperResults {
         if (n == 0) return "no trades yet"
         if (n < MIN_TRADES_FOR_VERDICT) return "$n of $MIN_TRADES_FOR_VERDICT trades needed to judge"
         val mean = s.pnlUsd / n
-        val se = if (s.windows > 0) {
+        // Clustered only when the window sums hold every close: a 1.9.0–1.9.1 record (same version, no
+        // window sums) would otherwise pair its whole-history mean with the few windows since the upgrade.
+        val se = if (s.windows > 0 && s.windowCloses == n) {
             val w = s.windows
             if (w < MIN_WINDOWS_FOR_VERDICT) return "$w of $MIN_WINDOWS_FOR_VERDICT market windows needed to judge"
             // Cluster-robust: Σ_w (S_w − n_w · mean)², with the window still collecting closes included.

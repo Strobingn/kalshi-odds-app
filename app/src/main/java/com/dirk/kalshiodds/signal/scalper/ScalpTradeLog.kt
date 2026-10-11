@@ -250,7 +250,9 @@ class ScalpTradeLog(
                     val target = File(to, f.name)
                     if (f.renameTo(target)) continue
                     val copied = runCatching { f.copyTo(target, overwrite = false).length() == f.length() }.getOrDefault(false)
-                    if (copied) f.delete() else all = false
+                    // Success means the live file is gone: a copy left beside an undeletable source
+                    // would still be read into the fresh record's charts and trade list.
+                    if (!(copied && f.delete())) all = false
                 }
                 all
             }.getOrDefault(false)

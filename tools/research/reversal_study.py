@@ -67,6 +67,8 @@ STAKE_USD = 5.0
 BUCKETS_BPS = (0.0, 5.0, 10.0, 20.0, 40.0, math.inf)
 RULE_MIN_BPS = 20.0
 ENTRY_AFTER_S = 60
+# How far past open + ENTRY_AFTER_S the entry candle may end (clock jitter, not a later minute).
+ENTRY_TOL_S = 5
 WINDOW_S = 900
 CONTIGUOUS_TOL_S = 5
 MIN_DAYS_FOR_OOS = 6
@@ -120,9 +122,13 @@ def window_from_market(m: dict, candles: list[dict]) -> Window | None:
     open_ts, close_ts = int(ot.timestamp()), int(ct.timestamp())
     bid = ask = None
     for c in sorted(candles, key=lambda c: c.get("end_period_ts") or 0):
-        if (c.get("end_period_ts") or 0) >= open_ts + ENTRY_AFTER_S:
-            b, a = te.candle_quote(c)
-            bid, ask = te.usable(b), te.usable(a)
+        ts = c.get("end_period_ts") or 0
+        if ts >= open_ts + ENTRY_AFTER_S:
+            # Only the preregistered one-minute candle: a later one (that minute had no candle) is a
+            # different entry, so the window has no quote rather than a 2- or 3-minute one.
+            if ts - (open_ts + ENTRY_AFTER_S) <= ENTRY_TOL_S:
+                b, a = te.candle_quote(c)
+                bid, ask = te.usable(b), te.usable(a)
             break
     return Window(m["ticker"], open_ts, close_ts, strike, _num(m.get("expiration_value")), res, bid, ask)
 

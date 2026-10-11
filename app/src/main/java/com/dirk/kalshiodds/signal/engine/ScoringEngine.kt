@@ -677,6 +677,8 @@ class ScoringEngine(
         // A model that weighs that move is not run on a made-up 0: the trainer almost always knew it.
         // Older models padded to the contract carry weight 0 there and run as before.
         val loaded = edgeModel?.takeUnless { prevWindowRet == null && it.weightOf("prev_window_return") != 0f }
+        // A configured model that was skipped is a failed gate, not a pass: no alert on the fallback fair.
+        if (edgeModel != null && loaded == null) modelEdgeQualified = false
         if (loaded != null) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
