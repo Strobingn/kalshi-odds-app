@@ -167,7 +167,7 @@ internal fun LiveWindowChart(window: LiveWindow?, markers: List<ArenaStats.Marke
 }
 
 @Composable
-private fun RingKey(color: Color) {
+internal fun RingKey(color: Color) {
     Canvas(Modifier.width(10.dp).height(10.dp)) {
         drawCircle(color, radius = size.minDimension / 2 - 1.dp.toPx(), style = Stroke(width = 2.dp.toPx()))
     }
@@ -228,7 +228,11 @@ internal fun HeatmapChart(
     tag: String,
     value: (ArenaStats.Cell) -> Double = { it.avgCents },
     valueText: (Double) -> String = { String.format(java.util.Locale.US, "%+.1f¢ a contract", it) },
-    minTrades: Int = 3
+    minTrades: Int = 3,
+    /** Fixed colour scale (e.g. 1.0 for a correlation); null scales to the biggest readable cell. */
+    scaleMax: Double? = null,
+    legend: List<String> = listOf("made money", "lost", "≈ 0"),
+    countNoun: String = "trade"
 ) {
     val colors = DipTheme.colors
     val ac = ArenaColors.current()
@@ -236,7 +240,7 @@ internal fun HeatmapChart(
         Muted("Fills in as trades close.")
         return
     }
-    val maxAbs = grid.cells.flatten().filterNotNull().filter { it.trades >= minTrades }
+    val maxAbs = scaleMax ?: grid.cells.flatten().filterNotNull().filter { it.trades >= minTrades }
         .maxOfOrNull { abs(value(it)) }?.takeIf { it > 1e-9 } ?: 1.0
     var tapped by remember(grid) { mutableStateOf<Pair<Int, Int>?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -247,7 +251,7 @@ internal fun HeatmapChart(
         } else {
             Readout(
                 valueText(value(cell)),
-                "${grid.rows[t.first].label} · ${columnLabel(t.second)} · ${cell.trades} trade${if (cell.trades == 1) "" else "s"} · ${ScalperResults.money(cell.netUsd)}"
+                "${grid.rows[t.first].label} · ${columnLabel(t.second)} · ${cell.trades} $countNoun${if (cell.trades == 1) "" else "s"} · ${ScalperResults.money(cell.netUsd)}"
             )
         }
         grid.rows.forEachIndexed { r, st ->
@@ -298,10 +302,10 @@ internal fun HeatmapChart(
             axisLabels.forEach { Muted(it) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            RectKey(ac.gain); Muted("made money")
-            RectKey(ac.loss); Muted("lost")
-            RectKey(ac.neutral); Muted("≈ 0")
-            RingKey(ac.muted); Muted("< $minTrades trades")
+            RectKey(ac.gain); Muted(legend[0])
+            RectKey(ac.loss); Muted(legend[1])
+            RectKey(ac.neutral); Muted(legend[2])
+            RingKey(ac.muted); Muted("< $minTrades ${countNoun}s")
         }
     }
 }

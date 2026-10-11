@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,6 +21,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -57,6 +59,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.signal.scalper.ArenaCharts
+import com.dirk.kalshiodds.signal.scalper.ArenaEdge
 import com.dirk.kalshiodds.signal.scalper.ArenaStats
 import com.dirk.kalshiodds.signal.scalper.LiveWindow
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
@@ -74,6 +77,9 @@ private const val PAGE = 200
 
 /** Closed trades the charts read (newest first from the trade file). */
 private const val CHART_TRADES = 3_000
+
+/** Trades in the rolling-edge average. */
+private const val ROLLING_TRADES = 30
 
 /**
  * "Scalper results": reads the paper scalper's record and its trade files.
@@ -166,6 +172,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
 enum class ArenaSection(val label: String) {
     OVERVIEW("Overview"),
     STRATEGIES("Strategies"),
+    EDGE("Edge"),
     TIMING("Timing"),
     TRADES("Trades")
 }
@@ -248,6 +255,13 @@ fun ScalperResultsScreen(
     val priceGrid = remember(chartTrades) { ArenaStats.priceBands(chartTrades) }
     val dayGrid = remember(chartTrades, today) { ArenaStats.daily(chartTrades, today) }
     val holdBuckets = remember(chartTrades, selected) { ArenaStats.holdBuckets(chartTrades, selected) }
+    val calBands = remember(chartTrades, selected) { ArenaEdge.calibration(chartTrades, selected) }
+    // The fan and the rolling line follow the selected strategy, or the leader when none is.
+    val edgeScope = selected ?: board.firstOrNull()?.strategy
+    val fan = remember(chartTrades, edgeScope) { edgeScope?.let { ArenaEdge.projection(chartTrades, it) } }
+    val rollingEdge = remember(chartTrades, edgeScope) { edgeScope?.let { ArenaEdge.rolling(chartTrades, it, ROLLING_TRADES) }.orEmpty() }
+    val minuteGrid = remember(chartTrades) { ArenaEdge.byMinute(chartTrades) }
+    val corrGrid = remember(chartTrades) { ArenaEdge.correlation(chartTrades) }
     Scaffold(
         containerColor = colors.bg,
         topBar = {
@@ -309,13 +323,16 @@ fun ScalperResultsScreen(
             }
             item(key = "sections") {
                 // One row of filters above everything they scope: the section, then the strategy you follow.
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     ArenaSection.values().forEach { sec ->
                         FilterChip(
                             selected = section == sec,
                             onClick = { sectionName = sec.name },
                             label = { Text(sec.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
-                            modifier = Modifier.weight(1f).testTag("SECTION_${sec.name}")
+                            modifier = Modifier.testTag("SECTION_${sec.name}")
                         )
                     }
                 }
@@ -410,7 +427,57 @@ fun ScalperResultsScreen(
                     }
                     item(key = "by_strategy") { Breakdown("By strategy", strategies) }
                 }
+                ArenaSection.EDGE -> {
+                    val scopeLabel = edgeScope?.label ?: "the leader"
+                    item(key = "chart_calibration") {
+                        ChartCard(
+                            "Is the price right?",
+                            "Trades held to the close, ${selected?.label ?: "all strategies"}: how often they won against what the price said they would.",
+                            "CHART_CALIBRATION"
+                        ) { CalibrationChart(calBands, selected?.label ?: "any strategy") }
+                    }
+                    item(key = "chart_fan") {
+                        ChartCard(
+                            "Skill or luck?",
+                            "$scopeLabel's own trades, reshuffled 400 times: where the next 200 could land.",
+                            "CHART_FAN"
+                        ) { ProjectionChart(fan, scopeLabel) }
+                    }
+                    item(key = "chart_rolling") {
+                        ChartCard(
+                            "Is the edge holding?",
+                            "$scopeLabel's average result per contract over its last $ROLLING_TRADES trades.",
+                            "CHART_ROLLING"
+                        ) { RollingEdgeChart(rollingEdge, ROLLING_TRADES, scopeLabel) }
+                    }
+                    item(key = "chart_corr") {
+                        ChartCard(
+                            "Who trades alike",
+                            "How the strategies' results move together, window by window. Blue = win and lose together, red = opposite.",
+                            "CHART_CORR"
+                        ) {
+                            HeatmapChart(
+                                corrGrid, { corrGrid.columns[it] },
+                                listOfNotNull(corrGrid.columns.firstOrNull(), corrGrid.columns.lastOrNull()), "CORR",
+                                valueText = { String.format(java.util.Locale.US, "r %+.2f", it) },
+                                minTrades = ArenaEdge.MIN_SHARED_WINDOWS,
+                                scaleMax = 1.0,
+                                legend = listOf("move together", "opposite", "unrelated"),
+                                countNoun = "shared window"
+                            )
+                        }
+                    }
+                }
                 ArenaSection.TIMING -> {
+                    item(key = "chart_minute") {
+                        ChartCard(
+                            "When in the window",
+                            "Average result per contract by the minute of the 15-minute window the entry filled.",
+                            "CHART_MINUTE"
+                        ) {
+                            HeatmapChart(minuteGrid, { "minute ${ArenaEdge.MINUTES[it]}" }, listOf("0", "7", "14"), "MINUTE")
+                        }
+                    }
                     item(key = "chart_day") {
                         ChartCard("Day by day", "Profit after fees per strategy per day, last 14 days (your clock).", "CHART_DAY") {
                             HeatmapChart(

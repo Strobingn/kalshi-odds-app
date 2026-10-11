@@ -19,6 +19,26 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.2 (claude/scalp-insights): an Edge section — is any of this skill?
+
+A fifth chip, **Edge**, asks the question the profit bars can't answer: is a strategy beating the market, or lucky?
+
+- *Is the price right?* For trades held to the close: how often they won against the price paid (the market's
+  own chance), by 10¢ band. The dashed diagonal is "won exactly as often as the price said", the short dash the
+  break-even after the entry fee, the whisker ±2 standard errors. Blue = clearly beat the price, red = clearly
+  lagged it, grey = can't tell yet (or under 5 trades).
+- *Skill or luck?* The strategy you follow (or the leader), its own trades reshuffled 400 times: where the next
+  200 could land (80% band and the middle path) and the share of paths that finish ahead. It says what the
+  record implies, not what the future holds.
+- *Is the edge holding?* Its average ¢ a contract over the last 30 trades, through time; the line turns red
+  below zero.
+- *Who trades alike.* Correlation of each pair's net, window by window (at least 8 shared windows). Two
+  "winners" that move together are one bet, not two.
+- **Timing** gains *When in the window*: strategy × minute of the 15-minute window the entry filled (0–14).
+
+The section chips now scroll sideways instead of squeezing. Numbers: `ArenaEdge` (`ArenaEdgeTest`); drawing:
+`ui/ArenaEdgeViews.kt`. Paper only.
+
 ## 1.9.1 (claude/scalp-insights): more scalping charts and data, in four sections
 
 The Arena tab now has one row of section chips (**Overview · Strategies · Timing · Trades**) under the headline,

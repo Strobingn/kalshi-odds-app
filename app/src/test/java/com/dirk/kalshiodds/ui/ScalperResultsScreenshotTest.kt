@@ -99,6 +99,15 @@ class ScalperResultsScreenshotTest {
     fun darkTimingDaysHoursHold() = snap("arena_dark_timing", true, 3, ArenaSection.TIMING)
 
     @Test
+    fun darkEdgeCalibrationAndFan() = snap("arena_dark_edge_calibration_fan", true, 3, ArenaSection.EDGE)
+
+    @Test
+    fun darkEdgeRollingAndCorrelation() = snap("arena_dark_edge_rolling_corr", true, 5, ArenaSection.EDGE)
+
+    @Test
+    fun lightEdgeCalibrationAndFan() = snap("arena_light_edge_calibration_fan", false, 3, ArenaSection.EDGE)
+
+    @Test
     fun darkTradesHistogram() = snap("arena_dark_trades_histogram", true, 3, ArenaSection.TRADES)
 
     @Test
@@ -171,12 +180,50 @@ class ScalperResultsScreenshotTest {
         return out
     }
 
+    /**
+     * 48 earlier windows with real tickers, every strategy trading each one:
+     * the scalps share a window factor (so the correlation map has structure)
+     * and the holds settle at $1 / $0 around their price (late favourites a
+     * little better than the price, long shots worse) for the calibration.
+     */
+    private fun edgeTrades(): List<ScalpTrade> {
+        val out = ArrayList<ScalpTrade>()
+        val rnd = java.util.Random(23)
+        val key = java.time.format.DateTimeFormatter.ofPattern("yyMMMddHHmm", java.util.Locale.US)
+        val et = java.time.ZoneId.of("America/New_York")
+        val strategies = ScalpStrategy.values()
+        for (w in 0 until 48) {
+            val close = liveOpen - 2 * 86_400_000L + w * 900_000L
+            val ticker = "KXBTC15M-" + key.format(java.time.Instant.ofEpochMilli(close).atZone(et)).uppercase(java.util.Locale.US) + "-00"
+            val open = close - 900_000L
+            val factor = rnd.nextGaussian()
+            strategies.forEachIndexed { i, st ->
+                val filled = open + (30 + rnd.nextInt(800)) * 1000L
+                if (st.hold) {
+                    val entry = Math.round((st.entryMin + rnd.nextDouble() * (st.entryMax - st.entryMin)) * 100) / 100.0
+                    val bias = when (st) {
+                        ScalpStrategy.LATE_FAVORITE -> 0.07
+                        ScalpStrategy.LONG_SHOT -> -0.08
+                        else -> 0.0
+                    }
+                    val exit = if (rnd.nextDouble() < entry + bias) 1.0 else 0.0
+                    out += trade(st, ticker, "YES", entry, exit, filled, close, 40_000L + w * 100 + i, kind = "SETTLED")
+                } else {
+                    val loading = if (i % 3 == 0) -1.0 else 1.0
+                    val cents = (loading * 2 * factor + rnd.nextGaussian() * 2 + (if (i % 4 == 0) 0.6 else -0.4)).toInt()
+                    out += trade(st, ticker, "YES", 0.5, 0.5 + cents / 100.0, filled, filled + 40_000L, 40_000L + w * 100 + i)
+                }
+            }
+        }
+        return out
+    }
+
     private fun snap(name: String, dark: Boolean, firstItem: Int, section: ArenaSection = ArenaSection.OVERVIEW) {
         val (state, trades) = fixture()
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
                 ScalperResultsScreen(
-                    state = state, trades = trades.take(40), onBack = {}, chartTrades = trades + extraTrades(),
+                    state = state, trades = trades.take(40), onBack = {}, chartTrades = trades + extraTrades() + edgeTrades(),
                     listState = androidx.compose.foundation.lazy.LazyListState(firstVisibleItemIndex = firstItem),
                     live = liveWindow(),
                     initialSection = section,

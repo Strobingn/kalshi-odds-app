@@ -104,7 +104,7 @@ object ArenaStats {
         val isEmpty: Boolean get() = cells.all { r -> r.all { it == null } }
     }
 
-    private fun grid(
+    internal fun grid(
         trades: List<ScalpTrade>,
         columns: List<String>,
         column: (ScalpTrade) -> Int?
