@@ -676,9 +676,10 @@ def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | 
         print(f"=== {series}", flush=True)
         markets = fetch_settled(series, days, per)
         print(f"  settled {len(markets)}", flush=True)
+        # A listing failure raises, so an empty one is complete: its cached markets left the window.
+        listed_series.add(series)
         if not markets:
             continue
-        listed_series.add(series)
         listed.update(m["ticker"] for m in markets)
         reused = [m for m in markets if m["ticker"] in done_before]
         for m in reused:

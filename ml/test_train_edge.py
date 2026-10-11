@@ -498,6 +498,25 @@ class ResumableCollectTest(unittest.TestCase):
         # Missing the last minutes before open: the window's end is unknown.
         self.assertIsNone(te.prev_window_bounds([r for r in dense if r[0] < open_ts - 300], open_ts))
 
+    def test_an_empty_listing_prunes_its_series(self) -> None:
+        old = [{"ticker": "KXBTC15M-T0", "close_time": "2026-09-01T00:15:00Z",
+                "open_time": "2026-09-01T00:00:00Z", "result": "yes"}]
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            _, fakes = self._fake(old)
+            saved = self._patched(fakes)
+            try:
+                te.collect(30, workers=1, progress=prog)
+                self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T0"])
+                _, fakes2 = self._fake([])  # the series has nothing settled in the window any more
+                self._patched(fakes2)
+                rows = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(rows, [])
+            self.assertEqual(te.load_progress(prog), {})
+
     def test_truncated_progress_line_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             prog = Path(td) / "progress.jsonl"
