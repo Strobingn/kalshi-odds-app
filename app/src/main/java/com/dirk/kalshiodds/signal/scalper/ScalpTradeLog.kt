@@ -143,28 +143,35 @@ class ScalpTradeLog(
         runCatching { io.execute { flushNow() } }
     }
 
-    /** Write what is queued, on this thread (export, reset, tests). */
-    fun flushNow() {
+    /**
+     * Write what is queued, on this thread (export, reset, tests). True when everything queued reached the
+     * disk; on a failed write the rows not yet written go back on the queue (none are lost) and it is false.
+     */
+    fun flushNow(): Boolean {
         val trades: List<ScalpTrade>
         val orders: List<Pair<Long, String>>
         synchronized(lock) {
-            if (pendingTrades.isEmpty() && pendingOrders.isEmpty()) return
+            if (pendingTrades.isEmpty() && pendingOrders.isEmpty()) return true
             trades = pendingTrades
             orders = pendingOrders
             pendingTrades = ArrayList()
             pendingOrders = ArrayList()
         }
         synchronized(fileLock) {
-            runCatching {
+            // One day file at a time; a day is only dropped from these once its rows are written.
+            val tradeDays = LinkedHashMap(trades.groupBy { utcDay(it.closedAtMs) })
+            val orderDays = LinkedHashMap(orders.groupBy { utcDay(it.first) })
+            val ok = runCatching {
                 dir.mkdirs()
-                for ((day, rows) in trades.groupBy { utcDay(it.closedAtMs) }) {
+                for ((day, rows) in tradeDays.entries.toList()) {
                     val f = File(dir, tradeFile(day))
                     val sb = StringBuilder(rows.size * 140)
                     if (!f.exists() || f.length() == 0L) sb.append(ScalpTrade.HEADER).append('\n')
                     for (r in rows) sb.append(r.toCsv()).append('\n')
                     f.appendText(sb.toString(), Charsets.UTF_8)
+                    tradeDays.remove(day)
                 }
-                for ((day, rows) in orders.groupBy { utcDay(it.first) }) {
+                for ((day, rows) in orderDays.entries.toList()) {
                     val f = File(dir, orderFile(day))
                     val sb = StringBuilder(rows.size * 260)
                     if (!f.exists() || f.length() == 0L) sb.append(ORDER_HEADER).append('\n')
@@ -172,10 +179,19 @@ class ScalpTradeLog(
                     GZIPOutputStream(BufferedOutputStream(FileOutputStream(f, true))).use {
                         it.write(sb.toString().toByteArray(Charsets.UTF_8))
                     }
+                    orderDays.remove(day)
                 }
-                enforceCapLocked()
+            }.isSuccess
+            if (!ok) {
+                synchronized(lock) {
+                    pendingTrades.addAll(0, tradeDays.values.flatten())
+                    pendingOrders.addAll(0, orderDays.values.flatten())
+                }
+                return false
             }
+            runCatching { enforceCapLocked() }
         }
+        return true
     }
 
     /** UTC days that have a trade file, oldest first. */
@@ -237,7 +253,8 @@ class ScalpTradeLog(
      * stays where it is. True only when every live file is in the archive (or there was none).
      */
     fun archive(nowMs: Long = System.currentTimeMillis()): Boolean {
-        flushNow()
+        // Rows still queued must reach the files first, or a reset would drop them with the old record.
+        if (!flushNow()) return false
         synchronized(fileLock) {
             cacheKey = null
             return runCatching {

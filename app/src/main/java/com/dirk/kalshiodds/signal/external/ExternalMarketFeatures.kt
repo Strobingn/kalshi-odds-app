@@ -138,13 +138,15 @@ class ExternalMarketClient(
         val funding = getJsonObject("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=$symbol")
             ?.optString("lastFundingRate")
             ?.toDoubleOrNull()
+        // The model's σ comes from Coinbase, the exchange the trainer reads, even when Binance answered.
+        val trainerVol = runCatching { coinbaseCloses(asset)?.let { trainerVolOf(it) } }.getOrNull()
         return AssetSpotFeatures(
             asset = asset.uppercase(),
             spotReturn1m = ret1,
             spotReturn5m = ret5,
             realizedVol15m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
-            trainerVol1m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
-            trainerVolAtMs = now,
+            trainerVol1m = trainerVol,
+            trainerVolAtMs = if (trainerVol != null) now else 0L,
             fundingRate = funding,
             lastPrice = last,
             source = "binance",
@@ -161,18 +163,7 @@ class ExternalMarketClient(
         }
         val ticker = getJsonObject("https://api.exchange.coinbase.com/products/$product/ticker")
         val last = ticker?.optString("price")?.toDoubleOrNull()
-        val candles = getJsonArray(
-            "https://api.exchange.coinbase.com/products/$product/candles?granularity=60"
-        )
-        val closes = mutableListOf<Double>()
-        if (candles != null) {
-            // Coinbase returns newest-first: [time, low, high, open, close, volume]
-            for (i in 0 until minOf(candles.length(), REST_BARS)) {
-                val row = candles.optJSONArray(i) ?: continue
-                row.optDouble(4).takeIf { !it.isNaN() }?.let { closes.add(it) }
-            }
-            closes.reverse()
-        }
+        val closes = coinbaseCloses(asset).orEmpty()
         if (closes.size < 3 && last == null) return null
         val px = closes.lastOrNull() ?: last ?: return null
         val series = if (closes.size >= 3) closes else listOf(px)
@@ -187,14 +178,37 @@ class ExternalMarketClient(
             spotReturn1m = ret1,
             spotReturn5m = ret5,
             realizedVol15m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
-            trainerVol1m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
-            trainerVolAtMs = now,
+            trainerVol1m = if (closes.size >= 3) trainerVolOf(closes) else null,
+            trainerVolAtMs = if (closes.size >= 3) now else 0L,
             fundingRate = null,
             lastPrice = px,
             source = "coinbase",
             fetchedAtMs = now
         )
     }
+
+    /** Coinbase 1-minute closes, oldest first (the last one still forming), or null. */
+    private fun coinbaseCloses(asset: String): List<Double>? {
+        val product = when (asset.uppercase()) {
+            "BTC" -> "BTC-USD"
+            "ETH" -> "ETH-USD"
+            "SOL" -> "SOL-USD"
+            else -> return null
+        }
+        val candles = getJsonArray("https://api.exchange.coinbase.com/products/$product/candles?granularity=60") ?: return null
+        val closes = mutableListOf<Double>()
+        // Coinbase returns newest-first: [time, low, high, open, close, volume]
+        for (i in 0 until minOf(candles.length(), REST_BARS)) {
+            val row = candles.optJSONArray(i) ?: continue
+            row.optDouble(4).takeIf { !it.isNaN() }?.let { closes.add(it) }
+        }
+        closes.reverse()
+        return closes
+    }
+
+    /** The trainer's σ from Coinbase closes: the finished bars only, the last VOL_BARS of them. */
+    private fun trainerVolOf(closes: List<Double>): Double? =
+        realizedVol((if (closes.size > VOL_BARS) closes.dropLast(1) else closes).takeLast(VOL_BARS))
 
     /**
      * EWMA sigma over 1-minute log returns (lambda = 0.86, up to ~64 bars).
