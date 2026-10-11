@@ -55,7 +55,7 @@ class AppIdentityTest {
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("versionCode = 69"))
-        assertTrue(gradle.contains("versionName = \"0.3.53\""))
+        assertTrue(gradle.contains("versionName = \"0.3.54\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
