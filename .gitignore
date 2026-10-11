@@ -67,3 +67,5 @@ tools/backtest/cache/
 tools/backtest/**/__pycache__/
 tools/backtest/**/*.pyc
 ml/__pycache__/
+__pycache__/
+*.pyc

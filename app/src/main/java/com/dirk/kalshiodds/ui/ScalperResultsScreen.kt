@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -69,10 +70,27 @@ private const val PAGE = 200
  * Read-only apart from the export; nothing here can place an order.
  */
 @Composable
-fun ScalperResultsRoute(onBack: () -> Unit) {
+fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) {
     val context = LocalContext.current
-    val store = remember { runCatching { KalshiOddsApp.from(context).container.scalperStore }.getOrNull() }
+    val container = remember { runCatching { KalshiOddsApp.from(context).container }.getOrNull() }
+    val store = container?.scalperStore
     val scope = rememberCoroutineScope()
+    val prefs = container?.preferences
+    val settings by produceState<com.dirk.kalshiodds.signal.config.SignalSettings?>(null, prefs) {
+        prefs?.settings?.collect { value = it }
+    }
+    val feed = arenaFeed(
+        settings,
+        turnOnArena = { scope.launch { prefs?.updateScalper(true) } },
+        turnOnLive = {
+            scope.launch {
+                prefs?.updateSubscribeTrades(true)
+                prefs?.updateLiveSignals(true)
+            }
+        },
+        turnOnTrades = { scope.launch { prefs?.updateSubscribeTrades(true) } },
+        openSettings = onOpenSettings
+    )
     var limit by rememberSaveable { mutableIntStateOf(PAGE) }
     var message by remember { mutableStateOf<String?>(null) }
     // The record changes many times a second while scalps close: read it once a second.
@@ -109,9 +127,44 @@ fun ScalperResultsRoute(onBack: () -> Unit) {
         trades = trades,
         onBack = onBack,
         onShowMore = { limit += PAGE },
-        onExport = { saveZip.launch("bitcoin-claude-scalper-data.zip") },
-        message = message
+        onExport = { saveZip.launch("strategy-arena-data.zip") },
+        message = message,
+        feed = feed
     )
+}
+
+/** Why the arena is not trading, and the one tap that fixes it. Null when the feed is on. */
+data class ArenaFeed(val message: String, val actionLabel: String, val action: () -> Unit)
+
+/**
+ * The arena trades only on the live Kalshi trade feed: Live signals on, a
+ * Kalshi API key saved (the WebSocket needs it; REST has no trade prints)
+ * and public trades subscribed. Pure apart from the callbacks.
+ */
+fun arenaFeed(
+    s: com.dirk.kalshiodds.signal.config.SignalSettings?,
+    turnOnArena: () -> Unit,
+    turnOnLive: () -> Unit,
+    turnOnTrades: () -> Unit,
+    openSettings: () -> Unit
+): ArenaFeed? = when {
+    s == null -> null
+    !s.scalperEnabled -> ArenaFeed(
+        "The arena is switched off, so none of the 15 strategies is running.", "Turn the arena on", turnOnArena
+    )
+    !s.liveSignalsEnabled -> ArenaFeed(
+        "Live signals are off, so the arena sees no trades and none of the 15 strategies is running.",
+        "Turn on Live signals", turnOnLive
+    )
+    !s.tradingCredentialsConfigured() -> ArenaFeed(
+        "The live trade feed needs your Kalshi API key (it signs the WebSocket; nothing here can order). " +
+            "Until a key is saved the arena runs nothing.",
+        "Add API key in Settings", openSettings
+    )
+    !s.subscribeTrades && !s.recordMarketData -> ArenaFeed(
+        "Public trades are not subscribed, so the arena sees no trades.", "Subscribe to trades", turnOnTrades
+    )
+    else -> null
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -119,11 +172,13 @@ fun ScalperResultsRoute(onBack: () -> Unit) {
 fun ScalperResultsScreen(
     state: ScalperState,
     trades: List<ScalpTrade>,
-    onBack: () -> Unit,
+    /** Null when the screen is a bottom tab: no back arrow. */
+    onBack: (() -> Unit)?,
     onShowMore: () -> Unit = {},
     onExport: () -> Unit = {},
     message: String? = null,
-    listState: LazyListState = rememberLazyListState()
+    listState: LazyListState = rememberLazyListState(),
+    feed: ArenaFeed? = null
 ) {
     val colors = DipTheme.colors
     val h = ScalperResults.headline(state)
@@ -135,10 +190,12 @@ fun ScalperResultsScreen(
         containerColor = colors.bg,
         topBar = {
             TopAppBar(
-                title = { Text("Scalper results · paper") },
+                title = { Text("Strategy arena · paper") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (onBack != null) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -155,6 +212,17 @@ fun ScalperResultsScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            if (feed != null) {
+                item(key = "feed") {
+                    Panel {
+                        Text("Not running", style = MaterialTheme.typography.labelMedium, color = colors.accentOrange, fontWeight = FontWeight.Bold)
+                        Text(feed.message, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                        OutlinedButton(onClick = feed.action, modifier = Modifier.fillMaxWidth().height(48.dp).testTag("ARENA_FIX")) {
+                            Text(feed.actionLabel)
+                        }
+                    }
+                }
+            }
             item(key = "headline") {
                 Panel {
                     Text("Profit or loss after fees", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -166,7 +234,7 @@ fun ScalperResultsScreen(
                     )
                     Text(
                         if (h.closed == 0) {
-                            "No scalps closed yet. Paper only: turn Live signals on and leave the app running."
+                            "No trades closed yet. Paper only: with Live signals on, leave the app running."
                         } else {
                             "Paper bankroll ${ScalperResults.plainMoney(h.bankrollUsd)} " +
                                 "(started at ${ScalperResults.plainMoney(ScalperResults.START_BANKROLL_USD)}) · " +
@@ -177,6 +245,7 @@ fun ScalperResultsScreen(
                     )
                 }
             }
+            item(key = "leaderboard") { Leaderboard(state) }
             item(key = "stats") {
                 Panel {
                     StatPair("Dollars won", ScalperResults.plainMoney(h.wonUsd), colors.up, "Dollars lost", ScalperResults.plainMoney(h.lostUsd), colors.down)
@@ -289,6 +358,47 @@ private fun Stat(label: String, value: String, color: Color, modifier: Modifier)
     Column(modifier) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = color)
+    }
+}
+
+/** All 15 strategies ranked by paper profit after fees, with whether each result is more than luck. */
+@Composable
+private fun Leaderboard(state: ScalperState) {
+    val colors = DipTheme.colors
+    val board = ScalperResults.leaderboard(state)
+    Panel {
+        Text("Leaderboard · 15 strategies · same market, same fees", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(ScalperResults.leaderLine(state), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+        board.forEach { r ->
+            Row(
+                Modifier.fillMaxWidth().testTag("ARENA_ROW_${r.strategy.name}"),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("#${r.rank}", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary, modifier = Modifier.width(30.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(r.strategy.label, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                    val detail = if (r.stats.closed == 0) {
+                        "waiting for its signal · from ${r.strategy.origin}"
+                    } else {
+                        ScalperResults.rowDetail(r.stats) + " · from ${r.strategy.origin}"
+                    }
+                    Text(detail, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                    Text(r.verdict, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                }
+                Text(
+                    if (r.stats.closed == 0) "–" else ScalperResults.money(r.stats.pnlUsd),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = pnlColor(r.stats.pnlUsd)
+                )
+            }
+        }
+        Text(
+            "Paper only, 10 contracts an order. \"Hold\" strategies count once their window settles. " +
+                "A lead over a few dozen trades is usually luck; the verdict line says when it is not.",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
     }
 }
 

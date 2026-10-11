@@ -26,21 +26,26 @@ enum class ExitKind { TARGET, STOP, TIMEOUT, SETTLED }
 
 /**
  * The paper scalper's strategies. They all run at once, each with its own
- * positions and its own line on the scoreboard.
+ * positions and its own line on the scoreboard, so the scoreboard is a
+ * tournament: same live market, same fills, same fees, one row each.
  *
- * Every scalp exits the same way: a resting offer [targetDollars] above the
- * entry (no fee), or a sale at the bid with the taker fee when the bid falls
- * [stopDollars] below the entry or [timeoutMs] passes.
+ * Scalps exit the same way: a resting offer [targetDollars] above the entry
+ * (no fee), or a sale at the bid with the taker fee when the bid falls
+ * [stopDollars] below the entry or [timeoutMs] passes. [hold] strategies
+ * have no exit: they ride to the settlement ($1 or $0).
  *
  * [taker] strategies buy at the ask the moment the signal fires and pay the
- * fee; the others rest a bid and wait up to 20 s for it to fill.
+ * fee; the others rest a bid and wait up to 20 s for it to fill. Entries
+ * are taken only between [entryMin] and [entryMax] (the side's price).
  *
  * [historyCents] is what one filled scalp made, in cents per contract, on
  * seven days of recorded order books (2026-10-03 → 10-09, 577 windows,
  * `tools/research/scalp/rec_g.py`): the real size displayed ahead of every
- * resting order had to trade or leave before it filled. The earlier figures
- * (22 days of trade prints, "front of the queue") assumed a place in line no
- * new order gets. A fact about the past, shown on the card; it gates nothing.
+ * resting order had to trade or leave before it filled. Null for the eight
+ * strategies added in 1.9.0, which have no history on this engine yet.
+ * A fact about the past, shown on the card; it gates nothing.
+ *
+ * [origin] is where the idea came from (another branch's app or study).
  */
 enum class ScalpStrategy(
     val label: String,
@@ -52,7 +57,11 @@ enum class ScalpStrategy(
     val cadenceSeconds: Int,
     /** Positions this strategy may have working at once, per side, per window. */
     val maxPerSide: Int,
-    val historyCents: Double
+    val historyCents: Double?,
+    val hold: Boolean = false,
+    val entryMin: Double = PrintGrid.MIN_PRICE,
+    val entryMax: Double = PrintGrid.MAX_PRICE,
+    val origin: String = "Claude"
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -69,7 +78,67 @@ enum class ScalpStrategy(
     /** Same three signals with a resting bid instead of paying the ask. */
     DIP_HUNTER_REST("Dip-hunter · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.44),
     MOMENTUM_SNIPER_REST("Momentum-sniper · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.20),
-    EXTREME_REVERSION_REST("Extreme reversion · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.44);
+    EXTREME_REVERSION_REST("Extreme reversion · resting", false, 0.01, 0.04, 30_000L, 2, 6, -2.44),
+
+    /**
+     * Bounce (codex/bitcoin-edge-limit-orders `ScalpEngine`): the side fell
+     * [BOUNCE_DROP_DOLLARS] or more from its 60 s high and has come back
+     * [BOUNCE_REBOUND_DOLLARS] off its 60 s low, spread at most 2¢. Buy now,
+     * +8¢ / −6¢ like the original (no fair-value check here).
+     */
+    BOUNCE("Bounce · buy now", true, 0.08, 0.06, 120_000L, 2, 1, null, origin = "codex"),
+
+    /** 50¢ breakout (grok-bitcoin `breakout_50`): the side crossed up through 50¢ in the last 10 s. */
+    BREAKOUT_50("50¢ breakout · buy now", true, 0.05, 0.03, 90_000L, 2, 1, null, origin = "grok"),
+
+    /**
+     * One cent better (grok-bitcoin `CentBetter`): when the spread is 2¢ or
+     * wider, rest a bid 1¢ above the best bid, minutes 3–13. Out at +2¢.
+     */
+    IMPROVE_1C("1¢ better · resting", false, 0.02, 0.04, 60_000L, 5, 2, null, origin = "grok"),
+
+    /**
+     * Flow fade (grok-bitcoin `FlowFade`): takers bought the other side 3:1
+     * ([FLOW_RATIO]) with at least [FLOW_MIN_CONTRACTS] contracts in 30 s.
+     * Rest a bid on this side, held to the settlement like the original.
+     */
+    FLOW_FADE("Flow fade · resting, hold", false, 0.0, 0.0, 0L, 5, 1, null, hold = true, origin = "grok"),
+
+    /**
+     * Late favorite (grok-bitcoin `LateFavoriteRule`, kashi D3): minutes
+     * 10–13, the side costs 80–95¢. Buy now, hold to the settlement.
+     */
+    LATE_FAVORITE(
+        "Late favorite · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
+        hold = true, entryMin = 0.80, entryMax = 0.95, origin = "grok / kashi"
+    ),
+
+    /**
+     * Early favorite (the price form of the Clear lead rule, 1.8.2): minutes
+     * 3–10, the side costs 65–85¢. Buy now, hold to the settlement.
+     */
+    EARLY_FAVORITE(
+        "Early favorite · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
+        hold = true, entryMin = 0.65, entryMax = 0.85, origin = "Claude clear lead"
+    ),
+
+    /**
+     * Momentum ride (kashi forecast ride, swarm): the side rose 4¢ or more in
+     * 30 s, minutes 5–13, 50–85¢. Buy now, hold to the settlement.
+     */
+    MOMENTUM_HOLD(
+        "Momentum ride · buy, hold", true, 0.0, 0.0, 0L, 5, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.85, origin = "kashi / swarm"
+    ),
+
+    /**
+     * Long shot (the app's HUNTER_VALUE ticket, grok `penny_press`): minutes
+     * 5–13, the side costs 10–20¢. Buy now, hold to the settlement.
+     */
+    LONG_SHOT(
+        "Long shot · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
+        hold = true, entryMin = 0.10, entryMax = 0.20, origin = "app / grok"
+    );
 
     companion object {
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
@@ -77,6 +146,20 @@ enum class ScalpStrategy(
 
         /** Price fall over 30 s that extreme reversion reacts to. */
         const val EXTREME_MOVE_DOLLARS = 0.06
+
+        /** Bounce: fall from the 60 s high, and the climb back off the 60 s low. */
+        const val BOUNCE_DROP_DOLLARS = 0.05
+        const val BOUNCE_REBOUND_DOLLARS = 0.01
+
+        /** Flow fade: taker contracts bought on the other side over 30 s, and their ratio to this side's. */
+        const val FLOW_MIN_CONTRACTS = 500.0
+        const val FLOW_RATIO = 3.0
+
+        /** Momentum ride: rise over 30 s. */
+        const val RIDE_MOVE_DOLLARS = 0.04
+
+        /** Spread limit for the bounce and the breakout, and the minimum spread for 1¢ better. */
+        const val TIGHT_SPREAD_DOLLARS = 0.02
     }
 }
 
@@ -236,7 +319,7 @@ class ScalperEngine(val config: Config = Config()) {
         context: ScalpContext? = null
     ): ScalpEvent.Posted? {
         require(!strategy.taker) { "${strategy.name} buys at the ask: use buyNow" }
-        if (!price.isFinite() || price < config.minPrice - EPS || price > config.maxPrice + EPS) return null
+        if (!inBand(strategy, price)) return null
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
         if (workingFor(strategy, ticker, want) >= strategy.maxPerSide) return null
         val known = queueAhead != null && queueAhead.isFinite() && queueAhead >= 0.0
@@ -274,7 +357,7 @@ class ScalperEngine(val config: Config = Config()) {
         context: ScalpContext? = null
     ): List<ScalpEvent> {
         require(strategy.taker) { "${strategy.name} rests a bid: use post" }
-        if (!askPrice.isFinite() || askPrice < config.minPrice - EPS || askPrice > config.maxPrice + EPS) return emptyList()
+        if (!inBand(strategy, askPrice)) return emptyList()
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
         if (workingFor(strategy, ticker, want) >= strategy.maxPerSide) return emptyList()
         val price = round4(askPrice)
@@ -343,6 +426,8 @@ class ScalperEngine(val config: Config = Config()) {
                     events += ScalpEvent.Filled(o, nowMs)
                 }
             } else {
+                // A hold has no offer: it waits for the settlement.
+                if (o.strategy.hold) continue
                 // Our offer is lifted by takers buying our side.
                 if (takerYes != yes) continue
                 val through = sidePrice > w.exitPrice + TICK_EPS
@@ -377,6 +462,7 @@ class ScalperEngine(val config: Config = Config()) {
                 }
                 continue
             }
+            if (o.strategy.hold) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
             val stopped = bid <= o.price - o.strategy.stopDollars + EPS
@@ -424,6 +510,19 @@ class ScalperEngine(val config: Config = Config()) {
 
     fun clear() {
         byTicker.clear()
+    }
+
+    /**
+     * The original 7 trade 10–90¢ ([Config.minPrice] / [Config.maxPrice]);
+     * a strategy with its own band ([ScalpStrategy.entryMin] /
+     * [ScalpStrategy.entryMax]) trades inside that band only.
+     */
+    private fun inBand(strategy: ScalpStrategy, price: Double): Boolean {
+        if (!price.isFinite()) return false
+        val ownBand = strategy.entryMin != PrintGrid.MIN_PRICE || strategy.entryMax != PrintGrid.MAX_PRICE
+        val lo = if (ownBand) strategy.entryMin else config.minPrice
+        val hi = if (ownBand) strategy.entryMax else config.maxPrice
+        return price >= lo - EPS && price <= hi + EPS
     }
 
     private fun close(w: Working, exitPrice: Double, kind: ExitKind, feeUsd: Double, nowMs: Long): ClosedScalp {

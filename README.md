@@ -19,6 +19,50 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.0-arena (claude/strategy-arena): Strategy Arena, 15 strategies at once, paper only
+
+A separate app, **Strategy Arena** (`com.dirk.kalshiodds.arena`), so it installs next to Claude Bitcoin and Mis
+Bitcoin. It is the Claude 1.8.8 build plus:
+
+- **Arena tab** in the bottom bar (second from the left). It holds a leaderboard of all 15 strategies, best paper
+  P&L after fees on top, each with a verdict: *N of 30 trades needed*, *within luck: no winner yet*, *ahead by
+  more than luck so far* or *losing by more than luck*. Below it: the totals, the bankroll chart, the breakdowns
+  and every trade. The Home card **Strategy arena · 15 at once** opens the same screen.
+- **Not running?** The tab says why and fixes it in one tap: the arena needs **Live signals** on and a **Kalshi API
+  key** saved (the trade feed is the authenticated WebSocket; REST has no trade prints). Live signals is off by
+  default, which is why the 1.8.4–1.8.8 scalper showed nothing on a fresh install.
+- **Eight new strategies** next to the seven from 1.8.4, taken from the other branches' apps. They all run on the
+  same live window, the same real trade prints, the same conservative fills (resting orders wait for the queue
+  ahead) and the same taker fee, 10 contracts an order:
+
+| Strategy | From | Entry | Exit |
+|---|---|---|---|
+| Bounce · buy now | codex `ScalpEngine` | 5¢ fall from the 60 s high, first 1–3¢ back, spread ≤ 2¢ | +8¢ / −6¢ / 120 s |
+| 50¢ breakout · buy now | grok `breakout_50` | side crosses up through 50¢ within 10 s, spread ≤ 2¢ | +5¢ / −3¢ / 90 s |
+| 1¢ better · resting | grok `CentBetter` | spread ≥ 2¢, minute 3+, bid 1¢ above the best bid | +2¢ / −4¢ / 60 s |
+| Flow fade · resting, hold | grok `FlowFade` | takers bought the other side 3:1, ≥ 500 contracts in 30 s | settlement |
+| Late favorite · buy, hold | grok `LateFavoriteRule`, kashi D3 | minutes 10–13, 80–95¢ | settlement |
+| Early favorite · buy, hold | Claude clear lead (price form) | minutes 3–10, 65–85¢ | settlement |
+| Momentum ride · buy, hold | kashi forecast ride, swarm | +4¢ in 30 s, minute 5+, 50–85¢ | settlement |
+| Long shot · buy, hold | app HUNTER_VALUE, grok `penny_press` | minute 5+, 10–20¢ | settlement |
+
+**What the other branches show about money.** None of the 11 branches surveyed has a strategy with a positive,
+out-of-sample result after fees: every scalper backtest is negative (kashi long history: dip −4.44¢,
+momentum −4.77¢, extreme reversion −2.53¢ per contract over 38 weeks; swarm: 0 of 2,100 dip combos positive), the
+app's pick lost −3.3% on 1,451 bets, and the 15-scalper labs on grok-bitcoin and miss-bitcoin committed no results
+(miss-bitcoin's paper fills also charge no fee). The closest to break-even were the late favorite (+$0.059 a bet,
+99% CI [−0.017, +0.141]) and 1¢ better (+$41.73 on 17 fills), so both are in the arena. The arena is how to find out
+on live data; it cannot place an order.
+
+| Control | Code | Test |
+|---------|------|------|
+| 15 strategies, bands, holds | `ScalpStrategy`, `ScalperEngine.inBand`, `onTrade` / `onClock` skip holds | `ArenaStrategiesTest.holdStrategiesHaveNoExitAndRideToTheSettlement`, `eachStrategyTradesOnlyInsideItsOwnPriceBand` |
+| New signals | `PaperScalper.decide`, `PrintGrid.highMid` / `lowMid` / `takerBought` | `ArenaStrategiesTest.aFavoriteLateInTheWindow…`, `flowFade…`, `oneCentBetter…`, `aFiveCentDrop…` |
+| Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.fifteenStrategiesEachWithItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
+| Status panel | `arenaFeed` (ScalperResultsScreen.kt) | `ArenaStrategiesTest.theStatusPanelNamesWhatStopsTheArena` |
+| Arena tab | `AppRoutes.PRIMARY`, `DipApp` bottom bar | `ArenaStrategiesTest.theArenaIsABottomTab` |
+| Update channel | `AppUpdate.BRANCH = "claude-strategy-arena"` | `AppUpdateTest` |
+
 ## 1.8.8 (Claude branch): the app stops telling you to bet without a reason
 
 Reported with a screenshot: `BET UP BTC · $5 wins $2330.00 profit · closes in 1:11` with UP at 0.2¢ and

@@ -92,6 +92,30 @@ class PrintGrid(val openMs: Long) {
         return mid(yes, s) - mid(yes, s - lagSeconds)
     }
 
+    /** Highest / lowest mid of [side] over the [w] seconds ending at [s]; NaN when no second had a quote. */
+    fun highMid(side: String, s: Int, w: Int): Double = extremeMid(isYes(side), s, w, high = true)
+
+    fun lowMid(side: String, s: Int, w: Int): Double = extremeMid(isYes(side), s, w, high = false)
+
+    private fun extremeMid(yes: Boolean, s: Int, w: Int, high: Boolean): Double {
+        var out = Double.NaN
+        for (i in max(s - w + 1, 0)..minOf(s, SECONDS - 1)) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            if (out.isNaN() || (high && m > out) || (!high && m < out)) out = m
+        }
+        return out
+    }
+
+    /**
+     * Contracts takers bought on [side] over the [w] seconds ending at [s]
+     * (a taker buying NO is a print with taker side "no").
+     */
+    fun takerBought(side: String, s: Int, w: Int): Double {
+        if (s < 0) return 0.0
+        return sum(if (isYes(side)) volYes else volNo, minOf(s, SECONDS - 1), w)
+    }
+
     private fun lastWithin(arr: DoubleArray, s: Int): Double {
         if (s < 0) return Double.NaN
         val top = if (s >= SECONDS) SECONDS - 1 else s

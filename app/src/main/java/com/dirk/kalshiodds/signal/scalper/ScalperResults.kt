@@ -86,6 +86,58 @@ object ScalperResults {
             state.curve.map { CurvePoint(it.tMs, START_BANKROLL_USD + it.pnlUsd) }
     }
 
+    /** One strategy's place in the arena: 1 = most paper profit after fees. */
+    data class Standing(val rank: Int, val strategy: ScalpStrategy, val stats: ScalpStats, val verdict: String)
+
+    /** Fewer closed trades than this and the order of the board is mostly luck. */
+    const val MIN_TRADES_FOR_VERDICT = 30
+
+    /**
+     * All 15 strategies, best paper P&L first. Strategies that have closed a
+     * trade come first; the ones still waiting for their signal follow in
+     * their own order.
+     */
+    fun leaderboard(state: ScalperState): List<Standing> =
+        ScalpStrategy.values()
+            .map { it to state.stats(it.name) }
+            .sortedWith(
+                compareByDescending<Pair<ScalpStrategy, ScalpStats>> { it.second.closed > 0 }
+                    .thenByDescending { it.second.pnlUsd }
+                    .thenBy { it.first.ordinal }
+            )
+            .mapIndexed { i, (st, stats) -> Standing(i + 1, st, stats, verdict(stats)) }
+
+    /**
+     * Is the result more than luck? Mean dollars per trade against two
+     * standard errors. The spread of results is rebuilt from the won / lost
+     * totals (every win taken at the average win, every loss at the average
+     * loss), which understates it, so this is a generous test: a strategy
+     * that fails it is certainly not proven.
+     */
+    fun verdict(s: ScalpStats): String {
+        val n = s.closed
+        if (n == 0) return "no trades yet"
+        if (n < MIN_TRADES_FOR_VERDICT) return "$n of $MIN_TRADES_FOR_VERDICT trades needed to judge"
+        val mean = s.pnlUsd / n
+        val aw = s.avgWinUsd ?: 0.0
+        val al = s.avgLossUsd ?: 0.0
+        val second = (s.wins * aw * aw + s.losses * al * al) / n
+        val se = kotlin.math.sqrt(kotlin.math.max(second - mean * mean, 0.0) / n)
+        return when {
+            mean - 2.0 * se > 0.0 -> "ahead by more than luck so far"
+            mean + 2.0 * se < 0.0 -> "losing by more than luck"
+            else -> "within luck: no winner yet"
+        }
+    }
+
+    /** `Bounce · buy now leads: +$4.20 over 37 trades (within luck: no winner yet)`, or why there is no leader. */
+    fun leaderLine(state: ScalperState): String {
+        val top = leaderboard(state).firstOrNull { it.stats.closed > 0 }
+            ?: return "No strategy has closed a trade yet. Turn Live signals on and leave the app open."
+        return "${top.strategy.label} leads: ${money(top.stats.pnlUsd)} over ${top.stats.closed} " +
+            "trade${if (top.stats.closed == 1) "" else "s"} (${top.verdict})"
+    }
+
     fun coinName(code: String): String = when (code.uppercase(Locale.US)) {
         "BTC" -> "Bitcoin"
         "ETH" -> "Ethereum"

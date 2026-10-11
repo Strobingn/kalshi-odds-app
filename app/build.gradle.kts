@@ -11,13 +11,14 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Mis_bitcoin build: separate package so it installs next to
-        // the main DipHunter and Claude apps instead of replacing them.
-        applicationId = "com.dirk.kalshiodds.mis"
+        // Strategy Arena build (claude/strategy-arena): separate package so it
+        // installs next to the DipHunter, Claude and Mis Bitcoin apps instead of
+        // replacing them.
+        applicationId = "com.dirk.kalshiodds.arena"
         minSdk = 26
         targetSdk = 35
-        versionCode = 51
-        versionName = "1.8.8"
+        versionCode = 52
+        versionName = "1.9.0-arena"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(

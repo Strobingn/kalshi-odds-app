@@ -13,11 +13,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * In-app update check for the Mis_bitcoin-branch build.
+ * In-app update check for the Strategy Arena build (`claude/strategy-arena`).
  *
- * Every push to `Mis_bitcoin` runs the Build APK workflow, which publishes the
- * APK on a rolling GitHub prerelease tagged `v<versionName>-Mis_bitcoin` with an
- * asset named `MisBitcoin-v<versionName>-<branch>-<run number>.apk`. The build
+ * Every push to that branch runs the Build APK workflow, which publishes the
+ * APK on a rolling GitHub prerelease tagged `v<versionName>-claude-strategy-arena`
+ * (the branch name with `/` replaced by `-`) with an asset named
+ * `StrategyArena-v<versionName>-<branch>-<run number>.apk`. The build
  * stamps the same run number into [BuildConfig.CI_RUN_NUMBER], so "is there
  * a newer build?" is a comparison of run numbers. Every CI APK is signed
  * with the committed debug keystore, so the new one installs over this one
@@ -30,9 +31,10 @@ object AppUpdate {
 
     const val RELEASES_URL = "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases?per_page=30"
     const val RELEASES_PAGE = "https://github.com/Strobingn/kalshi-odds-app/releases"
-    const val BRANCH = "Mis_bitcoin"
+    const val BRANCH = "claude-strategy-arena"
 
-    private val TAG = Regex("""^v(\d+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?)-(.+)$""")
+    /** The version part of a tag: `1.9.0` or `1.9.0-arena`. */
+    private val VERSION = Regex("""^\d+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?$""")
     private val ASSET_RUN = Regex("""-(\d+)\.apk$""")
     private val BODY_RUN = Regex("""run #(\d+)""")
     private val BODY_CODE = Regex("""\((\d+)\)""")
@@ -74,8 +76,12 @@ object AppUpdate {
             val o = el as? JsonObject ?: return@mapNotNull null
             if (o.bool("draft") == true) return@mapNotNull null
             val tag = o.string("tag_name") ?: return@mapNotNull null
-            val m = TAG.matchEntire(tag) ?: return@mapNotNull null
-            if (m.groupValues[2] != branch) return@mapNotNull null
+            // `v<version>-<branch>`. Matched on the branch suffix, not split on a dash: branch names hold
+            // dashes (claude-strategy-arena) and so can versions (1.9.0-arena).
+            val suffix = "-$branch"
+            if (!tag.startsWith("v") || !tag.endsWith(suffix) || tag.length <= suffix.length + 1) return@mapNotNull null
+            val versionName = tag.substring(1, tag.length - suffix.length)
+            if (!VERSION.matches(versionName)) return@mapNotNull null
             val asset = (o["assets"] as? JsonArray)
                 ?.mapNotNull { it as? JsonObject }
                 ?.firstOrNull { it.string("name")?.endsWith(".apk", ignoreCase = true) == true }
@@ -86,7 +92,7 @@ object AppUpdate {
             val body = o.string("body").orEmpty()
             Release(
                 tag = tag,
-                versionName = m.groupValues[1],
+                versionName = versionName,
                 runNumber = ASSET_RUN.find(apkName)?.groupValues?.get(1)?.toIntOrNull()
                     ?: BODY_RUN.find(body)?.groupValues?.get(1)?.toIntOrNull()
                     ?: 0,

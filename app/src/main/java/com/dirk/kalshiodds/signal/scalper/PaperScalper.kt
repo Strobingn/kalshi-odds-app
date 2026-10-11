@@ -375,17 +375,23 @@ class PaperScalper(
         val events = ArrayList<ScalpEvent>()
         val top = topOfBook(ticker)
         for (side in SIDES) {
-            if (!grid.quotable(side, s)) continue
             val yes = side == "YES"
             val realBid = (if (yes) top?.yesBid else top?.noBid)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
             val realAsk = (if (yes) top?.yesAsk else top?.noAsk)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
             val realQty = (if (yes) top?.yesBidQty else top?.noBidQty)?.takeIf { it.isFinite() && it >= 0.0 }
             val bookOk = realBid != null && realAsk != null && realBid < realAsk
+            // The original scalpers need the prints to quote the side inside 10–90¢; the strategies with their
+            // own price band (the holds) only need a live bid below a live ask.
+            val scalpOk = grid.quotable(side, s)
             val bid = if (bookOk) realBid!! else grid.bid(side, s)
             val ask = if (bookOk) realAsk!! else grid.ask(side, s)
+            val fresh = bid.isFinite() && ask.isFinite() && bid < ask
+            if (!scalpOk && !fresh) continue
             val queue = if (bookOk) realQty else null
             val d10 = grid.move(side, s, 10)
             val d30 = grid.move(side, s, 30)
+            val spread = ask - bid
+            val mid = (bid + ask) / 2.0
             val askQty = if (bookOk) (if (yes) top?.yesAskQty else top?.noAskQty)?.takeIf { it.isFinite() && it >= 0.0 } else null
             // What this order saw, for the order log only.
             fun seen(x: FloatArray?) = ScalpContext(
@@ -393,6 +399,8 @@ class PaperScalper(
                 move10 = d10.takeIf { !it.isNaN() }, move30 = d30.takeIf { !it.isNaN() }, features = x
             )
             for (st in due) {
+                val ownBand = st.entryMin != PrintGrid.MIN_PRICE || st.entryMax != PrintGrid.MAX_PRICE
+                if (if (ownBand) !fresh else !scalpOk) continue
                 val fire = when (st) {
                     ScalpStrategy.ML_REST -> null
                     ScalpStrategy.DIP_HUNTER, ScalpStrategy.DIP_HUNTER_REST ->
@@ -401,6 +409,29 @@ class PaperScalper(
                         !d10.isNaN() && d10 >= ScalpStrategy.FAST_MOVE_DOLLARS - EPS
                     ScalpStrategy.EXTREME_REVERSION, ScalpStrategy.EXTREME_REVERSION_REST ->
                         !d30.isNaN() && d30 <= -ScalpStrategy.EXTREME_MOVE_DOLLARS + EPS
+                    ScalpStrategy.BOUNCE -> {
+                        // A fall of 5¢ from the minute's high to a low in the last 20 s, and the first 1–3¢ back up.
+                        val high = grid.highMid(side, s, 60)
+                        val low = grid.lowMid(side, s, 20)
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !high.isNaN() && !low.isNaN() &&
+                            high - low >= ScalpStrategy.BOUNCE_DROP_DOLLARS - EPS &&
+                            mid - low >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && mid - low <= 0.03 + EPS
+                    }
+                    ScalpStrategy.BREAKOUT_50 ->
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d10.isNaN() &&
+                            mid >= 0.50 - EPS && mid - d10 < 0.50 - EPS
+                    ScalpStrategy.IMPROVE_1C ->
+                        s >= 180 && spread >= ScalpStrategy.TIGHT_SPREAD_DOLLARS - EPS
+                    ScalpStrategy.FLOW_FADE -> {
+                        val other = grid.takerBought(if (yes) "NO" else "YES", s, 30)
+                        val mine = grid.takerBought(side, s, 30)
+                        other >= ScalpStrategy.FLOW_MIN_CONTRACTS && other >= ScalpStrategy.FLOW_RATIO * mine
+                    }
+                    ScalpStrategy.LATE_FAVORITE -> s >= 600
+                    ScalpStrategy.EARLY_FAVORITE -> s in 180 until 600
+                    ScalpStrategy.MOMENTUM_HOLD ->
+                        s >= 300 && !d30.isNaN() && d30 >= ScalpStrategy.RIDE_MOVE_DOLLARS - EPS
+                    ScalpStrategy.LONG_SHOT -> s >= 300
                 }
                 if (fire == null) {
                     val m = model ?: continue
@@ -415,7 +446,11 @@ class PaperScalper(
                             st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, seen(null)
                         )
                     } else {
-                        engine.post(st, ticker, side, bid, queue, 0.0, 0.0, nowMs, seen(null))?.let { events += it }
+                        // 1¢ better rests inside the spread, so nobody is ahead of it at its price.
+                        val improve = st == ScalpStrategy.IMPROVE_1C
+                        val px = if (improve) ScalperEngine.round4(bid + 0.01) else bid
+                        val q = if (improve) 0.0 else queue
+                        engine.post(st, ticker, side, px, q, 0.0, 0.0, nowMs, seen(null))?.let { events += it }
                     }
                 }
             }
@@ -498,16 +533,17 @@ data class ScalperSummary(
     val note: String
 ) {
     companion object {
-        const val TITLE = "Paper scalper · aggressive · PAPER ONLY"
+        const val TITLE = "Strategy arena · 15 at once · PAPER ONLY"
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"
         const val NOTE =
-            "Seven strategies at once on real trade prints, 10 contracts each, no caps. Resting orders fill only " +
-                "after the queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee. " +
-                "In brackets: what a filled scalp of that kind made per contract on 7 days of recorded order " +
-                "books, real queue counted. " +
-                "Needs Live signals on. Never sends an order."
+            "Fifteen strategies at once on the same live Bitcoin window and the same real trade prints, " +
+                "10 contracts an order, no caps; the best P&L is on top. Resting orders fill only after the " +
+                "queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee; " +
+                "\"hold\" strategies ride to the settlement. In brackets: what a filled scalp of that kind made " +
+                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0, " +
+                "no history yet). Needs Live signals on. Never sends an order."
 
         fun of(state: ScalperState, working: Pair<Int, Int> = 0 to 0): ScalperSummary {
             val all = state.stats(ScalperState.ALL)
@@ -521,7 +557,8 @@ data class ScalperSummary(
                         .thenBy { it.first.ordinal }
                 )
                 .map { (st, s) ->
-                    val hist = String.format(Locale.US, " [history %+.2f¢]", st.historyCents)
+                    val hist = st.historyCents?.let { String.format(Locale.US, " [history %+.2f¢]", it) }
+                        ?: " [new · ${st.origin}]"
                     if (s.closed == 0) {
                         "${st.label}: no scalps yet$hist"
                     } else {
