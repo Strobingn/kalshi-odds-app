@@ -149,6 +149,9 @@ data class EdgeModel(
         return o.toString()
     }
 
+    /** The weight on feature [name], 0 when the model does not have it. */
+    fun weightOf(name: String): Float = featureNames.indexOf(name).let { if (it < 0) 0f else weights[it] }
+
     companion object {
         const val KIND_LOGISTIC = "logistic"
         const val KIND_OFFSET_LOGISTIC = "offset_logistic"

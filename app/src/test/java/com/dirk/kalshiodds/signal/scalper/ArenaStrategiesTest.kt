@@ -187,14 +187,48 @@ class ArenaStrategiesTest {
             groups = mapOf(ScalpStrategy.DIP_HUNTER.name to ScalpStats(closed = 400, pnlUsd = 12.0)),
             version = 2
         )
-        val start = ScalperState.upgraded(old) { archived++ }
+        val start = ScalperState.upgraded(old) { archived++; true }
         assertEquals(1, archived)
         assertEquals(ScalperState.VERSION, start.version)
         assertEquals("everyone starts together", 0, start.stats(ScalpStrategy.DIP_HUNTER.name).closed)
         val current = ScalperState.fresh().copy(groups = mapOf(ScalperState.ALL to ScalpStats(closed = 3)))
-        assertEquals(current, ScalperState.upgraded(current) { archived++ })
-        assertEquals(ScalperState.fresh(), ScalperState.upgraded(null) { archived++ })
+        assertEquals(current, ScalperState.upgraded(current) { archived++; true })
+        assertEquals(ScalperState.fresh(), ScalperState.upgraded(null) { archived++; true })
         assertEquals("only the old record is archived", 1, archived)
+        // An archive that did not complete keeps the old record (and its totals) for the next start.
+        assertEquals(old, ScalperState.upgraded(old) { false })
+        assertEquals(old, ScalperState.upgraded(old) { error("disk full") })
+    }
+
+    @Test
+    fun aLeadFromAFewCorrelatedWindowsIsNotBeyondLuck() {
+        fun stats(windows: List<List<Double>>): ScalpStats {
+            var s = ScalpStats()
+            windows.forEachIndexed { w, pnls ->
+                for (p in pnls) {
+                    s = s.copy(
+                        closed = s.closed + 1, pnlUsd = s.pnlUsd + p, pnlSqUsd = s.pnlSqUsd + p * p,
+                        wins = s.wins + (if (p > 0) 1 else 0), losses = s.losses + (if (p < 0) 1 else 0),
+                        wonUsd = s.wonUsd + maxOf(p, 0.0), lostUsd = s.lostUsd + maxOf(-p, 0.0)
+                    ).withWindowClose("KXBTC15M-W$w", p)
+                }
+            }
+            return s
+        }
+        // 40 scalps in two windows: plenty of trades, two independent outcomes.
+        val two = stats(listOf(List(20) { 1.0 }, List(20) { 1.0 }))
+        assertEquals(2, two.windows)
+        assertEquals("2 of 10 market windows needed to judge", ScalperResults.verdict(two))
+        // 20 windows of 2 scalps that win or lose together: 14 up, 6 down.
+        val paired = stats(List(20) { w -> List(2) { if (w < 14) 1.0 else -1.0 } })
+        assertEquals(20, paired.windows)
+        assertEquals(40, paired.closed)
+        assertEquals("clustered by window it is within luck", "within luck: no winner yet", ScalperResults.verdict(paired))
+        // The same 40 results counted as independent trades would have been called a lead.
+        assertEquals("ahead by more than luck so far", ScalperResults.verdict(paired.copy(windows = 0)))
+        // Many windows of steady wins still read as a lead.
+        val steady = stats(List(30) { w -> List(2) { if (w % 10 == 0) -1.0 else 1.0 } })
+        assertEquals("ahead by more than luck so far", ScalperResults.verdict(steady))
     }
 
     @Test

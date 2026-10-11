@@ -181,7 +181,7 @@ class ScalperResultsTest {
         val names = ArrayList<String>()
         ZipInputStream(zipped.toByteArray().inputStream()).use { z -> while (true) names += (z.nextEntry ?: break).name }
         assertEquals(listOf("scalper/scalp_orders_1970-01-01.csv.gz", "scalper/scalps_1970-01-01.csv"), names)
-        log.archive(nowMs = 123L)
+        assertTrue("every file reached the archive", log.archive(nowMs = 123L))
         assertTrue("the list starts again", log.recent(10).isEmpty())
         assertTrue(File(dir, "archive/123/scalps_1970-01-01.csv").exists())
         assertEquals("archived files are still exported", 2, log.zip(ByteArrayOutputStream()))

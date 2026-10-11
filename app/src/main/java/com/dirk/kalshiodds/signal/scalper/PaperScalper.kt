@@ -34,8 +34,35 @@ data class ScalpStats(
     val biggestWinUsd: Double = 0.0,
     val biggestLossUsd: Double = 0.0,
     /** Sum of each closed scalp's net squared, for the luck test's spread. 0 in records from before 1.9.2. */
-    val pnlSqUsd: Double = 0.0
+    val pnlSqUsd: Double = 0.0,
+    /**
+     * Per-window sums for the luck test, which clusters by market window: scalps in one window share
+     * its outcome, so they are not independent. [windows] counts windows with a close; the
+     * `win*` sums cover finished windows, `cur*` the one still collecting closes.
+     */
+    val windows: Int = 0,
+    val winSqUsd: Double = 0.0,
+    val winCrossUsd: Double = 0.0,
+    val winN2: Double = 0.0,
+    val curTicker: String = "",
+    val curUsd: Double = 0.0,
+    val curN: Int = 0
 ) {
+    /** These totals with one more close on [ticker] folded into the per-window sums. */
+    fun withWindowClose(ticker: String, pnlUsd: Double): ScalpStats {
+        val same = curN > 0 && curTicker == ticker
+        val done = curN > 0 && !same
+        return copy(
+            windows = windows + (if (same) 0 else 1),
+            winSqUsd = winSqUsd + (if (done) curUsd * curUsd else 0.0),
+            winCrossUsd = winCrossUsd + (if (done) curUsd * curN else 0.0),
+            winN2 = winN2 + (if (done) curN.toDouble() * curN else 0.0),
+            curTicker = ticker,
+            curUsd = (if (same) curUsd else 0.0) + pnlUsd,
+            curN = (if (same) curN else 0) + 1
+        )
+    }
+
     val winRate: Double? get() = if (closed > 0) wins.toDouble() / closed else null
     val perScalpUsd: Double? get() = if (closed > 0) pnlUsd / closed else null
     val avgWinUsd: Double? get() = if (wins > 0) wonUsd / wins else null
@@ -100,16 +127,15 @@ data class ScalperState(
 
         /**
          * The record to start from: [saved] when it is in the current format; otherwise a fresh one,
-         * after [archive] has moved the old trade files aside (kept, never deleted), so the leaderboard,
-         * the charts and the trade list all begin together for every strategy.
+         * once [archive] has moved the old trade files aside (kept, never deleted), so the leaderboard,
+         * the charts and the trade list all begin together for every strategy. When the archive does
+         * not complete, [saved] is kept as it is (old version and all) and the next start tries again.
          */
-        fun upgraded(saved: ScalperState?, archive: () -> Unit): ScalperState = when {
+        fun upgraded(saved: ScalperState?, archive: () -> Boolean): ScalperState = when {
             saved == null -> fresh()
             saved.version >= VERSION -> saved
-            else -> {
-                runCatching { archive() }
-                fresh()
-            }
+            runCatching { archive() }.getOrDefault(false) -> fresh()
+            else -> saved
         }
 
         /** `KXBTC15M-26OCT091315-15` → `BTC`. */
@@ -191,7 +217,7 @@ class ScalperLedger(
                                 stops = it.stops + (if (c.kind == ExitKind.STOP) 1 else 0),
                                 timeouts = it.timeouts + (if (c.kind == ExitKind.TIMEOUT) 1 else 0),
                                 settled = it.settled + (if (c.kind == ExitKind.SETTLED) 1 else 0)
-                            )
+                            ).withWindowClose(c.order.ticker, c.pnlUsd)
                         }
                         trades += ScalpTrade.of(c, run)
                         orders += c.closedAtMs to ScalpTradeLog.orderRow(c.order, c, c.closedAtMs, run)
