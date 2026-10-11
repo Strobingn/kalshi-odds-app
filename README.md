@@ -19,10 +19,10 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
-## 1.9.0-arena (claude/strategy-arena): Strategy Arena, 15 strategies at once, paper only
+## 1.9.0 (Claude branch): the Strategy Arena tab, 15 strategies at once, paper only
 
-A separate app, **Strategy Arena** (`com.dirk.kalshiodds.arena`), so it installs next to Claude Bitcoin and Mis
-Bitcoin. It is the Claude 1.8.8 build plus:
+Claude Bitcoin 1.9.0 installs over 1.8.8 and keeps your key, settings and paper records. It also carries
+`Mis_bitcoin`'s edge-model work (13-feature contract, resumable training, `mis-bitcoin-edge-model`) and:
 
 - **Arena tab** in the bottom bar (second from the left). It holds a leaderboard of all 15 strategies, best paper
   P&L after fees on top, each with a verdict: *N of 30 trades needed*, *within luck: no winner yet*, *ahead by
@@ -79,7 +79,7 @@ on live data; it cannot place an order.
 | Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.fifteenStrategiesEachWithItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
 | Status panel | `arenaFeed` (ScalperResultsScreen.kt) | `ArenaStrategiesTest.theStatusPanelNamesWhatStopsTheArena` |
 | Arena tab | `AppRoutes.PRIMARY`, `DipApp` bottom bar | `ArenaStrategiesTest.theArenaIsABottomTab` |
-| Update channel | `AppUpdate.BRANCH = "claude-strategy-arena"` | `AppUpdateTest` |
+| Update channel | `AppUpdate.BRANCH = "Claude"` (tags matched on the branch suffix) | `AppUpdateTest` |
 
 ## 1.8.8 (Claude branch): the app stops telling you to bet without a reason
 

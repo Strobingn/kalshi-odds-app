@@ -49,14 +49,14 @@ jobs:
         id: apk
         run: |
           src=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          out="StrategyArena-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}-${{ github.run_number }}.apk"
+          out="ClaudeBitcoin-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}-${{ github.run_number }}.apk"
           cp "$src" "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StrategyArena-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}
+          name: ClaudeBitcoin-v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
 
@@ -66,11 +66,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="v${{ steps.ver.outputs.name }}-${{ steps.ver.outputs.ref }}"
-          notes="Strategy Arena v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ steps.ver.outputs.ref }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
+          notes="Claude Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.code }}) from \`${{ steps.ver.outputs.ref }}\` @ ${GITHUB_SHA::7}, run #${{ github.run_number }}."
           # Rolling release per version + branch: move the tag to this commit.
           gh release delete "$tag" --yes --cleanup-tag || true
           gh release create "$tag" "${{ steps.apk.outputs.path }}" \
             --target "$GITHUB_SHA" \
-            --title "Strategy Arena v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.ref }})" \
+            --title "Claude Bitcoin v${{ steps.ver.outputs.name }} (${{ steps.ver.outputs.ref }})" \
             --notes "$notes" \
             --prerelease

@@ -13,12 +13,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * In-app update check for the Strategy Arena build (`claude/strategy-arena`).
+ * In-app update check for the Claude-branch build (Claude Bitcoin).
  *
- * Every push to that branch runs the Build APK workflow, which publishes the
- * APK on a rolling GitHub prerelease tagged `v<versionName>-claude-strategy-arena`
- * (the branch name with `/` replaced by `-`) with an asset named
- * `StrategyArena-v<versionName>-<branch>-<run number>.apk`. The build
+ * Every push to `Claude` runs the Build APK workflow, which publishes the
+ * APK on a rolling GitHub prerelease tagged `v<versionName>-Claude` (a branch
+ * name's `/` becomes `-`) with an asset named
+ * `ClaudeBitcoin-v<versionName>-<branch>-<run number>.apk`. The build
  * stamps the same run number into [BuildConfig.CI_RUN_NUMBER], so "is there
  * a newer build?" is a comparison of run numbers. Every CI APK is signed
  * with the committed debug keystore, so the new one installs over this one
@@ -31,7 +31,7 @@ object AppUpdate {
 
     const val RELEASES_URL = "https://api.github.com/repos/Strobingn/kalshi-odds-app/releases?per_page=30"
     const val RELEASES_PAGE = "https://github.com/Strobingn/kalshi-odds-app/releases"
-    const val BRANCH = "claude-strategy-arena"
+    const val BRANCH = "Claude"
 
     /** The version part of a tag: `1.9.0` or `1.9.0-arena`. */
     private val VERSION = Regex("""^\d+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?$""")
@@ -77,7 +77,7 @@ object AppUpdate {
             if (o.bool("draft") == true) return@mapNotNull null
             val tag = o.string("tag_name") ?: return@mapNotNull null
             // `v<version>-<branch>`. Matched on the branch suffix, not split on a dash: branch names hold
-            // dashes (claude-strategy-arena) and so can versions (1.9.0-arena).
+            // dashes (claude-strategy-arena) and so can versions (1.8.0-mis.1).
             val suffix = "-$branch"
             if (!tag.startsWith("v") || !tag.endsWith(suffix) || tag.length <= suffix.length + 1) return@mapNotNull null
             val versionName = tag.substring(1, tag.length - suffix.length)

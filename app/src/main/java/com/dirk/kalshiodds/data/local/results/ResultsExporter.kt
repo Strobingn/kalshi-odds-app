@@ -116,7 +116,7 @@ object ResultsExporter {
     }
 
     fun csv(bundle: ResultsBundle): String = buildString {
-        appendLine("# Strategy Arena results export")
+        appendLine("# Claude Bitcoin results export")
         appendLine("# Approve-gated tickets only — never unsupervised bets.")
         appendLine()
         appendLine(SNAPSHOT_HEADER)
