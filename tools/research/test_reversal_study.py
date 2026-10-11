@@ -95,13 +95,28 @@ def _synthetic(days: int, flip_big: float, seed: int, ask: float = 0.52) -> list
 
 def test_report_verdicts() -> None:
     # strong reversal priced at ~50¢ → PASS; none → FAIL (the ask + fee loses); 3 days → exploratory
-    strong = rs.report(_synthetic(15, 0.80, 1), iters=300)
+    strong = rs.report(_synthetic(18, 0.80, 1), iters=300)
     assert "OOS" in strong and "Decision: PASS" in strong, strong
-    none = rs.report(_synthetic(15, 0.50, 2), iters=300)
+    none = rs.report(_synthetic(18, 0.50, 2), iters=300)
     assert "Decision: FAIL" in none or "Decision: NO EDGE SHOWN" in none, none
     short = rs.report(_synthetic(3, 0.80, 3), iters=100)
     assert "EXPLORATORY" in short and "NOT EVALUABLE" in short
     assert "No back-to-back pairs" in rs.report([], iters=10)
+
+
+def test_oos_days_without_bets_do_not_count() -> None:
+    # 15 days, but the big moves (and so the rule's bets) happen on only two of the OOS days.
+    ws = _synthetic(15, 0.80, 6)
+    oos_start = T0 + (15 - 5) * 86_400
+    quiet = []
+    for w in ws:
+        if w.open_ts >= oos_start and (w.open_ts - oos_start) // 86_400 >= 2:
+            # Shrink every OOS move after the first two OOS days under the 20 bps rule threshold.
+            move = 5.0 if (w.settle or 0) >= w.strike else -5.0
+            w = rs.Window(w.ticker, w.open_ts, w.close_ts, w.strike, w.strike * (1 + move / 1e4), w.result, w.yes_bid, w.yes_ask)
+        quiet.append(w)
+    out = rs.report(quiet, iters=100)
+    assert "NOT EVALUABLE" in out and "with a bet" in out, out
 
 
 def test_cache_roundtrip_and_cli() -> None:

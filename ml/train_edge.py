@@ -638,12 +638,16 @@ def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | 
             sink.write(json.dumps({"ticker": m["ticker"], "rows": [_sample_row(r) for r in rows]}) + "\n")
             sink.flush()
     per = 0 if max_markets <= 0 else max(1, max_markets // len(SERIES))
+    listed: set[str] = set()
+    listed_series: set[str] = set()
     for series in SERIES:
         print(f"=== {series}", flush=True)
         markets = fetch_settled(series, days, per)
         print(f"  settled {len(markets)}", flush=True)
         if not markets:
             continue
+        listed_series.add(series)
+        listed.update(m["ticker"] for m in markets)
         reused = [m for m in markets if m["ticker"] in done_before]
         for m in reused:
             samples.extend(done_before[m["ticker"]])
@@ -693,7 +697,28 @@ def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | 
                             print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
     if sink is not None:
         sink.close()
+        if per == 0:
+            compact_progress(progress, listed, listed_series)
     return samples
+
+
+def compact_progress(path: Path, listed: set[str], listed_series: set[str]) -> None:
+    """Drop markets that left the lookback window, so the progress file tracks the listing.
+
+    Only series whose listing came back are pruned (a failed listing keeps its
+    markets). Written to a temp file and swapped in, so a kill here loses nothing.
+    """
+    done = load_progress(path)
+    keep = {t: rows for t, rows in done.items()
+            if t in listed or not any(t.startswith(series + "-") for series in listed_series)}
+    if len(keep) == len(done):
+        return
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as f:
+        for t, rows in keep.items():
+            f.write(json.dumps({"ticker": t, "rows": [_sample_row(r) for r in rows]}) + "\n")
+    tmp.replace(path)
+    print(f"  progress {path}: dropped {len(done) - len(keep)} markets past the window", flush=True)
 
 
 def _feature_tag() -> str:
@@ -1092,10 +1117,13 @@ def bootstrap_pnl_ci(
     together). The CI is on per-contract P&L; `ci_low > 0` is the promotion
     gate — a higher hit rate alone never is.
     """
-    by_day: dict[int, list[tuple[Sample, float]]] = {}
-    for s, p in rows:
-        by_day.setdefault(s.close_ts // 86400, []).append((s, p))
-    days = sorted(by_day.values(), key=lambda d: min(s.ts for s, _ in d))
+    # The same policy as ev_pnl / bet_log: ONE bet per market, at its first minute clearing the margin.
+    # Resampling every qualifying minute would count one settlement up to 13 times.
+    close_of = {s.ticker: s.close_ts for s, _ in rows}
+    by_day: dict[int, list[float]] = {}
+    for b in bet_log(rows, margin):
+        by_day.setdefault(close_of[b["ticker"]] // 86400, []).append(b["pnl"])
+    days = [by_day[d] for d in sorted(by_day)]
     if not days:
         return {"ci_low": 0.0, "ci_high": 0.0, "p_low": 0.0, "n_boot_markets": 0.0}
     rng = random.Random(seed)
@@ -1104,15 +1132,9 @@ def bootstrap_pnl_ci(
         pnl = 0.0
         n = 0
         for _ in range(len(days)):
-            for s, p in days[rng.randrange(len(days))]:
-                side, _, _ = ev_side(p, s.yes_ask, s.no_ask, margin)
-                if side is None:
-                    continue
-                ask = s.yes_ask if side == "YES" else s.no_ask
-                fee = fee_per_contract(ask)
-                won = (s.y == 1) == (side == "YES")
-                pnl += (1.0 - ask - fee) if won else (-ask - fee)
-                n += 1
+            day = days[rng.randrange(len(days))]
+            pnl += sum(day)
+            n += len(day)
         if n:
             per_bet.append(pnl / n)
     if not per_bet:
@@ -1225,13 +1247,14 @@ def sweep_l2(
     design: list[str] | None = None,
     candidates: tuple[float, ...] = (0.5, 0.05, 0.005),
 ) -> tuple[float, dict[str, dict[str, float]]]:
-    """Pick the L2 that minimizes holdout log-loss on the same folds.
+    """Pick the L2 that minimizes walk-forward log-loss on [samples].
 
     Rows are clustered by market, so a smaller L2 can look better by
     memorizing; log-loss punishes overconfidence harder than Brier, which
     makes it the right selection score. Returns (best_l2, per-candidate
-    metrics) — nested selection stays inside the walk-forward folds, so
-    the final gate numbers are never chosen on their own holdout.
+    metrics). This choice is made on its own holdout, so its scores are
+    optimistic: the promotion gate uses [walk_forward_hold_nested], which
+    runs this sweep inside each outer fold's training data only.
     """
     per: dict[str, dict[str, float]] = {}
     best_l2, best_ll = None, float("inf")
@@ -1248,6 +1271,30 @@ def sweep_l2(
     if best_l2 is None:
         best_l2 = DEFAULT_L2
     return best_l2, per
+
+
+def walk_forward_hold_nested(
+    samples: list[Sample],
+    folds: int = 4,
+    kind: str = KIND_OFFSET,
+    design: list[str] | None = None,
+    candidates: tuple[float, ...] = (0.5, 0.05, 0.005),
+) -> tuple[list[tuple[Sample, float]], list[float]]:
+    """Walk-forward holdout with the L2 chosen INSIDE each fold's training data.
+
+    For every outer (train, test) split, [sweep_l2] runs on `train` alone, the
+    winner is fitted on `train` and scored on `test`. The test rows never take
+    part in choosing the L2 that scores them, so the gate numbers are honest.
+    Returns (holdout rows, the L2 chosen per fold).
+    """
+    hold: list[tuple[Sample, float]] = []
+    chosen: list[float] = []
+    for train, test in fold_splits(samples, folds):
+        best, _ = sweep_l2(train, folds, kind, design, candidates)
+        chosen.append(best)
+        model = fit_model(train, kind, design, best)
+        hold.extend((s, model_predict(model, s.x, s.mid)) for s in test)
+    return hold, chosen
 
 
 def margin_curve(hold: list[tuple[Sample, float]], margins: tuple[float, ...] = (0.0, 0.01, 0.02, 0.03, 0.05, 0.08, 0.12)) -> dict[str, dict[str, float]]:
@@ -1464,14 +1511,13 @@ def main() -> int:
     else:
         try:
             if args.samples_cache:
+                # Always list again: markets already pulled come from the progress file, newly settled
+                # ones are fetched and those past the window drop out. (Reusing a complete samples file
+                # as-is would refit the same frozen window on every later run.)
                 scache = Path(args.samples_cache)
-                cached = load_samples_cache(scache, args.days)
-                if cached is not None:
-                    samples = cached
-                else:
-                    samples = collect(args.days, args.max_markets, args.workers,
-                                      progress=progress_path(scache, args.days))
-                    save_samples_cache(scache, args.days, samples)
+                samples = collect(args.days, args.max_markets, args.workers,
+                                  progress=progress_path(scache, args.days))
+                save_samples_cache(scache, args.days, samples)
             else:
                 samples = load_backtest_cache(Path(args.cache), args.days) if args.cache else collect(args.days, args.max_markets, args.workers)
         except Exception as e:
@@ -1489,11 +1535,15 @@ def main() -> int:
     n_yes = sum(s.y for s in samples)
     print(f"samples {len(samples)} markets {len({s.ticker for s in samples})} yes={n_yes} no={len(samples) - n_yes}", flush=True)
     if args.sweep_l2 and not synthetic:
+        # Gate numbers: L2 chosen inside each fold's training data (nested). The shipped model's L2:
+        # the sweep over everything, which is fine for the final fit because nothing is scored on it.
+        hold, chosen = walk_forward_hold_nested(samples, args.folds, args.kind, design)
         best_l2, per = sweep_l2(samples, args.folds, args.kind, design)
         print("l2 sweep:", json.dumps(per), flush=True)
-        print(f"selected l2={best_l2}", flush=True)
+        print(f"selected l2={best_l2} (per-fold nested choices {chosen})", flush=True)
         args.l2 = best_l2
-    hold = walk_forward_hold(samples, args.folds, args.kind, design, args.l2)
+    else:
+        hold = walk_forward_hold(samples, args.folds, args.kind, design, args.l2)
     metrics = walk_forward_metrics(hold, samples, args.ev_margin, folds=args.folds, l2=args.l2)
     if not synthetic:
         metrics.update(recency_metrics(hold))

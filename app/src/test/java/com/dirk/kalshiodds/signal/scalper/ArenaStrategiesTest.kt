@@ -168,6 +168,23 @@ class ArenaStrategiesTest {
     }
 
     @Test
+    fun aSevenStrategyRecordIsArchivedNotMixedIntoTheArena() {
+        var archived = 0
+        val old = ScalperState(
+            groups = mapOf(ScalpStrategy.DIP_HUNTER.name to ScalpStats(closed = 400, pnlUsd = 12.0)),
+            version = 2
+        )
+        val start = ScalperState.upgraded(old) { archived++ }
+        assertEquals(1, archived)
+        assertEquals(ScalperState.VERSION, start.version)
+        assertEquals("everyone starts together", 0, start.stats(ScalpStrategy.DIP_HUNTER.name).closed)
+        val current = ScalperState.fresh().copy(groups = mapOf(ScalperState.ALL to ScalpStats(closed = 3)))
+        assertEquals(current, ScalperState.upgraded(current) { archived++ })
+        assertEquals(ScalperState.fresh(), ScalperState.upgraded(null) { archived++ })
+        assertEquals("only the old record is archived", 1, archived)
+    }
+
+    @Test
     fun theArenaIsABottomTab() {
         assertTrue(AppRoutes.SCALPER in AppRoutes.PRIMARY)
         assertEquals(AppRoutes.SCALPER, AppRoutes.PRIMARY[1])

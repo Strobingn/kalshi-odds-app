@@ -344,8 +344,11 @@ def report(windows: list[Window], iters: int = 2000, seed: int = 11) -> str:
     out.append("")
     t = ev_stats(oos_rule, taker_pnl, iters, seed)
     lo, hi = t.get("ci99", (float("nan"), float("nan")))
-    if n_oos < MIN_OOS_DAYS_FOR_RULE or not t.get("n") or math.isnan(lo):
-        verdict = f"NOT EVALUABLE ({n_oos} OOS day(s); need ≥ {MIN_OOS_DAYS_FOR_RULE})."
+    # The requirement is OOS days that actually hold a bet, not calendar days in the partition.
+    bet_days = int(t.get("days", 0))
+    if bet_days < MIN_OOS_DAYS_FOR_RULE or not t.get("n") or math.isnan(lo):
+        verdict = (f"NOT EVALUABLE ({bet_days} OOS day(s) with a bet, of {n_oos} in the split; "
+                   f"need ≥ {MIN_OOS_DAYS_FOR_RULE}).")
     elif lo > 0:
         verdict = "PASS — OOS 99% CI at the ask is above 0. Paper trade it next; it is not proven live."
     elif hi < 0:
