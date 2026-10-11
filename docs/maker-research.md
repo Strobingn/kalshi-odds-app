@@ -104,3 +104,73 @@ the verified maker fee**, with at least 5 OOS days. The optimistic model, the
 IS tables and the fee-sensitivity grid are context and never count. Even on a
 pass, check the Δmid columns: a strongly negative Δmid means the edge depends
 on the settlement fair being right, not on capturing spread.
+
+## Pair maker (two-sided resting bids) — `tools/research/pair_maker.py`
+
+YES and NO on one market pay exactly $1 between them, and KXBTC15M has no
+maker fee. A YES bid at Py plus a NO bid at Pn with Py + Pn < $1 therefore
+locks in 1 − Py − Pn per pair when both legs fill, with no forecast. The
+risk is a one-legged fill right before the price moves against it.
+
+Pre-registered grid: `join` / `improve` (1¢ above the bid, queue 0) ×
+lock ≥ 1 / 2 / 3¢ × cancel 30 / 60 / 120 s × unwind `hold` (keep the lone
+leg to settlement) or `complete` (buy the missing leg at the ask with the
+0.07 taker fee). 10 contracts per leg, decisions every 30 s from 1:00 to
+13:00, one pair of bids at a time per market, conservative fills only.
+Maker fee 0 (verified) with 0.0175 as a stress line.
+
+The report splits P&L into *locked $* (the riskless pairs) and *other $*
+(everything a one-legged fill cost or made), and shows the filled leg's
+mid move for one-legged fills (negative = adverse selection). Same IS/OOS
+protocol and decision rule as `maker_sim.py`: paper trade only if the OOS
+99% day-block CI of $ per posted episode excludes 0 with ≥ 5 OOS days.
+
+```
+python3 tools/research/pair_maker.py --dir <recordings dir> --out pair.md
+python3 tools/research/test_pair_maker.py
+```
+
+Workflow "Pair maker (Claude)" runs it on the cloud recorder's cache.
+
+### Result, 2026-10-08 (cloud recordings 2026-10-03 → 10-08, 440 markets)
+
+**It loses.** Every config with a real sample lost money; the locked pairs
+are swamped by one-legged fills.
+
+| | IS (4 days) | OOS (2 days) |
+|---|---|---|
+| picked config | `join/L0.01/T30/hold` | same |
+| episodes | 6,450 | 1,781 |
+| both legs filled | 48% | 51% |
+| $ per episode (10 ct/leg) | −0.283, 99% CI [−0.381, −0.205] | −0.199, 99% CI [−0.312, −0.198] |
+| locked $ / other $ | +310 / −2,134 | +92 / −446 |
+| one-leg Δmid | −6.2¢ | −6.8¢ |
+
+- The book is almost always 1¢ wide, so the most a pair can lock is 1¢;
+  a lock of ≥ 2¢ happened 50 times in 4 days, and `improve` (1¢ inside on
+  both sides) almost never fits.
+- A lone leg is adversely selected by 6–15¢ (worse the longer the bid
+  rests), roughly ten times the 1¢ a completed pair earns.
+- Completing the lone leg at the ask does not help: it pays the 7% fee on
+  a price that already moved.
+- The decision rule says NOT EVALUABLE (2 OOS days < 5), but the sign is
+  not in doubt: retire the idea unless a fill-toxicity model (cancel the
+  bid before it is picked off) can remove most of the 6¢ markout.
+
+### Spot guard result, 2026-10-08 (same 6 days)
+
+Cancelling a leg once Coinbase moves 2 / 5 / 10 bps against it (1 s cancel
+latency) barely helps. Best guard was 2 bps:
+
+| | no guard | G2 |
+|---|---|---|
+| IS $/episode (`join/L0.01/T30/hold`) | −0.283 | −0.263 |
+| OOS $/episode | −0.199, 99% CI [−0.312, −0.198] | −0.160, 99% CI [−0.312, −0.159] |
+| one-leg Δmid (IS) | −6.2¢ | −5.6¢ |
+
+5 and 10 bps almost never fire before the fill. By the time Coinbase has
+moved enough to say "this bid is about to be picked off", the taker has
+already hit it — Kalshi's book reacts to Coinbase within about a second
+(`ws_lag.py`), so a guard that waits for Coinbase plus a 1 s cancel is too
+slow. **The pair maker stays retired.** A fill-toxicity model would need a
+signal that leads Kalshi's own takers, not Coinbase.

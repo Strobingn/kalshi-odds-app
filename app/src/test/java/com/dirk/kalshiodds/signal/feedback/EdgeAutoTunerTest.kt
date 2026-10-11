@@ -61,7 +61,7 @@ class EdgeAutoTunerTest {
         assertFalse(r.sitOut)
         assertTrue(r.thresholdPp >= 1.5)
         assertTrue((r.evAtThreshold ?: 0.0) > 5.0)
-        assertTrue((r.evP10 ?: 0.0) > 0.0, "10th-percentile EV must survive day resampling")
+        assertTrue("10th-percentile EV must survive day resampling", (r.evP10 ?: 0.0) > 0.0)
     }
 
     @Test
@@ -74,13 +74,17 @@ class EdgeAutoTunerTest {
             }
             repeat(60) { i ->
                 val day = 1L + (i % 6)
-                // Slight favorite priced about right: small negative EV.
-                add(EdgeAutoTuner.Sample(0.60, 0.58, false, edgeAfterFeesPp = 40.0, closeDay = day))
+                // Six ordinary days: a 58¢ favorite that wins half the time
+                // loses a little every day. The lucky day more than covers it,
+                // so the full-sample EV is positive.
+                val won = (i / 6) % 2 == 0
+                add(EdgeAutoTuner.Sample(0.60, 0.58, won, edgeAfterFeesPp = 40.0, closeDay = day))
             }
         }
         val r = EdgeAutoTuner.tune(samples, minSamples = 20)
+        assertTrue("full-sample EV ${r.evAtThreshold}", (r.evAtThreshold ?: 0.0) > 0.0)
         assertTrue(r.sitOut)
-        assertTrue(r.reason.contains("resampling"))
+        assertTrue(r.reason, r.reason.contains("resampling"))
     }
 
     @Test

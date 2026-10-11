@@ -61,10 +61,16 @@ jobs:
         continue-on-error: true
         with:
           path: ml/.samples-cache
-          # Keyed by the sample's newest row, not the run: a cache with
-          # fresher data than any previous run wins.
-          key: mis-samples-v1
+          # Every run saves its own copy (caches are immutable per key) and
+          # restores the newest one, so a pull cut off by the timeout is
+          # resumed by the next run instead of starting over.
+          key: mis-samples-v2-${{ github.run_id }}
+          restore-keys: mis-samples-v2-
       - name: Train
+        # Below the job's 300 min so the save step below still runs when
+        # the pull is cut off; the trainer appends each finished market to
+        # ml/.samples-cache/progress_*.jsonl as it goes.
+        timeout-minutes: 270
         run: |
           python3 ml/train_edge.py \
             --days ${{ github.event.inputs.days || github.event.client_payload.days || '270' }} \
@@ -75,11 +81,12 @@ jobs:
             --out ml/edge_model.json \
             --manifest ml/edge_model_manifest.json
       - name: Save sample cache
+        if: always()
         uses: actions/cache/save@v4
         continue-on-error: true
         with:
           path: ml/.samples-cache
-          key: mis-samples-v1
+          key: mis-samples-v2-${{ github.run_id }}
 
       - name: Upload model
         uses: actions/upload-artifact@v4

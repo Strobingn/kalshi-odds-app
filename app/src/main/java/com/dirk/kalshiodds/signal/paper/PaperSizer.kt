@@ -7,28 +7,28 @@ import kotlin.math.min
 /**
  * How much of its paper cash the AI puts on one bet. **Paper money only.**
  *
- * The AI is not held to the old $5 clip: it stakes the Kelly fraction of
- * its cash for the edge it sees, capped at [MAX_FRACTION] (10%) per bet —
- * a model that equals the market must not make paper results luck. For a contract bought at price p with fee f, and a win chance q:
+ * The AI stakes a quarter of the Kelly fraction of its cash, and never
+ * more than [MAX_FRACTION] (10%) on one bet. Full Kelly is only the
+ * fastest-growing size when the probability is right; this model's
+ * probabilities have lost to Kalshi's price, so full Kelly just magnifies a
+ * bad forecast. No edge (q ≤ cost including the taker fee) means no bet.
+ * For a contract bought at price p with fee f, and a win chance q:
  *
  *   cost c = p + f,  edge fraction = (q − c) / (1 − c),
  *   stake = cash × min([MAX_FRACTION], [KELLY_MULTIPLIER] × fraction)
  *
- * A bigger edge means a bigger bet. No edge (q ≤ c) means no extra stake:
- * the caller keeps its normal clip. Full Kelly is the fastest-growing size
- * only if q is right; a model that is overconfident will lose money fast,
- * and a lost all-in wipes the paper account (Reset puts it back to $100).
+ * A lost bet cannot wipe the paper account. Reset puts it back to $100.
  */
 object PaperSizer {
     /**
-     * Cap on the paper cash the AI may stake on one bet. Full Kelly is only
-     * optimal when the win probability is exactly right; a model that merely
-     * matches the market makes all-in paper results mostly luck (one bad
-     * window can halve the account). 10% keeps variance honest while still
-     * letting a real edge compound.
+     * Cap on the paper cash the AI may stake on one bet. A model that merely
+     * matches the market makes large-stake paper results mostly luck; 10%
+     * keeps variance honest while still letting a real edge compound.
      */
     const val MAX_FRACTION = 0.10
-    const val KELLY_MULTIPLIER = 1.0
+
+    /** Quarter Kelly: survives an overconfident win probability. */
+    const val KELLY_MULTIPLIER = 0.25
 
     /** Kelly fraction of cash for a buy at [price] with win chance [winProb], or 0 with no edge. */
     fun fraction(

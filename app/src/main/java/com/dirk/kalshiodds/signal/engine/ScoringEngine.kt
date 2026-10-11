@@ -720,6 +720,50 @@ class ScoringEngine(
                 )
             }
         }
+        // The blend above loses to Kalshi's mid on settled calls. Pick the
+        // likely winner from the mid, a proven model (25% weight), and the
+        // 60s settlement fair in the last five minutes. A spot-vs-strike
+        // lock still cannot be faded back across 50.
+        run {
+            val anchored = com.dirk.kalshiodds.signal.fair.WinningSide.fairYesPp(
+                marketPp = midPp,
+                settlePp = digitalFairPp,
+                tteSeconds = tteSec?.toDouble(),
+                modelPp = if (loaded?.beatsMarket == true) importedModelPp else null
+            )
+            val settleDominates = digitalFairPp != null && (tteSec ?: 900L) <= 60L
+            if (dir.applied && !settleDominates) {
+                fair = if (dir.side == "YES") maxOf(anchored, dir.fairPp) else minOf(anchored, dir.fairPp)
+                fair = fair.coerceIn(2.0, 98.0)
+                predictedSide = dir.side
+            } else {
+                fair = anchored
+                predictedSide = com.dirk.kalshiodds.signal.fair.WinningSide.side(fair)
+            }
+            delta = fair - midPp
+            ev = NetExpectedValue.compute(
+                fairYes = fair / 100.0,
+                mid = mid01,
+                spreadDollars = spread,
+                feeRate = settings.feeRate,
+                preferSide = predictedSide,
+                stakeUsd = settings.ticketStakeUsd
+            )
+            size = PositionSizer.suggest(
+                fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
+                contractPrice = ev.contractPrice,
+                bankrollUsd = settings.bankrollUsd,
+                mode = PositionSizer.modeOf(settings.useKelly),
+                kellyFraction = settings.kellyFraction,
+                fixedFraction = settings.fixedFraction,
+                maxFraction = settings.maxBankrollFraction,
+                liquidity = liquidityObs,
+                depthNearMid = depthNear,
+                spreadDollars = spread,
+                maxSpreadCents = settings.maxSpreadCents,
+                netEvPositive = ev.netEv > 0.0
+            )
+        }
         // After the edge-model block so the near-strike override sees the final net edge.
         val entry = EntryFilter.evaluate(
             tteSeconds = tteSec,
