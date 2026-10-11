@@ -26,6 +26,7 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
  * 13. BID_WALL            — a heavy bid holds while the ask softens.
  * 14. CALM_BEFORE_CLOSE    — mid-window quiet, stable ask, model edge.
  * 15. SETTLE_LOTTO        — tiny ask late (outside the binary zone).
+ */
  object ScalpStrategies {
 
     enum class Kind {
