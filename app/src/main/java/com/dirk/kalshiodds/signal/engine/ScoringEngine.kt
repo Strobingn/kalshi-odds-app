@@ -626,9 +626,12 @@ class ScoringEngine(
                 .coerceIn(0.01, 5.0)
         }
         val sigmaAnnual = annualize(spotFeat?.realizedVol15m)
-        // An imported model's σ inputs use the trainer's estimator (REST 1m bars); the stream's σ only
-        // stands in when REST has none.
-        val modelSigmaAnnual = annualize(spotFeat?.trainerVol1m) ?: sigmaAnnual
+        // An imported model's σ inputs use the trainer's estimator (REST 1m bars), and only while it is
+        // fresh: the stream's σ has another distribution, so it never stands in (the model is skipped).
+        val trainerVolFresh = spotFeat?.trainerVolAtMs?.let {
+            it > 0L && nowMs - it in 0L..com.dirk.kalshiodds.signal.config.SignalConstants.TRAINER_VOL_MAX_AGE_MS
+        } == true
+        val modelSigmaAnnual = if (trainerVolFresh) annualize(spotFeat?.trainerVol1m) else null
         // Kalshi settles on the 60 s average of the index (ties YES). Inside
         // the last minute, the part of that average already printed comes
         // from the streamed tape.
@@ -674,9 +677,12 @@ class ScoringEngine(
         } else {
             null
         }
-        // A model that weighs that move is not run on a made-up 0: the trainer almost always knew it.
-        // Older models padded to the contract carry weight 0 there and run as before.
-        val loaded = edgeModel?.takeUnless { prevWindowRet == null && it.weightOf("prev_window_return") != 0f }
+        // A model is not run on an input it weighs but cannot have: a made-up 0 for the previous window's
+        // move (older models padded to the contract carry weight 0 there), or no trainer-compatible σ.
+        val loaded = edgeModel?.takeUnless {
+            (prevWindowRet == null && it.weightOf("prev_window_return") != 0f) ||
+                (modelSigmaAnnual == null && (it.weightOf("dist_to_strike_vol") != 0f || it.weightOf("digital_fair") != 0f))
+        }
         // A configured model that was skipped is a failed gate, not a pass: no alert on the fallback fair.
         if (edgeModel != null && loaded == null) modelEdgeQualified = false
         if (loaded != null) {

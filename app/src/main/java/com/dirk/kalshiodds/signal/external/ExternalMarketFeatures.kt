@@ -44,6 +44,8 @@ data class AssetSpotFeatures(
      * was trained on this one, so its inputs keep it (REST only).
      */
     val trainerVol1m: Double? = null,
+    /** When [trainerVol1m] was fetched (REST), 0 when unknown; the stream never refreshes it. */
+    val trainerVolAtMs: Long = 0L,
     val fundingRate: Double? = null,
     val lastPrice: Double? = null,
     val source: String = "none",
@@ -142,6 +144,7 @@ class ExternalMarketClient(
             spotReturn5m = ret5,
             realizedVol15m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
             trainerVol1m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
+            trainerVolAtMs = now,
             fundingRate = funding,
             lastPrice = last,
             source = "binance",
@@ -185,6 +188,7 @@ class ExternalMarketClient(
             spotReturn5m = ret5,
             realizedVol15m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
             trainerVol1m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
+            trainerVolAtMs = now,
             fundingRate = null,
             lastPrice = px,
             source = "coinbase",

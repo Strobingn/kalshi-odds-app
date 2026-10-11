@@ -375,7 +375,9 @@ class ResumableCollectTest(unittest.TestCase):
         def fetch_spot(product, start, end, failed=None):
             if spot_gap is not None and failed is not None:
                 failed.append(spot_gap)
-            return []
+            # One bar a minute, minus the failed chunk.
+            return [(t, 100.0) for t in range(start - start % 60, end, 60)
+                    if spot_gap is None or not (spot_gap[0] <= t < spot_gap[1])]
 
         def fetch_candles(series, ticker, open_ts, close_ts):
             if fail_after is not None and len(calls) >= fail_after:
@@ -482,6 +484,19 @@ class ResumableCollectTest(unittest.TestCase):
                 list(te._page("/markets", {}))
         finally:
             te.http_get = saved
+
+    def test_prev_window_needs_both_boundary_bars(self) -> None:
+        open_ts = 1_788_000_000 - 1_788_000_000 % 900
+        dense = [(t, 100.0 + (t - open_ts) / 600.0) for t in range(open_ts - 3600, open_ts, 60)]
+        b = te.prev_window_bounds(dense, open_ts)
+        self.assertIsNotNone(b)
+        self.assertAlmostEqual(te.prev_window_return(dense, open_ts), (b[1] - b[0]) / b[0])
+        # The bar closing at open − 15 min is missing, and so is the one before it: the nearest is 3 min older.
+        holes = [r for r in dense if not (open_ts - 1080 <= r[0] < open_ts - 900)]
+        self.assertIsNone(te.prev_window_bounds(holes, open_ts))
+        self.assertEqual(te.prev_window_return(holes, open_ts), 0.0)
+        # Missing the last minutes before open: the window's end is unknown.
+        self.assertIsNone(te.prev_window_bounds([r for r in dense if r[0] < open_ts - 300], open_ts))
 
     def test_truncated_progress_line_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:
