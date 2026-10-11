@@ -61,8 +61,9 @@ fun ScalpScreen(
                 style = MaterialTheme.typography.labelLarge,
                 color = if (total >= 0.0) colors.up else colors.down,
                 fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(top = 6.dp)
+                modifier = Modifier.padding(top = 6.dp, bottom = 6.dp)
             )
+            ScalpCharts(state.accounts)
             OutlinedButton(onClick = onReset, modifier = Modifier.padding(top = 4.dp)) {
                 Text("Reset all 15 to \$20,000")
             }
@@ -103,14 +104,20 @@ private fun ScalpRow(rank: Int, account: ScalpAccount) {
         Text(
             String.format(
                 Locale.US,
-                "Cash $%.2f · %d trades · %d wins",
+                "Cash $%.2f · %d trades · %d wins%s",
                 account.cashUsd,
                 account.trades,
-                account.wins
+                account.wins,
+                if (account.trades > 0) {
+                    String.format(Locale.US, " · %.0f%%", 100.0 * account.wins / account.trades)
+                } else {
+                    ""
+                }
             ),
             style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary
+            color = if (account.cashUsd < 0.0) colors.down else colors.textSecondary
         )
+        ScalpSpark(account)
         Text(
             if (pos == null) {
                 account.lastNote

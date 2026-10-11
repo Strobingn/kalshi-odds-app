@@ -37,6 +37,8 @@ data class ScalpAccount(
     val realizedPnlUsd: Double = 0.0,
     val trades: Int = 0,
     val wins: Int = 0,
+    /** Equity samples, oldest first. Drawn on the scalp tab. */
+    val curve: List<Double> = emptyList(),
     val lastNote: String = "Flat. Waiting for a 15-minute quote."
 ) {
     /** Cash plus a bid mark of the open scalp. */
@@ -117,7 +119,7 @@ class ScalpLab(
                 val pos = account.position
                 if (pos == null || !pos.ticker.equals(ticker, ignoreCase = true)) return@map account
                 n += 1
-                closeSettlement(account, pos, outcome)
+                stamp(closeSettlement(account, pos, outcome))
             }
             if (n > 0) publish(_state.value.copy(accounts = next))
         }
@@ -139,7 +141,7 @@ class ScalpLab(
         val marked = mark(account, tape)
         val pos = marked.position
         val intent = ScalpCatalog.ALL.first { it.id == marked.id }.decide(marked, tape)
-        return when (intent) {
+        val next = when (intent) {
             is ScalpIntent.Buy -> if (pos == null) buy(marked, tape, intent) else marked
             is ScalpIntent.Sell -> {
                 if (pos == null || !pos.ticker.equals(tape.ticker, true)) marked
@@ -148,6 +150,16 @@ class ScalpLab(
             }
             ScalpIntent.Hold -> marked
         }
+        return stamp(next)
+    }
+
+    /** Keep a short equity line without rewriting the book on a 1¢ wiggle. */
+    private fun stamp(account: ScalpAccount): ScalpAccount {
+        val eq = account.equityUsd()
+        val last = account.curve.lastOrNull()
+        if (last != null && kotlin.math.abs(last - eq) < 0.5) return account
+        val next = if (account.curve.isEmpty()) listOf(ScalpCatalog.START_CASH, eq) else account.curve + eq
+        return account.copy(curve = next.takeLast(48))
     }
 
     private fun profitable(pos: ScalpPosition, bid: Double): Boolean {

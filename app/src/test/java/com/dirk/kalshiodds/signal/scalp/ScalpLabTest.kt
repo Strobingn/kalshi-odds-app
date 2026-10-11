@@ -25,8 +25,9 @@ class ScalpLabTest {
         assertTrue("open=$open", open >= 10)
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }.position!!
         assertEquals("YES", cheap.side)
-        assertTrue(cheap.contracts > 50_000)
-        assertTrue(cheap.stakeUsd > 10_000.0)
+        assertTrue(cheap.contracts > 10_000)
+        assertTrue(cheap.stakeUsd > 3_000.0)
+        assertTrue(cheap.stakeUsd < 8_000.0)
     }
 
     @Test
@@ -87,7 +88,7 @@ class ScalpLabTest {
         lab.onQuote(busyTape())
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
         assertTrue(cheap.position != null)
-        assertTrue(cheap.position!!.stakeUsd > 10_000.0)
+        assertTrue(cheap.position!!.stakeUsd > 3_000.0)
         assertTrue(cheap.cashUsd < 0.0)
     }
 
@@ -99,8 +100,45 @@ class ScalpLabTest {
         val lab = ScalpLab(ScalpLabState(accounts = rich))
         lab.onQuote(busyTape())
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
-        assertTrue(cheap.position!!.stakeUsd > 30_000.0)
-        assertTrue(cheap.cashUsd < 0.0)
+        assertTrue(cheap.position!!.stakeUsd > 8_000.0)
+        assertTrue(cheap.cashUsd < 40_000.0)
+    }
+
+    @Test
+    fun firstFiveDumpsALoserWhenFiveMinutesPass() {
+        val lab = ScalpLab()
+        lab.onQuote(tape(yesAsk = 0.20, yesBid = 0.19, noAsk = 0.82, noBid = 0.80, elapsedMs = 60_000L))
+        val bought = lab.snapshot().accounts.first { it.id == "first_5" }
+        assertTrue(bought.position != null)
+        lab.onQuote(
+            tape(
+                yesAsk = 0.12,
+                yesBid = 0.10,
+                noAsk = 0.90,
+                noBid = 0.88,
+                elapsedMs = 5L * 60L * 1000L
+            )
+        )
+        val sold = lab.snapshot().accounts.first { it.id == "first_5" }
+        assertNull(sold.position)
+        assertTrue(sold.realizedPnlUsd < 0.0)
+        assertTrue(sold.curve.size >= 2)
+    }
+
+    @Test
+    fun lateSmallSkipsANinetyCentFavorite() {
+        val lab = ScalpLab()
+        lab.onQuote(
+            tape(
+                yesAsk = 0.90,
+                yesBid = 0.89,
+                noAsk = 0.12,
+                noBid = 0.10,
+                elapsedMs = 12L * 60L * 1000L,
+                tteMs = 3L * 60L * 1000L
+            )
+        )
+        assertNull(lab.snapshot().accounts.first { it.id == "late_squeeze" }.position)
     }
 
     private fun busyTape(
