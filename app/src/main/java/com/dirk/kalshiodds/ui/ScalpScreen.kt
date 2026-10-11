@@ -33,7 +33,7 @@ object ScalpCopy {
                     else -> String.format(
                         Locale.US,
                         "%s · %s %s ×%d · entry %.0f¢ · bid %s · fair %s · unrealized %s after exit fee%s",
-                        t.strategy.label, t.ticker, t.side, t.remaining, (t.entryPrice ?: 0.0) * 100,
+                        t.algoLabel, t.ticker, t.side, t.remaining, (t.entryPrice ?: 0.0) * 100,
                         bid?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—",
                         fair?.let { String.format(Locale.US, "%.0f¢", it * 100) } ?: "—",
                         u?.let { String.format(Locale.US, "%+.2f USD", it) } ?: "—",
@@ -51,7 +51,7 @@ object ScalpCopy {
                 String.format(
                     Locale.US,
                     "%s · %s %s ×%d · in %.0f¢ out avg %.1f¢ · fees $%.2f · net %+.2f USD · hold %ds · %s",
-                    t.strategy.label, t.ticker, t.side, t.contracts, (t.entryPrice ?: 0.0) * 100,
+                    t.algoLabel, t.ticker, t.side, t.contracts, (t.entryPrice ?: 0.0) * 100,
                     if (t.contracts > 0) t.proceedsUsd / t.contracts * 100 else 0.0,
                     t.entryFeeUsd + t.exitFeeUsd, t.netUsd ?: 0.0, ((t.holdMs ?: 0L) / 1000L).toInt(), t.exitReason ?: ""
                 )

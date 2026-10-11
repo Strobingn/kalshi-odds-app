@@ -116,13 +116,17 @@ class ReleaseGate0340MultiStrategyTest {
         val tiny = book(bankroll = 5.0)
         tiny.onQuote(q(t, 0.44, 0.45), true)
         tiny.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(0, tiny.snapshot().size)
+        assertEquals(1, tiny.snapshot().size) // 0.3.54: shared bankroll — $5 free cash covers exactly one $3.66 clip
+        val broke = book(bankroll = 3.0)
+        broke.onQuote(q(t, 0.44, 0.45), true)
+        broke.onQuote(q(t + 30_000L, 0.34, 0.35), true)
+        assertEquals(0, broke.snapshot().size) // free cash can't cover a clip → skipped
         val b = book(bankroll = 40.0)
         b.onQuote(q(t, 0.44, 0.45), true)
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true)
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true)
         assertTrue(b.openCostUsd() <= 40.0 + 1e-9)
-        com.dirk.kalshiodds.decision.ScalpModels.ALL.forEach { assertTrue(b.openCostUsd(it) <= 40.0 / 8 + 1e-9) }
+        // 0.3.54: no per-model cap; total open cost ≤ free bankroll is the only limit
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)

@@ -61,9 +61,9 @@ object ScalpData {
         fun avg(xs0: List<Double>) = xs0.filter { it.isFinite() }.let { xs -> if (xs.isEmpty()) "—" else String.format(Locale.US, "%+.1f¢", xs.average() * 100) }
         return com.dirk.kalshiodds.decision.ScalpStrategy.values().flatMap { s ->
             listOf(true, false).map { mk ->
-                val rows = done.filter { it.strategy == s && it.isMaker == mk }
-                val fills = all.filter { it.strategy == s && it.isMaker == mk && it.entryAtMs != null }
-                val noFill = all.count { it.strategy == s && it.isMaker == mk && it.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL }
+                val rows = done.filter { it.strategyOrNull == s && it.isMaker == mk }
+                val fills = all.filter { it.strategyOrNull == s && it.isMaker == mk && it.entryAtMs != null }
+                val noFill = all.count { it.strategyOrNull == s && it.isMaker == mk && it.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL }
                 String.format(
                     Locale.US, "%s %s: %d trips · net %s/ct · AS30 %s · AS60 %s · no-fill %d",
                     s.label, if (mk) "maker" else "taker", rows.size,
@@ -132,7 +132,7 @@ object ScalpData {
             String.format(
                 Locale.US,
                 "%s · %s %s ×%d\nin %.0f¢ @ %s → out %.1f¢ @ %s · hold %ds\nfees $%.2f · net %+.2f USD · %s",
-                t.strategy.label, t.ticker, t.side, t.contracts,
+                t.algoLabel, t.ticker, t.side, t.contracts,
                 (t.entryPrice ?: 0.0) * 100, time(t.entryAtMs), exitAvg * 100, time(t.closedAtMs),
                 ((t.holdMs ?: 0L) / 1000L).toInt(), t.entryFeeUsd + t.exitFeeUsd, t.netUsd ?: 0.0, t.exitReason ?: ""
             ),

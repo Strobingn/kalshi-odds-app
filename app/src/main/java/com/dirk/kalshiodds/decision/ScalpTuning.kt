@@ -333,7 +333,7 @@ object ScalpBreakdown {
     private fun closed(trades: List<ScalpTrade>) = trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }
 
     fun byCoin(trades: List<ScalpTrade>) = rows(closed(trades)) { it.coin }
-    fun byStrategy(trades: List<ScalpTrade>) = rows(closed(trades)) { it.strategy.label }
+    fun byStrategy(trades: List<ScalpTrade>) = rows(closed(trades)) { it.algoLabel }
     fun byHourEt(trades: List<ScalpTrade>) = rows(closed(trades)) { t ->
         (t.entryAtMs ?: t.signalAtMs).let { String.format(Locale.US, "%02d ET", ScalpTicker.hourEt(it)) }
     }
@@ -362,9 +362,14 @@ object ScalpBreakdown {
             r.key, r.n, if (r.n == 0) 0 else Math.round(100.0 * r.wins / r.n), r.netUsd, r.avgCentsPerContract)
         val pw = roundTripsPerWindow(trades)
         val perStrategy = ScalpStrategy.values().flatMap { st ->
-            val mine = closed(trades).filter { it.strategy == st }
+            val mine = closed(trades).filter { it.strategyOrNull == st }
             if (mine.isEmpty()) return@flatMap listOf("${st.label} · no closed round trips yet")
             val r = rows(mine) { st.label }.single()
+            listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
+        } + listOf(ScalpModels.Model.FORECAST_RIDE, ScalpModels.Model.FORECAST_FADE).flatMap { m ->
+            val mine = closed(trades).filter { ForecastScalp.isForecast(it) && it.algoLabel == m.label }
+            if (mine.isEmpty()) return@flatMap listOf("${m.label} · no closed round trips yet")
+            val r = rows(mine) { m.label }.single()
             listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
         }
         return listOf("By strategy (net after both fees; coin and hour ET below each)") + perStrategy +
