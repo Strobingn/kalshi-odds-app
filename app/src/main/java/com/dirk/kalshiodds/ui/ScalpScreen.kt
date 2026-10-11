@@ -51,8 +51,8 @@ fun ScalpScreen(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "15 algorithms on the Bitcoin 15-minute market. Each starts at $100 and bets as much of that book as its rule wants, whenever it wants. " +
-                    "Paper only — nothing here is sent to Kalshi.",
+                "15 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets its own size. " +
+                    "A book can go negative and keep trading. Nothing here is sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -64,7 +64,7 @@ fun ScalpScreen(
                 modifier = Modifier.padding(top = 6.dp)
             )
             OutlinedButton(onClick = onReset, modifier = Modifier.padding(top = 4.dp)) {
-                Text("Reset all 15 to $100")
+                Text("Reset all 15 to \$20,000")
             }
         }
         itemsIndexed(ranked, key = { _, account -> account.id }) { index, account ->

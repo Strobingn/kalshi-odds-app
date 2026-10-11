@@ -36,7 +36,8 @@ sealed class ScalpIntent {
 }
 
 object ScalpCatalog {
-    const val START_CASH = 100.0
+    /** Each paper book. Not live cash. A book may trade through zero. */
+    const val START_CASH = 20_000.0
 
     val ALL: List<ScalpAlgo> = listOf(
         algo(

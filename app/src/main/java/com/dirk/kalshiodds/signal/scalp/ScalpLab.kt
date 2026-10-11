@@ -5,7 +5,6 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalConstants
-import com.dirk.kalshiodds.signal.paper.PaperBuy
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import java.util.ArrayDeque
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -56,7 +55,9 @@ data class ScalpLabState(
 
 /**
  * Fifteen paper scalps on the live Bitcoin 15-minute contract.
- * Each book starts at $100 and sizes itself. No live order path.
+ * Each book starts at $20,000. Size is the rule's fraction of that
+ * bankroll, or of cash when the book is ahead. Cash may go negative.
+ * No live order path.
  */
 class ScalpLab(
     initial: ScalpLabState = ScalpLabState(),
@@ -170,14 +171,17 @@ class ScalpLab(
         val side = if (intent.side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(if (side == "NO") tape.noAsk else tape.yesAsk) ?: return account
         val fraction = intent.fraction.coerceIn(0.01, 1.0)
-        val budget = account.cashUsd * fraction
+        // Ahead of the start: bet a fraction of what's there. At or under it
+        // (including a negative book): still bet a fraction of the $20k.
+        // Paper only, so the debit is allowed to push cash below zero.
+        val bankroll = maxOf(account.cashUsd, ScalpCatalog.START_CASH)
+        val budget = bankroll * fraction
         if (budget + 1e-9 < px) return account
-        val want = floor(budget / px + 1e-9).toInt()
-        val (qty, _) = PaperBuy.capContracts(want, account.cashUsd, px)
-        if (qty < 1) return account
+        val qtyLong = floor(budget / px + 1e-9).toLong()
+        if (qtyLong < 1L) return account
+        val qty = qtyLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val stake = qty * px
         val fee = KalshiFee.total(qty, px)
-        if (stake + fee > account.cashUsd + 1e-6) return account
         val bid = ScalpCatalog.bid(tape, side)
         val pos = ScalpPosition(
             ticker = tape.ticker,
@@ -193,7 +197,7 @@ class ScalpLab(
         return account.copy(
             cashUsd = account.cashUsd - stake - fee,
             position = pos,
-            lastNote = "BUY $side $qty ct @ ${cents(px)} · ${pct(fraction)} of cash"
+            lastNote = "BUY $side $qty ct @ ${cents(px)} · ${pct(fraction)} of ${moneyPlain(bankroll)}"
         )
     }
 
@@ -313,5 +317,6 @@ class ScalpLab(
         private fun cents(px: Double): String = String.format(java.util.Locale.US, "%.0f¢", px * 100.0)
         private fun pct(fraction: Double): String = String.format(java.util.Locale.US, "%.0f%%", fraction * 100.0)
         private fun money(pnl: Double): String = String.format(java.util.Locale.US, "%+.2f", pnl)
+        private fun moneyPlain(usd: Double): String = String.format(java.util.Locale.US, "$%.0f", usd)
     }
 }

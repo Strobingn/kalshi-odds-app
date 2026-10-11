@@ -13,7 +13,8 @@ class ScalpLabTest {
         assertEquals(15, ScalpCatalog.ALL.map { it.id }.distinct().size)
         val lab = ScalpLab()
         assertEquals(15, lab.snapshot().accounts.size)
-        assertEquals(100.0, lab.snapshot().accounts.sumOf { it.cashUsd } / 15.0, 1e-9)
+        assertEquals(ScalpCatalog.START_CASH, lab.snapshot().accounts.sumOf { it.cashUsd } / 15.0, 1e-9)
+        assertEquals(20_000.0, ScalpCatalog.START_CASH, 1e-9)
     }
 
     @Test
@@ -24,8 +25,8 @@ class ScalpLabTest {
         assertTrue("open=$open", open >= 10)
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }.position!!
         assertEquals("YES", cheap.side)
-        assertTrue(cheap.contracts > 100)
-        assertTrue(cheap.stakeUsd > 50.0)
+        assertTrue(cheap.contracts > 50_000)
+        assertTrue(cheap.stakeUsd > 10_000.0)
     }
 
     @Test
@@ -74,7 +75,32 @@ class ScalpLabTest {
         assertNull(after.position)
         val pnl = pos.contracts * 1.0 - pos.stakeUsd - pos.feeUsd
         assertEquals(pnl, after.realizedPnlUsd, 1e-6)
-        assertTrue(after.cashUsd > 100.0)
+        assertTrue(after.cashUsd > ScalpCatalog.START_CASH)
+    }
+
+    @Test
+    fun brokeBookStillBetsFullSizeAndGoesNegative() {
+        val broke = ScalpCatalog.ALL.map { algo ->
+            ScalpAccount(id = algo.id, name = algo.name, rule = algo.rule, cashUsd = 0.50)
+        }
+        val lab = ScalpLab(ScalpLabState(accounts = broke))
+        lab.onQuote(busyTape())
+        val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
+        assertTrue(cheap.position != null)
+        assertTrue(cheap.position!!.stakeUsd > 10_000.0)
+        assertTrue(cheap.cashUsd < 0.0)
+    }
+
+    @Test
+    fun bookAheadOfTheStartBetsAFractionOfThatCash() {
+        val rich = ScalpCatalog.merge(emptyList()).map { account ->
+            if (account.id == "all_in_cheap") account.copy(cashUsd = 40_000.0) else account
+        }
+        val lab = ScalpLab(ScalpLabState(accounts = rich))
+        lab.onQuote(busyTape())
+        val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
+        assertTrue(cheap.position!!.stakeUsd > 30_000.0)
+        assertTrue(cheap.cashUsd < 0.0)
     }
 
     private fun busyTape(
