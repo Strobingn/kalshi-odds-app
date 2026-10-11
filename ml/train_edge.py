@@ -773,10 +773,16 @@ def compact_progress(path: Path, listed: set[str], listed_series: set[str]) -> N
     print(f"  progress {path}: dropped {len(done) - len(keep)} markets past the window", flush=True)
 
 
+# Bump whenever the way rows are BUILT changes (not just which features exist): cached rows from an older
+# extractor are then rebuilt instead of trusted. 2: spot gaps and missing boundary bars defer a market.
+FEATURE_EXTRACTOR_VERSION = 2
+
+
 def _feature_tag() -> str:
-    """Short hash of the feature contract: rows from another contract are not reused."""
+    """Short hash of the feature contract and extractor: rows from another one are not reused."""
     import hashlib
-    return hashlib.sha1(",".join(FEATURE_NAMES).encode()).hexdigest()[:8]
+    key = ",".join(FEATURE_NAMES) + f"|extractor={FEATURE_EXTRACTOR_VERSION}"
+    return hashlib.sha1(key.encode()).hexdigest()[:8]
 
 
 def samples_cache_path(cache: Path, days: int) -> Path:

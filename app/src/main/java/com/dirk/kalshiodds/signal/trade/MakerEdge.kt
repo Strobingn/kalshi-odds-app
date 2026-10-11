@@ -55,7 +55,9 @@ object MakerEdge {
         side: String,
         yesBid: Double?,
         yesAsk: Double?,
-        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE
+        feeRate: Double = SignalConstants.DEFAULT_FEE_RATE,
+        /** The ticket's own contract count: Kalshi rounds the fee per order, so the per-contract fee depends on it. */
+        contracts: Int? = null
     ): Compare? {
         val p = pYes?.takeIf { it.isFinite() } ?: return null
         val wantYes = side.equals("YES", ignoreCase = true)
@@ -72,7 +74,8 @@ object MakerEdge {
         } else {
             null
         }
-        val feeTake = KalshiFee.perContract(tp, feeRate)
+        val feeTake = contracts?.takeIf { it > 0 }?.let { KalshiFee.total(it, tp, feeRate) / it }
+            ?: KalshiFee.perContract(tp, feeRate)
         val evTake = winProb - tp - feeTake
         val evRest = restPx?.let { winProb - it }
         val save = restPx?.let { (tp + feeTake) - it }

@@ -458,7 +458,10 @@ class PaperScalper(
             )
             for (st in due) {
                 val ownBand = st.entryMin != PrintGrid.MIN_PRICE || st.entryMax != PrintGrid.MAX_PRICE
-                if (if (ownBand) !fresh else !scalpOk) continue
+                // Own-band strategies may trade outside the grid's 10–90¢ quotable band, but still need a
+                // current grid quote: the cached book has no age, and a stalled book would price stale.
+                val printsLive = !grid.bid(side, s).isNaN() && !grid.ask(side, s).isNaN()
+                if (if (ownBand) !(fresh && printsLive) else !scalpOk) continue
                 val fire = when (st) {
                     ScalpStrategy.ML_REST -> null
                     ScalpStrategy.DIP_HUNTER, ScalpStrategy.DIP_HUNTER_REST ->
@@ -475,9 +478,12 @@ class PaperScalper(
                             hl.first - hl.second >= ScalpStrategy.BOUNCE_DROP_DOLLARS - EPS &&
                             mid - hl.second >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && mid - hl.second <= 0.03 + EPS
                     }
-                    ScalpStrategy.BREAKOUT_50 ->
-                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d10.isNaN() &&
-                            mid >= 0.50 - EPS && mid - d10 < 0.50 - EPS
+                    ScalpStrategy.BREAKOUT_50 -> {
+                        // Both ends from the print grid: the book mid now against a grid mid 10 s ago is not a crossing.
+                        val now = grid.mid(side, s)
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d10.isNaN() && !now.isNaN() &&
+                            now >= 0.50 - EPS && now - d10 < 0.50 - EPS
+                    }
                     ScalpStrategy.IMPROVE_1C ->
                         s >= 180 && spread >= ScalpStrategy.TIGHT_SPREAD_DOLLARS - EPS
                     ScalpStrategy.FLOW_FADE -> {
