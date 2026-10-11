@@ -466,6 +466,23 @@ class ResumableCollectTest(unittest.TestCase):
         self.assertTrue(te.spot_complete(t0, [(t0 + 120, t0 + 900)]))
         self.assertFalse(te.spot_complete(t0, [(t0 - te.SPOT_NEED_S, t0 - te.SPOT_NEED_S + 60)]))
 
+    def test_a_failed_cutoff_lookup_fails_the_listing(self) -> None:
+        # A transient /historical/cutoff failure must not read as "no history": that listing would
+        # prune every cached historical market and retrain on recent ones alone.
+        saved = te.http_get
+
+        def boom(url, *a, **k):
+            raise OSError("503")
+        try:
+            te.http_get = boom
+            with self.assertRaises(OSError):
+                te.fetch_settled(te.SERIES[0], 270)
+            te.http_get = lambda url, *a, **k: {"markets": [{"ticker": "X"}], "cursor": "more"}
+            with self.assertRaises(RuntimeError):
+                list(te._page("/markets", {}))
+        finally:
+            te.http_get = saved
+
     def test_truncated_progress_line_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             prog = Path(td) / "progress.jsonl"

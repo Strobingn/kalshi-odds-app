@@ -212,7 +212,7 @@ def episode_pnl(fy: int, py: float, fn: int, pn: float, result: str, maker_fee: 
 
 
 def resolve_ms(fy: int, last_y: int | None, end_y: int, fn: int, last_n: int | None, end_n: int) -> int:
-    """When a one-sided (or uneven) episode's imbalance is final.
+    """When an episode is over: neither order rests any more, so its fills (and any imbalance) are final.
 
     A leg is settled once it is fully filled (its last fill) or no longer
     resting (its cancel). The short leg can still fill until its cancel; the
@@ -243,10 +243,11 @@ def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) ->
         end_n = guard_cancel(m, "NO", t, end, cfg.guard_bps)
         fy, _, last_y = ms.conservative_fill_ts("YES", py, CONTRACTS, qy, m.trades, t, end_y, trade_ts)
         fn, _, last_n = ms.conservative_fill_ts("NO", pn, CONTRACTS, qn, m.trades, t, end_n, trade_ts)
-        end_snap = m.snap_at(end)
-        # The pair is completed when the imbalance is final, not at the nominal cancel: a guard can pull
-        # one leg early while the other fills later. Pricing at `end` would book future price moves.
-        done_snap = m.snap_at(resolve_ms(fy, last_y, end_y, fn, last_n, end_n))
+        # The episode is over once neither order rests (a full leg's last fill, or its cancel), not at the
+        # nominal cancel: a guard can pull a leg early. The completion quote, the one-leg markout and the
+        # next decision all use that time; `end` would book future price moves and block later posts.
+        done = resolve_ms(fy, last_y, end_y, fn, last_n, end_n)
+        end_snap = done_snap = m.snap_at(done)
         asks = {s: (done_snap.side(s)[2] if done_snap is not None else None) for s in ("YES", "NO")}
         pnl, cost, completed = episode_pnl(fy, py, fn, pn, m.result, maker_fee, cfg.unwind, asks)
         d_mid = None
@@ -254,9 +255,9 @@ def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) ->
             side = "YES" if fy else "NO"
             a, b = snap.mid(side), end_snap.mid(side)
             d_mid = (b - a) if a is not None and b is not None else None
-        res.episodes.append(Episode(m.ticker, m.day, t, end, py, pn, fy, fn, pnl, cost,
+        res.episodes.append(Episode(m.ticker, m.day, t, done, py, pn, fy, fn, pnl, cost,
                                     min(fy, fn), completed, d_mid))
-        busy_until = end
+        busy_until = done
 
 
 def run(d: Path, maker_fee: float, series: str = "BTC", grid: list[Config] | None = None) -> tuple[dict, dict]:

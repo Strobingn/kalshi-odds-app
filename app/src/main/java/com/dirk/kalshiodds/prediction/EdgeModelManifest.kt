@@ -111,10 +111,27 @@ data class EdgeModelManifest(
                 bootCiLow = m["boot_ci_low"],
                 bootCiHigh = m["boot_ci_high"],
                 promotionEligible = when (val pe = m["promotion_eligible"]) {
-                    null -> null
+                    null -> recomputedPromotion(m)
                     else -> pe > 0.5
                 }
             )
+        }
+
+        /** Same floors as `ml/train_edge.py` write_manifest (`sim_trades >= 200`, `MIN_PROMOTION_DAYS`). */
+        const val MIN_PROMOTION_TRADES = 200
+        const val MIN_PROMOTION_DAYS = 5
+
+        /**
+         * The trainer computes `promotion_eligible` only in the manifest. Without it, a model that
+         * carries its bootstrap numbers is judged on them, failing closed when any is missing
+         * (`boot_days` included); a model with none of them (an older trainer) stays scores-only.
+         */
+        internal fun recomputedPromotion(m: Map<String, Double>): Boolean? {
+            if (m["boot_ci_low"] == null && m["sim_trades"] == null && m["boot_days"] == null) return null
+            val trades = m["sim_trades"] ?: return false
+            val ciLow = m["boot_ci_low"] ?: return false
+            val days = m["boot_days"] ?: return false
+            return trades >= MIN_PROMOTION_TRADES && ciLow > 0.0 && days >= MIN_PROMOTION_DAYS
         }
 
         private fun requireFinite(o: JSONObject, key: String): Double {

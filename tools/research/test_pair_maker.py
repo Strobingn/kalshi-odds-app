@@ -153,6 +153,9 @@ def test_guarded_completion_is_priced_when_the_imbalance_is_final() -> None:
     assert (e.fy, e.fn, e.completed) == (0, 10, 10), (e.fy, e.fn, e.completed)
     want = 10 - (ms.fill_cost(10, 0.50, 0.0) + ms.fill_cost(10, 0.50, pm.TAKER_FEE))
     assert abs(e.pnl - want) < 1e-9, (e.pnl, want)
+    # the episode ends when it resolved (80 s), so the next decision is free from then on
+    assert e.end_ms == OPEN + 80_000, e.end_ms
+    assert res.episodes[1].post_ms < OPEN + 120_000, res.episodes[1].post_ms
     # resolve: a full leg is done at its last fill, anything else at its cancel
     assert pm.resolve_ms(0, None, 71, 10, 80, 120) == 80
     assert pm.resolve_ms(0, None, 120, 10, 50, 120) == 120
