@@ -135,6 +135,18 @@ class ArenaStrategiesTest {
     }
 
     @Test
+    fun aLowThenARallyThenAFallIsNotABounce() {
+        val s = runner()
+        for (sec in 0..64) second(s, sec, 0.50, 0.51)
+        // The low comes first, then a 7¢ rally, then a fall back to 2¢ above the low: the latest move is down.
+        for (sec in 65..67) second(s, sec, 0.49, 0.50)
+        for (sec in 68..72) second(s, sec, 0.56, 0.57)
+        for (sec in 73..76) second(s, sec, 0.51, 0.52)
+        assertEquals(0, s.ledger.snapshot().stats(ScalpStrategy.BOUNCE.name).posted)
+        assertEquals(0, s.engine.workingFor(ScalpStrategy.BOUNCE, t, "YES"))
+    }
+
+    @Test
     fun theVerdictSaysWhenALeadIsMoreThanLuck() {
         assertEquals("no trades yet", ScalperResults.verdict(ScalpStats()))
         assertEquals("10 of 30 trades needed to judge", ScalperResults.verdict(ScalpStats(closed = 10, wins = 10, pnlUsd = 10.0, wonUsd = 10.0)))
@@ -226,6 +238,8 @@ class ArenaStrategiesTest {
         assertEquals("clustered by window it is within luck", "within luck: no winner yet", ScalperResults.verdict(paired))
         // The same 40 results counted as independent trades would have been called a lead.
         assertEquals("ahead by more than luck so far", ScalperResults.verdict(paired.copy(windows = 0)))
+        // A record whose window sums miss some closes (written before them) keeps the trade-level test.
+        assertEquals(ScalperResults.verdict(paired.copy(windows = 0)), ScalperResults.verdict(paired.copy(windowCloses = 10)))
         // Many windows of steady wins still read as a lead.
         val steady = stats(List(30) { w -> List(2) { if (w % 10 == 0) -1.0 else 1.0 } })
         assertEquals("ahead by more than luck so far", ScalperResults.verdict(steady))

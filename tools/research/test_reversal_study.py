@@ -143,6 +143,9 @@ def test_window_from_market() -> None:
     assert (w.yes_bid, w.yes_ask) == (0.47, 0.50)  # first candle closing ≥ 60 s in
     assert rs.window_from_market({**m, "result": ""}, candles) is None
     assert rs.window_from_market({**m, "expiration_value": ""}, candles).settle is None
+    # No candle for the first minute: the 2-minute one is not the preregistered entry, so no quote.
+    late = rs.window_from_market(m, candles[1:])
+    assert (late.yes_bid, late.yes_ask) == (None, None)
 
 
 def main() -> int:

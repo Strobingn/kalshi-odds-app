@@ -67,6 +67,7 @@ class OffsetEdgeModelScoringTest {
             .score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!
         assertEquals("not run on a made-up 0", null, weighs.importedModelPp)
         assertFalse(weighs.modelBacked)
+        assertFalse("a skipped model is a failed gate, so no alert on the fallback", weighs.modelEdgeQualified)
         // A model with no weight on it (an older contract, padded) runs as before.
         val ignores = engine(model(kind = "offset_logistic", bias = 0.4, beats = true))
             .score(tick(yesBid = 0.40, yesAsk = 0.42), settings(), nowMs = 10_000L)!!

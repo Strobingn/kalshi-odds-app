@@ -46,7 +46,9 @@ data class ScalpStats(
     val winN2: Double = 0.0,
     val curTicker: String = "",
     val curUsd: Double = 0.0,
-    val curN: Int = 0
+    val curN: Int = 0,
+    /** Closes counted in the window sums. Below [closed] for a record that predates them (1.9.0–1.9.1). */
+    val windowCloses: Int = 0
 ) {
     /** These totals with one more close on [ticker] folded into the per-window sums. */
     fun withWindowClose(ticker: String, pnlUsd: Double): ScalpStats {
@@ -59,7 +61,8 @@ data class ScalpStats(
             winN2 = winN2 + (if (done) curN.toDouble() * curN else 0.0),
             curTicker = ticker,
             curUsd = (if (same) curUsd else 0.0) + pnlUsd,
-            curN = (if (same) curN else 0) + 1
+            curN = (if (same) curN else 0) + 1,
+            windowCloses = windowCloses + 1
         )
     }
 
@@ -477,12 +480,12 @@ class PaperScalper(
                     ScalpStrategy.EXTREME_REVERSION, ScalpStrategy.EXTREME_REVERSION_REST ->
                         !d30.isNaN() && d30 <= -ScalpStrategy.EXTREME_MOVE_DOLLARS + EPS
                     ScalpStrategy.BOUNCE -> {
-                        // A fall of 5¢ from the minute's high to a low in the last 20 s, and the first 1–3¢ back up.
-                        val high = grid.highMid(side, s, 60)
-                        val low = grid.lowMid(side, s, 20)
-                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !high.isNaN() && !low.isNaN() &&
-                            high - low >= ScalpStrategy.BOUNCE_DROP_DOLLARS - EPS &&
-                            mid - low >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && mid - low <= 0.03 + EPS
+                        // A fall of 5¢ from the minute's high to a low in the last 20 s (high first, then low),
+                        // and the first 1–3¢ back up.
+                        val hl = grid.highThenLow(side, s, 60, 20)
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && hl != null &&
+                            hl.first - hl.second >= ScalpStrategy.BOUNCE_DROP_DOLLARS - EPS &&
+                            mid - hl.second >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && mid - hl.second <= 0.03 + EPS
                     }
                     ScalpStrategy.BREAKOUT_50 ->
                         spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d10.isNaN() &&
