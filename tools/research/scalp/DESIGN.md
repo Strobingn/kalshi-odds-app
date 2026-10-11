@@ -177,3 +177,40 @@ take22_next (market orders: pay whatever the ask is one second later) and take_m
 that was seen; no fill, scored 0, if the ask has moved above it). Six targets: 99% interval required.
 The same staleness cannot help the resting-bid targets of Parts G and H (their fills come from later
 prints), and can only hurt them.
+
+## Part J — patient orders: a bid placed below the best bid (fixed 2026-10-10 before any Part J number)
+
+Parts G–I: an order that JOINS the best bid sits behind thousands of contracts and is filled mostly when the
+price is about to fall through it. The idea not yet tested: put the bid a few cents BELOW the best bid, before
+that price is the best one, and wait. Orders ahead of it that are cancelled and re-entered go behind it, so by
+the time the price comes down it may be near the front.
+
+Data: since 2026-10-09 ~18:00 UTC the cloud recorder keeps the 15 best resting bids on each side once a
+second (`depth_DAY.csv.gz`), so the size at a price below the best can be followed. Complete trade tape from
+`pull_tape.py`. **This is 2 UTC days (24 windows on 10-09, 89 on 10-10 so far).** Two days cannot carry a
+day-resampled interval; intervals here resample the windows, the two days are shown side by side, and
+whatever comes out is provisional until there are at least a week of days.
+
+Order: 10 contracts bid at (best bid - k cents), k = 1..5, on either side, when the best bid is 10c..90c and
+the bid's own price is at least 10c (so every price is on the 1-cent grid) and the size at that price is in
+the recorded 15 levels. It rests for N = 60 s or 300 s, never past 30 s before the close. Decisions every
+15 s from 60 s to 720 s after the open.
+
+Fill (the BOOK rule of Part G, now at any recorded level): the contracts ahead start as the size shown at
+that price when the order is placed; taker sales at the price use them up; they can never be more than the
+size shown at that price in any later snapshot (an empty or passed level means none are ahead); a taker sale
+below the price fills at once. Prices deeper than the 15 recorded levels give no bound.
+
+After a fill, two exits:
+  scalp   an offer 1c above the fill (queue from the other side's recorded levels, same rule; 3,500 assumed
+          where it is not recorded), stop when the best bid is 4c below, time-out 120 s; both sold at the
+          best bid with the taker fee rounded up per order; still open at the close settles.
+  hold    held to settlement, no fee.
+
+Cells: k (5) x N (2) x exit (2) = 20. Cents per order sent (unfilled = 0) and per fill.
+Bar: a cell counts only if the 99% window-resampled interval of cents per order sent is above zero AND it is
+above zero on each of the two days. Twenty cells and two days: a pass is a reason to run that order on paper
+in the app, nothing more. If no cell passes, the app is left alone.
+Context, no bar: k = 0 (joining the best bid) through the same code; how much the queue ahead shrinks while
+an order waits (size at the price when placed vs contracts still ahead when it fills or expires); the share
+of fills that came from a sale through the price.
