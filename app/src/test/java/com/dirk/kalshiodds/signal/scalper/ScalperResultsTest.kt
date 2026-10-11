@@ -119,6 +119,23 @@ class ScalperResultsTest {
     }
 
     @Test
+    fun aFailedFlushKeepsTheRowsQueuedAndBlocksTheArchive() {
+        // The log's directory is a plain file: nothing can be written.
+        val notADir = tmp.newFile("not-a-dir")
+        val log = ScalpTradeLog(notADir, run = 1L, io = direct)
+        val row = ScalpTrade(
+            closedAtMs = 1_791_400_000_123L, run = 1L, id = 1L, strategy = "ML_REST", ticker = t, side = "YES",
+            contracts = 10, entry = 0.50, exit = 0.51, kind = "TARGET", entryFeeUsd = 0.0, exitFeeUsd = 0.0,
+            pnlUsd = 0.10, postedAtMs = 1L, filledAtMs = 2L, queueAhead = 0.0, queueKnown = true,
+            predictionCents = 0.0, expectedCents = 0.0
+        )
+        log.add(listOf(row), emptyList())
+        assertFalse(log.flushNow())
+        assertEquals("the row is still queued, not lost", listOf(row), log.recent(10))
+        assertFalse("no reset while queued rows cannot be saved", log.archive(nowMs = 5L))
+    }
+
+    @Test
     fun anArchiveThatCannotFinishPutsEveryFileBack() {
         val dir = tmp.newFolder("partial")
         val a = File(dir, "scalps_2026-10-01.csv").apply { writeText("a\n") }
