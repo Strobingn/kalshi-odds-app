@@ -422,6 +422,14 @@ data class ScalpTrade(
     val isPrimary: Boolean by lazy(LazyThreadSafetyMode.PUBLICATION) { ruleVersion.split('|').getOrNull(2) != "S" }
     val coin: String get() = ScalpParams.coinOf(ticker)
     val strategy: ScalpStrategy get() = ScalpParams.byId(variantId)?.strategy ?: ScalpStrategy.FAIR_GAP
+    /** 0.3.54: display/breakdown label — forecast trades are their own algos, never "Fair-gap". */
+    val algoLabel: String get() = when {
+        variantId.startsWith(ForecastScalp.RIDE_PREFIX) -> ScalpModels.Model.FORECAST_RIDE.label
+        variantId.startsWith(ForecastScalp.FADE_PREFIX) -> ScalpModels.Model.FORECAST_FADE.label
+        else -> strategy.label
+    }
+    /** Strategy for per-strategy grouping, null for forecast trades (grouped separately). */
+    val strategyOrNull: ScalpStrategy? get() = if (ForecastScalp.isForecast(this)) null else strategy
 
     /** Mark-to-bid P&L after the exit fee for what is still held. */
     fun unrealizedUsd(bid: Double?): Double? {
@@ -564,9 +572,8 @@ class ScalpBook(
                         if (openCost + cost > bankrollUsd() + 1e-9) continue // paper bankroll fully committed
                         // 0.3.50: each of the six models has its own bankroll slice (independent ledger).
                         val model = ScalpModels.modelOf(p)
-                        val used = sliceUsed[model] ?: 0.0
-                        if (used + cost > ScalpModels.sliceUsd(bankrollUsd()) + 1e-9) continue
-                        sliceUsed[model] = used + cost
+                        // 0.3.54: no per-model cap — all scalpers share the one free paper bankroll.
+                        sliceUsed[model] = (sliceUsed[model] ?: 0.0) + cost
                         openCost += cost
                     }
                     val makerBid = if (p.maker) q.bid(sig.side)?.takeIf { it > 0.0 } else null
@@ -636,7 +643,6 @@ class ScalpBook(
             val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
             val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
             if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
-            if (openCostUsd(model) + cost > ScalpModels.sliceUsd(bankrollUsd()) + 1e-9) continue
             changed += ScalpTrade(
                 id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                 signalAsk = ask, fairAtSignal = mid + f, restingLimit = ask, restingSinceMs = q.nowMs,

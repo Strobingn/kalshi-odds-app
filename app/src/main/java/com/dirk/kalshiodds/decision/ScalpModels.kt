@@ -25,7 +25,8 @@ object ScalpModels {
     /** Sixth model: the dip-hunter seed run maker-first (resting bid entry, resting ask exit). */
     val MAKER_DIP_PARAMS: ScalpParams = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER).copy(maker = true)
 
-    fun sliceUsd(bankrollUsd: Double): Double = (bankrollUsd.takeIf { it.isFinite() } ?: 0.0).coerceAtLeast(0.0) / COUNT
+    /** 0.3.54: no per-model split — every scalper draws from the whole shared free paper bankroll. */
+    fun sliceUsd(bankrollUsd: Double): Double = (bankrollUsd.takeIf { it.isFinite() } ?: 0.0).coerceAtLeast(0.0)
 
     fun modelOf(p: ScalpParams): Model =
         if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
