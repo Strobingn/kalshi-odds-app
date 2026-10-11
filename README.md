@@ -19,6 +19,27 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.1 (claude/scalp-insights): more scalping charts and data, in four sections
+
+The Arena tab now has one row of section chips (**Overview · Strategies · Timing · Trades**) under the headline,
+and the "follow a strategy" filter applies across all of them.
+
+- **Overview.** *Live window*: the Bitcoin window trading now, its UP price second by second, with a ring at
+  every paper entry and a dot at every exit (blue made money, red lost, grey still open) joined by a thin line;
+  DOWN trades sit on the UP line (a DOWN entry at 40¢ is drawn at 60¢); tap a mark for the trade. Then the profit
+  bars, the race, the leaderboard, the bankroll and a new *drawdown* chart (how far below its best the arena, or
+  the strategy you follow, sits).
+- **Strategies.** A *stats table* per strategy: trades, ¢ a contract after fees, profit factor (won ÷ lost),
+  deepest drawdown, average hold, longest win / loss streaks. A *price heatmap*: strategy × entry price (10¢
+  bands of the side bought), blue made money, red lost, grey ≈ 0, outlined = under 3 trades. Then exits, win
+  rate and fees.
+- **Timing.** A *day-by-day heatmap* (strategy × the last 14 days), the hourly columns and *how long to hold*
+  (¢ a contract by time in the trade: under 10 s … over 5 min, and held to the close).
+- **Trades.** The per-trade histogram, the totals and every trade.
+
+Numbers: `ArenaStats` (`ArenaStatsTest`); live data: `PaperScalper.liveWindow` (prints per second +
+`ScalperEngine.openPositions`); drawing: `ui/ArenaInsightViews.kt`. Paper only, as before.
+
 ## 1.9.0 (Claude branch): the Strategy Arena tab, 15 strategies at once, paper only
 
 Claude Bitcoin 1.9.0 installs over 1.8.8 and keeps your key, settings and paper records. It also carries

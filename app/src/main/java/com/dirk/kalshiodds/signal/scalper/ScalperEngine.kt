@@ -296,6 +296,14 @@ class ScalperEngine(val config: Config = Config()) {
 
     fun hasWork(ticker: String): Boolean = !byTicker[ticker].isNullOrEmpty()
 
+    /** A filled paper position still waiting to exit (or for the settlement). */
+    data class OpenPosition(val order: ScalpOrder, val filledAtMs: Long)
+
+    /** Filled positions on [ticker], oldest first. Resting bids that have not filled are not positions. */
+    fun openPositions(ticker: String): List<OpenPosition> =
+        byTicker[ticker].orEmpty().mapNotNull { w -> w.filledAtMs?.let { OpenPosition(w.order, it) } }
+            .sortedBy { it.filledAtMs }
+
     /** Positions [strategy] has working on one side of [ticker] (resting bids and filled scalps). */
     fun workingFor(strategy: ScalpStrategy, ticker: String, side: String): Int {
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"

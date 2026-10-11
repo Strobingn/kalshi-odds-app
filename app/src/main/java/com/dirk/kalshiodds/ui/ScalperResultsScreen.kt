@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +57,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.signal.scalper.ArenaCharts
+import com.dirk.kalshiodds.signal.scalper.ArenaStats
+import com.dirk.kalshiodds.signal.scalper.LiveWindow
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
 import com.dirk.kalshiodds.signal.scalper.ScalpStrategy
 import com.dirk.kalshiodds.signal.scalper.ScalpTrade
@@ -123,6 +126,15 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
             delay(10_000L)
         }
     }
+    // The live window and its open positions, once a second.
+    val scalper = container?.scalper
+    val live by produceState<LiveWindow?>(null, scalper) {
+        val sc = scalper ?: return@produceState
+        while (true) {
+            value = runCatching { sc.liveWindow() }.getOrNull()
+            delay(1_000L)
+        }
+    }
     val saveZip = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri: Uri? ->
         val s = store
         if (uri != null && s != null) {
@@ -145,8 +157,17 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         onExport = { saveZip.launch("strategy-arena-data.zip") },
         message = message,
         feed = feed,
-        chartTrades = chartTrades
+        chartTrades = chartTrades,
+        live = live
     )
+}
+
+/** The Arena screen's sections (one row of chips at the top). */
+enum class ArenaSection(val label: String) {
+    OVERVIEW("Overview"),
+    STRATEGIES("Strategies"),
+    TIMING("Timing"),
+    TRADES("Trades")
 }
 
 /** Why the arena is not trading, and the one tap that fixes it. Null when the feed is on. */
@@ -196,7 +217,12 @@ fun ScalperResultsScreen(
     listState: LazyListState = rememberLazyListState(),
     feed: ArenaFeed? = null,
     /** The longer slice of the trade file the charts draw from. */
-    chartTrades: List<ScalpTrade> = trades
+    chartTrades: List<ScalpTrade> = trades,
+    /** The window trading now, for the live chart (null before its first print). */
+    live: LiveWindow? = null,
+    initialSection: ArenaSection = ArenaSection.OVERVIEW,
+    /** For the day-by-day grid; the phone's date in the app. */
+    today: java.time.LocalDate = java.time.LocalDate.now()
 ) {
     val colors = DipTheme.colors
     val h = ScalperResults.headline(state)
@@ -211,6 +237,17 @@ fun ScalperResultsScreen(
     val curves = remember(chartTrades) { ArenaCharts.equityCurves(chartTrades) }
     val curveOf = remember(curves) { curves.associateBy { it.strategy } }
     val bins = remember(chartTrades, selected) { ArenaCharts.histogram(chartTrades, selected) }
+    var sectionName by rememberSaveable { mutableStateOf(initialSection.name) }
+    val section = ArenaSection.values().firstOrNull { it.name == sectionName } ?: ArenaSection.OVERVIEW
+    val liveMarkers = remember(live, chartTrades) { live?.let { ArenaStats.markers(it, chartTrades) }.orEmpty() }
+    val drawdownCurve = remember(state.curve, curves, selected) {
+        if (selected == null) bankroll.map { CurvePoint(it.tMs, it.pnlUsd - ScalperResults.START_BANKROLL_USD) }
+        else curveOf[selected]?.points.orEmpty()
+    }
+    val statsRows = remember(chartTrades) { ArenaStats.strategyStats(chartTrades) }
+    val priceGrid = remember(chartTrades) { ArenaStats.priceBands(chartTrades) }
+    val dayGrid = remember(chartTrades, today) { ArenaStats.daily(chartTrades, today) }
+    val holdBuckets = remember(chartTrades, selected) { ArenaStats.holdBuckets(chartTrades, selected) }
     Scaffold(
         containerColor = colors.bg,
         topBar = {
@@ -270,8 +307,20 @@ fun ScalperResultsScreen(
                     )
                 }
             }
+            item(key = "sections") {
+                // One row of filters above everything they scope: the section, then the strategy you follow.
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    ArenaSection.values().forEach { sec ->
+                        FilterChip(
+                            selected = section == sec,
+                            onClick = { sectionName = sec.name },
+                            label = { Text(sec.label, maxLines = 1, style = MaterialTheme.typography.labelMedium) },
+                            modifier = Modifier.weight(1f).testTag("SECTION_${sec.name}")
+                        )
+                    }
+                }
+            }
             item(key = "filter") {
-                // One filter for the whole screen: the selected strategy is lit in the race and fills the histogram.
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -288,114 +337,161 @@ fun ScalperResultsScreen(
                     }
                 }
             }
-            item(key = "chart_pnl") {
-                ChartCard("Who is winning", "Paper profit after fees per strategy, best on top. Tap one to follow it.", "CHART_PNL") {
-                    PnlBarsChart(board, selected, onSelect)
-                }
-            }
-            item(key = "chart_race") {
-                ChartCard(
-                    "The race",
-                    "Running profit of every strategy over the last ${chartTrades.size} closed trades, from the same \$0 line.",
-                    "CHART_RACE"
-                ) { EquityRaceChart(curves, selected) }
-            }
-            item(key = "leaderboard") { Leaderboard(state, curveOf, selected, onSelect) }
-            item(key = "stats") {
-                Panel {
-                    StatPair("Dollars won", ScalperResults.plainMoney(h.wonUsd), colors.up, "Dollars lost", ScalperResults.plainMoney(h.lostUsd), colors.down)
-                    StatPair("Wins", h.wins.toString(), colors.textPrimary, "Losses", h.losses.toString(), colors.textPrimary)
-                    StatPair(
-                        "Average win", h.avgWinUsd?.let { ScalperResults.plainMoney(it) } ?: "–", colors.up,
-                        "Average loss", h.avgLossUsd?.let { ScalperResults.plainMoney(it) } ?: "–", colors.down
-                    )
-                    StatPair(
-                        "Biggest win", if (h.wins > 0) ScalperResults.plainMoney(h.biggestWinUsd) else "–", colors.up,
-                        "Biggest loss", if (h.losses > 0) ScalperResults.plainMoney(h.biggestLossUsd) else "–", colors.down
-                    )
-                    StatPair(
-                        "Total fees paid", ScalperResults.plainMoney(h.feesUsd), colors.textPrimary,
-                        "Broke even", h.flat.toString(), colors.textPrimary
-                    )
-                    Text(
-                        "Fees are already taken out of every number above.",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = colors.textSecondary
-                    )
-                }
-            }
-            item(key = "bankroll") {
-                Panel {
-                    Text("Paper bankroll over time", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-                    if (bankroll.size >= 2) {
-                        ScrubLineChart(bankroll, ScalperResults.START_BANKROLL_USD) { ScalperResults.plainMoney(it) }
-                    } else {
-                        Text(
-                            "The chart appears after the first scalp closes.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.textSecondary
-                        )
+            when (section) {
+                ArenaSection.OVERVIEW -> {
+                    item(key = "chart_live") {
+                        ChartCard(
+                            "Live window",
+                            "The Bitcoin window trading now (UP price) with every paper entry and exit on it.",
+                            "CHART_LIVE"
+                        ) { LiveWindowChart(live, liveMarkers, selected) }
+                    }
+                    item(key = "chart_pnl") {
+                        ChartCard("Who is winning", "Paper profit after fees per strategy, best on top. Tap one to follow it.", "CHART_PNL") {
+                            PnlBarsChart(board, selected, onSelect)
+                        }
+                    }
+                    item(key = "chart_race") {
+                        ChartCard(
+                            "The race",
+                            "Running profit of every strategy over the last ${chartTrades.size} closed trades, from the same \$0 line.",
+                            "CHART_RACE"
+                        ) { EquityRaceChart(curves, selected) }
+                    }
+                    item(key = "leaderboard") { Leaderboard(state, curveOf, selected, onSelect) }
+                    item(key = "bankroll") {
+                        ChartCard("Paper bankroll", "All 15 together, from a \$1,000 reference start.", "CHART_BANKROLL") {
+                            if (bankroll.size >= 2) {
+                                ScrubLineChart(bankroll, ScalperResults.START_BANKROLL_USD) { ScalperResults.plainMoney(it) }
+                            } else {
+                                Text("The chart appears after the first trade closes.", style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                            }
+                        }
+                    }
+                    item(key = "chart_drawdown") {
+                        ChartCard(
+                            "Drawdown",
+                            "How far ${selected?.label ?: "the whole arena"} sits under its best so far.",
+                            "CHART_DRAWDOWN"
+                        ) { DrawdownChart(drawdownCurve) }
                     }
                 }
-            }
-            item(key = "chart_hist") {
-                ChartCard(
-                    "What one trade makes",
-                    "Result per contract after fees, ${selected?.label ?: "all strategies"}. Red bins lost money.",
-                    "CHART_HIST"
-                ) { HistogramChart(bins, selected?.label ?: "any strategy") }
-            }
-            item(key = "chart_hour") {
-                ChartCard("Best and worst hours", "Profit after fees by hour of the day, your clock.", "CHART_HOUR") {
-                    HourlyChart(ArenaCharts.hourly(state))
-                }
-            }
-            item(key = "chart_exit") {
-                ChartCard("How trades end", "Share of each strategy's trades that hit the target, were stopped, timed out or rode to the close.", "CHART_EXIT") {
-                    ExitMixChart(ArenaCharts.exitMix(state))
-                }
-            }
-            item(key = "chart_win") {
-                ChartCard("Win rate", "Share of each strategy's trades that made money after fees.", "CHART_WIN") {
-                    WinRateChart(ArenaCharts.winRates(state))
-                }
-            }
-            item(key = "chart_fees") {
-                ChartCard("What the fees take", "Profit before and after the taker fee, per strategy.", "CHART_FEES") {
-                    FeeDragChart(ArenaCharts.feeDrag(state))
-                }
-            }
-            item(key = "by_strategy") { Breakdown("By strategy", strategies) }
-            item(key = "by_coin") { Breakdown("By coin", coins) }
-            item(key = "by_hour") { Breakdown("By hour of the day (your clock)", hours) }
-            item(key = "trades_header") {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        if (h.closed == 0) "Every trade" else "Every trade · ${h.closed} · newest first",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = colors.textPrimary
-                    )
-                    OutlinedButton(onClick = onExport, modifier = Modifier.height(44.dp)) {
-                        Text("Export all scalper data (zip)")
+                ArenaSection.STRATEGIES -> {
+                    item(key = "stats_table") {
+                        ChartCard("Strategy stats", "Over the last ${chartTrades.size} closed trades, best net first.", "CHART_STATS") {
+                            StatsTable(statsRows)
+                        }
                     }
-                    message?.let {
-                        Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                    item(key = "chart_price") {
+                        ChartCard(
+                            "Where in the price it pays",
+                            "Average result per contract by the entry price of the side bought (10¢ bands).",
+                            "CHART_PRICE"
+                        ) {
+                            HeatmapChart(
+                                priceGrid, { ArenaStats.priceBandLabel(it) }, listOf("0¢", "50¢", "100¢"), "PRICE"
+                            )
+                        }
                     }
-                    if (trades.isEmpty()) {
-                        Text(
-                            "Nothing here yet. Every closed scalp is listed with its entry, exit and net.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = colors.textSecondary
-                        )
+                    item(key = "chart_exit") {
+                        ChartCard("How trades end", "Share of each strategy's trades that hit the target, were stopped, timed out or rode to the close.", "CHART_EXIT") {
+                            ExitMixChart(ArenaCharts.exitMix(state))
+                        }
                     }
+                    item(key = "chart_win") {
+                        ChartCard("Win rate", "Share of each strategy's trades that made money after fees.", "CHART_WIN") {
+                            WinRateChart(ArenaCharts.winRates(state))
+                        }
+                    }
+                    item(key = "chart_fees") {
+                        ChartCard("What the fees take", "Profit before and after the taker fee, per strategy.", "CHART_FEES") {
+                            FeeDragChart(ArenaCharts.feeDrag(state))
+                        }
+                    }
+                    item(key = "by_strategy") { Breakdown("By strategy", strategies) }
                 }
-            }
-            items(trades, key = { "${it.run}-${it.id}" }) { t -> TradeRow(t) }
-            if (trades.size < h.closed && trades.isNotEmpty()) {
-                item(key = "more") {
-                    OutlinedButton(onClick = onShowMore, modifier = Modifier.fillMaxWidth().height(48.dp)) {
-                        Text("Show ${PAGE} more (${trades.size} of ${h.closed} shown)")
+                ArenaSection.TIMING -> {
+                    item(key = "chart_day") {
+                        ChartCard("Day by day", "Profit after fees per strategy per day, last 14 days (your clock).", "CHART_DAY") {
+                            HeatmapChart(
+                                dayGrid, { dayGrid.columns[it] },
+                                listOfNotNull(dayGrid.columns.firstOrNull(), dayGrid.columns.lastOrNull()), "DAY",
+                                value = { it.netUsd }, valueText = { ScalperResults.money(it) }, minTrades = 1
+                            )
+                        }
+                    }
+                    item(key = "chart_hour") {
+                        ChartCard("Best and worst hours", "Profit after fees by hour of the day, your clock.", "CHART_HOUR") {
+                            HourlyChart(ArenaCharts.hourly(state))
+                        }
+                    }
+                    item(key = "chart_hold") {
+                        ChartCard(
+                            "How long to hold",
+                            "Average result per contract by time in the trade, ${selected?.label ?: "all strategies"}.",
+                            "CHART_HOLD"
+                        ) { HoldTimeChart(holdBuckets, selected?.label ?: "any strategy") }
+                    }
+                    item(key = "by_hour") { Breakdown("By hour of the day (your clock)", hours) }
+                    item(key = "by_coin") { Breakdown("By coin", coins) }
+                }
+                ArenaSection.TRADES -> {
+                    item(key = "chart_hist") {
+                        ChartCard(
+                            "What one trade makes",
+                            "Result per contract after fees, ${selected?.label ?: "all strategies"}. Red bins lost money.",
+                            "CHART_HIST"
+                        ) { HistogramChart(bins, selected?.label ?: "any strategy") }
+                    }
+                    item(key = "stats") {
+                        Panel {
+                            StatPair("Dollars won", ScalperResults.plainMoney(h.wonUsd), colors.up, "Dollars lost", ScalperResults.plainMoney(h.lostUsd), colors.down)
+                            StatPair("Wins", h.wins.toString(), colors.textPrimary, "Losses", h.losses.toString(), colors.textPrimary)
+                            StatPair(
+                                "Average win", h.avgWinUsd?.let { ScalperResults.plainMoney(it) } ?: "–", colors.up,
+                                "Average loss", h.avgLossUsd?.let { ScalperResults.plainMoney(it) } ?: "–", colors.down
+                            )
+                            StatPair(
+                                "Biggest win", if (h.wins > 0) ScalperResults.plainMoney(h.biggestWinUsd) else "–", colors.up,
+                                "Biggest loss", if (h.losses > 0) ScalperResults.plainMoney(h.biggestLossUsd) else "–", colors.down
+                            )
+                            StatPair(
+                                "Total fees paid", ScalperResults.plainMoney(h.feesUsd), colors.textPrimary,
+                                "Broke even", h.flat.toString(), colors.textPrimary
+                            )
+                            Text("Fees are already taken out of every number above.", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                        }
+                    }
+                    item(key = "trades_header") {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text(
+                                if (h.closed == 0) "Every trade" else "Every trade · ${h.closed} · newest first",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = colors.textPrimary
+                            )
+                            OutlinedButton(onClick = onExport, modifier = Modifier.height(44.dp)) {
+                                Text("Export all scalper data (zip)")
+                            }
+                            message?.let {
+                                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                            }
+                            if (trades.isEmpty()) {
+                                Text(
+                                    "Nothing here yet. Every closed trade is listed with its entry, exit and net.",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
+                    }
+                    items(trades, key = { "${it.run}-${it.id}" }) { t -> TradeRow(t) }
+                    if (trades.size < h.closed && trades.isNotEmpty()) {
+                        item(key = "more") {
+                            OutlinedButton(onClick = onShowMore, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                                Text("Show ${PAGE} more (${trades.size} of ${h.closed} shown)")
+                            }
+                        }
                     }
                 }
             }

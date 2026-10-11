@@ -26,7 +26,9 @@ object ArenaColors {
         val baseline: Color,
         val shadeLight: Color,
         val shadeDark: Color,
-        val surface: Color
+        val surface: Color,
+        /** Diverging midpoint for heatmaps: a gray that reads as "nothing". */
+        val neutral: Color
     )
 
     @Composable
@@ -43,7 +45,8 @@ object ArenaColors {
                 baseline = Color(0xFF5A5A55),
                 shadeLight = Color(0xFF86B6EF),
                 shadeDark = Color(0xFF3987E5),
-                surface = c.surface
+                surface = c.surface,
+                neutral = Color(0xFF383835)
             )
         } else {
             Set(
@@ -55,7 +58,8 @@ object ArenaColors {
                 baseline = Color(0xFFC3C2B7),
                 shadeLight = Color(0xFF86B6EF),
                 shadeDark = Color(0xFF1C5CAB),
-                surface = c.surface
+                surface = c.surface,
+                neutral = Color(0xFFF0EFEC)
             )
         }
     }

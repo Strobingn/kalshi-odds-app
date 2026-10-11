@@ -325,6 +325,26 @@ class PaperScalper(
     @Synchronized
     fun working(): Pair<Int, Int> = engine.workingTotal()
 
+    /**
+     * The live window the scalper is watching, for the Arena's live chart:
+     * its YES mid per second from the prints (seconds with no fresh quote are
+     * left out) and the paper positions open on it. Null before the first
+     * print of a window.
+     */
+    @Synchronized
+    fun liveWindow(nowMs: Long = System.currentTimeMillis()): LiveWindow? {
+        val e = grids.entries.maxByOrNull { it.value.openMs } ?: return null
+        val grid = e.value
+        val last = grid.secondOf(nowMs).coerceAtMost(PrintGrid.SECONDS - 1)
+        if (last < 0) return null
+        val mids = ArrayList<Pair<Int, Double>>(last + 1)
+        for (s in 0..last) {
+            val m = grid.yesMid(s)
+            if (!m.isNaN()) mids += s to m
+        }
+        return LiveWindow(e.key, grid.openMs, mids, engine.openPositions(e.key))
+    }
+
     @Synchronized
     fun reset() {
         engine.clear()
@@ -477,6 +497,14 @@ class PaperScalper(
         private const val GRID_KEEP_MS = 120_000L
     }
 }
+
+/** The window on screen in the Arena's live chart. [mids] = (second since the open, YES mid). */
+data class LiveWindow(
+    val ticker: String,
+    val openMs: Long,
+    val mids: List<Pair<Int, Double>>,
+    val open: List<ScalperEngine.OpenPosition>
+)
 
 /** On-device store for the paper scalper's record. */
 class ScalperStore(context: Context) {
