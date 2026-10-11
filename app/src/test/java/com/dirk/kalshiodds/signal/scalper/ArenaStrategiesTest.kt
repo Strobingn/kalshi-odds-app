@@ -147,6 +147,19 @@ class ArenaStrategiesTest {
     }
 
     @Test
+    fun oneHugeWinIsNotALeadBeyondLuck() {
+        // 19 wins of 1¢, one of $20 and ten 50¢ losses: ahead, but almost all of it is one trade.
+        val won = 19 * 0.01 + 20.0
+        val s = ScalpStats(
+            closed = 30, wins = 20, losses = 10, pnlUsd = won - 5.0, wonUsd = won, lostUsd = 5.0,
+            pnlSqUsd = 19 * 0.01 * 0.01 + 400.0 + 10 * 0.25
+        )
+        assertEquals("within luck: no winner yet", ScalperResults.verdict(s))
+        // The class-average rebuild alone would have called it a lead.
+        assertEquals("ahead by more than luck so far", ScalperResults.verdict(s.copy(pnlSqUsd = 0.0)))
+    }
+
+    @Test
     fun theStatusPanelNamesWhatStopsTheArena() {
         val calls = ArrayList<String>()
         fun feed(s: SignalSettings) = arenaFeed(

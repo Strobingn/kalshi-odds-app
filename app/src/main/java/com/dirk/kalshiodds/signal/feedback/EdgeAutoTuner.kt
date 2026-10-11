@@ -128,7 +128,10 @@ object EdgeAutoTuner {
         val withinChance = !negativeEv && bestTaken.isNotEmpty() && lowerBound(bestTaken) <= 0.0
         val bootP10 = bootstrapEvP10(samples, bestThreshold)
         val failsResampling = bootP10 != null && bootP10 <= 0.0
-        val sitOut = !beats || negativeEv || failsResampling || withinChance || bestEv == Double.NEGATIVE_INFINITY
+        // No bootstrap means every call settled on one day: one day's calls share a regime, so they can't
+        // show the EV survives resampling. Fail closed until the record spans at least two days.
+        val oneDay = bootP10 == null && bestTaken.isNotEmpty()
+        val sitOut = !beats || negativeEv || failsResampling || withinChance || oneDay || bestEv == Double.NEGATIVE_INFINITY
         val reason = when {
             !beats && negativeEv ->
                 "The model hasn't beaten Kalshi's prices in testing, and this bet's expected value is negative."
@@ -142,6 +145,8 @@ object EdgeAutoTuner {
                 "EV is positive but does not survive day resampling (10th pct ${fmt(bootP10 ?: 0.0)}) — sitting out."
             withinChance ->
                 "The model's $bestN settled calls came out ahead, but by no more than luck would give. No bet calls until the record is clear of chance."
+            oneDay ->
+                "The model's $bestN settled calls all closed on one day. No bet calls until its record spans at least two days."
             else ->
                 "Auto-tune ${fmt(bestThreshold)} pp · EV ${fmt(bestEv)}${bootP10?.let { " (10th pct ${fmt(it)})" } ?: ""} on $bestN / ${samples.size} signals."
         }

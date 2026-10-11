@@ -211,6 +211,18 @@ def episode_pnl(fy: int, py: float, fn: int, pn: float, result: str, maker_fee: 
     return settle_payout(fy, fn, result) - cost, cost, completed
 
 
+def resolve_ms(fy: int, last_y: int | None, end_y: int, fn: int, last_n: int | None, end_n: int) -> int:
+    """When a one-sided (or uneven) episode's imbalance is final.
+
+    A leg is settled once it is fully filled (its last fill) or no longer
+    resting (its cancel). The short leg can still fill until its cancel; the
+    long leg can still grow until it is full or cancelled.
+    """
+    def leg_done(f: int, last: int | None, end: int) -> int:
+        return last if f >= CONTRACTS and last is not None else end
+    return max(leg_done(fy, last_y, end_y), leg_done(fn, last_n, end_n))
+
+
 def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) -> None:
     trade_ts = m._trade_ts
     stop = m.close_ms - CANCEL_BEFORE_CLOSE_MS
@@ -229,10 +241,13 @@ def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) ->
         end = ms.cancel_time(t, cfg.cancel_s, m.close_ms)
         end_y = guard_cancel(m, "YES", t, end, cfg.guard_bps)
         end_n = guard_cancel(m, "NO", t, end, cfg.guard_bps)
-        fy, _ = ms.conservative_fill("YES", py, CONTRACTS, qy, m.trades, t, end_y, trade_ts)
-        fn, _ = ms.conservative_fill("NO", pn, CONTRACTS, qn, m.trades, t, end_n, trade_ts)
+        fy, _, last_y = ms.conservative_fill_ts("YES", py, CONTRACTS, qy, m.trades, t, end_y, trade_ts)
+        fn, _, last_n = ms.conservative_fill_ts("NO", pn, CONTRACTS, qn, m.trades, t, end_n, trade_ts)
         end_snap = m.snap_at(end)
-        asks = {s: (end_snap.side(s)[2] if end_snap is not None else None) for s in ("YES", "NO")}
+        # The pair is completed when the imbalance is final, not at the nominal cancel: a guard can pull
+        # one leg early while the other fills later. Pricing at `end` would book future price moves.
+        done_snap = m.snap_at(resolve_ms(fy, last_y, end_y, fn, last_n, end_n))
+        asks = {s: (done_snap.side(s)[2] if done_snap is not None else None) for s in ("YES", "NO")}
         pnl, cost, completed = episode_pnl(fy, py, fn, pn, m.result, maker_fee, cfg.unwind, asks)
         d_mid = None
         if (fy > 0) != (fn > 0) and end_snap is not None:

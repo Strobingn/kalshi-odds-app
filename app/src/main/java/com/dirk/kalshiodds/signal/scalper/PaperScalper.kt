@@ -32,7 +32,9 @@ data class ScalpStats(
     /** Taker fees charged on entries and exits. Already inside [pnlUsd]. */
     val feesUsd: Double = 0.0,
     val biggestWinUsd: Double = 0.0,
-    val biggestLossUsd: Double = 0.0
+    val biggestLossUsd: Double = 0.0,
+    /** Sum of each closed scalp's net squared, for the luck test's spread. 0 in records from before 1.9.2. */
+    val pnlSqUsd: Double = 0.0
 ) {
     val winRate: Double? get() = if (closed > 0) wins.toDouble() / closed else null
     val perScalpUsd: Double? get() = if (closed > 0) pnlUsd / closed else null
@@ -179,6 +181,7 @@ class ScalperLedger(
                                 wins = it.wins + (if (c.pnlUsd > 0.0) 1 else 0),
                                 losses = it.losses + (if (c.pnlUsd < 0.0) 1 else 0),
                                 pnlUsd = it.pnlUsd + c.pnlUsd,
+                                pnlSqUsd = it.pnlSqUsd + c.pnlUsd * c.pnlUsd,
                                 wonUsd = it.wonUsd + (if (c.pnlUsd > 0.0) c.pnlUsd else 0.0),
                                 lostUsd = it.lostUsd + (if (c.pnlUsd < 0.0) -c.pnlUsd else 0.0),
                                 feesUsd = it.feesUsd + fees,

@@ -89,8 +89,9 @@ class NoBetGuardsTest {
 
     // ---- the model says BET only when its record is clear of chance ----
 
-    private fun call(model: Double, mid: Double, yes: Boolean) = EdgeAutoTuner.Sample(
-        modelYes = model, marketMid = mid, outcomeYes = yes, edgeAfterFeesPp = (kotlin.math.abs(model - mid) - 0.0175) * 100.0
+    private fun call(model: Double, mid: Double, yes: Boolean, day: Long = 0L) = EdgeAutoTuner.Sample(
+        modelYes = model, marketMid = mid, outcomeYes = yes, edgeAfterFeesPp = (kotlin.math.abs(model - mid) - 0.0175) * 100.0,
+        closeDay = day
     )
 
     @Test
@@ -117,11 +118,21 @@ class NoBetGuardsTest {
 
     @Test
     fun aRecordClearOfChanceLetsTheModelCall() {
-        // 27 right, 3 wrong at even money.
-        val strong = (0 until 30).map { i -> call(0.70, 0.50, yes = i < 27) }
+        // 27 right, 3 wrong at even money, over six days.
+        val strong = (0 until 30).map { i -> call(0.70, 0.50, yes = i < 27, day = (i % 6).toLong()) }
         val r = EdgeAutoTuner.tune(strong, minSamples = 30)
         assertTrue(EdgeAutoTuner.lowerBound(strong) > 0.0)
         assertFalse(r.sitOut)
         assertTrue(r.reason, r.reason.startsWith("Auto-tune"))
+    }
+
+    @Test
+    fun aStrongRecordFromOneDayIsStillNoBet() {
+        // The same 27 of 30, all settled on one day: one regime, nothing to resample.
+        val oneDay = (0 until 30).map { i -> call(0.70, 0.50, yes = i < 27) }
+        val r = EdgeAutoTuner.tune(oneDay, minSamples = 30)
+        assertTrue(EdgeAutoTuner.lowerBound(oneDay) > 0.0)
+        assertTrue(r.sitOut)
+        assertTrue(r.reason, r.reason.contains("all closed on one day"))
     }
 }

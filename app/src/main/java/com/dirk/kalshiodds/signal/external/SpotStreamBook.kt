@@ -163,6 +163,8 @@ object SpotMerge {
             spotReturn5m = stream.return5m ?: rest?.spotReturn5m,
             prevWindowReturn = stream.return15m ?: rest?.prevWindowReturn,
             realizedVol15m = stream.barStd1m ?: rest?.realizedVol15m,
+            // The model's σ stays the trainer's estimator; the stream's 10 s EWMA is a different distribution.
+            trainerVol1m = rest?.trainerVol1m,
             fundingRate = rest?.fundingRate,
             lastPrice = stream.lastPrice,
             source = if (usedRest) "$SOURCE+${rest!!.source}" else SOURCE,
