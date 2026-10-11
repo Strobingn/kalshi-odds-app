@@ -514,6 +514,13 @@ class ResumableCollectTest(unittest.TestCase):
             self.assertNotEqual(te.progress_path(d, 270), te.samples_cache_path(d, 270))
         finally:
             te.FEATURE_NAMES[:] = saved
+        # A new extractor with the same feature names also gets fresh paths.
+        v = te.FEATURE_EXTRACTOR_VERSION
+        try:
+            te.FEATURE_EXTRACTOR_VERSION = v + 1
+            self.assertNotEqual(a, te.samples_cache_path(d, 270))
+        finally:
+            te.FEATURE_EXTRACTOR_VERSION = v
 
 
 if __name__ == "__main__":

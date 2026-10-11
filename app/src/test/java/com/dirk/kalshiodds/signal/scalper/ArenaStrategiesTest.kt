@@ -166,22 +166,8 @@ class ArenaStrategiesTest {
         assertEquals(0, s.engine.workingFor(ScalpStrategy.BOUNCE, t, "YES"))
     }
 
-    @Test
-    fun theVerdictSaysWhenALeadIsMoreThanLuck() {
-        assertEquals("no trades yet", ScalperResults.verdict(ScalpStats()))
-        assertEquals("10 of 30 trades needed to judge", ScalperResults.verdict(ScalpStats(closed = 10, wins = 10, pnlUsd = 10.0, wonUsd = 10.0)))
-        val steady = ScalpStats(closed = 40, wins = 36, losses = 4, pnlUsd = 36.0 - 4.0, wonUsd = 36.0, lostUsd = 4.0)
-        assertEquals("ahead by more than luck so far", ScalperResults.verdict(steady))
-        val coin = ScalpStats(closed = 40, wins = 21, losses = 19, pnlUsd = 2.0, wonUsd = 21.0, lostUsd = 19.0)
-        assertEquals("within luck: no winner yet", ScalperResults.verdict(coin))
-        val bleed = ScalpStats(closed = 40, wins = 4, losses = 36, pnlUsd = -32.0, wonUsd = 4.0, lostUsd = 36.0)
-        assertEquals("losing by more than luck", ScalperResults.verdict(bleed))
-    }
-
-    @Test
-    fun oneHugeWinIsNotALeadBeyondLuck() {
-        // 19 wins of 1¢, one of $20 and ten 50¢ losses, each in its own window: ahead, but almost all of it is one trade.
-        val results = List(19) { 0.01 } + 20.0 + List(10) { -0.5 }
+    /** A record built close by close, one market window per close. */
+    private fun oneWindowEach(results: List<Double>): ScalpStats {
         var s = ScalpStats()
         results.forEachIndexed { i, p ->
             s = s.copy(
@@ -190,14 +176,36 @@ class ArenaStrategiesTest {
                 wonUsd = s.wonUsd + maxOf(p, 0.0), lostUsd = s.lostUsd + maxOf(-p, 0.0)
             ).withWindowClose("KXBTC15M-W$i", p)
         }
+        return s
+    }
+
+    @Test
+    fun theVerdictSaysWhenALeadIsMoreThanLuck() {
+        assertEquals("no trades yet", ScalperResults.verdict(ScalpStats()))
+        assertEquals("10 of 30 trades needed to judge", ScalperResults.verdict(ScalpStats(closed = 10, wins = 10, pnlUsd = 10.0, wonUsd = 10.0)))
+        val steady = oneWindowEach(List(36) { 1.0 } + List(4) { -1.0 })
+        assertEquals("ahead by more than luck so far", ScalperResults.verdict(steady))
+        val coin = oneWindowEach(List(21) { 1.0 } + List(19) { -1.0 })
+        assertEquals("within luck: no winner yet", ScalperResults.verdict(coin))
+        val bleed = oneWindowEach(List(4) { 1.0 } + List(36) { -1.0 })
+        assertEquals("losing by more than luck", ScalperResults.verdict(bleed))
+        // Totals from before the window sums (1.9.0–1.9.1) get no verdict, not one from class averages.
+        val legacy = ScalpStats(closed = 40, wins = 36, losses = 4, pnlUsd = 32.0, wonUsd = 36.0, lostUsd = 4.0)
+        assertEquals(ScalperResults.NO_WINDOW_HISTORY, ScalperResults.verdict(legacy))
+    }
+
+    @Test
+    fun oneHugeWinIsNotALeadBeyondLuck() {
+        // 19 wins of 1¢, one of $20 and ten 50¢ losses, each in its own window: ahead, but almost all of it is one trade.
+        val s = oneWindowEach(List(19) { 0.01 } + 20.0 + List(10) { -0.5 })
         assertEquals("within luck: no winner yet", ScalperResults.verdict(s))
-        // The class-average rebuild (a record whose window sums miss closes) would have called it a lead.
-        assertEquals("ahead by more than luck so far", ScalperResults.verdict(s.copy(windowCloses = 0)))
+        // Without complete window sums there is no verdict (a class-average rebuild would have called it a lead).
+        assertEquals(ScalperResults.NO_WINDOW_HISTORY, ScalperResults.verdict(s.copy(windowCloses = 0)))
         // Totals from before the window sums plus one new close: the partial sums are not used.
         val legacy = s.copy(windows = 0, winSqUsd = 0.0, winCrossUsd = 0.0, winN2 = 0.0, curTicker = "", curUsd = 0.0, curN = 0, windowCloses = 0)
         val oneMore = legacy.copy(closed = legacy.closed + 1, pnlUsd = legacy.pnlUsd + 0.01, wins = legacy.wins + 1, wonUsd = legacy.wonUsd + 0.01)
             .withWindowClose("KXBTC15M-NEW", 0.01)
-        assertEquals(ScalperResults.verdict(oneMore.copy(windows = 0)), ScalperResults.verdict(oneMore))
+        assertEquals(ScalperResults.NO_WINDOW_HISTORY, ScalperResults.verdict(oneMore))
     }
 
     @Test
@@ -269,8 +277,8 @@ class ArenaStrategiesTest {
         assertEquals(20, paired.windows)
         assertEquals(40, paired.closed)
         assertEquals("clustered by window it is within luck", "within luck: no winner yet", ScalperResults.verdict(paired))
-        // The same 40 results counted as independent trades would have been called a lead.
-        assertEquals("ahead by more than luck so far", ScalperResults.verdict(paired.copy(windows = 0)))
+        // Without its window sums the same record gets no verdict at all.
+        assertEquals(ScalperResults.NO_WINDOW_HISTORY, ScalperResults.verdict(paired.copy(windows = 0)))
         // A held position from the last window settling between this window's scalps is still one window.
         val interleaved = ScalpStats()
             .withWindowClose("W1", 1.0).withWindowClose("W2", 1.0)

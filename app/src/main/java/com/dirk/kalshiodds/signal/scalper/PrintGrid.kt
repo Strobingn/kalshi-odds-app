@@ -95,6 +95,9 @@ class PrintGrid(val openMs: Long) {
     /** YES mid at the end of second [s] from the prints (both proxies fresh), NaN otherwise. */
     fun yesMid(s: Int): Double = mid(true, s)
 
+    /** Mid of [side] at the end of second [s] from the prints (NaN when either proxy is stale). */
+    fun mid(side: String, s: Int): Double = mid(isYes(side), s)
+
     /** Highest / lowest mid of [side] over the [w] seconds ending at [s]; NaN when no second had a quote. */
     fun highMid(side: String, s: Int, w: Int): Double = extremeMid(isYes(side), s, w, high = true)
 

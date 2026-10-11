@@ -438,7 +438,7 @@ object TicketBuilder {
         val makerNote = if ((side == "YES" || side == "NO") && pYes01 != null) {
             val yb = freshBestBid(market, "YES", ctx)
             val ya = bestAsk(market, "YES", ctx)
-            MakerEdge.compare(pYes01, side, yb, ya, ctx.settings.feeRate)?.summary()
+            MakerEdge.compare(pYes01, side, yb, ya, ctx.settings.feeRate, contracts = live.count)?.summary()
         } else {
             null
         }

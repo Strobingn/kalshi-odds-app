@@ -95,6 +95,8 @@ object ScalperResults {
     /** Independent market windows the clustered luck test needs. */
     const val MIN_WINDOWS_FOR_VERDICT = 10
 
+    const val NO_WINDOW_HISTORY = "no luck test: this record predates per-window totals (reset to start one)"
+
     /**
      * All 15 strategies, best paper P&L first. Strategies that have closed a
      * trade come first; the ones still waiting for their signal follow in
@@ -114,10 +116,9 @@ object ScalperResults {
      * Is the result more than luck? Mean dollars per trade against two
      * standard errors. Scalps in one market window share its outcome, so the
      * error is clustered by window and needs [MIN_WINDOWS_FOR_VERDICT]
-     * windows. Those sums count only closes since they were kept (1.9.2), so a
-     * record whose sums miss some closes rebuilds the spread from the won /
-     * lost totals instead (every win at the average win, every loss at the
-     * average loss), which understates it.
+     * windows. Those sums count only closes since they were kept (1.9.2); a
+     * record whose sums miss some closes gets no verdict ([NO_WINDOW_HISTORY])
+     * rather than one built from class averages, which understate the spread.
      */
     fun verdict(s: ScalpStats): String {
         val n = s.closed
@@ -136,10 +137,8 @@ object ScalperResults {
             val num = sq - 2.0 * mean * cross + mean * mean * n2
             kotlin.math.sqrt(kotlin.math.max(num, 0.0) * w / (w - 1.0)) / n
         } else {
-            val aw = s.avgWinUsd ?: 0.0
-            val al = s.avgLossUsd ?: 0.0
-            val second = (s.wins * aw * aw + s.losses * al * al) / n
-            kotlin.math.sqrt(kotlin.math.max(second - mean * mean, 0.0) / n)
+            // A record whose window sums miss closes (written before them) has no honest spread to test.
+            return NO_WINDOW_HISTORY
         }
         return when {
             mean - 2.0 * se > 0.0 -> "ahead by more than luck so far"
