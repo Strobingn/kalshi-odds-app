@@ -47,3 +47,12 @@ python3 -m rec_h rows.npz h.json book all 2           # H: book + spot model, le
 python3 -m rec_h rows.npz i.json take_m10_next all 2  # I: taker targets (also take22_next, take_m30_next, take_m10_ioc)
 python3 -m rec_markout recwin                         # what the takers in the tape made
 ```
+
+## Patient orders on recorded depth (section J)
+
+```
+python3 -m test_depth_sim                              # 38 hand-built checks
+python3 -m pull_tape tape 1.5 8                        # complete tape for the depth days
+python3 depth_build.py rec depthwin tape               # tape + 15 levels a side per window (needs depth_DAY.csv.gz)
+python3 -m rec_j depthwin j.json                       # J: bids 0..5c below the best bid, 60 s / 300 s, scalp / hold
+```

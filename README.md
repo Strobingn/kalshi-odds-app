@@ -95,6 +95,11 @@ day (ML scalper −1.6¢ per order sent, resting signals about −2¢, buy-now a
 book and one-second Bitcoin found nothing worth trading, and a short queue turned out to be the worst
 place to join. The card's figures in brackets are these numbers now.
 
+**Patient orders** (section J, 2026-10-10): a bid placed 1–5¢ below the best bid and left to wait, on two
+days of 15-level book data. All 20 versions lost (about −1.4¢ to −2.4¢ per order sent). Waiting roughly
+halves the queue ahead but most fills come from the price falling through the order. Two days is a small
+sample; the app was left alone.
+
 ## 1.8.4 (Claude branch): paper scalper, aggressive, paper only
 
 Home card **Paper scalper · aggressive · PAPER ONLY** runs seven scalping strategies at once on the live Bitcoin window and scores each one: the ML scalper (a trained model picks calm moments to rest a bid and offer it 1¢ higher), and dip-hunter, momentum-sniper and extreme reversion, each in a buy-now form and a resting form. Both sides, several positions per strategy, 10 contracts an order, no caps, exits in 30–120 s. It holds no trade client and no credentials: nothing it does can reach Kalshi.

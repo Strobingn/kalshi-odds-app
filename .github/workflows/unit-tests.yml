@@ -44,6 +44,8 @@ jobs:
           pip install -q numpy pandas
           python3 tools/research/test_tape_study.py
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_scalp_b.py
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_rec_sim.py
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_depth_sim.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue
