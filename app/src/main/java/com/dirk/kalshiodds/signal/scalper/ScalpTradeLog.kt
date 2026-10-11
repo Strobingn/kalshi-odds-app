@@ -245,16 +245,26 @@ class ScalpTradeLog(
                 if (live.isEmpty()) return@runCatching true
                 val to = File(File(dir, ARCHIVE), nowMs.toString())
                 if (!to.isDirectory && !to.mkdirs()) return@runCatching false
-                var all = true
+                // All or nothing: a partial archive would leave totals that no longer match the live files.
+                val moved = ArrayList<Pair<File, File>>()
+                fun rollback() {
+                    for ((src, dst) in moved.asReversed()) {
+                        if (!dst.renameTo(src)) runCatching { dst.copyTo(src, overwrite = false); dst.delete() }
+                    }
+                    to.delete()
+                }
                 for (f in live) {
                     val target = File(to, f.name)
-                    if (f.renameTo(target)) continue
+                    if (f.renameTo(target)) { moved += f to target; continue }
                     val copied = runCatching { f.copyTo(target, overwrite = false).length() == f.length() }.getOrDefault(false)
                     // Success means the live file is gone: a copy left beside an undeletable source
                     // would still be read into the fresh record's charts and trade list.
-                    if (!(copied && f.delete())) all = false
+                    if (copied && f.delete()) { moved += f to target; continue }
+                    if (copied) target.delete()
+                    rollback()
+                    return@runCatching false
                 }
-                all
+                true
             }.getOrDefault(false)
         }
     }

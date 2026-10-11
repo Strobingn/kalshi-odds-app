@@ -119,6 +119,20 @@ class ScalperResultsTest {
     }
 
     @Test
+    fun anArchiveThatCannotFinishPutsEveryFileBack() {
+        val dir = tmp.newFolder("partial")
+        val a = File(dir, "scalps_2026-10-01.csv").apply { writeText("a\n") }
+        val b = File(dir, "scalps_2026-10-02.csv").apply { writeText("b\n") }
+        // A directory where b's archive copy would go: b can be neither renamed nor copied there.
+        File(dir, "archive/9/${b.name}").mkdirs()
+        val log = ScalpTradeLog(dir, run = 1L, io = direct)
+        assertFalse(log.archive(nowMs = 9L))
+        assertTrue("a is back in place", a.isFile && a.readText() == "a\n")
+        assertTrue("b never left", b.isFile && b.readText() == "b\n")
+        assertFalse("no half archive left behind", File(dir, "archive/9/${a.name}").exists())
+    }
+
+    @Test
     fun everyOrderIsWrittenToDiskAndReadBackNewestFirst() {
         val dir = tmp.newFolder("scalper")
         val log = ScalpTradeLog(dir, run = 77L, io = direct)

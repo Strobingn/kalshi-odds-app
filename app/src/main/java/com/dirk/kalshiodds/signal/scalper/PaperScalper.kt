@@ -36,8 +36,9 @@ data class ScalpStats(
     /**
      * Per-window sums for the luck test, which clusters by market window: scalps in one window share
      * its outcome, so they are not independent. [windows] counts windows with a close; the
-     * `win*` sums cover finished windows, `cur*` and `prev*` the two still collecting closes (a held
-     * position settles after the next window has started, so two windows interleave).
+     * `win*` sums cover finished windows; `cur*`, `prev*` and the `old*` lists the windows still
+     * collecting closes (a held position settles after the next window has started, sometimes later),
+     * up to [OPEN_WINDOWS] of them, so a late settlement still joins its own window.
      */
     val windows: Int = 0,
     val winSqUsd: Double = 0.0,
@@ -49,23 +50,44 @@ data class ScalpStats(
     val prevTicker: String = "",
     val prevUsd: Double = 0.0,
     val prevN: Int = 0,
+    val oldTickers: List<String> = emptyList(),
+    val oldUsd: List<Double> = emptyList(),
+    val oldN: List<Int> = emptyList(),
     /** Closes counted in the window sums. Below [closed] for a record that predates them (1.9.0–1.9.1). */
     val windowCloses: Int = 0
 ) {
     /** These totals with one more close on [ticker] folded into the per-window sums. */
-    fun withWindowClose(ticker: String, pnlUsd: Double): ScalpStats = when {
-        curN > 0 && curTicker == ticker -> copy(curUsd = curUsd + pnlUsd, curN = curN + 1, windowCloses = windowCloses + 1)
-        prevN > 0 && prevTicker == ticker -> copy(prevUsd = prevUsd + pnlUsd, prevN = prevN + 1, windowCloses = windowCloses + 1)
-        // A new window: the older of the two open ones is finished, the current one becomes the previous.
-        else -> copy(
-            windows = windows + 1,
-            winSqUsd = winSqUsd + prevUsd * prevUsd,
-            winCrossUsd = winCrossUsd + prevUsd * prevN,
-            winN2 = winN2 + prevN.toDouble() * prevN,
-            prevTicker = curTicker, prevUsd = curUsd, prevN = curN,
-            curTicker = ticker, curUsd = pnlUsd, curN = 1,
-            windowCloses = windowCloses + 1
-        )
+    fun withWindowClose(ticker: String, pnlUsd: Double): ScalpStats {
+        val old = oldTickers.indexOf(ticker)
+        return when {
+            curN > 0 && curTicker == ticker -> copy(curUsd = curUsd + pnlUsd, curN = curN + 1, windowCloses = windowCloses + 1)
+            prevN > 0 && prevTicker == ticker -> copy(prevUsd = prevUsd + pnlUsd, prevN = prevN + 1, windowCloses = windowCloses + 1)
+            old >= 0 -> copy(
+                oldUsd = oldUsd.toMutableList().also { it[old] += pnlUsd },
+                oldN = oldN.toMutableList().also { it[old] += 1 },
+                windowCloses = windowCloses + 1
+            )
+            else -> {
+                // A new window: the current one becomes the previous, the previous joins the older open
+                // ones, and only the oldest beyond OPEN_WINDOWS is finished.
+                val tk = (if (prevN > 0) listOf(prevTicker) else emptyList()) + oldTickers
+                val usd = (if (prevN > 0) listOf(prevUsd) else emptyList()) + oldUsd
+                val n = (if (prevN > 0) listOf(prevN) else emptyList()) + oldN
+                val keep = OPEN_WINDOWS - 2
+                val doneUsd = usd.drop(keep)
+                val doneN = n.drop(keep)
+                copy(
+                    windows = windows + 1,
+                    winSqUsd = winSqUsd + doneUsd.sumOf { it * it },
+                    winCrossUsd = winCrossUsd + doneUsd.indices.sumOf { doneUsd[it] * doneN[it] },
+                    winN2 = winN2 + doneN.sumOf { it.toDouble() * it },
+                    oldTickers = tk.take(keep), oldUsd = usd.take(keep), oldN = n.take(keep),
+                    prevTicker = curTicker, prevUsd = curUsd, prevN = curN,
+                    curTicker = ticker, curUsd = pnlUsd, curN = 1,
+                    windowCloses = windowCloses + 1
+                )
+            }
+        }
     }
 
     val winRate: Double? get() = if (closed > 0) wins.toDouble() / closed else null
@@ -73,6 +95,11 @@ data class ScalpStats(
     val avgWinUsd: Double? get() = if (wins > 0) wonUsd / wins else null
     val avgLossUsd: Double? get() = if (losses > 0) lostUsd / losses else null
     val flat: Int get() = closed - wins - losses
+
+    companion object {
+        /** Windows kept open for late closes: the current one and the three before it (an hour). */
+        const val OPEN_WINDOWS = 4
+    }
 }
 
 /** Running paper P&L after the last scalp of a time bucket closed. */
