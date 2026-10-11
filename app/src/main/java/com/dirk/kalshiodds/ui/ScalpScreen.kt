@@ -154,6 +154,21 @@ fun ScalpScreen(
             SizingDataCard(state = state, colors = colors)
         }
 
+        // Per-strategy chart cards, ranked best settled P&L first.
+        val byStrategy = state.paper.fills
+            .filter { ScalpStrategies.strategyOf(it.source) != null }
+            .groupBy { ScalpStrategies.strategyOf(it.source)!! }
+        val rankedKinds = ScalpStrategies.Kind.entries
+            .sortedByDescending { kind -> byStrategy[kind].orEmpty().mapNotNull { it.pnlUsd }.sum() }
+        items(rankedKinds.size) { i ->
+            val kind = rankedKinds[i]
+            StrategyChartCard(
+                kind = kind,
+                fills = byStrategy[kind].orEmpty(),
+                colors = colors
+            )
+        }
+
         item {
             Text(
                 "OPEN (${openFills.size})",
