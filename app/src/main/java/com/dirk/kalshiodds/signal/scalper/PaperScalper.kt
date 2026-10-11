@@ -464,7 +464,11 @@ class PaperScalper(
             val realBid = (if (yes) top?.yesBid else top?.noBid)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
             val realAsk = (if (yes) top?.yesAsk else top?.noAsk)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
             val realQty = (if (yes) top?.yesBidQty else top?.noBidQty)?.takeIf { it.isFinite() && it >= 0.0 }
-            val bookOk = realBid != null && realAsk != null && realBid < realAsk
+            // The cached book carries no age, so it is trusted only while it agrees with the trade prints
+            // (within BOOK_GRID_TOLERANCE); a stalled book drifting from the live prints is ignored.
+            val gridMid = grid.mid(side, s)
+            val bookOk = realBid != null && realAsk != null && realBid < realAsk &&
+                (gridMid.isNaN() || kotlin.math.abs((realBid + realAsk) / 2.0 - gridMid) <= BOOK_GRID_TOLERANCE + EPS)
             // The original scalpers need the prints to quote the side inside 10–90¢; the strategies with their
             // own price band (the holds) only need a live bid below a live ask.
             val scalpOk = grid.quotable(side, s)
@@ -500,14 +504,15 @@ class PaperScalper(
                     ScalpStrategy.BOUNCE -> {
                         // A fall of 5¢ from the minute's high to a low in the last 20 s (high first, then low),
                         // and the first 1–3¢ back up.
+                        // The rebound is read on the same print grid as the low.
                         val hl = grid.highThenLow(side, s, 60, 20)
-                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && hl != null &&
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && hl != null && !gridMid.isNaN() &&
                             hl.first - hl.second >= ScalpStrategy.BOUNCE_DROP_DOLLARS - EPS &&
-                            mid - hl.second >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && mid - hl.second <= 0.03 + EPS
+                            gridMid - hl.second >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && gridMid - hl.second <= 0.03 + EPS
                     }
                     ScalpStrategy.BREAKOUT_50 -> {
                         // Both ends from the print grid: the book mid now against a grid mid 10 s ago is not a crossing.
-                        val now = grid.mid(side, s)
+                        val now = gridMid
                         spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d10.isNaN() && !now.isNaN() &&
                             now >= 0.50 - EPS && now - d10 < 0.50 - EPS
                     }
@@ -565,6 +570,9 @@ class PaperScalper(
         private val SIDES = listOf("YES", "NO")
         private val STRATEGIES = ScalpStrategy.values().toList()
         private const val EPS = 1e-9
+
+        /** Farthest the cached book's mid may sit from the live print mid before the book is ignored. */
+        const val BOOK_GRID_TOLERANCE = 0.03
         private const val GRID_KEEP_MS = 120_000L
     }
 }

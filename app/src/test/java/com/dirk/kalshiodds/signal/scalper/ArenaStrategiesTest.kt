@@ -125,6 +125,16 @@ class ArenaStrategiesTest {
     }
 
     @Test
+    fun aStaleBookFarFromThePrintsIsIgnored() {
+        // The cached book still says 60/61¢ while every print trades at 85/86¢: the book is stale. Priced off the
+        // book, the late favourite would see a 61¢ ask (outside its 80–95¢ band) and never buy.
+        val stale = TopOfBook(yesBid = 0.60, yesBidQty = 2_000.0, yesAsk = 0.61, noBid = 0.39, noBidQty = 2_000.0, noAsk = 0.40)
+        val s = runner { stale }
+        for (sec in 0..610) second(s, sec, 0.85, 0.86)
+        assertTrue("priced off the live prints instead", s.ledger.snapshot().stats(ScalpStrategy.LATE_FAVORITE.name).posted >= 1)
+    }
+
+    @Test
     fun aFiveCentDropAndTheFirstCentBackIsABounce() {
         val s = runner()
         for (sec in 0..69) second(s, sec, 0.60, 0.61)
