@@ -91,8 +91,13 @@ object EdgeFeatures {
      * perpetual funding settlement (00/08/16 UTC, ±7.5 min).
      */
     fun isFundingHour(nowMs: Long, tteSeconds: Double?): Boolean {
-        val closeMs = nowMs + (tteSeconds ?: 900.0).coerceAtLeast(0.0).toLong() * 1000L
-        return closeMs % (8 * 3_600_000L) < 900_000L
+        val approxCloseMs = nowMs + ((tteSeconds ?: 900.0).coerceAtLeast(0.0) * 1000.0).toLong()
+        // The time left is whole seconds (truncated), so now + tte lands up to a second before the real
+        // close: 07:59:59.4 instead of 08:00:00, which is ~8 h past a funding hour, not 0. Windows close on a
+        // quarter hour, so snap to the nearest one first (trainer: close_ts % 28800 < 900).
+        val q = 900_000L
+        val closeMs = Math.floorDiv(approxCloseMs + q / 2, q) * q
+        return Math.floorMod(closeMs, 8 * 3_600_000L) < q
     }
 
     fun timeOfDayFrac(nowMs: Long, tz: TimeZone = TimeZone.getTimeZone("America/New_York")): Float {

@@ -80,7 +80,11 @@ data class ScalperState(
     fun stats(key: String): ScalpStats = groups[key] ?: ScalpStats()
 
     companion object {
-        const val VERSION = 2
+        /**
+         * 3 = the 15-strategy arena (1.9.0). A 1.8.x record holds history for the original seven
+         * strategies only; carried over, those seven would race the eight new ones from a head start.
+         */
+        const val VERSION = 3
         const val ALL = "ALL"
         const val QUEUE_AWARE = "QUEUE_AWARE"
         const val COIN_PREFIX = "COIN_"
@@ -91,6 +95,20 @@ data class ScalperState(
 
         /** An empty record in the current format. */
         fun fresh(): ScalperState = ScalperState(version = VERSION)
+
+        /**
+         * The record to start from: [saved] when it is in the current format; otherwise a fresh one,
+         * after [archive] has moved the old trade files aside (kept, never deleted), so the leaderboard,
+         * the charts and the trade list all begin together for every strategy.
+         */
+        fun upgraded(saved: ScalperState?, archive: () -> Unit): ScalperState = when {
+            saved == null -> fresh()
+            saved.version >= VERSION -> saved
+            else -> {
+                runCatching { archive() }
+                fresh()
+            }
+        }
 
         /** `KXBTC15M-26OCT091315-15` → `BTC`. */
         fun coinOf(ticker: String): String {
@@ -507,8 +525,9 @@ class ScalperStore(context: Context) {
     private fun load(): ScalperState {
         val raw = prefs.getString(KEY, null) ?: return ScalperState.fresh()
         val saved = runCatching { json.decodeFromString(ScalperState.serializer(), raw) }.getOrNull()
-        // A 1.8.4 record has no won / lost / fee totals and no trade file: start a new one.
-        return saved?.takeIf { it.version >= ScalperState.VERSION } ?: ScalperState.fresh()
+        // An older record (1.8.4: no won / lost / fee totals; 1.8.5–1.8.8: seven strategies only) is not
+        // mixed into the arena: its trade files are archived and a new record starts for all fifteen.
+        return ScalperState.upgraded(saved) { log.archive() }
     }
 
     private fun save(state: ScalperState) {

@@ -70,6 +70,14 @@ data class ExternalSnapshot(
     }
 }
 
+/**
+ * REST 1-minute bars to ask for: the trainer's 60 finished bars
+ * (ml/train_edge.py SPOT_LOOKBACK_BARS) plus the bar still in progress,
+ * which both APIs return last. Volatility uses the 60 finished ones only.
+ */
+private const val VOL_BARS = 60
+private const val REST_BARS = VOL_BARS + 1
+
 class ExternalMarketClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(SignalConstants.EXTERNAL_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -105,7 +113,7 @@ class ExternalMarketClient(
             "SOL" -> "SOLUSDT"
             else -> return null
         }
-        val klines = getJsonArray("https://api.binance.com/api/v3/klines?symbol=$symbol&interval=1m&limit=20")
+        val klines = getJsonArray("https://api.binance.com/api/v3/klines?symbol=$symbol&interval=1m&limit=$REST_BARS")
             ?: return null
         val closes = (0 until klines.length()).mapNotNull { i ->
             klines.optJSONArray(i)?.optString(4)?.toDoubleOrNull()
@@ -125,7 +133,7 @@ class ExternalMarketClient(
             asset = asset.uppercase(),
             spotReturn1m = ret1,
             spotReturn5m = ret5,
-            realizedVol15m = realizedVol(closes.takeLast(64)),
+            realizedVol15m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
             fundingRate = funding,
             lastPrice = last,
             source = "binance",
@@ -148,7 +156,7 @@ class ExternalMarketClient(
         val closes = mutableListOf<Double>()
         if (candles != null) {
             // Coinbase returns newest-first: [time, low, high, open, close, volume]
-            for (i in 0 until minOf(candles.length(), 20)) {
+            for (i in 0 until minOf(candles.length(), REST_BARS)) {
                 val row = candles.optJSONArray(i) ?: continue
                 row.optDouble(4).takeIf { !it.isNaN() }?.let { closes.add(it) }
             }
@@ -167,7 +175,7 @@ class ExternalMarketClient(
             asset = asset.uppercase(),
             spotReturn1m = ret1,
             spotReturn5m = ret5,
-            realizedVol15m = realizedVol(series.takeLast(64)),
+            realizedVol15m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
             fundingRate = null,
             lastPrice = px,
             source = "coinbase",

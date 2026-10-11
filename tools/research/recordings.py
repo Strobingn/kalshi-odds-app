@@ -47,12 +47,14 @@ HEADERS = {
     ],
     "trades": ["ts_ms", "ticker", "yes_price", "count", "taker_side"],
     "settle": ["ticker", "close_ms", "strike", "result"],
+    # CF Benchmarks settlement index (the app's RecordingFormat.INDEX_HEADER).
+    "index": ["ts_ms", "asset", "index_id", "value", "avg_60", "final_minute_avg"],
 }
-KINDS = ("spot", "book", "trades", "settle")
+KINDS = ("spot", "book", "trades", "settle", "index")
 
 _INT_COLS = {"ts_ms", "close_ms"}
-_STR_COLS = {"product", "ticker", "taker_side", "result"}
-_FILE_RE = re.compile(r"^(spot|book|trades|settle)_(\d{4}-\d{2}-\d{2})\.csv(\.gz)?$")
+_STR_COLS = {"product", "ticker", "taker_side", "result", "asset", "index_id"}
+_FILE_RE = re.compile(r"^(spot|book|trades|settle|index)_(\d{4}-\d{2}-\d{2})\.csv(\.gz)?$")
 _CHUNK = 4096
 
 
@@ -165,7 +167,7 @@ def read_kind(path: str | os.PathLike, kind: str) -> list[dict]:
 
 
 def load_day(dir: str | os.PathLike, day: str) -> dict[str, list[dict]]:
-    """``{"spot": [...], "book": [...], "trades": [...], "settle": [...]}`` for one UTC day.
+    """``{"spot": [...], "book": [...], "trades": [...], "settle": [...], "index": [...]}`` for one UTC day.
 
     Missing files give empty lists. Rows keep file order (ascending ts_ms as
     written); ``load_days`` sorts across days.
@@ -193,7 +195,7 @@ def load_days(dir: str | os.PathLike, days: list[str] | None = None) -> dict[str
         one = load_day(dir, day)
         for k in KINDS:
             merged[k].extend(one[k])
-    for k in ("spot", "book", "trades"):
+    for k in ("spot", "book", "trades", "index"):
         merged[k].sort(key=lambda r: r["ts_ms"])
     seen: dict[str, dict] = {}
     for r in merged["settle"]:

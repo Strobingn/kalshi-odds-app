@@ -93,6 +93,29 @@ class SpotStreamBook(
         )
     }
 
+    private val prevWindow = LinkedHashMap<String, Double>()
+
+    /**
+     * Return over the window BEFORE the one opening at [openMs]
+     * (openMs − 15 min → openMs), parity with ml/train_edge.py
+     * `prev_window_return`. Worked out once, as soon as the tape holds both
+     * ends (the tape keeps 20 minutes, so in the first ~5 minutes of the
+     * window), and kept for the rest of it. Null when it cannot be known.
+     */
+    @Synchronized
+    fun prevWindowReturn(asset: String, openMs: Long, nowMs: Long): Double? {
+        val key = asset.uppercase() + "@" + openMs
+        prevWindow[key]?.let { return it }
+        if (nowMs < openMs) return null
+        val tape = tapes[asset.uppercase()] ?: return null
+        val start = tape.priceAtOrBefore(openMs - WINDOW_MS) ?: return null
+        val end = tape.priceAtOrBefore(openMs) ?: return null
+        val r = end / start - 1.0
+        prevWindow[key] = r
+        while (prevWindow.size > PREV_WINDOW_KEEP) prevWindow.remove(prevWindow.keys.first())
+        return r
+    }
+
     /** Mean ln(price) of [asset] over [fromMs, toMs] from the tape, or null. */
     @Synchronized
     fun meanLogPrice(asset: String, fromMs: Long, toMs: Long): Double? =
@@ -106,6 +129,12 @@ class SpotStreamBook(
     companion object {
         /** Heartbeats alone keep a price usable for at most this long. */
         const val MAX_PRINT_AGE_MS = 60_000L
+
+        /** One 15-minute window. */
+        const val WINDOW_MS = 900_000L
+
+        /** Previous-window returns kept (one per asset and window). */
+        const val PREV_WINDOW_KEEP = 12
     }
 }
 

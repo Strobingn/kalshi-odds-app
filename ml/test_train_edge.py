@@ -282,6 +282,31 @@ class OffsetModelTest(unittest.TestCase):
         # market vs itself: perfect parity on the recent slice
         self.assertAlmostEqual(r["recent_model_brier"], r["recent_market_brier"], places=9)
 
+    def test_bootstrap_counts_one_bet_per_market(self) -> None:
+        # Ten markets on one day, each with 13 qualifying minutes: the CI must be built from 10 bets.
+        rows = []
+        for m in range(10):
+            for k in range(13):
+                s = te.Sample(x=[0.0] * len(te.FEATURE_NAMES), y=1 if m < 6 else 0, mid=0.5,
+                              ts=1_000 + m * 900 + k * 60, close_ts=1_900 + m * 900,
+                              ticker=f"M{m}", yes_ask=0.40 + 0.01 * k, no_ask=0.62)
+                rows.append((s, 0.70))
+        bets = te.bet_log(rows)
+        self.assertEqual(len(bets), 10)
+        ci = te.bootstrap_pnl_ci(rows, n_boot=50)
+        per_bet = sum(b["pnl"] for b in bets) / len(bets)
+        # One day only: every resample is that day, so the CI collapses onto the one-bet-per-market mean.
+        self.assertAlmostEqual(ci["ci_low"], per_bet, places=12)
+        self.assertAlmostEqual(ci["ci_high"], per_bet, places=12)
+
+    def test_nested_l2_never_scores_a_fold_on_its_own_choice(self) -> None:
+        samples = _samples(360, seed=11, lag=0.4)
+        hold, chosen = te.walk_forward_hold_nested(samples, folds=3, candidates=(0.5, 0.05, 0.005))
+        plain = te.walk_forward_hold(samples, folds=3)
+        self.assertEqual(len(hold), len(plain))
+        self.assertEqual(len(chosen), len(te.fold_splits(samples, 3)))
+        self.assertTrue(all(c in (0.5, 0.05, 0.005, te.DEFAULT_L2) for c in chosen))
+
     def test_sweep_l2_prefers_some_regularization(self) -> None:
         # A lagging market: the truth moves and the mid underreacts. Any
         # nonzero L2 should be selected; the sweep must return a candidate.
@@ -380,6 +405,27 @@ class ResumableCollectTest(unittest.TestCase):
             self.assertEqual(len(calls2), 2)  # only the two unfinished markets
             self.assertEqual(sorted(r.ticker for r in rows), sorted(m["ticker"] for m in markets))
             self.assertEqual(len(te.load_progress(prog)), 6)
+
+    def test_each_run_adds_new_markets_and_drops_expired_ones(self) -> None:
+        old = [{"ticker": f"KXBTC15M-T{i}", "close_time": "2026-09-01T00:15:00Z",
+                "open_time": "2026-09-01T00:00:00Z", "result": "yes"} for i in range(3)]
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            _, fakes = self._fake(old)
+            saved = self._patched(fakes)
+            try:
+                te.collect(30, workers=1, progress=prog)
+                # A week later: T0 has left the window, T3 has settled.
+                now = old[1:] + [dict(old[0], ticker="KXBTC15M-T3")]
+                calls, fakes2 = self._fake(now)
+                self._patched(fakes2)
+                rows = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(calls, ["KXBTC15M-T3"])
+            self.assertEqual(sorted(r.ticker for r in rows), ["KXBTC15M-T1", "KXBTC15M-T2", "KXBTC15M-T3"])
+            self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T1", "KXBTC15M-T2", "KXBTC15M-T3"])
 
     def test_truncated_progress_line_is_skipped(self) -> None:
         with tempfile.TemporaryDirectory() as td:

@@ -207,6 +207,19 @@ class SpotTape(
         }
     }
 
+    /**
+     * Price of the last print at or before [tMs], or null when there is none
+     * or it is more than [lookbackSlackMs] older than [tMs].
+     */
+    fun priceAtOrBefore(tMs: Long): Double? {
+        if (size == 0) return null
+        val i = indexAtOrBefore(tMs)
+        if (i < 0) return null
+        val at = idx(i)
+        if (tMs - times[at] > lookbackSlackMs) return null
+        return prices[at].takeIf { it > 0.0 }
+    }
+
     /** Logical index (0 = oldest) of the last sample with time ≤ [t], or −1. */
     private fun indexAtOrBefore(t: Long): Int {
         var lo = 0

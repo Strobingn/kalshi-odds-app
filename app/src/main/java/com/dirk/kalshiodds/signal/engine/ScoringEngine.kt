@@ -682,9 +682,13 @@ class ScoringEngine(
                     // model was trained on (ml/train_edge.py), not the
                     // settlement-average fair shown in the app.
                     digitalFair = null,
-                    // Trailing-15-minute return = the previous window's move
-                    // (reversal tilt; parity with prev_window_return).
-                    prevWindowReturn = spotFeat?.prevWindowReturn,
+                    // The previous window's move (open − 15 min → open), parity with
+                    // prev_window_return; null (→ 0, as in training) when it cannot be known.
+                    prevWindowReturn = if (close != null && settleAsset != null) {
+                        runCatching { spotStream?.prevWindowReturn(settleAsset, close - 900_000L, nowMs) }.getOrNull()
+                    } else {
+                        null
+                    },
                     // Funding-settlement close (00/08/16 UTC): regime flag,
                     // parity with is_funding_hour.
                     isFundingHour = null  // EdgeFeatures derives it from close time
