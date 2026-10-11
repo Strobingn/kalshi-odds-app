@@ -122,7 +122,7 @@ class ReleaseGate0340MultiStrategyTest {
         b.onQuote(q(t + 30_000L, 0.34, 0.35), true)
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true)
         assertTrue(b.openCostUsd() <= 40.0 + 1e-9)
-        com.dirk.kalshiodds.decision.ScalpModels.ALL.forEach { assertTrue(b.openCostUsd(it) <= 40.0 / 8 + 1e-9) }
+        com.dirk.kalshiodds.decision.// 0.3.54: no per-model cap; total ≤ free bankroll is the only limit
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)

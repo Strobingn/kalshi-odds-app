@@ -14,9 +14,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReleaseGate0353Test {
-    @Test fun eightModelsEighthSlices() {
+    @Test fun eightModelsSharedBankroll() {
         assertEquals(8, ScalpModels.ALL.size)
-        assertEquals(2_500.0, ScalpModels.sliceUsd(20_000.0), 1e-9)
+        assertEquals(20_000.0, ScalpModels.sliceUsd(20_000.0), 1e-9) // 0.3.54: no per-model split
     }
 
     @Test fun forecasterDeterministicAndReadyAtOpen() {

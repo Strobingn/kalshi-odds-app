@@ -604,6 +604,7 @@ class ScalpBook(
 
     // ---- 0.3.53 Forecast ride / fade (paper only) ----
     private val fcHist = HashMap<String, ArrayDeque<ShortHorizonForecaster.Sample>>()
+    private val leadHist = HashMap<String, ArrayDeque<Pair<Long, Double>>>()
 
     /**
      * Feed one fresh book per market tick (same quote as [onQuote]) plus top-3 level sizes. Ride buys the side the
@@ -625,21 +626,39 @@ class ScalpBook(
         while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > 200_000L) hist.removeFirst()
         if (q.nowMs >= q.closeMs) fcHist.remove(key)
         if (fcHist.size > ScalpMemory.MAX_TICKERS) fcHist.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { fcHist.remove(it) }
-        val pred = ShortHorizonForecaster.predict(coin, horizon, x) ?: return@synchronized emptyList()
+        // 0.3.54 fc54: lead (CF index, Coinbase spot fallback) history per coin — spans windows, ready at the open.
+        val lead = (if (q.cfFresh()) q.cfSpot else q.spot)?.takeIf { it > 0 && it.isFinite() }
+        val lh = leadHist.getOrPut(coin) { ArrayDeque() }
+        if (lead != null) {
+            lh.addLast(q.nowMs to lead)
+            while (lh.isNotEmpty() && q.nowMs - lh.first().first > 75_000L) lh.removeFirst()
+        }
+        val cfg = LeadForecaster.configFor(coin)
+        val h54 = nowHorizonS ?: cfg.horizonS
+        val mid60 = hist.firstOrNull { it.atMs >= q.nowMs - 60_000L }?.takeIf { it.atMs < q.nowMs }?.mid
+        val imb = (top3Yes - top3No) / maxOf(top3Yes + top3No, 1e-9)
+        val x54 = if (lead == null || q.strike == null || q.sigmaPerSec == null) null else
+            LeadForecaster.features(mid, mid60, imb, lead, q.strike, q.sigmaPerSec, q.tauS) { k ->
+                lh.lastOrNull { it.first <= q.nowMs - k * 1000L }?.second
+            }
+        val pred54 = x54?.let { LeadForecaster.predict(coin, h54, it) }
+        @Suppress("UNUSED_VARIABLE") val fc53 = ShortHorizonForecaster.predict(coin, horizon, x) // kept for comparison/logging
+        val pred = pred54 ?: 0.0 // no lead → no entry (0 never clears the bar); open trades exit on "forecast turned"
+        val enabledNow = enabled && pred54 != null
         val changed = ArrayList<ScalpTrade>()
         for (ride in listOf(true, false)) {
             val f = if (ride) pred else -pred
-            val vid = ForecastScalp.variantId(ride, horizon)
+            val vid = ForecastScalp.variantId(ride, h54)
             val prefix = if (ride) ForecastScalp.RIDE_PREFIX else ForecastScalp.FADE_PREFIX
             val active = _all.value.firstOrNull { it.ticker == key && it.variantId.startsWith(prefix) && isActive(it) }
             if (active != null) {
-                fcStep(active, q, f, horizon)?.let { changed += it }
+                fcStep(active, q, f, h54)?.let { changed += it }
                 continue
             }
-            if (!enabled || q.nowMs >= q.closeMs || !q.fresh()) continue
+            if (!enabledNow || q.nowMs >= q.closeMs || !q.fresh()) continue
             val side = if (f > 0) "YES" else "NO"
             val ask = q.ask(side) ?: continue
-            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS)) continue
+            if (!ForecastScalp.wantsEntry(mid, ya - yb, ask, kotlin.math.abs(f), q.tauS, cfg.marginUsd)) continue
             val model = if (ride) ScalpModels.Model.FORECAST_RIDE else ScalpModels.Model.FORECAST_FADE
             val cost = ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, ask)
             if (openCostUsd() + cost > bankrollUsd() + 1e-9) continue
@@ -647,7 +666,7 @@ class ScalpBook(
                 id = idFactory(), ticker = key, side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
                 signalAsk = ask, fairAtSignal = mid + f, restingLimit = ask, restingSinceMs = q.nowMs,
                 note = String.format(Locale.US, "%s · forecast %+.1f¢ over %s · %s", if (ride) "Forecast ride" else "Forecast fade",
-                    f * 100, ShortHorizonForecaster.horizonLabel(horizon), ShortHorizonForecaster.VERSION),
+                    f * 100, ShortHorizonForecaster.horizonLabel(h54), LeadForecaster.VERSION),
                 ruleVersion = "${ScalpRule.VERSION}|$vid|P"
             )
         }

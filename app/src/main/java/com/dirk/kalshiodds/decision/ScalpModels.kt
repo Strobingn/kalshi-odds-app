@@ -242,9 +242,10 @@ object ForecastScalp {
     fun variantId(ride: Boolean, horizonS: Int) = (if (ride) RIDE_PREFIX else FADE_PREFIX) + "-h" + (if (horizonS < 0) "close" else horizonS.toString())
 
     /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
-    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double): Boolean =
+    /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
+    fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY): Boolean =
         mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
-            move > spread + 2 * ScalpRule.orderFee(1, ask) + SAFETY
+            move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
 
     /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
     fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double): String? = when {
@@ -256,7 +257,5 @@ object ForecastScalp {
         else -> null
     }
 
-    fun horizonNote(): String = ScalpParams.COINS.joinToString(" · ") { c ->
-        "$c " + ShortHorizonForecaster.horizonLabel(ShortHorizonForecaster.horizonFor(c))
-    } + " (" + ShortHorizonForecaster.VERSION + ")"
+    fun horizonNote(): String = LeadForecaster.note()
 }
