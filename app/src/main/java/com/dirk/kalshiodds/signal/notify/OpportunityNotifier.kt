@@ -46,10 +46,13 @@ class OpportunityNotifier(private val context: Context) {
     }
 
     fun notify(ticket: TradeTicket, quiet: Boolean): Boolean {
-        val title = when (ticket.kind) {
+        val title = when {
+            ticket.clearLead -> context.getString(R.string.opportunity_clearlead_title, WindowLabel.of(ticket.ticker))
+            else -> when (ticket.kind) {
             TicketKind.HUNTER_VALUE -> context.getString(R.string.opportunity_longshot_title, WindowLabel.of(ticket.ticker))
             TicketKind.HUNTER -> context.getString(R.string.opportunity_hunter_title, WindowLabel.of(ticket.ticker))
             else -> context.getString(R.string.opportunity_wintarget_title, WindowLabel.of(ticket.ticker))
+            }
         }
         val text = context.getString(
             R.string.opportunity_body,

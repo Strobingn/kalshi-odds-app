@@ -29,6 +29,7 @@ jobs:
           python3 tools/research/test_maker_sim.py
           python3 tools/research/test_pair_maker.py
           python3 tools/research/test_reversal_study.py
+          python3 tools/research/test_queue_maker.py
           python3 tools/research/test_settlement.py
           python3 tools/research/test_recordings.py
           python3 tools/research/test_arb_scan.py
@@ -41,6 +42,11 @@ jobs:
           python3 tools/research/test_xvenue.py
           pip install -q cryptography "websockets>=14"
           python3 tools/research/test_ws.py
+          pip install -q numpy pandas
+          python3 tools/research/test_tape_study.py
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_scalp_b.py
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_rec_sim.py
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_depth_sim.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue

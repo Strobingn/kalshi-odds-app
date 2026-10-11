@@ -111,11 +111,15 @@ class MainActivity : ComponentActivity() {
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
                                 onOpenArb = { navigator.open(AppRoutes.ARB) },
+                                onOpenScalper = { navigator.open(AppRoutes.SCALPER) },
                                 onOpenChart = {
                                     chartTicker = it.ticker
                                     navigator.open(AppRoutes.CHART)
                                 }
                             )
+                        },
+                        scalper = {
+                            com.dirk.kalshiodds.ui.ScalperResultsRoute(onBack = { navigator.back() })
                         },
                         settings = {
                             SettingsScreen(

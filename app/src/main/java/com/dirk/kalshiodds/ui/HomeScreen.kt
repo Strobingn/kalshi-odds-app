@@ -64,6 +64,7 @@ fun HomeScreen(
     onOpenSignalHistory: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit,
     onOpenArb: () -> Unit = {},
+    onOpenScalper: () -> Unit = {},
     onRefresh: () -> Unit,
     onBuyMarket: (MarketUiModel, String) -> Unit,
     onPaperSide: (MarketUiModel, String) -> Unit,
@@ -80,6 +81,7 @@ fun HomeScreen(
     onPaperSellTicket: (String, Int, Double) -> Unit,
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit,
+    limitHost: com.dirk.kalshiodds.signal.limit.LimitHost? = null,
     onResumeAlerts: () -> Unit = {},
     nowMs: Long = System.currentTimeMillis(),
     versionLabel: String = AppVersion.label
@@ -185,7 +187,9 @@ fun HomeScreen(
                                 }
                             }
                         }
-                        state.userMessage?.takeIf { !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) }?.let { msg ->
+                        state.userMessage?.takeIf {
+                            !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) && !it.startsWith("REAL limit ")
+                        }?.let { msg ->
                             item {
                                 Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
                             }
@@ -220,6 +224,35 @@ fun HomeScreen(
                                         { onSellMarket(market) }
                                     },
                                     onOpenChart = { onOpenChart(market) }
+                                )
+                            }
+                        }
+                        if (state.paperLimits.isNotEmpty() ||
+                            state.tickets.working.any { it.isResting && it.error?.startsWith("cancelled") != true }
+                        ) {
+                            item(key = "working_limits") {
+                                com.dirk.kalshiodds.ui.components.WorkingLimitsCard(
+                                    live = state.tickets.working,
+                                    paper = state.paperLimits,
+                                    nowMs = nowMs,
+                                    onCancelLive = onCancelOrder,
+                                    onCancelPaper = { limitHost?.cancelPaper(it) }
+                                )
+                            }
+                        }
+                        if (state.settings.scalperEnabled) {
+                            item(key = "paper_scalper") {
+                                com.dirk.kalshiodds.ui.components.ScalperCard(
+                                    com.dirk.kalshiodds.signal.scalper.ScalperSummary.of(state.scalper, state.scalperWorking),
+                                    onOpenResults = onOpenScalper
+                                )
+                            }
+                        }
+                        if (state.settings.clearLeadEnabled) {
+                            item(key = "clear_lead") {
+                                com.dirk.kalshiodds.ui.components.FlowFadeCard(
+                                    state.clearLead,
+                                    summary = com.dirk.kalshiodds.signal.trend.ClearLeadSummary.of(state.clearLead)
                                 )
                             }
                         }
@@ -262,7 +295,8 @@ fun HomeScreen(
                         onPaper = onPaperTicket,
                         onPaperSell = onPaperSellTicket,
                         onCancelApprove = onCancelApprove,
-                        onCancelOrder = onCancelOrder
+                        onCancelOrder = onCancelOrder,
+                        limitHost = limitHost
                     )
                     }
                 }

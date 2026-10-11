@@ -56,6 +56,8 @@ object TicketBuilder {
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
         return (hunter + value + configured)
+            // The app does not suggest a side priced under 5¢ (see [MIN_CALL_ASK]). Buy on a card still works.
+            .filterNot { isLongShotPrice(it.limitPrice) }
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
@@ -159,7 +161,9 @@ object TicketBuilder {
             stakeUsd = stake,
             minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
             kind = TicketKind.MANUAL,
-            requireGates = false
+            requireGates = false,
+            // The clear-lead rule buys the favourite: no min-profit gate on its side.
+            clearLead = clearLeadSide(market, ctx.settings) == want
         ) ?: blocked(market, want, ctx, noSellers(want), stake)
         val heldOpposite = ctx.heldOpposite(market.ticker, want)
         return if (heldOpposite > 0) {
@@ -167,6 +171,47 @@ object TicketBuilder {
         } else {
             built
         }
+    }
+
+    /**
+     * The side the clear-lead rule ([com.dirk.kalshiodds.signal.trend.ClearLeadRule])
+     * is calling on [market] right now, or null: rule off in Settings, or
+     * Bitcoin is not clearly ahead inside minutes 3–10. Independent of the
+     * model and of the sit-out switch.
+     */
+    fun clearLeadSide(market: MarketUiModel, settings: SignalSettings): String? {
+        if (!settings.clearLeadEnabled) return null
+        return when (market.clearLeadSide?.uppercase()) {
+            "YES" -> "YES"
+            "NO" -> "NO"
+            else -> null
+        }
+    }
+
+    /**
+     * Approve-gated $5 buy on the clear-lead side, or null when the rule is
+     * not on or the ticket cannot be approved (no sellers, closed window).
+     * Same ticket the Buy button builds, so headline, sheet and Approve agree.
+     */
+    fun proposeClearLead(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        val side = clearLeadSide(market, ctx.settings) ?: return null
+        return proposeManual(market, side, ctx)?.takeIf { it.clearLead && it.canApprove }
+    }
+
+    fun clearLeadNote(market: MarketUiModel, nowMs: Long): String {
+        val tte = market.closeTimeEpochMs?.let { ((it - nowMs) / 1000L).coerceAtLeast(0L) }
+        val bp = market.clearLeadBp
+        val why = if (bp != null && bp.isFinite() && tte != null) {
+            com.dirk.kalshiodds.signal.trend.ClearLeadRule.Signal(
+                side = if (bp >= 0.0) "YES" else "NO",
+                distanceBp = bp,
+                tteSeconds = tte
+            ).reason
+        } else {
+            "Bitcoin is clearly ahead on this side"
+        }
+        return "Clear lead · $why · $5 all-in cap including fees · Approve still required"
     }
 
     /**
@@ -324,7 +369,8 @@ object TicketBuilder {
         stakeUsd: Double,
         minPayoutUsd: Double,
         kind: TicketKind,
-        requireGates: Boolean
+        requireGates: Boolean,
+        clearLead: Boolean = false
     ): TradeTicket? {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
         if (kind != TicketKind.MANUAL && entryBlockReason(market, ctx.settings) != null) return null
@@ -379,7 +425,7 @@ object TicketBuilder {
         val bookSide = if (side == "YES") "bid" else "ask"
         val netPer = market.netEvDollars
         val minProfit = ctx.settings.minProfitIfWinUsd
-        val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
+        val belowMin = !clearLead && LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
         val blockedReason = if (belowMin) {
             LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
         } else {
@@ -432,7 +478,11 @@ object TicketBuilder {
                     minProfit
                 )
                 TicketKind.MANUAL ->
-                    "Manual buy · $5 all-in cap including fees · Approve still required"
+                    if (clearLead) {
+                        clearLeadNote(market, ctx.nowMs)
+                    } else {
+                        "Manual buy · $5 all-in cap including fees · Approve still required"
+                    }
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
@@ -448,14 +498,19 @@ object TicketBuilder {
             allInUsd = live.allInUsd,
             belowMinProfit = belowMin,
             minProfitIfWinUsd = minProfit,
+            clearLead = clearLead,
             winTargetUsd = minProfit,
             winTargetCapped = true,
-            winTargetNote = String.format(
-                java.util.Locale.US,
-                "$5 all-in · min profit $%.0f · wins $%.2f",
-                minProfit,
-                live.profitIfWinUsd
-            ),
+            winTargetNote = if (clearLead) {
+                String.format(java.util.Locale.US, "$5 all-in · wins $%.2f", live.profitIfWinUsd)
+            } else {
+                String.format(
+                    java.util.Locale.US,
+                    "$5 all-in · min profit $%.0f · wins $%.2f",
+                    minProfit,
+                    live.profitIfWinUsd
+                )
+            },
             bankrollSource = ctx.bankrollSource,
             bankrollUsd = bankroll,
             visibleContracts = quoted?.toInt()
@@ -474,6 +529,31 @@ object TicketBuilder {
      */
     fun entryBlockReason(market: MarketUiModel, settings: SignalSettings): String? =
         if (settings.entryFilterEnabled) market.entryBlockReason?.takeIf { it.isNotBlank() } else null
+
+    /**
+     * The app never suggests a bet on a side priced under this.
+     *
+     * The model's chance is clamped to 2–98% and its calibration rarely goes
+     * under about 4%, so on a side priced at a fraction of a cent it always
+     * "sees" a few points of edge. That is the clamp, not information: with a
+     * minute left and UP at 0.2¢, the market's 0.2% is the better number.
+     * Buyers of the cheap side are also the group that lost most on the
+     * recorded tape (docs/tape-study-2026-10-04.md). The user's own Buy on a
+     * card and limit orders are not affected.
+     */
+    const val MIN_CALL_ASK = 0.05
+
+    fun isLongShotPrice(ask: Double?): Boolean =
+        ask != null && ask.isFinite() && ask > 0.0 && ask < MIN_CALL_ASK - 1e-9
+
+    /** `UP costs 0.2¢. That far out the model cannot tell 0.2% from a few percent, so its "edge" is not real. No bet.` */
+    fun longShotReason(side: String, ask: Double): String {
+        val c = ask * 100.0
+        val fmt = if (c < 1.0) "%.1f" else "%.0f"
+        val n = String.format(java.util.Locale.US, fmt, c)
+        return "${if (side.equals("NO", true)) "DOWN" else "UP"} costs $n¢. That far out the model cannot tell " +
+            "$n% from a few percent, so its \"edge\" is not real. No bet."
+    }
 
     fun modelProb(market: MarketUiModel, side: String): Double? {
         val yes = market.importedModelPp?.div(100.0)

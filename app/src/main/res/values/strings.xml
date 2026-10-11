@@ -25,5 +25,6 @@
     <string name="opportunity_longshot_title">Long-shot · %1$s</string>
     <string name="opportunity_hunter_title">Hunter · %1$s</string>
     <string name="opportunity_wintarget_title">Ticket · %1$s</string>
+    <string name="opportunity_clearlead_title">Clear lead · %1$s</string>
     <string name="opportunity_body">%1$s · %2$d ct · $%3$s stake. Tap to open the ticket. Approve still required.</string>
 </resources>

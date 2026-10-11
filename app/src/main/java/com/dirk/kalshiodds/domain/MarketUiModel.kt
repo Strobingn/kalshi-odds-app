@@ -119,6 +119,10 @@ data class MarketUiModel(
     val modelEdgeQualified: Boolean = true,
     val spotUsd: Double? = null,
     val spotVsTargetUsd: Double? = null,
+    /** Clear-lead rule ([com.dirk.kalshiodds.signal.trend.ClearLeadRule]): "YES" / "NO" while it is on, else null. */
+    val clearLeadSide: String? = null,
+    /** Signed distance of spot from the start price in basis points while the clear-lead rule is on. */
+    val clearLeadBp: Double? = null,
     val pastSettlements: List<Boolean> = emptyList(),
     /** Blend-channel deviations (featureFair − mid) in pp from [ScoringEngine.Score]. */
     val featureDevs: Map<String, Double> = emptyMap(),
@@ -298,6 +302,8 @@ fun MarketUiModel.withSignalScore(
         modelEdgeQualified = score.modelEdgeQualified,
         spotUsd = score.spotUsd,
         spotVsTargetUsd = score.spotVsTargetUsd,
+        clearLeadSide = score.clearLeadSide,
+        clearLeadBp = score.clearLeadBp,
         featureDevs = score.featureDevs
     )
 }

@@ -19,6 +19,126 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.8.8 (Claude branch): the app stops telling you to bet without a reason
+
+Reported with a screenshot: `BET UP BTC · $5 wins $2330.00 profit · closes in 1:11` with UP at 0.2¢ and
+"Model 4% vs market 0% · edge +3 pts". The 4% was the model's floor (its chance is clamped to 2–98%), so
+any side priced at a fraction of a cent showed a few points of "edge".
+
+- **No call under 5¢** (`TicketBuilder.MIN_CALL_ASK`). The card says NO BET with the reason, the hunter
+  and long-shot tickets are not offered there, whatever the model says. Your own Buy and limit orders
+  still work at any price.
+- **The model has to earn BET** (`EdgeAutoTuner`). It may call a bet only when its own settled record has
+  enough calls, beats Kalshi's prices on both scores, and its average result per call is above zero by two
+  standard errors. Before, a model with no record was allowed to call bets and any positive total counted.
+  With no record, a losing one, or one within chance, the card says NO BET and why. A fresh install starts
+  silent. The clear-lead rule (your rule) is separate and unchanged.
+
+## 1.8.7 (Claude branch): limit orders at your own price, paper and real
+
+Buy UP / Buy DOWN (or Sell on a position) → **LIMIT ORDER** / **LIMIT SELL** on the confirm sheet opens an
+editor (`LimitOrderDialog`, rules in `signal/limit/LimitOrder.kt`): pick the price (1¢ steps from 10¢ to
+90¢, 0.1¢ outside), the contracts and how long the order may rest (30 s, 2 min, 5 min, or until 30 s
+before the close). It shows the best bid and ask, the size already resting at your price, and the cost
+and payout if it fills.
+
+- **Resting, post-only.** Kalshi rejects the order instead of letting it cross, so it never pays the taker
+  fee. A price at or through the other side is refused in the editor ("use Buy").
+- **Paper** (`PaperLimitBook`): the order waits against the real book and fills only from real trade
+  prints, after the size ahead of it has traded (or a print goes through its price). The size ahead can
+  only shrink as the live book shows fewer contracts at that price. No fee. Needs Live signals on. Paper
+  resting orders are dropped if the app restarts.
+- **Real**: sent only by the editor's REAL MONEY button, through the same Approve path, $5 all-in cap and
+  daily cap as every live buy. Every resting order carries Kalshi's `expiration_time`, so it ends on
+  Kalshi's side even if the app is closed; the app cancels it 2 s earlier when it is running.
+- **Limit sells** rest above the bid for no more than is held. Kalshi allows reduce-only only on
+  immediate-or-cancel orders, so a resting sell is not reduce-only: while one rests on a window the app
+  will not send another sell there.
+- **Limit orders resting** (Home card): every real and paper resting order with its Cancel. Before this
+  version a resting real order could not be cancelled from the screen.
+- The min-profit-if-win setting switches off the buy-now ticket above about 31¢; a limit order at your own
+  price is not held to it, and the editor says so.
+
+Not checked against Kalshi: this build was unit tested (request shape, caps, expiry, paper fills) but no
+real or demo order was sent from here. A limit order does not jump the queue: see sections G–I of the
+scalping write-up for what joining the best price did on recorded books.
+
+## 1.8.6 (Claude branch): the scalper card shows real-order-book history
+
+The figures in brackets on the Paper scalper card were "22 days of trade prints, back of the queue to
+front". They are now what a filled scalp of each kind made on 7 days of recorded order books with the
+real queue counted (all negative, see below). No trading logic changed.
+
+## 1.8.5 (Claude branch): scalper results screen, every paper order saved
+
+Home → Paper scalper card → **See full results, chart and every trade** (`ScalperResultsScreen`):
+
+- profit or loss after fees, dollars won against dollars lost, win and loss counts, average and biggest
+  win and loss, total fees paid;
+- a chart of the paper bankroll over time (it starts from a $1,000 reference; the scalper has no real balance);
+- breakdowns by strategy, by coin and by hour of the day;
+- every closed scalp, newest first, with its entry, exit, fees and net.
+
+Every paper order is now kept on the phone under `filesDir/scalper/` (`ScalpTradeLog`):
+`scalps_YYYY-MM-DD.csv` has one row per closed scalp; `scalp_orders_YYYY-MM-DD.csv.gz` has one row per
+order, filled or not, with the book the scalper saw, the price moves and the model's inputs. "Export all
+scalper data (zip)" on the results screen saves them all. "Reset paper scalper" archives the files instead
+of deleting them. A record made by 1.8.4 is replaced by a new one, because 1.8.4 kept no per-trade file
+and no won / lost / fee totals. Still paper only: no order path.
+
+The cloud recorder's files and the study's trade tape are now also kept in the `scalper-data` release
+(`export-recordings.yml`, `archive-tape.yml`, `record.yml`), and the recorder keeps 15 book levels a side.
+
+**Real order books** ([`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md) sections G–I): on 7
+days of recorded books with the real size ahead counted, every rule the paper scalper runs lost on every
+day (ML scalper −1.6¢ per order sent, resting signals about −2¢, buy-now about −3.5¢), a model given the
+book and one-second Bitcoin found nothing worth trading, and a short queue turned out to be the worst
+place to join. The card's figures in brackets are these numbers now.
+
+**Patient orders** (section J, 2026-10-10): a bid placed 1–5¢ below the best bid and left to wait, on two
+days of 15-level book data. All 20 versions lost (about −1.4¢ to −2.4¢ per order sent). Waiting roughly
+halves the queue ahead but most fills come from the price falling through the order. Two days is a small
+sample; the app was left alone.
+
+## 1.8.4 (Claude branch): paper scalper, aggressive, paper only
+
+Home card **Paper scalper · aggressive · PAPER ONLY** runs seven scalping strategies at once on the live Bitcoin window and scores each one: the ML scalper (a trained model picks calm moments to rest a bid and offer it 1¢ higher), and dip-hunter, momentum-sniper and extreme reversion, each in a buy-now form and a resting form. Both sides, several positions per strategy, 10 contracts an order, no caps, exits in 30–120 s. It holds no trade client and no credentials: nothing it does can reach Kalshi.
+
+- **Real fills, real queue.** Orders are filled by the public trade prints. A resting order fills only when a print trades through its price or the size shown ahead of it plus its own size has traded at its price. Buy-now entries and stop / time-out exits pay the exact taker fee.
+- **Scoreboard.** P&L, scalps and win rate per strategy, with what the strategy did on 22 days of history beside it. For the ML scalper, also the split by queue ahead and the orders its queue penalty says should pay.
+- **What history says** ([`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md) sections E and F): the buy-now strategies lost 3.1–3.7¢ a contract on all 22 days; the resting versions were about zero at the front of the queue; the ML scalper made +0.35¢ at the front (99% interval [+0.24, +0.47]) and lost past about 250 contracts ahead.
+- Needs Live signals on (the trade prints and the book). Settings → **Paper scalper** turns it off and resets the record.
+
+| Control | Code | Test |
+|---------|------|------|
+| Features from trade prints | `PrintGrid.features` | `ScalperParityTest.featuresRebuiltFromPrintsMatchThePythonStudy` |
+| Model in the app | `ScalperModel.predict` (`assets/scalper_model.json`) | `ScalperParityTest.modelOutputsMatchThePythonStudy` |
+| Fills, exits, fees | `ScalperEngine.onTrade` / `onClock` / `settle` | `ScalperEngineTest.restingBidFillsOnlyAfterTheQueueAndItsOwnSizeHaveTraded`, `stopSellsAtTheBidAndPaysTheTakerFee`, `buyNowStopAndTimeOutPayBothFees` |
+| Strategies and cadence | `PaperScalper.decide` | `ScalperEngineTest.aSharpDropFiresTheDipHunterAndExtremeReversionOnThatSideAndMomentumOnTheOther`, `mlScalperPostsOnBothSidesEveryFiveSecondsFromTheRealBidAndQueue` |
+| Scoreboard | `ScalperLedger.apply` → `ScalperSummary.of` → `ScalperCard` | `ScalperEngineTest.scoreboardSplitsByStrategyAndByQueue` |
+| Feed | `SignalHub.ingestTick` → `PaperScalper.onTrade` / `onClock`; `AppContainer.onMarketSettled` → `settle` | `ScalperEngineTest.otherCoinsAndBadPrintsAreIgnored` |
+
+## Scalping study, 2026-10-09
+
+**A scalp on this market pays only from the front of the queue.** Buying at the ask and selling at the bid lost 1.6–4.3¢ a round trip under every rule tried (67 cells over 46 days of quotes and 22 days of the full trade tape), and a LightGBM model could rank those scalps but not find a positive group. Resting in and resting out earned +0.18¢ per order at the front of the queue and lost 2.9¢ at the back; a model that picks calm stretches raised the front-of-queue figure to +0.44¢ (99% interval [+0.36, +0.52], 7 of 7 test days). Break-even is about 250 contracts ahead; the usual queue is 2,000–10,000. Write-up: [`docs/scalping-2026-10-09.md`](docs/scalping-2026-10-09.md); tools: `tools/research/scalp/`.
+
+## 1.8.2 (Claude branch): Clear lead, Dirk's rule
+
+The app now bets the way Bitcoin is going, once it is clearly ahead. When Bitcoin is 0.10–0.20% from the window's start price between minute 3 and minute 10, the Bitcoin card says **BET UP** or **BET DOWN** on the side Bitcoin is on, and Buy opens a $5 all-in ticket on that side. Approve is still required and the $5 cap and daily cap are unchanged.
+
+- **Why that band.** Over 4,264 settled windows (2026-08-24 → 10-08), betting the side Bitcoin is on won 75.7% of the time at an average 75.2¢, −0.6¢ per contract after the fee. The 0.10–0.20% band in minutes 3–10 came out ahead in both halves: +2.0¢ per contract [+0.0, +3.9] in the first 23 days and +0.9¢ [−1.3, +2.8] in the last 23, about +8¢ per $5 bet overall. A lead, not proof. Write-up: [`docs/clear-lead-2026-10-09.md`](docs/clear-lead-2026-10-09.md); tool: `tools/research/clear_lead_study.py`.
+- **Nothing else gates it.** The rule does not use the model, so the sit-out switch does not silence it. Its tickets are 60–95¢ buys, so the $10 min-profit-if-win setting (which allows nothing above 31¢) does not apply to its side. Every other ticket keeps its gates.
+- **Paper record.** Home card **Clear lead (your rule) · PAPER RECORD** logs the first call in every window as a $5 buy at the ask and settles it, approved or not. About 1,000 settled windows are needed before the record means anything.
+- **Switch.** Settings → **Clear lead rule**, with a reset for the record.
+
+| Control | Code | Test |
+|---------|------|------|
+| The rule | `ClearLeadRule.signal` | `ClearLeadTest.distanceBandIsTenInclusiveToTwentyExclusive`, `timeBandIsMinuteThreeToMinuteTen` |
+| Engine → card | `ScoringEngine.Score.clearLeadSide` → `MarketUiModel.withSignalScore` | `ClearLeadTest.engineScoreCarriesTheCallIntoTheMarketModel` |
+| Headline and ticket | `BetCall.clearLeadCall` → `TicketBuilder.proposeClearLead` → `proposeManual` | `ClearLeadTest.headlineIsBetUpWithAnApprovableEightyCentTicket`, `theBuyButtonBuildsTheSameTicketAndTheOtherSideKeepsItsGate` |
+| Not silenced by sit-out | `BetCall.decide` | `ClearLeadTest.sitOutDoesNotSilenceTheRuleButTheSettingDoes` |
+| Paper record | `SignalHub.maybeClearLead` → `ClearLeadRule.decide` → `LateFavoriteLedger.record` | `ClearLeadTest.ledgerRecordsOncePerWindowAndSettles` |
+
 ## 1.8.0-mis.1 (Mis_bitcoin branch, Mis Bitcoin)
 
 Fork of the Claude 1.8.0 build with a hardened model-promotion pipeline: the trainer now publishes a market-block bootstrap 90% P&L CI at the ask and `promotion_eligible` (>= 20 EV-at-ask trades AND CI excluding zero); `ModelActivation` refuses activation on `promotion_eligible: false` even when Brier/log-loss beat the market. Separate package `com.dirk.kalshiodds.mis`, its own model release tag `mis-bitcoin-edge-model`, retrains on every push to `Mis_bitcoin` that touches `ml/`.

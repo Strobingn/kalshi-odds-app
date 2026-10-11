@@ -92,4 +92,15 @@ class RestingBidTest {
         assertTrue(RestingBid.build(ticket().copy(reduceOnly = true), 0.50, 0.53).isFailure)
         assertFalse(ticket().postOnly)
     }
+
+    @Test
+    fun onlyBtcCanRest() {
+        assertTrue(RestingBid.allowedFor("KXBTC15M-26OCT041430-30"))
+        org.junit.Assert.assertFalse(RestingBid.allowedFor("KXETH15M-26OCT041430-30"))
+        org.junit.Assert.assertFalse(RestingBid.allowedFor("KXSOL15M-26OCT041430-30"))
+        val eth = ticket().copy(ticker = "KXETH15M-26OCT041430-30")
+        val r = RestingBid.build(eth, bid = 0.40, ask = 0.45)
+        assertTrue(r.isFailure)
+        assertEquals(RestingBid.NOT_THIS_COIN, r.exceptionOrNull()?.message)
+    }
 }

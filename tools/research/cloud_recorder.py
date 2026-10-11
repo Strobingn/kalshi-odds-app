@@ -9,6 +9,13 @@ lag_study.py and maker_sim.py run on either:
   trades_YYYY-MM-DD.csv.gz  ts_ms,ticker,yes_price,count,taker_side             (ts_ms = Kalshi created_time)
   settle_YYYY-MM-DD.csv     ticker,close_ms,strike,result
 
+  depth_YYYY-MM-DD.csv.gz   ts_ms,ticker,yes_levels,no_levels   (Bitcoin only; the best DEPTH_LEVELS resting bids
+                            per side as price:size|price:size, best first. recordings.py does not read it;
+                            tools/research/scalp reads it to follow the size at a price that is not yet the best.)
+
+Trades are paged until a page comes back short, so busy seconds are complete (until 2026-10-09 only the
+newest 1,000 per 5 s poll were kept).
+
 ts_ms is the runner's clock at receipt (trades: exchange time). Polling, not
 websockets: the timing is ~1 s granular, which is what the studies use. Each
 flush appends a gzip member, so files can be copied or extended across runs.
@@ -35,6 +42,11 @@ from recordings import HEADERS  # noqa: E402
 
 COINBASE = "https://api.exchange.coinbase.com"
 SERIES = {"KXBTC15M": "BTC-USD", "KXETH15M": "ETH-USD", "KXSOL15M": "SOL-USD"}
+DEPTH_SERIES = "KXBTC15M"
+DEPTH_LEVELS = 15
+DEPTH_HEADER = ["ts_ms", "ticker", "yes_levels", "no_levels"]
+ALL_HEADERS = {**HEADERS, "depth": DEPTH_HEADER}
+TRADE_PAGES_MAX = 20
 LIST_EVERY_S = 30
 TRADES_EVERY_S = 5
 SETTLE_EVERY_S = 30
@@ -89,6 +101,38 @@ def book_row(ts_ms: int, ticker: str, strike, close_ms, body) -> list | None:
     return [ts_ms, ticker, strike, close_ms, yb[0], yb[1], ya[0], ya[1], nb[0], nb[1], na[0], na[1]]
 
 
+def depth_row(ts_ms: int, ticker: str, body) -> list | None:
+    """The best DEPTH_LEVELS resting bids on each side, `price:size|price:size`, best first."""
+    b = parse_orderbook(body)
+    if b is None or (not b.yes_bids and not b.no_bids):
+        return None
+
+    def side(levels: list) -> str:
+        return "|".join(f"{p:.4g}:{q}" for p, q in levels[:DEPTH_LEVELS])
+
+    return [ts_ms, ticker, side(b.yes_bids), side(b.no_bids)]
+
+
+def new_trades(pages, seen: set, older: set) -> list:
+    """Trade rows not written before, from an iterator of API pages (newest first). Stops paging at a short
+    page or at a page that is all known. `seen` gains the ids; `older` is the previous generation of ids."""
+    rows = []
+    for page in pages:
+        fresh = 0
+        for t in page:
+            tid = t.get("trade_id") or json.dumps(t, sort_keys=True)
+            if tid in seen or tid in older:
+                continue
+            seen.add(tid)
+            fresh += 1
+            row = trade_row(t)
+            if row:
+                rows.append(row)
+        if len(page) < 1000 or fresh == 0:
+            break
+    return rows
+
+
 def trade_row(t: dict) -> list | None:
     ts = iso_ms(t.get("created_time"))
     tk = t.get("ticker")
@@ -97,7 +141,8 @@ def trade_row(t: dict) -> list | None:
     price = dollars(t, "yes_price")
     cnt = t.get("count_fp", t.get("count"))
     try:
-        cnt = int(float(cnt))
+        cnt = float(cnt)
+        cnt = int(cnt) if cnt.is_integer() else round(cnt, 2)   # Kalshi trades can be for part of a contract
     except (TypeError, ValueError):
         return None
     side = (t.get("taker_side") or "").lower()
@@ -122,7 +167,7 @@ class Sink:
             gz = kind != "settle"
             path = self.out / (f"{kind}_{day}.csv.gz" if gz else f"{kind}_{day}.csv")
             new = not path.exists()
-            text = ("" if not new else ",".join(HEADERS[kind]) + "\n") + "".join(
+            text = ("" if not new else ",".join(ALL_HEADERS[kind]) + "\n") + "".join(
                 ",".join(num(v) for v in r) + "\n" for r in rows)
             if gz:
                 with open(path, "ab") as f:
@@ -143,8 +188,9 @@ def run(out: Path, minutes: float, log=print) -> dict:
     except (OSError, ValueError):
         pending = {}            # ticker -> {"close_ms", "strike"} awaiting result
     seen_trades: set = set()
+    older_trades: set = set()
     trade_since: dict = {}
-    stats = dict(spot=0, book=0, trades=0, settle=0, errors=0)
+    stats = dict(spot=0, book=0, depth=0, trades=0, settle=0, errors=0)
     t_end = time.time() + minutes * 60
     last = dict(list=0.0, trades=0.0, settle=0.0, flush=time.time())
 
@@ -196,22 +242,32 @@ def run(out: Path, minutes: float, log=print) -> dict:
             if row:
                 sink.add("book", ts, row)
                 stats["book"] += 1
+            if m["series"] == DEPTH_SERIES:
+                drow = depth_row(ts, tk, body)
+                if drow:
+                    sink.add("depth", ts, drow)
+                    stats["depth"] += 1
 
         if tick - last["trades"] >= TRADES_EVERY_S:
             last["trades"] = tick
             for tk in live.values():
                 since = trade_since.get(tk, int(tick) - 60)
-                q = urllib.parse.urlencode({"ticker": tk, "min_ts": str(since), "limit": "1000"})
-                body = get(f"{KALSHI}/markets/trades?{q}") or {}
-                for t in body.get("trades") or []:
-                    tid = t.get("trade_id") or json.dumps(t, sort_keys=True)
-                    if tid in seen_trades:
-                        continue
-                    seen_trades.add(tid)
-                    row = trade_row(t)
-                    if row:
-                        sink.add("trades", row[0], row)
-                        stats["trades"] += 1
+
+                def pages(tk=tk, since=since):
+                    cursor = None
+                    for _ in range(TRADE_PAGES_MAX):
+                        params = {"ticker": tk, "min_ts": str(since), "limit": "1000"}
+                        if cursor:
+                            params["cursor"] = cursor
+                        body = get(f"{KALSHI}/markets/trades?{urllib.parse.urlencode(params)}") or {}
+                        yield body.get("trades") or []
+                        cursor = body.get("cursor")
+                        if not cursor:
+                            return
+
+                for row in new_trades(pages(), seen_trades, older_trades):
+                    sink.add("trades", row[0], row)
+                    stats["trades"] += 1
                 trade_since[tk] = int(tick) - 10
 
         if tick - last["settle"] >= SETTLE_EVERY_S:
@@ -235,7 +291,9 @@ def run(out: Path, minutes: float, log=print) -> dict:
             last["flush"] = tick
             sink.flush()
             if len(seen_trades) > 200_000:
-                seen_trades.clear()
+                # Keep the last generation too, so a trade seen just before the swap is not written twice.
+                older_trades = seen_trades
+                seen_trades = set()
         spare = 1.0 - (time.time() - tick)
         if spare > 0:
             time.sleep(spare)

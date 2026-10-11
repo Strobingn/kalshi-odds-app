@@ -780,6 +780,31 @@ fun SettingsContent(
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
+            ToggleRow("Clear lead rule (bet the side Bitcoin is on)", s.clearLeadEnabled, { viewModel?.setClearLead(it) })
+            Text(
+                "Your rule. When Bitcoin is 0.10–0.20% from the window's start price between minute 3 and minute 10, " +
+                    "the card says BET UP or BET DOWN on that side with a \$5 ticket (Approve still required), and " +
+                    "every window is logged to the Clear lead paper record on Home. These are 60–95¢ buys, so the " +
+                    "min-profit setting does not block them. History: a small edge in 46 days of data, not proven.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedButton(onClick = { viewModel?.resetClearLead() }, modifier = Modifier.height(44.dp)) {
+                Text("Reset clear-lead record")
+            }
+            ToggleRow("Paper scalper (aggressive, paper only)", s.scalperEnabled, { viewModel?.setScalper(it) })
+            Text(
+                "Runs seven scalping strategies at once on paper: the ML scalper, dip-hunter, momentum-sniper and " +
+                    "extreme reversion, the last three both buying at the ask and resting a bid. Several positions " +
+                    "at a time, no caps, exits in 30–120 s. Filled by real trade prints; scored on Home by strategy, with " +
+                    "a full results screen (profit after fees, bankroll chart, every trade). Every order is saved " +
+                    "on the phone. Needs Live signals on. Never sent to Kalshi.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            OutlinedButton(onClick = { viewModel?.resetScalper() }, modifier = Modifier.height(44.dp)) {
+                Text("Reset paper scalper")
+            }
             ToggleRow("Late-favorite paper tracker", s.lateFavoriteEnabled, { viewModel?.setLateFavorite(it) })
             Text(
                 "Logs a \$5 paper bet on the side spot is on with ≤5 min left, |z| ≥ 1.5 and ask 80–97¢. " +

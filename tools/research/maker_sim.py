@@ -796,6 +796,18 @@ def report(results: dict, taker: dict, stats: dict, maker_fee: float, fee_is_def
             L.append(f"| {c.label()} | " + " | ".join(cells) + " |")
         L.append("")
 
+    # The app's live rule (CentBetterRule / "REST 1¢ BETTER": bid + 1¢, margin
+    # 0.02, cancel after 30 s) is fixed in advance, so it is scored on every
+    # day and on the held-out days without any selection.
+    app_cfg = Config("improve", 30, 0.02)
+    if any(k[0] == app_cfg for k in results):
+        L += ["## Pre-registered: the app's 1¢-better-bid rule (improve/T30/m0.02), maker fee "
+              f"{maker_fee:g}", ""] + HEAD
+        for model in ("conservative", "optimistic"):
+            for lbl, ds in (("all days", None),) + ((("OOS days", oos_days),) if oos_mode else ()):
+                L.append(row(f"{model} · {lbl}", summarize(results[(app_cfg, maker_fee, model)], ds, iters, seed)))
+        L.append("")
+
     L += ["## Taker reference (same fair/side logic, take the ask at fee 0.07, capped at displayed ask qty)", "",
           "| Margin | days | bets | win% | avg ask | P&L $ | $/bet | 99% CI $/bet |", "|---|---:|---:|---:|---:|---:|---:|---|"]
     for mg, bets in taker.items():

@@ -16,7 +16,8 @@ fun OddsScreen(
     onOpenHistory: () -> Unit,
     onOpenSignalHistory: () -> Unit = onOpenHistory,
     onOpenChart: (MarketUiModel) -> Unit,
-    onOpenArb: () -> Unit = {}
+    onOpenArb: () -> Unit = {},
+    onOpenScalper: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     HomeScreen(
@@ -28,6 +29,7 @@ fun OddsScreen(
         onOpenSignalHistory = onOpenSignalHistory,
         onOpenChart = onOpenChart,
         onOpenArb = onOpenArb,
+        onOpenScalper = onOpenScalper,
         onRefresh = { viewModel.refresh() },
         onBuyMarket = { market, side -> viewModel.buyMarket(market, side) },
         onPaperSide = { market, side -> viewModel.paperBuySide(market, side) },
@@ -47,6 +49,7 @@ fun OddsScreen(
         onPaperSellTicket = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
         onCancelApprove = { viewModel.cancelTicketApprove() },
         onCancelOrder = { viewModel.cancelWorkingOrder(it) },
+        limitHost = viewModel.limitHost,
         onResumeAlerts = { viewModel.resumeAlerts() }
     )
 }

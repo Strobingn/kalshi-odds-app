@@ -30,6 +30,18 @@ object RestingBid {
             "Cheaper than buying now, but it may not fill, and fills tend to come when the price moves against you."
 
     const val NO_QUOTE = "No live bid or ask to rest against"
+    const val NOT_THIS_COIN = "Resting bids lost money on ETH and SOL in the cloud recordings: BTC only"
+
+    /**
+     * Coins where resting is offered. The cloud maker simulation (7 days,
+     * 2026-10-03 → 10-09, conservative fills, bid + 1¢, margin 0.02,
+     * cancel 30 s) lost on ETH (−0.80¢/contract, 99% range below zero, also
+     * on held-out days) and SOL (−0.95¢ on held-out days, range below zero).
+     * BTC is unproven either way, so only BTC keeps the option.
+     */
+    val SERIES = listOf("KXBTC15M")
+
+    fun allowedFor(ticker: String): Boolean = SERIES.any { ticker.startsWith(it, ignoreCase = true) }
     const val NO_ROOM = "Spread is 1¢: no room to rest a bid"
 
     /** (price, contracts) for a resting bid, or null with the reason in [failure]. */
@@ -52,6 +64,7 @@ object RestingBid {
         if (ticket.isSell || ticket.paperOnly || ticket.reduceOnly) {
             return Result.failure(IllegalStateException("Only live buys can rest"))
         }
+        if (!allowedFor(ticket.ticker)) return Result.failure(IllegalStateException(NOT_THIS_COIN))
         if (bid == null || ask == null) return Result.failure(IllegalStateException(NO_QUOTE))
         val price = priceFor(bid, ask) ?: return Result.failure(
             IllegalStateException(
