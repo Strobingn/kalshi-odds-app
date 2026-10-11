@@ -333,7 +333,7 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
         // binary zone — cheap, mostly dead, occasionally huge. Explicitly
         // capped to only fire OUTSIDE the no-auto-bet window (enforced by the
         // guard at the top of evaluate).
-        if (left in NO_AUTO_BET_MS..LOTTO_MAX_LEFT_MS && ai != null) {
+        if (left >= com.dirk.kalshiodds.domain.MarketLifecycle.NO_AUTO_BET_MS && left <= LOTTO_MAX_LEFT_MS && ai != null) {
             if (ask <= LOTTO_MAX_ASK && ai >= ask + LOTTO_MIN_EDGE) {
                 out += Signal(
                     Kind.SETTLE_LOTTO, market.ticker, "YES", ask,
