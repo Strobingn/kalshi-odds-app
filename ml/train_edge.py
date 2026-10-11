@@ -490,21 +490,32 @@ def prev_window_return(spot_rows: list[tuple[int, float]], open_ts: int) -> floa
     by open_ts only (no look-ahead). The 15-minute sign-reversal tilt
     (arXiv 2608.21888): positive prior move -> slightly lower P(YES).
     """
-    lo = open_ts - 900
-    hi = open_ts
-    known = [c for ts, c in spot_rows if lo + 60 <= ts + 60 <= hi]
-    # first and last bar closes strictly inside the previous window
-    first = None
-    last = None
-    for ts, c in spot_rows:
-        if ts + 60 <= lo:
-            first = c
-        elif ts + 60 <= hi and ts >= lo:
-            if last is None or ts > (last[0] if last else -1):
-                last = (ts, c)
-    if first is None or last is None or last[1] <= 0 or first <= 0:
+    b = prev_window_bounds(spot_rows, open_ts)
+    if b is None:
         return 0.0
-    return (last[1] - first) / first
+    first, last = b
+    return (last - first) / first
+
+
+# How far a boundary bar's close may sit before open − 15 min / open (one bar).
+PREV_WINDOW_TOL_S = 60
+
+
+def prev_window_bounds(spot_rows: list[tuple[int, float]], open_ts: int) -> tuple[float, float] | None:
+    """(close at open − 15 min, close at open) from the bars that closed by each boundary, or None.
+
+    Each must be the bar closing within PREV_WINDOW_TOL_S of its boundary: a sparse response
+    (no failed chunk, just missing minutes) would otherwise span the wrong interval. [spot_rows]
+    must be sorted by bucket start.
+    """
+    def close_at(t: int) -> float | None:
+        i = bisect.bisect_right(spot_rows, (t - 60, math.inf)) - 1  # last bar closing (start + 60) <= t
+        if i < 0:
+            return None
+        ts, c = spot_rows[i]
+        return c if c > 0 and t - (ts + 60) <= PREV_WINDOW_TOL_S else None
+    first, last = close_at(open_ts - 900), close_at(open_ts)
+    return None if first is None or last is None else (first, last)
 
 
 def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, float]], idx: int) -> list[float] | None:
@@ -686,6 +697,17 @@ def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | 
             ok = [m for m in markets if spot_complete(int(parse_iso(m["close_time"]).timestamp()), gaps)]
             print(f"  spot gaps {len(gaps)}: deferring {len(markets) - len(ok)} markets to the next run", flush=True)
             markets = ok
+            if not markets:
+                continue
+        # Same for a successful but sparse reply: no bar at a previous-window boundary would cache
+        # prev_window_return as an interval it is not. Those markets wait for the next run too.
+        def open_of(m: dict) -> int:
+            o = parse_iso(m.get("open_time"))
+            return int(o.timestamp()) if o else int(parse_iso(m["close_time"]).timestamp()) - 900
+        bounded = [m for m in markets if prev_window_bounds(spot, open_of(m)) is not None]
+        if len(bounded) < len(markets):
+            print(f"  spot boundary bars missing: deferring {len(markets) - len(bounded)} markets", flush=True)
+            markets = bounded
             if not markets:
                 continue
 

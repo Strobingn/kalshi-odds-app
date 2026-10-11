@@ -219,6 +219,10 @@ class ArenaStrategiesTest {
         // An archive that did not complete keeps the old record (and its totals) for the next start.
         assertEquals(old, ScalperState.upgraded(old) { false })
         assertEquals(old, ScalperState.upgraded(old) { error("disk full") })
+        // ...and trading on it does not stamp it current, so that next start still archives it.
+        val ledger = ScalperLedger(initial = old)
+        ledger.apply(ScalperEngine().buyNow(ScalpStrategy.MOMENTUM_SNIPER, t, "YES", 0.40, { _, _ -> null }, 1_000L))
+        assertEquals(2, ledger.snapshot().version)
     }
 
     @Test
@@ -247,6 +251,13 @@ class ArenaStrategiesTest {
         assertEquals("clustered by window it is within luck", "within luck: no winner yet", ScalperResults.verdict(paired))
         // The same 40 results counted as independent trades would have been called a lead.
         assertEquals("ahead by more than luck so far", ScalperResults.verdict(paired.copy(windows = 0)))
+        // A held position from the last window settling between this window's scalps is still one window.
+        val interleaved = ScalpStats()
+            .withWindowClose("W1", 1.0).withWindowClose("W2", 1.0)
+            .withWindowClose("W1", 1.0).withWindowClose("W2", 1.0).withWindowClose("W3", 1.0)
+        assertEquals(3, interleaved.windows)
+        assertEquals(2, interleaved.prevN)
+        assertEquals(5, interleaved.windowCloses)
         // A record whose window sums miss some closes (written before them) keeps the trade-level test.
         assertEquals(ScalperResults.verdict(paired.copy(windows = 0)), ScalperResults.verdict(paired.copy(windowCloses = 10)))
         // Many windows of steady wins still read as a lead.

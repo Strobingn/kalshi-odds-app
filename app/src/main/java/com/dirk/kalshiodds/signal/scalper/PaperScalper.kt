@@ -36,7 +36,8 @@ data class ScalpStats(
     /**
      * Per-window sums for the luck test, which clusters by market window: scalps in one window share
      * its outcome, so they are not independent. [windows] counts windows with a close; the
-     * `win*` sums cover finished windows, `cur*` the one still collecting closes.
+     * `win*` sums cover finished windows, `cur*` and `prev*` the two still collecting closes (a held
+     * position settles after the next window has started, so two windows interleave).
      */
     val windows: Int = 0,
     val winSqUsd: Double = 0.0,
@@ -45,21 +46,24 @@ data class ScalpStats(
     val curTicker: String = "",
     val curUsd: Double = 0.0,
     val curN: Int = 0,
+    val prevTicker: String = "",
+    val prevUsd: Double = 0.0,
+    val prevN: Int = 0,
     /** Closes counted in the window sums. Below [closed] for a record that predates them (1.9.0–1.9.1). */
     val windowCloses: Int = 0
 ) {
     /** These totals with one more close on [ticker] folded into the per-window sums. */
-    fun withWindowClose(ticker: String, pnlUsd: Double): ScalpStats {
-        val same = curN > 0 && curTicker == ticker
-        val done = curN > 0 && !same
-        return copy(
-            windows = windows + (if (same) 0 else 1),
-            winSqUsd = winSqUsd + (if (done) curUsd * curUsd else 0.0),
-            winCrossUsd = winCrossUsd + (if (done) curUsd * curN else 0.0),
-            winN2 = winN2 + (if (done) curN.toDouble() * curN else 0.0),
-            curTicker = ticker,
-            curUsd = (if (same) curUsd else 0.0) + pnlUsd,
-            curN = (if (same) curN else 0) + 1,
+    fun withWindowClose(ticker: String, pnlUsd: Double): ScalpStats = when {
+        curN > 0 && curTicker == ticker -> copy(curUsd = curUsd + pnlUsd, curN = curN + 1, windowCloses = windowCloses + 1)
+        prevN > 0 && prevTicker == ticker -> copy(prevUsd = prevUsd + pnlUsd, prevN = prevN + 1, windowCloses = windowCloses + 1)
+        // A new window: the older of the two open ones is finished, the current one becomes the previous.
+        else -> copy(
+            windows = windows + 1,
+            winSqUsd = winSqUsd + prevUsd * prevUsd,
+            winCrossUsd = winCrossUsd + prevUsd * prevN,
+            winN2 = winN2 + prevN.toDouble() * prevN,
+            prevTicker = curTicker, prevUsd = curUsd, prevN = curN,
+            curTicker = ticker, curUsd = pnlUsd, curN = 1,
             windowCloses = windowCloses + 1
         )
     }
@@ -252,7 +256,9 @@ class ScalperLedger(
                 groups = groups,
                 recent = recent,
                 startedAtMs = started,
-                version = ScalperState.VERSION,
+                // The loaded record's version, not the current one: a legacy record whose archive failed
+                // must still read as legacy on the next start, so the archive is retried there.
+                version = cur.version,
                 curve = curve,
                 curveBucketMs = bucketMs
             )

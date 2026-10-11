@@ -119,6 +119,12 @@ object SignalConstants {
     const val ADAPTER_WEIGHT_EMA = 0.15
 
     const val EXTERNAL_CACHE_MS = 25_000L
+
+    /**
+     * Oldest REST volatility an imported model may score with (a few missed polls). Past it the
+     * model is skipped: the stream's σ is a different estimator from the trainer's.
+     */
+    const val TRAINER_VOL_MAX_AGE_MS = 180_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
     const val EXTERNAL_READ_TIMEOUT_MS = 4_000L
 

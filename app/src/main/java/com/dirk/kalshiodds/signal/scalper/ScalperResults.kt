@@ -129,10 +129,10 @@ object ScalperResults {
         val se = if (s.windows > 0 && s.windowCloses == n) {
             val w = s.windows
             if (w < MIN_WINDOWS_FOR_VERDICT) return "$w of $MIN_WINDOWS_FOR_VERDICT market windows needed to judge"
-            // Cluster-robust: Σ_w (S_w − n_w · mean)², with the window still collecting closes included.
-            val sq = s.winSqUsd + s.curUsd * s.curUsd
-            val cross = s.winCrossUsd + s.curUsd * s.curN
-            val n2 = s.winN2 + s.curN.toDouble() * s.curN
+            // Cluster-robust: Σ_w (S_w − n_w · mean)², with the two windows still collecting closes included.
+            val sq = s.winSqUsd + s.curUsd * s.curUsd + s.prevUsd * s.prevUsd
+            val cross = s.winCrossUsd + s.curUsd * s.curN + s.prevUsd * s.prevN
+            val n2 = s.winN2 + s.curN.toDouble() * s.curN + s.prevN.toDouble() * s.prevN
             val num = sq - 2.0 * mean * cross + mean * mean * n2
             kotlin.math.sqrt(kotlin.math.max(num, 0.0) * w / (w - 1.0)) / n
         } else {
