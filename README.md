@@ -33,9 +33,9 @@ Kelly is the growth-optimal bet size **only if the model probability is the true
 2. **Quarter-Kelly (`DEFAULT_KELLY_FRACTION = 0.25`).** Estimation error makes full Kelly systematically oversize; quarter-Kelly gives up little growth and roughly quarters the drawdown.
 3. **Max 5% of bankroll per clip (`DEFAULT_MAX_BANKROLL_FRACTION`), and ≤25% of bankroll at the final client check.** Even a huge estimated edge cannot concentrate the book in one 15-minute window, and a malformed ticket cannot either.
 
-### Six parallel paper scalpers + Scalp tab (0.3.17)
+### 15 parallel paper scalpers + Scalp tab (0.3.17)
 
-The paper book now runs six strategies side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`). The app now has a persistent bottom navigation with a dedicated **Scalp tab**: strategy leaderboard (best settled P&L first), open fills with their exit rules, the settled ledger, and a **SIZING ALGORITHMS** card showing both sizing engines live — the paper learning sizer (settled W/L record, realized P&L, learning multiplier, equity fraction, next AI stake) and the live quarter-Kelly edge sizer (current BTC window's AI% vs ask, edge cap, sized clip with count/all-in/fee, profit if win):
+The paper book now runs **fifteen strategies** side by side, each tagged on every fill and scored on its own ledger (`ScalpStrategies`). The app now has a persistent bottom navigation with a dedicated **Scalp tab**: strategy leaderboard (best settled P&L first), open fills with their exit rules, the settled ledger, and a **SIZING ALGORITHMS** card showing both sizing engines live — the paper learning sizer (settled W/L record, realized P&L, learning multiplier, equity fraction, next AI stake) and the live quarter-Kelly edge sizer (current BTC window's AI% vs ask, edge cap, sized clip with count/all-in/fee, profit if win):
 
 1. **mid window reversal** — fades an early-window overreaction (ask stretched ≥12¢ from the AI's fair value in minutes 1–5); exits on the first 10–15¢ recovery.
 2. **t minus exit** — buys deep dips (≥5¢ under the AI, ask ≤40¢) with ≥4 minutes left; **hard time-stop at T−3:00**, never holds into the binary zone.
@@ -43,6 +43,15 @@ The paper book now runs six strategies side by side, each tagged on every fill a
 4. **rollover gap** — in a fresh window's first 30s, fades stale pricing when the latest spot print is materially off the strike; exits as soon as the book reprices.
 5. **lead lag** — a fresh Binance/Coinbase tick ≥0.10% off the strike that Kalshi's ask hasn't reflected yet; exits within 2s of the book catching up.
 6. **AI edge (baseline)** — the always-on edge-sized AI fill from the last build, kept unchanged as the benchmark.
+7. **spread squeeze** — tight spread with the last trade printing at the ask; exits when the spread widens.
+8. **volume surge** — 24h volume far above window volume with a model edge; fast money entering.
+9. **OI flip** — open interest above dollar liquidity with the AI's direction; heavy positioning.
+10. **confidence press** — the AI's own confidence ≥65% while holding a price edge.
+11. **sequence momentum** — the AI holding one side through the early window.
+12. **cross-window drift** — the prior window's settle direction carrying into a fresh window with spot still drifting that way.
+13. **bid wall** — a heavy bid (≥25¢) holding while the ask thins to ≤40 ct.
+14. **calm before close** — mid-window quiet, tight spread, and a clear ≥8¢ model edge.
+15. **settle lotto** — a tiny ask (≤12¢) with a big model edge in the last safe stretch; blocked by the binary-zone guard like everything else.
 
 The learning multiplier (`AggressivePaperSizer`) feeds on all settled fills, so a strategy that wins presses its own sizing harder. One open fill per ticker **per strategy** — the strategies can hold the same window simultaneously.
 

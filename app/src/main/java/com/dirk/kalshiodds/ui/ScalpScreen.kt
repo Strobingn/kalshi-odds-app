@@ -64,9 +64,12 @@ fun ScalpScreen(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    "Six parallel paper-only strategies: mid window reversal, " +
-                        "t minus exit, book imbalance, rollover gap, lead lag, " +
-                        "and the AI edge baseline. Never hits Kalshi.",
+                    "15 parallel paper-only strategies, each on its own ledger: " +
+                        "mid window reversal, t minus exit, book imbalance, rollover " +
+                        "gap, lead lag, AI edge baseline, spread squeeze, volume " +
+                        "surge, OI flip, confidence press, sequence momentum, " +
+                        "cross-window drift, bid wall, calm before close, and " +
+                        "settle lotto. Never hits Kalshi.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textSecondary
                 )

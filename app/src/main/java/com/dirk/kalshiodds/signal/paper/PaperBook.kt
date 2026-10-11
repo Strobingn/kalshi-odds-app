@@ -480,6 +480,9 @@ class PaperBook(
     fun settle(ticker: String, result: String): List<PaperFill> {
         val outcome = result.lowercase().trim()
         if (outcome != "yes" && outcome != "no" && outcome != "void") return emptyList()
+        // Feed the cross-window drift strategy with the settled direction.
+        if (outcome == "yes") ScalpStrategies.noteSettle(resultUp = true)
+        if (outcome == "no") ScalpStrategies.noteSettle(resultUp = false)
         val changed = mutableListOf<PaperFill>()
         synchronized(lock) {
             val cur = _state.value

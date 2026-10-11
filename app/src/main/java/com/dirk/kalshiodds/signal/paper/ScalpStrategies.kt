@@ -10,15 +10,23 @@ import com.dirk.kalshiodds.signal.config.SignalConstants
  * paper-only, tagged on every fill, and scored on its own ledger so the
  * home scorecard can rank strategies by realized paper P&L.
  *
- * Strategies:
- * 1. [Kind.MID_WINDOW_REVERSAL]   — fade an early-window overreaction.
- * 2. [Kind.T_MINUS_EXIT]           — buy the dip, always exit by T\u22123 minutes.
- * 3. [Kind.BOOK_IMBALANCE]         — ask-side thinning with a static bid.
- * 4. [Kind.ROLLOVER_GAP]           — first 30s of a window reprices stale info.
- * 5. [Kind.LEAD_LAG]               — Kalshi lags Binance/Coinbase spot ticks.
- * 6. [Kind.AI_EDGE]                — the always-on edge-sized AI fill (baseline).
- */
-object ScalpStrategies {
+ * Strategies (15 total):
+ *  1. MID_WINDOW_REVERSAL  — fade an early-window overreaction.
+ *  2. T_MINUS_EXIT         — buy the dip, always exit by T−3 minutes.
+ *  3. BOOK_IMBALANCE       — ask-side thinning with a static bid.
+ *  4. ROLLOVER_GAP         — first 30s of a window reprices stale info.
+ *  5. LEAD_LAG             — Kalshi lags Binance/Coinbase spot ticks.
+ *  6. AI_EDGE              — the always-on edge-sized AI fill (baseline).
+ *  7. SPREAD_SQUEEZE       — tight spread + last trade at the ask.
+ *  8. VOLUME_SURGE         — 24h volume surge flags fast money entering.
+ *  9. OI_FLIP              — open interest above liquidity = positioning.
+ * 10. CONFIDENCE_PRESS     — the AI's confidence spikes with an edge.
+ * 11. SEQUENCE_MOMENTUM    — repeated same-side AI prints early in the window.
+ * 12. CROSS_WINDOW_DRIFT   — prior window's settle direction carries over.
+ * 13. BID_WALL            — a heavy bid holds while the ask softens.
+ * 14. CALM_BEFORE_CLOSE    — mid-window quiet, stable ask, model edge.
+ * 15. SETTLE_LOTTO        — tiny ask late (outside the binary zone).
+ object ScalpStrategies {
 
     enum class Kind {
         MID_WINDOW_REVERSAL,
@@ -26,7 +34,16 @@ object ScalpStrategies {
         BOOK_IMBALANCE,
         ROLLOVER_GAP,
         LEAD_LAG,
-        AI_EDGE
+        AI_EDGE,
+        SPREAD_SQUEEZE,
+        VOLUME_SURGE,
+        OI_FLIP,
+        CONFIDENCE_PRESS,
+        SEQUENCE_MOMENTUM,
+        CROSS_WINDOW_DRIFT,
+        BID_WALL,
+        CALM_BEFORE_CLOSE,
+        SETTLE_LOTTO
     }
 
     data class Signal(
@@ -168,6 +185,169 @@ object ScalpStrategies {
             }
         }
 
+        val yesBid = KalshiPrice.usable(market.yesBid)
+        val last = KalshiPrice.usable(market.lastPrice)
+        val aiConf = market.aiConfidence
+        val spotNow = lastSpot[market.ticker]
+        val strikeNow = market.floorStrike
+
+        // 7. Spread squeeze: tight book with the last trade printing at the
+        // ask side — buyers lifting offers in a compressed spread.
+        if (spread != null && spread <= SPREAD_SQUEEZE_MAX && last != null) {
+            if (last >= ask - 0.01) {
+                out += Signal(
+                    Kind.SPREAD_SQUEEZE, market.ticker, "YES", ask,
+                    "exit when the spread widens past ${pct(SPREAD_SQUEEZE_MAX)}",
+                    "last ${pct(last)} at the ask in a ${pct(spread)} spread"
+                )
+            } else if (noAsk != null && yesBid != null && last <= yesBid + 0.01) {
+                out += Signal(
+                    Kind.SPREAD_SQUEEZE, market.ticker, "NO", noAsk,
+                    "exit when the spread widens past ${pct(SPREAD_SQUEEZE_MAX)}",
+                    "last ${pct(last)} at the bid in a ${pct(spread)} spread"
+                )
+            }
+        }
+
+        // 8. Volume surge: 24h volume far above current-window volume flags
+        // fast money positioned on this series this window.
+        val vol = market.volume
+        val vol24 = market.volume24h
+        if (vol != null && vol24 != null && vol > 0.0 && ai != null) {
+            if (vol24 >= vol * VOLUME_SURGE_RATIO && ai > ask + CONF_EDGE_MARGIN) {
+                out += Signal(
+                    Kind.VOLUME_SURGE, market.ticker, "YES", ask,
+                    "exit on the first 2-4¢ move or T−3:00",
+                    "24h volume ${pct(vol24 / (vol * VOLUME_SURGE_RATIO))}× window volume with the AI above"
+                )
+            }
+        }
+
+        // 9. OI flip: open interest above dollar liquidity — heavy
+        // positioning — taken with the AI's direction.
+        val oi = market.openInterest
+        val liq = market.liquidityDollars
+        if (oi != null && liq != null && liq > 0.0 && ai != null) {
+            if (oi >= liq * OI_FLIP_RATIO) {
+                if (ai > ask + CONF_EDGE_MARGIN) {
+                    out += Signal(
+                        Kind.OI_FLIP, market.ticker, "YES", ask,
+                        "exit on the first 3-5¢ move or T−3:00",
+                        "open interest ${pct(oi / (liq * OI_FLIP_RATIO))}× liquidity with the AI above"
+                    )
+                } else if (noAsk != null && (1.0 - ai) > noAsk + CONF_EDGE_MARGIN) {
+                    out += Signal(
+                        Kind.OI_FLIP, market.ticker, "NO", noAsk,
+                        "exit on the first 3-5¢ move or T−3:00",
+                        "open interest ${pct(oi / (liq * OI_FLIP_RATIO))}× liquidity with the AI below"
+                    )
+                }
+            }
+        }
+
+        // 10. Confidence press: the AI's own confidence spikes while it also
+        // holds a price edge — press the same direction it is pressing.
+        if (aiConf != null && ai != null && aiConf >= CONFIDENCE_MIN) {
+            if (ai > ask + CONF_EDGE_MARGIN) {
+                out += Signal(
+                    Kind.CONFIDENCE_PRESS, market.ticker, "YES", ask,
+                    "exit when confidence fades or T−3:00",
+                    "AI confidence ${pct(aiConf)} with a ${pct(ai - ask)} edge"
+                )
+            } else if (noAsk != null && (1.0 - ai) > noAsk + CONF_EDGE_MARGIN) {
+                out += Signal(
+                    Kind.CONFIDENCE_PRESS, market.ticker, "NO", noAsk,
+                    "exit when confidence fades or T−3:00",
+                    "AI confidence ${pct(aiConf)} against with a ${pct(1.0 - ai - noAsk)} edge"
+                )
+            }
+        }
+
+        // 11. Sequence momentum: repeated same-side AI prints early in the
+        // window — the model keeps landing on the same side.
+        if (ai != null && age in 60_000..360_000 && aiConf != null && aiConf >= SEQUENCE_MIN_CONF) {
+            if (ai > ask + CONF_EDGE_MARGIN) {
+                out += Signal(
+                    Kind.SEQUENCE_MOMENTUM, market.ticker, "YES", ask,
+                    "exit on the first opposite AI print or T−3:00",
+                    "AI holding above the ask through the early window"
+                )
+            } else if (noAsk != null && (1.0 - ai) > noAsk + CONF_EDGE_MARGIN) {
+                out += Signal(
+                    Kind.SEQUENCE_MOMENTUM, market.ticker, "NO", noAsk,
+                    "exit on the first opposite AI print or T−3:00",
+                    "AI holding below through the early window"
+                )
+            }
+        }
+
+        // 12. Cross-window drift: the prior window settled the same direction
+        // the spot is drifting now — carry trades into the fresh window.
+        if (age <= CROSS_WINDOW_MS && spotNow != null && strikeNow != null && ask <= 0.70) {
+            val driftPp = (spotNow - strikeNow) / strikeNow * 100.0
+            if (driftPp >= CROSS_WINDOW_MIN_DRIFT_PP && lastSettleUp) {
+                out += Signal(
+                    Kind.CROSS_WINDOW_DRIFT, market.ticker, "YES", ask,
+                    "exit when the drift stalls or T−3:00",
+                    "prior window settled UP and spot is still ${String.format(java.util.Locale.US, "%.3f", driftPp)}% over"
+                )
+            } else if (driftPp <= -CROSS_WINDOW_MIN_DRIFT_PP && !lastSettleUp && noAsk != null && noAsk <= 0.70) {
+                out += Signal(
+                    Kind.CROSS_WINDOW_DRIFT, market.ticker, "NO", noAsk,
+                    "exit when the drift stalls or T−3:00",
+                    "prior window settled DOWN and spot is still ${String.format(java.util.Locale.US, "%.3f", driftPp)}% under"
+                )
+            }
+        }
+
+        // 13. Bid wall: a heavy bid holds the floor while the ask softens —
+        // a buyer absorbing every dip.
+        if (yesBid != null && askSize != null && yesBid >= BID_WALL_MIN_BID && askSize <= BID_WALL_MAX_ASK_SIZE) {
+            out += Signal(
+                Kind.BID_WALL, market.ticker, "YES", ask,
+                "exit when the wall lifts or T−3:00",
+                "bid holding ${pct(yesBid)} with the ask thinned to $askSize ct"
+            )
+        }
+
+        // 14. Calm before close: mid-window quiet, tight book, a stable ask,
+        // and the AI holding a clear edge — the classic settle-quality entry.
+        if (age in CALM_MIN_AGE_MS..CALM_MAX_AGE_MS && spread != null && spread <= CALM_MAX_SPREAD && ai != null) {
+            if (ai > ask + CALM_MIN_EDGE) {
+                out += Signal(
+                    Kind.CALM_BEFORE_CLOSE, market.ticker, "YES", ask,
+                    "exit at T−3:00 — never into the binary zone",
+                    "calm ${pct(spread)} spread with a ${pct(ai - ask)} edge mid-window"
+                )
+            } else if (noAsk != null && (1.0 - ai) > noAsk + CALM_MIN_EDGE) {
+                out += Signal(
+                    Kind.CALM_BEFORE_CLOSE, market.ticker, "NO", noAsk,
+                    "exit at T−3:00 — never into the binary zone",
+                    "calm ${pct(spread)} spread with a ${pct(1.0 - ai - noAsk)} edge mid-window"
+                )
+            }
+        }
+
+        // 15. Settle lotto: a tiny ask in the last safe stretch before the
+        // binary zone — cheap, mostly dead, occasionally huge. Explicitly
+        // capped to only fire OUTSIDE the no-auto-bet window (enforced by the
+        // guard at the top of evaluate).
+        if (left in NO_AUTO_BET_MS..LOTTO_MAX_LEFT_MS && ai != null) {
+            if (ask <= LOTTO_MAX_ASK && ai >= ask + LOTTO_MIN_EDGE) {
+                out += Signal(
+                    Kind.SETTLE_LOTTO, market.ticker, "YES", ask,
+                    "exit at the binary-zone boundary — hold to settle only if already winning",
+                    "${pct(ask)} ask with a ${pct(ai)} model at ${left / 1000}s left"
+                )
+            } else if (noAsk != null && noAsk <= LOTTO_MAX_ASK && (1.0 - ai) >= noAsk + LOTTO_MIN_EDGE) {
+                out += Signal(
+                    Kind.SETTLE_LOTTO, market.ticker, "NO", noAsk,
+                    "exit at the binary-zone boundary — hold to settle only if already winning",
+                    "${pct(noAsk)} ask with a ${pct(1.0 - ai)} model at ${left / 1000}s left"
+                )
+            }
+        }
+
         return out
     }
 
@@ -200,4 +380,30 @@ object ScalpStrategies {
     const val ROLLOVER_GAP_MS = 30_000L
     const val ROLLOVER_GAP_PCT = 0.05
     const val LEAD_LAG_MIN_GAP_PP = 0.10
+    const val SPREAD_SQUEEZE_MAX = 0.03
+    const val VOLUME_SURGE_RATIO = 8.0
+    const val OI_FLIP_RATIO = 1.0
+    const val CONFIDENCE_MIN = 0.65
+    const val CONF_EDGE_MARGIN = 0.03
+    const val SEQUENCE_MIN_CONF = 0.55
+    const val CROSS_WINDOW_MS = 120_000L
+    const val CROSS_WINDOW_MIN_DRIFT_PP = 0.05
+    const val BID_WALL_MIN_BID = 0.25
+    const val BID_WALL_MAX_ASK_SIZE = 40.0
+    const val CALM_MIN_AGE_MS = 240_000L
+    const val CALM_MAX_AGE_MS = 600_000L
+    const val CALM_MAX_SPREAD = 0.03
+    const val CALM_MIN_EDGE = 0.08
+    const val LOTTO_MAX_LEFT_MS = 420_000L
+    const val LOTTO_MAX_ASK = 0.12
+    const val LOTTO_MIN_EDGE = 0.10
+
+    /** Direction of the prior settled window for the cross-window drift strategy. */
+    @Volatile
+    var lastSettleUp: Boolean = false
+
+    /** Record a settlement so the drift strategy can carry it forward. */
+    fun noteSettle(resultUp: Boolean) {
+        lastSettleUp = resultUp
+    }
 }

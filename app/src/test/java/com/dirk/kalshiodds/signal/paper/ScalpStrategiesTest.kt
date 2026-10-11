@@ -17,7 +17,13 @@ class ScalpStrategiesTest {
         aiYes: Double? = 0.50,
         askSize: Double? = null,
         spread: Double? = 0.02,
-        strike: Double? = 67_000.0
+        strike: Double? = 67_000.0,
+        aiConfidence: Double? = null,
+        volume: Double = 5_000.0,
+        volume24h: Double = 5_000.0,
+        openInterest: Double? = 500.0,
+        liquidityDollars: Double? = 5_000.0,
+        lastPrice: Double? = null
     ) = MarketUiModel(
         ticker = "KXBTC15M-T",
         title = "BTC",
@@ -27,15 +33,16 @@ class ScalpStrategiesTest {
         yesAsk = yesAsk,
         noBid = 1.0 - yesAsk - 0.01,
         noAsk = 1.0 - yesAsk,
-        lastPrice = yesAsk,
         yesProbabilityPercent = yesAsk * 100.0,
         noProbabilityPercent = (1.0 - yesAsk) * 100.0,
         aiYesPercent = aiYes?.times(100.0),
         aiNoPercent = aiYes?.let { (100.0 - it * 100.0) },
         yesAskSize = askSize,
         spreadDollars = spread,
-        volume = 5_000.0,
-        volume24h = 5_000.0,
+        aiConfidence = aiConfidence,
+        lastPrice = lastPrice ?: yesAsk,
+        volume = volume,
+        volume24h = volume24h,
         openInterest = 500.0,
         liquidityDollars = 5_000.0,
         closeTimeLocal = null,
@@ -151,6 +158,88 @@ class ScalpStrategiesTest {
         assertNull(com.dirk.kalshiodds.signal.trade.TicketBuilder.propose(market, ctx))
         assertNull(com.dirk.kalshiodds.signal.trade.TicketBuilder.proposeHunter(market, ctx))
         assertNull(com.dirk.kalshiodds.signal.trade.TicketBuilder.proposeHunterValue(market, ctx))
+    }
+
+    @Test
+    fun spreadSqueezeFiresWhenLastPrintsAtTheAsk() {
+        val now = open + 300_000L
+        val signals = ScalpStrategies.evaluate(
+            market(yesAsk = 0.50, aiYes = 0.50, spread = 0.02, lastPrice = 0.50),
+            now
+        )
+        val squeeze = signals.firstOrNull { it.kind == ScalpStrategies.Kind.SPREAD_SQUEEZE }
+        assertNotNull(squeeze)
+        assertEquals("YES", squeeze!!.side)
+    }
+
+    @Test
+    fun volumeSurgeFiresOnHeavy24hVolumeWithModelEdge() {
+        val now = open + 300_000L
+        val signals = ScalpStrategies.evaluate(
+            market(yesAsk = 0.30, aiYes = 0.45, volume = 500.0, volume24h = 20_000.0),
+            now
+        )
+        assertNotNull(signals.firstOrNull { it.kind == ScalpStrategies.Kind.VOLUME_SURGE })
+    }
+
+    @Test
+    fun oiFlipFiresOnHeavyPositioningWithModelEdge() {
+        val now = open + 300_000L
+        val signals = ScalpStrategies.evaluate(
+            market(yesAsk = 0.30, aiYes = 0.45, openInterest = 9_000.0, liquidityDollars = 5_000.0),
+            now
+        )
+        assertNotNull(signals.firstOrNull { it.kind == ScalpStrategies.Kind.OI_FLIP })
+    }
+
+    @Test
+    fun confidencePressFiresOnHighAiConfidenceWithEdge() {
+        val now = open + 300_000L
+        val signals = ScalpStrategies.evaluate(
+            market(yesAsk = 0.30, aiYes = 0.45, aiConfidence = 0.70),
+            now
+        )
+        assertNotNull(signals.firstOrNull { it.kind == ScalpStrategies.Kind.CONFIDENCE_PRESS })
+    }
+
+    @Test
+    fun crossWindowDriftCarriesPriorSettleDirection() {
+        ScalpStrategies.noteSettle(resultUp = true)
+        ScalpStrategies.noteSpot("KXBTC15M-T", 67_060.0, open + 30_000L)
+        val signals = ScalpStrategies.evaluate(market(yesAsk = 0.45), open + 60_000L)
+        val drift = signals.firstOrNull { it.kind == ScalpStrategies.Kind.CROSS_WINDOW_DRIFT }
+        assertNotNull(drift)
+        assertEquals("YES", drift!!.side)
+    }
+
+    @Test
+    fun bidWallFiresOnHeavyBidWithSoftAsk() {
+        val now = open + 300_000L
+        val signals = ScalpStrategies.evaluate(
+            market(yesAsk = 0.30, aiYes = 0.50, askSize = 20.0),
+            now
+        )
+        assertNotNull(signals.firstOrNull { it.kind == ScalpStrategies.Kind.BID_WALL })
+    }
+
+    @Test
+    fun calmBeforeCloseFiresMidWindowWithClearEdge() {
+        val now = open + 300_000L
+        val signals = ScalpStrategies.evaluate(
+            market(yesAsk = 0.30, aiYes = 0.45, spread = 0.02),
+            now
+        )
+        assertNotNull(signals.firstOrNull { it.kind == ScalpStrategies.Kind.CALM_BEFORE_CLOSE })
+    }
+
+    @Test
+    fun settleLottoOnlyFiresOutsideTheBinaryZone() {
+        // 5 minutes left, 10c ask with a big model edge: fires.
+        val late = ScalpStrategies.evaluate(market(yesAsk = 0.10, aiYes = 0.35), close - 300_000L)
+        assertNotNull(late.firstOrNull { it.kind == ScalpStrategies.Kind.SETTLE_LOTTO })
+        // 2 minutes left: binary zone blocks everything, lotto included.
+        val binary = ScalpStrategies.evaluate(market(yesAsk = 0.10, aiYes = 0.35), close - 120_000L)
+        assertTrue(binary.isEmpty())
     }
 
     @Test
