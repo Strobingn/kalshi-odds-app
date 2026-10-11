@@ -16,7 +16,8 @@ import kotlin.math.min
  *   cost c = p + f,  edge fraction = (q − c) / (1 − c),
  *   stake = cash × min([MAX_FRACTION], [KELLY_MULTIPLIER] × fraction)
  *
- * A lost bet cannot wipe the paper account. Reset puts it back to $100.
+ * A lost bet does not shut the book off. Reset puts it back to $20,000.
+ * If cash is already under that, the caller still sizes off $20,000.
  */
 object PaperSizer {
     const val MAX_FRACTION = 0.25

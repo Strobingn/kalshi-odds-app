@@ -47,8 +47,8 @@ object SignalConstants {
     /** Default advisory bankroll used only for suggested size (not the paper book). */
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
-    /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
-    const val PAPER_START_USD = 100.0
+    /** Isolated paper book — never hits Kalshi. Visible on the home screen. Cash may go negative. */
+    const val PAPER_START_USD = 20_000.0
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
     const val PAPER_LEDGER_MAX = 40

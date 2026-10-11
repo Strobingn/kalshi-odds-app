@@ -56,7 +56,7 @@ fun PaperBookCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Start $100 · buys under 50¢ in the first 7 min · sells the rollover or the flatten · never hits Kalshi",
+                        "Start \$20,000 · cash can go negative · buys under 50¢ in the first 7 min · sells the rollover or the flatten · never hits Kalshi",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
@@ -86,7 +86,7 @@ fun PaperBookCard(
                 if (enabled) {
                     "AI buys under 50¢ in the first 7 minutes, more when the price is lower, and sells when the bid rolls over or the market flattens. Live Approve is the only path that can place a real order."
                 } else {
-                    "Paper trading is off. Turn it on to buy the early move under 50¢ on this $100 book."
+                    "Paper trading is off. Turn it on to buy the early move under 50¢ on this \$20,000 book. Cash can go negative. It never hits Kalshi."
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -97,7 +97,7 @@ fun PaperBookCard(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper to $100")
+                Text("Reset paper to \$20,000")
             }
             if (onViewHistory != null) {
                 OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {

@@ -20,6 +20,10 @@ class PaperBookStore(context: Context) {
     )
 
     private fun load(): PaperBookState {
+        if (prefs.getInt(VER, 0) < BANKROLL_VER) {
+            prefs.edit().remove(KEY).putInt(VER, BANKROLL_VER).apply()
+            return PaperBookState()
+        }
         val raw = prefs.getString(KEY, null) ?: return PaperBookState()
         return runCatching { json.decodeFromString(PaperBookState.serializer(), raw) }
             .getOrElse { PaperBookState() }
@@ -34,5 +38,8 @@ class PaperBookStore(context: Context) {
     companion object {
         private const val PREFS = "diphunter_paper_book"
         private const val KEY = "state_json"
+        private const val VER = "bankroll_ver"
+        /** $20,000 start. Paper cash may go negative. */
+        private const val BANKROLL_VER = 2
     }
 }

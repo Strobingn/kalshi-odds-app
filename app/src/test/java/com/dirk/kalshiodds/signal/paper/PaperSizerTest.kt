@@ -57,11 +57,11 @@ class PaperSizerTest {
     fun autoAlertFillIsLargerWhenTheAskIsLower() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         val fill = book.considerAlert(alert("NO", 62.0), ask = 0.20, enabled = true)!!
-        val qty = com.dirk.kalshiodds.signal.trade.ScalpExit.contractsFor(0.20, 100.0)
+        val qty = com.dirk.kalshiodds.signal.trade.ScalpExit.contractsFor(0.20, com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD)
         assertEquals(qty, fill.contracts)
         assertEquals(qty * 0.20, fill.stakeUsd, 1e-6)
         assertTrue(fill.note.contains("lower price"))
-        assertTrue(book.snapshot().cashUsd < 100.0)
+        assertTrue(book.snapshot().cashUsd < com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD)
     }
 
     @Test
@@ -69,21 +69,22 @@ class PaperSizerTest {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         val fill = book.considerAlert(alert("YES", 52.0), ask = 0.51, enabled = true)
         assertEquals(null, fill)
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
-    fun theSecondBetUsesWhatIsLeftNotTheStartingBalance() {
-        var n = 0
-        val book = PaperBook(idFactory = { "p${n++}" }, nowMs = { 10L })
-        val first = book.considerAlert(alert("YES", 90.0), ask = 0.20, enabled = true)!!
-        val second = book.considerAlert(
-            alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"),
-            ask = 0.20,
-            enabled = true
+    fun aBrokeBookStillBetsTheFullStartSize() {
+        val book = PaperBook(
+            idFactory = { "p1" },
+            nowMs = { 10L },
+            initial = PaperBookState(cashUsd = -50.0)
         )
-        assertTrue(first.stakeUsd > 10.0)
-        assertTrue(second != null && second.stakeUsd < first.stakeUsd)
-        assertTrue(book.snapshot().cashUsd >= 0.0)
+        val fill = book.considerAlert(alert("YES", 90.0), ask = 0.20, enabled = true)!!
+        val qty = com.dirk.kalshiodds.signal.trade.ScalpExit.contractsFor(
+            0.20,
+            com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+        )
+        assertEquals(qty, fill.contracts)
+        assertTrue(book.snapshot().cashUsd < 0.0)
     }
 }
