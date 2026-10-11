@@ -4,6 +4,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -168,7 +169,7 @@ class ScalpTradeLog(
                     val sb = StringBuilder(rows.size * 140)
                     if (!f.exists() || f.length() == 0L) sb.append(ScalpTrade.HEADER).append('\n')
                     for (r in rows) sb.append(r.toCsv()).append('\n')
-                    f.appendText(sb.toString(), Charsets.UTF_8)
+                    appendOrRollBack(f) { it.appendText(sb.toString(), Charsets.UTF_8) }
                     tradeDays.remove(day)
                 }
                 for ((day, rows) in orderDays.entries.toList()) {
@@ -176,8 +177,10 @@ class ScalpTradeLog(
                     val sb = StringBuilder(rows.size * 260)
                     if (!f.exists() || f.length() == 0L) sb.append(ORDER_HEADER).append('\n')
                     for (r in rows) sb.append(r.second).append('\n')
-                    GZIPOutputStream(BufferedOutputStream(FileOutputStream(f, true))).use {
-                        it.write(sb.toString().toByteArray(Charsets.UTF_8))
+                    appendOrRollBack(f) { file ->
+                        GZIPOutputStream(BufferedOutputStream(FileOutputStream(file, true))).use {
+                            it.write(sb.toString().toByteArray(Charsets.UTF_8))
+                        }
                     }
                     orderDays.remove(day)
                 }
@@ -324,6 +327,23 @@ class ScalpTradeLog(
         const val DIR_NAME = "scalper"
         const val ARCHIVE = "archive"
         const val DEFAULT_MAX_BYTES = 400L * 1024L * 1024L
+
+        /**
+         * Appends to [f] with [write]. If it fails part-way (a full disk), the file is cut back to its
+         * length before, so the requeued rows are not written twice and no half gzip member is left.
+         */
+        internal fun appendOrRollBack(f: File, write: (File) -> Unit) {
+            val existed = f.exists()
+            val before = if (existed) f.length() else 0L
+            try {
+                write(f)
+            } catch (e: Throwable) {
+                runCatching {
+                    if (!existed) f.delete() else RandomAccessFile(f, "rw").use { it.setLength(before) }
+                }
+                throw e
+            }
+        }
         const val UNFILLED = "UNFILLED"
 
         /** [ScalpTrade.HEADER] with `resolved_ms` first, then what the scalper saw when it sent the order. */
