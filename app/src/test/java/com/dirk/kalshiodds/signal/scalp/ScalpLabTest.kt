@@ -25,13 +25,13 @@ class ScalpLabTest {
         assertTrue("open=$open", open >= 10)
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }.position!!
         assertEquals("YES", cheap.side)
-        assertTrue(cheap.contracts > 10_000)
-        assertTrue(cheap.stakeUsd > 3_000.0)
-        assertTrue(cheap.stakeUsd < 8_000.0)
+        assertTrue(cheap.contracts > 8_000)
+        assertTrue(cheap.stakeUsd > 1_500.0)
+        assertTrue(cheap.stakeUsd < 2_500.0)
     }
 
     @Test
-    fun noCapBuysAboveFiftyAndTheUnderFiftyRuleDoesNot() {
+    fun noCapDoesNotBuyAboveFifty() {
         val lab = ScalpLab()
         lab.onQuote(
             tape(
@@ -43,21 +43,27 @@ class ScalpLabTest {
             )
         )
         val noCap = lab.snapshot().accounts.first { it.id == "no_cap" }
-        val under = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
+        val trail = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         val first = lab.snapshot().accounts.first { it.id == "first_5" }
-        assertEquals("NO", noCap.position?.side)
-        assertTrue(noCap.position!!.entry >= 0.50)
-        assertNull(under.position)
+        assertNull(noCap.position)
+        assertNull(trail.position)
         assertNull(first.position)
     }
 
     @Test
-    fun allInUnderFiftySellsTheRiseBeforeSettlement() {
+    fun trailFiveHoldsTheRiseAndSellsAFiveCentDrop() {
         val lab = ScalpLab()
         lab.onQuote(busyTape())
         val bought = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         assertTrue(bought.position != null)
+        assertEquals("YES", bought.position!!.side)
+        assertTrue(bought.position!!.stakeUsd > 1_500.0)
+        assertTrue(bought.position!!.stakeUsd < 2_500.0)
         lab.onQuote(busyTape(yesBid = 0.30, yesAsk = 0.31, yesBids = listOf(0.19, 0.22, 0.26, 0.30)))
+        val riding = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
+        assertTrue(riding.position != null)
+        assertTrue(riding.position!!.peakBid >= 0.30)
+        lab.onQuote(busyTape(yesBid = 0.25, yesAsk = 0.26, yesBids = listOf(0.30, 0.28, 0.25)))
         val sold = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         assertNull(sold.position)
         assertEquals(1, sold.trades)
@@ -88,7 +94,7 @@ class ScalpLabTest {
         lab.onQuote(busyTape())
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
         assertTrue(cheap.position != null)
-        assertTrue(cheap.position!!.stakeUsd > 3_000.0)
+        assertTrue(cheap.position!!.stakeUsd > 1_500.0)
         assertTrue(cheap.cashUsd < 0.0)
     }
 
@@ -100,7 +106,7 @@ class ScalpLabTest {
         val lab = ScalpLab(ScalpLabState(accounts = rich))
         lab.onQuote(busyTape())
         val cheap = lab.snapshot().accounts.first { it.id == "all_in_cheap" }
-        assertTrue(cheap.position!!.stakeUsd > 8_000.0)
+        assertTrue(cheap.position!!.stakeUsd > 3_500.0)
         assertTrue(cheap.cashUsd < 40_000.0)
     }
 

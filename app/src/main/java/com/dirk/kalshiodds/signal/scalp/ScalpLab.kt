@@ -154,11 +154,6 @@ class ScalpLab(
         return stamp(trade(account, tape))
     }
 
-    /**
-     * The rule fires first. Then the book applies what it has learned:
-     * sell a small pop, sell the give-back, and get out by minute 7
-     * so the same book can trade again instead of sitting until settlement.
-     */
     private fun trade(account: ScalpAccount, tape: ScalpTape): ScalpAccount {
         val marked = if (account.position?.ticker?.equals(tape.ticker, true) == true) mark(account, tape) else account
         val pos = marked.position
@@ -171,38 +166,24 @@ class ScalpLab(
                 else if (intent.force || profitable(pos, ScalpCatalog.bid(tape, pos.side))) sell(marked, pos, tape)
                 else marked
             }
-            ScalpIntent.Hold -> {
-                if (pos != null) marked
-                else {
-                    val probe = learnedProbe(marked, tape)
-                    if (probe != null) buy(marked, tape, probe) else marked
-                }
-            }
+            ScalpIntent.Hold -> marked
         }
     }
 
+    /**
+     * Safety net only. The rule owns the trail. This does not sell a rising
+     * trade, and it does not sell a 2¢ wiggle. It only gets a red trade out
+     * by minute 7, and anything still open in the last 90 seconds.
+     */
     private fun adapt(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent): ScalpIntent {
         val pos = account.position ?: return intent
         if (!pos.ticker.equals(tape.ticker, true)) return intent
         val bid = ScalpCatalog.bid(tape, pos.side)
-        val outOfTime = tape.elapsedMs >= SEVEN_MIN || tape.tteMs in 1..NINETY_SEC
-        if (outOfTime) return ScalpIntent.Sell(force = true)
-        val target = if (account.settleLosses > 0 || account.scalpWins > 0) account.learnedExit else 0.05
-        if (bid + 1e-9 >= pos.entry + target) return ScalpIntent.Sell(force = true)
-        if (pos.peakBid + 1e-9 >= pos.entry + 0.03 && pos.peakBid - bid + 1e-9 >= 0.02) {
+        if (tape.tteMs in 1..NINETY_SEC) return ScalpIntent.Sell(force = true)
+        if (tape.elapsedMs >= SEVEN_MIN && bid + 1e-9 < pos.entry && intent is ScalpIntent.Hold) {
             return ScalpIntent.Sell(force = true)
         }
         return intent
-    }
-
-    /** A book whose own setup has not fired still takes the early cheap pop, up to 3 times a window. */
-    private fun learnedProbe(account: ScalpAccount, tape: ScalpTape): ScalpIntent.Buy? {
-        if (tape.elapsedMs >= SEVEN_MIN) return null
-        if (account.tripTicker == tape.ticker && account.trips >= 3) return null
-        val side = if (tape.yesAsk <= tape.noAsk) "YES" else "NO"
-        val px = if (side == "YES") tape.yesAsk else tape.noAsk
-        if (px >= 0.40) return null
-        return ScalpIntent.Buy(side, 0.10)
     }
 
     /** Keep a short equity line without rewriting the book on a 1¢ wiggle. */
@@ -235,7 +216,9 @@ class ScalpLab(
         val side = if (intent.side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(if (side == "NO") tape.noAsk else tape.yesAsk) ?: return account
         val fraction = (intent.fraction * account.sizeScale).coerceIn(0.01, 1.0)
-        val bankroll = maxOf(account.cashUsd, ScalpCatalog.START_CASH)
+        // Cash on hand when the book still has money. The $20k start when it
+        // is broke or negative, so a paper book can keep scalping.
+        val bankroll = if (account.cashUsd >= 100.0) account.cashUsd else ScalpCatalog.START_CASH
         val budget = bankroll * fraction
         if (budget + 1e-9 < px) return account
         if (account.lastSellTicker.equals(tape.ticker, true) && account.lastSellPx > 0.0 && px + 1e-9 >= account.lastSellPx) {

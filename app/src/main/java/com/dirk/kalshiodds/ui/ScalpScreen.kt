@@ -51,9 +51,9 @@ fun ScalpScreen(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "15 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper. " +
-                    "They sell the pop and can trade again in the same window. When the window rolls, they close the old contract and trade the new one. " +
-                    "A loss from sitting until settlement makes the next bet smaller. Nothing here is sent to Kalshi.",
+                "15 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets a slice of the cash on hand. " +
+                    "Trail 5¢ buys the side under 50¢, holds the rise, and sells when the bid drops 5¢ off the high. " +
+                    "Nothing here is sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

@@ -42,312 +42,239 @@ object ScalpCatalog {
     val ALL: List<ScalpAlgo> = listOf(
         algo(
             "all_in_cheap",
-            "Cheap 22",
-            "Was 100% under 40¢. Now 22%. Sells 8¢ up, 4¢ off the high, or at minute 7 even if it's red."
+            "Cheap trail",
+            "10% of cash on the cheaper ask under 40¢. Holds the rise. Sells when the bid drops 5¢ off the high."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val side = cheaper(t)
-                if (ask(t, side) < 0.40) ScalpIntent.Buy(side, 0.22) else ScalpIntent.Hold
+                if (ask(t, side) < 0.40) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
             } else {
-                val bid = bid(t, pos.side)
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid >= pos.entry + 0.08 -> ScalpIntent.Sell()
-                    pos.peakBid >= pos.entry + 0.03 && pos.peakBid - bid >= 0.04 -> ScalpIntent.Sell(force = true)
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "no_cap",
-            "Under 70",
-            "Was 100% under 95¢. Now 18% and only under 70¢. Sells 5¢ up, or dumps a loser after minute 7."
+            "Under 50",
+            "Was buying up to 70¢. Now 10% of cash, cheaper ask under 50¢ only. Holds the rise, sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val side = cheaper(t)
-                if (ask(t, side) < 0.70) ScalpIntent.Buy(side, 0.18) else ScalpIntent.Hold
+                if (ask(t, side) < 0.50) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
             } else {
-                val b = bid(t, pos.side)
-                when {
-                    t.elapsedMs >= SEVEN_MIN && b + 1e-9 < pos.entry -> ScalpIntent.Sell(force = true)
-                    t.tteMs in 1..THREE_MIN -> ScalpIntent.Sell(force = true)
-                    b >= pos.entry + 0.05 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "penny_press",
-            "Penny 12",
-            "Was 80% waiting on a 10¢ pop. Now 12% at 12¢ or less. Sells 4¢ up, or at minute 7."
+            "Penny trail",
+            "Was a lottery at 80%. Now 8% of cash at 20¢ or less. Holds the rise, sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 when {
-                    t.yesAsk <= 0.12 -> ScalpIntent.Buy("YES", 0.12)
-                    t.noAsk <= 0.12 -> ScalpIntent.Buy("NO", 0.12)
+                    t.yesAsk <= 0.20 -> ScalpIntent.Buy("YES", 0.08)
+                    t.noAsk <= 0.20 -> ScalpIntent.Buy("NO", 0.08)
                     else -> ScalpIntent.Hold
                 }
             } else {
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid(t, pos.side) >= pos.entry + 0.04 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "tight_4c",
-            "Tight 4¢",
-            "20% of cash on a cheaper ask from 15¢ to 80¢. Sells 4¢ up, or at minute 7 if it never came."
+            "Tight trail",
+            "Was settling losers. Now 10% of cash under 45¢. Holds the rise, sells a 4¢ drop off the high."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val side = cheaper(t)
-                val px = ask(t, side)
-                if (px in 0.15..0.80) ScalpIntent.Buy(side, 0.20) else ScalpIntent.Hold
+                if (ask(t, side) < 0.45) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
             } else {
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid(t, pos.side) >= pos.entry + 0.04 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.04)
             }
         },
         algo(
             "momentum",
             "Momentum",
-            "40% of cash after four rising bids under 80¢. Sells 3¢ off a high that cleared 4¢, or at minute 7."
+            "12% of cash after four rising bids under 50¢. Holds the rise. Sells a 5¢ drop off the high."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 when {
-                    rising(t.yesBids, 4) && t.yesAsk < 0.80 -> ScalpIntent.Buy("YES", 0.40)
-                    rising(t.noBids, 4) && t.noAsk < 0.80 -> ScalpIntent.Buy("NO", 0.40)
+                    rising(t.yesBids, 4) && t.yesAsk < 0.50 -> ScalpIntent.Buy("YES", 0.12)
+                    rising(t.noBids, 4) && t.noAsk < 0.50 -> ScalpIntent.Buy("NO", 0.12)
                     else -> ScalpIntent.Hold
                 }
             } else {
-                val b = bid(t, pos.side)
-                if (pos.peakBid >= pos.entry + 0.04 && pos.peakBid - b >= 0.03) {
-                    ScalpIntent.Sell(force = true)
-                } else if (t.elapsedMs >= SEVEN_MIN) {
-                    ScalpIntent.Sell(force = true)
-                } else {
-                    ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "fade_spike",
-            "Fade the spike",
-            "50% of cash when an ask is 8¢ under the window high. Sells 6¢ up, or at minute 7."
+            "Fade trail",
+            "Was 50% on a dump. Now 12% of cash when an ask is 8¢ under the high and under 50¢. Sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 when {
-                    t.yesHigh - t.yesAsk >= 0.08 && t.yesAsk > 0.04 -> ScalpIntent.Buy("YES", 0.50)
-                    t.noHigh - t.noAsk >= 0.08 && t.noAsk > 0.04 -> ScalpIntent.Buy("NO", 0.50)
+                    t.yesHigh - t.yesAsk >= 0.08 && t.yesAsk in 0.05..0.50 -> ScalpIntent.Buy("YES", 0.12)
+                    t.noHigh - t.noAsk >= 0.08 && t.noAsk in 0.05..0.50 -> ScalpIntent.Buy("NO", 0.12)
                     else -> ScalpIntent.Hold
                 }
             } else {
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid(t, pos.side) >= pos.entry + 0.06 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "first_5",
             "First 5 min",
-            "70% of cash in the first 5 minutes if the cheaper ask is under 55¢. Sells at 5 minutes or 6¢ up."
+            "12% of cash in the first 5 minutes, cheaper ask under 50¢. Holds the rise, sells a 5¢ drop, or dumps a loser at minute 5."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 if (t.elapsedMs < FIVE_MIN) {
                     val side = cheaper(t)
-                    if (ask(t, side) < 0.55) ScalpIntent.Buy(side, 0.70) else ScalpIntent.Hold
+                    if (ask(t, side) < 0.50) ScalpIntent.Buy(side, 0.12) else ScalpIntent.Hold
                 } else {
                     ScalpIntent.Hold
                 }
             } else {
                 val b = bid(t, pos.side)
                 when {
-                    t.elapsedMs >= FIVE_MIN -> ScalpIntent.Sell(force = true)
-                    b >= pos.entry + 0.06 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
+                    t.elapsedMs >= FIVE_MIN && b + 1e-9 < pos.entry -> ScalpIntent.Sell(force = true)
+                    else -> trail(pos, t, 0.05)
                 }
             }
         },
         algo(
             "min_5_7",
             "Minutes 5–7",
-            "60% of cash only between minute 5 and 7, cheaper ask under 65¢. Sells on a 3¢ dip or at minute 7."
+            "12% of cash between minute 5 and 7, cheaper ask under 50¢. Holds the rise, sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 if (t.elapsedMs in FIVE_MIN until SEVEN_MIN) {
                     val side = cheaper(t)
-                    if (ask(t, side) < 0.65) ScalpIntent.Buy(side, 0.60) else ScalpIntent.Hold
+                    if (ask(t, side) < 0.50) ScalpIntent.Buy(side, 0.12) else ScalpIntent.Hold
                 } else {
                     ScalpIntent.Hold
                 }
             } else {
-                val b = bid(t, pos.side)
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    pos.peakBid - b >= 0.03 && pos.peakBid > pos.entry -> ScalpIntent.Sell(force = true)
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "late_squeeze",
-            "Late small",
-            "Was 100% on a 55–92¢ favorite. Now 12%, and only 55–68¢, with a 6¢ cut. Out in the last 45 seconds."
+            "Early cheap",
+            "Was 100% on a late favorite. Now 10% of cash on a cheaper ask under 40¢ in the first 7 minutes. Sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
-                if (t.tteMs in 1..FOUR_MIN) {
-                    when {
-                        t.yesAsk in 0.55..0.68 && t.yesAsk >= t.noAsk -> ScalpIntent.Buy("YES", 0.12)
-                        t.noAsk in 0.55..0.68 -> ScalpIntent.Buy("NO", 0.12)
-                        else -> ScalpIntent.Hold
-                    }
+                if (t.elapsedMs < SEVEN_MIN) {
+                    val side = cheaper(t)
+                    if (ask(t, side) < 0.40) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
                 } else {
                     ScalpIntent.Hold
                 }
             } else {
-                val b = bid(t, pos.side)
-                when {
-                    t.tteMs <= 45_000L -> ScalpIntent.Sell(force = true)
-                    b >= pos.entry + 0.03 -> ScalpIntent.Sell()
-                    pos.entry - b >= 0.06 -> ScalpIntent.Sell(force = true)
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "gap_side",
             "Wider side",
-            "50% of cash on the cheaper side when the two asks differ by 8¢ or more. Sells 6¢ up, or at minute 7."
+            "12% of cash on the cheaper side when the asks differ by 8¢ and that side is under 50¢. Sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val gap = kotlin.math.abs(t.yesAsk - t.noAsk)
                 val side = cheaper(t)
-                if (gap >= 0.08 && ask(t, side) < 0.90) ScalpIntent.Buy(side, 0.50) else ScalpIntent.Hold
+                if (gap >= 0.08 && ask(t, side) < 0.50) ScalpIntent.Buy(side, 0.12) else ScalpIntent.Hold
             } else {
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid(t, pos.side) >= pos.entry + 0.06 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "breakout_50",
             "Breakout 50",
-            "50% of cash when YES crosses up through 50¢. Sells 5¢ up, or cuts back under 48¢."
+            "12% of cash when YES crosses up through 50¢. Holds the rise, sells a 5¢ drop, or cuts back under 48¢."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val prev = t.yesBids.dropLast(1).lastOrNull()
-                if (prev != null && prev < 0.50 && t.yesBid >= 0.50 && t.yesAsk < 0.70) {
-                    ScalpIntent.Buy("YES", 0.50)
+                if (prev != null && prev < 0.50 && t.yesBid >= 0.50 && t.yesAsk < 0.62) {
+                    ScalpIntent.Buy("YES", 0.12)
                 } else {
                     ScalpIntent.Hold
                 }
             } else {
                 val b = bid(t, pos.side)
                 when {
-                    b >= pos.entry + 0.05 -> ScalpIntent.Sell()
                     b < 0.48 -> ScalpIntent.Sell(force = true)
-                    else -> ScalpIntent.Hold
+                    else -> trail(pos, t, 0.05)
                 }
             }
         },
         algo(
             "dump_catch",
             "Bounce",
-            "Was 100% on a 10¢ dump. Now 20%, and only if the bid is ticking back up. Sells 5¢ up, or at minute 7."
+            "10% of cash on a 10¢ dump that is ticking back up, under 50¢. Holds the rise, sells a 5¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 when {
-                    t.yesHigh - t.yesAsk >= 0.10 && t.yesAsk > 0.04 && bouncing(t.yesBids) -> ScalpIntent.Buy("YES", 0.20)
-                    t.noHigh - t.noAsk >= 0.10 && t.noAsk > 0.04 && bouncing(t.noBids) -> ScalpIntent.Buy("NO", 0.20)
+                    t.yesHigh - t.yesAsk >= 0.10 && t.yesAsk in 0.05..0.50 && bouncing(t.yesBids) -> ScalpIntent.Buy("YES", 0.10)
+                    t.noHigh - t.noAsk >= 0.10 && t.noAsk in 0.05..0.50 && bouncing(t.noBids) -> ScalpIntent.Buy("NO", 0.10)
                     else -> ScalpIntent.Hold
                 }
             } else {
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid(t, pos.side) >= pos.entry + 0.05 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "slow_trail",
             "Slow trail",
-            "35% of cash on a cheaper ask under 45¢. Sells 2¢ off a high that cleared 5¢, or at minute 7."
+            "10% of cash on a cheaper ask under 45¢. Holds the rise. Sells when the bid drops 5¢ off the high."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val side = cheaper(t)
-                if (ask(t, side) < 0.45) ScalpIntent.Buy(side, 0.35) else ScalpIntent.Hold
+                if (ask(t, side) < 0.45) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
             } else {
-                val b = bid(t, pos.side)
-                if (pos.peakBid >= pos.entry + 0.05 && pos.peakBid - b >= 0.02) {
-                    ScalpIntent.Sell(force = true)
-                } else if (t.elapsedMs >= SEVEN_MIN) {
-                    ScalpIntent.Sell(force = true)
-                } else {
-                    ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "all_in_under_50",
-            "Under 50",
-            "Was 100% under 50¢. Now 22%. Sells 6¢ up, 3¢ off the high, or at minute 7 even if it's red."
+            "Trail 5¢",
+            "10% of cash on the cheaper ask under 50¢. Holds while the price rises. Sells once the bid drops 5¢ off the high."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val side = cheaper(t)
-                if (ask(t, side) < 0.50) ScalpIntent.Buy(side, 0.22) else ScalpIntent.Hold
+                if (ask(t, side) < 0.50) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
             } else {
-                val b = bid(t, pos.side)
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    b >= pos.entry + 0.06 -> ScalpIntent.Sell()
-                    pos.peakBid >= pos.entry + 0.02 && pos.peakBid - b >= 0.03 -> ScalpIntent.Sell(force = true)
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.05)
             }
         },
         algo(
             "tight_spread",
             "Tight spread",
-            "25% of cash when the spread is 2¢ or less and the ask is under 70¢. Sells 3¢ up, or at minute 7."
+            "Was settling. Now 10% of cash when the spread is 2¢ or less and the ask is under 50¢. Sells a 4¢ drop."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
                 val yesSpread = t.yesAsk - t.yesBid
                 val noSpread = t.noAsk - t.noBid
                 when {
-                    yesSpread in 0.0..0.02 && t.yesAsk < 0.70 -> ScalpIntent.Buy("YES", 0.25)
-                    noSpread in 0.0..0.02 && t.noAsk < 0.70 -> ScalpIntent.Buy("NO", 0.25)
+                    yesSpread in 0.0..0.02 && t.yesAsk < 0.50 -> ScalpIntent.Buy("YES", 0.10)
+                    noSpread in 0.0..0.02 && t.noAsk < 0.50 -> ScalpIntent.Buy("NO", 0.10)
                     else -> ScalpIntent.Hold
                 }
             } else {
-                when {
-                    t.elapsedMs >= SEVEN_MIN -> ScalpIntent.Sell(force = true)
-                    bid(t, pos.side) >= pos.entry + 0.03 -> ScalpIntent.Sell()
-                    else -> ScalpIntent.Hold
-                }
+                trail(pos, t, 0.04)
             }
         }
     )
@@ -386,6 +313,22 @@ object ScalpCatalog {
 
     private fun cheaper(t: ScalpTape): String = if (t.yesAsk <= t.noAsk) "YES" else "NO"
 
+    /**
+     * Hold the rise. Sell when the bid is [drop] under the high of this trade.
+     * A red trade that has flattened by minute 7 is cut so it does not settle.
+     * Anything still open in the last 90 seconds is closed.
+     */
+    private fun trail(pos: ScalpPosition, t: ScalpTape, drop: Double): ScalpIntent {
+        val b = bid(t, pos.side)
+        return when {
+            pos.peakBid - b + 1e-9 >= drop -> ScalpIntent.Sell(force = true)
+            t.elapsedMs >= SEVEN_MIN && b + 1e-9 < pos.peakBid -> ScalpIntent.Sell(force = true)
+            t.elapsedMs >= SEVEN_MIN && b + 1e-9 < pos.entry -> ScalpIntent.Sell(force = true)
+            t.tteMs in 1..90_000L -> ScalpIntent.Sell(force = true)
+            else -> ScalpIntent.Hold
+        }
+    }
+
     private fun ask(t: ScalpTape, side: String): Double = if (side == "NO") t.noAsk else t.yesAsk
 
     internal fun bid(t: ScalpTape, side: String): Double = if (side == "NO") t.noBid else t.yesBid
@@ -402,6 +345,4 @@ object ScalpCatalog {
 
     private const val FIVE_MIN = 5L * 60L * 1000L
     private const val SEVEN_MIN = 7L * 60L * 1000L
-    private const val FOUR_MIN = 4L * 60L * 1000L
-    private const val THREE_MIN = 3L * 60L * 1000L
 }
