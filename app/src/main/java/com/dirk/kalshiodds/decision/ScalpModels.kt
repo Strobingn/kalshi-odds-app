@@ -248,11 +248,12 @@ object ForecastScalp {
             move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
 
     /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
+    /** [sideForecast] NaN = no fresh forecast: forecast-based exits are skipped (hold until fresh data). */
     fun wantsExit(sideForecast: Double, bid: Double, heldS: Double, horizonS: Int, tauS: Double): String? = when {
         bid >= TAKE_PROFIT - 1e-9 -> "take profit ≥ 90¢"
-        sideForecast < HARD_FLIP -> "forecast flipped hard"
-        sideForecast < ScalpRule.orderFee(1, bid) -> "forecast turned (move < exit fee)"
-        horizonS > 0 && heldS >= horizonS -> "horizon reached"
+        !sideForecast.isNaN() && sideForecast < HARD_FLIP -> "forecast flipped hard"
+        !sideForecast.isNaN() && sideForecast < ScalpRule.orderFee(1, bid) -> "forecast turned (move < exit fee)"
+        !sideForecast.isNaN() && horizonS > 0 && heldS >= horizonS -> "horizon reached"
         tauS < EXIT_BEFORE_CLOSE_S -> "exit before close"
         else -> null
     }

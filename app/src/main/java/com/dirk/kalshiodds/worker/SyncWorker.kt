@@ -36,11 +36,12 @@ class SyncWorker(
             val startedMs = System.currentTimeMillis()
             val paper = container.paper.book.snapshot()
             val settings = container.preferences.hydrate()
+            val picked = com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.select(store.recentSnapshots(4000))
             val result = SupabaseSync().roundTrip(
                 settings = hub,
                 local = SupabaseSync.LocalBundle(
                     // 0.3.55: read a full sync interval; SnapshotUploadFilter picks the few worth uploading.
-                    snapshots = com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.select(store.recentSnapshots(4000)),
+                    snapshots = picked,
                     alerts = store.recentAlerts(200),
                     tickets = store.recentTickets(200),
                     settingsChanges = archive.recentSettingsChanges(200),
@@ -55,6 +56,8 @@ class SyncWorker(
                 onPaper = { fill -> container.paper.book.upsertFromSync(fill) }
             )
             if (result.acknowledgePaper) container.paper.book.acknowledgePaperSync(startedMs)
+            // 0.3.56: only a successful upload advances the snapshot throttle.
+            if (result.snapshotsOk) com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.commit(picked)
             settingsJson.lastOrNull()?.let { container.preferences.restoreSnapshot(it) }
             result
         }.getOrElse { SupabaseSync.Status(ok = false, message = it.message ?: "sync failed") }

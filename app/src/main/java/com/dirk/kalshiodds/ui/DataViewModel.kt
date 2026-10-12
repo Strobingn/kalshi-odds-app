@@ -330,6 +330,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     restore.batch.sessions.forEach { archive.insertSession(it) }
                     archive.upsertSettled(restore.settled)
                     restore.paper.forEach { container.paper.book.upsertFromSync(it) }
+                    runCatching { container.scalp.importRestored(restore.scalps) }
+                    runCatching { container.shadow.book.importRestored(restore.shadow) }
                     restore.settingsSnapshot?.let { container.preferences.restoreSnapshot(it) }
                     restore.message
                 } catch (t: Throwable) {

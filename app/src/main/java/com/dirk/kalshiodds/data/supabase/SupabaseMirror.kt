@@ -41,7 +41,9 @@ class SupabaseMirror(
         val settled: List<SettledWindowRow>,
         val message: String,
         val paper: List<PaperFill> = emptyList(),
-        val settingsSnapshot: String? = null
+        val settingsSnapshot: String? = null,
+        val scalps: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
+        val shadow: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList()
     )
 
     fun restore(settings: DataHubSettings, seen: SeenKeys): Restore {
@@ -120,6 +122,8 @@ class SupabaseMirror(
         val tickets = ArrayList<TicketAttemptRow>()
         val settingsChanges = ArrayList<SettingsChange>()
         val paper = ArrayList<PaperFill>()
+        val scalps = ArrayList<com.dirk.kalshiodds.decision.ScalpTrade>()
+        val shadow = ArrayList<com.dirk.kalshiodds.signal.paper.ShadowTicket>()
         var settingsSnapshot: String? = null
         var settingsSnapshotAt = Long.MIN_VALUE
         for (rec in rows) {
@@ -153,6 +157,8 @@ class SupabaseMirror(
                     }
                 }
                 "paper" -> paper.add(SyncRows.paper(o, rec))
+                "scalp" -> SyncRows.scalp(o)?.let { scalps.add(it) }
+                "shadow" -> SyncRows.shadow(o)?.let { shadow.add(it) }
             }
         }
         val batch = ImportBatch(
@@ -166,14 +172,17 @@ class SupabaseMirror(
             "diphunter_sync has no kashi rows to restore."
         } else {
             "Restored diphunter_sync: ${snapshots.size} snapshots, ${alerts.size} alerts, " +
-                "${tickets.size} tickets, ${settingsChanges.size} settings, ${paper.size} paper.$cap"
+                "${tickets.size} tickets, ${settingsChanges.size} settings, ${paper.size} paper, " +
+                "${scalps.size} scalp round trips, ${shadow.size} shadow tickets.$cap"
         }
         return Restore(
             batch = batch,
             settled = emptyList(),
             message = message,
             paper = paper,
-            settingsSnapshot = settingsSnapshot
+            settingsSnapshot = settingsSnapshot,
+            scalps = scalps,
+            shadow = shadow
         )
     }
 
@@ -186,7 +195,9 @@ class SupabaseMirror(
             "ticket",
             "settings",
             "settings_snapshot",
-            "paper"
+            "paper",
+            "scalp",
+            "shadow"
         )
 
         /**

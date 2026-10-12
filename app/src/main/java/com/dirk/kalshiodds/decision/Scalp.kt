@@ -621,7 +621,6 @@ class ScalpBook(
         val mid = (yb + ya) / 2
         val sample = ShortHorizonForecaster.Sample(q.nowMs, mid, top3Yes, top3No)
         val hist = fcHist.getOrPut(key) { ArrayDeque() }
-        val x = ShortHorizonForecaster.features(sample, hist, q.closeMs)
         hist.addLast(sample)
         while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > 200_000L) hist.removeFirst()
         if (q.nowMs >= q.closeMs) fcHist.remove(key)
@@ -642,8 +641,9 @@ class ScalpBook(
                 lh.lastOrNull { it.first <= q.nowMs - k * 1000L }?.second
             }
         val pred54 = x54?.let { LeadForecaster.predict(coin, h54, it) }
-        @Suppress("UNUSED_VARIABLE") val fc53 = ShortHorizonForecaster.predict(coin, horizon, x) // kept for comparison/logging
-        val pred = pred54 ?: 0.0 // no lead → no entry (0 never clears the bar); open trades exit on "forecast turned"
+        // 0.3.56: stale/missing lead → no forecast. No entries, and open trades HOLD (only TP/horizon/close exits)
+        // instead of reading a fake 0 forecast as "forecast turned".
+        val pred = pred54 ?: Double.NaN
         val enabledNow = enabled && pred54 != null
         val changed = ArrayList<ScalpTrade>()
         for (ride in listOf(true, false)) {
@@ -899,6 +899,14 @@ class ScalpBook(
         }
         out.forEach { save(it) }
         out.filter { it.isPrimary }
+    }
+
+    /** 0.3.56 reinstall restore: add closed round trips whose id is unknown. */
+    fun importRestored(rows: List<ScalpTrade>): Int = synchronized(lock) {
+        val have = _all.value.map { it.id }.toHashSet()
+        val add = rows.filter { it.id !in have }.distinctBy { it.id }
+        add.forEach { save(it) }
+        add.size
     }
 
     private fun save(t: ScalpTrade) {
