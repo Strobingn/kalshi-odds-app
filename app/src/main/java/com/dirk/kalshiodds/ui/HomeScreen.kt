@@ -228,7 +228,7 @@ fun HomeScreen(
                         if (openScalp != null) {
                             item(key = "scalp_lab") {
                                 Text(
-                                    "Scalp lab · 15 algorithms",
+                                    "Scalp lab · 20 algorithms",
                                     style = MaterialTheme.typography.titleSmall,
                                     color = colors.accentBlue,
                                     fontWeight = FontWeight.Bold,

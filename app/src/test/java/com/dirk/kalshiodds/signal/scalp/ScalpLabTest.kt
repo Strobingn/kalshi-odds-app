@@ -8,12 +8,12 @@ import org.junit.Test
 class ScalpLabTest {
 
     @Test
-    fun fifteenDifferentScalps() {
-        assertEquals(15, ScalpCatalog.ALL.size)
-        assertEquals(15, ScalpCatalog.ALL.map { it.id }.distinct().size)
+    fun twentyDifferentScalps() {
+        assertEquals(20, ScalpCatalog.ALL.size)
+        assertEquals(20, ScalpCatalog.ALL.map { it.id }.distinct().size)
         val lab = ScalpLab()
-        assertEquals(15, lab.snapshot().accounts.size)
-        assertEquals(ScalpCatalog.START_CASH, lab.snapshot().accounts.sumOf { it.cashUsd } / 15.0, 1e-9)
+        assertEquals(20, lab.snapshot().accounts.size)
+        assertEquals(ScalpCatalog.START_CASH, lab.snapshot().accounts.sumOf { it.cashUsd } / 20.0, 1e-9)
         assertEquals(20_000.0, ScalpCatalog.START_CASH, 1e-9)
     }
 

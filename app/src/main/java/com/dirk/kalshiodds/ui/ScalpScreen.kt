@@ -24,7 +24,7 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 
 /**
- * All 15 paper scalps. Read-only except Reset. Nothing on this screen
+ * All 20 paper scalps. Read-only except Reset. Nothing on this screen
  * can place a Kalshi order.
  */
 @Composable
@@ -51,7 +51,7 @@ fun ScalpScreen(
                 fontWeight = FontWeight.Bold
             )
             Text(
-                "15 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets a slice of the cash on hand. " +
+                "20 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets a slice of the cash on hand. " +
                     "Trail 5¢ buys the side under 50¢, holds the rise, and sells when the bid drops 5¢ off the high. " +
                     "Nothing here is sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
@@ -66,7 +66,7 @@ fun ScalpScreen(
             )
             ScalpCharts(state.accounts)
             OutlinedButton(onClick = onReset, modifier = Modifier.padding(top = 4.dp)) {
-                Text("Reset all 15 to \$20,000")
+                Text("Reset all 20 to \$20,000")
             }
         }
         itemsIndexed(ranked, key = { _, account -> account.id }) { index, account ->

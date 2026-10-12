@@ -31,7 +31,7 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 import kotlin.math.abs
 
-/** P&L bars and the combined equity line for the 15 paper scalps. */
+/** P&L bars and the combined equity line for the 20 paper scalps. */
 @Composable
 fun ScalpCharts(accounts: List<ScalpAccount>) {
     val colors = DipTheme.colors

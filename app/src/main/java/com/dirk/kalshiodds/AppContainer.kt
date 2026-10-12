@@ -152,7 +152,7 @@ class AppContainer(context: Context) {
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
     val paper = PaperBookStore(app)
-    /** Fifteen paper scalps. No path to a live order. */
+    /** Twenty paper scalps. No path to a live order. */
     val scalp = ScalpStore(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(

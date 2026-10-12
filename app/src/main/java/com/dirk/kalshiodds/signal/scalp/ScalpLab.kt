@@ -67,7 +67,7 @@ data class ScalpLabState(
 )
 
 /**
- * Fifteen paper scalps on the live Bitcoin 15-minute contract.
+ * Twenty paper scalps on the live Bitcoin 15-minute contract.
  * Each book starts at $20,000. Size is the rule's fraction of that
  * bankroll, or of cash when the book is ahead. Cash may go negative.
  * No live order path.

@@ -276,6 +276,85 @@ object ScalpCatalog {
             } else {
                 trail(pos, t, 0.04)
             }
+        },
+        algo(
+            "dip_buy",
+            "Dip buy",
+            "10% of cash when an ask is 6¢ under the window high, under 40¢, and the bid is ticking up. Sells a 5¢ drop."
+        ) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                when {
+                    t.yesHigh - t.yesAsk >= 0.06 && t.yesAsk < 0.40 && bouncing(t.yesBids) -> ScalpIntent.Buy("YES", 0.10)
+                    t.noHigh - t.noAsk >= 0.06 && t.noAsk < 0.40 && bouncing(t.noBids) -> ScalpIntent.Buy("NO", 0.10)
+                    else -> ScalpIntent.Hold
+                }
+            } else {
+                trail(pos, t, 0.05)
+            }
+        },
+        algo(
+            "wide_gap",
+            "Wide gap",
+            "10% of cash on the cheaper side when the two asks differ by 15¢ or more and that side is under 35¢. Sells a 5¢ drop."
+        ) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                val gap = kotlin.math.abs(t.yesAsk - t.noAsk)
+                val side = cheaper(t)
+                if (gap >= 0.15 && ask(t, side) < 0.35) ScalpIntent.Buy(side, 0.10) else ScalpIntent.Hold
+            } else {
+                trail(pos, t, 0.05)
+            }
+        },
+        algo(
+            "burst",
+            "Burst",
+            "10% of cash after three prints each up at least 2¢, ask under 45¢. Holds the burst, sells a 4¢ drop."
+        ) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                when {
+                    stepped(t.yesBids, 3, 0.02) && t.yesAsk < 0.45 -> ScalpIntent.Buy("YES", 0.10)
+                    stepped(t.noBids, 3, 0.02) && t.noAsk < 0.45 -> ScalpIntent.Buy("NO", 0.10)
+                    else -> ScalpIntent.Hold
+                }
+            } else {
+                trail(pos, t, 0.04)
+            }
+        },
+        algo(
+            "reclaim",
+            "Reclaim",
+            "10% of cash when the bid has reclaimed 4¢ off the window low and is still under 45¢. Sells a 5¢ drop."
+        ) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                when {
+                    t.yesBid - t.yesLow >= 0.04 && t.yesAsk < 0.45 -> ScalpIntent.Buy("YES", 0.10)
+                    t.noBid - t.noLow >= 0.04 && t.noAsk < 0.45 -> ScalpIntent.Buy("NO", 0.10)
+                    else -> ScalpIntent.Hold
+                }
+            } else {
+                trail(pos, t, 0.05)
+            }
+        },
+        algo(
+            "deep_value",
+            "Deep value",
+            "8% of cash on a cheaper ask at 25¢ or less in the first 10 minutes. Wider trail: sells a 6¢ drop."
+        ) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                if (t.elapsedMs < TEN_MIN) {
+                    val side = cheaper(t)
+                    if (ask(t, side) <= 0.25) ScalpIntent.Buy(side, 0.08) else ScalpIntent.Hold
+                } else {
+                    ScalpIntent.Hold
+                }
+            } else {
+                trail(pos, t, 0.06)
+            }
         }
     )
 
@@ -343,6 +422,12 @@ object ScalpCatalog {
         return xs.takeLast(n).zipWithNext().all { (prev, next) -> next > prev + 0.004 }
     }
 
+    private fun stepped(xs: List<Double>, n: Int, step: Double): Boolean {
+        if (xs.size < n) return false
+        return xs.takeLast(n).zipWithNext().all { (prev, next) -> next + 1e-9 >= prev + step }
+    }
+
     private const val FIVE_MIN = 5L * 60L * 1000L
     private const val SEVEN_MIN = 7L * 60L * 1000L
+    private const val TEN_MIN = 10L * 60L * 1000L
 }

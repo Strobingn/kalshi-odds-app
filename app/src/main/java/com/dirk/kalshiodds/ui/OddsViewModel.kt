@@ -82,7 +82,7 @@ data class OddsUiState(
     /** Paper-only 1¢-better resting bid tracker. */
     val centBetter: com.dirk.kalshiodds.signal.latefav.LateFavoriteState =
         com.dirk.kalshiodds.signal.latefav.LateFavoriteState(),
-    /** Fifteen paper scalps. Never a live order. */
+    /** Twenty paper scalps. Never a live order. */
     val scalp: com.dirk.kalshiodds.signal.scalp.ScalpLabState =
         com.dirk.kalshiodds.signal.scalp.ScalpLabState()
 )
