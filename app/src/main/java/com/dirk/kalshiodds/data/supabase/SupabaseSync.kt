@@ -41,13 +41,16 @@ class SupabaseSync(
          */
         val advanced: Boolean = false,
         /** Safe to drop the paper sync tail. False when the paper batch failed. */
-        val acknowledgePaper: Boolean = false
+        val acknowledgePaper: Boolean = false,
+        /** 0.3.56: the snapshot batch landed (or there was none) — safe to commit SnapshotUploadFilter. */
+        val snapshotsOk: Boolean = false
     )
 
     data class PushOutcome(
         val pushed: Int,
         val errors: List<String>,
-        val paperOk: Boolean
+        val paperOk: Boolean,
+        val failedKinds: Set<String> = emptySet()
     )
 
     data class LocalBundle(
@@ -91,6 +94,7 @@ class SupabaseSync(
         var pushed = 0
         val errors = ArrayList<String>()
         var sawPaper = false
+        val failed = HashSet<String>()
         var paperOk = true
         for ((kind, batch) in deduped.groupBy { it.kind }) {
             if (kind == "paper") sawPaper = true
@@ -100,11 +104,12 @@ class SupabaseSync(
             } catch (t: Throwable) {
                 val reason = t.message?.takeIf { it.isNotBlank() } ?: "sync failed"
                 errors += "$TABLE $kind: $reason"
+                failed += kind
                 if (kind == "paper") paperOk = false
             }
         }
         if (!sawPaper) paperOk = true
-        return PushOutcome(pushed, errors, paperOk)
+        return PushOutcome(pushed, errors, paperOk, failed)
     }
 
     fun pack(bundle: LocalBundle): List<SyncMerge.Record> {
@@ -266,7 +271,8 @@ class SupabaseSync(
                 pulled = remote.size,
                 pushed = pushed.pushed,
                 advanced = pushed.errors.isEmpty() || pushed.pushed > 0,
-                acknowledgePaper = pushed.paperOk
+                acknowledgePaper = pushed.paperOk,
+                snapshotsOk = "snapshot" !in pushed.failedKinds
             )
         } catch (t: Throwable) {
             Status(ok = false, message = t.message?.takeIf { it.isNotBlank() } ?: "Sync failed")
@@ -433,7 +439,12 @@ object SnapshotUploadFilter {
 
     fun reset() = last.clear()
 
+    /**
+     * 0.3.56: pure — picks rows against the last *committed* upload state and does not change it.
+     * Call [commit] with the rows only after the upload succeeded, so a failed sync re-selects them.
+     */
     fun select(rows: List<ScoredSnapshotRow>): List<ScoredSnapshotRow> {
+        val last = HashMap(this.last)
         val out = ArrayList<ScoredSnapshotRow>()
         for (s in rows.sortedBy { it.createdAtMs }) {
             val prev = last[s.ticker]
@@ -448,13 +459,58 @@ object SnapshotUploadFilter {
                 out += s
             }
         }
-        if (last.size > 256) last.entries.sortedBy { it.value.atMs }.take(last.size - 128).forEach { last.remove(it.key) }
         return out
+    }
+
+    /** Record [uploaded] as the new per-ticker upload state (newest row per ticker wins). */
+    fun commit(uploaded: List<ScoredSnapshotRow>) {
+        for (s in uploaded.sortedBy { it.createdAtMs }) {
+            val prev = last[s.ticker]
+            if (prev == null || s.createdAtMs >= prev.atMs) last[s.ticker] = Last(s.createdAtMs, s.side, s.edgePp)
+        }
+        if (last.size > 256) last.entries.sortedBy { it.value.atMs }.take(last.size - 128).forEach { last.remove(it.key) }
     }
 }
 
 /** Maps a `diphunter_sync` payload into local rows. Shared by sync apply and restore. */
 internal object SyncRows {
+    private fun JSONObject.dOrNull(k: String): Double? = if (has(k) && !isNull(k)) optDouble(k).takeIf { it.isFinite() } else null
+
+    /** 0.3.56 restore of a synced scalp round trip (closed, primary). */
+    fun scalp(o: JSONObject): com.dirk.kalshiodds.decision.ScalpTrade? {
+        val id = o.optString("id").ifBlank { return null }
+        val closed = o.optLong("closedAtMs").takeIf { it > 0 } ?: return null
+        val n = o.optInt("contracts")
+        val entry = o.dOrNull("entryPrice")
+        return com.dirk.kalshiodds.decision.ScalpTrade(
+            id = id, ticker = o.optString("ticker"), side = o.optString("side"),
+            state = com.dirk.kalshiodds.decision.ScalpState.CLOSED,
+            signalAtMs = o.optLong("entryAtMs").takeIf { it > 0 } ?: closed, signalAsk = entry ?: 0.0, fairAtSignal = entry ?: 0.0,
+            contracts = n, entryPrice = entry, entryFeeUsd = o.dOrNull("feesUsd") ?: 0.0,
+            entryAtMs = o.optLong("entryAtMs").takeIf { it > 0 }, soldContracts = n,
+            proceedsUsd = (o.dOrNull("exitAvg") ?: 0.0) * n, closedAtMs = closed, netUsd = o.dOrNull("netUsd"),
+            exitReason = o.optString("exitReason").ifBlank { null }, note = "restored from diphunter_sync",
+            ruleVersion = "restored|${o.optString("variant").ifBlank { com.dirk.kalshiodds.decision.ScalpParams.LEGACY_ID }}|${if (o.optBoolean("primary", true)) "P" else "S"}"
+        )
+    }
+
+    /** 0.3.56 restore of a synced Autopilot SHADOW ticket. */
+    fun shadow(o: JSONObject): com.dirk.kalshiodds.signal.paper.ShadowTicket? {
+        val id = o.optString("id").ifBlank { return null }
+        val px = o.dOrNull("limitPrice") ?: return null
+        val side = o.optString("side")
+        return com.dirk.kalshiodds.signal.paper.ShadowTicket(
+            id = id, ticker = o.optString("ticker"), side = side, action = o.optString("action").ifBlank { "buy" },
+            bookSide = side.lowercase(), count = o.optInt("count"), limitPrice = px,
+            yesLimitPrice = if (side.equals("NO", true)) 1.0 - px else px, clientOrderId = "restored-$id",
+            createdAtMs = o.optLong("createdAtMs"), reason = o.optString("reason"), payloadJson = "{}",
+            depthFill = o.optBoolean("booked"), booked = o.optBoolean("booked"), stakeUsd = o.dOrNull("stakeUsd") ?: 0.0,
+            feeUsd = o.dOrNull("feeUsd") ?: 0.0, settled = o.optBoolean("settled"),
+            outcome = o.optString("outcome").takeIf { it.isNotBlank() && it != "null" }, pnlUsd = o.dOrNull("pnlUsd"),
+            won = o.dOrNull("pnlUsd")?.let { it > 0.0 }
+        )
+    }
+
     fun snapshot(o: JSONObject, fallbackAt: Long) = ScoredSnapshotRow(
         ticker = o.optString("ticker"),
         series = o.optString("series"),

@@ -132,6 +132,16 @@ class ShadowBook(
         Recorded(row, true)
     }
 
+    /** 0.3.56 reinstall restore: add tickets whose id is unknown; never touches cash. */
+    fun importRestored(rows: List<ShadowTicket>): Int = synchronized(lock) {
+        val cur = _state.value
+        val have = cur.tickets.map { it.id }.toHashSet()
+        val add = rows.filter { it.id.isNotBlank() && it.id !in have }.distinctBy { it.id }
+        if (add.isEmpty()) return 0
+        publish(cur.copy(tickets = (cur.tickets + add).sortedByDescending { it.createdAtMs }.take(LEDGER_MAX)))
+        add.size
+    }
+
     fun settle(ticker: String, result: String): List<ShadowTicket> {
         val outcome = result.lowercase().trim()
         if (outcome != "yes" && outcome != "no" && outcome != "void") return emptyList()

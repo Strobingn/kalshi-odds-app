@@ -93,7 +93,7 @@ class ReleaseGate0355SyncTest {
                 batch += ScoredSnapshotRow(ticker = tk, series = "S", side = if (edge > 0) "YES" else "NO", edgePp = edge, fairPp = 50.0, marketPp = 50.0,
                     regime = null, uncertainty = null, createdAtMs = t0 + s * 1000L)
             }
-            if (s % 900 == 899) { kept += SnapshotUploadFilter.select(batch).size; batch = ArrayList() }
+            if (s % 900 == 899) { val k = SnapshotUploadFilter.select(batch); SnapshotUploadFilter.commit(k); kept += k.size; batch = ArrayList() }
         }
         // ≤ 1/min per ticker on change, ≥ heartbeat 5 min: expect a few thousand a day, not 38k–260k
         assertTrue("kept=$kept", kept in 864..4_400)
