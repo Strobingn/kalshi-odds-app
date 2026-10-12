@@ -56,7 +56,11 @@ class SupabaseSync(
         val tickets: List<TicketAttemptRow> = emptyList(),
         val settingsChanges: List<SettingsChange> = emptyList(),
         val paperFills: List<PaperFill> = emptyList(),
-        val settingsSnapshot: String? = null
+        val settingsSnapshot: String? = null,
+        /** 0.3.55: the 8 paper scalpers' closed round trips (never synced before). */
+        val scalps: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
+        /** 0.3.55: Autopilot SHADOW tickets (Autopilot has been in SHADOW since Oct 10 01:27 ET; never synced before). */
+        val shadow: List<com.dirk.kalshiodds.signal.paper.ShadowTicket> = emptyList()
     )
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
@@ -105,17 +109,39 @@ class SupabaseSync(
 
     fun pack(bundle: LocalBundle): List<SyncMerge.Record> {
         val out = ArrayList<SyncMerge.Record>()
-        bundle.snapshots.forEach { s ->
+        // 0.3.55: only meaningful snapshot changes (or one per ticker per 5 min), compact payload (no note, 0.1pp).
+        bundle.snapshots.forEach { s -> // 0.3.55: SyncWorker passes SnapshotUploadFilter.select(...) rows
             val payload = JSONObject()
                 .put("ticker", s.ticker)
                 .put("series", s.series)
                 .put("side", s.side)
-                .put("edgePp", s.edgePp)
-                .put("fairPp", s.fairPp)
-                .put("marketPp", s.marketPp)
+                .putFinite("edgePp", SnapshotUploadFilter.r1(s.edgePp))
+                .putFinite("fairPp", SnapshotUploadFilter.r1(s.fairPp))
+                .putFinite("marketPp", SnapshotUploadFilter.r1(s.marketPp))
                 .put("createdAtMs", s.createdAtMs)
-                .put("note", s.note)
             out.add(rec("snapshot:${s.ticker}:${s.createdAtMs}:${s.side}", "snapshot", s.createdAtMs, payload))
+        }
+        bundle.scalps.forEach { t ->
+            if (t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED) return@forEach
+            val at = t.closedAtMs ?: return@forEach
+            val payload = JSONObject()
+                .put("id", t.id).put("ticker", t.ticker).put("side", t.side)
+                .put("algo", t.algoLabel).put("variant", t.variantId).put("primary", t.isPrimary)
+                .put("contracts", t.contracts).putFinite("entryPrice", t.entryPrice)
+                .putFinite("exitAvg", if (t.contracts > 0) t.proceedsUsd / t.contracts else null)
+                .putFinite("feesUsd", t.entryFeeUsd + t.exitFeeUsd).putFinite("netUsd", t.netUsd)
+                .put("entryAtMs", t.entryAtMs ?: JSONObject.NULL).put("closedAtMs", at)
+                .put("exitReason", t.exitReason ?: "")
+            out.add(rec("scalp:${t.id}", "scalp", at, payload))
+        }
+        bundle.shadow.forEach { s ->
+            val payload = JSONObject()
+                .put("id", s.id).put("ticker", s.ticker).put("side", s.side).put("action", s.action)
+                .put("count", s.count).putFinite("limitPrice", s.limitPrice).put("booked", s.booked)
+                .putFinite("stakeUsd", s.stakeUsd).putFinite("feeUsd", s.feeUsd).put("settled", s.settled)
+                .put("outcome", s.outcome ?: JSONObject.NULL).putFinite("pnlUsd", s.pnlUsd)
+                .put("reason", s.reason.take(200)).put("createdAtMs", s.createdAtMs)
+            out.add(rec("shadow:${s.id}", "shadow", s.createdAtMs, payload))
         }
         bundle.alerts.forEach { a ->
             val payload = JSONObject()
@@ -256,6 +282,8 @@ class SupabaseSync(
             .addEncodedQueryParameter("select", "*")
             .addEncodedQueryParameter("limit", "2000")
             .addEncodedQueryParameter("key", "like.kashi:*")
+            // 0.3.55: never pull snapshots back (append-only, not merged) — that was ~2000 rows of egress per sync.
+            .addEncodedQueryParameter("kind", "not.in.(snapshot,scalp,shadow)")
             // One page. Newest first; key breaks timestamp ties so the page is stable.
             .addEncodedQueryParameter("order", "updated_at.desc,key.asc")
             .build()
@@ -386,6 +414,44 @@ class SupabaseSync(
 }
 
 class SyncHttpException(message: String) : Exception(message)
+
+private fun JSONObject.putFinite(k: String, v: Double?): JSONObject = put(k, v?.takeIf { it.isFinite() } ?: JSONObject.NULL)
+
+/**
+ * 0.3.55 snapshot upload throttle. The phone scores every book update; uploading the newest 400 every sync was
+ * ~38k rows / ~25–50 MB a day. Per ticker we now upload a row only when the side flips or the edge moves ≥ 3pp
+ * (at most one per minute), and otherwise at most one row per 5 minutes. Local SQLite keeps every row.
+ */
+object SnapshotUploadFilter {
+    const val MIN_GAP_MS = 60_000L
+    const val HEARTBEAT_MS = 300_000L
+    const val EDGE_MOVE_PP = 3.0
+    private data class Last(val atMs: Long, val side: String, val edgePp: Double)
+    private val last = java.util.concurrent.ConcurrentHashMap<String, Last>()
+
+    fun r1(v: Double): Double = if (v.isFinite()) Math.round(v * 10.0) / 10.0 else v
+
+    fun reset() = last.clear()
+
+    fun select(rows: List<ScoredSnapshotRow>): List<ScoredSnapshotRow> {
+        val out = ArrayList<ScoredSnapshotRow>()
+        for (s in rows.sortedBy { it.createdAtMs }) {
+            val prev = last[s.ticker]
+            val keep = prev == null || run {
+                val dt = s.createdAtMs - prev.atMs
+                dt < 0L || dt >= HEARTBEAT_MS ||
+                    (s.side != prev.side && (dt >= MIN_GAP_MS || dt == 0L)) || // YES+NO rows of one score both go
+                    (dt >= MIN_GAP_MS && s.edgePp.isFinite() && kotlin.math.abs(s.edgePp - prev.edgePp) >= EDGE_MOVE_PP)
+            }
+            if (keep) {
+                last[s.ticker] = Last(s.createdAtMs, s.side, s.edgePp)
+                out += s
+            }
+        }
+        if (last.size > 256) last.entries.sortedBy { it.value.atMs }.take(last.size - 128).forEach { last.remove(it.key) }
+        return out
+    }
+}
 
 /** Maps a `diphunter_sync` payload into local rows. Shared by sync apply and restore. */
 internal object SyncRows {

@@ -39,12 +39,15 @@ class SyncWorker(
             val result = SupabaseSync().roundTrip(
                 settings = hub,
                 local = SupabaseSync.LocalBundle(
-                    snapshots = store.recentSnapshots(400),
+                    // 0.3.55: read a full sync interval; SnapshotUploadFilter picks the few worth uploading.
+                    snapshots = com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.select(store.recentSnapshots(4000)),
                     alerts = store.recentAlerts(200),
                     tickets = store.recentTickets(200),
                     settingsChanges = archive.recentSettingsChanges(200),
                     paperFills = paper.fillsForSync(),
-                    settingsSnapshot = SettingsRestore.snapshot(settings)
+                    settingsSnapshot = SettingsRestore.snapshot(settings),
+                    scalps = container.scalp.all.value.filter { it.isPrimary && it.closedAtMs != null && it.closedAtMs!! >= hub.lastSyncAtMs - 3_600_000L },
+                    shadow = container.shadow.book.snapshot().tickets.filter { it.createdAtMs >= startedMs - 6 * 3_600_000L }
                 ),
                 store = store,
                 lastPushMs = hub.lastSyncAtMs,
