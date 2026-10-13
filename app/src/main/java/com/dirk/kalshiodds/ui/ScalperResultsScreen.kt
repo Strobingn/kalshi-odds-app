@@ -244,7 +244,9 @@ fun ScalperResultsScreen(
     if (open != null) {
         // System back closes the page (screenshots have no back dispatcher, so only where there is one).
         if (androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current != null) BackHandler { openName = null }
-        StrategyPage(open, state, chartTrades, pageListState) { openName = null }
+        // Each strategy's page opens at its top, not where the last one was left.
+        val pageState = remember(open) { if (open == initialOpen) pageListState else LazyListState() }
+        StrategyPage(open, state, chartTrades, pageState) { openName = null }
         return
     }
     val colors = DipTheme.colors
@@ -265,18 +267,21 @@ fun ScalperResultsScreen(
     val liveMarkers = remember(live, chartTrades) { live?.let { ArenaStats.markers(it, chartTrades) }.orEmpty() }
     val drawdownCurve = remember(state.curve, curves, selected) {
         if (selected == null) bankroll.map { CurvePoint(it.tMs, it.pnlUsd - ScalperResults.START_BANKROLL_USD) }
-        else curveOf[selected]?.points.orEmpty()
+        // Unthinned, so a short trough between the chart's sampled points still counts.
+        else ArenaCharts.equityCurves(chartTrades.filter { it.strategy == selected.name }, Int.MAX_VALUE).firstOrNull()?.points.orEmpty()
     }
-    val statsRows = remember(chartTrades) { ArenaStats.strategyStats(chartTrades) }
-    val priceGrid = remember(chartTrades) { ArenaStats.priceBands(chartTrades) }
-    val dayGrid = remember(chartTrades, today) { ArenaStats.daily(chartTrades, today) }
+    // Following a strategy scopes the per-strategy tables and grids to it (correlation stays a pairs view).
+    val scoped = remember(chartTrades, selected) { selected?.let { s -> chartTrades.filter { it.strategy == s.name } } ?: chartTrades }
+    val statsRows = remember(scoped) { ArenaStats.strategyStats(scoped) }
+    val priceGrid = remember(scoped) { ArenaStats.priceBands(scoped) }
+    val dayGrid = remember(scoped, today) { ArenaStats.daily(scoped, today) }
     val holdBuckets = remember(chartTrades, selected) { ArenaStats.holdBuckets(chartTrades, selected) }
     val calBands = remember(chartTrades, selected) { ArenaEdge.calibration(chartTrades, selected) }
     // The fan and the rolling line follow the selected strategy, or the leader when none is.
     val edgeScope = selected ?: board.firstOrNull()?.strategy
     val fan = remember(chartTrades, edgeScope) { edgeScope?.let { ArenaEdge.projection(chartTrades, it) } }
     val rollingEdge = remember(chartTrades, edgeScope) { edgeScope?.let { ArenaEdge.rolling(chartTrades, it, ROLLING_TRADES) }.orEmpty() }
-    val minuteGrid = remember(chartTrades) { ArenaEdge.byMinute(chartTrades) }
+    val minuteGrid = remember(scoped) { ArenaEdge.byMinute(scoped) }
     val corrGrid = remember(chartTrades) { ArenaEdge.correlation(chartTrades) }
     val payoffDots = remember(chartTrades) { ArenaExec.payoffMap(chartTrades) }
     val twins = remember(chartTrades, state) { ArenaExec.twins(chartTrades, state) }
@@ -284,7 +289,8 @@ fun ScalperResultsScreen(
     val waitGrid = remember(chartTrades) { ArenaExec.fillSpeed(chartTrades) }
     val queueGrid = remember(chartTrades) { ArenaExec.queueDepth(chartTrades) }
     val modelBands = remember(chartTrades) { ArenaExec.modelCheck(chartTrades) }
-    val rankRace = remember(chartTrades, today) { ArenaExec.rankRace(chartTrades, today) }
+    val raceTruncated = chartTrades.size >= CHART_TRADES
+    val rankRace = remember(chartTrades, today) { ArenaExec.rankRace(chartTrades, today, partialOldestDay = raceTruncated) }
     val compareRows = remember(state, chartTrades) { ArenaTable.rows(state, chartTrades) }
     val onOpen: (ScalpStrategy) -> Unit = { st -> openName = st.name }
     Scaffold(
@@ -404,7 +410,8 @@ fun ScalperResultsScreen(
                     item(key = "chart_rank") {
                         ChartCard(
                             "Rank by day",
-                            "Each strategy's place on running profit at the end of each day, last 14 days (your clock).",
+                            "Each strategy's place on running profit at the end of each day, last 14 days (your clock)." +
+                                if (raceTruncated) " Counted from the first whole day in the last ${CHART_TRADES} trades." else "",
                             "CHART_RANK"
                         ) { RankRaceChart(rankRace, selected) }
                     }
@@ -816,6 +823,8 @@ internal fun StrategyPage(
     val mine = remember(chartTrades, st) { chartTrades.filter { it.strategy == st.name } }
     val detail = remember(state, chartTrades, st) { ArenaTable.detail(st, state, chartTrades) }
     val curve = remember(mine) { ArenaCharts.equityCurves(mine).firstOrNull()?.points.orEmpty() }
+    // The drawdown reads every close: a short trough between the line chart's sampled points still counts.
+    val fullCurve = remember(mine) { ArenaCharts.equityCurves(mine, Int.MAX_VALUE).firstOrNull()?.points.orEmpty() }
     val bins = remember(mine) { ArenaCharts.histogram(mine, st) }
     val rolling = remember(mine) { ArenaEdge.rolling(mine, st, ROLLING_TRADES) }
     val fan = remember(mine) { ArenaEdge.projection(mine, st) }
@@ -855,7 +864,7 @@ internal fun StrategyPage(
                     if (curve.size >= 2) ScrubLineChart(curve, 0.0) { ScalperResults.money(it) } else Muted("Appears after its first closed trades.")
                 }
             }
-            item(key = "dd") { ChartCard("Drawdown", "How far it sits under its best so far.", "CHART_ST_DD") { DrawdownChart(curve) } }
+            item(key = "dd") { ChartCard("Drawdown", "How far it sits under its best so far.", "CHART_ST_DD") { DrawdownChart(fullCurve) } }
             item(key = "hist") {
                 ChartCard("What one trade makes", "Result per contract after fees. Red bins lost money.", "CHART_ST_HIST") {
                     HistogramChart(bins, st.label)

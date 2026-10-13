@@ -554,10 +554,11 @@ class PaperScalper(
                             avg - gridMid >= ScalpStrategy.STRETCH_DOLLARS - EPS
                     }
                     ScalpStrategy.SQUEEZE_BREAKOUT -> {
-                        // The range is the two minutes before the last 5 s, so the break itself is not inside it.
+                        // The range is the two minutes before the last 5 s, so the break itself is not inside it,
+                        // and it must have been quoted through both of its minutes: a few prints are no squeeze.
                         val hi = grid.highMid(side, s - 5, 120)
                         val lo = grid.lowMid(side, s - 5, 120)
-                        s >= 125 && spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS &&
+                        s >= 125 && spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && grid.coveredBothHalves(side, s - 5, 120) &&
                             !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
                             hi - lo <= ScalpStrategy.SQUEEZE_RANGE_DOLLARS + EPS &&
                             gridMid - hi >= ScalpStrategy.SQUEEZE_BREAK_DOLLARS - EPS
@@ -565,7 +566,7 @@ class PaperScalper(
                     ScalpStrategy.RANGE_FLOOR -> {
                         val hi = grid.highMid(side, s, 120)
                         val lo = grid.lowMid(side, s, 120)
-                        s >= 120 && !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
+                        s >= 120 && grid.coveredBothHalves(side, s, 120) && !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
                             hi - lo >= ScalpStrategy.FLOOR_MIN_RANGE_DOLLARS - EPS &&
                             hi - lo <= ScalpStrategy.FLOOR_MAX_RANGE_DOLLARS + EPS &&
                             gridMid <= lo + 0.005 + EPS

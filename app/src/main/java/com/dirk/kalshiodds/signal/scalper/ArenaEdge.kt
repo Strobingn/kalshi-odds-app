@@ -78,16 +78,24 @@ object ArenaEdge {
         /** Share of resampled paths that finish above $0. */
         val pProfit: Double,
         val horizon: Int,
-        val sample: Int
+        /** Trades resampled from, and the market windows they fell in. */
+        val sample: Int,
+        val windows: Int = 0
     )
 
     const val MIN_FAN_TRADES = 10
 
+    /** Fewer windows than this and the resample is mostly one or two outcomes repeated. */
+    const val MIN_FAN_WINDOWS = 5
+
     /**
-     * Draws [paths] sequences of [horizon] trades from the strategy's own
-     * past results (with replacement) and reports the spread. It says what
-     * the record so far implies; it cannot know whether the future looks
-     * like the past. Null with fewer than [MIN_FAN_TRADES] trades.
+     * Draws [paths] futures of [horizon] trades from the strategy's own past
+     * results and reports the spread. Trades in one market window share its
+     * outcome, so whole windows are drawn (with replacement), each adding all
+     * of its trades at once, as the leaderboard's luck test clusters them.
+     * It says what the record so far implies; it cannot know whether the
+     * future looks like the past. Null with fewer than [MIN_FAN_TRADES]
+     * trades or [MIN_FAN_WINDOWS] windows.
      */
     fun projection(
         trades: List<ScalpTrade>,
@@ -97,8 +105,10 @@ object ArenaEdge {
         points: Int = 40,
         seed: Int = 7
     ): Fan? {
-        val pnl = trades.filter { strategy == null || it.strategy == strategy.name }.map { it.pnlUsd }
-        if (pnl.size < MIN_FAN_TRADES || horizon < 1 || paths < 1) return null
+        val rows = trades.filter { strategy == null || it.strategy == strategy.name }
+        if (rows.size < MIN_FAN_TRADES || horizon < 1 || paths < 1) return null
+        val windows = rows.groupBy { it.ticker }.values.map { w -> w.size to w.sumOf { it.pnlUsd } }
+        if (windows.size < MIN_FAN_WINDOWS) return null
         val rnd = Random(seed)
         val stride = maxOf(1, horizon / points)
         val steps = (stride..horizon step stride).toMutableList()
@@ -106,10 +116,14 @@ object ArenaEdge {
         val at = Array(steps.size) { DoubleArray(paths) }
         for (p in 0 until paths) {
             var run = 0.0
+            var n = 0
             var k = 0
-            for (s in 1..horizon) {
-                run += pnl[rnd.nextInt(pnl.size)]
-                if (k < steps.size && s == steps[k]) { at[k][p] = run; k++ }
+            while (k < steps.size) {
+                val (count, pnl) = windows[rnd.nextInt(windows.size)]
+                run += pnl
+                n += count
+                // A window lands all its trades at once: every step it passes reads the same total.
+                while (k < steps.size && n >= steps[k]) { at[k][p] = run; k++ }
             }
         }
         fun pct(arr: DoubleArray, q: Double): Double {
@@ -123,7 +137,8 @@ object ArenaEdge {
             p90 = at.map { pct(it, 0.90) },
             pProfit = at.last().count { it > 0.0 }.toDouble() / paths,
             horizon = horizon,
-            sample = pnl.size
+            sample = rows.size,
+            windows = windows.size
         )
     }
 

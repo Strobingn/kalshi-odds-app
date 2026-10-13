@@ -114,6 +114,9 @@ class ArenaTableTest {
         assertEquals(3, d.sampled)
         val none = ArenaTable.detail(ScalpStrategy.LONG_SHOT, ScalperState.fresh(), trades)
         assertNull(none.best)
+        val winless = ArenaTable.detail(b, ScalperState.fresh(), listOf(trade(b, 1, -0.2), trade(b, 2, -0.5)))
+        assertEquals("the best of a winless record is its smallest loss", -0.2, winless.best!!.pnlUsd, 1e-12)
+        assertEquals(-0.5, winless.worst!!.pnlUsd, 1e-12)
         assertTrue(none.recent.isEmpty())
     }
 }

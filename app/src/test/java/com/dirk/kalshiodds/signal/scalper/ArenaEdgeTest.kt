@@ -68,8 +68,9 @@ class ArenaEdgeTest {
     @Test
     fun projectionIsReproducibleAndBracketsTheMiddle() {
         val st = ScalpStrategy.BOUNCE
-        assertNull(ArenaEdge.projection((0 until 9).map { trade(st, it.toLong(), 1.0) }, st))
-        val trades = (0 until 50).map { trade(st, it.toLong(), if (it % 5 == 0) -1.0 else 0.5) }
+        assertNull(ArenaEdge.projection((0 until 9).map { trade(st, it.toLong(), 1.0, ticker = "W$it") }, st))
+        assertNull("20 trades in 2 windows is two outcomes", ArenaEdge.projection((0 until 20).map { trade(st, it.toLong(), 1.0, ticker = "W${it % 2}") }, st))
+        val trades = (0 until 50).map { trade(st, it.toLong(), if (it % 5 == 0) -1.0 else 0.5, ticker = "W$it") }
         val a = ArenaEdge.projection(trades, st, horizon = 100, paths = 300)
         val b = ArenaEdge.projection(trades, st, horizon = 100, paths = 300)
         assertNotNull(a)
@@ -77,6 +78,7 @@ class ArenaEdgeTest {
         a!!
         assertEquals(100, a.steps.last())
         assertEquals(50, a.sample)
+        assertEquals(50, a.windows)
         for (i in a.steps.indices) {
             assertTrue(a.p10[i] <= a.p50[i])
             assertTrue(a.p50[i] <= a.p90[i])
@@ -84,8 +86,20 @@ class ArenaEdgeTest {
         // Mean +0.2 a trade, so the middle path after 100 trades sits near +$20 and nearly all paths finish up.
         assertEquals(20.0, a.p50.last(), 5.0)
         assertTrue(a.pProfit > 0.95)
-        val losing = (0 until 50).map { trade(st, it.toLong(), if (it % 5 == 0) 1.0 else -0.5) }
+        val losing = (0 until 50).map { trade(st, it.toLong(), if (it % 5 == 0) 1.0 else -0.5, ticker = "W$it") }
         assertTrue(ArenaEdge.projection(losing, st)!!.pProfit < 0.05)
+    }
+
+    @Test
+    fun tradesThatShareAWindowAreResampledTogether() {
+        val st = ScalpStrategy.BOUNCE
+        // The same 60 results, once spread over 60 windows and once in 6 windows of 10 that win or lose together.
+        val spread = (0 until 60).map { trade(st, it.toLong(), if ((it / 10) % 2 == 0) 0.6 else -0.5, ticker = "S$it") }
+        val clustered = (0 until 60).map { trade(st, it.toLong(), if ((it / 10) % 2 == 0) 0.6 else -0.5, ticker = "C${it / 10}") }
+        val a = ArenaEdge.projection(spread, st, horizon = 120, paths = 600)!!
+        val b = ArenaEdge.projection(clustered, st, horizon = 120, paths = 600)!!
+        assertEquals(6, b.windows)
+        assertTrue("clustered outcomes give a wider fan", b.p90.last() - b.p10.last() > 1.5 * (a.p90.last() - a.p10.last()))
     }
 
     @Test

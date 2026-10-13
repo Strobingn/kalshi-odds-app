@@ -204,8 +204,9 @@ object ArenaTable {
             row = row,
             stats = state.stats(st.name),
             streaks = (ps?.longestWinStreak ?: 0) to (ps?.longestLossStreak ?: 0),
-            best = mine.maxByOrNull { it.pnlUsd }?.takeIf { it.pnlUsd > 0 },
-            worst = mine.minByOrNull { it.pnlUsd }?.takeIf { it.pnlUsd < 0 },
+            // The real extremes even when every trade won (or lost): the best of a winless record is its smallest loss.
+            best = mine.maxByOrNull { it.pnlUsd },
+            worst = mine.minByOrNull { it.pnlUsd },
             recent = mine.sortedByDescending { it.closedAtMs }.take(recent),
             sampled = mine.size
         )

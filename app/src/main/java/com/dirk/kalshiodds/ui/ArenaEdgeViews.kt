@@ -148,7 +148,7 @@ internal fun ProjectionChart(fan: ArenaEdge.Fan?, scope: String) {
     val colors = DipTheme.colors
     val ac = ArenaColors.current()
     if (fan == null) {
-        Muted("Needs ${ArenaEdge.MIN_FAN_TRADES} closed trades for $scope.")
+        Muted("Needs ${ArenaEdge.MIN_FAN_TRADES} closed trades over ${ArenaEdge.MIN_FAN_WINDOWS} windows for $scope.")
         return
     }
     val lo0 = minOf(fan.p10.minOrNull() ?: 0.0, 0.0)
@@ -167,7 +167,7 @@ internal fun ProjectionChart(fan: ArenaEdge.Fan?, scope: String) {
         if (i == null) {
             Readout(
                 "${pct(fan.pProfit)} finish ahead",
-                "after ${fan.horizon} more trades · resampled from ${fan.sample} · drag to read"
+                "after ${fan.horizon} more trades · ${fan.sample} trades in ${fan.windows} windows, resampled by window · drag to read"
             )
         } else {
             Readout(

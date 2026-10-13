@@ -73,6 +73,16 @@ class ArenaMoreStrategiesTest {
     }
 
     @Test
+    fun aFewPrintsAreNoSqueeze() {
+        // Prints for the first 20 s, then nothing until a jump: the two "quiet" minutes were never quoted.
+        val s = runner()
+        for (sec in 0..20) second(s, sec, 0.50, 0.51)
+        for (sec in 125..134) second(s, sec, 0.52, 0.53)
+        assertEquals(0, posted(s, ScalpStrategy.SQUEEZE_BREAKOUT))
+        assertEquals(0, posted(s, ScalpStrategy.RANGE_FLOOR))
+    }
+
+    @Test
     fun rangeFloorRestsABidOnTheLowOfARange() {
         val s = runner()
         // 20 s at 50/51, 20 s at 55/56, and so on: a 5¢ range. Seconds 120–139 sit on its floor.

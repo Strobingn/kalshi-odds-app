@@ -19,6 +19,16 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.6 (claude/scalper-model-refresh): review fixes for the 30-strategy arena
+
+- *Skill or luck?* now resamples whole market windows, not single trades: trades in one window share its
+  outcome, so the fan is honest about how wide the future is (as the leaderboard's luck test already was).
+- Squeeze breakout and range floor fire only when both minutes of their two-minute range were actually quoted.
+- Following a strategy now scopes the stats table and the price, day and minute heatmaps to it.
+- Drawdown (strategy page and Overview) is read from every close, not the chart's sampled points.
+- Rank by day starts from the first whole day when the chart's 3,000-trade slice cuts into the oldest one.
+- A strategy page opens at its top; best / worst trade show the real extremes of a one-sided record.
+
 ## 1.9.5 (claude/scalp-insights): Compare all 30, and a page for every strategy
 
 - **Compare** (a new section chip, second from the left): every strategy in one table: rank, net, trades,
