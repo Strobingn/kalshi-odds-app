@@ -530,7 +530,7 @@ class ScalpBook(
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
         // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
-        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + ScalpModels.MAKER_DIP_PARAMS + ScalpParams.HOLD60_SIBLINGS
+        val primaries = ScalpStrategy.values().map { paramsFor(coin, it) } + ScalpModels.MAKER_DIP_PARAMS + ScalpParams.HOLD60_SIBLINGS + ScalpParams.QUEUED_COPIES
         val primaryIds = primaries.map { it.id }.toSet()
         val key = q.ticker.uppercase()
         val hist = history.getOrPut(key) { ArrayDeque() }
@@ -725,8 +725,24 @@ class ScalpBook(
         ShockFav.Kind.LAGGARD -> when {
             bid >= entry + p.tp - 1e-9 -> "take profit +${Math.round(p.tp * 100)}¢"
             tauS < 30.0 -> "τ < 30 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
-        ShockFav.Kind.IMBALANCE -> when { tauS < 30.0 -> "τ < 30 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+        ShockFav.Kind.IMBALANCE -> when {
+            p.tpNet && (bid - entry) - (ScalpRule.orderFee(ShockFav.CLIP, bid) + ScalpRule.orderFee(ShockFav.CLIP, entry)) / ShockFav.CLIP > p.tp + 1e-9 -> "net take profit > ${Math.round(p.tp * 100)}¢"
+            tauS < 30.0 -> "τ < 30 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+        ShockFav.Kind.SIMPLE_DIP -> when {
+            bid >= entry + p.tp - 1e-9 -> "take profit +${Math.round(p.tp * 100)}¢"
+            tauS < 60.0 -> "60 s before close"; else -> null }
         ShockFav.Kind.FADE_MAKER -> when { bid >= entry + p.tp + 0.01 - 1e-9 -> "maker target"; tauS < 45.0 -> "τ < 45 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+    }
+
+    private val simpleHist = HashMap<String, ArrayDeque<Triple<Long, Double, Double>>>()
+
+    /** Side whose ask sits ≥ p.dip below its own 5-min average ask (needs ≥ 4 min of history, τ ≥ 120 s, ask 5–95¢). */
+    private fun simpleDipSide(key: String, p: ShockFav.Params, q: ScalpRule.Quote): String? {
+        val h = simpleHist[key] ?: return null
+        if (h.isEmpty() || q.nowMs - h.first().first < ShockFav.SIMPLE_MIN_HISTORY_MS || q.tauS < 120.0) return null
+        val avgY = h.sumOf { it.second } / h.size
+        val avgN = h.sumOf { it.third } / h.size
+        return ShockFav.simpleDipSide(p, q.ask("YES"), avgY, q.ask("NO"), avgN)
     }
 
     fun onShockFavQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
@@ -736,6 +752,13 @@ class ScalpBook(
         val key = q.ticker.uppercase()
         val coin = ScalpParams.coinOf(q.ticker)
         val sec = q.nowMs / 1000L
+        // 0.3.63 Simple dip: rolling 5-min side asks (price only), before any spot/fair early return.
+        simpleHist.getOrPut(key) { ArrayDeque() }.let { h ->
+            h.addLast(Triple(q.nowMs, ya, 1.0 - yb))
+            while (h.isNotEmpty() && q.nowMs - h.first().first > ShockFav.SIMPLE_WINDOW_MS) h.removeFirst()
+            while (h.size > 2_000) h.removeFirst()
+        }
+        if (simpleHist.size > ScalpMemory.MAX_TICKERS) simpleHist.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { simpleHist.remove(it) }
         val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
         q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
         // 0.3.58: same fair as bt58 — 900 s 1 s-return σ from the ring, open basis to strike, raw τ.
@@ -831,6 +854,7 @@ class ScalpBook(
                     val side = when (p.kind) {
                         ShockFav.Kind.LAGGARD -> ShockFav.laggardSide(p, coin, sfSpot, sec, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.IMBALANCE -> ShockFav.imbalanceSide(p, yb, ya, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
+                        ShockFav.Kind.SIMPLE_DIP -> simpleDipSide(key, p, q)
                         ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, 5)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { if (it > 0) "NO" else "YES" } else null
                         else -> null
                     } ?: continue

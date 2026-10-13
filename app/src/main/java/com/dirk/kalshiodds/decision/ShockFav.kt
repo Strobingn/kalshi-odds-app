@@ -25,7 +25,7 @@ object ShockFav {
     val MEDIAN_SIGMA: Map<String, Double> = mapOf("BTC" to 2.654e-5, "ETH" to 3.990e-5, "SOL" to 7.569e-5)
 
     /** 0.3.59 rule families. SHOCK_FAV = shock and/or late-fav legs; the rest are single-leg. */
-    enum class Kind { SHOCK_FAV, LAGGARD, FADE_MAKER, IMBALANCE }
+    enum class Kind { SHOCK_FAV, LAGGARD, FADE_MAKER, IMBALANCE, SIMPLE_DIP }
     /** 0.3.59: Scalp tab is Bitcoin only — sf scalpers trade BTC; ETH/SOL spot is signal input only. */
     const val TRADE_COIN = "BTC"
 
@@ -62,6 +62,11 @@ object ShockFav {
         val gap: Double = 0.05,
         val amax: Double = 0.97,
         val brti: Boolean = false,
+        /** 0.3.63 Simple dip: buy a side when its ask is ≥ dip below its own rolling 5-min average ask (price only). */
+        val dip: Double = 0.0,
+        /** 0.3.63 sf32: take profit only when the gain per contract after both taker fees exceeds tp. */
+        val tpNet: Boolean = false,
+        val group: String? = null,
         /** Walk-forward test-day result of bt58 (per trade, $, 10-ct clips, after fees) and its 95 % CI, for the card. */
         val oos: String = ""
     ) {
@@ -70,7 +75,9 @@ object ShockFav {
         fun summary(): String = when (kind) {
             Kind.LAGGARD -> String.format(java.util.Locale.US, "BTC lags: ETH+SOL move ≥%.0fbp/%ds same way, BTC < half → buy BTC that way; +%.0f¢ TP, hold ≤%ds", xBp, yS, tp * 100, maxHoldS)
             Kind.FADE_MAKER -> String.format(java.util.Locale.US, "after a ≥%.0fbp/5s shock, rest a bid on the dumped side (trade-through fills, fee 0); ask at +%.0f¢, else exit ≤%ds", xBp, tp * 100, maxHoldS)
-            Kind.IMBALANCE -> String.format(java.util.Locale.US, "top-of-book size ≥%.0f%% one side, spread ≤2¢ → buy that side, hold %ds", imbR * 100, maxHoldS)
+            Kind.IMBALANCE -> String.format(java.util.Locale.US, "top-of-book size ≥%.0f%% one side, spread ≤2¢ → buy that side, hold %ds", imbR * 100, maxHoldS) +
+                (if (tpNet) String.format(java.util.Locale.US, "; take profit when gain after fees > %.0f¢", tp * 100) else "")
+            Kind.SIMPLE_DIP -> String.format(java.util.Locale.US, "price only: ask ≥%.0f¢ below its 5-min average → buy; sell +%.0f¢, stop 15¢, out 60 s before close", dip * 100, tp * 100)
             Kind.SHOCK_FAV -> summaryShockFav()
         } + (if (offUsHours) " · off-US hours" else "")
         private fun summaryShockFav(): String = buildString {
@@ -81,6 +88,18 @@ object ShockFav {
         }
     }
 
+    /** bt63 (BTC, 2 s delay, walk-forward) test-day results — filled from report63_btc.json. */
+    private val SIMPLE_OOS: Map<String, String> = mapOf("sf41" to "BTC 2s delay: -0.41/trade (-0.47…-0.35) n=2122", "sf42" to "BTC 2s delay: -0.44/trade (-0.53…-0.35) n=1615", "sf43" to "BTC 2s delay: -0.41/trade (-0.48…-0.34) n=1716", "sf44" to "BTC 2s delay: -0.44/trade (-0.53…-0.34) n=1419")
+    private val SIMPLE_NOEDGE: Map<String, Boolean> = mapOf("sf41" to true, "sf42" to true, "sf43" to true, "sf44" to true)
+    const val SIMPLE_WINDOW_MS = 300_000L
+    const val SIMPLE_MIN_HISTORY_MS = 240_000L
+    /** Pure Simple-dip entry rule. */
+    fun simpleDipSide(p: Params, askYes: Double?, avgYes: Double, askNo: Double?, avgNo: Double): String? = when {
+        askYes != null && askYes in 0.05..0.95 && askYes <= avgYes - p.dip + 1e-9 -> "YES"
+        askNo != null && askNo in 0.05..0.95 && askNo <= avgNo - p.dip + 1e-9 -> "NO"
+        else -> null
+    }
+    fun v(code: String): Params = VARIANTS.first { it.code == code }
     val VARIANTS: List<Params> = listOf(
         Params("sf01", "Shock base", noEdge2s = true, oos = "BTC 2s delay: -0.25/trade (-0.48…-0.02) n=92"),
         Params("sf02", "Shock fast 3s", xBp = 6.0, yS = 3, lag = 0.06, maxHoldS = 60, noEdge2s = true, oos = "BTC 2s delay: -0.41/trade (-0.74…-0.07) n=31"),
@@ -110,17 +129,23 @@ object ShockFav {
         Params("sf28", "Overshoot fade (maker)", kind = Kind.FADE_MAKER, shock = false, xBp = 8.0, ttlS = 20, tp = 0.04, maxHoldS = 60, noEdge2s = true, oos = "BTC 2s delay: -0.52/trade (-0.88…-0.21) n=27"),
         Params("sf29", "Final-60s average edge", shock = false, fav = true, brti = true, fmin = 0.75, gap = 0.08, favTmin = 5.0, amax = 0.95, noEdge2s = true, oos = "BTC 2s delay: -0.44/trade (-1.43…+0.51) n=52"),
         Params("sf30", "Book imbalance", kind = Kind.IMBALANCE, shock = false, imbR = 0.85, maxHoldS = 90, noEdge2s = true, oos = "BTC 2s delay: -0.36/trade (-0.43…-0.29) n=2639"),
-        Params("sf31", "Late fav strict off-US hours", shock = false, fav = true, fmin = 0.95, amax = 0.95, offUsHours = true, noEdge2s = false, oos = "BTC 2s delay: +1.43/trade (+0.23…+3.01) n=16")
+        Params("sf31", "Late fav strict off-US hours", shock = false, fav = true, fmin = 0.95, amax = 0.95, offUsHours = true, noEdge2s = false, oos = "BTC 2s delay: +1.43/trade (+0.23…+3.01) n=16"),
+        // 0.3.63 queued copy + four Simple dip scalpers (price only; group "Simple").
+        Params("sf32", "Book imbalance, net TP >2¢", kind = Kind.IMBALANCE, shock = false, imbR = 0.85, maxHoldS = 90, tp = 0.02, tpNet = true, noEdge2s = true, oos = "copy of sf30 + net take-profit; not separately backtested"),
+        Params("sf41", "Simple dip 5¢ → +8¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.05, tp = 0.08, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf41"), oos = SIMPLE_OOS.getValue("sf41")),
+        Params("sf42", "Simple dip 5¢ → +15¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.05, tp = 0.15, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf42"), oos = SIMPLE_OOS.getValue("sf42")),
+        Params("sf43", "Simple dip 10¢ → +8¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.10, tp = 0.08, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf43"), oos = SIMPLE_OOS.getValue("sf43")),
+        Params("sf44", "Simple dip 10¢ → +15¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.10, tp = 0.15, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf44"), oos = SIMPLE_OOS.getValue("sf44"))
     )
     private val BY_CODE = VARIANTS.associateBy { it.code }
 
     fun isShockFav(variantId: String): Boolean = variantId.length >= 4 && variantId.startsWith(PREFIX) && variantId[2].isDigit()
     /** 0.3.61 per-bet stop (¢ below entry, at the side's bid). bt61 train-chosen level per variant (BTC, 2 s delay); "none" or not studied → 25¢ (widest). */
-    val STOP_C: Map<String, Int> = mapOf("sf16" to 10, "sf18" to 10, "sf21" to 10, "sf23" to 10, "sf17" to 15, "sf19" to 15)
+    val STOP_C: Map<String, Int> = mapOf("sf41" to 15, "sf42" to 15, "sf43" to 15, "sf44" to 15, "sf16" to 10, "sf18" to 10, "sf21" to 10, "sf23" to 10, "sf17" to 15, "sf19" to 15)
     fun stopC(p: Params): Int = STOP_C[p.code] ?: 25
     /** True when bt61's train split chose a stop (else the 25¢ default is a backstop only). */
     fun stopTrainChosen(p: Params): Boolean = p.code in TRAIN_CHOSE
-    private val TRAIN_CHOSE = setOf("sf01", "sf02", "sf05", "sf07", "sf08", "sf09", "sf12", "sf15", "sf20", "sf16", "sf18", "sf21", "sf23", "sf17", "sf19")
+    private val TRAIN_CHOSE = setOf("sf41", "sf42", "sf43", "sf44", "sf01", "sf02", "sf05", "sf07", "sf08", "sf09", "sf12", "sf15", "sf20", "sf16", "sf18", "sf21", "sf23", "sf17", "sf19")
     /** 0.3.61 labels (nothing deleted). */
     val TAGS: Map<String, String> = mapOf(
         "sf01" to "duplicate: identical trades to sf09 on the BTC-only tab",

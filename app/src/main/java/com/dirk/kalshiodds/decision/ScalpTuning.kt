@@ -150,6 +150,13 @@ data class ScalpParams(
         val HOLD60_SIBLINGS: List<ScalpParams> by lazy {
             listOf(ScalpStrategy.DIP_HUNTER, ScalpStrategy.MOMENTUM).map { STRATEGY_SEEDS.getValue(it).copy(hold60 = true) }
         }
+        /** 0.3.63 queued copies: Fair-gap hold (BTC seed, hold60) and Dip / Momentum with no early take-profit (stop kept). */
+        val QUEUED_COPIES: List<ScalpParams> by lazy {
+            listOf(seedFor("BTC").copy(hold60 = true),
+                STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER).copy(target = NO_TP),
+                STRATEGY_SEEDS.getValue(ScalpStrategy.MOMENTUM).copy(target = NO_TP))
+        }
+        const val NO_TP = 0.99
         val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
 
         /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */
@@ -163,7 +170,7 @@ data class ScalpParams(
          */
         private val BY_ID: Map<String, ScalpParams> by lazy {
             val m = LinkedHashMap<String, ScalpParams>()
-            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS + HOLD60_SIBLINGS).forEach { m.putIfAbsent(it.id, it) }
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS + HOLD60_SIBLINGS + QUEUED_COPIES).forEach { m.putIfAbsent(it.id, it) }
             m
         }
 

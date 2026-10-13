@@ -20,6 +20,10 @@ object ScalpModels {
         /** 0.3.61 siblings: paper copies next to the unchanged originals. */
         DIP_HOLD("diph60", "Dip-hunter hold", "Dip-hunter entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
         MOMO_HOLD("momoh60", "Momentum-sniper hold", "Momentum-sniper entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
+        /** 0.3.63 queued copies. */
+        FAIR_HOLD("fairh60", "Fair-gap hold", "Fair-gap entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
+        DIP_NOTP("dipnotp", "Dip-hunter no TP", "Dip-hunter entries and stop; no early take-profit target"),
+        MOMO_NOTP("momonotp", "Momentum-sniper no TP", "Momentum-sniper entries and stop; no early take-profit target"),
         // 0.3.57 sf57: twenty shock-lag / late-favourite paper scalpers (see ShockFav).
         SF01("sf01", "sf01 " + ShockFav.VARIANTS[0].label, ShockFav.VARIANTS[0].summary()),
         SF02("sf02", "sf02 " + ShockFav.VARIANTS[1].label, ShockFav.VARIANTS[1].summary()),
@@ -49,7 +53,12 @@ object ScalpModels {
         SF28("sf28", "sf28 " + ShockFav.VARIANTS[25].label, ShockFav.VARIANTS[25].summary()),
         SF29("sf29", "sf29 " + ShockFav.VARIANTS[26].label, ShockFav.VARIANTS[26].summary()),
         SF30("sf30", "sf30 " + ShockFav.VARIANTS[27].label, ShockFav.VARIANTS[27].summary()),
-        SF31("sf31", "sf31 " + ShockFav.VARIANTS[28].label, ShockFav.VARIANTS[28].summary())
+        SF31("sf31", "sf31 " + ShockFav.VARIANTS[28].label, ShockFav.VARIANTS[28].summary()),
+        SF32("sf32", "sf32 " + ShockFav.v("sf32").label, ShockFav.v("sf32").summary()),
+        SF41("sf41", "Simple · sf41 " + ShockFav.v("sf41").label, ShockFav.v("sf41").summary()),
+        SF42("sf42", "Simple · sf42 " + ShockFav.v("sf42").label, ShockFav.v("sf42").summary()),
+        SF43("sf43", "Simple · sf43 " + ShockFav.v("sf43").label, ShockFav.v("sf43").summary()),
+        SF44("sf44", "Simple · sf44 " + ShockFav.v("sf44").label, ShockFav.v("sf44").summary())
     }
 
     val ALL: List<Model> = Model.values().toList()
@@ -73,7 +82,9 @@ object ScalpModels {
     fun sliceUsd(bankrollUsd: Double): Double = (bankrollUsd.takeIf { it.isFinite() } ?: 0.0).coerceAtLeast(0.0)
 
     fun modelOf(p: ScalpParams): Model =
-        if (p.hold60) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_HOLD else Model.DIP_HOLD) else if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
+        if (p.hold60 && p.strategy == ScalpStrategy.FAIR_GAP) Model.FAIR_HOLD
+        else if (p.target >= ScalpParams.NO_TP - 1e-9) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_NOTP else Model.DIP_NOTP)
+        else if (p.hold60) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_HOLD else Model.DIP_HOLD) else if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
 
     fun modelOf(s: ScalpStrategy): Model = when (s) {
         ScalpStrategy.FAIR_GAP -> Model.FAIR_GAP
@@ -101,12 +112,15 @@ object ScalpModels {
             Model.DIP_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[0].stop * 100)}¢ after 60s"
             Model.MOMO_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[1].stop * 100)}¢ after 60s"
             Model.FAIR_GAP -> "stop per-coin tuned"
+            Model.FAIR_HOLD -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[0].stop * 100)}¢ after 60s"
+            Model.DIP_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[1].stop * 100)}¢"
+            Model.MOMO_NOTP -> "stop ${Math.round(ScalpParams.QUEUED_COPIES[2].stop * 100)}¢"
             else -> ScalpModels.legacyStop(m)
         }
     }
     private fun legacyStop(m: Model): String = ScalpStrategy.values().firstOrNull { modelOf(it) == m }
         ?.let { "stop ${Math.round(ScalpParams.STRATEGY_SEEDS.getValue(it).stop * 100)}¢" } ?: "stop ${Math.round(MAKER_DIP_PARAMS.stop * 100)}¢"
-    fun tag(m: Model): String? = ShockFav.TAGS[m.code]
+    fun tag(m: Model): String? = ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }
     /** Σ (actual − no-stop shadow) over closed trades whose note carries "nostop=±x.xx". Positive = the stop saved money. */
     fun stopSaved(trades: List<ScalpTrade>): Pair<Double, Int> {
         var s = 0.0; var n = 0
