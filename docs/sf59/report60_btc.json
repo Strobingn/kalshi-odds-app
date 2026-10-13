@@ -1,0 +1,194 @@
+{
+ "delay_s": 2,
+ "train": [
+  "2026-09-25",
+  "2026-09-26",
+  "2026-09-27",
+  "2026-09-28",
+  "2026-09-29",
+  "2026-09-30",
+  "2026-10-01",
+  "2026-10-02",
+  "2026-10-03",
+  "2026-10-04"
+ ],
+ "test": [
+  "2026-10-05",
+  "2026-10-06",
+  "2026-10-07",
+  "2026-10-08",
+  "2026-10-09",
+  "2026-10-10"
+ ],
+ "rep": {
+  "sf21 Late fav \u226597% fair": {
+   "params": {
+    "fmin": 0.97,
+    "gap": 0.03,
+    "amax": 0.97
+   },
+   "train_n": 50,
+   "train_net": -1.36,
+   "oos_n": 16,
+   "oos_net": 22.41,
+   "oos_per_trade": 1.4006,
+   "ci_lo": 0.2936,
+   "ci_hi": 2.92
+  },
+  "sf22 Late fav strict \u226440s": {
+   "params": {
+    "fmin": 0.95,
+    "gap": 0.05,
+    "tmax": 40,
+    "amax": 0.95
+   },
+   "train_n": 24,
+   "train_net": -4.67,
+   "oos_n": 8,
+   "oos_net": 16.02,
+   "oos_per_trade": 2.0025,
+   "ci_lo": -0.3738,
+   "ci_hi": 4.8601
+  },
+  "sf23 Late fav strict 10\u201330s": {
+   "params": {
+    "fmin": 0.95,
+    "gap": 0.05,
+    "tmin": 10,
+    "tmax": 30,
+    "amax": 0.95
+   },
+   "train_n": 23,
+   "train_net": 4.48,
+   "oos_n": 10,
+   "oos_net": 17.91,
+   "oos_per_trade": 1.791,
+   "ci_lo": 0.008,
+   "ci_hi": 4.2082
+  },
+  "sf24 Late fav strict 60s-avg fair": {
+   "params": {
+    "brti": true,
+    "fmin": 0.95,
+    "gap": 0.03,
+    "amax": 0.95
+   },
+   "train_n": 131,
+   "train_net": 17.92,
+   "oos_n": 50,
+   "oos_net": -2.55,
+   "oos_per_trade": -0.051,
+   "ci_lo": -0.9729,
+   "ci_hi": 0.8661
+  },
+  "sf25 Late fav strict BTC": {
+   "params": {
+    "coins": [
+     "BTC"
+    ],
+    "fmin": 0.95,
+    "gap": 0.05,
+    "amax": 0.95
+   },
+   "train_n": 50,
+   "train_net": 14.75,
+   "oos_n": 16,
+   "oos_net": 22.9,
+   "oos_per_trade": 1.4313,
+   "ci_lo": 0.2319,
+   "ci_hi": 3.0072
+  },
+  "sf26 Late fav strict ETH+SOL": {
+   "params": {
+    "coins": [
+     "ETH",
+     "SOL"
+    ],
+    "fmin": 0.95,
+    "gap": 0.03,
+    "amax": 0.95
+   },
+   "train_n": 0,
+   "train_net": 0.0,
+   "oos_n": 0,
+   "oos_net": 0,
+   "oos_per_trade": null,
+   "ci_lo": null,
+   "ci_hi": null
+  },
+  "sf27 Cross-coin laggard": {
+   "params": {
+    "X": 8,
+    "Y": 10,
+    "mh": 30,
+    "tp": 0.02
+   },
+   "train_n": 36,
+   "train_net": -17.14,
+   "oos_n": 24,
+   "oos_net": -5.43,
+   "oos_per_trade": -0.2262,
+   "ci_lo": -0.5573,
+   "ci_hi": 0.0074
+  },
+  "sf28 Overshoot fade (maker)": {
+   "params": {
+    "X": 8,
+    "ttl": 20,
+    "tp": 0.04,
+    "mh": 60
+   },
+   "train_n": 70,
+   "train_net": -40.69,
+   "oos_n": 27,
+   "oos_net": -14.17,
+   "oos_per_trade": -0.5248,
+   "ci_lo": -0.8788,
+   "ci_hi": -0.208
+  },
+  "sf29 Final-60s average edge": {
+   "params": {
+    "brti": true,
+    "fmin": 0.75,
+    "gap": 0.08,
+    "tmin": 5,
+    "amax": 0.95
+   },
+   "train_n": 121,
+   "train_net": 26.78,
+   "oos_n": 52,
+   "oos_net": -23.08,
+   "oos_per_trade": -0.4439,
+   "ci_lo": -1.4345,
+   "ci_hi": 0.5101
+  },
+  "sf30 Book imbalance": {
+   "params": {
+    "r": 0.85,
+    "mh": 90
+   },
+   "train_n": 4734,
+   "train_net": -1519.87,
+   "oos_n": 2639,
+   "oos_net": -944.98,
+   "oos_per_trade": -0.3581,
+   "ci_lo": -0.4277,
+   "ci_hi": -0.2886
+  },
+  "sf31 Late fav strict by hours": {
+   "params": {
+    "hours": "nonus",
+    "fmin": 0.95,
+    "gap": 0.05,
+    "amax": 0.95
+   },
+   "train_n": 36,
+   "train_net": 10.56,
+   "oos_n": 16,
+   "oos_net": 22.9,
+   "oos_per_trade": 1.4313,
+   "ci_lo": 0.2319,
+   "ci_hi": 3.0072
+  }
+ }
+}

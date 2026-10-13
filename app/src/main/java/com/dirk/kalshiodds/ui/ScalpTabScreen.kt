@@ -188,15 +188,11 @@ fun ScalpTabContent(
             item(key = "algo-h") {
                 Text("Algorithms", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
             }
-            items(ScalpModels.ALL, key = { "algo-" + it.code }) { m ->
-                AlgoCard(m, st.algoAllTime[m], st.algoToday[m], st.algoByCoin[m].orEmpty()) { onOpenAlgo(m) }
+            items(ScalpModels.CARD_ORDER, key = { "algo-" + it.code }) { m ->
+                AlgoCard(m, st.algoAllTime[m], st.algoToday[m], emptyMap()) { onOpenAlgo(m) }
             }
-            item(key = "coins-h") {
-                Text("Leaders by coin", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-            }
-        }
-        if (showCoinCards) items(com.dirk.kalshiodds.decision.ScalpParams.COINS, key = { "coin-$it" }) { coin ->
-            CoinCard(coin, st.leaderTodayByCoin[coin].orEmpty())
+            // 0.3.59: one combined Bitcoin leaderboard (no per-coin boards).
+            item(key = "board") { CombinedBoard(ScalpModels.combinedBoard(st.algoAllTime)) }
         }
         item(key = "ladder-card") {
             FieldCard {
@@ -271,6 +267,10 @@ internal fun AlgoCard(
                 modifier = Modifier.border(1.dp, if (holding) c.accentBlue else c.border, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 2.dp)
             )
         }
+        if (ScalpModels.noEdge2s(m)) {
+            Text("no edge at 2s delay", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = c.down, maxLines = 1,
+                modifier = Modifier.border(1.dp, c.down, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
+        }
         com.dirk.kalshiodds.decision.ShockFav.byVariantId(m.code)?.let { p ->
             Text(p.summary(), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("Backtest (test days): " + p.oos, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -294,13 +294,6 @@ internal fun AlgoCard(
         StatPair("Avg win", r?.avgWinUsd?.let { ScalpTabCopy.money(it) } ?: "—", "Avg loss", r?.avgLossUsd?.let { ScalpTabCopy.money(it) } ?: "—")
         StatPair("Open", r?.let { "${it.openContracts} ct" } ?: "—", "Unrealized", r?.takeIf { it.open > 0 }?.let { ScalpTabCopy.money(it.unrealizedUsd) } ?: "—")
         Spacer(Modifier.height(4.dp))
-        Text(
-            com.dirk.kalshiodds.decision.ScalpParams.COINS.joinToString("   ") { coin ->
-                val cr = byCoin[coin]
-                "$coin " + (cr?.takeIf { it.roundTrips > 0 }?.let { ScalpTabCopy.money(it.netUsd) } ?: "—")
-            },
-            style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis
-        )
     }
 }
 
@@ -313,6 +306,26 @@ internal fun StatPair(l1: String, v1: String, l2: String, v2: String) {
         Spacer(Modifier.width(16.dp))
         Text(l2, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = c.textSecondary, maxLines = 1)
         Text(v2, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1, textAlign = TextAlign.End)
+    }
+}
+
+@Composable
+private fun CombinedBoard(rows: List<ScalpModels.Row>) {
+    val c = DipTheme.colors
+    FieldCard {
+        Text("Leaderboard · BTC 15m", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Spacer(Modifier.height(6.dp))
+        rows.forEachIndexed { i, r ->
+            val traded = r.roundTrips > 0
+            Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${i + 1}.", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = c.textSecondary, modifier = Modifier.width(30.dp))
+                Text(r.model.label + if (ScalpModels.noEdge2s(r.model)) " ·no edge" else "", style = MaterialTheme.typography.bodySmall,
+                    color = if (ScalpModels.noEdge2s(r.model)) c.textSecondary else c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text("${r.roundTrips}", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = c.textSecondary, modifier = Modifier.padding(horizontal = 8.dp))
+                Text(if (traded) ScalpTabCopy.money(r.netUsd) else "—", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold, color = if (!traded) c.textSecondary else if (r.netUsd >= 0) c.up else c.down, maxLines = 1)
+            }
+        }
     }
 }
 

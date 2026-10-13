@@ -37,13 +37,31 @@ object ScalpModels {
         SF17("sf17", "sf17 " + ShockFav.VARIANTS[16].label, ShockFav.VARIANTS[16].summary()),
         SF18("sf18", "sf18 " + ShockFav.VARIANTS[17].label, ShockFav.VARIANTS[17].summary()),
         SF19("sf19", "sf19 " + ShockFav.VARIANTS[18].label, ShockFav.VARIANTS[18].summary()),
-        SF20("sf20", "sf20 " + ShockFav.VARIANTS[19].label, ShockFav.VARIANTS[19].summary())
+        SF20("sf20", "sf20 " + ShockFav.VARIANTS[19].label, ShockFav.VARIANTS[19].summary()),
+        SF21("sf21", "sf21 " + ShockFav.VARIANTS[20].label, ShockFav.VARIANTS[20].summary()),
+        SF22("sf22", "sf22 " + ShockFav.VARIANTS[21].label, ShockFav.VARIANTS[21].summary()),
+        SF23("sf23", "sf23 " + ShockFav.VARIANTS[22].label, ShockFav.VARIANTS[22].summary()),
+        SF24("sf24", "sf24 " + ShockFav.VARIANTS[23].label, ShockFav.VARIANTS[23].summary()),
+        SF27("sf27", "sf27 " + ShockFav.VARIANTS[24].label, ShockFav.VARIANTS[24].summary()),
+        SF28("sf28", "sf28 " + ShockFav.VARIANTS[25].label, ShockFav.VARIANTS[25].summary()),
+        SF29("sf29", "sf29 " + ShockFav.VARIANTS[26].label, ShockFav.VARIANTS[26].summary()),
+        SF30("sf30", "sf30 " + ShockFav.VARIANTS[27].label, ShockFav.VARIANTS[27].summary()),
+        SF31("sf31", "sf31 " + ShockFav.VARIANTS[28].label, ShockFav.VARIANTS[28].summary())
     }
 
     val ALL: List<Model> = Model.values().toList()
     val COUNT: Int get() = ALL.size
     private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
     val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) }
+    /** 0.3.59: true for sf variants with no positive BTC 2 s-delay test CI. */
+    fun noEdge2s(m: Model): Boolean = ShockFav.byVariantId(m.code)?.noEdge2s == true
+    /** Card order: 2 s-delay survivors first, then legacy models, then no-edge sf variants (fixed order within groups). */
+    val CARD_ORDER: List<Model> by lazy {
+        ALL.sortedBy { m -> val p = ShockFav.byVariantId(m.code); when { p == null -> 1; !p.noEdge2s -> 0; else -> 2 } }
+    }
+    /** One combined leaderboard: survivors first, then by net. */
+    fun combinedBoard(rows: Map<Model, Row>): List<Row> = ALL.mapNotNull { rows[it] }
+        .sortedWith(compareBy<Row> { if (noEdge2s(it.model)) 1 else 0 }.thenByDescending { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
 
     /** Sixth model: the dip-hunter seed run maker-first (resting bid entry, resting ask exit). */
     val MAKER_DIP_PARAMS: ScalpParams = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER).copy(maker = true)
