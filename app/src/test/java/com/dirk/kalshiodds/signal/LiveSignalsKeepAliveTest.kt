@@ -9,9 +9,9 @@ import org.junit.Test
 class LiveSignalsKeepAliveTest {
 
     @Test
-    fun stickyRestartWhenLiveAndNotExplicitStop() {
-        assertEquals(LiveSignalsPolicy.START_STICKY, LiveSignalsPolicy.startCommand(explicitStop = false))
-        assertTrue(LiveSignalsPolicy.shouldRestartAfterKill(liveEnabled = true, explicitStop = false))
+    fun liveServiceNeverSelfRestartsFromTheBackground() {
+        assertEquals(LiveSignalsPolicy.START_NOT_STICKY, LiveSignalsPolicy.startCommand(explicitStop = false))
+        assertFalse(LiveSignalsPolicy.shouldRestartAfterKill(liveEnabled = true, explicitStop = false))
     }
 
     @Test
@@ -122,7 +122,7 @@ class LiveSignalsKeepAliveTest {
                 foregroundFailed = true
             )
         )
-        assertTrue(
+        assertFalse(
             LiveSignalsPolicy.shouldRestartAfterKill(
                 liveEnabled = true,
                 explicitStop = false,
@@ -137,7 +137,7 @@ class LiveSignalsKeepAliveTest {
     }
 
     @Test
-    fun stopActionAndWatchdogConstantsAreStable() {
+    fun stopActionAndNotificationConstantsAreStable() {
         assertEquals(
             "com.dirk.kalshiodds.signal.service.STOP_LIVE_SIGNALS",
             LiveSignalsPolicy.ACTION_STOP
@@ -147,7 +147,5 @@ class LiveSignalsKeepAliveTest {
         assertEquals("Chat Bitcoin live signals", LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertEquals("diphunter_live_signals_ongoing", LiveSignalsPolicy.CHANNEL_ONGOING)
         assertEquals(45_000L, LiveSignalsPolicy.METADATA_INTERVAL_MS)
-        assertEquals(15L, LiveSignalsPolicy.WATCHDOG_PERIOD_MINUTES)
-        assertTrue(LiveSignalsPolicy.WATCHDOG_SOON_SECONDS in 5L..60L)
     }
 }

@@ -4,16 +4,9 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.util.Log
-import androidx.work.Constraints
 import androidx.work.CoroutineWorker
-import androidx.work.ExistingPeriodicWorkPolicy
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -54,7 +47,9 @@ object LiveSignalsKeepAlive {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "startForegroundService failed: ${t.javaClass.simpleName}: ${t.message}")
-            enqueueSoon(app)
+            // Do not retry through WorkManager: it is itself a background
+            // context and Android can reject a foreground-service launch there.
+            // The next user-visible Activity start retries safely.
         }
     }
 
@@ -92,30 +87,11 @@ object LiveSignalsKeepAlive {
 
     fun enqueueWatchdogs(context: Context) {
         val wm = WorkManager.getInstance(context.applicationContext)
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-        val periodic = PeriodicWorkRequestBuilder<LiveSignalsWatchdogWorker>(
-            LiveSignalsPolicy.WATCHDOG_PERIOD_MINUTES,
-            TimeUnit.MINUTES
-        ).setConstraints(constraints).build()
-        wm.enqueueUniquePeriodicWork(
-            LiveSignalsWatchdogWorker.PERIODIC_NAME,
-            ExistingPeriodicWorkPolicy.UPDATE,
-            periodic
-        )
-    }
-
-    fun enqueueSoon(context: Context) {
-        if (!isEnabled(context)) return
-        val req = OneTimeWorkRequestBuilder<LiveSignalsWatchdogWorker>()
-            .setInitialDelay(LiveSignalsPolicy.WATCHDOG_SOON_SECONDS, TimeUnit.SECONDS)
-            .build()
-        WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-            LiveSignalsWatchdogWorker.SOON_NAME,
-            ExistingWorkPolicy.REPLACE,
-            req
-        )
+        // Clear watchdog work scheduled by earlier app versions. A worker is
+        // background work and is not allowed to resurrect this FGS on Android
+        // 12+; keeping it would recreate the same crash/retry loop.
+        wm.cancelUniqueWork(LiveSignalsWatchdogWorker.PERIODIC_NAME)
+        wm.cancelUniqueWork(LiveSignalsWatchdogWorker.SOON_NAME)
     }
 
     private fun prefs(context: Context) =
@@ -125,14 +101,15 @@ object LiveSignalsKeepAlive {
         )
 }
 
-/** Safety net: re-start the FGS after OEM kills or a missed START_STICKY. */
+/**
+ * Compatibility endpoint for already-enqueued watchdog work from old builds.
+ * It intentionally never starts a foreground service from WorkManager.
+ */
 class LiveSignalsWatchdogWorker(
     appContext: Context,
     params: WorkerParameters
 ) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
-        // WorkManager is a background start — KeepAlive swallows FGS-not-allowed.
-        LiveSignalsKeepAlive.ensureService(applicationContext)
         return Result.success()
     }
 

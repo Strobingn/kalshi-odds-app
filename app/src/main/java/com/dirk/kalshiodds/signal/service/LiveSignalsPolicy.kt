@@ -10,8 +10,6 @@ object LiveSignalsPolicy {
     const val PREFS_ENABLED_KEY = "live_signals_enabled"
 
     const val METADATA_INTERVAL_MS = 45_000L
-    const val WATCHDOG_PERIOD_MINUTES = 15L
-    const val WATCHDOG_SOON_SECONDS = 25L
     const val WAKELOCK_TAG = "diphunter:live-signals"
     const val WAKELOCK_TIMEOUT_MS = 3L * 60L * 60L * 1000L
 
@@ -23,10 +21,10 @@ object LiveSignalsPolicy {
     const val BATTERY_SETTINGS_ACTION = "android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS"
     const val APP_DETAILS_ACTION = "android.settings.APPLICATION_DETAILS_SETTINGS"
 
-    /** Android [android.app.Service.START_STICKY] — restart after the OS reclaims the process. */
+    /** Android [android.app.Service.START_STICKY]. Kept for source compatibility only. */
     const val START_STICKY = 1
 
-    /** Android [android.app.Service.START_NOT_STICKY] — user asked us to stay down. */
+    /** Android [android.app.Service.START_NOT_STICKY] — do not self-restart from the background. */
     const val START_NOT_STICKY = 2
 
     /**
@@ -39,8 +37,13 @@ object LiveSignalsPolicy {
     const val TICKET_REBUILD_DEBOUNCE_MS = 300L
     const val LIFECYCLE_CHANNEL = "market_lifecycle_v2"
 
-    fun startCommand(explicitStop: Boolean): Int =
-        if (explicitStop) START_NOT_STICKY else START_STICKY
+    /**
+     * A killed foreground service must not ask Android to resurrect it from a
+     * background context. On Android 12+ that can be rejected and turn an OEM
+     * kill into a process crash loop. The next Activity foreground start owns
+     * resumption instead.
+     */
+    fun startCommand(explicitStop: Boolean): Int = START_NOT_STICKY
 
     /**
      * Application.onCreate is too early / often still "background" for FGS.
@@ -62,7 +65,7 @@ object LiveSignalsPolicy {
         liveEnabled: Boolean,
         explicitStop: Boolean,
         foregroundFailed: Boolean = false
-    ): Boolean = liveEnabled && !explicitStop && !foregroundFailed
+    ): Boolean = false
 
     fun shouldConnectWs(liveEnabled: Boolean, credentialsConfigured: Boolean): Boolean =
         liveEnabled && credentialsConfigured

@@ -28,9 +28,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
- * scoring loop while "Live signals" is on. Survives Activity onStop / process
- * reclaim via START_STICKY, onTaskRemoved restart, and a WorkManager watchdog.
- * Analysis / alerts only — no order channels, no auto-fire.
+ * scoring loop while "Live signals" is on. It may continue while Android keeps
+ * this valid foreground service alive, but never self-restarts from a killed
+ * background process. Analysis / alerts only — no order channels, no auto-fire.
  *
  * Crash contract: startForeground is the first thing in onCreate and is
  * wrapped; pipeline / WS / notification failures never kill the process.
@@ -89,7 +89,7 @@ class LiveSignalsService : Service() {
                 }
             }
         }
-        return START_STICKY
+        return LiveSignalsPolicy.startCommand(explicitStop)
     }
 
     private fun bindRollover() {
@@ -345,15 +345,9 @@ class LiveSignalsService : Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        if (LiveSignalsPolicy.shouldRestartAfterKill(
-                LiveSignalsKeepAlive.isEnabled(this),
-                explicitStop,
-                foregroundFailed
-            )
-        ) {
-            LiveSignalsKeepAlive.startService(this)
-            LiveSignalsKeepAlive.enqueueSoon(this)
-        }
+        // Never attempt a foreground-service start here. This callback can run
+        // after the app has entered the background, where Android 12+ may
+        // reject the launch and crash/restart-loop the process.
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -367,34 +361,20 @@ class LiveSignalsService : Service() {
     }
 
     private fun handleDataSyncTimeout() {
-        // API 35 dataSync time-box. Re-promote as dataSync; never specialUse.
-        if (LiveSignalsPolicy.shouldRestartAfterKill(
-                LiveSignalsKeepAlive.isEnabled(this),
-                explicitStop,
-                foregroundFailed
-            )
-        ) {
-            promoteToForeground()
-        } else {
-            stopSelf()
-        }
+        // Android 15 time-boxed the dataSync FGS type. Stop cleanly rather
+        // than immediately re-promoting and risking another background crash.
+        tearDownPipeline()
+        releaseWakeLock()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        stopSelf()
     }
 
     override fun onDestroy() {
-        val restart = LiveSignalsPolicy.shouldRestartAfterKill(
-            LiveSignalsKeepAlive.isEnabled(this),
-            explicitStop,
-            foregroundFailed
-        )
         tearDownPipeline()
         releaseWakeLock()
         runCatching { KalshiOddsApp.from(this).container.hub.wsLive = false }
         scope.cancel()
         super.onDestroy()
-        if (restart) {
-            LiveSignalsKeepAlive.startService(applicationContext)
-            LiveSignalsKeepAlive.enqueueSoon(applicationContext)
-        }
     }
 
     private fun tearDownPipeline() {
