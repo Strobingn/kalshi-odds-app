@@ -58,7 +58,18 @@ object ScalpModels {
         SF41("sf41", "Simple · sf41 " + ShockFav.v("sf41").label, ShockFav.v("sf41").summary()),
         SF42("sf42", "Simple · sf42 " + ShockFav.v("sf42").label, ShockFav.v("sf42").summary()),
         SF43("sf43", "Simple · sf43 " + ShockFav.v("sf43").label, ShockFav.v("sf43").summary()),
-        SF44("sf44", "Simple · sf44 " + ShockFav.v("sf44").label, ShockFav.v("sf44").summary())
+        SF44("sf44", "Simple · sf44 " + ShockFav.v("sf44").label, ShockFav.v("sf44").summary()),
+        SF51("sf51", "Open 50 · sf51 " + ShockFav.v("sf51").label, ShockFav.v("sf51").summary()),
+        SF52("sf52", "Open 50 · sf52 " + ShockFav.v("sf52").label, ShockFav.v("sf52").summary()),
+        SF53("sf53", "Open 50 · sf53 " + ShockFav.v("sf53").label, ShockFav.v("sf53").summary()),
+        SF54("sf54", "Open 50 · sf54 " + ShockFav.v("sf54").label, ShockFav.v("sf54").summary()),
+        SF55("sf55", "Open 50 · sf55 " + ShockFav.v("sf55").label, ShockFav.v("sf55").summary()),
+        SF56("sf56", "Open 50 · sf56 " + ShockFav.v("sf56").label, ShockFav.v("sf56").summary()),
+        SF57("sf57", "Open 50 · sf57 " + ShockFav.v("sf57").label, ShockFav.v("sf57").summary()),
+        SF58("sf58", "Open 50 · sf58 " + ShockFav.v("sf58").label, ShockFav.v("sf58").summary()),
+        SF59("sf59", "Open 50 · sf59 " + ShockFav.v("sf59").label, ShockFav.v("sf59").summary()),
+        SF60("sf60", "Open 50 · sf60 " + ShockFav.v("sf60").label, ShockFav.v("sf60").summary()),
+        SF61("sf61", "Open 50 · sf61 " + ShockFav.v("sf61").label, ShockFav.v("sf61").summary())
     }
 
     val ALL: List<Model> = Model.values().toList()
