@@ -228,7 +228,7 @@ object SignalConstants {
     /** Hard cap for the auto daily-loss slider. */
     const val AUTO_DAILY_LOSS_HARD_CAP_USD = 250.0
 
-    /** Max concurrent auto-opened positions (one per strategy scalper). */
+    /** Max concurrent auto-opened positions — the 24 strategy scouts race for these slots. */
     const val AUTO_MAX_OPEN_POSITIONS = 4
 
     /** Max auto order attempts per calendar day (buys + sells). */
