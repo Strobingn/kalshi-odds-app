@@ -158,6 +158,7 @@ object ScalpModels {
             closed.filter { it.entryCostUsd > 0.0 }.map { it.windowKey to it.netUsd!! / it.entryCostUsd },
             resamples = resamples
         )
+        val ss = stopSaved(closed)
         return Row(
             model = model,
             netUsd = net,
@@ -176,8 +177,8 @@ object ScalpModels {
             losses = losses.count { it.netUsd!! < 0.0 },
             openContracts = active.filter { it.state != ScalpState.PENDING_ENTRY }.sumOf { it.remaining.coerceAtLeast(0) },
             feesUsd = closed.sumOf { it.entryFeeUsd + it.exitFeeUsd },
-            stopSavedUsd = stopSaved(closed).first,
-            stopsHit = stopSaved(closed).second,
+            stopSavedUsd = ss.first,
+            stopsHit = ss.second,
             stopLabel = stopLabel(model)
         )
     }

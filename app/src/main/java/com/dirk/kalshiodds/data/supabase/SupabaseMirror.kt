@@ -57,7 +57,8 @@ class SupabaseMirror(
         var hitPageCap = false
         for (kind in RESTORE_KINDS) {
             var after: String? = null
-            while (pages < MAX_PAGES) {
+            var kindPages = 0
+            while (pages < MAX_PAGES && kindPages < MAX_PAGES_PER_KIND) {
                 val page = try {
                     fetchPage(settings, kind, after)
                 } catch (e: SyncHttpException) {
@@ -68,10 +69,10 @@ class SupabaseMirror(
                     return Restore(ImportBatch(), emptyList(), "Restore stopped: diphunter_sync pages did not advance.")
                 }
                 rows += page.filter { it.kind == kind }
-                pages++
+                pages++; kindPages++
                 if (page.size < pageSize || last == null) break
                 after = last
-                if (pages >= MAX_PAGES) hitPageCap = true
+                if (pages >= MAX_PAGES || kindPages >= MAX_PAGES_PER_KIND) hitPageCap = true
             }
         }
         return assemble(rows, seen, hitPageCap)
@@ -187,7 +188,10 @@ class SupabaseMirror(
 
     companion object {
         const val PAGE_SIZE = 1000
-        const val MAX_PAGES = 200
+        /** 0.3.62: total and per-kind caps keep restore memory bounded (snapshot alone has 200k+ rows; loading
+         *  all of them at once ran the phone out of memory once keyset paging made every page fast). */
+        const val MAX_PAGES = 40
+        const val MAX_PAGES_PER_KIND = 10
         val RESTORE_KINDS = listOf(
             "snapshot",
             "alert",
