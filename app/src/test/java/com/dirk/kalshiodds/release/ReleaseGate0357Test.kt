@@ -26,7 +26,7 @@ class ReleaseGate0357Test {
     @Test fun twentyVariantsDistinctAndMapped() {
         assertEquals(29, ShockFav.VARIANTS.size)
         assertEquals(29, ShockFav.VARIANTS.map { it.code }.toSet().size)
-        assertEquals(37, ScalpModels.ALL.size)
+        assertEquals(39, ScalpModels.ALL.size)
         assertEquals(29, ScalpModels.SF_MODELS.size)
         assertTrue(ShockFav.isShockFav("sf07") && ShockFav.isShockFav("sf20f") && !ShockFav.isShockFav("fcride-h300"))
     }

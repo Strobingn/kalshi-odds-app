@@ -50,44 +50,43 @@ class SupabaseMirror(
         if (!settings.supabaseConfigured) {
             return Restore(ImportBatch(), emptyList(), "Supabase is not configured")
         }
+        // 0.3.61 keyset paging per kind (kind=eq.K, key > last key, order key.asc) on the (kind,key) index —
+        // replaces kind=in.(…) + OFFSET, which rescanned skipped rows and hit the 3 s anon statement_timeout.
         val rows = ArrayList<SyncMerge.Record>()
-        var offset = 0
-        var previousFirstKey: String? = null
         var pages = 0
         var hitPageCap = false
-        while (pages < MAX_PAGES) {
-            val page = try {
-                fetchPage(settings, offset)
-            } catch (e: SyncHttpException) {
-                return Restore(ImportBatch(), emptyList(), soften(e.message ?: "restore failed"))
+        for (kind in RESTORE_KINDS) {
+            var after: String? = null
+            while (pages < MAX_PAGES) {
+                val page = try {
+                    fetchPage(settings, kind, after)
+                } catch (e: SyncHttpException) {
+                    return Restore(ImportBatch(), emptyList(), soften(e.message ?: "restore failed"))
+                }
+                val last = page.lastOrNull()?.key
+                if (last != null && after != null && last <= after) {
+                    return Restore(ImportBatch(), emptyList(), "Restore stopped: diphunter_sync pages did not advance.")
+                }
+                rows += page.filter { it.kind == kind }
+                pages++
+                if (page.size < pageSize || last == null) break
+                after = last
+                if (pages >= MAX_PAGES) hitPageCap = true
             }
-            val first = page.firstOrNull()?.key
-            if (first != null && first == previousFirstKey) {
-                return Restore(
-                    ImportBatch(),
-                    emptyList(),
-                    "Restore stopped: diphunter_sync pages did not advance."
-                )
-            }
-            previousFirstKey = first
-            rows += page
-            pages++
-            if (page.size < pageSize) break
-            offset += page.size
-            if (pages >= MAX_PAGES) hitPageCap = true
         }
         return assemble(rows, seen, hitPageCap)
     }
 
-    private fun fetchPage(settings: DataHubSettings, offset: Int): List<SyncMerge.Record> {
-        val url = settings.supabaseUrl.trimEnd('/').toHttpUrl().newBuilder()
+    private fun fetchPage(settings: DataHubSettings, kind: String, afterKey: String?): List<SyncMerge.Record> {
+        val b = settings.supabaseUrl.trimEnd('/').toHttpUrl().newBuilder()
             .addPathSegments("rest/v1/${SupabaseSync.TABLE}")
             .addEncodedQueryParameter("select", "key,kind,updated_at,payload")
+            .addEncodedQueryParameter("kind", "eq.$kind")
             .addEncodedQueryParameter("key", "like.${SupabaseSync.KEY_PREFIX}*")
-            .addEncodedQueryParameter("kind", "in.(${RESTORE_KINDS.joinToString(",")})")
+        if (afterKey != null) b.addQueryParameter("key", "gt.$afterKey")
+        val url = b
             .addEncodedQueryParameter("order", "key.asc")
             .addEncodedQueryParameter("limit", pageSize.toString())
-            .addEncodedQueryParameter("offset", offset.toString())
             .build()
         val req = Request.Builder()
             .url(url)

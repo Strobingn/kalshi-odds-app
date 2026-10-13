@@ -115,6 +115,18 @@ object ShockFav {
     private val BY_CODE = VARIANTS.associateBy { it.code }
 
     fun isShockFav(variantId: String): Boolean = variantId.length >= 4 && variantId.startsWith(PREFIX) && variantId[2].isDigit()
+    /** 0.3.61 per-bet stop (¢ below entry, at the side's bid). bt61 train-chosen level per variant (BTC, 2 s delay); "none" or not studied → 25¢ (widest). */
+    val STOP_C: Map<String, Int> = mapOf("sf16" to 10, "sf18" to 10, "sf21" to 10, "sf23" to 10, "sf17" to 15, "sf19" to 15)
+    fun stopC(p: Params): Int = STOP_C[p.code] ?: 25
+    /** True when bt61's train split chose a stop (else the 25¢ default is a backstop only). */
+    fun stopTrainChosen(p: Params): Boolean = p.code in TRAIN_CHOSE
+    private val TRAIN_CHOSE = setOf("sf01", "sf02", "sf05", "sf07", "sf08", "sf09", "sf12", "sf15", "sf20", "sf16", "sf18", "sf21", "sf23", "sf17", "sf19")
+    /** 0.3.61 labels (nothing deleted). */
+    val TAGS: Map<String, String> = mapOf(
+        "sf01" to "duplicate: identical trades to sf09 on the BTC-only tab",
+        "sf09" to "duplicate: identical trades to sf01 on the BTC-only tab",
+        "sf10" to "zero trades: ETH+SOL only, tab is BTC-only",
+        "sf11" to "zero trades: calm-regime filter never fired on BTC in backtest")
     fun byVariantId(variantId: String): Params? = if (isShockFav(variantId)) BY_CODE[variantId.take(4)] else null
     fun isFavLeg(variantId: String): Boolean = isShockFav(variantId) && variantId.endsWith("f")
 

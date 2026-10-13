@@ -42,19 +42,21 @@ class SupabaseMirrorRestoreTest {
         )
         val script = Pages(
             mapOf(
-                0 to "[$yes,$no]",
-                2 to "[$paper]"
+                "snapshot|" to "[$no,$yes]",
+                "paper|" to "[$paper]"
             )
         )
         val restore = SupabaseMirror(client(script), pageSize = 2).restore(hub, SeenKeys())
-        assertEquals(listOf(0, 2), script.offsets)
+        // keyset: snapshot page full (2) → next snapshot page after last key; paper short page → done
+        assertTrue(script.offsets.contains("snapshot|kashi:snapshot:KXBTC15M-A:42:YES"))
+        assertTrue(script.urls.none { it.contains("offset=") })
         assertTrue(script.urls.all { it.contains("/diphunter_sync?") || it.contains("/diphunter_sync&") || it.contains("diphunter_sync") })
         assertTrue(script.urls.all { it.contains("order=key.asc") })
         assertTrue(script.urls.all { it.contains("key=like.kashi") })
-        assertTrue(script.urls.all { it.contains("kind=in.") })
-        assertTrue(script.urls.all { it.contains("snapshot") && it.contains("paper") })
+        assertTrue(script.urls.all { it.contains("kind=eq.") })
+        assertTrue(script.urls.any { it.contains("kind=eq.snapshot") } && script.urls.any { it.contains("kind=eq.paper") })
         assertTrue(script.urls.none { it.contains("diphunter_snapshots") })
-        assertEquals(listOf("YES", "NO"), restore.batch.snapshots.map { it.side })
+        assertEquals(setOf("YES", "NO"), restore.batch.snapshots.map { it.side }.toSet())
         assertEquals(1, restore.paper.size)
         assertEquals("p1", restore.paper.single().id)
         assertTrue(restore.message.contains("2 snapshots"))
@@ -65,12 +67,12 @@ class SupabaseMirrorRestoreTest {
     fun emptyTableIsACleanRestore() {
         val script = Pages(emptyMap(), fallback = "[]")
         val restore = SupabaseMirror(client(script), pageSize = 2).restore(hub, SeenKeys())
-        assertEquals(listOf(0), script.offsets)
+        assertEquals(SupabaseMirror.RESTORE_KINDS.size, script.urls.size)
         assertTrue(restore.batch.snapshots.isEmpty())
         assertTrue(restore.paper.isEmpty())
         assertTrue(restore.message.contains("no kashi rows"))
         assertFalse(restore.message.contains("diphunter_snapshots"))
-        assertTrue(script.urls.single().contains("diphunter_sync"))
+        assertTrue(script.urls.all { it.contains("diphunter_sync") })
     }
 
     @Test
@@ -99,16 +101,18 @@ class SupabaseMirrorRestoreTest {
     private fun client(script: Pages) = OkHttpClient.Builder().addInterceptor(script).build()
 
     private class Pages(
-        private val bodies: Map<Int, String>,
+        private val bodies: Map<String, String>,
         private val fallback: String = "[]",
         private val code: Int = 200
     ) : Interceptor {
         val urls = mutableListOf<String>()
-        val offsets = mutableListOf<Int>()
+        val offsets = mutableListOf<String>()
         override fun intercept(chain: Interceptor.Chain): Response {
             val url = chain.request().url
             urls += url.toString()
-            val offset = url.queryParameter("offset")?.toIntOrNull() ?: -1
+            val kind = url.queryParameter("kind")?.removePrefix("eq.") ?: ""
+            val after = url.queryParameterValues("key").firstOrNull { it?.startsWith("gt.") == true }?.removePrefix("gt.") ?: ""
+            val offset = "$kind|$after"
             offsets += offset
             val text = if (code == 200) bodies[offset] ?: fallback else fallback
             return Response.Builder()
