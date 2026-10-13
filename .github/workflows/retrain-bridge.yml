@@ -1,0 +1,42 @@
+name: Retrain Mis_bitcoin model (bridge)
+
+# Scheduled workflows only run from the default branch. This bridge lives on
+# main and, on a weekly cron, starts train-edge-model.yml AT THE Mis_bitcoin
+# REF through the workflow-dispatch API, so that model actually retrains on
+# fresh settled data. (repository_dispatch can't do this: it always runs the
+# default branch's copy of a workflow.) The dispatch needs a file with the
+# same name on the default branch; main has one, and `ref` picks the
+# Mis_bitcoin version of it, inputs included.
+#
+# Requires a repo-scoped PAT with repo access stored as the secret
+# RETRAIN_DISPATCH_TOKEN (the default GITHUB_TOKEN cannot send dispatches
+# cross-branch in some configurations). Until that secret exists, the
+# dispatch step fails softly and the run stays green.
+
+on:
+  schedule:
+    # Monday 08:41 UTC — after the weekend's settled windows.
+    - cron: "41 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Start the Mis_bitcoin trainer
+        env:
+          GH_TOKEN: ${{ secrets.RETRAIN_DISPATCH_TOKEN }}
+        run: |
+          set -eu
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "RETRAIN_DISPATCH_TOKEN secret not set — nothing to do."
+            exit 0
+          fi
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/train-edge-model.yml/dispatches \
+            -f ref=Mis_bitcoin \
+            -f "inputs[days]=270"
+          echo "started train-edge-model.yml on Mis_bitcoin (days=270)"

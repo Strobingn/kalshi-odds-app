@@ -97,6 +97,15 @@ class ParseTest(unittest.TestCase):
         )
         self.assertEqual(",".join(HEADERS["trades"]), "ts_ms,ticker,yes_price,count,taker_side")
         self.assertEqual(",".join(HEADERS["settle"]), "ticker,close_ms,strike,result")
+        self.assertEqual(",".join(HEADERS["index"]), "ts_ms,asset,index_id,value,avg_60,final_minute_avg")
+
+    def test_index_rows_written_by_the_app(self):
+        t0 = 1790596800000
+        text = f"{','.join(HEADERS['index'])}\n{t0},BTC,BRTI,65012.3,65010.1,\n{t0 + 1000},BTC,BRTI,65013,,65011.5\n"
+        rows = parse_csv("index", text)
+        self.assertEqual(rows[0], {"ts_ms": t0, "asset": "BTC", "index_id": "BRTI", "value": 65012.3,
+                                   "avg_60": 65010.1, "final_minute_avg": None})
+        self.assertEqual(rows[1]["final_minute_avg"], 65011.5)
 
 
 class FixtureLoadTest(unittest.TestCase):
@@ -114,7 +123,7 @@ class FixtureLoadTest(unittest.TestCase):
         self.assertEqual(ts, sorted(ts))
 
     def test_missing_day_and_dir(self):
-        self.assertEqual(load_day(FIXTURE, "2020-01-01"), {"spot": [], "book": [], "trades": [], "settle": []})
+        self.assertEqual(load_day(FIXTURE, "2020-01-01"), {"spot": [], "book": [], "trades": [], "settle": [], "index": []})
         self.assertEqual(list_days(FIXTURE / "nope"), [])
 
     def test_load_days_merges(self):

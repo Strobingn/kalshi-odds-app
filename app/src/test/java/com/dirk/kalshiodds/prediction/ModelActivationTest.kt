@@ -29,6 +29,36 @@ class ModelActivationTest {
         assertTrue(d.reason.contains("Activated"))
     }
 
+    private fun modelWith(metrics: Map<String, Double>): EdgeModel {
+        val n = EdgeFeatures.SIZE
+        val zeros = List(n) { "0" }.joinToString(",")
+        val ones = List(n) { "1" }.joinToString(",")
+        val names = EdgeFeatures.NAMES.joinToString(",") { "\"$it\"" }
+        val base = mapOf("model_brier" to 0.18, "market_brier" to 0.22, "model_logloss" to 0.50, "market_logloss" to 0.58, "n_holdout" to 500.0)
+        val m = (base + metrics).entries.joinToString(",") { "\"${it.key}\": ${it.value}" }
+        return EdgeModel.parse(
+            """{"version": 1, "kind": "logistic", "feature_names": [$names], "weights": [$zeros], "bias": 0.0,
+                "mean": [$zeros], "std": [$ones], "metrics": {$m}}"""
+        )
+    }
+
+    @Test
+    fun aManifestlessModelIsJudgedOnItsEmbeddedBootstrap() {
+        fun decide(metrics: Map<String, Double>) = ModelActivation.decide(
+            EdgeModelManifest.fromModelMetrics(modelWith(metrics), "2026-10-11T00:00:00Z"), modelValid = true
+        )
+        val good = mapOf("sim_trades" to 240.0, "boot_ci_low" to 0.01, "boot_days" to 12.0)
+        assertTrue(decide(good).activate)
+        assertFalse("CI includes zero", decide(good + ("boot_ci_low" to -0.01)).activate)
+        assertFalse("one day of bets", decide(good + ("boot_days" to 1.0)).activate)
+        assertFalse("too few bets", decide(good + ("sim_trades" to 150.0)).activate)
+        assertFalse("a bootstrap without its day count fails closed", decide(good - "boot_days").activate)
+        // No bootstrap numbers at all (an older trainer): judged on the scores, as before.
+        assertEquals(null, EdgeModelManifest.fromModelMetrics(modelWith(emptyMap()), "2026-10-11T00:00:00Z").promotionEligible)
+        // The manifest's own flag still wins when it is embedded.
+        assertFalse(decide(good + ("promotion_eligible" to 0.0)).activate)
+    }
+
     @Test
     fun doesNotActivateWhenWorseThanMarket() {
         val m = EdgeModelManifest(
@@ -92,12 +122,84 @@ class ModelActivationTest {
     @Test
     fun claudeAppReadsItsOwnReleaseTag() {
         // edge-model-latest belongs to the main app; this build must never pull it.
-        assertEquals("claude-edge-model", SignalConstants.EDGE_MODEL_RELEASE_TAG)
+        assertEquals("mis-bitcoin-edge-model", SignalConstants.EDGE_MODEL_RELEASE_TAG)
         val m = EdgeModelManifest.parse(
             """{"version":"2","trained_at":"2026-09-27T08:17:00Z","n_samples":900,
                "model_brier":0.158,"market_brier":0.159,"model_logloss":0.47,"market_logloss":0.48}"""
         )
-        assertEquals("claude-edge-model", m.tag)
+        assertEquals("mis-bitcoin-edge-model", m.tag)
+    }
+
+    @Test
+    fun promotionIneligibleKeepsModelAdvisory() {
+        // Beats the market on scores but the ask-fill bootstrap CI includes
+        // zero → activation refused even though beatsMarket is true.
+        val raw = """
+            {
+              "version": "2",
+              "trained_at": "2026-09-27T00:00:00Z",
+              "n_samples": 180,
+              "model_brier": 0.15,
+              "market_brier": 0.16,
+              "model_logloss": 0.46,
+              "market_logloss": 0.47,
+              "boot_ci_low": -0.01,
+              "boot_ci_high": 0.04,
+              "promotion_eligible": false
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        assertTrue(m.beatsMarket)
+        assertEquals(-0.01, m.bootCiLow!!, 1e-9)
+        assertEquals(0.04, m.bootCiHigh!!, 1e-9)
+        assertEquals(false, m.promotionEligible)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("advisory"))
+        val again = EdgeModelManifest.parse(m.toJson())
+        assertEquals(false, again.promotionEligible)
+        assertEquals(m.bootCiLow, again.bootCiLow)
+    }
+
+    @Test
+    fun promotionEligibleActivates() {
+        val raw = """
+            {
+              "version": "2",
+              "trained_at": "2026-09-27T00:00:00Z",
+              "n_samples": 180,
+              "model_brier": 0.15,
+              "market_brier": 0.16,
+              "model_logloss": 0.46,
+              "market_logloss": 0.47,
+              "boot_ci_low": 0.012,
+              "boot_ci_high": 0.06,
+              "promotion_eligible": true
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertTrue(d.activate)
+    }
+
+    @Test
+    fun manifestWithoutPromotionFlagUsesScoresOnly() {
+        // Older trainers never published promotion_eligible: keep activating on
+        // beatsMarket alone (null ≠ false).
+        val raw = """
+            {
+              "version": "2",
+              "trained_at": "2026-09-27T00:00:00Z",
+              "n_samples": 180,
+              "model_brier": 0.15,
+              "market_brier": 0.16,
+              "model_logloss": 0.46,
+              "market_logloss": 0.47
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        assertEquals(null, m.promotionEligible)
+        assertTrue(ModelActivation.decide(m, modelValid = true).activate)
     }
 
     @Test

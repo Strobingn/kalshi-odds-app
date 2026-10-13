@@ -25,6 +25,14 @@ Pre-registered grid (fixed before any data was seen):
                       side at its ask (taker fee 0.07), so every fill ends as a
                       pair; if there is no ask, hold
 
+Spot guard (added 2026-10-08 after the first run showed one-legged fills
+adversely selected by 6–15¢; pre-registered before the guarded run):
+
+  guard     0 (off) / 2 / 5 / 10 bps: cancel a leg once Coinbase spot has
+            moved that far against it since the post (YES leg: spot down;
+            NO leg: spot up). The cancel takes effect 1 s later
+            (GUARD_LATENCY_MS); trades in that second still fill us.
+
 Size: 10 contracts per leg. Decision times every 30 s from 1:00 to 13:00
 elapsed. One episode (a pair of resting bids) at a time per market; the next
 episode may start at the first decision time after the previous one ended.
@@ -51,6 +59,7 @@ Python 3 stdlib only. Prints (and optionally writes) a Markdown report.
 from __future__ import annotations
 
 import argparse
+import bisect
 import math
 import sys
 from collections import defaultdict
@@ -71,6 +80,8 @@ RULES = ("join", "improve")
 LOCKS = (0.01, 0.02, 0.03)
 CANCEL_SECS = (30, 60, 120)
 UNWINDS = ("hold", "complete")
+GUARDS_BPS = (0.0, 2.0, 5.0, 10.0)
+GUARD_LATENCY_MS = 1_000
 CONTRACTS = 10
 DECISION_ELAPSED_S = tuple(range(60, 781, 30))
 CANCEL_BEFORE_CLOSE_MS = ms.CANCEL_BEFORE_CLOSE_MS
@@ -89,12 +100,33 @@ class Config:
     lock: float
     cancel_s: int
     unwind: str
+    guard_bps: float = 0.0
 
     def label(self) -> str:
-        return f"{self.rule}/L{self.lock:.2f}/T{self.cancel_s}/{self.unwind}"
+        g = f"/G{self.guard_bps:g}" if self.guard_bps > 0 else ""
+        return f"{self.rule}/L{self.lock:.2f}/T{self.cancel_s}/{self.unwind}{g}"
 
 
-GRID = [Config(r, lk, t, u) for r in RULES for lk in LOCKS for t in CANCEL_SECS for u in UNWINDS]
+GRID = [Config(r, lk, t, u, g) for r in RULES for lk in LOCKS for t in CANCEL_SECS for u in UNWINDS
+        for g in GUARDS_BPS]
+
+
+def guard_cancel(m: ms.Market, side: str, post_ms: int, end_ms: int, guard_bps: float) -> int:
+    """When a leg's resting bid is gone: GUARD_LATENCY_MS after spot first moves
+    guard_bps against it (YES: down, NO: up), never later than end_ms."""
+    if guard_bps <= 0:
+        return end_ms
+    ref = m.spot_at(post_ms)
+    if ref is None:
+        return end_ms
+    lo, hi = ref * (1 - guard_bps / 1e4), ref * (1 + guard_bps / 1e4)
+    i = bisect.bisect_right(m.spot_ts, post_ms)
+    while i < len(m.spot_ts) and m.spot_ts[i] <= end_ms:
+        px = m.spot_px[i]
+        if (side == "YES" and px <= lo + EPS) or (side == "NO" and px >= hi - EPS):
+            return min(end_ms, m.spot_ts[i] + GUARD_LATENCY_MS)
+        i += 1
+    return end_ms
 
 
 def _bid(snap: ms.Snap, side: str) -> tuple[float | None, float | None]:
@@ -179,6 +211,18 @@ def episode_pnl(fy: int, py: float, fn: int, pn: float, result: str, maker_fee: 
     return settle_payout(fy, fn, result) - cost, cost, completed
 
 
+def resolve_ms(fy: int, last_y: int | None, end_y: int, fn: int, last_n: int | None, end_n: int) -> int:
+    """When an episode is over: neither order rests any more, so its fills (and any imbalance) are final.
+
+    A leg is settled once it is fully filled (its last fill) or no longer
+    resting (its cancel). The short leg can still fill until its cancel; the
+    long leg can still grow until it is full or cancelled.
+    """
+    def leg_done(f: int, last: int | None, end: int) -> int:
+        return last if f >= CONTRACTS and last is not None else end
+    return max(leg_done(fy, last_y, end_y), leg_done(fn, last_n, end_n))
+
+
 def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) -> None:
     trade_ts = m._trade_ts
     stop = m.close_ms - CANCEL_BEFORE_CLOSE_MS
@@ -195,19 +239,25 @@ def simulate_market(m: ms.Market, cfg: Config, maker_fee: float, res: Result) ->
             continue
         py, qy, pn, qn = q
         end = ms.cancel_time(t, cfg.cancel_s, m.close_ms)
-        fy, _ = ms.conservative_fill("YES", py, CONTRACTS, qy, m.trades, t, end, trade_ts)
-        fn, _ = ms.conservative_fill("NO", pn, CONTRACTS, qn, m.trades, t, end, trade_ts)
-        end_snap = m.snap_at(end)
-        asks = {s: (end_snap.side(s)[2] if end_snap is not None else None) for s in ("YES", "NO")}
+        end_y = guard_cancel(m, "YES", t, end, cfg.guard_bps)
+        end_n = guard_cancel(m, "NO", t, end, cfg.guard_bps)
+        fy, _, last_y = ms.conservative_fill_ts("YES", py, CONTRACTS, qy, m.trades, t, end_y, trade_ts)
+        fn, _, last_n = ms.conservative_fill_ts("NO", pn, CONTRACTS, qn, m.trades, t, end_n, trade_ts)
+        # The episode is over once neither order rests (a full leg's last fill, or its cancel), not at the
+        # nominal cancel: a guard can pull a leg early. The completion quote, the one-leg markout and the
+        # next decision all use that time; `end` would book future price moves and block later posts.
+        done = resolve_ms(fy, last_y, end_y, fn, last_n, end_n)
+        end_snap = done_snap = m.snap_at(done)
+        asks = {s: (done_snap.side(s)[2] if done_snap is not None else None) for s in ("YES", "NO")}
         pnl, cost, completed = episode_pnl(fy, py, fn, pn, m.result, maker_fee, cfg.unwind, asks)
         d_mid = None
         if (fy > 0) != (fn > 0) and end_snap is not None:
             side = "YES" if fy else "NO"
             a, b = snap.mid(side), end_snap.mid(side)
             d_mid = (b - a) if a is not None and b is not None else None
-        res.episodes.append(Episode(m.ticker, m.day, t, end, py, pn, fy, fn, pnl, cost,
+        res.episodes.append(Episode(m.ticker, m.day, t, done, py, pn, fy, fn, pnl, cost,
                                     min(fy, fn), completed, d_mid))
-        busy_until = end
+        busy_until = done
 
 
 def run(d: Path, maker_fee: float, series: str = "BTC", grid: list[Config] | None = None) -> tuple[dict, dict]:
@@ -334,8 +384,11 @@ def report(results: dict, stats: dict, maker_fee: float, iters: int = 2000, seed
     out.append("")
     s = oos[maker_fee]
     lo, hi = s.get("ci99", (float("nan"), float("nan")))
-    if len(oos_days) < MIN_OOS_DAYS_FOR_RULE or s.get("filled", 0) == 0 or math.isnan(lo):
-        verdict = f"NOT EVALUABLE ({len(oos_days)} OOS day(s); need ≥ {MIN_OOS_DAYS_FOR_RULE})."
+    # The day-block CI has as many blocks as days THIS config posted on, not as many as the OOS split has.
+    used = int(s.get("days", 0))
+    if used < MIN_OOS_DAYS_FOR_RULE or s.get("filled", 0) == 0 or math.isnan(lo):
+        verdict = (f"NOT EVALUABLE ({used} OOS day(s) with episodes for this config, of {len(oos_days)}; "
+                   f"need ≥ {MIN_OOS_DAYS_FOR_RULE}).")
     elif lo > 0:
         verdict = "PASS — OOS 99% CI of $/episode is above 0. Paper trade it next; it is not proven live."
     elif hi < 0:

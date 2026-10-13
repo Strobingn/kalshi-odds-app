@@ -19,6 +19,68 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.0 (Claude branch): the Strategy Arena tab, 15 strategies at once, paper only
+
+Claude Bitcoin 1.9.0 installs over 1.8.8 and keeps your key, settings and paper records. It also carries
+`Mis_bitcoin`'s edge-model work (13-feature contract, resumable training, `mis-bitcoin-edge-model`) and:
+
+- **Arena tab** in the bottom bar (second from the left). It holds a leaderboard of all 15 strategies, best paper
+  P&L after fees on top, each with a verdict: *N of 30 trades needed*, *within luck: no winner yet*, *ahead by
+  more than luck so far* or *losing by more than luck*. Below it: the totals, the bankroll chart, the breakdowns
+  and every trade. The Home card **Strategy arena · 15 at once** opens the same screen.
+- **Not running?** The tab says why and fixes it in one tap: the arena needs **Live signals** on and a **Kalshi API
+  key** saved (the trade feed is the authenticated WebSocket; REST has no trade prints). Live signals is off by
+  default, which is why the 1.8.4–1.8.8 scalper showed nothing on a fresh install.
+- **Charts (Arena tab only).** Tap any strategy (in the profit bars or the leaderboard) to follow it; one
+  "Show all" resets.
+  - *Who is winning:* profit after fees per strategy, diverging around $0 (blue gain, red loss).
+  - *The race:* running profit of all 15 from the same $0 line over the last 3,000 closed trades; the top three
+    and the one you follow in colour, the rest grey; drag across to read every coloured line at one moment.
+  - *Leaderboard sparklines:* each strategy's running profit in one small line.
+  - *Paper bankroll:* one line with a light wash; drag to read any moment.
+  - *What one trade makes:* histogram of the result per contract after fees (2¢ bins, open ends for holds);
+    red bins lost money; all strategies or the one you follow.
+  - *Best and worst hours:* profit by hour of the day.
+  - *How trades end:* target / stopped / timed out / held to close, per strategy.
+  - *Win rate:* per strategy, with the 50% line.
+  - *What the fees take:* profit before and after the taker fee, per strategy (dumbbell).
+
+  Colours are the validated reference palette (blue/orange/aqua/yellow for the race and the exit mix; blue ↔ red
+  for gain / loss), stepped for the dark and the light theme and checked for colour-blind separation. Every chart
+  has a legend or labels, and every value is also in a list on the same screen. Numbers: `ArenaCharts`
+  (`ArenaChartsTest`); drawing: `ui/ArenaChartViews.kt` (`ScalperResultsScreenshotTest` renders each chart).
+- **Eight new strategies** next to the seven from 1.8.4, taken from the other branches' apps. They all run on the
+  same live window, the same real trade prints, the same conservative fills (resting orders wait for the queue
+  ahead) and the same taker fee, 10 contracts an order:
+
+| Strategy | From | Entry | Exit |
+|---|---|---|---|
+| Bounce · buy now | codex `ScalpEngine` | 5¢ fall from the 60 s high, first 1–3¢ back, spread ≤ 2¢ | +8¢ / −6¢ / 120 s |
+| 50¢ breakout · buy now | grok `breakout_50` | side crosses up through 50¢ within 10 s, spread ≤ 2¢ | +5¢ / −3¢ / 90 s |
+| 1¢ better · resting | grok `CentBetter` | spread ≥ 2¢, minute 3+, bid 1¢ above the best bid | +2¢ / −4¢ / 60 s |
+| Flow fade · resting, hold | grok `FlowFade` | takers bought the other side 3:1, ≥ 500 contracts in 30 s | settlement |
+| Late favorite · buy, hold | grok `LateFavoriteRule`, kashi D3 | minutes 10–13, 80–95¢ | settlement |
+| Early favorite · buy, hold | Claude clear lead (price form) | minutes 3–10, 65–85¢ | settlement |
+| Momentum ride · buy, hold | kashi forecast ride, swarm | +4¢ in 30 s, minute 5+, 50–85¢ | settlement |
+| Long shot · buy, hold | app HUNTER_VALUE, grok `penny_press` | minute 5+, 10–20¢ | settlement |
+
+**What the other branches show about money.** None of the 11 branches surveyed has a strategy with a positive,
+out-of-sample result after fees: every scalper backtest is negative (kashi long history: dip −4.44¢,
+momentum −4.77¢, extreme reversion −2.53¢ per contract over 38 weeks; swarm: 0 of 2,100 dip combos positive), the
+app's pick lost −3.3% on 1,451 bets, and the 15-scalper labs on grok-bitcoin and miss-bitcoin committed no results
+(miss-bitcoin's paper fills also charge no fee). The closest to break-even were the late favorite (+$0.059 a bet,
+99% CI [−0.017, +0.141]) and 1¢ better (+$41.73 on 17 fills), so both are in the arena. The arena is how to find out
+on live data; it cannot place an order.
+
+| Control | Code | Test |
+|---------|------|------|
+| 15 strategies, bands, holds | `ScalpStrategy`, `ScalperEngine.inBand`, `onTrade` / `onClock` skip holds | `ArenaStrategiesTest.holdStrategiesHaveNoExitAndRideToTheSettlement`, `eachStrategyTradesOnlyInsideItsOwnPriceBand` |
+| New signals | `PaperScalper.decide`, `PrintGrid.highMid` / `lowMid` / `takerBought` | `ArenaStrategiesTest.aFavoriteLateInTheWindow…`, `flowFade…`, `oneCentBetter…`, `aFiveCentDrop…` |
+| Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.fifteenStrategiesEachWithItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
+| Status panel | `arenaFeed` (ScalperResultsScreen.kt) | `ArenaStrategiesTest.theStatusPanelNamesWhatStopsTheArena` |
+| Arena tab | `AppRoutes.PRIMARY`, `DipApp` bottom bar | `ArenaStrategiesTest.theArenaIsABottomTab` |
+| Update channel | `AppUpdate.BRANCH = "Claude"` (tags matched on the branch suffix) | `AppUpdateTest` |
+
 ## 1.8.8 (Claude branch): the app stops telling you to bet without a reason
 
 Reported with a screenshot: `BET UP BTC · $5 wins $2330.00 profit · closes in 1:11` with UP at 0.2¢ and
@@ -139,6 +201,10 @@ The app now bets the way Bitcoin is going, once it is clearly ahead. When Bitcoi
 | Not silenced by sit-out | `BetCall.decide` | `ClearLeadTest.sitOutDoesNotSilenceTheRuleButTheSettingDoes` |
 | Paper record | `SignalHub.maybeClearLead` → `ClearLeadRule.decide` → `LateFavoriteLedger.record` | `ClearLeadTest.ledgerRecordsOncePerWindowAndSettles` |
 
+## 1.8.0-mis.1 (Mis_bitcoin branch, Mis Bitcoin)
+
+Fork of the Claude 1.8.0 build with a hardened model-promotion pipeline: the trainer now publishes a market-block bootstrap 90% P&L CI at the ask and `promotion_eligible` (>= 20 EV-at-ask trades AND CI excluding zero); `ModelActivation` refuses activation on `promotion_eligible: false` even when Brier/log-loss beat the market. Separate package `com.dirk.kalshiodds.mis`, its own model release tag `mis-bitcoin-edge-model`, retrains on every push to `Mis_bitcoin` that touches `ml/`.
+
 ## 1.3 (Claude branch, Bitcoin Claude)
 
 **No way of betting this market came out positive.** A study of Kalshi's own public trade history (952 settled `KXBTC15M` windows, 33.3M trades, 2026-09-24 → 2026-10-04) found that buying at the ask lost 1.01¢ per contract (−2.1% of stake, 95% CI [−1.14, −0.87]), almost all of it the fee. Resting orders earned +0.29¢ per fill only at the front of the queue and lost 0.9–1.5¢ behind the 2,000–10,000 contracts that normally sit at the best bid. Full write-up: [`docs/tape-study-2026-10-04.md`](docs/tape-study-2026-10-04.md). 1.3 does not add a live strategy; it shows the cost, limits the damage, and paper-tests the one lead that turned up.
@@ -147,7 +213,7 @@ The app now bets the way Bitcoin is going, once it is clearly ahead. When Bitcoi
 - **Daily live cap.** Live buys stop once the day's all-in total reaches the cap (default **$50**, Settings → Live Approve tickets, 0 = off). A buy that would pass it is not sent and the reason is shown. Sells and paper are never blocked. The count resets at midnight on the phone; the part of a resting order Kalshi confirms as cancelled is given back. `LiveDailyCap` / `LiveDailyCapTest`.
 - **Trade-tape study tool.** `tools/research/tape_study.py` (`pull`, `report`, `makersim`, `hourly`, `streaks`) reproduces the write-up from public data, no API key.
 - **Flow fade, paper only.** Signal: takers buying one side at least 3:1 over the last 30 s. Buying the other side at the ask looked good on the 11 days it was found on and **failed on the 12 days before** (774 bets, −2.9¢ per contract; all 23 days: −0.0¢), so it is retired. What the home card **Flow fade (resting bid) · PAPER** runs instead is a resting no-fee bid on the side takers are not buying, counted as filled only after the queue ahead has traded: +1.8¢ per fill with 2,000 contracts ahead and +1.0¢ with 5,000 over 23 days, both with a 95% interval that includes zero. Not proven; paper only; needs Live signals on. Write-up: [`docs/flow-fade-2026-10-04.md`](docs/flow-fade-2026-10-04.md); tool: `tools/research/flow_study.py`. `FlowFadeRule` / `MakerPaperBook` / `FlowMakerTest`.
-- **Update from inside the app.** Settings → **App update** shows this build's number, checks GitHub for a newer `Claude` build when Settings opens or on tap, and Download hands the APK to the browser. Every CI APK is signed with the same committed debug key, so it installs over the old one and keeps settings and the Kalshi key. `AppUpdate` / `AppUpdateTest`.
+- **Update from inside the app.** Settings → **App update** shows this build's number, checks GitHub for a newer `Mis_bitcoin` build when Settings opens or on tap, and Download hands the APK to the browser. Every CI APK is signed with the same committed debug key, so it installs over the old one and keeps settings and the Kalshi key. `AppUpdate` / `AppUpdateTest`.
 
 | Control | Code | Test |
 |---------|------|------|

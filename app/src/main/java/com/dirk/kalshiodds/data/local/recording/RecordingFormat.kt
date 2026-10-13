@@ -34,18 +34,20 @@ object RecordingFormat {
     const val KIND_BOOK = "book"
     const val KIND_TRADES = "trades"
     const val KIND_SETTLE = "settle"
+    const val KIND_INDEX = "index"
 
     const val SPOT_HEADER = "ts_ms,product,price"
     const val BOOK_HEADER =
         "ts_ms,ticker,strike,close_ms,yes_bid,yes_bid_qty,yes_ask,yes_ask_qty,no_bid,no_bid_qty,no_ask,no_ask_qty"
     const val TRADES_HEADER = "ts_ms,ticker,yes_price,count,taker_side"
     const val SETTLE_HEADER = "ticker,close_ms,strike,result"
+    const val INDEX_HEADER = "ts_ms,asset,index_id,value,avg_60,final_minute_avg"
 
-    val GZ_KINDS: List<String> = listOf(KIND_SPOT, KIND_BOOK, KIND_TRADES)
+    val GZ_KINDS: List<String> = listOf(KIND_SPOT, KIND_BOOK, KIND_TRADES, KIND_INDEX)
     val ALL_KINDS: List<String> = GZ_KINDS + KIND_SETTLE
 
     private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd").withZone(ZoneOffset.UTC)
-    private val FILE_RE = Regex("^(spot|book|trades|settle)_(\\d{4}-\\d{2}-\\d{2})\\.csv(\\.gz)?$")
+    private val FILE_RE = Regex("^(spot|book|trades|settle|index)_(\\d{4}-\\d{2}-\\d{2})\\.csv(\\.gz)?$")
 
     fun utcDay(epochMs: Long): String = DAY.format(Instant.ofEpochMilli(epochMs))
 
@@ -54,6 +56,7 @@ object RecordingFormat {
         KIND_BOOK -> BOOK_HEADER
         KIND_TRADES -> TRADES_HEADER
         KIND_SETTLE -> SETTLE_HEADER
+        KIND_INDEX -> INDEX_HEADER
         else -> error("unknown kind $kind")
     }
 
@@ -65,7 +68,7 @@ object RecordingFormat {
         val m = FILE_RE.matchEntire(name) ?: return null
         val kind = m.groupValues[1]
         val gz = m.groupValues[3].isNotEmpty()
-        if ((kind == KIND_SETTLE) == gz) return null
+        if ((kind == KIND_SETTLE) == gz) return null  // settle is the only non-gz kind
         return kind to m.groupValues[2]
     }
 
@@ -98,6 +101,10 @@ object RecordingFormat {
 
     fun settleRow(ticker: String, closeMs: Long?, strike: Double?, result: String): String =
         "${field(ticker)},${closeMs?.toString().orEmpty()},${num(strike)},${field(result).lowercase()}"
+
+    /** CF Benchmarks settlement-index print (ts_ms,asset,index_id,value,avg_60,final_minute_avg). */
+    fun indexRow(tsMs: Long, asset: String, indexId: String, value: Double, avg60: Double?, finalMinuteAvg: Double?): String =
+        "$tsMs,${field(asset)},${field(indexId)},${num(value)},${num(avg60)},${num(finalMinuteAvg)}"
 
     /** Kalshi trade `taker_side` → `yes` / `no` / empty. */
     fun takerSideField(raw: String?): String = when (raw?.trim()?.lowercase()) {

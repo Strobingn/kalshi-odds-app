@@ -1,34 +1,54 @@
 name: Train edge model
 
-# Publishes to the rolling `claude-edge-model` release, which the Claude app
+# Publishes to the rolling `mis-bitcoin-edge-model` release, which this app
 # (SignalConstants.EDGE_MODEL_RELEASE_TAG) downloads. `edge-model-latest`
 # belongs to the main app; nothing in this file may write to it.
 # Scheduled workflows only run from the default branch, and even there this
 # file only ever targets RELEASE_TAG below.
 
 on:
+  # GitHub schedules only run from the default branch, so the reliable
+  # retrain triggers here are pushes to this branch and manual runs. The
+  # main-branch bridge (retrain-bridge.yml) starts this file at the
+  # Mis_bitcoin ref on a cron: gh api -X POST
+  #   repos/{owner}/{repo}/actions/workflows/train-edge-model.yml/dispatches
+  #   -f ref=Mis_bitcoin -f "inputs[days]=270".
+  # repository_dispatch below would run the default branch's copy instead.
+  push:
+    branches: [Mis_bitcoin]
+    paths:
+      - "ml/**"
+      - ".github/workflows/train-edge-model.yml"
+  repository_dispatch:
+    types: [retrain-mis-bitcoin]
   schedule:
-    # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
+    # Kept for the day Mis_bitcoin becomes the default branch. Until then
+    # this cron never fires; use the repository_dispatch bridge instead.
     - cron: "17 8 * * 1"
   workflow_dispatch:
     inputs:
       days:
         description: Lookback days for settled Kalshi 15m markets
         required: false
-        default: "30"
+        default: "270"
 
 permissions:
   contents: write
 
+concurrency:
+  group: train-edge-model-Mis_bitcoin
+  cancel-in-progress: true
+
 env:
-  RELEASE_TAG: claude-edge-model
+  RELEASE_TAG: mis-bitcoin-edge-model
 
 jobs:
   train:
     runs-on: ubuntu-latest
-    # Every decision minute of every settled market: ~9k candle pulls at
-    # ≤ 10 req/s, then a few minutes of pure-Python Newton fits.
-    timeout-minutes: 120
+    # Every decision minute of every settled market in the window. 270 days
+    # pulls ~30k markets through the live + historical tiers at ≤ 10 req/s
+    # (~2.5h), then the L2 sweep and Newton fits (pure Python).
+    timeout-minutes: 300
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,14 +56,40 @@ jobs:
           python-version: "3.12"
       - name: Trainer tests (no look-ahead, offset model)
         run: python3 ml/test_train_edge.py
+
+      - name: Restore sample cache
+        id: samples
+        uses: actions/cache/restore@v4
+        continue-on-error: true
+        with:
+          path: ml/.samples-cache
+          # Every run saves its own copy (caches are immutable per key) and
+          # restores the newest one, so a pull cut off by the timeout is
+          # resumed by the next run instead of starting over.
+          key: mis-samples-v2-${{ github.run_id }}
+          restore-keys: mis-samples-v2-
       - name: Train
+        # Below the job's 300 min so the save step below still runs when
+        # the pull is cut off; the trainer appends each finished market to
+        # ml/.samples-cache/progress_*.jsonl as it goes.
+        timeout-minutes: 270
         run: |
           python3 ml/train_edge.py \
-            --days ${{ github.event.inputs.days || '30' }} \
+            --days ${{ github.event.inputs.days || github.event.client_payload.days || '270' }} \
             --tag "$RELEASE_TAG" \
+            --samples-cache ml/.samples-cache \
+            --sweep-l2 \
             --require-live \
             --out ml/edge_model.json \
             --manifest ml/edge_model_manifest.json
+      - name: Save sample cache
+        if: always()
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: ml/.samples-cache
+          key: mis-samples-v2-${{ github.run_id }}
+
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
@@ -51,6 +97,7 @@ jobs:
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
+            ml/bet_log.json
             ml/parity_sample.last.json
           if-no-files-found: error
       - name: Publish rolling release
@@ -58,7 +105,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          test "$RELEASE_TAG" = "claude-edge-model"
+          test "$RELEASE_TAG" = "mis-bitcoin-edge-model"
           gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
@@ -72,13 +119,17 @@ jobs:
               f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
               f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
               f"- sim EV-at-ask trades: {m.get('sim_trades')}, P&L/contract sum: {m.get('sim_pnl')}\\n"
-              f"- beats_market: {m.get('beats_market')}"
+              f"- calibration ECE: {m.get('model_calibration_error')} vs market {m.get('market_calibration_error')}\n"
+              f"- bootstrap 90% P&L CI at ask: [{m.get('boot_ci_low')}, {m.get('boot_ci_high')}], P(loss)={m.get('boot_p_of_loss')}\n"
+              f"- beats_market: {m.get('beats_market')}\n"
+              f"- promotion_eligible: {m.get('promotion_eligible')}"
           )
           PY
           )
           gh release create "$RELEASE_TAG" \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
+            ml/bet_log.json \
             --target "$GITHUB_SHA" \
-            --title "Edge model (Claude app)" \
+            --title "Edge model (Mis_bitcoin app)" \
             --notes "$NOTES"

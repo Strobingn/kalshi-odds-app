@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import sys
 import tempfile
@@ -108,7 +109,7 @@ def _samples(n_markets: int, seed: int = 3, lag: float = 0.0) -> list[te.Sample]
         for k in range(1, 14):
             spot_logit = truth + rng.gauss(0.0, 0.5)
             mid = te.sigmoid((1.0 - lag) * truth + (rng.gauss(0.0, 0.3) if lag else 0.0))
-            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit)]
+            x = [spot_logit / 1.6, (900 - 60 * k) / 900, mid, 0.0, 0.02, 0.0, 0.05, 0.0, 0.5, te.sigmoid(spot_logit), 0.0, 0.0, mid * mid]
             out.append(
                 te.Sample(
                     x=x,
@@ -126,8 +127,8 @@ def _samples(n_markets: int, seed: int = 3, lag: float = 0.0) -> list[te.Sample]
 
 class OffsetModelTest(unittest.TestCase):
     def _zero_model(self, mean_mid: float = 0.0, std_mid: float = 1.0) -> dict:
-        mean = [0.0] * 10
-        std = [1.0] * 10
+        mean = [0.0] * len(te.FEATURE_NAMES)
+        std = [1.0] * len(te.FEATURE_NAMES)
         mean[te.MID_INDEX] = mean_mid
         std[te.MID_INDEX] = std_mid
         return {
@@ -145,7 +146,7 @@ class OffsetModelTest(unittest.TestCase):
         # A scaler on market_mid must not touch the offset: it is logit(mid), not a feature.
         for model in (self._zero_model(), self._zero_model(mean_mid=0.5, std_mid=0.2)):
             for mid in (0.001, 0.03, 0.31, 0.5, 0.77, 0.999):
-                x = [0.0] * 10
+                x = [0.0] * len(te.FEATURE_NAMES)
                 x[te.MID_INDEX] = mid
                 self.assertAlmostEqual(te.model_predict(model, x, mid), mid, places=9)
         clipped = te.model_predict(self._zero_model(), [0.0] * 10, 0.0002)
@@ -218,7 +219,130 @@ class OffsetModelTest(unittest.TestCase):
         # Margin: 3¢ after fees (1.3¢ here).
         self.assertIsNone(te.ev_side(0.56, 0.53, 0.48)[0])
 
-    def test_export_is_offset_logistic_with_ten_features(self) -> None:
+    def test_calibration_error_small_for_calibrated_forecast(self) -> None:
+        # 100 rows at p=0.7 with 70 YES: that bin's ECE is 0.
+        p = [0.7] * 100
+        y = [1] * 70 + [0] * 30
+        self.assertAlmostEqual(te.calibration_error(p, y), 0.0)
+        # Same forecast, wrong outcomes: large ECE.
+        self.assertGreater(te.calibration_error(p, [1] * 30 + [0] * 70), 0.3)
+        self.assertEqual(te.calibration_error([], []), 1.0)
+
+    def test_bootstrap_ci_brackets_true_pnl_and_is_deterministic(self) -> None:
+        samples = _samples(240, seed=5, lag=0.4)
+        rows = [(s, te.sigmoid(2.0 * s.x[0])) for s in samples]
+        base = te.ev_pnl(rows)
+        a = te.bootstrap_pnl_ci(rows, n_boot=200)
+        b = te.bootstrap_pnl_ci(rows, n_boot=200)
+        self.assertEqual(a, b, "fixed seed → deterministic CI")
+        self.assertLessEqual(a["ci_low"], base["pnl_per_bet"] + 0.05)
+        self.assertGreaterEqual(a["ci_high"], base["pnl_per_bet"] - 0.05)
+        self.assertGreaterEqual(a["ci_low"], 0.0 if base["pnl_per_bet"] > 0.10 else -1.0)
+        self.assertTrue(0.0 <= a["p_low"] <= 1.0)
+        # Day blocks: the 240 synthetic markets span 2 UTC days of close_ts.
+        self.assertEqual(a["n_boot_markets"], 2.0, "one block per UTC day")
+
+    def test_promotion_requires_bootstrap_ci_excluding_zero(self) -> None:
+        # Beats the market on scores but the CI includes zero → not eligible.
+        metrics = {
+            "n_holdout": 100.0,
+            "model_brier": 0.10,
+            "market_brier": 0.15,
+            "model_logloss": 0.30,
+            "market_logloss": 0.40,
+            "sim_trades": 240.0,
+            "boot_ci_low": -0.01,
+            "boot_ci_high": 0.05,
+            "boot_days": 12.0,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertTrue(payload["beats_market"])
+        self.assertFalse(payload["promotion_eligible"])
+        metrics["boot_ci_low"] = 0.01
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertTrue(payload["promotion_eligible"])
+        # A positive CI from too few distinct days (one regime resampled) never promotes.
+        metrics["boot_days"] = 1.0
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertFalse(payload["promotion_eligible"])
+        metrics["boot_days"] = 12.0
+        # Too few simulated trades can never promote.
+        metrics["sim_trades"] = 150.0
+        metrics["boot_ci_low"] = 0.05
+        with tempfile.TemporaryDirectory() as tmp:
+            man = Path(tmp) / "manifest.json"
+            te.write_manifest(metrics, man, synthetic=False)
+            payload = json.loads(man.read_text())
+        self.assertFalse(payload["promotion_eligible"])
+
+    def test_recency_metrics_flag_a_stale_fit(self) -> None:
+        hold = [(s, s.mid) for s in _samples(240, seed=3)]
+        r = te.recency_metrics(hold)
+        self.assertEqual(r["recent_n"], 780.0)  # 240 markets x 13 min x 25%
+        # market vs itself: perfect parity on the recent slice
+        self.assertAlmostEqual(r["recent_model_brier"], r["recent_market_brier"], places=9)
+
+    def test_bootstrap_counts_one_bet_per_market(self) -> None:
+        # Ten markets on one day, each with 13 qualifying minutes: the CI must be built from 10 bets.
+        rows = []
+        for m in range(10):
+            for k in range(13):
+                s = te.Sample(x=[0.0] * len(te.FEATURE_NAMES), y=1 if m < 6 else 0, mid=0.5,
+                              ts=1_000 + m * 900 + k * 60, close_ts=1_900 + m * 900,
+                              ticker=f"M{m}", yes_ask=0.40 + 0.01 * k, no_ask=0.62)
+                rows.append((s, 0.70))
+        bets = te.bet_log(rows)
+        self.assertEqual(len(bets), 10)
+        ci = te.bootstrap_pnl_ci(rows, n_boot=50)
+        per_bet = sum(b["pnl"] for b in bets) / len(bets)
+        # One day only: every resample is that day, so the CI collapses onto the one-bet-per-market mean.
+        self.assertAlmostEqual(ci["ci_low"], per_bet, places=12)
+        self.assertAlmostEqual(ci["ci_high"], per_bet, places=12)
+
+    def test_nested_l2_never_scores_a_fold_on_its_own_choice(self) -> None:
+        samples = _samples(360, seed=11, lag=0.4)
+        hold, chosen = te.walk_forward_hold_nested(samples, folds=3, candidates=(0.5, 0.05, 0.005))
+        plain = te.walk_forward_hold(samples, folds=3)
+        self.assertEqual(len(hold), len(plain))
+        self.assertEqual(len(chosen), len(te.fold_splits(samples, 3)))
+        self.assertTrue(all(c in (0.5, 0.05, 0.005, te.DEFAULT_L2) for c in chosen))
+
+    def test_sweep_l2_prefers_some_regularization(self) -> None:
+        # A lagging market: the truth moves and the mid underreacts. Any
+        # nonzero L2 should be selected; the sweep must return a candidate.
+        best, per = te.sweep_l2(_samples(360, seed=11, lag=0.4), folds=3, candidates=(0.5, 0.05, 0.005))
+        self.assertIn(best, (0.5, 0.05, 0.005))
+        self.assertEqual(len(per), 3)
+        for cand, m in per.items():
+            self.assertIn("logloss", m)
+            self.assertGreater(m["logloss"], 0.0)
+
+    def test_margin_curve_monotone_fewer_bets(self) -> None:
+        hold = [(s, te.sigmoid(2.0 * s.x[0])) for s in _samples(240, seed=5, lag=0.4)]
+        curve = te.margin_curve(hold)
+        self.assertIn("0.03", curve)
+        ns = [curve[k]["n"] for k in sorted(curve)]
+        margins = sorted(float(k) for k in curve)
+        counts = [curve[f"{m:.2f}"]["n"] for m in margins]
+        self.assertEqual(counts, sorted(counts, reverse=True), "higher margin → fewer (or equal) bets")
+
+    def test_walk_forward_reports_calibration_and_bootstrap(self) -> None:
+        metrics = te.walk_forward(_samples(360, seed=9, lag=0.3))
+        for key in ("model_calibration_error", "market_calibration_error", "boot_ci_low", "boot_ci_high", "boot_p_of_loss"):
+            self.assertIn(key, metrics)
+            self.assertTrue(math.isfinite(metrics[key]), key)
+        self.assertLessEqual(metrics["model_calibration_error"], metrics["market_calibration_error"] + 0.05)
+
+    def test_export_is_offset_logistic_with_all_features(self) -> None:
         samples = _samples(90)
         model = te.fit_model(samples)
         metrics = te.walk_forward(samples)
@@ -231,12 +355,191 @@ class OffsetModelTest(unittest.TestCase):
             manifest = json.loads(man.read_text())
         self.assertEqual(payload["kind"], "offset_logistic")
         self.assertEqual(payload["feature_names"], te.FEATURE_NAMES)
-        self.assertEqual(len(payload["weights"]), 10)
+        self.assertEqual(len(payload["weights"]), len(te.FEATURE_NAMES))
         self.assertEqual(payload["mid_clip"], te.MID_CLIP)
         self.assertEqual((payload["platt_a"], payload["platt_b"]), (1.0, 0.0))
         self.assertTrue(all(isinstance(v, float) for v in payload["metrics"].values()))
-        self.assertEqual(manifest["tag"], "claude-edge-model")
+        self.assertEqual(manifest["tag"], "mis-bitcoin-edge-model")
         self.assertFalse(manifest["beats_market"], "synthetic data never activates")
+
+
+class ResumableCollectTest(unittest.TestCase):
+    """A pull killed by the job timeout must keep every finished market."""
+
+    def _fake(self, markets, fail_after=None, spot_gap=None):
+        calls = []
+
+        def fetch_settled(series, days, per=0):
+            return [dict(m) for m in markets] if series == te.SERIES[0] else []
+
+        def fetch_spot(product, start, end, failed=None):
+            if spot_gap is not None and failed is not None:
+                failed.append(spot_gap)
+            # One bar a minute, minus the failed chunk.
+            return [(t, 100.0) for t in range(start - start % 60, end, 60)
+                    if spot_gap is None or not (spot_gap[0] <= t < spot_gap[1])]
+
+        def fetch_candles(series, ticker, open_ts, close_ts):
+            if fail_after is not None and len(calls) >= fail_after:
+                raise KeyboardInterrupt  # the runner killing the job
+            calls.append(ticker)
+            return []
+
+        def market_samples(m, candles, spot):
+            return [te.Sample(x=[0.0] * len(te.FEATURE_NAMES), y=1, mid=0.5, ts=1, close_ts=2,
+                              ticker=m["ticker"], yes_ask=0.51, no_ask=0.5)]
+
+        return calls, {"fetch_settled": fetch_settled, "fetch_spot": fetch_spot,
+                       "fetch_candles": fetch_candles, "market_samples": market_samples}
+
+    def _patched(self, fakes):
+        saved = {k: getattr(te, k) for k in fakes}
+        for k, v in fakes.items():
+            setattr(te, k, v)
+        return saved
+
+    def test_killed_pull_resumes_without_refetching(self) -> None:
+        markets = [{"ticker": f"KXBTC15M-T{i}", "close_time": "2026-09-01T00:15:00Z",
+                    "open_time": "2026-09-01T00:00:00Z", "result": "yes"} for i in range(6)]
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            calls, fakes = self._fake(markets, fail_after=4)
+            saved = self._patched(fakes)
+            try:
+                with self.assertRaises(KeyboardInterrupt):
+                    te.collect(30, workers=1, progress=prog)
+                self.assertEqual(len(te.load_progress(prog)), 4)
+                calls2, fakes2 = self._fake(markets)
+                self._patched(fakes2)
+                rows = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(len(calls2), 2)  # only the two unfinished markets
+            self.assertEqual(sorted(r.ticker for r in rows), sorted(m["ticker"] for m in markets))
+            self.assertEqual(len(te.load_progress(prog)), 6)
+
+    def test_each_run_adds_new_markets_and_drops_expired_ones(self) -> None:
+        old = [{"ticker": f"KXBTC15M-T{i}", "close_time": "2026-09-01T00:15:00Z",
+                "open_time": "2026-09-01T00:00:00Z", "result": "yes"} for i in range(3)]
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            _, fakes = self._fake(old)
+            saved = self._patched(fakes)
+            try:
+                te.collect(30, workers=1, progress=prog)
+                # A week later: T0 has left the window, T3 has settled.
+                now = old[1:] + [dict(old[0], ticker="KXBTC15M-T3")]
+                calls, fakes2 = self._fake(now)
+                self._patched(fakes2)
+                rows = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(calls, ["KXBTC15M-T3"])
+            self.assertEqual(sorted(r.ticker for r in rows), ["KXBTC15M-T1", "KXBTC15M-T2", "KXBTC15M-T3"])
+            self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T1", "KXBTC15M-T2", "KXBTC15M-T3"])
+
+    def test_markets_hit_by_a_spot_gap_wait_for_the_next_run(self) -> None:
+        # T0 closes on Sep 1, T1 on Sep 3. A failed spot chunk on Sep 1 must not cache T0 with empty spot features.
+        markets = [{"ticker": "KXBTC15M-T0", "close_time": "2026-09-01T00:15:00Z",
+                    "open_time": "2026-09-01T00:00:00Z", "result": "yes"},
+                   {"ticker": "KXBTC15M-T1", "close_time": "2026-09-03T00:15:00Z",
+                    "open_time": "2026-09-03T00:00:00Z", "result": "yes"}]
+        t0 = int(te.parse_iso(markets[0]["close_time"]).timestamp())
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            calls, fakes = self._fake(markets, spot_gap=(t0 - 3600, t0 - 600))
+            saved = self._patched(fakes)
+            try:
+                rows = te.collect(30, workers=1, progress=prog)
+                self.assertEqual(calls, ["KXBTC15M-T1"])
+                self.assertEqual([r.ticker for r in rows], ["KXBTC15M-T1"])
+                self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T1"])
+                # Spot is back: T0 is pulled now, T1 comes from the progress file.
+                calls2, fakes2 = self._fake(markets)
+                self._patched(fakes2)
+                rows2 = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(calls2, ["KXBTC15M-T0"])
+            self.assertEqual(sorted(r.ticker for r in rows2), ["KXBTC15M-T0", "KXBTC15M-T1"])
+        self.assertTrue(te.spot_complete(t0, [(t0 + 120, t0 + 900)]))
+        self.assertFalse(te.spot_complete(t0, [(t0 - te.SPOT_NEED_S, t0 - te.SPOT_NEED_S + 60)]))
+
+    def test_a_failed_cutoff_lookup_fails_the_listing(self) -> None:
+        # A transient /historical/cutoff failure must not read as "no history": that listing would
+        # prune every cached historical market and retrain on recent ones alone.
+        saved = te.http_get
+
+        def boom(url, *a, **k):
+            raise OSError("503")
+        try:
+            te.http_get = boom
+            with self.assertRaises(OSError):
+                te.fetch_settled(te.SERIES[0], 270)
+            te.http_get = lambda url, *a, **k: {"markets": [{"ticker": "X"}], "cursor": "more"}
+            with self.assertRaises(RuntimeError):
+                list(te._page("/markets", {}))
+        finally:
+            te.http_get = saved
+
+    def test_prev_window_needs_both_boundary_bars(self) -> None:
+        open_ts = 1_788_000_000 - 1_788_000_000 % 900
+        dense = [(t, 100.0 + (t - open_ts) / 600.0) for t in range(open_ts - 3600, open_ts, 60)]
+        b = te.prev_window_bounds(dense, open_ts)
+        self.assertIsNotNone(b)
+        self.assertAlmostEqual(te.prev_window_return(dense, open_ts), (b[1] - b[0]) / b[0])
+        # The bar closing at open − 15 min is missing, and so is the one before it: the nearest is 3 min older.
+        holes = [r for r in dense if not (open_ts - 1080 <= r[0] < open_ts - 900)]
+        self.assertIsNone(te.prev_window_bounds(holes, open_ts))
+        self.assertEqual(te.prev_window_return(holes, open_ts), 0.0)
+        # Missing the last minutes before open: the window's end is unknown.
+        self.assertIsNone(te.prev_window_bounds([r for r in dense if r[0] < open_ts - 300], open_ts))
+
+    def test_an_empty_listing_prunes_its_series(self) -> None:
+        old = [{"ticker": "KXBTC15M-T0", "close_time": "2026-09-01T00:15:00Z",
+                "open_time": "2026-09-01T00:00:00Z", "result": "yes"}]
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            _, fakes = self._fake(old)
+            saved = self._patched(fakes)
+            try:
+                te.collect(30, workers=1, progress=prog)
+                self.assertEqual(sorted(te.load_progress(prog)), ["KXBTC15M-T0"])
+                _, fakes2 = self._fake([])  # the series has nothing settled in the window any more
+                self._patched(fakes2)
+                rows = te.collect(30, workers=1, progress=prog)
+            finally:
+                for k, v in saved.items():
+                    setattr(te, k, v)
+            self.assertEqual(rows, [])
+            self.assertEqual(te.load_progress(prog), {})
+
+    def test_truncated_progress_line_is_skipped(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            prog = Path(td) / "progress.jsonl"
+            prog.write_text('{"ticker": "A", "rows": []}\n{"ticker": "B", "ro')
+            self.assertEqual(list(te.load_progress(prog)), ["A"])
+
+    def test_cache_paths_change_with_the_feature_contract(self) -> None:
+        d = Path("/tmp/x")
+        a = te.samples_cache_path(d, 270)
+        saved = list(te.FEATURE_NAMES)
+        try:
+            te.FEATURE_NAMES.append("extra")
+            self.assertNotEqual(a, te.samples_cache_path(d, 270))
+            self.assertNotEqual(te.progress_path(d, 270), te.samples_cache_path(d, 270))
+        finally:
+            te.FEATURE_NAMES[:] = saved
+        # A new extractor with the same feature names also gets fresh paths.
+        v = te.FEATURE_EXTRACTOR_VERSION
+        try:
+            te.FEATURE_EXTRACTOR_VERSION = v + 1
+            self.assertNotEqual(a, te.samples_cache_path(d, 270))
+        finally:
+            te.FEATURE_EXTRACTOR_VERSION = v
 
 
 if __name__ == "__main__":

@@ -110,6 +110,59 @@ def test_simulate_fills_and_sequencing() -> None:
     assert all(e.end_ms <= CLOSE - pm.CANCEL_BEFORE_CLOSE_MS for e in res.episodes)
 
 
+def test_spot_guard() -> None:
+    # spot 60,000 at the post (60 s), drops 6 bps at 70 s, recovers at 90 s
+    sts = [OPEN + s * 1000 for s in (59, 70, 90)]
+    spx = [60000.0, 60000.0 * (1 - 6e-4), 60000.0]
+    book = [snap(t, 0.45, 0, 0.50, 0) for t in range(0, 900, 5)]
+    trades = [trade(70.5, 0.45, 10, "no"),   # YES fill inside the 1 s cancel latency
+              trade(75, 0.45, 10, "no"),     # after the YES cancel took effect
+              trade(80, 0.50, 10, "yes")]    # NO fill (spot moved down = NO's way: no guard)
+    m = ms.Market("KXBTC15M-G", CLOSE, 60000.0, "no", book, trades, sts, spx)
+    t, end = OPEN + 60_000, OPEN + 120_000
+    assert pm.guard_cancel(m, "YES", t, end, 5.0) == OPEN + 71_000   # 70 s + 1 s latency
+    assert pm.guard_cancel(m, "NO", t, end, 5.0) == end              # spot never rose 5 bps
+    assert pm.guard_cancel(m, "YES", t, end, 10.0) == end            # 6 bps < 10 bps guard
+    assert pm.guard_cancel(m, "YES", t, end, 0.0) == end             # guard off
+    res_off, res_on = pm.Result(), pm.Result()
+    pm.simulate_market(m, pm.Config("join", 0.03, 60, "hold", 0.0), 0.0, res_off)
+    pm.simulate_market(m, pm.Config("join", 0.03, 60, "hold", 5.0), 0.0, res_on)
+    off, on = res_off.episodes[0], res_on.episodes[0]
+    assert (off.fy, off.fn) == (10, 10), (off.fy, off.fn)   # unguarded: both trades fill YES (capped at 10)
+    assert (on.fy, on.fn) == (10, 10)                       # guard fired, but the 70.5 s print beat the cancel
+    # with the in-latency print removed, the guard keeps the YES leg empty
+    m2 = ms.Market("KXBTC15M-G", CLOSE, 60000.0, "no", book, trades[1:], sts, spx)
+    r2 = pm.Result()
+    pm.simulate_market(m2, pm.Config("join", 0.03, 60, "hold", 5.0), 0.0, r2)
+    assert (r2.episodes[0].fy, r2.episodes[0].fn) == (0, 10)
+    assert "G5" in pm.Config("join", 0.03, 60, "hold", 5.0).label()
+    assert "/G" not in pm.Config("join", 0.03, 60, "hold").label()
+
+
+def test_guarded_completion_is_priced_when_the_imbalance_is_final() -> None:
+    # YES is guard-cancelled at 71 s with nothing filled; NO fills all 10 at 80 s. The pair is known to be
+    # one-sided at 80 s, so the completing YES buy uses the 80 s ask (0.50), not the 120 s ask (0.70).
+    sts = [OPEN + s * 1000 for s in (59, 70, 90)]
+    spx = [60000.0, 60000.0 * (1 - 6e-4), 60000.0]
+    book = [snap(t, 0.45, 0, 0.50, 0) if t <= 95 else snap(t, 0.65, 0, 0.70, 0) for t in range(0, 900, 5)]
+    trades = [trade(75, 0.45, 10, "no"), trade(80, 0.50, 10, "yes")]
+    m = ms.Market("KXBTC15M-G", CLOSE, 60000.0, "yes", book, trades, sts, spx)
+    res = pm.Result()
+    pm.simulate_market(m, pm.Config("join", 0.03, 60, "complete", 5.0), 0.0, res)
+    e = res.episodes[0]
+    assert (e.fy, e.fn, e.completed) == (0, 10, 10), (e.fy, e.fn, e.completed)
+    want = 10 - (ms.fill_cost(10, 0.50, 0.0) + ms.fill_cost(10, 0.50, pm.TAKER_FEE))
+    assert abs(e.pnl - want) < 1e-9, (e.pnl, want)
+    # the episode ends when it resolved (80 s), so the next decision is free from then on
+    assert e.end_ms == OPEN + 80_000, e.end_ms
+    assert res.episodes[1].post_ms < OPEN + 120_000, res.episodes[1].post_ms
+    # resolve: a full leg is done at its last fill, anything else at its cancel
+    assert pm.resolve_ms(0, None, 71, 10, 80, 120) == 80
+    assert pm.resolve_ms(0, None, 120, 10, 50, 120) == 120
+    assert pm.resolve_ms(3, 65, 120, 10, 50, 120) == 120
+    assert ms.conservative_fill_ts("NO", 0.50, 10, 0.0, trades, OPEN, OPEN + 120_000)[2] == OPEN + 80_000
+
+
 def test_summary_split() -> None:
     res = pm.Result([
         pm.Episode("A", "2026-09-01", 0, 1, 0.45, 0.50, 10, 10, 0.50, 9.5, 10, 0, None),
@@ -156,6 +209,17 @@ def test_is_oos_report() -> None:
     # only 9 days → 3 OOS days: below the 5 needed, so not evaluable
     short = {k: pm.Result([e for e in v.episodes if e.day in days[:9]]) for k, v in results.items()}
     assert "NOT EVALUABLE" in pm.report(short, stats, 0.0, iters=200)
+    # 5 OOS days overall, but the picked config only posted on 2 of them: two day blocks are not enough
+    sparse_days = days[:10] + days[-2:]
+    sparse = {
+        (good, 0.0): _days_result({d: [0.5, 0.4, 0.6] * 3 for d in sparse_days}),
+        (bad, 0.0): _days_result({d: [-0.2] * 9 for d in days}),
+        (good, pm.STRESS_MAKER_FEE): _days_result({d: [0.3] * 9 for d in sparse_days}),
+        (bad, pm.STRESS_MAKER_FEE): _days_result({d: [-0.4] * 9 for d in days}),
+    }
+    text = pm.report(sparse, stats, 0.0, iters=200)
+    assert "OOS days: 5" in text and f"Picked on IS: `{good.label()}`" in text, text
+    assert "Decision: NOT EVALUABLE (2 OOS day(s) with episodes for this config, of 5" in text, text
 
 
 def test_end_to_end_fixture() -> None:

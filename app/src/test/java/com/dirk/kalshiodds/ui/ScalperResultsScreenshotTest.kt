@@ -60,6 +60,8 @@ class ScalperResultsScreenshotTest {
                 ledger.apply(e.onClock(ticker, at + 12_000L, if (yes) bid else null, if (yes) null else bid))
             }
         }
+        // The window settles: the hold strategies (and any scalp still open) close at $1 / $0.
+        ledger.apply(e.settle(ticker, "yes", t0 + 160 * 95_000L))
         return ledger.snapshot() to trades.asReversed()
     }
 
@@ -75,6 +77,25 @@ class ScalperResultsScreenshotTest {
     @Test
     fun lightTop() = snap("scalper_results_light_top", false, 0)
 
+    // Arena charts: item 2 = profit bars, 3 = race, 7 = histogram + hours, 9 = exits, win rate, fees.
+    @Test
+    fun darkPnlBars() = snap("arena_dark_pnl_bars", true, 2)
+
+    @Test
+    fun darkRace() = snap("arena_dark_race", true, 3)
+
+    @Test
+    fun darkHistogramAndHours() = snap("arena_dark_histogram_hours", true, 7)
+
+    @Test
+    fun darkExitsWinsFees() = snap("arena_dark_exits_wins_fees", true, 9)
+
+    @Test
+    fun lightRace() = snap("arena_light_race", false, 3)
+
+    @Test
+    fun lightExitsWinsFees() = snap("arena_light_exits_wins_fees", false, 9)
+
     @Test
     fun empty() {
         paparazzi.snapshot(name = "scalper_results_empty") {
@@ -89,7 +110,7 @@ class ScalperResultsScreenshotTest {
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
                 ScalperResultsScreen(
-                    state = state, trades = trades.take(40), onBack = {},
+                    state = state, trades = trades.take(40), onBack = {}, chartTrades = trades,
                     listState = androidx.compose.foundation.lazy.LazyListState(firstVisibleItemIndex = firstItem)
                 )
             }

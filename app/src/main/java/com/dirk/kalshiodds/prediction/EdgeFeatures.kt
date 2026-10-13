@@ -10,7 +10,7 @@ import kotlin.math.ln
  * Order **must** match `ml/train_edge.py` / the JSON `feature_names`.
  */
 object EdgeFeatures {
-    const val SIZE = 10
+    const val SIZE = 13
     val NAMES = listOf(
         "dist_to_strike_vol",
         "tte_frac",
@@ -21,7 +21,10 @@ object EdgeFeatures {
         "realized_vol",
         "cross_asset",
         "time_of_day",
-        "digital_fair"
+        "digital_fair",
+        "prev_window_return",
+        "is_funding_hour",
+        "mid_squared"
     )
 
     data class Raw(
@@ -36,7 +39,19 @@ object EdgeFeatures {
         val realizedVol01: Double? = null,
         val crossAssetRet: Double? = null,
         val nowMs: Long = System.currentTimeMillis(),
-        val digitalFair: Double? = null
+        val digitalFair: Double? = null,
+        /**
+         * Simple return over the FULL PREVIOUS 15-minute window (the window
+         * before this market opened): the documented 15-minute sign
+         * reversal tilt (arXiv 2608.21888: 50.2% -> 53.0% sign-flip by
+         * prior-move size). Positive = BTC rose into this market's open.
+         */
+        val prevWindowReturn: Double? = null,
+        /** True when this window closes into a perpetual funding settlement
+         * (close time at 00/08/16 UTC): documented weaker reversal accuracy
+         * and different payoff geometry in those hours. Parity with the
+         * trainer's is_funding_hour. Derived from close time when null. */
+        val isFundingHour: Boolean? = null
     )
 
     fun build(raw: Raw): FloatArray {
@@ -64,8 +79,25 @@ object EdgeFeatures {
             (raw.realizedVol01 ?: 0.0).toFloat().coerceIn(0f, 1f),
             (raw.crossAssetRet ?: 0.0).toFloat().coerceIn(-0.2f, 0.2f),
             tod,
-            (digital ?: raw.marketMid).toFloat().coerceIn(0f, 1f)
+            (digital ?: raw.marketMid).toFloat().coerceIn(0f, 1f),
+            (raw.prevWindowReturn ?: 0.0).toFloat().coerceIn(-0.05f, 0.05f),
+            if (raw.isFundingHour ?: isFundingHour(raw.nowMs, raw.tteSeconds)) 1f else 0f,
+            (raw.marketMid * raw.marketMid).toFloat().coerceIn(0f, 1f)
         )
+    }
+
+    /**
+     * True when the window closing [nowMs] + [tteSeconds] lands on a
+     * perpetual funding settlement (00/08/16 UTC, ±7.5 min).
+     */
+    fun isFundingHour(nowMs: Long, tteSeconds: Double?): Boolean {
+        val approxCloseMs = nowMs + ((tteSeconds ?: 900.0).coerceAtLeast(0.0) * 1000.0).toLong()
+        // The time left is whole seconds (truncated), so now + tte lands up to a second before the real
+        // close: 07:59:59.4 instead of 08:00:00, which is ~8 h past a funding hour, not 0. Windows close on a
+        // quarter hour, so snap to the nearest one first (trainer: close_ts % 28800 < 900).
+        val q = 900_000L
+        val closeMs = Math.floorDiv(approxCloseMs + q / 2, q) * q
+        return Math.floorMod(closeMs, 8 * 3_600_000L) < q
     }
 
     fun timeOfDayFrac(nowMs: Long, tz: TimeZone = TimeZone.getTimeZone("America/New_York")): Float {

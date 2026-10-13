@@ -38,6 +38,7 @@ import argparse
 import bisect
 import json
 import math
+import random
 import sys
 import threading
 import time
@@ -67,6 +68,18 @@ FEATURE_NAMES = [
     "cross_asset",
     "time_of_day",
     "digital_fair",
+    # Simple return over the full previous 15-minute window (open-900s to
+    # open): the 15-minute sign-reversal tilt (arXiv 2608.21888).
+    "prev_window_return",
+    # 1.0 when the window CLOSES into a perpetual funding settlement
+    # (00/08/16 UTC): documented different payoff geometry and weaker
+    # reversal accuracy in those hours (arXiv 2608.21888 / 2607.09426).
+    "is_funding_hour",
+    # mid^2 interaction: the GWU favorite-longshot study (313,972 contracts)
+    # found expensive contracts win MORE than price implies and cheap ones
+    # less. A quadratic in mid lets the fit express that curvature instead
+    # of a linear tilt only.
+    "mid_squared",
 ]
 MID_INDEX = FEATURE_NAMES.index("market_mid")
 SECONDS_PER_YEAR = 365.25 * 24 * 3600
@@ -74,7 +87,9 @@ FEE_RATE = 0.07
 CONF_MARGIN = 0.03
 UA = "DipHunterTrainer/1.1"
 # App: ExternalMarketFeatures.realizedVol(closes.takeLast(16)).
-SPOT_LOOKBACK_BARS = 16
+SPOT_LOOKBACK_BARS = 60
+# EWMA decay for realized vol (matches the app's ExternalMarketFeatures).
+EWMA_LAMBDA = 0.86
 # Ignore spot bars older than this at a decision (data gaps must not feed
 # hours-old spot into dist / digital fair).
 SPOT_MAX_AGE_S = 60 * (SPOT_LOOKBACK_BARS + 5)
@@ -90,11 +105,16 @@ MID_CLIP = 0.001
 # market_mid is NOT a column: logit(mid) is already the offset. A second
 # linear mid term is what lets the fit walk off a price that is already
 # the better forecast.
+# prev_window_return tests the 15-minute sign reversal (arXiv 2608.21888);
+# is_funding_hour lets calibration shift for windows closing into perp
+# funding; mid_squared fits favorite-longshot curvature. mid_squared is
+# monotone in the mid on [0, 1], so it can stand in for part of a linear mid
+# term: L2 and the holdout promotion gate are what keep it honest.
 # Left out on purpose: market_mid, tte_frac / spread (no direction),
 # imbalance (always 0 in training — no historical L2), momentum /
 # realized_vol (the app builds them from its tick buffer, training from
 # 1m candles — no parity), time_of_day (trainer UTC vs app New York clock).
-OFFSET_FEATURES = ["dist_to_strike_vol", "cross_asset", "digital_fair"]
+OFFSET_FEATURES = ["dist_to_strike_vol", "cross_asset", "digital_fair", "prev_window_return", "is_funding_hour", "mid_squared"]
 # Rows are clustered: the 13 minutes of one market share one outcome, so
 # the effective sample is the market count. 0.05 keeps a calibrated
 # market close to w = 0 at a few hundred markets (see test_train_edge.py).
@@ -106,6 +126,8 @@ EV_MARGIN = 0.03
 FIRST_DECISION_MINUTE = 1
 LAST_DECISION_MINUTE = 13
 MIN_TRAIN_ROWS = 20
+# Distinct UTC days with a holdout bet before the bootstrap CI can promote a model.
+MIN_PROMOTION_DAYS = 5
 MAX_PAGES = 400
 
 
@@ -288,11 +310,13 @@ def usable(p: float | None) -> float | None:
 
 
 def historical_cutoff_ts() -> int:
-    """GET /historical/cutoff — markets settled before this live only under /historical."""
-    try:
-        body = http_get(f"{KALSHI}/historical/cutoff", limiter=KALSHI_LIMIT) or {}
-    except Exception:
-        return 0
+    """GET /historical/cutoff — markets settled before this live only under /historical.
+
+    0 when the API reports no cutoff (no historical tier). A failed request
+    raises instead: treating it as 0 would skip the historical listing, and
+    the run would prune and retrain on the recent markets alone.
+    """
+    body = http_get(f"{KALSHI}/historical/cutoff", limiter=KALSHI_LIMIT) or {}
     dt = parse_iso(body.get("market_settled_ts")) if isinstance(body, dict) else None
     return int(dt.timestamp()) if dt else 0
 
@@ -310,6 +334,8 @@ def _page(path: str, params: dict) -> Iterable[dict]:
         cursor = data.get("cursor")
         if not batch or not cursor:
             return
+    # Still a cursor after MAX_PAGES: a partial listing would look like markets leaving the window.
+    raise RuntimeError(f"{path} listing still had pages after {MAX_PAGES}")
 
 
 def fetch_settled(series: str, days: int, max_markets: int = 0, now: float | None = None) -> list[dict]:
@@ -367,10 +393,13 @@ def fetch_candles(series: str, ticker: str, open_ts: int, close_ts: int) -> list
     return (hist or {}).get("candlesticks") or []
 
 
-def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
+def fetch_spot(product: str, start: int, end: int,
+               failed: list[tuple[int, int]] | None = None) -> list[tuple[int, float]]:
     """1-minute Coinbase closes as (bucket_start_ts, close), oldest first.
 
-    Pages 280 bars per request (the endpoint caps at 300).
+    Pages 280 bars per request (the endpoint caps at 300). A chunk that fails
+    is appended to [failed] as (start, end), so callers can tell a gap from a
+    quiet market.
     """
     span = 60 * 280
     by_ts: dict[int, float] = {}
@@ -387,12 +416,24 @@ def fetch_spot(product: str, start: int, end: int) -> list[tuple[int, float]]:
         except Exception as e:
             print(f"  spot {product} chunk failed: {e}", flush=True)
             data = []
+            if failed is not None:
+                failed.append((cursor, chunk_end))
         if isinstance(data, list):
             for r in data:
                 if r and len(r) >= 5:
                     by_ts[int(r[0])] = float(r[4])
         cursor = chunk_end
     return sorted(by_ts.items())
+
+
+# Spot history a market's rows read: its 15 minutes plus the lookback before the open.
+SPOT_NEED_S = 900 + 60 * (SPOT_LOOKBACK_BARS + 5)
+
+
+def spot_complete(close_ts: int, gaps: list[tuple[int, int]]) -> bool:
+    """True when no failed spot chunk overlaps the interval this market's features read."""
+    lo, hi = close_ts - SPOT_NEED_S, close_ts + 60
+    return not any(a < hi and b > lo for a, b in gaps)
 
 
 def spot_known_at(spot: list[tuple[int, float]], decision_ts: int, keep: int = SPOT_LOOKBACK_BARS) -> list[float]:
@@ -409,14 +450,27 @@ def spot_known_at(spot: list[tuple[int, float]], decision_ts: int, keep: int = S
 
 
 def realized_vol_annual(closes: list[float]) -> float | None:
+    """EWMA sigma over 1-minute log returns (lambda = 0.86, ~60 bars).
+
+    The 16-bar sample std was noisy: sigma is the digital fair's only
+    parameter, and jitter in it moved the fair ~30% farther from the market
+    than EWMA in testing. Same formula as the app's
+    ExternalMarketFeatures.realizedVol — trainer and phone must agree.
+    """
     if len(closes) < 5:
         return None
     rets = [math.log(b / a) for a, b in zip(closes, closes[1:]) if a > 0 and b > 0]
     if len(rets) < 4:
         return None
+    lam = EWMA_LAMBDA
+    # Unbiased-start EWMA: seed with the sample variance, then weight the rest.
     mean = sum(rets) / len(rets)
-    var = sum((r - mean) ** 2 for r in rets) / (len(rets) - 1)
-    std = math.sqrt(max(var, 0.0))
+    var = sum((r - mean) ** 2 for r in rets) / len(rets)
+    w_sum = 1.0
+    for r in rets:
+        var = lam * var + (1.0 - lam) * (r - mean) ** 2
+        w_sum = lam * w_sum + (1.0 - lam)
+    std = math.sqrt(max(var / w_sum, 0.0))
     if std <= 0:
         return None
     return min(5.0, max(0.01, std * math.sqrt(SECONDS_PER_YEAR / 60.0)))
@@ -429,6 +483,41 @@ def spot_return(closes: list[float], bars: int) -> float:
     return (closes[-1] - closes[-1 - bars]) / closes[-1 - bars]
 
 
+def prev_window_return(spot_rows: list[tuple[int, float]], open_ts: int) -> float:
+    """Simple return over the PREVIOUS window (open-900 .. open), 0 when unknown.
+
+    Parity: the app's SpotTape.returnOver(15 min, at open) — bars that closed
+    by open_ts only (no look-ahead). The 15-minute sign-reversal tilt
+    (arXiv 2608.21888): positive prior move -> slightly lower P(YES).
+    """
+    b = prev_window_bounds(spot_rows, open_ts)
+    if b is None:
+        return 0.0
+    first, last = b
+    return (last - first) / first
+
+
+# How far a boundary bar's close may sit before open − 15 min / open (one bar).
+PREV_WINDOW_TOL_S = 60
+
+
+def prev_window_bounds(spot_rows: list[tuple[int, float]], open_ts: int) -> tuple[float, float] | None:
+    """(close at open − 15 min, close at open) from the bars that closed by each boundary, or None.
+
+    Each must be the bar closing within PREV_WINDOW_TOL_S of its boundary: a sparse response
+    (no failed chunk, just missing minutes) would otherwise span the wrong interval. [spot_rows]
+    must be sorted by bucket start.
+    """
+    def close_at(t: int) -> float | None:
+        i = bisect.bisect_right(spot_rows, (t - 60, math.inf)) - 1  # last bar closing (start + 60) <= t
+        if i < 0:
+            return None
+        ts, c = spot_rows[i]
+        return c if c > 0 and t - (ts + 60) <= PREV_WINDOW_TOL_S else None
+    first, last = close_at(open_ts - 900), close_at(open_ts)
+    return None if first is None or last is None else (first, last)
+
+
 def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, float]], idx: int) -> list[float] | None:
     mid = candle_mid(candles[idx])
     if mid is None:
@@ -436,6 +525,8 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
     close_dt = parse_iso(market.get("close_time"))
     end_ts = int(candles[idx].get("end_period_ts") or 0)
     tte = max(0.0, (close_dt.timestamp() if close_dt else end_ts) - end_ts)
+    open_dt = parse_iso(market.get("open_time"))
+    open_ts = int(open_dt.timestamp()) if open_dt else (int(close_dt.timestamp()) - 900 if close_dt else end_ts - 900)
     window = [candle_mid(c) for c in candles[max(0, idx - 7) : idx + 1]]
     mids = [m for m in window if m is not None]
     momentum = (mids[-1] - mids[0]) if len(mids) >= 2 else 0.0
@@ -464,6 +555,9 @@ def features_for(market: dict, candles: list[dict], spot_rows: list[tuple[int, f
         float(max(-0.2, min(0.2, spot_return(spot, 5)))),
         float((hour * 60) / (24 * 60)),
         float(fair if fair is not None else mid),
+        float(max(-0.05, min(0.05, prev_window_return(spot_rows, open_ts)))),
+        1.0 if (close_dt.timestamp() if close_dt else end_ts) % 28800 < 900 else 0.0,
+        float(mid * mid),
     ]
 
 
@@ -513,19 +607,110 @@ def market_samples(market: dict, candles: list[dict], spot_rows: list[tuple[int,
     return out
 
 
-def collect(days: int, max_markets: int = 0, workers: int = 3) -> list[Sample]:
-    """Live pull: settled markets, their 1m candles, and Coinbase spot."""
+def _sample_row(s: Sample) -> dict:
+    return {
+        "x": s.x, "y": s.y, "mid": s.mid, "ts": s.ts,
+        "close_ts": s.close_ts, "ticker": s.ticker,
+        "yes_ask": s.yes_ask, "no_ask": s.no_ask,
+    }
+
+
+def _sample_from_row(o: dict) -> Sample:
+    return Sample(
+        x=[float(v) for v in o["x"]],
+        y=int(o["y"]),
+        mid=float(o["mid"]),
+        ts=int(o["ts"]),
+        close_ts=int(o["close_ts"]),
+        ticker=str(o["ticker"]),
+        yes_ask=float(o["yes_ask"]) if o.get("yes_ask") is not None else None,
+        no_ask=float(o["no_ask"]) if o.get("no_ask") is not None else None,
+    )
+
+
+def load_progress(path: Path | None) -> dict[str, list[Sample]]:
+    """Markets already pulled by an earlier (possibly killed) run: ticker -> rows.
+
+    One JSON line per finished market, appended as it completes, so a run cut
+    off by the job timeout keeps everything it pulled. A truncated last line
+    is skipped. A market with zero usable rows is still recorded (as []), so
+    it is not fetched again.
+    """
+    done: dict[str, list[Sample]] = {}
+    if path is None or not path.is_file():
+        return done
+    with path.open() as f:
+        for line in f:
+            try:
+                o = json.loads(line)
+                done[str(o["ticker"])] = [_sample_from_row(r) for r in o["rows"]]
+            except Exception:
+                continue
+    return done
+
+
+def collect(days: int, max_markets: int = 0, workers: int = 3, progress: Path | None = None) -> list[Sample]:
+    """Live pull: settled markets, their 1m candles, and Coinbase spot.
+
+    With [progress], markets finished by an earlier run are reused and every
+    newly finished market is appended to that file straight away.
+    """
     samples: list[Sample] = []
+    done_before = load_progress(progress)
+    if done_before:
+        print(f"  progress {progress}: {len(done_before)} markets already pulled", flush=True)
+    sink = None
+    if progress is not None:
+        progress.parent.mkdir(parents=True, exist_ok=True)
+        sink = progress.open("a")
+
+    def record(m: dict, rows: list[Sample]) -> None:
+        samples.extend(rows)
+        if sink is not None:
+            sink.write(json.dumps({"ticker": m["ticker"], "rows": [_sample_row(r) for r in rows]}) + "\n")
+            sink.flush()
     per = 0 if max_markets <= 0 else max(1, max_markets // len(SERIES))
+    listed: set[str] = set()
+    listed_series: set[str] = set()
     for series in SERIES:
         print(f"=== {series}", flush=True)
         markets = fetch_settled(series, days, per)
         print(f"  settled {len(markets)}", flush=True)
+        # A listing failure raises, so an empty one is complete: its cached markets left the window.
+        listed_series.add(series)
+        if not markets:
+            continue
+        listed.update(m["ticker"] for m in markets)
+        reused = [m for m in markets if m["ticker"] in done_before]
+        for m in reused:
+            samples.extend(done_before[m["ticker"]])
+        markets = [m for m in markets if m["ticker"] not in done_before]
+        print(f"  reused {len(reused)} from progress, {len(markets)} to fetch", flush=True)
         if not markets:
             continue
         closes = [int(parse_iso(m["close_time"]).timestamp()) for m in markets]
-        spot = fetch_spot(PRODUCT[series], min(closes) - 900 - 60 * (SPOT_LOOKBACK_BARS + 5), max(closes) + 60)
+        gaps: list[tuple[int, int]] = []
+        spot = fetch_spot(PRODUCT[series], min(closes) - SPOT_NEED_S, max(closes) + 60, gaps)
         print(f"  spot bars {len(spot)}", flush=True)
+        if gaps:
+            # A market whose spot interval hit a failed chunk would be cached with zero spot features
+            # forever: leave it out of this run (and of the progress file) so the next run retries it.
+            ok = [m for m in markets if spot_complete(int(parse_iso(m["close_time"]).timestamp()), gaps)]
+            print(f"  spot gaps {len(gaps)}: deferring {len(markets) - len(ok)} markets to the next run", flush=True)
+            markets = ok
+            if not markets:
+                continue
+        # Same for a successful but sparse reply: no bar at a previous-window boundary would cache
+        # prev_window_return as an interval it is not. Those markets wait for the next run too.
+        def open_of(m: dict) -> int:
+            o = parse_iso(m.get("open_time"))
+            return int(o.timestamp()) if o else int(parse_iso(m["close_time"]).timestamp()) - 900
+        bounded = [m for m in markets if prev_window_bounds(spot, open_of(m)) is not None]
+        if len(bounded) < len(markets):
+            print(f"  spot boundary bars missing: deferring {len(markets) - len(bounded)} markets", flush=True)
+            markets = bounded
+            if not markets:
+                continue
 
         def one(m: dict) -> list[Sample]:
             close_ts = int(parse_iso(m["close_time"]).timestamp())
@@ -537,15 +722,110 @@ def collect(days: int, max_markets: int = 0, workers: int = 3) -> list[Sample]:
         done = 0
         with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
             futs = {pool.submit(one, m): m for m in markets}
+            skipped: list[dict] = []
             for fut in as_completed(futs):
                 try:
-                    samples.extend(fut.result())
+                    record(futs[fut], fut.result())
                 except Exception as e:
+                    # 429s are transient: keep the market for one retry pass
+                    # instead of dropping its 13 decision minutes forever.
+                    skipped.append(futs[fut])
                     print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
                 done += 1
                 if done % 250 == 0:
                     print(f"  candles {done}/{len(markets)} rows {len(samples)}", flush=True)
+            for attempt in range(2):
+                if not skipped:
+                    break
+                print(f"  retrying {len(skipped)} rate-limited markets (pass {attempt + 1})", flush=True)
+                time.sleep(30.0 * (attempt + 1))
+                retry, skipped = skipped, []
+                with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+                    futs = {pool.submit(one, m): m for m in retry}
+                    for fut in as_completed(futs):
+                        try:
+                            record(futs[fut], fut.result())
+                        except Exception as e:
+                            skipped.append(futs[fut])
+                            print(f"  skip {futs[fut].get('ticker')}: {e}", flush=True)
+    if sink is not None:
+        sink.close()
+        if per == 0:
+            compact_progress(progress, listed, listed_series)
     return samples
+
+
+def compact_progress(path: Path, listed: set[str], listed_series: set[str]) -> None:
+    """Drop markets that left the lookback window, so the progress file tracks the listing.
+
+    Only series whose listing came back are pruned (a failed listing keeps its
+    markets). Written to a temp file and swapped in, so a kill here loses nothing.
+    """
+    done = load_progress(path)
+    keep = {t: rows for t, rows in done.items()
+            if t in listed or not any(t.startswith(series + "-") for series in listed_series)}
+    if len(keep) == len(done):
+        return
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w") as f:
+        for t, rows in keep.items():
+            f.write(json.dumps({"ticker": t, "rows": [_sample_row(r) for r in rows]}) + "\n")
+    tmp.replace(path)
+    print(f"  progress {path}: dropped {len(done) - len(keep)} markets past the window", flush=True)
+
+
+# Bump whenever the way rows are BUILT changes (not just which features exist): cached rows from an older
+# extractor are then rebuilt instead of trusted. 2: spot gaps and missing boundary bars defer a market.
+FEATURE_EXTRACTOR_VERSION = 2
+
+
+def _feature_tag() -> str:
+    """Short hash of the feature contract and extractor: rows from another one are not reused."""
+    import hashlib
+    key = ",".join(FEATURE_NAMES) + f"|extractor={FEATURE_EXTRACTOR_VERSION}"
+    return hashlib.sha1(key.encode()).hexdigest()[:8]
+
+
+def samples_cache_path(cache: Path, days: int) -> Path:
+    return cache / f"samples_{days}d_{_feature_tag()}.jsonl"
+
+
+def progress_path(cache: Path, days: int) -> Path:
+    return cache / f"progress_{days}d_{_feature_tag()}.jsonl"
+
+
+def load_samples_cache(cache: Path, days: int) -> list[Sample] | None:
+    """Previously collected live samples for this window, or None.
+
+    A 270-day pull takes hours and gets 429-skipped markets; once it is
+    collected it is cached verbatim (feature rows are immutable — they
+    only depend on settled data). Retrains refit on the same rows.
+    """
+    path = samples_cache_path(cache, days)
+    if not path.is_file():
+        return None
+    out: list[Sample] = []
+    with path.open() as f:
+        for line in f:
+            if not line.strip():
+                continue
+            try:
+                out.append(_sample_from_row(json.loads(line)))
+            except Exception:
+                continue
+    print(f"  samples cache {path}: {len(out)} rows", flush=True)
+    return out if out else None
+
+
+def save_samples_cache(cache: Path, days: int, samples: list[Sample]) -> None:
+    cache.mkdir(parents=True, exist_ok=True)
+    path = samples_cache_path(cache, days)
+    tmp = path.with_suffix(".tmp")
+    with tmp.open("w") as f:
+        for s in samples:
+            f.write(json.dumps(_sample_row(s)) + "\n")
+    tmp.replace(path)
+    print(f"  wrote samples cache {path} ({len(samples)} rows)", flush=True)
 
 
 def load_backtest_cache(cache: Path, days: int | None = None) -> list[Sample]:
@@ -807,6 +1087,20 @@ def logloss(p: list[float], y: list[int]) -> float:
     return s / len(y)
 
 
+def calibration_error(p: list[float], y: list[int], bins: int = 10) -> float:
+    """Expected calibration error; reported with proper scores, never alone."""
+    if not p:
+        return 1.0
+    total = 0.0
+    for bucket in range(bins):
+        rows = [(pi, yi) for pi, yi in zip(p, y) if min(bins - 1, int(pi * bins)) == bucket]
+        if rows:
+            total += len(rows) / len(p) * abs(
+                sum(pi for pi, _ in rows) / len(rows) - sum(yi for _, yi in rows) / len(rows)
+            )
+    return total
+
+
 def fee_per_contract(price: float, fee_rate: float = FEE_RATE) -> float:
     """Kalshi taker fee `rate·P·(1−P)` per contract, before cent rounding.
 
@@ -830,6 +1124,86 @@ def ev_side(p_yes: float, yes_ask: float | None, no_ask: float | None, margin: f
     if best is None or best[1] <= margin:
         return None, ev_yes, ev_no
     return best[0], ev_yes, ev_no
+
+
+def bet_log(rows: list[tuple[Sample, float]], margin: float = EV_MARGIN) -> list[dict[str, Any]]:
+    """Every simulated EV-at-ask bet, newest last, for release publication.
+
+    One bet per market (first minute clearing the margin, same as ev_pnl):
+    ticker, minute offset, side, ask, fee, model P(YES), mid, EV, outcome.
+    """
+    by_ticker: dict[str, list[tuple[Sample, float]]] = {}
+    for s, p in rows:
+        by_ticker.setdefault(s.ticker, []).append((s, p))
+    out: list[dict[str, Any]] = []
+    for ticker, items in by_ticker.items():
+        items.sort(key=lambda sp: sp[0].ts)
+        for s, p in items:
+            side, ev_yes, ev_no = ev_side(p, s.yes_ask, s.no_ask, margin)
+            if side is None:
+                continue
+            ask = s.yes_ask if side == "YES" else s.no_ask
+            fee = fee_per_contract(ask)
+            won = (s.y == 1) == (side == "YES")
+            out.append({
+                "ticker": ticker,
+                "minute": (s.ts - (s.close_ts - 900)) // 60,
+                "side": side,
+                "ask": ask,
+                "fee": fee,
+                "p_yes": p,
+                "mid": s.mid,
+                "ev": (ev_yes if side == "YES" else ev_no),
+                "won": won,
+                "pnl": (1.0 - ask - fee) if won else (-ask - fee),
+            })
+            break
+    out.sort(key=lambda b: b["ticker"])
+    return out
+
+
+def bootstrap_pnl_ci(
+    rows: list[tuple[Sample, float]],
+    margin: float = EV_MARGIN,
+    n_boot: int = 1000,
+    level: float = 0.90,
+    seed: int = 2026,
+) -> dict[str, float]:
+    """Block bootstrap over DAYS of the EV-at-ask betting rule.
+
+    A market's minutes share one settlement, and a day's markets share a
+    vol regime, so the resample unit is the UTC DAY (all of its bets move
+    together). The CI is on per-contract P&L; `ci_low > 0` is the promotion
+    gate — a higher hit rate alone never is.
+    """
+    # The same policy as ev_pnl / bet_log: ONE bet per market, at its first minute clearing the margin.
+    # Resampling every qualifying minute would count one settlement up to 13 times.
+    close_of = {s.ticker: s.close_ts for s, _ in rows}
+    by_day: dict[int, list[float]] = {}
+    for b in bet_log(rows, margin):
+        by_day.setdefault(close_of[b["ticker"]] // 86400, []).append(b["pnl"])
+    days = [by_day[d] for d in sorted(by_day)]
+    if not days:
+        return {"ci_low": 0.0, "ci_high": 0.0, "p_low": 0.0, "n_boot_markets": 0.0}
+    rng = random.Random(seed)
+    per_bet: list[float] = []
+    for m in range(n_boot):
+        pnl = 0.0
+        n = 0
+        for _ in range(len(days)):
+            day = days[rng.randrange(len(days))]
+            pnl += sum(day)
+            n += len(day)
+        if n:
+            per_bet.append(pnl / n)
+    if not per_bet:
+        return {"ci_low": 0.0, "ci_high": 0.0, "p_low": 1.0, "n_boot_markets": 0.0}
+    per_bet.sort()
+    def q(frac: float) -> float:
+        return per_bet[min(len(per_bet) - 1, max(0, int(frac * len(per_bet))))]
+    lo, hi = q((1.0 - level) / 2.0), q(1.0 - (1.0 - level) / 2.0)
+    p_low = sum(1.0 for v in per_bet if v <= 0.0) / len(per_bet)
+    return {"ci_low": lo, "ci_high": hi, "p_low": p_low, "n_boot_markets": float(len(days))}
 
 
 def ev_pnl(rows: list[tuple[Sample, float]], margin: float = EV_MARGIN) -> dict[str, float]:
@@ -888,6 +1262,120 @@ def fold_splits(samples: list[Sample], folds: int = 4) -> list[tuple[list[Sample
     return out
 
 
+def walk_forward_hold(
+    samples: list[Sample],
+    folds: int = 4,
+    kind: str = KIND_OFFSET,
+    design: list[str] | None = None,
+    l2: float = DEFAULT_L2,
+) -> list[tuple[Sample, float]]:
+    """Walk-forward holdout rows (sample, predicted P(YES)) in time order."""
+    hold: list[tuple[Sample, float]] = []
+    for train, test in fold_splits(samples, folds):
+        model = fit_model(train, kind, design, l2)
+        hold.extend((s, model_predict(model, s.x, s.mid)) for s in test)
+    return hold
+
+
+def recency_metrics(hold: list[tuple[Sample, float]], fraction: float = 0.25) -> dict[str, float]:
+    """Scores on the most recent [fraction] of the holdout only.
+
+    Crypto vol regimes drift over months; a model can beat the market on the
+    full holdout and still be stale on the most recent data. These numbers
+    gate nothing by themselves (the full-holdout gates do), but the manifest
+    publishes them so a stale fit is visible before promotion.
+    """
+    if not hold:
+        return {"recent_model_brier": 1.0, "recent_market_brier": 0.0, "recent_n": 0.0}
+    cut = int(len(hold) * (1.0 - fraction))
+    recent = hold[cut:]
+    ph = [p for _, p in recent]
+    yh = [s.y for s, _ in recent]
+    mh = [s.mid for s, _ in recent]
+    return {
+        "recent_model_brier": brier(ph, yh),
+        "recent_market_brier": brier(mh, yh),
+        "recent_n": float(len(recent)),
+    }
+
+
+def sweep_l2(
+    samples: list[Sample],
+    folds: int = 4,
+    kind: str = KIND_OFFSET,
+    design: list[str] | None = None,
+    candidates: tuple[float, ...] = (0.5, 0.05, 0.005),
+) -> tuple[float, dict[str, dict[str, float]]]:
+    """Pick the L2 that minimizes walk-forward log-loss on [samples].
+
+    Rows are clustered by market, so a smaller L2 can look better by
+    memorizing; log-loss punishes overconfidence harder than Brier, which
+    makes it the right selection score. Returns (best_l2, per-candidate
+    metrics). This choice is made on its own holdout, so its scores are
+    optimistic: the promotion gate uses [walk_forward_hold_nested], which
+    runs this sweep inside each outer fold's training data only.
+    """
+    per: dict[str, dict[str, float]] = {}
+    best_l2, best_ll = None, float("inf")
+    for cand in candidates:
+        hold = walk_forward_hold(samples, folds, kind, design, cand)
+        if not hold:
+            continue
+        ll = logloss([p for _, p in hold], [s.y for s, _ in hold])
+        mb = brier([p for _, p in hold], [s.y for s, _ in hold])
+        mm = brier([s.mid for s, _ in hold], [s.y for s, _ in hold])
+        per[str(cand)] = {"logloss": ll, "brier": mb, "market_brier": mm}
+        if ll < best_ll:
+            best_ll, best_l2 = ll, cand
+    if best_l2 is None:
+        best_l2 = DEFAULT_L2
+    return best_l2, per
+
+
+def walk_forward_hold_nested(
+    samples: list[Sample],
+    folds: int = 4,
+    kind: str = KIND_OFFSET,
+    design: list[str] | None = None,
+    candidates: tuple[float, ...] = (0.5, 0.05, 0.005),
+) -> tuple[list[tuple[Sample, float]], list[float]]:
+    """Walk-forward holdout with the L2 chosen INSIDE each fold's training data.
+
+    For every outer (train, test) split, [sweep_l2] runs on `train` alone, the
+    winner is fitted on `train` and scored on `test`. The test rows never take
+    part in choosing the L2 that scores them, so the gate numbers are honest.
+    Returns (holdout rows, the L2 chosen per fold).
+    """
+    hold: list[tuple[Sample, float]] = []
+    chosen: list[float] = []
+    for train, test in fold_splits(samples, folds):
+        best, _ = sweep_l2(train, folds, kind, design, candidates)
+        chosen.append(best)
+        model = fit_model(train, kind, design, best)
+        hold.extend((s, model_predict(model, s.x, s.mid)) for s in test)
+    return hold, chosen
+
+
+def margin_curve(hold: list[tuple[Sample, float]], margins: tuple[float, ...] = (0.0, 0.01, 0.02, 0.03, 0.05, 0.08, 0.12)) -> dict[str, dict[str, float]]:
+    """EV-at-ask P&L per margin threshold: how picky should the bet rule be?
+
+    The app fires at EV_MARGIN = 3¢. If a higher margin shows a materially
+    better P&L per bet with enough trades, raising the app's threshold is
+    the cheapest possible improvement: fewer, better bets. Diagnostic only —
+    the bootstrap CI at the shipped margin stays the promotion gate.
+    """
+    out: dict[str, dict[str, float]] = {}
+    for m in margins:
+        stats = ev_pnl(hold, m)
+        out[f"{m:.2f}"] = {
+            "n": stats["n"],
+            "pnl": stats["pnl"],
+            "pnl_per_bet": stats["pnl_per_bet"],
+            "hit_rate": stats["hit_rate"],
+        }
+    return out
+
+
 def walk_forward(
     samples: list[Sample],
     folds: int = 4,
@@ -895,12 +1383,20 @@ def walk_forward(
     design: list[str] | None = None,
     l2: float = DEFAULT_L2,
     ev_margin: float = EV_MARGIN,
-) -> dict[str, float]:
+) -> dict[str, Any]:
     """Time-ordered walk-forward over [fold_splits]."""
-    hold: list[tuple[Sample, float]] = []
-    for train, test in fold_splits(samples, folds):
-        model = fit_model(train, kind, design, l2)
-        hold.extend((s, model_predict(model, s.x, s.mid)) for s in test)
+    hold = walk_forward_hold(samples, folds, kind, design, l2)
+    return walk_forward_metrics(hold, samples, ev_margin, folds=folds, l2=l2)
+
+
+def walk_forward_metrics(
+    hold: list[tuple[Sample, float]],
+    samples: list[Sample],
+    ev_margin: float,
+    folds: int,
+    l2: float,
+) -> dict[str, Any]:
+    """Holdout metrics for precomputed walk-forward rows."""
     if not hold:
         return {"n_samples": float(len(samples)), "n_holdout": 0.0}
     ph = [p for _, p in hold]
@@ -908,6 +1404,7 @@ def walk_forward(
     mh = [s.mid for s, _ in hold]
     sim = ev_pnl(hold, ev_margin)
     market_sim = ev_pnl([(s, s.mid) for s, _ in hold], ev_margin)
+    boot = bootstrap_pnl_ci(hold, ev_margin)
     model_brier = brier(ph, yh)
     market_brier = brier(mh, yh)
     return {
@@ -930,6 +1427,14 @@ def walk_forward(
         "sim_pnl_per_bet": sim["pnl_per_bet"],
         # Sanity: the market as its own model can never clear ask + fee.
         "market_sim_trades": market_sim["n"],
+        "model_calibration_error": calibration_error(ph, yh),
+        "market_calibration_error": calibration_error(mh, yh),
+        "boot_ci_low": boot["ci_low"],
+        "boot_ci_high": boot["ci_high"],
+        "boot_p_of_loss": boot["p_low"],
+        "boot_markets": boot["n_boot_markets"],
+        "boot_days": boot["n_boot_markets"],
+        "margin_curve": margin_curve(hold),  # type: ignore[arg-type]
     }
 
 
@@ -940,7 +1445,7 @@ def fixture_dataset(n: int = 240) -> list[Sample]:
         mid = 0.35 + 0.3 * ((i % 40) / 40.0)
         dist = (mid - 0.5) * 2
         fair = min(0.95, max(0.05, mid + 0.08 * math.sin(i / 7.0)))
-        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair]
+        row = [dist, 0.5, mid, 0.0, 0.02, 0.01, 0.04, 0.0, (i % 24) / 24.0, fair, 0.0, 0.0, mid * mid]
         label = 1 if fair + 0.02 * math.sin(i) > 0.5 else 0
         ts = t0 + i * 900
         out.append(
@@ -961,7 +1466,7 @@ def fixture_dataset(n: int = 240) -> list[Sample]:
 # --- Export -------------------------------------------------------------------
 
 
-def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, synthetic: bool = False, tag: str = "claude-edge-model", version: str = "2") -> None:
+def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None = None, synthetic: bool = False, tag: str = "mis-bitcoin-edge-model", version: str = "2") -> None:
     n = int(metrics.get("n_holdout", metrics.get("n_samples", 0)) or 0)
     model_brier = float(metrics.get("model_brier", 1.0))
     market_brier = float(metrics.get("market_brier", 1.0))
@@ -982,8 +1487,29 @@ def write_manifest(metrics: dict[str, Any], path: Path, trained_at: str | None =
         "model_asset": "edge_model.json",
         "tag": tag,
         "synthetic": synthetic,
+        "model_calibration_error": metrics.get("model_calibration_error"),
+        "market_calibration_error": metrics.get("market_calibration_error"),
+        "boot_ci_low": metrics.get("boot_ci_low"),
+        "boot_ci_high": metrics.get("boot_ci_high"),
+        "boot_p_of_loss": metrics.get("boot_p_of_loss"),
+        "boot_days": metrics.get("boot_days"),
+        "sim_trades": metrics.get("sim_trades"),
         # Synthetic (fixture) data never activates on a phone.
         "beats_market": (not synthetic) and n > 0 and model_brier < market_brier and model_ll < market_ll,
+        # Promotion needs BOTH: the model beats the market mid out of sample
+        # (proper scores) AND the market-block bootstrap P&L CI at the ask
+        # excludes zero. Either failing keeps the model advisory-only.
+        "promotion_eligible": (
+            (not synthetic)
+            and n > 0
+            and model_brier < market_brier
+            and model_ll < market_ll
+            and float(metrics.get("sim_trades", 0) or 0) >= 200
+            and float(metrics.get("boot_ci_low", 0.0) or 0.0) > 0.0
+            # The day-block CI is only a robustness check with several days to resample: one day's
+            # bets resample to a zero-width interval around that day's (single-regime) result.
+            and float(metrics.get("boot_days", 0) or 0) >= MIN_PROMOTION_DAYS
+        ),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -1026,11 +1552,13 @@ def main() -> int:
     ap.add_argument("--kind", choices=[KIND_OFFSET, KIND_LOGISTIC], default=KIND_OFFSET)
     ap.add_argument("--features", default=",".join(OFFSET_FEATURES), help="offset model design columns")
     ap.add_argument("--l2", type=float, default=DEFAULT_L2)
+    ap.add_argument("--sweep-l2", action="store_true", help="pick L2 by holdout log-loss over a fixed grid")
     ap.add_argument("--folds", type=int, default=4)
     ap.add_argument("--ev-margin", type=float, default=EV_MARGIN)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--cache", default=None, help="train from a tools/backtest cache dir instead of the network")
-    ap.add_argument("--tag", default="claude-edge-model", help="release tag written into the manifest")
+    ap.add_argument("--samples-cache", default=None, help="dir to cache/reuse the collected live sample rows")
+    ap.add_argument("--tag", default="mis-bitcoin-edge-model", help="release tag written into the manifest")
     ap.add_argument("--out", default=str(ML_DIR / "edge_model.json"))
     ap.add_argument("--manifest", default=str(ML_DIR / "edge_model_manifest.json"))
     ap.add_argument("--fixture", action="store_true")
@@ -1046,7 +1574,16 @@ def main() -> int:
         samples = fixture_dataset()
     else:
         try:
-            samples = load_backtest_cache(Path(args.cache), args.days) if args.cache else collect(args.days, args.max_markets, args.workers)
+            if args.samples_cache:
+                # Always list again: markets already pulled come from the progress file, newly settled
+                # ones are fetched and those past the window drop out. (Reusing a complete samples file
+                # as-is would refit the same frozen window on every later run.)
+                scache = Path(args.samples_cache)
+                samples = collect(args.days, args.max_markets, args.workers,
+                                  progress=progress_path(scache, args.days))
+                save_samples_cache(scache, args.days, samples)
+            else:
+                samples = load_backtest_cache(Path(args.cache), args.days) if args.cache else collect(args.days, args.max_markets, args.workers)
         except Exception as e:
             if args.require_live:
                 print(f"live collect failed: {e}", flush=True)
@@ -1061,7 +1598,19 @@ def main() -> int:
             samples, synthetic = fixture_dataset(), True
     n_yes = sum(s.y for s in samples)
     print(f"samples {len(samples)} markets {len({s.ticker for s in samples})} yes={n_yes} no={len(samples) - n_yes}", flush=True)
-    metrics = walk_forward(samples, args.folds, args.kind, design, args.l2, args.ev_margin)
+    if args.sweep_l2 and not synthetic:
+        # Gate numbers: L2 chosen inside each fold's training data (nested). The shipped model's L2:
+        # the sweep over everything, which is fine for the final fit because nothing is scored on it.
+        hold, chosen = walk_forward_hold_nested(samples, args.folds, args.kind, design)
+        best_l2, per = sweep_l2(samples, args.folds, args.kind, design)
+        print("l2 sweep:", json.dumps(per), flush=True)
+        print(f"selected l2={best_l2} (per-fold nested choices {chosen})", flush=True)
+        args.l2 = best_l2
+    else:
+        hold = walk_forward_hold(samples, args.folds, args.kind, design, args.l2)
+    metrics = walk_forward_metrics(hold, samples, args.ev_margin, folds=args.folds, l2=args.l2)
+    if not synthetic:
+        metrics.update(recency_metrics(hold))
     if synthetic:
         metrics["synthetic"] = 1.0
     print(json.dumps(metrics, indent=2), flush=True)
@@ -1069,6 +1618,10 @@ def main() -> int:
     print("weights " + ", ".join(f"{n}={w:+.4f}" for n, w in zip(FEATURE_NAMES, model["weights"]) if w) + f", bias={model['bias']:+.4f}", flush=True)
     export(model, metrics, Path(args.out))
     write_manifest(metrics, Path(args.manifest), synthetic=synthetic, tag=args.tag, version="2" if args.kind == KIND_OFFSET else "1")
+    if not synthetic:
+        log_path = Path(args.out).resolve().parent / "bet_log.json"
+        log_path.write_text(json.dumps(bet_log(hold, args.ev_margin), indent=2), encoding="utf-8")
+        print(f"wrote {log_path}", flush=True)
     # Do not overwrite the hand-checked Android/Python parity fixture.
     # Write a sample next to the exported model for debugging only.
     if not args.fixture:

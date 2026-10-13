@@ -92,6 +92,58 @@ class PrintGrid(val openMs: Long) {
         return mid(yes, s) - mid(yes, s - lagSeconds)
     }
 
+    /** Mid of [side] at the end of second [s] from the prints (NaN when either proxy is stale). */
+    fun mid(side: String, s: Int): Double = mid(isYes(side), s)
+
+    /** Highest / lowest mid of [side] over the [w] seconds ending at [s]; NaN when no second had a quote. */
+    fun highMid(side: String, s: Int, w: Int): Double = extremeMid(isYes(side), s, w, high = true)
+
+    fun lowMid(side: String, s: Int, w: Int): Double = extremeMid(isYes(side), s, w, high = false)
+
+    private fun extremeMid(yes: Boolean, s: Int, w: Int, high: Boolean): Double {
+        var out = Double.NaN
+        for (i in max(s - w + 1, 0)..minOf(s, SECONDS - 1)) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            if (out.isNaN() || (high && m > out) || (!high && m < out)) out = m
+        }
+        return out
+    }
+
+    /**
+     * The lowest mid of [side] in the [lowW] seconds ending at [s] (its latest second if tied), and the
+     * highest mid in the [w] seconds ending at [s] that came no later than that low: a drop measured
+     * high first, then low. Null when either has no quote.
+     */
+    fun highThenLow(side: String, s: Int, w: Int, lowW: Int): Pair<Double, Double>? {
+        val yes = isYes(side)
+        val top = minOf(s, SECONDS - 1)
+        var low = Double.NaN
+        var lowAt = -1
+        for (i in max(s - lowW + 1, 0)..top) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            if (low.isNaN() || m <= low) { low = m; lowAt = i }
+        }
+        if (lowAt < 0) return null
+        var high = Double.NaN
+        for (i in max(s - w + 1, 0)..lowAt) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            if (high.isNaN() || m > high) high = m
+        }
+        return if (high.isNaN()) null else high to low
+    }
+
+    /**
+     * Contracts takers bought on [side] over the [w] seconds ending at [s]
+     * (a taker buying NO is a print with taker side "no").
+     */
+    fun takerBought(side: String, s: Int, w: Int): Double {
+        if (s < 0) return 0.0
+        return sum(if (isYes(side)) volYes else volNo, minOf(s, SECONDS - 1), w)
+    }
+
     private fun lastWithin(arr: DoubleArray, s: Int): Double {
         if (s < 0) return Double.NaN
         val top = if (s >= SECONDS) SECONDS - 1 else s

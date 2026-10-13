@@ -2,7 +2,7 @@ name: Unit tests
 
 on:
   push:
-    branches: [Claude]
+    branches: [Claude, claude/kalshi-odds-newest, claude/strategy-arena]
   workflow_dispatch:
 
 permissions:
@@ -28,6 +28,7 @@ jobs:
           python3 tools/backtest/test_parity.py
           python3 tools/research/test_maker_sim.py
           python3 tools/research/test_pair_maker.py
+          python3 tools/research/test_reversal_study.py
           python3 tools/research/test_queue_maker.py
           python3 tools/research/test_settlement.py
           python3 tools/research/test_recordings.py

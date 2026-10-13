@@ -33,14 +33,21 @@ class PaperSizerTest {
     fun kellyFractionMatchesTheFormula() {
         val c = 0.5 + 0.07 * 0.25
         val full = (0.70 - c) / (1.0 - c)
-        assertEquals(PaperSizer.KELLY_MULTIPLIER * full, PaperSizer.fraction(0.50, 0.70), 1e-12)
+        assertEquals(
+            minOf(PaperSizer.MAX_FRACTION, PaperSizer.KELLY_MULTIPLIER * full),
+            PaperSizer.fraction(0.50, 0.70),
+            1e-12
+        )
     }
 
     @Test
-    fun aCertainWinUsesAQuarterOfTheCashNotAllOfIt() {
-        assertEquals(0.25, PaperSizer.fraction(0.50, 1.0), 1e-12)
+    fun aCertainWinIsCappedAtTenPercent() {
+        // Quarter Kelly of a certain win is 25%, but no bet may stake more
+        // than 10% of paper cash.
+        assertEquals(0.10, PaperSizer.MAX_FRACTION, 1e-12)
+        assertEquals(PaperSizer.MAX_FRACTION, PaperSizer.fraction(0.50, 1.0), 1e-12)
         val n = PaperSizer.contracts(100.0, 0.50, 1.0)
-        assertTrue("n=$n", n in 40..55)
+        assertTrue("n=$n", n in 18..20)
     }
 
     @Test
@@ -78,8 +85,9 @@ class PaperSizerTest {
         val book = PaperBook(idFactory = { "p${n++}" }, nowMs = { 10L })
         val first = book.considerAlert(alert("YES", 90.0), ask = 0.50, enabled = true)!!
         val second = book.considerAlert(alert("YES", 90.0, ticker = "KXBTC15M-26OCT051045-45"), ask = 0.50, enabled = true)
-        assertTrue(first.stakeUsd > 10.0)
-        assertTrue(first.stakeUsd < 40.0)
+        // Quarter Kelly of a 90% call at 50¢ is ~20%, capped at 10% of $100.
+        assertTrue("stake=${first.stakeUsd}", first.stakeUsd > 5.0)
+        assertTrue("stake=${first.stakeUsd}", first.stakeUsd <= 10.0 + 1e-9)
         assertTrue(second == null || second.stakeUsd < first.stakeUsd)
         assertTrue(book.snapshot().cashUsd >= 0.0)
     }

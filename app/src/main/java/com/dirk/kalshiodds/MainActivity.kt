@@ -119,7 +119,14 @@ class MainActivity : ComponentActivity() {
                             )
                         },
                         scalper = {
-                            com.dirk.kalshiodds.ui.ScalperResultsRoute(onBack = { navigator.back() })
+                            // A bottom tab when opened from the bar, a detail screen when opened from the Home card.
+                            com.dirk.kalshiodds.ui.ScalperResultsRoute(
+                                onBack = if (navigator.canPop) ({ navigator.back() }) else null,
+                                onOpenSettings = {
+                                    settingsFocusApiKey = true
+                                    navigator.open(AppRoutes.SETTINGS)
+                                }
+                            )
                         },
                         settings = {
                             SettingsScreen(

@@ -86,6 +86,77 @@ object ScalperResults {
             state.curve.map { CurvePoint(it.tMs, START_BANKROLL_USD + it.pnlUsd) }
     }
 
+    /** One strategy's place in the arena: 1 = most paper profit after fees. */
+    data class Standing(val rank: Int, val strategy: ScalpStrategy, val stats: ScalpStats, val verdict: String)
+
+    /** Fewer closed trades than this and the order of the board is mostly luck. */
+    const val MIN_TRADES_FOR_VERDICT = 30
+
+    /** Independent market windows the clustered luck test needs. */
+    const val MIN_WINDOWS_FOR_VERDICT = 10
+
+    const val NO_WINDOW_HISTORY = "no luck test: this record predates per-window totals (reset to start one)"
+
+    /**
+     * All 15 strategies, best paper P&L first. Strategies that have closed a
+     * trade come first; the ones still waiting for their signal follow in
+     * their own order.
+     */
+    fun leaderboard(state: ScalperState): List<Standing> =
+        ScalpStrategy.values()
+            .map { it to state.stats(it.name) }
+            .sortedWith(
+                compareByDescending<Pair<ScalpStrategy, ScalpStats>> { it.second.closed > 0 }
+                    .thenByDescending { it.second.pnlUsd }
+                    .thenBy { it.first.ordinal }
+            )
+            .mapIndexed { i, (st, stats) -> Standing(i + 1, st, stats, verdict(stats)) }
+
+    /**
+     * Is the result more than luck? Mean dollars per trade against two
+     * standard errors. Scalps in one market window share its outcome, so the
+     * error is clustered by window and needs [MIN_WINDOWS_FOR_VERDICT]
+     * windows. Those sums count only closes since they were kept (1.9.2); a
+     * record whose sums miss some closes gets no verdict ([NO_WINDOW_HISTORY])
+     * rather than one built from class averages, which understate the spread.
+     */
+    fun verdict(s: ScalpStats): String {
+        val n = s.closed
+        if (n == 0) return "no trades yet"
+        if (n < MIN_TRADES_FOR_VERDICT) return "$n of $MIN_TRADES_FOR_VERDICT trades needed to judge"
+        val mean = s.pnlUsd / n
+        // Clustered only when the window sums hold every close: a 1.9.0–1.9.1 record (same version, no
+        // window sums) would otherwise pair its whole-history mean with the few windows since the upgrade.
+        val se = if (s.windows > 0 && s.windowCloses == n) {
+            val w = s.windows
+            if (w < MIN_WINDOWS_FOR_VERDICT) return "$w of $MIN_WINDOWS_FOR_VERDICT market windows needed to judge"
+            // Cluster-robust: Σ_w (S_w − n_w · mean)², with the windows still collecting closes included.
+            val openUsd = listOf(s.curUsd, s.prevUsd) + s.oldUsd
+            val openN = listOf(s.curN, s.prevN) + s.oldN
+            val sq = s.winSqUsd + openUsd.sumOf { it * it }
+            val cross = s.winCrossUsd + openUsd.indices.sumOf { openUsd[it] * openN[it] }
+            val n2 = s.winN2 + openN.sumOf { it.toDouble() * it }
+            val num = sq - 2.0 * mean * cross + mean * mean * n2
+            kotlin.math.sqrt(kotlin.math.max(num, 0.0) * w / (w - 1.0)) / n
+        } else {
+            // A record whose window sums miss closes (written before them) has no honest spread to test.
+            return NO_WINDOW_HISTORY
+        }
+        return when {
+            mean - 2.0 * se > 0.0 -> "ahead by more than luck so far"
+            mean + 2.0 * se < 0.0 -> "losing by more than luck"
+            else -> "within luck: no winner yet"
+        }
+    }
+
+    /** `Bounce · buy now leads: +$4.20 over 37 trades (within luck: no winner yet)`, or why there is no leader. */
+    fun leaderLine(state: ScalperState): String {
+        val top = leaderboard(state).firstOrNull { it.stats.closed > 0 }
+            ?: return "No strategy has closed a trade yet. Turn Live signals on and leave the app open."
+        return "${top.strategy.label} leads: ${money(top.stats.pnlUsd)} over ${top.stats.closed} " +
+            "trade${if (top.stats.closed == 1) "" else "s"} (${top.verdict})"
+    }
+
     fun coinName(code: String): String = when (code.uppercase(Locale.US)) {
         "BTC" -> "Bitcoin"
         "ETH" -> "Ethereum"

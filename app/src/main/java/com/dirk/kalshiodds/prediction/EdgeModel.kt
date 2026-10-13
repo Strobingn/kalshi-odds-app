@@ -149,6 +149,9 @@ data class EdgeModel(
         return o.toString()
     }
 
+    /** The weight on feature [name], 0 when the model does not have it. */
+    fun weightOf(name: String): Float = featureNames.indexOf(name).let { if (it < 0) 0f else weights[it] }
+
     companion object {
         const val KIND_LOGISTIC = "logistic"
         const val KIND_OFFSET_LOGISTIC = "offset_logistic"
@@ -157,13 +160,27 @@ data class EdgeModel(
         /** KalshiPrice 0.1¢ tick: zero weights reproduce every usable mid. */
         const val DEFAULT_MID_CLIP = 0.001f
 
+        /** Feature counts of the earlier shipped contracts, padded on load. */
+        val LEGACY_SIZES = setOf(10, 11, 12)
+
         fun parse(raw: String): EdgeModel {
             val o = JSONObject(raw)
-            val names = stringList(o.getJSONArray("feature_names"))
-            val weights = floatArray(o.getJSONArray("weights"))
-            val mean = floatArray(o.getJSONArray("mean"))
-            val std = floatArray(o.getJSONArray("std"))
+            var names = stringList(o.getJSONArray("feature_names"))
+            var weights = floatArray(o.getJSONArray("weights"))
+            var mean = floatArray(o.getJSONArray("mean"))
+            var std = floatArray(o.getJSONArray("std"))
             require(names.size == weights.size) { "feature_names / weights length mismatch" }
+            // An older contract (10, 11 or 12 features) is a prefix of the current one: the features added
+            // since get weight 0, mean 0 and std 1, so the model predicts exactly what it did before. Without
+            // this, an upgrade would drop the imported model and its rollback copy until a new one is trained.
+            val k = names.size
+            // Only the contracts that actually shipped: a truncated or hand-made file is still refused.
+            if (k in LEGACY_SIZES && k < EdgeFeatures.SIZE && names == EdgeFeatures.NAMES.take(k) && mean.size == k && std.size == k) {
+                names = EdgeFeatures.NAMES
+                weights = FloatArray(EdgeFeatures.SIZE) { if (it < k) weights[it] else 0f }
+                mean = FloatArray(EdgeFeatures.SIZE) { if (it < k) mean[it] else 0f }
+                std = FloatArray(EdgeFeatures.SIZE) { if (it < k) std[it] else 1f }
+            }
             require(names.size == EdgeFeatures.SIZE) {
                 "expected ${EdgeFeatures.SIZE} features, got ${names.size}"
             }

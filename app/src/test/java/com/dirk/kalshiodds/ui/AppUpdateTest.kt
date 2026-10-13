@@ -23,28 +23,45 @@ class AppUpdateTest {
 
     private val sample = "[" + listOf(
         release("edge-model-latest", null),
-        release("arb-v1.0-Claude", "ArbHunter-v1.0-Claude-12.apk"),
+        release("arb-v1.0-Mis_bitcoin", "ArbHunter-v1.0-Mis_bitcoin-12.apk"),
         release("v1.3-Claude", "DipHunter-v1.3-Claude-61.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #61."),
         release("v1.2-Claude", "DipHunter-v1.2-Claude-58.apk", "Claude Bitcoin v1.2 (33) from `Claude` @ 1180cc9, run #58."),
         release("v0.3.15-main", "DipHunter-v0.3.15-main-99.apk", "DipHunter v0.3.15 (31) from `main` @ d34495b, run #99."),
-        release("v1.4-Claude", "DipHunter-v1.4-Claude-70.apk", "draft", draft = true)
+        release("v1.4-Claude", "DipHunter-v1.4-Claude-70.apk", "draft", draft = true),
+        release("v1.8.0-mis.1-Mis_bitcoin", "MisBitcoin-v1.8.0-mis.1-Mis_bitcoin-140.apk", "Mis Bitcoin v1.8.0-mis.1 (44) from `Mis_bitcoin` @ b5d0de6, run #140."),
+        release(
+            "v1.9.0-arena-claude-strategy-arena",
+            "StrategyArena-v1.9.0-arena-claude-strategy-arena-150.apk",
+            "Strategy Arena v1.9.0-arena (52) from `claude-strategy-arena` @ 0000000, run #150."
+        ),
+        release("v1.9.0-Claude", "ClaudeBitcoin-v1.9.0-Claude-230.apk", "Claude Bitcoin v1.9.0 (52) from `Claude` @ b8b8fa7, run #230.")
     ).joinToString(",") + "]"
 
     @Test
     fun parsesOnlyClaudeBranchAppReleasesWithAnApk() {
         val r = AppUpdate.parse(sample)
-        assertEquals(listOf("v1.3-Claude", "v1.2-Claude"), r.map { it.tag })
-        val newest = r.first()
-        assertEquals("1.3", newest.versionName)
-        assertEquals(61, newest.runNumber)
-        assertEquals(34, newest.versionCode)
-        assertEquals("abc1234", newest.sha)
-        assertEquals("DipHunter-v1.3-Claude-61.apk", newest.apkName)
+        assertEquals(listOf("v1.3-Claude", "v1.2-Claude", "v1.9.0-Claude"), r.map { it.tag })
+        val newest = AppUpdate.latest(r)!!
+        assertEquals("1.9.0", newest.versionName)
+        assertEquals(230, newest.runNumber)
+        assertEquals(52, newest.versionCode)
+        assertEquals("b8b8fa7", newest.sha)
+        assertEquals("ClaudeBitcoin-v1.9.0-Claude-230.apk", newest.apkName)
         assertEquals(
-            "https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.3-Claude/DipHunter-v1.3-Claude-61.apk",
+            "https://github.com/Strobingn/kalshi-odds-app/releases/download/v1.9.0-Claude/ClaudeBitcoin-v1.9.0-Claude-230.apk",
             newest.apkUrl
         )
-        assertEquals("v1.3 build #61", newest.label)
+        assertEquals("v1.9.0 build #230", newest.label)
+    }
+
+    @Test
+    fun dashesInTheBranchOrTheVersionDoNotConfuseTheMatch() {
+        // A plain version next to a dashed branch: `v1.3-claude-strategy-arena` is 1.3 on claude-strategy-arena.
+        val json = "[" + release("v1.3-claude-strategy-arena", "StrategyArena-v1.3-claude-strategy-arena-7.apk") + "]"
+        assertEquals("1.3", AppUpdate.parse(json, branch = "claude-strategy-arena").single().versionName)
+        assertTrue("another branch's release is not ours", AppUpdate.parse(json).isEmpty())
+        assertEquals(listOf("1.8.0-mis.1"), AppUpdate.parse(sample, branch = "Mis_bitcoin").map { it.versionName })
+        assertEquals(listOf("1.9.0-arena"), AppUpdate.parse(sample, branch = "claude-strategy-arena").map { it.versionName })
     }
 
     @Test
@@ -58,23 +75,23 @@ class AppUpdateTest {
     @Test
     fun latestIsTheHighestRunNumber() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))!!
-        assertEquals(61, latest.runNumber)
+        assertEquals(230, latest.runNumber)
         assertNull(AppUpdate.latest(emptyList()))
     }
 
     @Test
     fun newerRunIsAnUpdateEvenAtTheSameVersion() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))
-        assertTrue(AppUpdate.decide(latest, currentRun = 60, currentCode = 34) is AppUpdate.Status.Available)
-        assertTrue(AppUpdate.decide(latest, currentRun = 61, currentCode = 34) is AppUpdate.Status.UpToDate)
-        assertTrue(AppUpdate.decide(latest, currentRun = 62, currentCode = 34) is AppUpdate.Status.UpToDate)
+        assertTrue(AppUpdate.decide(latest, currentRun = 229, currentCode = 34) is AppUpdate.Status.Available)
+        assertTrue(AppUpdate.decide(latest, currentRun = 230, currentCode = 34) is AppUpdate.Status.UpToDate)
+        assertTrue(AppUpdate.decide(latest, currentRun = 231, currentCode = 34) is AppUpdate.Status.UpToDate)
     }
 
     @Test
     fun localBuildFallsBackToVersionCode() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))
-        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 33) is AppUpdate.Status.Available)
-        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 34) is AppUpdate.Status.UpToDate)
+        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 51) is AppUpdate.Status.Available)
+        assertTrue(AppUpdate.decide(latest, currentRun = 0, currentCode = 52) is AppUpdate.Status.UpToDate)
     }
 
     @Test
@@ -88,7 +105,7 @@ class AppUpdateTest {
 
     @Test
     fun runNumberFallsBackToTheReleaseNotes() {
-        val json = "[" + release("v1.3-Claude", "BitcoinClaude.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
+        val json = "[" + release("v1.3-Claude", "ClaudeBitcoin.apk", "Claude Bitcoin v1.3 (34) from `Claude` @ abc1234, run #77.") + "]"
         assertEquals(77, AppUpdate.parse(json).single().runNumber)
     }
 
@@ -101,8 +118,8 @@ class AppUpdateTest {
     @Test
     fun copyIsPlain() {
         val latest = AppUpdate.latest(AppUpdate.parse(sample))!!
-        assertEquals("Update available: v1.3 build #61", AppUpdate.statusLine(AppUpdate.Status.Available(latest)))
-        assertEquals("Up to date. Newest on GitHub: v1.3 build #61", AppUpdate.statusLine(AppUpdate.Status.UpToDate(latest)))
+        assertEquals("Update available: v1.9.0 build #230", AppUpdate.statusLine(AppUpdate.Status.Available(latest)))
+        assertEquals("Up to date. Newest on GitHub: v1.9.0 build #230", AppUpdate.statusLine(AppUpdate.Status.UpToDate(latest)))
         assertEquals("Checking GitHub…", AppUpdate.statusLine(AppUpdate.Status.Checking))
         assertEquals("Build #61 · abc1234", AppUpdate.buildLabel(61, "abc1234"))
         assertEquals("Local build (not from GitHub)", AppUpdate.buildLabel(0, "local"))

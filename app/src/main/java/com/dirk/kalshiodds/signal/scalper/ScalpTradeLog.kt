@@ -4,6 +4,7 @@ import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.OutputStream
+import java.io.RandomAccessFile
 import java.time.Instant
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -143,38 +144,58 @@ class ScalpTradeLog(
         runCatching { io.execute { flushNow() } }
     }
 
-    /** Write what is queued, on this thread (export, reset, tests). */
-    fun flushNow() {
-        val trades: List<ScalpTrade>
-        val orders: List<Pair<Long, String>>
-        synchronized(lock) {
-            if (pendingTrades.isEmpty() && pendingOrders.isEmpty()) return
-            trades = pendingTrades
-            orders = pendingOrders
-            pendingTrades = ArrayList()
-            pendingOrders = ArrayList()
-        }
+    /**
+     * Write what is queued, on this thread (export, reset, tests). True when everything queued reached the
+     * disk; on a failed write the rows not yet written go back on the queue (none are lost) and it is false.
+     */
+    fun flushNow(): Boolean {
         synchronized(fileLock) {
-            runCatching {
+            // Rows are taken off the queue only while holding the file lock, so a reset (which holds it
+            // too) never sees an empty queue while an earlier batch is still on its way to the files.
+            val trades: List<ScalpTrade>
+            val orders: List<Pair<Long, String>>
+            synchronized(lock) {
+                if (pendingTrades.isEmpty() && pendingOrders.isEmpty()) return true
+                trades = pendingTrades
+                orders = pendingOrders
+                pendingTrades = ArrayList()
+                pendingOrders = ArrayList()
+            }
+            // One day file at a time; a day is only dropped from these once its rows are written.
+            val tradeDays = LinkedHashMap(trades.groupBy { utcDay(it.closedAtMs) })
+            val orderDays = LinkedHashMap(orders.groupBy { utcDay(it.first) })
+            val ok = runCatching {
                 dir.mkdirs()
-                for ((day, rows) in trades.groupBy { utcDay(it.closedAtMs) }) {
+                for ((day, rows) in tradeDays.entries.toList()) {
                     val f = File(dir, tradeFile(day))
                     val sb = StringBuilder(rows.size * 140)
                     if (!f.exists() || f.length() == 0L) sb.append(ScalpTrade.HEADER).append('\n')
                     for (r in rows) sb.append(r.toCsv()).append('\n')
-                    f.appendText(sb.toString(), Charsets.UTF_8)
+                    appendOrRollBack(f) { it.appendText(sb.toString(), Charsets.UTF_8) }
+                    tradeDays.remove(day)
                 }
-                for ((day, rows) in orders.groupBy { utcDay(it.first) }) {
+                for ((day, rows) in orderDays.entries.toList()) {
                     val f = File(dir, orderFile(day))
                     val sb = StringBuilder(rows.size * 260)
                     if (!f.exists() || f.length() == 0L) sb.append(ORDER_HEADER).append('\n')
                     for (r in rows) sb.append(r.second).append('\n')
-                    GZIPOutputStream(BufferedOutputStream(FileOutputStream(f, true))).use {
-                        it.write(sb.toString().toByteArray(Charsets.UTF_8))
+                    appendOrRollBack(f) { file ->
+                        GZIPOutputStream(BufferedOutputStream(FileOutputStream(file, true))).use {
+                            it.write(sb.toString().toByteArray(Charsets.UTF_8))
+                        }
                     }
+                    orderDays.remove(day)
                 }
-                enforceCapLocked()
+            }.isSuccess
+            if (!ok) {
+                synchronized(lock) {
+                    pendingTrades.addAll(0, tradeDays.values.flatten())
+                    pendingOrders.addAll(0, orderDays.values.flatten())
+                }
+                return false
             }
+            runCatching { enforceCapLocked() }
+            return true
         }
     }
 
@@ -231,17 +252,43 @@ class ScalpTradeLog(
         return n
     }
 
-    /** Reset: the live files move to `archive/<now>/` so the trade list starts empty and nothing is lost. */
-    fun archive(nowMs: Long = System.currentTimeMillis()) {
-        flushNow()
+    /**
+     * Reset: the live files move to `archive/<now>/` so the trade list starts empty and nothing is lost.
+     * A file that cannot be renamed is copied and only then removed; a file that can't be copied either
+     * stays where it is. True only when every live file is in the archive (or there was none).
+     */
+    fun archive(nowMs: Long = System.currentTimeMillis()): Boolean {
+        // Held from the flush to the last move, so no writer can add pre-reset rows in between.
         synchronized(fileLock) {
-            runCatching {
+            // Rows still queued must reach the files first, or a reset would drop them with the old record.
+            if (!flushNow()) return false
+            cacheKey = null
+            return runCatching {
                 val live = dir.listFiles()?.filter { it.isFile && isLogFile(it.name) }.orEmpty()
-                if (live.isEmpty()) return
-                val to = File(File(dir, ARCHIVE), nowMs.toString()).apply { mkdirs() }
-                for (f in live) if (!f.renameTo(File(to, f.name))) f.delete()
-                cacheKey = null
-            }
+                if (live.isEmpty()) return@runCatching true
+                val to = File(File(dir, ARCHIVE), nowMs.toString())
+                if (!to.isDirectory && !to.mkdirs()) return@runCatching false
+                // All or nothing: a partial archive would leave totals that no longer match the live files.
+                val moved = ArrayList<Pair<File, File>>()
+                fun rollback() {
+                    for ((src, dst) in moved.asReversed()) {
+                        if (!dst.renameTo(src)) runCatching { dst.copyTo(src, overwrite = false); dst.delete() }
+                    }
+                    to.delete()
+                }
+                for (f in live) {
+                    val target = File(to, f.name)
+                    if (f.renameTo(target)) { moved += f to target; continue }
+                    val copied = runCatching { f.copyTo(target, overwrite = false).length() == f.length() }.getOrDefault(false)
+                    // Success means the live file is gone: a copy left beside an undeletable source
+                    // would still be read into the fresh record's charts and trade list.
+                    if (copied && f.delete()) { moved += f to target; continue }
+                    if (copied) target.delete()
+                    rollback()
+                    return@runCatching false
+                }
+                true
+            }.getOrDefault(false)
         }
     }
 
@@ -283,6 +330,23 @@ class ScalpTradeLog(
         const val DIR_NAME = "scalper"
         const val ARCHIVE = "archive"
         const val DEFAULT_MAX_BYTES = 400L * 1024L * 1024L
+
+        /**
+         * Appends to [f] with [write]. If it fails part-way (a full disk), the file is cut back to its
+         * length before, so the requeued rows are not written twice and no half gzip member is left.
+         */
+        internal fun appendOrRollBack(f: File, write: (File) -> Unit) {
+            val existed = f.exists()
+            val before = if (existed) f.length() else 0L
+            try {
+                write(f)
+            } catch (e: Throwable) {
+                runCatching {
+                    if (!existed) f.delete() else RandomAccessFile(f, "rw").use { it.setLength(before) }
+                }
+                throw e
+            }
+        }
         const val UNFILLED = "UNFILLED"
 
         /** [ScalpTrade.HEADER] with `resolved_ms` first, then what the scalper saw when it sent the order. */

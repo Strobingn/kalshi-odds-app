@@ -19,7 +19,7 @@ object AppRoutes {
     const val CHART = "chart"
     const val ARB = "arb"
 
-    /** Paper scalper results: totals, bankroll chart, breakdowns and every trade. */
+    /** Strategy arena (paper scalper): the 15-strategy leaderboard, totals, bankroll chart and every trade. */
     const val SCALPER = "scalper"
 
     val ALL: List<String> = listOf(
@@ -28,7 +28,7 @@ object AppRoutes {
 
     /** Destinations deliberately exposed in the persistent bottom navigation. */
     val PRIMARY: List<String> = listOf(
-        HOME, SCORECARD, SIGNAL_HISTORY, HISTORY, DATA, SETTINGS
+        HOME, SCALPER, SCORECARD, SIGNAL_HISTORY, HISTORY, DATA, SETTINGS
     )
 }
 

@@ -14,6 +14,9 @@ data class StreamSpot(
     val lastPrintMs: Long,
     val return1m: Double?,
     val return5m: Double?,
+    /** Return over the trailing 15 minutes (the previous window when the
+     * market just opened): the 15-minute sign-reversal feature. */
+    val return15m: Double?,
     val barStd1m: Double?,
     val ewmaReturns: Int
 )
@@ -84,9 +87,33 @@ class SpotStreamBook(
             lastPrintMs = printMs,
             return1m = tape.returnOver(60_000L, nowMs),
             return5m = tape.returnOver(300_000L, nowMs),
+            return15m = tape.returnOver(900_000L, nowMs),
             barStd1m = tape.barStd1m(),
             ewmaReturns = tape.returnCount
         )
+    }
+
+    private val prevWindow = LinkedHashMap<String, Double>()
+
+    /**
+     * Return over the window BEFORE the one opening at [openMs]
+     * (openMs − 15 min → openMs), parity with ml/train_edge.py
+     * `prev_window_return`. Worked out once, as soon as the tape holds both
+     * ends (the tape keeps 20 minutes, so in the first ~5 minutes of the
+     * window), and kept for the rest of it. Null when it cannot be known.
+     */
+    @Synchronized
+    fun prevWindowReturn(asset: String, openMs: Long, nowMs: Long): Double? {
+        val key = asset.uppercase() + "@" + openMs
+        prevWindow[key]?.let { return it }
+        if (nowMs < openMs) return null
+        val tape = tapes[asset.uppercase()] ?: return null
+        val start = tape.priceAtOrBefore(openMs - WINDOW_MS) ?: return null
+        val end = tape.priceAtOrBefore(openMs) ?: return null
+        val r = end / start - 1.0
+        prevWindow[key] = r
+        while (prevWindow.size > PREV_WINDOW_KEEP) prevWindow.remove(prevWindow.keys.first())
+        return r
     }
 
     /** Mean ln(price) of [asset] over [fromMs, toMs] from the tape, or null. */
@@ -102,6 +129,12 @@ class SpotStreamBook(
     companion object {
         /** Heartbeats alone keep a price usable for at most this long. */
         const val MAX_PRINT_AGE_MS = 60_000L
+
+        /** One 15-minute window. */
+        const val WINDOW_MS = 900_000L
+
+        /** Previous-window returns kept (one per asset and window). */
+        const val PREV_WINDOW_KEEP = 12
     }
 }
 
@@ -128,7 +161,11 @@ object SpotMerge {
             asset = stream.asset,
             spotReturn1m = stream.return1m ?: rest?.spotReturn1m,
             spotReturn5m = stream.return5m ?: rest?.spotReturn5m,
+            prevWindowReturn = stream.return15m ?: rest?.prevWindowReturn,
             realizedVol15m = stream.barStd1m ?: rest?.realizedVol15m,
+            // The model's σ stays the trainer's estimator; the stream's 10 s EWMA is a different distribution.
+            trainerVol1m = rest?.trainerVol1m,
+            trainerVolAtMs = rest?.trainerVolAtMs ?: 0L,
             fundingRate = rest?.fundingRate,
             lastPrice = stream.lastPrice,
             source = if (usedRest) "$SOURCE+${rest!!.source}" else SOURCE,

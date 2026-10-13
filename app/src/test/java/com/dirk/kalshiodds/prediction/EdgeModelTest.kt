@@ -15,12 +15,12 @@ class EdgeModelTest {
           "kind": "logistic",
           "feature_names": [
             "dist_to_strike_vol","tte_frac","market_mid","imbalance","spread",
-            "momentum","realized_vol","cross_asset","time_of_day","digital_fair"
+            "momentum","realized_vol","cross_asset","time_of_day","digital_fair","prev_window_return","is_funding_hour","mid_squared"
           ],
-          "weights": [0.20, -0.10, 0.80, 0.05, -0.15, 0.10, -0.05, 0.00, 0.02, 0.40],
+          "weights": [0.20, -0.10, 0.80, 0.05, -0.15, 0.10, -0.05, 0.00, 0.02, 0.40, 0, 0, 0],
           "bias": -0.25,
-          "mean": [0,0,0,0,0,0,0,0,0,0],
-          "std":  [1,1,1,1,1,1,1,1,1,1],
+          "mean": [0,0,0,0,0,0,0,0,0,0,0,0,0],
+          "std":  [1,1,1,1,1,1,1,1,1,1,1,1,1],
           "platt_a": 1.0,
           "platt_b": 0.0,
           "blend_weight": 0.35,
@@ -32,7 +32,7 @@ class EdgeModelTest {
     @Test
     fun loadAndParityWithPythonSigmoid() {
         val model = EdgeModel.parse(fixture)
-        val x = floatArrayOf(0.4f, 0.5f, 0.42f, 0.1f, 0.02f, 0.01f, 0.04f, 0.0f, 0.3f, 0.48f)
+        val x = floatArrayOf(0.4f, 0.5f, 0.42f, 0.1f, 0.02f, 0.01f, 0.04f, 0.0f, 0.3f, 0.48f, 0.0f, 0.0f, 0.0f)
         // Python: sigmoid(bias + w·x) with mean 0 / std 1
         val z = -0.25 + 0.20 * 0.4 + -0.10 * 0.5 + 0.80 * 0.42 + 0.05 * 0.1 +
             -0.15 * 0.02 + 0.10 * 0.01 + -0.05 * 0.04 + 0.00 * 0.0 + 0.02 * 0.3 + 0.40 * 0.48
@@ -80,17 +80,17 @@ class EdgeModelTest {
     }
 
     private fun offsetJson(
-        weights: String = "[0,0,0,0,0,0,0,0,0,0]",
+        weights: String = "[0,0,0,0,0,0,0,0,0,0,0,0,0]",
         bias: Double = 0.0,
-        mean: String = "[0,0,0,0,0,0,0,0,0,0]",
-        std: String = "[1,1,1,1,1,1,1,1,1,1]"
+        mean: String = "[0,0,0,0,0,0,0,0,0,0,0,0,0]",
+        std: String = "[1,1,1,1,1,1,1,1,1,1,1,1,1]"
     ) = """
         {
           "version": 2,
           "kind": "offset_logistic",
           "feature_names": [
             "dist_to_strike_vol","tte_frac","market_mid","imbalance","spread",
-            "momentum","realized_vol","cross_asset","time_of_day","digital_fair"
+            "momentum","realized_vol","cross_asset","time_of_day","digital_fair","prev_window_return","is_funding_hour","mid_squared"
           ],
           "weights": $weights,
           "bias": $bias,
@@ -108,13 +108,13 @@ class EdgeModelTest {
     """.trimIndent()
 
     private fun featuresWithMid(mid: Double) =
-        floatArrayOf(0.4f, 0.5f, mid.toFloat(), 0.1f, 0.02f, 0.01f, 0.04f, 0.001f, 0.3f, 0.48f)
+        floatArrayOf(0.4f, 0.5f, mid.toFloat(), 0.1f, 0.02f, 0.01f, 0.04f, 0.001f, 0.3f, 0.48f, 0.0f, 0.0f, 0.0f)
 
     @Test
     fun offsetZeroWeightsReproduceTheMid() {
         // A scaler on market_mid must not touch the offset: logit(mid) is not a feature.
         val plain = EdgeModel.parse(offsetJson())
-        val scaled = EdgeModel.parse(offsetJson(mean = "[0,0,0.5,0,0,0,0,0,0,0]", std = "[1,1,0.2,1,1,1,1,1,1,1]"))
+        val scaled = EdgeModel.parse(offsetJson(mean = "[0,0,0.5,0,0,0,0,0,0,0,0,0,0]", std = "[1,1,0.2,1,1,1,1,1,1,1,1,1,1]"))
         for (model in listOf(plain, scaled)) {
             assertTrue(model.isMarketAnchored)
             for (mid in listOf(0.001, 0.03, 0.31, 0.5, 0.77, 0.97, 0.999)) {
@@ -133,10 +133,10 @@ class EdgeModelTest {
         // ml/train_edge.py model_predict: sigmoid(logit(clip(mid)) + b + Σ w·(x−mean)/std)
         val model = EdgeModel.parse(
             offsetJson(
-                weights = "[0.30, 0, -0.10, 0, 0, 0, 0, 0.05, 0, 0.20]",
+                weights = "[0.30, 0, -0.10, 0, 0, 0, 0, 0.05, 0, 0.20, 0, 0, 0]",
                 bias = 0.04,
-                mean = "[0.1, 0, 0.5, 0, 0, 0, 0, 0.0, 0, 0.5]",
-                std = "[1.5, 1, 0.3, 1, 1, 1, 1, 0.002, 1, 0.3]"
+                mean = "[0.1, 0, 0.5, 0, 0, 0, 0, 0.0, 0, 0.5, 0, 0, 0]",
+                std = "[1.5, 1, 0.3, 1, 1, 1, 1, 0.002, 1, 0.3, 1, 1, 1]"
             )
         )
         val mid = 0.42
@@ -155,7 +155,7 @@ class EdgeModelTest {
 
     @Test
     fun offsetJsonRoundTrip() {
-        val model = EdgeModel.parse(offsetJson(weights = "[0.3,0,-0.1,0,0,0,0,0.05,0,0.2]", bias = 0.04))
+        val model = EdgeModel.parse(offsetJson(weights = "[0.3,0,-0.1,0,0,0,0,0.05,0,0.2,0,0,0]", bias = 0.04))
         val again = EdgeModel.parse(model.toJson())
         assertEquals("offset_logistic", again.kind)
         assertTrue(again.isMarketAnchored)
@@ -171,7 +171,7 @@ class EdgeModelTest {
     fun legacyLogisticIgnoresTheMidAndStillBlends() {
         val model = EdgeModel.parse(fixture)
         assertFalse(model.isMarketAnchored)
-        val x = floatArrayOf(0.4f, 0.5f, 0.42f, 0.1f, 0.02f, 0.01f, 0.04f, 0.0f, 0.3f, 0.48f)
+        val x = floatArrayOf(0.4f, 0.5f, 0.42f, 0.1f, 0.02f, 0.01f, 0.04f, 0.0f, 0.3f, 0.48f, 0.0f, 0.0f, 0.0f)
         assertEquals(model.predictYes(x), model.predictYes(x, 0.90), 0.0)
         // 0.35 × model + 0.65 × mid, as before.
         assertEquals(0.35 * 0.80 + 0.65 * 0.40, model.blendWithMarket(0.80, 0.40), 1e-6)

@@ -360,7 +360,15 @@ def conservative_fill(side: str, price: float, contracts: int, queue_ahead: floa
                       trades: list[Trade], post_ms: int, cancel_ms: int,
                       trade_ts: list[int] | None = None) -> tuple[int, int | None]:
     """(filled contracts, first fill ts). Trades in (post_ms, cancel_ms] only."""
-    filled, first = 0, None
+    filled, first, _ = conservative_fill_ts(side, price, contracts, queue_ahead, trades, post_ms, cancel_ms, trade_ts)
+    return filled, first
+
+
+def conservative_fill_ts(side: str, price: float, contracts: int, queue_ahead: float,
+                         trades: list[Trade], post_ms: int, cancel_ms: int,
+                         trade_ts: list[int] | None = None) -> tuple[int, int | None, int | None]:
+    """(filled contracts, first fill ts, last fill ts): [conservative_fill] plus when the last contract filled."""
+    filled, first, last = 0, None, None
     q = max(0.0, queue_ahead)
     i = bisect.bisect_right(trade_ts if trade_ts is not None else [t.ts for t in trades], post_ms)
     while i < len(trades) and trades[i].ts <= cancel_ms and filled < contracts:
@@ -377,7 +385,8 @@ def conservative_fill(side: str, price: float, contracts: int, queue_ahead: floa
             if take > 0:
                 filled += take
                 first = first if first is not None else tr.ts
-    return filled, first
+                last = tr.ts
+    return filled, first, last
 
 
 def optimistic_fill(side: str, price: float, contracts: int, book: list[Snap],

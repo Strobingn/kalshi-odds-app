@@ -32,7 +32,20 @@ data class AssetSpotFeatures(
     val asset: String,
     val spotReturn1m: Double? = null,
     val spotReturn5m: Double? = null,
+    /** Return over the trailing 15 minutes at this market's open — the
+     * previous window's move (reversal-tilt feature; parity with the
+     * trainer's prev_window_return). */
+    val prevWindowReturn: Double? = null,
     val realizedVol15m: Double? = null,
+    /**
+     * σ of 1-minute log returns from the trainer's own estimator (60 finished
+     * bars, EWMA λ = 0.86, `realized_vol_annual`). The stream's σ replaces
+     * [realizedVol15m] for the app's own fair value, but an imported model
+     * was trained on this one, so its inputs keep it (REST only).
+     */
+    val trainerVol1m: Double? = null,
+    /** When [trainerVol1m] was fetched (REST), 0 when unknown; the stream never refreshes it. */
+    val trainerVolAtMs: Long = 0L,
     val fundingRate: Double? = null,
     val lastPrice: Double? = null,
     val source: String = "none",
@@ -65,6 +78,14 @@ data class ExternalSnapshot(
         }
     }
 }
+
+/**
+ * REST 1-minute bars to ask for: the trainer's 60 finished bars
+ * (ml/train_edge.py SPOT_LOOKBACK_BARS) plus the bar still in progress,
+ * which both APIs return last. Volatility uses the 60 finished ones only.
+ */
+private const val VOL_BARS = 60
+private const val REST_BARS = VOL_BARS + 1
 
 class ExternalMarketClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
@@ -101,7 +122,7 @@ class ExternalMarketClient(
             "SOL" -> "SOLUSDT"
             else -> return null
         }
-        val klines = getJsonArray("https://api.binance.com/api/v3/klines?symbol=$symbol&interval=1m&limit=20")
+        val klines = getJsonArray("https://api.binance.com/api/v3/klines?symbol=$symbol&interval=1m&limit=$REST_BARS")
             ?: return null
         val closes = (0 until klines.length()).mapNotNull { i ->
             klines.optJSONArray(i)?.optString(4)?.toDoubleOrNull()
@@ -117,11 +138,15 @@ class ExternalMarketClient(
         val funding = getJsonObject("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=$symbol")
             ?.optString("lastFundingRate")
             ?.toDoubleOrNull()
+        // The model's σ comes from Coinbase, the exchange the trainer reads, even when Binance answered.
+        val trainerVol = runCatching { coinbaseCloses(asset)?.let { trainerVolOf(it) } }.getOrNull()
         return AssetSpotFeatures(
             asset = asset.uppercase(),
             spotReturn1m = ret1,
             spotReturn5m = ret5,
-            realizedVol15m = realizedVol(closes.takeLast(16)),
+            realizedVol15m = realizedVol(closes.dropLast(1).takeLast(VOL_BARS)),
+            trainerVol1m = trainerVol,
+            trainerVolAtMs = if (trainerVol != null) now else 0L,
             fundingRate = funding,
             lastPrice = last,
             source = "binance",
@@ -138,18 +163,7 @@ class ExternalMarketClient(
         }
         val ticker = getJsonObject("https://api.exchange.coinbase.com/products/$product/ticker")
         val last = ticker?.optString("price")?.toDoubleOrNull()
-        val candles = getJsonArray(
-            "https://api.exchange.coinbase.com/products/$product/candles?granularity=60"
-        )
-        val closes = mutableListOf<Double>()
-        if (candles != null) {
-            // Coinbase returns newest-first: [time, low, high, open, close, volume]
-            for (i in 0 until minOf(candles.length(), 20)) {
-                val row = candles.optJSONArray(i) ?: continue
-                row.optDouble(4).takeIf { !it.isNaN() }?.let { closes.add(it) }
-            }
-            closes.reverse()
-        }
+        val closes = coinbaseCloses(asset).orEmpty()
         if (closes.size < 3 && last == null) return null
         val px = closes.lastOrNull() ?: last ?: return null
         val series = if (closes.size >= 3) closes else listOf(px)
@@ -163,7 +177,9 @@ class ExternalMarketClient(
             asset = asset.uppercase(),
             spotReturn1m = ret1,
             spotReturn5m = ret5,
-            realizedVol15m = realizedVol(series.takeLast(16)),
+            realizedVol15m = realizedVol((if (series.size > VOL_BARS) series.dropLast(1) else series).takeLast(VOL_BARS)),
+            trainerVol1m = if (closes.size >= 3) trainerVolOf(closes) else null,
+            trainerVolAtMs = if (closes.size >= 3) now else 0L,
             fundingRate = null,
             lastPrice = px,
             source = "coinbase",
@@ -171,6 +187,36 @@ class ExternalMarketClient(
         )
     }
 
+    /** Coinbase 1-minute closes, oldest first (the last one still forming), or null. */
+    private fun coinbaseCloses(asset: String): List<Double>? {
+        val product = when (asset.uppercase()) {
+            "BTC" -> "BTC-USD"
+            "ETH" -> "ETH-USD"
+            "SOL" -> "SOL-USD"
+            else -> return null
+        }
+        val candles = getJsonArray("https://api.exchange.coinbase.com/products/$product/candles?granularity=60") ?: return null
+        val closes = mutableListOf<Double>()
+        // Coinbase returns newest-first: [time, low, high, open, close, volume]
+        for (i in 0 until minOf(candles.length(), REST_BARS)) {
+            val row = candles.optJSONArray(i) ?: continue
+            row.optDouble(4).takeIf { !it.isNaN() }?.let { closes.add(it) }
+        }
+        closes.reverse()
+        return closes
+    }
+
+    /** The trainer's σ from Coinbase closes: the finished bars only, the last VOL_BARS of them. */
+    private fun trainerVolOf(closes: List<Double>): Double? =
+        realizedVol((if (closes.size > VOL_BARS) closes.dropLast(1) else closes).takeLast(VOL_BARS))
+
+    /**
+     * EWMA sigma over 1-minute log returns (lambda = 0.86, up to ~64 bars).
+     * Sigma is the digital fair's only parameter; the 16-bar sample std was
+     * noisy enough to move the fair ~30% farther from the market in testing.
+     * Parity: ml/train_edge.py realized_vol_annual uses the same lambda and
+     * unbiased-start formula, so trainer and phone agree.
+     */
     private fun realizedVol(closes: List<Double>): Double? {
         if (closes.size < 4) return null
         val rets = closes.zipWithNext { a, b ->
@@ -178,8 +224,15 @@ class ExternalMarketClient(
         }
         if (rets.isEmpty()) return null
         val mean = rets.average()
-        val var_ = rets.map { val d = it - mean; d * d }.average()
-        return sqrt(var_.coerceAtLeast(0.0))
+        var var_ = rets.map { val d = it - mean; d * d }.average()
+        var wSum = 1.0
+        val lam = 0.86
+        for (r in rets) {
+            val d = r - mean
+            var_ = lam * var_ + (1.0 - lam) * d * d
+            wSum = lam * wSum + (1.0 - lam)
+        }
+        return sqrt((var_ / wSum).coerceAtLeast(0.0))
     }
 
     private fun getJsonObject(url: String): JSONObject? {

@@ -75,7 +75,14 @@ object SignalConstants {
 
     const val DEFAULT_AUTO_TUNE = true
     const val DEFAULT_AUTO_TUNE_OVERRIDE = false
-    const val AUTO_TUNE_MIN_SAMPLES = 30
+    /**
+     * Auto-tune needs a result that survives resampling: at least this many
+     * settled signals AND enough bets at the chosen threshold that its EV is
+     * not one lucky day (day-block bootstrap in EdgeAutoTuner).
+     */
+    const val AUTO_TUNE_MIN_SAMPLES = 100
+    const val AUTO_TUNE_MIN_BETS = 30
+    const val AUTO_TUNE_BOOTSTRAP_RUNS = 200
 
     const val DEFAULT_OPPORTUNITY_ALERTS = true
     const val DEFAULT_OPPORTUNITY_QUIET = false
@@ -92,7 +99,7 @@ object SignalConstants {
      * (`.github/workflows/train-edge-model.yml`). `edge-model-latest`
      * belongs to the main app.
      */
-    const val EDGE_MODEL_RELEASE_TAG = "claude-edge-model"
+    const val EDGE_MODEL_RELEASE_TAG = "mis-bitcoin-edge-model"
 
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true
@@ -112,6 +119,12 @@ object SignalConstants {
     const val ADAPTER_WEIGHT_EMA = 0.15
 
     const val EXTERNAL_CACHE_MS = 25_000L
+
+    /**
+     * Oldest REST volatility an imported model may score with (a few missed polls). Past it the
+     * model is skipped: the stream's σ is a different estimator from the trainer's.
+     */
+    const val TRAINER_VOL_MAX_AGE_MS = 180_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
     const val EXTERNAL_READ_TIMEOUT_MS = 4_000L
 

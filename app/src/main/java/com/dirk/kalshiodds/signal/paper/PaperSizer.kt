@@ -8,10 +8,11 @@ import kotlin.math.min
  * How much of its paper cash the AI puts on one bet. **Paper money only.**
  *
  * The AI stakes a quarter of the Kelly fraction of its cash, and never
- * more than [MAX_FRACTION] (25%). Full Kelly is only the fastest-growing
- * size when the probability is right; this model's probabilities lose to
- * Kalshi's price, so a full-Kelly all-in just magnifies a bad forecast.
- * No edge (q ≤ cost including the taker fee) means no bet.
+ * more than [MAX_FRACTION] (10%) on one bet. Full Kelly is only the
+ * fastest-growing size when the probability is right; this model's
+ * probabilities have lost to Kalshi's price, so full Kelly just magnifies a
+ * bad forecast. No edge (q ≤ cost including the taker fee) means no bet.
+ * For a contract bought at price p with fee f, and a win chance q:
  *
  *   cost c = p + f,  edge fraction = (q − c) / (1 − c),
  *   stake = cash × min([MAX_FRACTION], [KELLY_MULTIPLIER] × fraction)
@@ -19,7 +20,14 @@ import kotlin.math.min
  * A lost bet cannot wipe the paper account. Reset puts it back to $100.
  */
 object PaperSizer {
-    const val MAX_FRACTION = 0.25
+    /**
+     * Cap on the paper cash the AI may stake on one bet. A model that merely
+     * matches the market makes large-stake paper results mostly luck; 10%
+     * keeps variance honest while still letting a real edge compound.
+     */
+    const val MAX_FRACTION = 0.10
+
+    /** Quarter Kelly: survives an overconfident win probability. */
     const val KELLY_MULTIPLIER = 0.25
 
     /** Kelly fraction of cash for a buy at [price] with win chance [winProb], or 0 with no edge. */

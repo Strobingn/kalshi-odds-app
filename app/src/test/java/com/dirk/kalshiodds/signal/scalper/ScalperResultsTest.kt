@@ -119,6 +119,56 @@ class ScalperResultsTest {
     }
 
     @Test
+    fun aFailedFlushKeepsTheRowsQueuedAndBlocksTheArchive() {
+        // The log's directory is a plain file: nothing can be written.
+        val notADir = tmp.newFile("not-a-dir")
+        val log = ScalpTradeLog(notADir, run = 1L, io = direct)
+        val row = ScalpTrade(
+            closedAtMs = 1_791_400_000_123L, run = 1L, id = 1L, strategy = "ML_REST", ticker = t, side = "YES",
+            contracts = 10, entry = 0.50, exit = 0.51, kind = "TARGET", entryFeeUsd = 0.0, exitFeeUsd = 0.0,
+            pnlUsd = 0.10, postedAtMs = 1L, filledAtMs = 2L, queueAhead = 0.0, queueKnown = true,
+            predictionCents = 0.0, expectedCents = 0.0
+        )
+        log.add(listOf(row), emptyList())
+        assertFalse(log.flushNow())
+        assertEquals("the row is still queued, not lost", listOf(row), log.recent(10))
+        assertFalse("no reset while queued rows cannot be saved", log.archive(nowMs = 5L))
+    }
+
+    @Test
+    fun aWriteThatFailsPartWayIsCutBackSoTheRetryDoesNotDuplicate() {
+        val dir = tmp.newFolder("partial-write")
+        val f = File(dir, "scalps_2026-10-01.csv").apply { writeText("header\nrow1\n") }
+        val boom = runCatching {
+            ScalpTradeLog.appendOrRollBack(f) {
+                it.appendText("row2\nro")
+                error("disk full")
+            }
+        }
+        assertTrue(boom.isFailure)
+        assertEquals("the half-written rows are gone", "header\nrow1\n", f.readText())
+        val fresh = File(dir, "orders_2026-10-01.csv.gz")
+        runCatching { ScalpTradeLog.appendOrRollBack(fresh) { it.writeText("x"); error("disk full") } }
+        assertFalse("a file the failed write created is removed", fresh.exists())
+        ScalpTradeLog.appendOrRollBack(f) { it.appendText("row2\n") }
+        assertEquals("header\nrow1\nrow2\n", f.readText())
+    }
+
+    @Test
+    fun anArchiveThatCannotFinishPutsEveryFileBack() {
+        val dir = tmp.newFolder("partial")
+        val a = File(dir, "scalps_2026-10-01.csv").apply { writeText("a\n") }
+        val b = File(dir, "scalps_2026-10-02.csv").apply { writeText("b\n") }
+        // A directory where b's archive copy would go: b can be neither renamed nor copied there.
+        File(dir, "archive/9/${b.name}").mkdirs()
+        val log = ScalpTradeLog(dir, run = 1L, io = direct)
+        assertFalse(log.archive(nowMs = 9L))
+        assertTrue("a is back in place", a.isFile && a.readText() == "a\n")
+        assertTrue("b never left", b.isFile && b.readText() == "b\n")
+        assertFalse("no half archive left behind", File(dir, "archive/9/${a.name}").exists())
+    }
+
+    @Test
     fun everyOrderIsWrittenToDiskAndReadBackNewestFirst() {
         val dir = tmp.newFolder("scalper")
         val log = ScalpTradeLog(dir, run = 77L, io = direct)
@@ -181,7 +231,7 @@ class ScalperResultsTest {
         val names = ArrayList<String>()
         ZipInputStream(zipped.toByteArray().inputStream()).use { z -> while (true) names += (z.nextEntry ?: break).name }
         assertEquals(listOf("scalper/scalp_orders_1970-01-01.csv.gz", "scalper/scalps_1970-01-01.csv"), names)
-        log.archive(nowMs = 123L)
+        assertTrue("every file reached the archive", log.archive(nowMs = 123L))
         assertTrue("the list starts again", log.recent(10).isEmpty())
         assertTrue(File(dir, "archive/123/scalps_1970-01-01.csv").exists())
         assertEquals("archived files are still exported", 2, log.zip(ByteArrayOutputStream()))

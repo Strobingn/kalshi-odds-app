@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -91,13 +92,15 @@ private data class BottomDestination(
 )
 
 /**
- * Mirrors the compact, always-visible six-tab layout in the supplied design.
- * "Live" is the signal feed and "Real" opens the recorded-history screen;
- * neither tab places an order by itself.
+ * Mirrors the compact, always-visible tab layout in the supplied design.
+ * "Arena" is the 15-strategy paper scalper leaderboard, "Live" is the signal
+ * feed and "Real" opens the recorded-history screen; no tab places an order
+ * by itself.
  */
 private val bottomDestinations = listOf(
     BottomDestination(AppRoutes.HOME, "Home", Icons.Default.Home),
-    BottomDestination(AppRoutes.SCORECARD, "Scorecard", Icons.Default.Assessment),
+    BottomDestination(AppRoutes.SCALPER, "Arena", Icons.Default.EmojiEvents),
+    BottomDestination(AppRoutes.SCORECARD, "Score", Icons.Default.Assessment),
     BottomDestination(AppRoutes.SIGNAL_HISTORY, "Live", Icons.Default.ReceiptLong),
     BottomDestination(AppRoutes.HISTORY, "Real", Icons.Default.AccountBalance),
     BottomDestination(AppRoutes.DATA, "Data", Icons.Default.FormatListBulleted),
@@ -120,7 +123,7 @@ private fun AppBottomNavigation(
                 selected = item.route == selectedRoute,
                 onClick = { onSelect(item.route) },
                 icon = { Icon(item.icon, contentDescription = item.label) },
-                // Six destinations share the phone width. Keep "Scorecard"
+                // Seven destinations share the phone width. Keep "Scorecard"
                 // on one compact line instead of wrapping a final "d" below it.
                 label = {
                     Text(

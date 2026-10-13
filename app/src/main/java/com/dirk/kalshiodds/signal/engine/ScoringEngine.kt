@@ -620,11 +620,18 @@ class ScoringEngine(
             heavyOut.usedHeavy &&
             !heavyOut.uncertaintyPassed
         val extBlocked = extOut?.blockReason
-        val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
-            if (!barStd.isFinite() || barStd <= 0.0) null
-            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
+        fun annualize(barStd: Double?): Double? = barStd?.let {
+            if (!it.isFinite() || it <= 0.0) null
+            else (it * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
                 .coerceIn(0.01, 5.0)
         }
+        val sigmaAnnual = annualize(spotFeat?.realizedVol15m)
+        // An imported model's σ inputs use the trainer's estimator (REST 1m bars), and only while it is
+        // fresh: the stream's σ has another distribution, so it never stands in (the model is skipped).
+        val trainerVolFresh = spotFeat?.trainerVolAtMs?.let {
+            it > 0L && nowMs - it in 0L..com.dirk.kalshiodds.signal.config.SignalConstants.TRAINER_VOL_MAX_AGE_MS
+        } == true
+        val modelSigmaAnnual = if (trainerVolFresh) annualize(spotFeat?.trainerVol1m) else null
         // Kalshi settles on the 60 s average of the index (ties YES). Inside
         // the last minute, the part of that average already printed comes
         // from the streamed tape.
@@ -663,14 +670,28 @@ class ScoringEngine(
         var importedModelPp: Double? = null
         var modelEdgeQualified = true
         var importedBlendW: Double? = null
-        val loaded = edgeModel
+        // The previous window's move (open − 15 min → open), parity with prev_window_return; null when
+        // the tape does not reach back that far (Live signals started inside the last ~20 minutes).
+        val prevWindowRet = if (edgeModel != null && close != null && settleAsset != null) {
+            runCatching { spotStream?.prevWindowReturn(settleAsset, close - 900_000L, nowMs) }.getOrNull()
+        } else {
+            null
+        }
+        // A model is not run on an input it weighs but cannot have: a made-up 0 for the previous window's
+        // move (older models padded to the contract carry weight 0 there), or no trainer-compatible σ.
+        val loaded = edgeModel?.takeUnless {
+            (prevWindowRet == null && it.weightOf("prev_window_return") != 0f) ||
+                (modelSigmaAnnual == null && (it.weightOf("dist_to_strike_vol") != 0f || it.weightOf("digital_fair") != 0f))
+        }
+        // A configured model that was skipped is a failed gate, not a pass: no alert on the fallback fair.
+        if (edgeModel != null && loaded == null) modelEdgeQualified = false
         if (loaded != null) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
                     spot = spotFeat?.lastPrice,
                     strike = strikeUsd,
                     tteSeconds = (tteSec ?: 900L).toDouble(),
-                    sigmaAnnual = sigmaAnnual,
+                    sigmaAnnual = modelSigmaAnnual,
                     marketMid = mid01,
                     imbalance = imb,
                     spread = spread,
@@ -681,7 +702,11 @@ class ScoringEngine(
                     // Null: EdgeFeatures computes the point-spot digital the
                     // model was trained on (ml/train_edge.py), not the
                     // settlement-average fair shown in the app.
-                    digitalFair = null
+                    digitalFair = null,
+                    prevWindowReturn = prevWindowRet,
+                    // Funding-settlement close (00/08/16 UTC): regime flag,
+                    // parity with is_funding_hour.
+                    isFundingHour = null  // EdgeFeatures derives it from close time
                 )
             )
             val pYes = loaded.predictYes(feats, mid01)

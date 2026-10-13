@@ -13,11 +13,12 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 
 /**
- * In-app update check for the Claude-branch build.
+ * In-app update check for the Claude-branch build (Claude Bitcoin).
  *
  * Every push to `Claude` runs the Build APK workflow, which publishes the
- * APK on a rolling GitHub prerelease tagged `v<versionName>-Claude` with an
- * asset named `ClaudeBitcoin-v<versionName>-Claude-<run number>.apk`. The build
+ * APK on a rolling GitHub prerelease tagged `v<versionName>-Claude` (a branch
+ * name's `/` becomes `-`) with an asset named
+ * `ClaudeBitcoin-v<versionName>-<branch>-<run number>.apk`. The build
  * stamps the same run number into [BuildConfig.CI_RUN_NUMBER], so "is there
  * a newer build?" is a comparison of run numbers. Every CI APK is signed
  * with the committed debug keystore, so the new one installs over this one
@@ -32,7 +33,8 @@ object AppUpdate {
     const val RELEASES_PAGE = "https://github.com/Strobingn/kalshi-odds-app/releases"
     const val BRANCH = "Claude"
 
-    private val TAG = Regex("""^v(\d+(?:\.\d+)*)-(.+)$""")
+    /** The version part of a tag: `1.9.0` or `1.9.0-arena`. */
+    private val VERSION = Regex("""^\d+(?:\.\d+)*(?:-[A-Za-z0-9.]+)?$""")
     private val ASSET_RUN = Regex("""-(\d+)\.apk$""")
     private val BODY_RUN = Regex("""run #(\d+)""")
     private val BODY_CODE = Regex("""\((\d+)\)""")
@@ -74,8 +76,12 @@ object AppUpdate {
             val o = el as? JsonObject ?: return@mapNotNull null
             if (o.bool("draft") == true) return@mapNotNull null
             val tag = o.string("tag_name") ?: return@mapNotNull null
-            val m = TAG.matchEntire(tag) ?: return@mapNotNull null
-            if (m.groupValues[2] != branch) return@mapNotNull null
+            // `v<version>-<branch>`. Matched on the branch suffix, not split on a dash: branch names hold
+            // dashes (claude-strategy-arena) and so can versions (1.8.0-mis.1).
+            val suffix = "-$branch"
+            if (!tag.startsWith("v") || !tag.endsWith(suffix) || tag.length <= suffix.length + 1) return@mapNotNull null
+            val versionName = tag.substring(1, tag.length - suffix.length)
+            if (!VERSION.matches(versionName)) return@mapNotNull null
             val asset = (o["assets"] as? JsonArray)
                 ?.mapNotNull { it as? JsonObject }
                 ?.firstOrNull { it.string("name")?.endsWith(".apk", ignoreCase = true) == true }
@@ -86,7 +92,7 @@ object AppUpdate {
             val body = o.string("body").orEmpty()
             Release(
                 tag = tag,
-                versionName = m.groupValues[1],
+                versionName = versionName,
                 runNumber = ASSET_RUN.find(apkName)?.groupValues?.get(1)?.toIntOrNull()
                     ?: BODY_RUN.find(body)?.groupValues?.get(1)?.toIntOrNull()
                     ?: 0,
@@ -157,7 +163,7 @@ class AppUpdateChecker(
             val request = Request.Builder()
                 .url(url)
                 .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "ClaudeBitcoin/${BuildConfig.VERSION_NAME}")
+                .header("User-Agent", "MisBitcoin/${BuildConfig.VERSION_NAME}")
                 .build()
             client.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {

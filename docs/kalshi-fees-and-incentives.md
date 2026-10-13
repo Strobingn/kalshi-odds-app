@@ -258,3 +258,24 @@ good.
   exactly the maker rate a `quadratic_with_maker_fees` series with multiplier 1
   would charge.
 - Do not add any liquidity-incentive income to simulations for $5 tickets.
+
+## Update 2026-10-07 (Mis_bitcoin): maker fee CONFIRMED zero
+
+`tools/research/fee_probe.py` run against the live API (all four series):
+
+| Series | fee_type | multiplier | Maker rate | Taker rate | LIP programs |
+|---|---|---|---:|---:|---:|
+| KXBTC15M | quadratic | 1 | **0** | 0.07 | 0 |
+| KXETH15M | quadratic | 1 | **0** | 0.07 | 0 |
+| KXSOL15M | quadratic | 1 | **0** | 0.07 | 0 |
+| KXBTCD | quadratic | 1 | **0** | 0.07 | 0 |
+
+The "unknown maker fee" caveat is resolved: **resting orders are free** on
+every series we trade. Combined with the tape study (takers −1.01¢/contract,
+front-of-queue resting bids +0.29¢/contract), the maker path
+(`RestingBid`, `FlowFade` paper mode) is structurally the cheapest way to
+get exposure. Also noted: `KXCRYPTOLEAD15M` ("Coin Race 15 minutes", which
+crypto has the highest return) is the only crypto series with upcoming
+liquidity-incentive programs (520 listed). The incentive-programs endpoint
+ignores series/market filters, so per-market payout terms could not be
+confirmed from the public API alone; needs a paginated probe by market_id.
