@@ -237,13 +237,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             next = next.copy(
                 leaderAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor),
                 leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor) }.orEmpty(),
-                leaderByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor) },
+                leaderByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, withCi = false) },
                 algoAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor).associateBy { it.model },
-                algoToday = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now)).associateBy { it.model },
+                algoToday = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now), withCi = false).associateBy { it.model },
                 algoByCoin = byCoinPerModel(trades, bidFor, null),
                 algoTodayByCoin = byCoinPerModel(trades, bidFor, com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now)),
                 leaderTodayByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
-                    com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now))
+                    com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now), withCi = false)
                 },
                 windows = com.dirk.kalshiodds.decision.ScalpModels.perWindow(trades, cur.coin),
                 sliceUsd = com.dirk.kalshiodds.decision.ScalpModels.sliceUsd(runCatching { paperBook.snapshot().cashUsd }.getOrDefault(bankroll))
@@ -272,7 +272,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         trades: List<com.dirk.kalshiodds.decision.ScalpTrade>, bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double?, since: Long?
     ): Map<com.dirk.kalshiodds.decision.ScalpModels.Model, Map<String, com.dirk.kalshiodds.decision.ScalpModels.Row>> {
         val perCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
-            com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = since).associateBy { it.model }
+            com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = since, withCi = false).associateBy { it.model }
         }
         return com.dirk.kalshiodds.decision.ScalpModels.ALL.associateWith { m -> perCoin.mapValues { it.value.getValue(m) } }
     }
@@ -1604,6 +1604,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     enabled = s.paperTradingEnabled
                 )
             }
+            // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
+            runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
         }
     }
 

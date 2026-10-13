@@ -271,6 +271,10 @@ internal fun AlgoCard(
                 modifier = Modifier.border(1.dp, if (holding) c.accentBlue else c.border, RoundedCornerShape(8.dp)).padding(horizontal = 8.dp, vertical = 2.dp)
             )
         }
+        com.dirk.kalshiodds.decision.ShockFav.byVariantId(m.code)?.let { p ->
+            Text(p.summary(), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text("Backtest (test days): " + p.oos, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
         if (m == ScalpModels.Model.FORECAST_RIDE || m == ScalpModels.Model.FORECAST_FADE) {
             Text("Horizon: " + com.dirk.kalshiodds.decision.ForecastScalp.horizonNote(), style = MaterialTheme.typography.labelSmall,
                 color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)

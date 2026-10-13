@@ -426,10 +426,11 @@ data class ScalpTrade(
     val algoLabel: String get() = when {
         variantId.startsWith(ForecastScalp.RIDE_PREFIX) -> ScalpModels.Model.FORECAST_RIDE.label
         variantId.startsWith(ForecastScalp.FADE_PREFIX) -> ScalpModels.Model.FORECAST_FADE.label
+        ShockFav.isShockFav(variantId) -> ShockFav.byVariantId(variantId)?.let { "${it.code} ${it.label}" } ?: variantId
         else -> strategy.label
     }
     /** Strategy for per-strategy grouping, null for forecast trades (grouped separately). */
-    val strategyOrNull: ScalpStrategy? get() = if (ForecastScalp.isForecast(this)) null else strategy
+    val strategyOrNull: ScalpStrategy? get() = if (ForecastScalp.isForecast(this) || ShockFav.isShockFav(variantId)) null else strategy
 
     /** Mark-to-bid P&L after the exit fee for what is still held. */
     fun unrealizedUsd(bid: Double?): Double? {
@@ -698,6 +699,93 @@ class ScalpBook(
             }
             else -> null
         }
+    }
+
+    // ---------------- 0.3.57 sf57: twenty shock / late-favourite paper scalpers ----------------
+    private val sfSpot = HashMap<String, ShockFav.SpotRing>()
+
+    /**
+     * One conflated quote → all twenty sf57 variants (paper). Called from the paper lane (never Main). Cheap: one scan
+     * of this ticker's active sf trades, O(1) spot-ring lookups per variant (multi-shock: ≤ 30).
+     */
+    fun onShockFavQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
+        val yb = q.yesBid ?: return@synchronized emptyList()
+        val ya = q.yesAsk ?: return@synchronized emptyList()
+        if (ya <= yb) return@synchronized emptyList()
+        val key = q.ticker.uppercase()
+        val coin = ScalpParams.coinOf(q.ticker)
+        val sec = q.nowMs / 1000L
+        val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
+        q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
+        val fairYes = q.fair("YES") ?: return@synchronized emptyList()
+        val mine = _trades.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
+        val changed = ArrayList<ScalpTrade>()
+        val live = q.nowMs < q.closeMs && q.fresh()
+        // exits first (shock legs; fav legs hold to settlement)
+        for (t in mine) {
+            if (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) continue
+            if (ShockFav.isFavLeg(t.variantId) || !live) continue
+            val p = ShockFav.byVariantId(t.variantId) ?: continue
+            val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
+            val sideFair = if (t.side == "YES") fairYes else 1.0 - fairYes
+            val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
+                ?: ShockFav.shockExit(p, (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, q.tauS, bid, sideFair) ?: continue
+            val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
+            val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
+            if (n <= 0) { if (base !== t) changed += base; continue }
+            val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+            changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
+        }
+        if (enabled && live) {
+            val sigma = q.sigmaPerSec
+            var openCost = openCostUsd()
+            val bankroll = bankrollUsd()
+            var brtiFair: Double? = null
+            for (p in ShockFav.VARIANTS) {
+                if (p.shock && mine.none { it.variantId == p.shockId && isActive(it) }) {
+                    val side = ShockFav.shockSide(p, coin, ring, sec, q.tauS, sigma)
+                    if (side != null) {
+                        val sideFair = if (side == "YES") fairYes else 1.0 - fairYes
+                        val ask = q.ask(side)
+                        if (ask != null && ShockFav.shockEntryOk(p, sideFair, ask))
+                            sfEnter(q, p, p.shockId, side, ask, sideFair, openCost, bankroll, "shock")?.let { changed += it; openCost += it.entryCostUsd }
+                    }
+                }
+                if (p.fav && mine.none { it.variantId == p.favId } && q.tauS <= p.favTmax && q.tauS >= p.favTmin) {
+                    val fy = if (p.brti && q.strike != null && sigma != null && q.spot != null) {
+                        brtiFair ?: run {
+                            val m = (60.0 - q.tauS).toInt().coerceIn(0, 60)
+                            val obs = (sec - m + 1..sec).mapNotNull { ring.at(it) }
+                            ShockFav.brtiFairYes(q.spot, q.strike, sigma, q.tauS, obs).also { brtiFair = it }
+                        }
+                    } else fairYes
+                    for (side in listOf("YES", "NO")) {
+                        val f = if (side == "YES") fy else 1.0 - fy
+                        val ask = q.ask(side) ?: continue
+                        if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin)) continue
+                        sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; openCost += it.entryCostUsd }
+                        break
+                    }
+                }
+            }
+        }
+        changed.forEach { save(it) }
+        changed
+    }
+
+    /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
+    private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
+                        openCost: Double, bankroll: Double, what: String): ScalpTrade? {
+        val n = minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
+        if (n <= 0) return null
+        val cost = ask * n + ScalpRule.orderFee(n, ask)
+        if (openCost + cost > bankroll + 1e-9) return null
+        return ScalpTrade(
+            id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.OPEN, signalAtMs = q.nowMs,
+            signalAsk = ask, fairAtSignal = fair, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
+            note = String.format(Locale.US, "%s %s · %s · fair %.0f¢ vs ask %.0f¢ · %s", p.code, p.label, what, fair * 100, ask * 100, ShockFav.VERSION),
+            ruleVersion = "${ScalpRule.VERSION}|$vid|P"
+        )
     }
 
     /** Re-tune when enough new closed round trips (all variants) have accumulated. Deterministic. */
