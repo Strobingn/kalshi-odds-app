@@ -282,7 +282,10 @@ class ScalperEngineTest {
         assertEquals("YES bid sat behind 80", 2, st.stats(ScalperState.bucketKey(QueueBucket.FRONT)).posted)
         assertEquals("NO bid sat behind 4,000", 2, st.stats(ScalperState.bucketKey(QueueBucket.DEEP)).posted)
         assertEquals("0.5 − penalty(80) > 0 only for the YES bids", 2, st.stats(ScalperState.QUEUE_AWARE).posted)
-        assertEquals("quiet market: none of the fast strategies fired", ml.posted, st.stats(ScalperState.ALL).posted)
+        // The two 1.9.4 makers rest exactly in a still market with a short queue; every signal strategy stays out.
+        val stillMakers = st.stats(ScalpStrategy.QUIET_MAKER.name).posted + st.stats(ScalpStrategy.PENNY_SCALPER.name).posted
+        assertTrue("the still-market makers did rest", stillMakers > 0)
+        assertEquals("quiet market: none of the fast strategies fired", ml.posted, st.stats(ScalperState.ALL).posted - stillMakers)
     }
 
     @Test
@@ -290,7 +293,11 @@ class ScalperEngineTest {
         val fake = Fake()
         val s = runner(fake, model = null)
         for (sec in 30..120) quiet(s, sec)
-        assertEquals("no model, quiet market: nothing to do", 0, s.ledger.snapshot().stats(ScalperState.ALL).posted)
+        val st = s.ledger.snapshot()
+        assertEquals("no model, quiet market: only the quiet maker rests", st.stats(ScalpStrategy.QUIET_MAKER.name).posted, st.stats(ScalperState.ALL).posted)
+        assertEquals("nothing before a minute of prints (warm at 90 s)", 0, runner(Fake(), model = null).also { r ->
+            for (sec in 30..89) quiet(r, sec)
+        }.ledger.snapshot().stats(ScalperState.ALL).posted)
         val late = runner(Fake(), flatModel(0.5))
         for (sec in 100..150) quiet(late, sec)
         assertEquals("joined at 100 s: not warm until 160 s", 0, late.ledger.snapshot().stats(ScalperState.ALL).posted)

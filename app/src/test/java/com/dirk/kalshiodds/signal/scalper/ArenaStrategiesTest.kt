@@ -11,7 +11,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** The 15-strategy arena: the eight strategies added in 1.9.0, the leaderboard and the status panel. Paper only. */
+/** The arena: the eight strategies added in 1.9.0, the leaderboard and the status panel. Paper only. */
 class ArenaStrategiesTest {
 
     private val t = "KXBTC15M-26OCT091215-15"
@@ -33,16 +33,16 @@ class ArenaStrategiesTest {
     }
 
     @Test
-    fun fifteenStrategiesEachWithItsOwnRow() {
-        assertEquals(15, ScalpStrategy.values().size)
+    fun everyStrategyHasItsOwnRow() {
+        assertEquals(30, ScalpStrategy.values().size)
         val board = ScalperResults.leaderboard(ScalperState.fresh())
-        assertEquals(15, board.size)
-        assertEquals((1..15).toList(), board.map { it.rank })
+        assertEquals(30, board.size)
+        assertEquals((1..30).toList(), board.map { it.rank })
         assertEquals("idle strategies keep their own order", ScalpStrategy.values().toList(), board.map { it.strategy })
         assertTrue(board.all { it.verdict == "no trades yet" })
         assertTrue(ScalperResults.leaderLine(ScalperState.fresh()).startsWith("No strategy has closed a trade yet"))
         val copy = ScalperSummary.of(ScalperState.fresh())
-        assertEquals(15, copy.strategyLines.size)
+        assertEquals(30, copy.strategyLines.size)
         assertTrue(copy.strategyLines.any { it == "Bounce · buy now: no scalps yet [new · codex]" })
     }
 

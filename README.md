@@ -19,6 +19,118 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.5 (claude/scalp-insights): Compare all 30, and a page for every strategy
+
+- **Compare** (a new section chip, second from the left): every strategy in one table: rank, net, trades,
+  win rate and a fourth column that follows the sort.
+  - Filter chips: *All · Buy now · Resting · Hold to close · New in 1.9.4 · Has traded*, each with its count.
+  - Sort chips (or tap a column's name): net, trades, win rate, ¢ a contract, profit factor, drawdown, hold
+    time, fill rate. Tap again to flip best-first / worst-first. Strategies with no number yet always sit at
+    the bottom.
+- **A page for every strategy.** Tap a row in Compare, or *Open* beside the strategy you follow. The page has:
+  - its rules in words: signal, entry, exit, price band, size;
+  - its net and luck verdict;
+  - every number: trades, wins, ¢ a contract, profit factor, dollars won and lost, drawdown, hold, fees,
+    best and worst trade, runs, posted and filled, how its trades ended;
+  - its own charts: running profit, drawdown, per-trade histogram, rolling edge, the luck fan, calibration
+    (holds), hold time, minute of the window and price band;
+  - its last 20 trades.
+
+  Back returns to the arena. Totals come from the ledger (every close), the per-trade numbers from the trade
+  file. Numbers: `ArenaTable` (`ArenaTableTest`); drawing: `ui/ArenaCompareViews.kt` and `StrategyPage`.
+
+## 1.9.4 (claude/scalp-insights): fifteen more strategies — 30 at once
+
+The arena now runs **30** paper strategies side by side on the same live window, fills and fees. The fifteen new
+ones each trade their own signal; none has history on this engine yet, so their leaderboard rows say
+"new · Claude 1.9.4" until they trade. Existing records keep their history: the new rows simply start at zero.
+
+| Strategy | Entry | Exit |
+| --- | --- | --- |
+| Stretch fade · buy now | mid 3¢+ under its own 60 s average, spread ≤ 2¢ | +2¢ / −3¢ / 45 s |
+| Squeeze breakout · buy now | two quiet minutes (range ≤ 4¢), then the mid 1¢ above that range | +3¢ / −2¢ / 60 s |
+| Range floor · resting | a 3–8¢ two-minute range, mid back on its low: bid at the floor | +2¢ / −3¢ / 60 s |
+| Trend pullback · buy now | up 5¢+ over two minutes, down 1¢+ in the last 10 s | +3¢ / −3¢ / 60 s |
+| Flow follow · buy now | takers bought this side 3:1, 500+ contracts in 30 s (flow fade's mirror) | +2¢ / −2¢ / 30 s |
+| Whale follow · buy now | one taker print of 1,000+ contracts on this side in the last 5 s | +2¢ / −2¢ / 30 s |
+| Quiet maker · resting | the mid has not moved for 30 s | +1¢ / −2¢ / 60 s |
+| Opening drive · buy, hold | minutes 2–4, up 6¢+ since minute 1, 50–80¢ | settlement |
+| Late tiebreak · buy, hold | minutes 12–13, 45–60¢, up 2¢+ in the last minute | settlement |
+| Heavy favorite · buy, hold | minutes 12–13, 92–97¢ | settlement |
+| Panic fade · buy now | down 4¢+ in 10 s with 300+ contracts sold into it | +3¢ / −3¢ / 60 s |
+| Steady climb · buy now | up 1¢ / 3¢ / 4¢ over 10 / 30 / 60 s | +3¢ / −2¢ / 60 s |
+| Penny scalper · resting | 1¢ spread and at most 200 contracts ahead on the bid (needs the live book) | +1¢ / −2¢ / 30 s |
+| Book imbalance · buy now | the bid shows 3× the ask's size and 300+ contracts (needs the live book) | +2¢ / −2¢ / 30 s |
+| Late comeback · buy, hold | minutes 10–13, an underdog at 20–40¢ up 4¢+ in 30 s | settlement |
+
+Every chart, heatmap and table in the Arena covers all 30. Signals: `PaperScalper.decide` (new grid helpers
+`PrintGrid.avgMid` and `biggestTakerBuy`); tests: `ArenaMoreStrategiesTest`, one per strategy, each with the case
+that must not fire. Paper only. A larger field also means more chances for one strategy to look good by luck;
+the leaderboard's luck verdict still needs 30 trades over 10 windows before it calls anything.
+
+## 1.9.3 (claude/scalp-insights): an Execution section — how the orders are worked
+
+A sixth chip, **Execution**, looks at how each strategy gets in, not just what it made:
+
+- *Win often or win big?* The payoff map: each strategy at its win rate (across) and average win ÷ average loss
+  (up), dot size by trades. The dashed curve is break-even (payoff = losses ÷ wins); above it made money. A 30%
+  hitter can be fine if its wins are 3× its losses; a 70% hitter can lose if they are not.
+- *Pay the ask or wait?* The dip, momentum and extreme-reversion signals each run twice, buying now and resting
+  a bid. Side by side: result per contract after fees with ±2 standard-error whiskers, and how often the resting
+  half filled.
+- *How often bids fill.* Filled ÷ posted for every resting strategy.
+- *Fast fills, good fills?* Strategy × how long the resting bid waited (<1s … 1m+). Bids that fill instantly are
+  often the ones the market was leaving: adverse selection shows up as red on the left.
+- *Place in line.* Strategy × contracts ahead in the queue when posted (front … 1k+).
+- *Did the ML forecast hold?* The ML scalper's expected ¢ at posting, banded, against what its fills made, with
+  the "forecast was right" diagonal. Only filled bids count, so a gap is partly the fills being worse than the
+  average post.
+- **Overview** gains *Rank by day*: every strategy's place on running profit at the end of each of the last 14
+  days; the three leaders (or the one you follow) in colour. Drag to read a day.
+
+Numbers: `ArenaExec` (`ArenaExecTest`); drawing: `ui/ArenaExecViews.kt`. Paper only.
+
+## 1.9.2 (claude/scalp-insights): an Edge section — is any of this skill?
+
+A fifth chip, **Edge**, asks the question the profit bars can't answer: is a strategy beating the market, or lucky?
+
+- *Is the price right?* For trades held to the close: how often they won against the price paid (the market's
+  own chance), by 10¢ band. The dashed diagonal is "won exactly as often as the price said", the short dash the
+  break-even after the entry fee, the whisker ±2 standard errors. Blue = clearly beat the price, red = clearly
+  lagged it, grey = can't tell yet (or under 5 trades).
+- *Skill or luck?* The strategy you follow (or the leader), its own trades reshuffled 400 times: where the next
+  200 could land (80% band and the middle path) and the share of paths that finish ahead. It says what the
+  record implies, not what the future holds.
+- *Is the edge holding?* Its average ¢ a contract over the last 30 trades, through time; the line turns red
+  below zero.
+- *Who trades alike.* Correlation of each pair's net, window by window (at least 8 shared windows). Two
+  "winners" that move together are one bet, not two.
+- **Timing** gains *When in the window*: strategy × minute of the 15-minute window the entry filled (0–14).
+
+The section chips now scroll sideways instead of squeezing. Numbers: `ArenaEdge` (`ArenaEdgeTest`); drawing:
+`ui/ArenaEdgeViews.kt`. Paper only.
+
+## 1.9.1 (claude/scalp-insights): more scalping charts and data, in four sections
+
+The Arena tab now has one row of section chips (**Overview · Strategies · Timing · Trades**) under the headline,
+and the "follow a strategy" filter applies across all of them.
+
+- **Overview.** *Live window*: the Bitcoin window trading now, its UP price second by second, with a ring at
+  every paper entry and a dot at every exit (blue made money, red lost, grey still open) joined by a thin line;
+  DOWN trades sit on the UP line (a DOWN entry at 40¢ is drawn at 60¢); tap a mark for the trade. Then the profit
+  bars, the race, the leaderboard, the bankroll and a new *drawdown* chart (how far below its best the arena, or
+  the strategy you follow, sits).
+- **Strategies.** A *stats table* per strategy: trades, ¢ a contract after fees, profit factor (won ÷ lost),
+  deepest drawdown, average hold, longest win / loss streaks. A *price heatmap*: strategy × entry price (10¢
+  bands of the side bought), blue made money, red lost, grey ≈ 0, outlined = under 3 trades. Then exits, win
+  rate and fees.
+- **Timing.** A *day-by-day heatmap* (strategy × the last 14 days), the hourly columns and *how long to hold*
+  (¢ a contract by time in the trade: under 10 s … over 5 min, and held to the close).
+- **Trades.** The per-trade histogram, the totals and every trade.
+
+Numbers: `ArenaStats` (`ArenaStatsTest`); live data: `PaperScalper.liveWindow` (prints per second +
+`ScalperEngine.openPositions`); drawing: `ui/ArenaInsightViews.kt`. Paper only, as before.
+
 ## 1.9.0 (Claude branch): the Strategy Arena tab, 15 strategies at once, paper only
 
 Claude Bitcoin 1.9.0 installs over 1.8.8 and keeps your key, settings and paper records. It also carries
@@ -76,7 +188,7 @@ on live data; it cannot place an order.
 |---------|------|------|
 | 15 strategies, bands, holds | `ScalpStrategy`, `ScalperEngine.inBand`, `onTrade` / `onClock` skip holds | `ArenaStrategiesTest.holdStrategiesHaveNoExitAndRideToTheSettlement`, `eachStrategyTradesOnlyInsideItsOwnPriceBand` |
 | New signals | `PaperScalper.decide`, `PrintGrid.highMid` / `lowMid` / `takerBought` | `ArenaStrategiesTest.aFavoriteLateInTheWindow…`, `flowFade…`, `oneCentBetter…`, `aFiveCentDrop…` |
-| Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.fifteenStrategiesEachWithItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
+| Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.everyStrategyHasItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
 | Status panel | `arenaFeed` (ScalperResultsScreen.kt) | `ArenaStrategiesTest.theStatusPanelNamesWhatStopsTheArena` |
 | Arena tab | `AppRoutes.PRIMARY`, `DipApp` bottom bar | `ArenaStrategiesTest.theArenaIsABottomTab` |
 | Update channel | `AppUpdate.BRANCH = "Claude"` (tags matched on the branch suffix) | `AppUpdateTest` |

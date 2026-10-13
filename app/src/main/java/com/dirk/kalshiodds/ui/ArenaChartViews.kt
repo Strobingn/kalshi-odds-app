@@ -80,13 +80,13 @@ internal fun ChartCard(title: String, subtitle: String, tag: String, content: @C
 }
 
 @Composable
-private fun Muted(text: String, modifier: Modifier = Modifier) {
+internal fun Muted(text: String, modifier: Modifier = Modifier) {
     Text(text, style = MaterialTheme.typography.labelMedium, color = DipTheme.colors.textSecondary, modifier = modifier, maxLines = 1, overflow = TextOverflow.Ellipsis)
 }
 
 /** The value leads, the label follows (tap / drag readout). */
 @Composable
-private fun Readout(value: String, label: String) {
+internal fun Readout(value: String, label: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = DipTheme.colors.textPrimary)
         Muted(label)
@@ -95,7 +95,7 @@ private fun Readout(value: String, label: String) {
 
 /** A short stroke of the series colour: the key for lines (legends and readouts). */
 @Composable
-private fun LineKey(color: Color) {
+internal fun LineKey(color: Color) {
     Canvas(Modifier.size(width = 14.dp, height = 10.dp)) {
         drawLine(color, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
     }
@@ -103,14 +103,14 @@ private fun LineKey(color: Color) {
 
 /** A small filled square: the key for bars and segments. */
 @Composable
-private fun RectKey(color: Color) {
+internal fun RectKey(color: Color) {
     Canvas(Modifier.size(10.dp)) {
         drawRoundRect(color, cornerRadius = CornerRadius(2.dp.toPx()))
     }
 }
 
 /** A bar with a 4 dp rounded data end and a square end on the baseline. */
-private fun DrawScope.bar(left: Float, top: Float, right: Float, bottom: Float, color: Color, roundEnd: BarEnd) {
+internal fun DrawScope.bar(left: Float, top: Float, right: Float, bottom: Float, color: Color, roundEnd: BarEnd) {
     val w = right - left
     val h = bottom - top
     if (w <= 0.5f || h <= 0.5f) return
@@ -126,7 +126,7 @@ private fun DrawScope.bar(left: Float, top: Float, right: Float, bottom: Float, 
     drawPath(Path().apply { addRoundRect(rr) }, color)
 }
 
-private enum class BarEnd { LEFT, RIGHT, TOP, BOTTOM, NONE }
+internal enum class BarEnd { LEFT, RIGHT, TOP, BOTTOM, NONE }
 
 // ---------------------------------------------------------------- P&L bars
 
@@ -281,7 +281,7 @@ internal fun EquityRaceChart(curves: List<ArenaCharts.Curve>, selected: ScalpStr
     }
 }
 
-private fun DrawScope.drawCurve(
+internal fun DrawScope.drawCurve(
     pts: List<CurvePoint>,
     x: (Long) -> Float,
     y: (Double) -> Float,
@@ -372,7 +372,7 @@ internal fun ScrubLineChart(points: List<CurvePoint>, baseline: Double, valueLab
 
 /** Columns diverging around 0: blue up, red down; null = an empty slot. Tap a column to read it. */
 @Composable
-private fun DivergingColumns(
+internal fun DivergingColumns(
     values: List<Double?>,
     tag: String,
     height: Int,
@@ -581,7 +581,7 @@ internal fun FeeDragChart(rows: List<ArenaCharts.FeeDrag>) {
 }
 
 @Composable
-private fun DotKey(color: Color) {
+internal fun DotKey(color: Color) {
     Canvas(Modifier.size(10.dp)) { drawCircle(color, radius = size.minDimension / 2) }
 }
 
