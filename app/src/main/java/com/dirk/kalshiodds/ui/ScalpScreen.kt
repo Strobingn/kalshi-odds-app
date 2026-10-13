@@ -112,7 +112,7 @@ fun ScalpScreen(
                     )
                 }
                 Text(
-                    "Sells when the bid is 2¢ under the high of the trade. Nothing is held to settlement.",
+                    "Sells a 2¢ giveback after the bid has risen 2¢, and cuts a trade that is 3¢ under the entry. Nothing is held to settlement.",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary
                 )

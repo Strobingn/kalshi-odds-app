@@ -52,10 +52,11 @@ data class ScalpAccount(
     val lastSellTicker: String = "",
     val lastNote: String = "Flat. Waiting for a 15-minute quote."
 ) {
-    /** Cash plus a bid mark of the open scalp. */
+    /** Cash plus a bid mark of the open scalp, minus the fee to close it. */
     fun equityUsd(): Double {
         val pos = position ?: return cashUsd
-        return cashUsd + pos.contracts * (pos.lastBid)
+        val closeFee = com.dirk.kalshiodds.signal.trade.KalshiFee.total(pos.contracts, pos.lastBid)
+        return cashUsd + pos.contracts * pos.lastBid - closeFee
     }
 
     fun pnlUsd(): Double = equityUsd() - ScalpCatalog.START_CASH
@@ -171,16 +172,18 @@ class ScalpLab(
     }
 
     /**
-     * Nothing holds to settlement. Once the bid is 2¢ under the high of this
-     * trade, every book sells, including Momentum and Breakout. Anything still
-     * open in the last 90 seconds is closed too.
+     * Nothing holds to settlement. A rise that gives back 2¢ is sold.
+     * A trade that never rose and is 3¢ under the entry is cut.
+     * Anything still open in the last 90 seconds is closed.
      */
     private fun adapt(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent): ScalpIntent {
         val pos = account.position ?: return intent
         if (!pos.ticker.equals(tape.ticker, true)) return intent
         val bid = ScalpCatalog.bid(tape, pos.side)
         if (tape.tteMs in 1..NINETY_SEC) return ScalpIntent.Sell(force = true)
-        if (pos.peakBid - bid + 1e-9 >= 0.02) return ScalpIntent.Sell(force = true)
+        val rose = pos.peakBid + 1e-9 >= pos.entry + 0.02
+        if (rose && pos.peakBid - bid + 1e-9 >= 0.02) return ScalpIntent.Sell(force = true)
+        if (!rose && bid + 1e-9 <= pos.entry - 0.03) return ScalpIntent.Sell(force = true)
         return intent
     }
 
@@ -223,7 +226,11 @@ class ScalpLab(
         if (account.lastSellTicker.equals(tape.ticker, true) && account.lastSellPx > 0.0 && px + 1e-9 >= account.lastSellPx) {
             return account
         }
-        val qtyLong = floor(budget / px + 1e-9).toLong()
+        val feePer = 0.07 * px * (1.0 - px)
+        var qtyLong = floor(budget / (px + feePer) + 1e-9).toLong()
+        while (qtyLong >= 1L && qtyLong * px + KalshiFee.total(qtyLong.toInt(), px) > budget + 1e-6) {
+            qtyLong -= 1L
+        }
         if (qtyLong < 1L) return account
         val qty = qtyLong.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         val stake = qty * px
