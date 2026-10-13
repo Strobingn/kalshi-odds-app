@@ -56,6 +56,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
+import com.dirk.kalshiodds.signal.trade.AutoTradeEngine
 import kotlinx.coroutines.launch
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
@@ -386,7 +387,7 @@ fun SettingsContent(
             Section("Watch series")
             Text(
                 "Bitcoin-only. scalpHunter-Kimi watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
 
@@ -786,12 +787,12 @@ fun SettingsContent(
 
             Section("Auto-trade (real money)")
             Text(
-                "Armed = FOUR strategy scalpers trade real Kalshi money in parallel — Momentum, " +
-                    "Hunter, Value, and Best-EV each place their own buys at the armed stake " +
-                    "(default $50 a clip, up to $250), ride the move, and sell when the exit brain " +
-                    "says it is turning down — no Approve tap. The board below shows each scalper's " +
-                    "P&L so you can see which model actually wins. Hard caps: stake ≤ your max below, " +
-                    "${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open positions (one per scalper), " +
+                "Armed = 24 strategy scalpers compete for ${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open slots, " +
+                    "trading real Kalshi money at the armed stake (default $50 a clip, up to $250). " +
+                    "Each scout buys only its own style of ticket, rides the move, and sells when the exit " +
+                    "brain says it is turning down — no Approve tap. The leaderboard below ranks all 24 by " +
+                    "realized P&L and explains exactly what each one buys. Hard caps: stake ≤ your max below, " +
+                    "${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open positions, " +
                     "${SignalConstants.AUTO_MAX_DAILY_ORDERS} orders/day, 2-minute cooldown per market, " +
                     "and the daily loss limit pauses everything. Every order is logged. " +
                     "This can lose real money fast at these sizes.",
@@ -813,6 +814,56 @@ fun SettingsContent(
                 color = if (s.autoTradeEnabled) colors.textPrimary else colors.textSecondary,
                 fontWeight = if (s.autoTradeEnabled) FontWeight.Bold else null
             )
+            Section("Strategy leaderboard — 24 models ranked by P&L")
+            Text(
+                "Every scout explains itself below. Green or red is its all-time realized P&L; " +
+                    "the riding line shows what it holds right now. Sorted best first.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            state.autoBoard.forEachIndexed { index, entry ->
+                val pnlColor = when {
+                    entry.pnlUsd > 0.0 -> colors.up
+                    entry.pnlUsd < 0.0 -> colors.down
+                    else -> colors.textSecondary
+                }
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(colors.surfaceAlt, RoundedCornerShape(12.dp))
+                        .padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${index + 1}. ${entry.label}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            AutoTradeEngine.fmtSignedUsd(entry.pnlUsd),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = pnlColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Text(
+                        entry.blurb,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                    entry.position?.let { pos ->
+                        Text(
+                            "Riding ${pos.side} ${pos.ticker} ×${pos.contracts} @ ${(pos.entryPrice * 100.0).toInt()}¢",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+            }
             if (s.autoTradeEnabled) {
                 Text(
                     String.format(Locale.US, "Auto max stake  $%.0f per order", s.autoMaxStakeUsd),
