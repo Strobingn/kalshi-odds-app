@@ -62,6 +62,7 @@ jobs:
         run: |
           mkdir -p work/tape/raw dl
           gh release download scalper-data -p 'kxbtc15m_trade_tape_to_*.tar' -D dl || echo "(no archived tape)"
+          ls -la dl || true
           for f in dl/*.tar; do [ -f "$f" ] && tar -xf "$f" -C work/tape; done
           if [ -f work/tape/markets.json ]; then mv work/tape/markets.json work/tape/markets_archive.json; fi
           echo "archived windows: $(ls work/tape/raw | wc -l)"
@@ -172,4 +173,7 @@ jobs:
           git add app/src/main/assets/scalper_model.json app/src/test/resources/scalper_parity.json docs/scalper-model-retrain.md
           range=$(python3 -c 'import json; print(" … ".join(json.load(open("work/gate.json"))["test"]))')
           git commit -m "Scalper model retrained, tested on ${range}" -m "$(cat work/gate.md)"
+          # The branch may have moved during the run (this commit only touches the model files): replay onto it.
+          git fetch origin "${GITHUB_REF_NAME}"
+          git rebase "origin/${GITHUB_REF_NAME}"
           git push origin "HEAD:${GITHUB_REF_NAME}"
