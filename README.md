@@ -19,6 +19,26 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.5 (claude/scalp-insights): Compare all 30, and a page for every strategy
+
+- **Compare** (a new section chip, second from the left): every strategy in one table: rank, net, trades,
+  win rate and a fourth column that follows the sort.
+  - Filter chips: *All · Buy now · Resting · Hold to close · New in 1.9.4 · Has traded*, each with its count.
+  - Sort chips (or tap a column's name): net, trades, win rate, ¢ a contract, profit factor, drawdown, hold
+    time, fill rate. Tap again to flip best-first / worst-first. Strategies with no number yet always sit at
+    the bottom.
+- **A page for every strategy.** Tap a row in Compare, or *Open* beside the strategy you follow. The page has:
+  - its rules in words: signal, entry, exit, price band, size;
+  - its net and luck verdict;
+  - every number: trades, wins, ¢ a contract, profit factor, dollars won and lost, drawdown, hold, fees,
+    best and worst trade, runs, posted and filled, how its trades ended;
+  - its own charts: running profit, drawdown, per-trade histogram, rolling edge, the luck fan, calibration
+    (holds), hold time, minute of the window and price band;
+  - its last 20 trades.
+
+  Back returns to the arena. Totals come from the ledger (every close), the per-trade numbers from the trade
+  file. Numbers: `ArenaTable` (`ArenaTableTest`); drawing: `ui/ArenaCompareViews.kt` and `StrategyPage`.
+
 ## 1.9.4 (claude/scalp-insights): fifteen more strategies — 30 at once
 
 The arena now runs **30** paper strategies side by side on the same live window, fills and fees. The fifteen new

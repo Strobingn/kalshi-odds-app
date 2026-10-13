@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.ui
 
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
@@ -62,6 +63,7 @@ import com.dirk.kalshiodds.signal.scalper.ArenaCharts
 import com.dirk.kalshiodds.signal.scalper.ArenaEdge
 import com.dirk.kalshiodds.signal.scalper.ArenaExec
 import com.dirk.kalshiodds.signal.scalper.ArenaStats
+import com.dirk.kalshiodds.signal.scalper.ArenaTable
 import com.dirk.kalshiodds.signal.scalper.LiveWindow
 import com.dirk.kalshiodds.signal.scalper.CurvePoint
 import com.dirk.kalshiodds.signal.scalper.ScalpStrategy
@@ -172,6 +174,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
 /** The Arena screen's sections (one row of chips at the top). */
 enum class ArenaSection(val label: String) {
     OVERVIEW("Overview"),
+    COMPARE("Compare"),
     STRATEGIES("Strategies"),
     EDGE("Edge"),
     EXECUTION("Execution"),
@@ -231,8 +234,19 @@ fun ScalperResultsScreen(
     live: LiveWindow? = null,
     initialSection: ArenaSection = ArenaSection.OVERVIEW,
     /** For the day-by-day grid; the phone's date in the app. */
-    today: java.time.LocalDate = java.time.LocalDate.now()
+    today: java.time.LocalDate = java.time.LocalDate.now(),
+    /** A strategy whose own page is open (screenshots); null = the arena. */
+    initialOpen: ScalpStrategy? = null,
+    pageListState: LazyListState = rememberLazyListState()
 ) {
+    var openName by rememberSaveable { mutableStateOf(initialOpen?.name) }
+    val open = ScalpStrategy.values().firstOrNull { it.name == openName }
+    if (open != null) {
+        // System back closes the page (screenshots have no back dispatcher, so only where there is one).
+        if (androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current != null) BackHandler { openName = null }
+        StrategyPage(open, state, chartTrades, pageListState) { openName = null }
+        return
+    }
     val colors = DipTheme.colors
     val h = ScalperResults.headline(state)
     val bankroll = ScalperResults.bankroll(state)
@@ -271,6 +285,8 @@ fun ScalperResultsScreen(
     val queueGrid = remember(chartTrades) { ArenaExec.queueDepth(chartTrades) }
     val modelBands = remember(chartTrades) { ArenaExec.modelCheck(chartTrades) }
     val rankRace = remember(chartTrades, today) { ArenaExec.rankRace(chartTrades, today) }
+    val compareRows = remember(state, chartTrades) { ArenaTable.rows(state, chartTrades) }
+    val onOpen: (ScalpStrategy) -> Unit = { st -> openName = st.name }
     Scaffold(
         containerColor = colors.bg,
         topBar = {
@@ -359,6 +375,7 @@ fun ScalperResultsScreen(
                         modifier = Modifier.weight(1f)
                     )
                     if (selected != null) {
+                        OutlinedButton(onClick = { onOpen(selected) }, modifier = Modifier.height(40.dp).testTag("OPEN_SELECTED")) { Text("Open") }
                         OutlinedButton(onClick = { selectedName = null }, modifier = Modifier.height(40.dp)) { Text("Show all") }
                     }
                 }
@@ -407,6 +424,15 @@ fun ScalperResultsScreen(
                             "How far ${selected?.label ?: "the whole arena"} sits under its best so far.",
                             "CHART_DRAWDOWN"
                         ) { DrawdownChart(drawdownCurve) }
+                    }
+                }
+                ArenaSection.COMPARE -> {
+                    item(key = "compare") {
+                        ChartCard(
+                            "Compare all ${ScalpStrategy.values().size}",
+                            "Every strategy side by side. Filter by how it trades, sort by any number, tap one to open its page.",
+                            "CHART_COMPARE"
+                        ) { CompareTable(compareRows, onOpen) }
                     }
                 }
                 ArenaSection.STRATEGIES -> {
@@ -631,7 +657,7 @@ fun ScalperResultsScreen(
 }
 
 @Composable
-private fun pnlColor(v: Double): Color {
+internal fun pnlColor(v: Double): Color {
     val colors = DipTheme.colors
     return when {
         v > 0.0 -> colors.up
@@ -641,7 +667,7 @@ private fun pnlColor(v: Double): Color {
 }
 
 @Composable
-private fun Panel(content: @Composable () -> Unit) {
+internal fun Panel(content: @Composable () -> Unit) {
     val colors = DipTheme.colors
     Column(
         modifier = Modifier
@@ -750,7 +776,7 @@ private fun Breakdown(title: String, rows: List<ScalperResults.Row>) {
 }
 
 @Composable
-private fun TradeRow(t: ScalpTrade) {
+internal fun TradeRow(t: ScalpTrade) {
     val colors = DipTheme.colors
     Row(
         modifier = Modifier
@@ -770,5 +796,114 @@ private fun TradeRow(t: ScalpTrade) {
             fontWeight = FontWeight.SemiBold,
             color = pnlColor(t.pnlUsd)
         )
+    }
+}
+
+/**
+ * One strategy's own page: its rules in words, every number, its charts and
+ * its trades, all scoped to that strategy. Back (or the arrow) returns to the arena.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun StrategyPage(
+    st: ScalpStrategy,
+    state: ScalperState,
+    chartTrades: List<ScalpTrade>,
+    listState: LazyListState,
+    onBack: () -> Unit
+) {
+    val colors = DipTheme.colors
+    val mine = remember(chartTrades, st) { chartTrades.filter { it.strategy == st.name } }
+    val detail = remember(state, chartTrades, st) { ArenaTable.detail(st, state, chartTrades) }
+    val curve = remember(mine) { ArenaCharts.equityCurves(mine).firstOrNull()?.points.orEmpty() }
+    val bins = remember(mine) { ArenaCharts.histogram(mine, st) }
+    val rolling = remember(mine) { ArenaEdge.rolling(mine, st, ROLLING_TRADES) }
+    val fan = remember(mine) { ArenaEdge.projection(mine, st) }
+    val cal = remember(mine) { ArenaEdge.calibration(mine, st) }
+    val hold = remember(mine) { ArenaStats.holdBuckets(mine, st) }
+    val minute = remember(mine) { ArenaEdge.byMinute(mine) }
+    val price = remember(mine) { ArenaStats.priceBands(mine) }
+    Scaffold(
+        containerColor = colors.bg,
+        topBar = {
+            TopAppBar(
+                title = { Text(st.label, maxLines = 1) },
+                navigationIcon = {
+                    IconButton(onClick = onBack, modifier = Modifier.testTag("STRATEGY_BACK")) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to the arena")
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = colors.bg,
+                    titleContentColor = colors.textPrimary,
+                    navigationIconContentColor = colors.accentBlue
+                )
+            )
+        }
+    ) { pad ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().padding(pad).testTag("STRATEGY_PAGE_${st.name}"),
+            state = listState,
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item(key = "head") { StrategyHeader(st, detail) }
+            item(key = "rules") { ChartCard("How it trades", "Its signal, entry, exit and limits.", "CHART_RULES") { StrategyRules(st) } }
+            item(key = "numbers") { ChartCard("Every number", "Paper dollars after fees.", "CHART_NUMBERS") { StrategyNumbers(st, detail) } }
+            item(key = "curve") {
+                ChartCard("Running profit", "Its own profit after fees, trade by trade. Drag to read.", "CHART_ST_CURVE") {
+                    if (curve.size >= 2) ScrubLineChart(curve, 0.0) { ScalperResults.money(it) } else Muted("Appears after its first closed trades.")
+                }
+            }
+            item(key = "dd") { ChartCard("Drawdown", "How far it sits under its best so far.", "CHART_ST_DD") { DrawdownChart(curve) } }
+            item(key = "hist") {
+                ChartCard("What one trade makes", "Result per contract after fees. Red bins lost money.", "CHART_ST_HIST") {
+                    HistogramChart(bins, st.label)
+                }
+            }
+            item(key = "rolling") {
+                ChartCard("Is the edge holding?", "Average result per contract over its last $ROLLING_TRADES trades.", "CHART_ST_ROLLING") {
+                    RollingEdgeChart(rolling, ROLLING_TRADES, st.label)
+                }
+            }
+            item(key = "fan") {
+                ChartCard("Skill or luck?", "Its own trades reshuffled 400 times: where the next 200 could land.", "CHART_ST_FAN") {
+                    ProjectionChart(fan, st.label)
+                }
+            }
+            if (st.hold || cal.isNotEmpty()) {
+                item(key = "cal") {
+                    ChartCard("Is the price right?", "Trades held to the close: how often they won against the price paid.", "CHART_ST_CAL") {
+                        CalibrationChart(cal, st.label)
+                    }
+                }
+            }
+            if (!st.hold) {
+                item(key = "hold") {
+                    ChartCard("How long to hold", "Average result per contract by time in the trade.", "CHART_ST_HOLD") {
+                        HoldTimeChart(hold, st.label)
+                    }
+                }
+            }
+            item(key = "minute") {
+                ChartCard("When in the window", "Average result per contract by the minute its entry filled.", "CHART_ST_MINUTE") {
+                    HeatmapChart(minute, { "minute ${ArenaEdge.MINUTES[it]}" }, listOf("0", "7", "14"), "ST_MINUTE")
+                }
+            }
+            item(key = "price") {
+                ChartCard("Where in the price", "Average result per contract by the entry price (10¢ bands).", "CHART_ST_PRICE") {
+                    HeatmapChart(price, { ArenaStats.priceBandLabel(it) }, listOf("0¢", "50¢", "100¢"), "ST_PRICE")
+                }
+            }
+            item(key = "trades_head") {
+                Text(
+                    if (detail.recent.isEmpty()) "Its trades · none yet" else "Its last ${detail.recent.size} trades · newest first",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = colors.textPrimary
+                )
+            }
+            items(detail.recent, key = { "st-${it.run}-${it.id}" }) { t -> TradeRow(t) }
+        }
     }
 }

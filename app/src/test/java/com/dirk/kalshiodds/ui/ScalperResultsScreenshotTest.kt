@@ -119,6 +119,22 @@ class ScalperResultsScreenshotTest {
     @Test
     fun lightExecutionPayoffAndTwins() = snap("arena_light_execution_payoff_twins", false, 3, ArenaSection.EXECUTION)
 
+    // The Compare table, and one strategy's own page (items: 0 head, 1 rules, 2 numbers, 3 curve, 4 drawdown, …).
+    @Test
+    fun darkCompare() = snap("arena_dark_compare", true, 3, ArenaSection.COMPARE)
+
+    @Test
+    fun lightCompare() = snap("arena_light_compare", false, 3, ArenaSection.COMPARE)
+
+    @Test
+    fun darkStrategyPageTop() = snap("arena_dark_strategy_page_top", true, 0, open = ScalpStrategy.BOUNCE)
+
+    @Test
+    fun darkStrategyPageCharts() = snap("arena_dark_strategy_page_charts", true, 3, open = ScalpStrategy.BOUNCE)
+
+    @Test
+    fun lightStrategyPageHold() = snap("arena_light_strategy_page_hold", false, 0, open = ScalpStrategy.LATE_FAVORITE)
+
     @Test
     fun darkTradesHistogram() = snap("arena_dark_trades_histogram", true, 3, ArenaSection.TRADES)
 
@@ -243,7 +259,13 @@ class ScalperResultsScreenshotTest {
         return out
     }
 
-    private fun snap(name: String, dark: Boolean, firstItem: Int, section: ArenaSection = ArenaSection.OVERVIEW) {
+    private fun snap(
+        name: String,
+        dark: Boolean,
+        firstItem: Int,
+        section: ArenaSection = ArenaSection.OVERVIEW,
+        open: ScalpStrategy? = null
+    ) {
         val (state, trades) = fixture()
         paparazzi.snapshot(name = name) {
             KalshiOddsTheme(darkTheme = dark) {
@@ -252,7 +274,9 @@ class ScalperResultsScreenshotTest {
                     listState = androidx.compose.foundation.lazy.LazyListState(firstVisibleItemIndex = firstItem),
                     live = liveWindow(),
                     initialSection = section,
-                    today = java.time.LocalDate.of(2026, 10, 10)
+                    today = java.time.LocalDate.of(2026, 10, 10),
+                    initialOpen = open,
+                    pageListState = androidx.compose.foundation.lazy.LazyListState(firstVisibleItemIndex = firstItem)
                 )
             }
         }
