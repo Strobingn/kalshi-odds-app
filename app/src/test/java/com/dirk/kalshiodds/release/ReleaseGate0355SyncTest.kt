@@ -77,7 +77,8 @@ class ReleaseGate0355SyncTest {
         assertFalse(snap.has("note"))
         assertEquals("Forecast ride", fake.posted.first { it.first == "scalp" }.second.getJSONObject(0).getJSONObject("payload").getString("algo"))
         // pull never fetches snapshots back
-        assertTrue(fake.getUrls.single().contains("kind=not.in.(snapshot,scalp,shadow)"))
+        assertEquals(SupabaseSync.PULL_KINDS.size, fake.getUrls.size)
+        assertTrue(fake.getUrls.all { u -> SupabaseSync.PULL_KINDS.any { u.contains("kind=eq.$it") } && !u.contains("snapshot,") && !u.contains("eq.scalp") && !u.contains("eq.shadow") })
     }
 
     @Test fun snapshotUploadsAreThrottled() {

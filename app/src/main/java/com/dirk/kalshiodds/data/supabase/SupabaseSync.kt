@@ -68,7 +68,9 @@ class SupabaseSync(
 
     fun pull(settings: DataHubSettings): List<SyncMerge.Record> {
         if (!settings.supabaseConfigured) return emptyList()
-        return parseRows(restGet(settings, TABLE))
+        // 0.3.60: one indexed query per kind (kind, updated_at, key index) instead of kind=not.in(...) over the
+        // whole table, which scanned ~110k snapshot rows and hit the 3 s anon statement timeout (500 / 57014).
+        return PULL_KINDS.flatMap { parseRows(restGet(settings, TABLE, it)) }.distinctBy { it.key }
     }
 
     fun push(settings: DataHubSettings, rows: List<SyncMerge.Record>): Int =
@@ -282,16 +284,16 @@ class SupabaseSync(
     private fun rec(key: String, kind: String, at: Long, payload: JSONObject) =
         SyncMerge.Record(namespaceKey(key), kind, at, payload.toString())
 
-    private fun restGet(settings: DataHubSettings, table: String): String {
+    private fun restGet(settings: DataHubSettings, table: String, kind: String): String {
         val url = settings.supabaseUrl.trimEnd('/').toHttpUrl().newBuilder()
             .addPathSegments("rest/v1/$table")
             .addEncodedQueryParameter("select", "*")
-            .addEncodedQueryParameter("limit", "2000")
+            .addEncodedQueryParameter("limit", PULL_LIMIT_PER_KIND.toString())
             .addEncodedQueryParameter("key", "like.kashi:*")
-            // 0.3.55: never pull snapshots back (append-only, not merged) — that was ~2000 rows of egress per sync.
-            .addEncodedQueryParameter("kind", "not.in.(snapshot,scalp,shadow)")
-            // One page. Newest first; key breaks timestamp ties so the page is stable.
-            .addEncodedQueryParameter("order", "updated_at.desc,key.asc")
+            // 0.3.55: never pull snapshots/scalp/shadow back; 0.3.60: positive per-kind equality (index-backed).
+            .addEncodedQueryParameter("kind", "eq.$kind")
+            // Newest first; direction matches the (kind, updated_at, key) index so it is a plain backward index scan.
+            .addEncodedQueryParameter("order", "updated_at.desc,key.desc")
             .build()
         val req = Request.Builder()
             .url(url)
@@ -347,6 +349,9 @@ class SupabaseSync(
 
     companion object {
         const val TABLE = "diphunter_sync"
+        /** 0.3.60: kinds merged back on pull (everything except snapshot / scalp / shadow, which are push-only). */
+        val PULL_KINDS = listOf("alert", "paper", "ticket", "settings", "settings_snapshot")
+        const val PULL_LIMIT_PER_KIND = 1000
         const val KEY_PREFIX = "kashi:"
         /** PostgREST `like` filter. `*` is the wildcard. */
         const val PULL_FILTER = "key=like.kashi:*"
