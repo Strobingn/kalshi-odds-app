@@ -17,6 +17,9 @@ object ScalpModels {
         FORECAST_RIDE("fcride", "Forecast ride", "near 50¢ (40–60¢), buy the side the deterministic short-horizon forecast says rises by more than spread + both fees; hold while it keeps pointing up"),
         /** 0.3.53: exact mirror of Forecast ride — trades against the forecast with the same band, exits, sizing and fees. */
         FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: same band, exits, sizing and fees, but takes the side the forecast says falls"),
+        /** 0.3.61 siblings: paper copies next to the unchanged originals. */
+        DIP_HOLD("diph60", "Dip-hunter hold", "Dip-hunter entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
+        MOMO_HOLD("momoh60", "Momentum-sniper hold", "Momentum-sniper entries; stop armed after 60 s; fair-value early exit off; hold to settlement"),
         // 0.3.57 sf57: twenty shock-lag / late-favourite paper scalpers (see ShockFav).
         SF01("sf01", "sf01 " + ShockFav.VARIANTS[0].label, ShockFav.VARIANTS[0].summary()),
         SF02("sf02", "sf02 " + ShockFav.VARIANTS[1].label, ShockFav.VARIANTS[1].summary()),
@@ -70,7 +73,7 @@ object ScalpModels {
     fun sliceUsd(bankrollUsd: Double): Double = (bankrollUsd.takeIf { it.isFinite() } ?: 0.0).coerceAtLeast(0.0)
 
     fun modelOf(p: ScalpParams): Model =
-        if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
+        if (p.hold60) (if (p.strategy == ScalpStrategy.MOMENTUM) Model.MOMO_HOLD else Model.DIP_HOLD) else if (p.maker && p.strategy == ScalpStrategy.DIP_HUNTER) Model.MAKER_DIP else modelOf(p.strategy)
 
     fun modelOf(s: ScalpStrategy): Model = when (s) {
         ScalpStrategy.FAIR_GAP -> Model.FAIR_GAP
@@ -89,6 +92,32 @@ object ScalpModels {
         val p = ScalpParams.byId(t.variantId) ?: return Model.FAIR_GAP
         return modelOf(p)
     }
+
+    /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
+    fun stopLabel(m: Model): String {
+        ShockFav.byVariantId(m.code)?.let { p -> return "stop ${ShockFav.stopC(p)}¢" + if (ShockFav.stopTrainChosen(p)) "" else " (default)" }
+        return when (m) {
+            Model.FORECAST_RIDE, Model.FORECAST_FADE -> "stop ${ForecastScalp.STOP_C}¢ (default)"
+            Model.DIP_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[0].stop * 100)}¢ after 60s"
+            Model.MOMO_HOLD -> "stop ${Math.round(ScalpParams.HOLD60_SIBLINGS[1].stop * 100)}¢ after 60s"
+            Model.FAIR_GAP -> "stop per-coin tuned"
+            else -> ScalpModels.legacyStop(m)
+        }
+    }
+    private fun legacyStop(m: Model): String = ScalpStrategy.values().firstOrNull { modelOf(it) == m }
+        ?.let { "stop ${Math.round(ScalpParams.STRATEGY_SEEDS.getValue(it).stop * 100)}¢" } ?: "stop ${Math.round(MAKER_DIP_PARAMS.stop * 100)}¢"
+    fun tag(m: Model): String? = ShockFav.TAGS[m.code]
+    /** Σ (actual − no-stop shadow) over closed trades whose note carries "nostop=±x.xx". Positive = the stop saved money. */
+    fun stopSaved(trades: List<ScalpTrade>): Pair<Double, Int> {
+        var s = 0.0; var n = 0
+        for (t in trades) {
+            if (t.state != ScalpState.CLOSED) continue
+            val v = NOSTOP_RX.find(t.note)?.groupValues?.get(1)?.toDoubleOrNull() ?: continue
+            s += (t.netUsd ?: continue) - v; n++
+        }
+        return s to n
+    }
+    private val NOSTOP_RX = Regex("nostop=([+-]?[0-9]+\\.[0-9]+)")
 
     data class Row(
         val model: Model,
@@ -109,7 +138,11 @@ object ScalpModels {
         val grossLossUsd: Double = 0.0,
         val losses: Int = 0,
         val openContracts: Int = 0,
-        val feesUsd: Double = 0.0
+        val feesUsd: Double = 0.0,
+        /** 0.3.61: Σ(actual − no-stop shadow) over stopped trades (+ = stop saved money) and how many stops fired. */
+        val stopSavedUsd: Double = 0.0,
+        val stopsHit: Int = 0,
+        val stopLabel: String = ""
     ) {
         val holding: Boolean get() = openContracts > 0
     }
@@ -142,7 +175,10 @@ object ScalpModels {
             grossLossUsd = losses.filter { it.netUsd!! < 0.0 }.sumOf { it.netUsd!! },
             losses = losses.count { it.netUsd!! < 0.0 },
             openContracts = active.filter { it.state != ScalpState.PENDING_ENTRY }.sumOf { it.remaining.coerceAtLeast(0) },
-            feesUsd = closed.sumOf { it.entryFeeUsd + it.exitFeeUsd }
+            feesUsd = closed.sumOf { it.entryFeeUsd + it.exitFeeUsd },
+            stopSavedUsd = stopSaved(closed).first,
+            stopsHit = stopSaved(closed).second,
+            stopLabel = stopLabel(model)
         )
     }
 
@@ -279,6 +315,8 @@ object ForecastScalp {
     const val HARD_FLIP = -0.03
     const val ENTRY_LIMIT_TTL_MS = 2_000L
     const val SAFETY = 0.005
+    /** 0.3.61 per-bet stop (¢ below entry at the bid). Not studied in bt61 → widest level. */
+    const val STOP_C = 25
 
     fun isForecast(t: ScalpTrade): Boolean = t.variantId.startsWith(RIDE_PREFIX) || t.variantId.startsWith(FADE_PREFIX)
     fun variantId(ride: Boolean, horizonS: Int) = (if (ride) RIDE_PREFIX else FADE_PREFIX) + "-h" + (if (horizonS < 0) "close" else horizonS.toString())

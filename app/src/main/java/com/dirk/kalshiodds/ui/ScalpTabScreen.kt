@@ -62,6 +62,9 @@ import java.util.Locale
 
 /** Scalp tab copy (pure, tested). 0.3.51: plain cards; raw per-model detail lives in Scalp Data. */
 object ScalpTabCopy {
+    /** 0.3.61: "stop saved $x vs no-stop (n stops)" / "stop cost …"; "no stops hit yet" when none. */
+    fun stopSaved(r: ScalpModels.Row?): String = if (r == null || r.stopsHit == 0) "no stops hit yet"
+        else (if (r.stopSavedUsd >= 0) "stop saved " else "stop cost ") + money(kotlin.math.abs(r.stopSavedUsd)) + " vs no-stop (${r.stopsHit} stop" + (if (r.stopsHit == 1) ")" else "s)")
     const val TITLE = "Scalp"
     const val PAPER_NOTE = "Paper only. Six models run on every BTC/ETH/SOL 15-min window, each with its own bankroll slice. " +
         "Tap a ladder row to place a paper limit at that price; tap your order to cancel; drag it to reprice. " +
@@ -271,6 +274,11 @@ internal fun AlgoCard(
             Text("no edge at 2s delay", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = c.down, maxLines = 1,
                 modifier = Modifier.border(1.dp, c.down, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 1.dp))
         }
+        ScalpModels.tag(m)?.let { tg ->
+            Text(tg, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Text(ScalpModels.stopLabel(m) + " · " + ScalpTabCopy.stopSaved(all), style = MaterialTheme.typography.labelSmall, color = c.textSecondary,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
         com.dirk.kalshiodds.decision.ShockFav.byVariantId(m.code)?.let { p ->
             Text(p.summary(), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text("Backtest (test days): " + p.oos, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -321,6 +329,8 @@ private fun CombinedBoard(rows: List<ScalpModels.Row>) {
                 Text("${i + 1}.", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = c.textSecondary, modifier = Modifier.width(30.dp))
                 Text(r.model.label + if (ScalpModels.noEdge2s(r.model)) " ·no edge" else "", style = MaterialTheme.typography.bodySmall,
                     color = if (ScalpModels.noEdge2s(r.model)) c.textSecondary else c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(r.stopLabel.removePrefix("stop ").substringBefore(" ") + " " + (if (r.stopsHit > 0) ScalpTabCopy.money(r.stopSavedUsd) else "·"), style = MaterialTheme.typography.labelSmall,
+                    fontFamily = FontFamily.Monospace, color = c.textSecondary, maxLines = 1, modifier = Modifier.padding(start = 6.dp))
                 Text("${r.roundTrips}", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace, color = c.textSecondary, modifier = Modifier.padding(horizontal = 8.dp))
                 Text(if (traded) ScalpTabCopy.money(r.netUsd) else "—", style = MaterialTheme.typography.labelMedium, fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.SemiBold, color = if (!traded) c.textSecondary else if (r.netUsd >= 0) c.up else c.down, maxLines = 1)

@@ -49,7 +49,12 @@ data class ScalpParams(
      * 0.3.43 maker-first variant: post-only resting entry at the bid and resting exit at the ask (maker fee $0 on
      * these quadratic series). Conservative queue model + adverse-selection logging. Tracked separately (own id).
      */
-    val maker: Boolean = false
+    val maker: Boolean = false,
+    /**
+     * 0.3.61 sibling: stop armed only after 60 s held, fair-value early exits (gap-closed / turn-down) off, no target or
+     * time stop — hold to settlement unless the stop fires. Own id ("-h60"); originals unchanged.
+     */
+    val hold60: Boolean = false
 ) {
     /** Fair-gap ids keep the 0.3.40 format (g14-t12-…); other strategies are prefixed ("dip-g06-…"). */
     // 0.3.50: computed once per instance (was String.format on every access — hot in ScalpBook.onQuote).
@@ -58,7 +63,7 @@ data class ScalpParams(
             Locale.US, "g%02d-t%02d-s%02d-d%02d-w%03d",
             Math.round(minGap * 100), Math.round(target * 100), Math.round(stop * 100),
             Math.round(turnDown * 100), Math.round(tauMinS)
-        ) + (if (maker) "-mk" else "")
+        ) + (if (maker) "-mk" else "") + (if (hold60) "-h60" else "")
     }
 
     fun label(): String {
@@ -141,6 +146,10 @@ data class ScalpParams(
         }
 
         /** Everything the book runs as paper variants: 8 fair-gap + 12 strategy variants. */
+        /** 0.3.61: Dip-hunter and Momentum-sniper hold-to-settlement siblings (stop armed after 60 s). */
+        val HOLD60_SIBLINGS: List<ScalpParams> by lazy {
+            listOf(ScalpStrategy.DIP_HUNTER, ScalpStrategy.MOMENTUM).map { STRATEGY_SEEDS.getValue(it).copy(hold60 = true) }
+        }
         val ALL_VARIANTS: List<ScalpParams> get() = GRID + STRATEGY_GRID + MAKER_VARIANTS
 
         /** 0.3.43: one maker-entry + maker-exit variant per strategy (fair-gap per coin seed), shadow-tracked. */
@@ -154,7 +163,7 @@ data class ScalpParams(
          */
         private val BY_ID: Map<String, ScalpParams> by lazy {
             val m = LinkedHashMap<String, ScalpParams>()
-            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS).forEach { m.putIfAbsent(it.id, it) }
+            (GRID + STRATEGY_GRID + SEEDS.values + STRATEGY_SEEDS.values + CLASSIC + MAKER_VARIANTS + HOLD60_SIBLINGS).forEach { m.putIfAbsent(it.id, it) }
             m
         }
 
