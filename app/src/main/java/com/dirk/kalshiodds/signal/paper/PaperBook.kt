@@ -41,6 +41,10 @@ data class PaperFill(
     val highWaterMarkPrice: Double = 0.0,
     /** Version of the independent paper strategy that opened this fill. */
     val strategyVersion: String? = null,
+    /** Immutable evidence for the strategy decision, not a secret or an order ID. */
+    val strategyDecisionFingerprint: String? = null,
+    /** Track-specific probability present when this fill was opened. */
+    val strategyEntryProbability: Double? = null,
     val note: String,
     val winTargetUsd: Double? = null
 ) {
@@ -185,7 +189,9 @@ class PaperBook(
             source = source,
             note = "Unlimited-credit paper autopilot · visible touch liquidity only · never sent to Kalshi",
             winTargetUsd = ticket.winTargetUsd,
-            strategyVersion = ticket.strategyVersion
+            strategyVersion = ticket.strategyVersion,
+            strategyDecisionFingerprint = ticket.strategyDecisionFingerprint,
+            strategyEntryProbability = ticket.strategyEntryProbability
         )
     }
 
@@ -696,7 +702,9 @@ class PaperBook(
         source: String,
         note: String,
         winTargetUsd: Double? = null,
-        strategyVersion: String? = null
+        strategyVersion: String? = null,
+        strategyDecisionFingerprint: String? = null,
+        strategyEntryProbability: Double? = null
     ): PaperFill? {
         if (CryptoMarkets.isRetiredTicker(ticker)) return null
         val want = if (side.equals("NO", true)) "NO" else "YES"
@@ -708,10 +716,11 @@ class PaperBook(
             // A paper autopilot entry represents one executable order in one
             // contract window. Rebuilds happen as quotes/scores refresh; they
             // must not turn the same visible touch into repeated full-depth
-            // buys. This is not a stake cap: the first fill still uses all
-            // visible touch liquidity with unlimited synthetic credit.
+            // buys after an exit. This is not a stake cap: the one fill still
+            // uses all visible touch liquidity with unlimited synthetic credit.
+            // The next 15-minute window has a new ticker and is independent.
             if (cur.fills.any {
-                    !it.settled && it.ticker.equals(ticker, ignoreCase = true) &&
+                    it.ticker.equals(ticker, ignoreCase = true) &&
                         (strategyVersion == null || it.strategyVersion == strategyVersion)
                 }) {
                 return null
@@ -730,6 +739,8 @@ class PaperBook(
                 feeUsd = fee,
                 highWaterMarkPrice = px,
                 strategyVersion = strategyVersion,
+                strategyDecisionFingerprint = strategyDecisionFingerprint,
+                strategyEntryProbability = strategyEntryProbability,
                 note = "$note · fee ${fmt(fee)}",
                 winTargetUsd = winTargetUsd
             )

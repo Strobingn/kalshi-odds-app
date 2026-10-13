@@ -84,7 +84,15 @@ data class TradeTicket(
     /** Frozen public spot features for paper-strategy evaluation. */
     val strategySpotReturn1m: Double? = null,
     val strategySpotReturn5m: Double? = null,
-    val strategyTimeToCloseSec: Long? = null
+    val strategyTimeToCloseSec: Long? = null,
+    /**
+     * Deterministic, human-readable fingerprint of the inputs that selected
+     * this paper strategy's side. It lets the ledger detect nominally
+     * different tracks that are really making the same decision.
+     */
+    val strategyDecisionFingerprint: String? = null,
+    /** Track-specific probability frozen at entry, when the strategy has one. */
+    val strategyEntryProbability: Double? = null
 ) {
     val displaySide: String get() = side.uppercase()
 

@@ -357,7 +357,7 @@ private fun ScalpScorecard(scorecard: ScalpTrackScore) {
             if (scorecard.settled == 0) {
                 "${scorecard.fills} fills · ${scorecard.open} open · needs settled outcomes before ranking"
             } else {
-                "${scorecard.fills} fills · ${scorecard.open} open · ${scorecard.wins}/${scorecard.settled} wins (${String.format(Locale.US, "%.0f", scorecard.winRate * 100)}%) · realized ${signedMoney(pnl)}"
+                "${scorecard.fills} fills · ${scorecard.open} open · ${scorecard.wins}/${scorecard.settled} wins (${String.format(Locale.US, "%.0f", scorecard.winRate * 100)}%) · ${afterFeePerContract(scorecard.review.meanPnlPerContractUsd)} / ct · realized ${signedMoney(pnl)}"
             },
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
@@ -431,6 +431,13 @@ private fun ScalpFillCard(fill: PaperFill, archivedAtMs: Long? = null) {
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
+        fill.strategyDecisionFingerprint?.let { fingerprint ->
+            Text(
+                "Decision $fingerprint",
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary
+            )
+        }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
                 archivedAtMs?.let { "Archived ${timeLabel(it)} · opened ${timeLabel(fill.createdAtMs)}" }
@@ -495,6 +502,8 @@ private fun trackLabel(strategyVersion: String?, note: String = ""): String =
 private fun money(value: Double): String = String.format(Locale.US, "$%.2f", value)
 
 private fun signedMoney(value: Double): String = String.format(Locale.US, "%+.2f", value)
+
+private fun afterFeePerContract(value: Double?): String = value?.let { signedMoney(it) } ?: "—"
 
 private fun signed(value: Double): String = String.format(Locale.US, "%+.4f", value)
 

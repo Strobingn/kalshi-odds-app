@@ -474,7 +474,9 @@ class TicketBuilderGateTest {
         // automatic live-ticket value gates. The live-capable kinds remain
         // absent when the modeled value does not clear costs.
         assertTrue(tickets.filterNot { it.kind == TicketKind.SCALP }.isEmpty())
-        assertEquals(ScalpSignal.Track.values().size, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
+        // Four observable hypotheses remain. The other sixteen report no
+        // observation instead of copying this market's baseline side.
+        assertEquals(4, tickets.count { it.kind == TicketKind.SCALP && it.paperOnly })
         assertTrue(TicketBuilder.proposeManual(m, "YES", ctx) != null)
     }
 
@@ -724,13 +726,13 @@ class TicketBuilderGateTest {
     }
 
     @Test
-    fun disablingLiveTicketsStillLeavesAllTwentyPaperScalpTracks() {
+    fun disablingLiveTicketsLeavesOnlyObservablePaperScalpTracks() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketsEnabled = false, ticketRespectGates = false),
             alertsPaused = false
         )
         val tickets = TicketBuilder.proposeAll(listOf(market(true, false, 0.03)), ctx)
-        assertEquals(ScalpSignal.Track.values().size, tickets.size)
+        assertEquals(4, tickets.size)
         assertTrue(tickets.all { it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.SCALP })
     }
 }

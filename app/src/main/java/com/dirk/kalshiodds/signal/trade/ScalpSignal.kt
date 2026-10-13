@@ -3,11 +3,12 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.domain.MarketUiModel
 
 /**
- * Twenty independent, paper-only scalp hypotheses. They deliberately have no
- * timing, stake, favorite-strength, or model-edge entry gate: each selector
- * chooses a side for the same executable quote so their results can be
- * compared fairly. [TicketBuilder] still requires an open market and an
- * executable displayed ask; that is quote integrity, not a financial cap.
+ * Twenty independent, paper-only scalp hypotheses. They have no timing, stake,
+ * favorite-strength, or model-edge entry gate. A hypothesis may, however,
+ * decline an observation when its own required input is absent: substituting
+ * the baseline side made several supposedly independent tracks identical and
+ * invalidated their comparison. [TicketBuilder] still requires an open market
+ * and an executable displayed ask; that is quote integrity, not a financial cap.
  */
 object ScalpSignal {
     const val FORMULA_VERSION = "scalp-v5-twenty-track"
@@ -41,19 +42,44 @@ object ScalpSignal {
 
     data class Candidate(
         val track: Track,
-        val side: String,
+        /** Null means this hypothesis has no valid observation, never a hidden fallback. */
+        val side: String?,
         val selectedFrom: String,
         val spotReturn1m: Double?,
         val spotReturn5m: Double?,
-        val timeToCloseSec: Long?
+        val timeToCloseSec: Long?,
+        /** Probability for this track's own exit check, frozen in the paper ledger. */
+        val entryProbability: Double? = null
     ) {
         val formulaVersion: String get() = track.formulaVersion
 
+        /**
+         * This deliberately remains readable rather than hashed. It is proof
+         * of which signal selected an entry and makes accidental duplicate
+         * strategies visible in exports and the Supabase ledger.
+         */
+        val fingerprint: String = buildString {
+            append(formulaVersion)
+            append('|').append(side ?: "NO_OBSERVATION")
+            append('|').append(selectedFrom)
+            append("|r1=").append(spotReturn1m?.let(::fingerprintNumber) ?: "na")
+            append("|r5=").append(spotReturn5m?.let(::fingerprintNumber) ?: "na")
+            append("|tte=").append(timeToCloseSec ?: "na")
+            append("|p=").append(entryProbability?.let(::fingerprintNumber) ?: "na")
+        }
+
+        private fun fingerprintNumber(value: Double): String =
+            String.format(java.util.Locale.US, "%.5f", value)
+
         fun note(): String =
-            "Paper-only ${track.label} · ${track.family} · $formulaVersion · unrestricted entry · side: $selectedFrom"
+            if (side == null) {
+                "Paper-only ${track.label} · ${track.family} · $formulaVersion · no observation: $selectedFrom"
+            } else {
+                "Paper-only ${track.label} · ${track.family} · $formulaVersion · unrestricted entry · side: $selectedFrom"
+            }
     }
 
-    /** All twenty tracks trade each open market independently; none is an entry gate. */
+    /** All twenty hypotheses are evaluated every open market; none has a stake or timing gate. */
     fun candidates(market: MarketUiModel, nowMs: Long): List<Candidate> = listOf(
         dipHunter(market, nowMs),
         spotDirection(Track.MOMENTUM_SNIPER, market.spotReturn1m, "YES", "NO", "1m public-spot momentum", market, nowMs),
@@ -80,18 +106,55 @@ object ScalpSignal {
     /** Compatibility selector for callers that request the original baseline. */
     fun candidate(market: MarketUiModel, nowMs: Long): Candidate = dipHunter(market, nowMs)
 
+    /**
+     * The same track-specific probability that justified an entry must power
+     * its fair-value exit. Returning null means the position relies on the
+     * loss/trailing exits rather than borrowing the generic AI forecast.
+     */
+    fun exitProbability(strategyVersion: String?, market: MarketUiModel, side: String): Double? {
+        val track = Track.values().firstOrNull { it.formulaVersion == strategyVersion } ?: return null
+        val yes = when (track) {
+            Track.DIP_HUNTER, Track.MODEL_DISLOCATION -> percent(market.aiYesPercent)
+            Track.FAIR_VALUE_FOLLOWER -> percent(market.finalMinuteFairPp)
+            Track.FAIR_VALUE_DISLOCATION, Track.SPOT_TARGET -> percent(market.digitalFairPp)
+            Track.MARKET_FAVORITE, Track.BOOK_PRESSURE -> percent(market.yesProbabilityPercent)
+            Track.IMPORTED_MODEL -> percent(market.importedModelPp)
+            Track.MLP_CHANNEL -> percent(market.mlpPp)
+            Track.CNN_CHANNEL -> percent(market.cnnPp)
+            Track.GBM_CHANNEL -> percent(market.gbmPp)
+            Track.SURVIVAL_CHANNEL -> percent(market.survivalYesPp)
+            Track.MM_SHADOW -> percent(market.mmShadowPp)
+            Track.MOMENTUM_SNIPER,
+            Track.EXTREME_REVERSAL,
+            Track.ONE_MINUTE_REVERSAL,
+            Track.FIVE_MINUTE_TREND,
+            Track.DUAL_HORIZON_MOMENTUM,
+            Track.DUAL_HORIZON_REVERSAL,
+            Track.ODDS_TAPE -> null
+        } ?: return null
+        return if (side.equals("NO", ignoreCase = true)) 1.0 - yes / 100.0 else yes / 100.0
+    }
+
     private fun dipHunter(market: MarketUiModel, nowMs: Long): Candidate {
         val engineSide = market.predictedSide?.uppercase()?.takeIf { it == "YES" || it == "NO" }
-        if (engineSide != null) return candidate(Track.DIP_HUNTER, engineSide, "settlement-aware engine", market, nowMs)
+        if (engineSide != null) return candidate(
+            Track.DIP_HUNTER,
+            engineSide,
+            "settlement-aware engine",
+            market,
+            nowMs,
+            percent(market.aiYesPercent)?.div(100.0)
+        )
         val aiYes = percent(market.aiYesPercent)
-        if (aiYes != null) return candidate(Track.DIP_HUNTER, side(aiYes), "AI fair value fallback", market, nowMs)
+        if (aiYes != null) return candidate(Track.DIP_HUNTER, side(aiYes), "AI fair value", market, nowMs, aiYes / 100.0)
         val marketYes = percent(market.yesProbabilityPercent)
         return candidate(
             Track.DIP_HUNTER,
             side(marketYes ?: 50.0),
             if (marketYes != null) "market price fallback" else "default YES",
             market,
-            nowMs
+            nowMs,
+            marketYes?.div(100.0)
         )
     }
 
@@ -106,7 +169,7 @@ object ScalpSignal {
     ): Candidate {
         val change = returnValue?.takeIf { it.isFinite() }
         if (change != null) return candidate(track, if (change >= 0.0) positiveSide else negativeSide, "$source (${formatReturn(change)})", market, nowMs)
-        return fallback(track, "$source unavailable", market, nowMs)
+        return unavailable(track, "$source unavailable", market, nowMs)
     }
 
     private fun dualHorizon(track: Track, market: MarketUiModel, follow: Boolean, nowMs: Long): Candidate {
@@ -118,7 +181,7 @@ object ScalpSignal {
             // misleadingly large short-term tilt. Recover the preceding four
             // minutes first, then use the stronger non-overlapping segment.
             val priorFour = ((1.0 + five) / (1.0 + one) - 1.0).takeIf { it.isFinite() }
-            if (priorFour == null) return fallback(track, "non-overlapping spot return unavailable", market, nowMs)
+            if (priorFour == null) return unavailable(track, "non-overlapping spot return unavailable", market, nowMs)
             val combined = when {
                 sameDirection(one, priorFour) -> one + priorFour
                 kotlin.math.abs(priorFour) > kotlin.math.abs(one) -> priorFour
@@ -135,15 +198,22 @@ object ScalpSignal {
                 nowMs
             )
         }
-        return fallback(track, "dual-horizon spot unavailable", market, nowMs)
+        return unavailable(track, "dual-horizon spot unavailable", market, nowMs)
     }
 
     private fun fairValueFollower(market: MarketUiModel, nowMs: Long): Candidate {
-        val digitalFair = percent(market.digitalFairPp)
-        if (digitalFair != null) return candidate(Track.FAIR_VALUE_FOLLOWER, side(digitalFair), "digital fair value (${formatPercent(digitalFair)})", market, nowMs)
-        val aiFair = percent(market.aiYesPercent)
-        if (aiFair != null) return candidate(Track.FAIR_VALUE_FOLLOWER, side(aiFair), "AI fair value (${formatPercent(aiFair)})", market, nowMs)
-        return fallback(Track.FAIR_VALUE_FOLLOWER, "fair value unavailable", market, nowMs)
+        val lockedFair = percent(market.finalMinuteFairPp)
+        if (lockedFair != null && (market.finalMinuteSamples ?: 0) in 1 until 60) {
+            return candidate(
+                Track.FAIR_VALUE_FOLLOWER,
+                side(lockedFair),
+                "CF 60s settlement average (${market.finalMinuteSamples} samples, ${formatPercent(lockedFair)})",
+                market,
+                nowMs,
+                lockedFair / 100.0
+            )
+        }
+        return unavailable(Track.FAIR_VALUE_FOLLOWER, "CF final-minute average unavailable", market, nowMs)
     }
 
     private fun bookPressure(market: MarketUiModel, nowMs: Long): Candidate {
@@ -158,13 +228,13 @@ object ScalpSignal {
                 nowMs
             )
         }
-        return fallback(Track.BOOK_PRESSURE, "executable asks unavailable", market, nowMs)
+        return unavailable(Track.BOOK_PRESSURE, "executable asks unavailable", market, nowMs)
     }
 
     private fun marketFavorite(market: MarketUiModel, nowMs: Long): Candidate {
         val yesMid = percent(market.yesProbabilityPercent)
         if (yesMid != null) return candidate(Track.MARKET_FAVORITE, side(yesMid), "displayed market midpoint (${formatPercent(yesMid)} YES)", market, nowMs)
-        return fallback(Track.MARKET_FAVORITE, "market midpoint unavailable", market, nowMs)
+        return unavailable(Track.MARKET_FAVORITE, "market midpoint unavailable", market, nowMs)
     }
 
     private fun dislocation(
@@ -178,9 +248,9 @@ object ScalpSignal {
         val mid = percent(market.yesProbabilityPercent)
         if (fair != null && mid != null) {
             val gap = fair - mid
-            return candidate(track, if (gap >= 0.0) "YES" else "NO", "$source minus market ${formatPp(gap)}", market, nowMs)
+            return candidate(track, if (gap >= 0.0) "YES" else "NO", "$source minus market ${formatPp(gap)}", market, nowMs, fair / 100.0)
         }
-        return fallback(track, "$source or market midpoint unavailable", market, nowMs)
+        return unavailable(track, "$source or market midpoint unavailable", market, nowMs)
     }
 
     private fun probability(
@@ -191,8 +261,8 @@ object ScalpSignal {
         nowMs: Long
     ): Candidate {
         val yes = percent(yesPp)
-        if (yes != null) return candidate(track, side(yes), "$source (${formatPercent(yes)} YES)", market, nowMs)
-        return fallback(track, "$source unavailable", market, nowMs)
+        if (yes != null) return candidate(track, side(yes), "$source (${formatPercent(yes)} YES)", market, nowMs, yes / 100.0)
+        return unavailable(track, "$source unavailable", market, nowMs)
     }
 
     private fun oddsTape(market: MarketUiModel, nowMs: Long): Candidate {
@@ -202,27 +272,33 @@ object ScalpSignal {
             val move = last - first
             return candidate(Track.ODDS_TAPE, if (move >= 0.0) "YES" else "NO", "YES odds tape ${formatPp(move)}", market, nowMs)
         }
-        return fallback(Track.ODDS_TAPE, "odds tape unavailable", market, nowMs)
+        return unavailable(Track.ODDS_TAPE, "odds tape unavailable", market, nowMs)
     }
 
     private fun spotTarget(market: MarketUiModel, nowMs: Long): Candidate {
         val distance = market.spotVsTargetUsd?.takeIf { it.isFinite() }
         if (distance != null) return candidate(Track.SPOT_TARGET, if (distance >= 0.0) "YES" else "NO", "spot versus target ${formatUsd(distance)}", market, nowMs)
-        return fallback(Track.SPOT_TARGET, "spot-target distance unavailable", market, nowMs)
+        return unavailable(Track.SPOT_TARGET, "spot-target distance unavailable", market, nowMs)
     }
 
-    private fun fallback(track: Track, unavailable: String, market: MarketUiModel, nowMs: Long): Candidate {
-        val baseline = dipHunter(market, nowMs)
-        return candidate(track, baseline.side, "$unavailable; ${baseline.selectedFrom} fallback", market, nowMs)
-    }
+    private fun unavailable(track: Track, reason: String, market: MarketUiModel, nowMs: Long): Candidate =
+        candidate(track, null, reason, market, nowMs)
 
-    private fun candidate(track: Track, side: String, source: String, market: MarketUiModel, nowMs: Long): Candidate = Candidate(
+    private fun candidate(
+        track: Track,
+        side: String?,
+        source: String,
+        market: MarketUiModel,
+        nowMs: Long,
+        entryProbability: Double? = null
+    ): Candidate = Candidate(
         track = track,
         side = side,
         selectedFrom = source,
         spotReturn1m = market.spotReturn1m?.takeIf { it.isFinite() },
         spotReturn5m = market.spotReturn5m?.takeIf { it.isFinite() },
-        timeToCloseSec = market.closeTimeEpochMs?.let { close -> ((close - nowMs) / 1_000L).takeIf { it >= 0L } }
+        timeToCloseSec = market.closeTimeEpochMs?.let { close -> ((close - nowMs) / 1_000L).takeIf { it >= 0L } },
+        entryProbability = entryProbability
     )
 
     private fun side(yesPp: Double): String = if (yesPp >= 50.0) "YES" else "NO"

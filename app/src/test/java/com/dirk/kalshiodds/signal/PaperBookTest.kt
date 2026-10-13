@@ -199,7 +199,10 @@ class PaperBookTest {
         assertEquals(1, book.snapshot().fills.count { it.settled })
         assertTrue(book.snapshot().realizedPnlUsd.isFinite())
 
-        val nextWindowEntry = book.considerUnboundedTicket(ticket, enabled = true)
+        val nextWindowEntry = book.considerUnboundedTicket(
+            ticket.copy(ticker = "KXBTC15M-AUTO-NEXT"),
+            enabled = true
+        )
         assertTrue(nextWindowEntry != null)
         assertEquals(2_000, nextWindowEntry!!.contracts)
     }
@@ -212,7 +215,9 @@ class PaperBookTest {
             paperOnly = true,
             limitPrice = 0.40,
             estimatedAvgFill = 0.40,
-            visibleContracts = 100
+            visibleContracts = 100,
+            strategyDecisionFingerprint = "test|YES|fingerprint",
+            strategyEntryProbability = 0.75
         )
         val fills = ScalpSignal.Track.values().associateWith { track ->
             book.considerUnboundedTicket(base.copy(strategyVersion = track.formulaVersion), enabled = true)!!
@@ -222,13 +227,21 @@ class PaperBookTest {
         val reversal = fills.getValue(ScalpSignal.Track.EXTREME_REVERSAL)
 
         assertEquals(ScalpSignal.Track.values().size, book.snapshot().openCount)
+        assertEquals("test|YES|fingerprint", dip.strategyDecisionFingerprint)
+        assertEquals(0.75, dip.strategyEntryProbability!!, 1e-9)
         assertNull(book.considerUnboundedTicket(base.copy(strategyVersion = dip.strategyVersion), enabled = true))
         assertNotNull(book.updateAutoPositionHighWater(momentum.id, 0.45))
         assertNotNull(book.autoSell(momentum.id, 0.44, "test"))
         assertEquals(ScalpSignal.Track.values().size - 1, book.snapshot().openCount)
         assertTrue(!book.snapshot().fills.single { it.id == dip.id }.settled)
         assertTrue(!book.snapshot().fills.single { it.id == reversal.id }.settled)
-        assertNotNull(book.considerUnboundedTicket(base.copy(strategyVersion = momentum.strategyVersion), enabled = true))
+        assertNull(book.considerUnboundedTicket(base.copy(strategyVersion = momentum.strategyVersion), enabled = true))
+        assertNotNull(
+            book.considerUnboundedTicket(
+                base.copy(ticker = "KXBTC15M-MULTI-NEXT", strategyVersion = momentum.strategyVersion),
+                enabled = true
+            )
+        )
         assertEquals(ScalpSignal.Track.values().size, book.snapshot().openCount)
     }
 

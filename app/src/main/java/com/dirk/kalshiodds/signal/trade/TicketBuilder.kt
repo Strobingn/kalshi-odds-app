@@ -114,9 +114,10 @@ object TicketBuilder {
     fun proposeScalps(market: MarketUiModel, ctx: Context): List<TradeTicket> {
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return emptyList()
         return ScalpSignal.candidates(market, ctx.nowMs).mapNotNull { scalp ->
+            val side = scalp.side ?: return@mapNotNull null
             buildTicket(
                 market = market,
-                side = scalp.side,
+                side = side,
                 ctx = ctx,
                 stakeUsd = SignalConstants.HUNTER_STAKE_USD,
                 minPayoutUsd = SignalConstants.CONTRACT_SETTLEMENT_USD,
@@ -518,7 +519,9 @@ object TicketBuilder {
             strategyDecisionSource = strategy?.selectedFrom,
             strategySpotReturn1m = strategy?.spotReturn1m,
             strategySpotReturn5m = strategy?.spotReturn5m,
-            strategyTimeToCloseSec = strategy?.timeToCloseSec
+            strategyTimeToCloseSec = strategy?.timeToCloseSec,
+            strategyDecisionFingerprint = strategy?.fingerprint,
+            strategyEntryProbability = strategy?.entryProbability
         )
     }
 

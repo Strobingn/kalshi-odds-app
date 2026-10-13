@@ -18,6 +18,7 @@ import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
+import com.dirk.kalshiodds.signal.trade.ScalpSignal
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
 import com.dirk.kalshiodds.chart.ChartWindowService
@@ -839,11 +840,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val market = markets[fill.ticker] ?: return@forEach
             val bid = TicketBuilder.freshBestBid(market, fill.side, context) ?: return@forEach
             val marked = paperBook.updateAutoPositionHighWater(fill.id, bid) ?: return@forEach
-            val fairSide = when (marked.side.uppercase()) {
-                "YES" -> market.aiYesPercent?.div(100.0)
-                "NO" -> market.aiNoPercent?.div(100.0)
-                else -> null
-            }
+            val fairSide = ScalpSignal.exitProbability(marked.strategyVersion, market, marked.side)
             val exit = com.dirk.kalshiodds.signal.paper.PaperPositionManager.decide(
                 fill = marked,
                 executableBid = bid,

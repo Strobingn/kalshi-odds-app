@@ -39,7 +39,31 @@ class ScalpSignalTest {
         )
         assertEquals(20, candidates.size)
         assertEquals(ScalpSignal.Track.values().map { it.formulaVersion }, candidates.map { it.formulaVersion })
-        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", "YES", "NO", "YES"), candidates.take(8).map { it.side })
+        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", null, "NO", "YES"), candidates.take(8).map { it.side })
+    }
+
+    @Test fun missingFeatureIsRecordedAsNoObservationInsteadOfBaselineFallback() {
+        val candidates = ScalpSignal.candidates(
+            market(0.50, 0.004, 0.020).copy(predictedSide = "YES"),
+            openedAt + 60_000L
+        ).associateBy { it.track }
+
+        val imported = candidates.getValue(ScalpSignal.Track.IMPORTED_MODEL)
+        assertEquals(null, imported.side)
+        org.junit.Assert.assertTrue(imported.selectedFrom.contains("unavailable"))
+        org.junit.Assert.assertTrue(imported.fingerprint.contains("NO_OBSERVATION"))
+    }
+
+    @Test fun exitProbabilityUsesTheTrackInputRatherThanGenericAi() {
+        val m = market(0.50, 0.004, 0.020).copy(
+            aiYesPercent = 90.0,
+            importedModelPp = 35.0,
+            finalMinuteFairPp = 80.0,
+            finalMinuteSamples = 30
+        )
+        assertEquals(0.35, ScalpSignal.exitProbability("scalp-v5-imported-model", m, "YES")!!, 1e-9)
+        assertEquals(0.20, ScalpSignal.exitProbability("scalp-v4-fair-value-follower", m, "NO")!!, 1e-9)
+        org.junit.Assert.assertNull(ScalpSignal.exitProbability("scalp-v3-momentum-sniper", m, "YES"))
     }
 
     @Test fun modelAndMarketChannelsUseTheirOwnAvailableInputs() {
@@ -98,8 +122,8 @@ class ScalpSignalTest {
             market(0.50, -0.003, 0.010).copy(predictedSide = "YES", yesAskSize = 10.0),
             TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false, nowMs = openedAt + 10_000L)
         )
-        assertEquals(ScalpSignal.Track.values().size, tickets.size)
-        assertEquals(ScalpSignal.Track.values().size, tickets.mapNotNull { it.strategyVersion }.toSet().size)
+        assertEquals(9, tickets.size)
+        assertEquals(tickets.size, tickets.mapNotNull { it.strategyVersion }.toSet().size)
         org.junit.Assert.assertTrue(tickets.all { it.paperOnly && it.canPaper && !it.canApprove })
     }
 }
