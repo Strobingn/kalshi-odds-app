@@ -983,14 +983,19 @@ class ScalpBook(
      * (hold-to-settle legs → settlement) for the full clip at the bid with taker fee. Result written into the closed
      * trade's note as "nostop=±x.xx" (no schema change). In memory only; an app restart drops unresolved shadows.
      */
+    companion object ShadowLimits { const val MAX_SHADOWS = 500 }
     private class Shadow(val tradeId: String, val ticker: String, val side: String, val n: Int, val cost: Double, val entryAtMs: Long,
                          val sf: Boolean, val exit: (ScalpRule.Quote, Double, Double, Double?) -> Boolean) { var value: Double? = null }
     private val shadows = LinkedHashMap<String, Shadow>()
+    internal fun shadowCount(): Int = synchronized(lock) { shadows.size }
 
     private fun addShadow(t: ScalpTrade, sf: Boolean, exit: (ScalpRule.Quote, Double, Double, Double?) -> Boolean) {
         if (t.contracts <= 0 || shadows.containsKey(t.id)) return
         shadows[t.id] = Shadow(t.id, t.ticker.uppercase(), t.side, t.contracts, t.entryCostUsd, t.entryAtMs ?: 0L, sf, exit)
-        while (shadows.size > 2000) shadows.remove(shadows.keys.first())
+        // 0.3.62: hard bound + drop shadows of windows that closed > 1 h ago without a settlement callback.
+        val cutoff = System.currentTimeMillis() - 3_600_000L
+        shadows.values.removeAll { (ScalpTicker.closeMs(it.ticker) ?: Long.MAX_VALUE) < cutoff }
+        while (shadows.size > MAX_SHADOWS) shadows.remove(shadows.keys.first())
     }
 
     private fun stepShadows(q: ScalpRule.Quote, fairYes: Double?) {
@@ -1001,16 +1006,19 @@ class ScalpBook(
             val bid = q.bid(sh.side)?.takeIf { it > 0.0 } ?: continue
             val heldS = (q.nowMs - sh.entryAtMs) / 1000.0
             val sideFair = fairYes?.let { if (sh.side == "YES") it else 1.0 - it }
-            if (sh.exit(q, heldS, bid, sideFair)) sh.value = sh.n * bid - ScalpRule.orderFee(sh.n, bid) - sh.cost
+            if (runCatching { sh.exit(q, heldS, bid, sideFair) }.getOrDefault(false)) sh.value = sh.n * bid - ScalpRule.orderFee(sh.n, bid) - sh.cost
         }
         applyShadows()
     }
 
     private fun applyShadows() {
+        // 0.3.62: only index the ledger when something resolved (was a linear ledger scan per shadow per quote).
+        if (shadows.values.none { it.value != null }) return
+        val byId = _all.value.associateBy { x -> x.id }
         val it = shadows.values.iterator()
         while (it.hasNext()) {
             val sh = it.next(); val v = sh.value ?: continue
-            val t = _all.value.firstOrNull { x -> x.id == sh.tradeId } ?: run { it.remove(); null } ?: continue
+            val t = byId[sh.tradeId] ?: run { it.remove(); null } ?: continue
             if (t.state != ScalpState.CLOSED) continue
             if (!t.note.contains("nostop=")) save(t.copy(note = String.format(Locale.US, "%s · nostop=%+.2f", t.note, v)))
             it.remove()

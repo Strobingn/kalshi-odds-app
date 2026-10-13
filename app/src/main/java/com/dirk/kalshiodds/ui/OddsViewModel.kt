@@ -1603,7 +1603,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 cfAgeMs = cfTick?.ageMs(now),
                 bookGap = !hub.scoring.book.hasSnapshot(market.ticker)
             )
-            container.scalp.onQuote(qq, enabled = s.paperTradingEnabled)
+            // 0.3.62: a paper-scalp exception must never take down the quote lane / app.
+            runCatching { container.scalp.onQuote(qq, enabled = s.paperTradingEnabled) }
             // 0.3.53 Forecast ride / fade: same quote + top-3 book sizes (recorder-identical features).
             runCatching {
                 container.scalp.onForecastQuote(
