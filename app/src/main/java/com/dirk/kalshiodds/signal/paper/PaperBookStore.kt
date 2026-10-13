@@ -32,7 +32,8 @@ class PaperBookStore(context: Context) {
             prefs.edit().putString(KEY, json.encodeToString(PaperBookState.serializer(), state)).apply()
         }
         // KEEP coalesces rapid quote/high-water-mark updates into one network
-        // job. The worker uploads only the paper ledger, never Kalshi keys.
+        // job. WorkManager runs it only when Android permits network work; the
+        // worker uploads only the paper ledger, never Kalshi keys.
         runCatching { PaperScalpSyncWorker.enqueueOnce(app) }
     }
 
