@@ -196,10 +196,10 @@ fun arenaFeed(
 ): ArenaFeed? = when {
     s == null -> null
     !s.scalperEnabled -> ArenaFeed(
-        "The arena is switched off, so none of the 15 strategies is running.", "Turn the arena on", turnOnArena
+        "The arena is switched off, so none of the 30 strategies is running.", "Turn the arena on", turnOnArena
     )
     !s.liveSignalsEnabled -> ArenaFeed(
-        "Live signals are off, so the arena sees no trades and none of the 15 strategies is running.",
+        "Live signals are off, so the arena sees no trades and none of the 30 strategies is running.",
         "Turn on Live signals", turnOnLive
     )
     !s.tradingCredentialsConfigured() -> ArenaFeed(
@@ -353,7 +353,7 @@ fun ScalperResultsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        if (selected == null) "Showing all 15 · tap a strategy to follow it" else "Following ${selected.label}",
+                        if (selected == null) "Showing all 30 · tap a strategy to follow it" else "Following ${selected.label}",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary,
                         modifier = Modifier.weight(1f)
@@ -393,7 +393,7 @@ fun ScalperResultsScreen(
                     }
                     item(key = "leaderboard") { Leaderboard(state, curveOf, selected, onSelect) }
                     item(key = "bankroll") {
-                        ChartCard("Paper bankroll", "All 15 together, from a \$1,000 reference start.", "CHART_BANKROLL") {
+                        ChartCard("Paper bankroll", "All 30 together, from a \$1,000 reference start.", "CHART_BANKROLL") {
                             if (bankroll.size >= 2) {
                                 ScrubLineChart(bankroll, ScalperResults.START_BANKROLL_USD) { ScalperResults.plainMoney(it) }
                             } else {
@@ -670,7 +670,7 @@ private fun Stat(label: String, value: String, color: Color, modifier: Modifier)
     }
 }
 
-/** All 15 strategies ranked by paper profit after fees, with whether each result is more than luck. */
+/** All 30 strategies ranked by paper profit after fees, with whether each result is more than luck. */
 @Composable
 private fun Leaderboard(
     state: ScalperState,
@@ -681,7 +681,7 @@ private fun Leaderboard(
     val colors = DipTheme.colors
     val board = ScalperResults.leaderboard(state)
     Panel {
-        Text("Leaderboard · 15 strategies · same market, same fees", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text("Leaderboard · 30 strategies · same market, same fees", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(ScalperResults.leaderLine(state), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
         board.forEach { r ->
             Row(

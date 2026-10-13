@@ -19,6 +19,35 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.4 (claude/scalp-insights): fifteen more strategies — 30 at once
+
+The arena now runs **30** paper strategies side by side on the same live window, fills and fees. The fifteen new
+ones each trade their own signal; none has history on this engine yet, so their leaderboard rows say
+"new · Claude 1.9.4" until they trade. Existing records keep their history: the new rows simply start at zero.
+
+| Strategy | Entry | Exit |
+| --- | --- | --- |
+| Stretch fade · buy now | mid 3¢+ under its own 60 s average, spread ≤ 2¢ | +2¢ / −3¢ / 45 s |
+| Squeeze breakout · buy now | two quiet minutes (range ≤ 4¢), then the mid 1¢ above that range | +3¢ / −2¢ / 60 s |
+| Range floor · resting | a 3–8¢ two-minute range, mid back on its low: bid at the floor | +2¢ / −3¢ / 60 s |
+| Trend pullback · buy now | up 5¢+ over two minutes, down 1¢+ in the last 10 s | +3¢ / −3¢ / 60 s |
+| Flow follow · buy now | takers bought this side 3:1, 500+ contracts in 30 s (flow fade's mirror) | +2¢ / −2¢ / 30 s |
+| Whale follow · buy now | one taker print of 1,000+ contracts on this side in the last 5 s | +2¢ / −2¢ / 30 s |
+| Quiet maker · resting | the mid has not moved for 30 s | +1¢ / −2¢ / 60 s |
+| Opening drive · buy, hold | minutes 2–4, up 6¢+ since minute 1, 50–80¢ | settlement |
+| Late tiebreak · buy, hold | minutes 12–13, 45–60¢, up 2¢+ in the last minute | settlement |
+| Heavy favorite · buy, hold | minutes 12–13, 92–97¢ | settlement |
+| Panic fade · buy now | down 4¢+ in 10 s with 300+ contracts sold into it | +3¢ / −3¢ / 60 s |
+| Steady climb · buy now | up 1¢ / 3¢ / 4¢ over 10 / 30 / 60 s | +3¢ / −2¢ / 60 s |
+| Penny scalper · resting | 1¢ spread and at most 200 contracts ahead on the bid (needs the live book) | +1¢ / −2¢ / 30 s |
+| Book imbalance · buy now | the bid shows 3× the ask's size and 300+ contracts (needs the live book) | +2¢ / −2¢ / 30 s |
+| Late comeback · buy, hold | minutes 10–13, an underdog at 20–40¢ up 4¢+ in 30 s | settlement |
+
+Every chart, heatmap and table in the Arena covers all 30. Signals: `PaperScalper.decide` (new grid helpers
+`PrintGrid.avgMid` and `biggestTakerBuy`); tests: `ArenaMoreStrategiesTest`, one per strategy, each with the case
+that must not fire. Paper only. A larger field also means more chances for one strategy to look good by luck;
+the leaderboard's luck verdict still needs 30 trades over 10 windows before it calls anything.
+
 ## 1.9.3 (claude/scalp-insights): an Execution section — how the orders are worked
 
 A sixth chip, **Execution**, looks at how each strategy gets in, not just what it made:
@@ -139,7 +168,7 @@ on live data; it cannot place an order.
 |---------|------|------|
 | 15 strategies, bands, holds | `ScalpStrategy`, `ScalperEngine.inBand`, `onTrade` / `onClock` skip holds | `ArenaStrategiesTest.holdStrategiesHaveNoExitAndRideToTheSettlement`, `eachStrategyTradesOnlyInsideItsOwnPriceBand` |
 | New signals | `PaperScalper.decide`, `PrintGrid.highMid` / `lowMid` / `takerBought` | `ArenaStrategiesTest.aFavoriteLateInTheWindow…`, `flowFade…`, `oneCentBetter…`, `aFiveCentDrop…` |
-| Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.fifteenStrategiesEachWithItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
+| Leaderboard and verdict | `ScalperResults.leaderboard` / `verdict` / `leaderLine` | `ArenaStrategiesTest.everyStrategyHasItsOwnRow`, `theVerdictSaysWhenALeadIsMoreThanLuck` |
 | Status panel | `arenaFeed` (ScalperResultsScreen.kt) | `ArenaStrategiesTest.theStatusPanelNamesWhatStopsTheArena` |
 | Arena tab | `AppRoutes.PRIMARY`, `DipApp` bottom bar | `ArenaStrategiesTest.theArenaIsABottomTab` |
 | Update channel | `AppUpdate.BRANCH = "Claude"` (tags matched on the branch suffix) | `AppUpdateTest` |

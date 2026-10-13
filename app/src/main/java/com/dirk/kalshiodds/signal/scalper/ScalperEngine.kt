@@ -138,6 +138,77 @@ enum class ScalpStrategy(
     LONG_SHOT(
         "Long shot · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
         hold = true, entryMin = 0.10, entryMax = 0.20, origin = "app / grok"
+    ),
+
+    // ---- 1.9.4: fifteen more, each on its own signal. None has history on this engine yet. ----
+
+    /** Stretch fade: the side's mid sits [STRETCH_DOLLARS] or more under its own 60 s average. Buy the snap back. */
+    STRETCH_FADE("Stretch fade · buy now", true, 0.02, 0.03, 45_000L, 2, 2, null, origin = "Claude 1.9.4"),
+
+    /**
+     * Squeeze breakout: two quiet minutes (the mid stayed inside [SQUEEZE_RANGE_DOLLARS]), then the mid
+     * breaks 1¢ above that range. Buy the break.
+     */
+    SQUEEZE_BREAKOUT("Squeeze breakout · buy now", true, 0.03, 0.02, 60_000L, 2, 1, null, origin = "Claude 1.9.4"),
+
+    /** Range floor: a 3–8¢ two-minute range and the mid back on its low. Rest a bid at the floor. */
+    RANGE_FLOOR("Range floor · resting", false, 0.02, 0.03, 60_000L, 5, 2, null, origin = "Claude 1.9.4"),
+
+    /** Trend pullback: up [PULLBACK_TREND_DOLLARS] over two minutes, then down 1¢ in the last 10 s. Buy the dip in the trend. */
+    TREND_PULLBACK("Trend pullback · buy now", true, 0.03, 0.03, 60_000L, 2, 2, null, origin = "Claude 1.9.4"),
+
+    /** Flow follow: the mirror of flow fade. Takers bought this side 3:1, 500+ contracts in 30 s: go with them. */
+    FLOW_FOLLOW("Flow follow · buy now", true, 0.02, 0.02, 30_000L, 2, 2, null, origin = "Claude 1.9.4"),
+
+    /** Whale follow: one taker bought [WHALE_CONTRACTS]+ contracts of this side in a single print in the last 5 s. */
+    WHALE_FOLLOW("Whale follow · buy now", true, 0.02, 0.02, 30_000L, 2, 1, null, origin = "Claude 1.9.4"),
+
+    /** Quiet maker: the mid has not moved for 30 s. Rest a bid and take 1¢. */
+    QUIET_MAKER("Quiet maker · resting", false, 0.01, 0.02, 60_000L, 5, 2, null, origin = "Claude 1.9.4"),
+
+    /**
+     * Opening drive: minutes 2–4, the side is up [DRIVE_DOLLARS] or more since minute 1 and costs 50–80¢.
+     * Buy now, hold to the settlement.
+     */
+    OPENING_DRIVE(
+        "Opening drive · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.80, origin = "Claude 1.9.4"
+    ),
+
+    /** Late tiebreak: minutes 12–13, a near coin flip (45–60¢) that rose 2¢ in the last minute. Buy, hold. */
+    LATE_TIEBREAK(
+        "Late tiebreak · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
+        hold = true, entryMin = 0.45, entryMax = 0.60, origin = "Claude 1.9.4"
+    ),
+
+    /** Heavy favorite: minutes 12–13, the side costs 92–97¢. Buy now, hold for the last few cents. */
+    HEAVY_FAVORITE(
+        "Heavy favorite · buy, hold", true, 0.0, 0.0, 0L, 10, 1, null,
+        hold = true, entryMin = 0.92, entryMax = 0.97, origin = "Claude 1.9.4"
+    ),
+
+    /**
+     * Panic fade: the side fell [PANIC_DROP_DOLLARS] in 10 s on [PANIC_CONTRACTS]+ contracts sold into it.
+     * Buy the overshoot now.
+     */
+    PANIC_FADE("Panic fade · buy now", true, 0.03, 0.03, 60_000L, 2, 1, null, origin = "Claude 1.9.4"),
+
+    /** Steady climb: up 1¢ over 10 s, 3¢ over 30 s and 4¢ over 60 s — a move that keeps going. Buy now. */
+    STEADY_CLIMB("Steady climb · buy now", true, 0.03, 0.02, 60_000L, 2, 1, null, origin = "Claude 1.9.4"),
+
+    /**
+     * Penny scalper: a 1¢ spread and at most [PENNY_MAX_QUEUE] contracts ahead on the bid (the book must
+     * show the queue). Rest a bid, out at +1¢, quick time-out.
+     */
+    PENNY_SCALPER("Penny scalper · resting", false, 0.01, 0.02, 30_000L, 2, 2, null, origin = "Claude 1.9.4"),
+
+    /** Book imbalance: the bid shows 3× the size of the ask and 300+ contracts (the book must be live). Buy now. */
+    BOOK_IMBALANCE("Book imbalance · buy now", true, 0.02, 0.02, 30_000L, 2, 1, null, origin = "Claude 1.9.4"),
+
+    /** Late comeback: minutes 10–13, an underdog (20–40¢) up 4¢ in 30 s. Buy now, hold to the settlement. */
+    LATE_COMEBACK(
+        "Late comeback · buy, hold", true, 0.0, 0.0, 0L, 5, 1, null,
+        hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4"
     );
 
     companion object {
@@ -160,6 +231,44 @@ enum class ScalpStrategy(
 
         /** Spread limit for the bounce and the breakout, and the minimum spread for 1¢ better. */
         const val TIGHT_SPREAD_DOLLARS = 0.02
+
+        /** Stretch fade: distance under the 60 s average mid. */
+        const val STRETCH_DOLLARS = 0.03
+
+        /** Squeeze breakout: widest two-minute range that counts as quiet, and the break above it. */
+        const val SQUEEZE_RANGE_DOLLARS = 0.04
+        const val SQUEEZE_BREAK_DOLLARS = 0.01
+
+        /** Range floor: the two-minute range it trades in. */
+        const val FLOOR_MIN_RANGE_DOLLARS = 0.03
+        const val FLOOR_MAX_RANGE_DOLLARS = 0.08
+
+        /** Trend pullback: the two-minute rise, and the 10 s dip inside it. */
+        const val PULLBACK_TREND_DOLLARS = 0.05
+        const val PULLBACK_DIP_DOLLARS = 0.01
+
+        /** Whale follow: one print at least this size. */
+        const val WHALE_CONTRACTS = 1_000.0
+
+        /** Opening drive: the rise since minute 1. */
+        const val DRIVE_DOLLARS = 0.06
+
+        /** Late tiebreak: the last minute's rise. */
+        const val TIEBREAK_MOVE_DOLLARS = 0.02
+
+        /** Panic fade: the 10 s fall and the contracts sold into it. */
+        const val PANIC_DROP_DOLLARS = 0.04
+        const val PANIC_CONTRACTS = 300.0
+
+        /** Penny scalper: deepest queue on the bid it will join. */
+        const val PENNY_MAX_QUEUE = 200.0
+
+        /** Book imbalance: bid size against ask size, and the smallest bid that counts. */
+        const val IMBALANCE_RATIO = 3.0
+        const val IMBALANCE_MIN_CONTRACTS = 300.0
+
+        /** Late comeback: the underdog's 30 s rise. */
+        const val COMEBACK_MOVE_DOLLARS = 0.04
     }
 }
 

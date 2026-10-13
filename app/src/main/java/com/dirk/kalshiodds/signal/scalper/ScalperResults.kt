@@ -98,7 +98,7 @@ object ScalperResults {
     const val NO_WINDOW_HISTORY = "no luck test: this record predates per-window totals (reset to start one)"
 
     /**
-     * All 15 strategies, best paper P&L first. Strategies that have closed a
+     * All 30 strategies, best paper P&L first. Strategies that have closed a
      * trade come first; the ones still waiting for their signal follow in
      * their own order.
      */

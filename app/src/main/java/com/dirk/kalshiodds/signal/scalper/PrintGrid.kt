@@ -147,6 +147,29 @@ class PrintGrid(val openMs: Long) {
         return sum(if (isYes(side)) volYes else volNo, minOf(s, SECONDS - 1), w)
     }
 
+    /**
+     * Average mid of [side] over the [w] seconds ending at [s], over the seconds that had a fresh quote.
+     * NaN when fewer than half of them did.
+     */
+    fun avgMid(side: String, s: Int, w: Int): Double {
+        val yes = isYes(side)
+        var sum = 0.0
+        var n = 0
+        for (i in max(s - w + 1, 0)..minOf(s, SECONDS - 1)) {
+            val m = mid(yes, i)
+            if (m.isNaN()) continue
+            sum += m
+            n++
+        }
+        return if (n * 2 < w || n == 0) Double.NaN else sum / n
+    }
+
+    /** The biggest single taker buy of [side] (contracts) in the [w] seconds ending at [s]; 0 when none. */
+    fun biggestTakerBuy(side: String, s: Int, w: Int): Double {
+        if (s < 0) return 0.0
+        return maxOver(if (isYes(side)) maxYes else maxNo, minOf(s, SECONDS - 1), w)
+    }
+
     private fun lastWithin(arr: DoubleArray, s: Int): Double {
         if (s < 0) return Double.NaN
         val top = if (s >= SECONDS) SECONDS - 1 else s

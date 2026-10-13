@@ -548,6 +548,71 @@ class PaperScalper(
                     ScalpStrategy.MOMENTUM_HOLD ->
                         s >= 300 && !d30.isNaN() && d30 >= ScalpStrategy.RIDE_MOVE_DOLLARS - EPS
                     ScalpStrategy.LONG_SHOT -> s >= 300
+                    ScalpStrategy.STRETCH_FADE -> {
+                        val avg = grid.avgMid(side, s, 60)
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !avg.isNaN() && !gridMid.isNaN() &&
+                            avg - gridMid >= ScalpStrategy.STRETCH_DOLLARS - EPS
+                    }
+                    ScalpStrategy.SQUEEZE_BREAKOUT -> {
+                        // The range is the two minutes before the last 5 s, so the break itself is not inside it.
+                        val hi = grid.highMid(side, s - 5, 120)
+                        val lo = grid.lowMid(side, s - 5, 120)
+                        s >= 125 && spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS &&
+                            !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
+                            hi - lo <= ScalpStrategy.SQUEEZE_RANGE_DOLLARS + EPS &&
+                            gridMid - hi >= ScalpStrategy.SQUEEZE_BREAK_DOLLARS - EPS
+                    }
+                    ScalpStrategy.RANGE_FLOOR -> {
+                        val hi = grid.highMid(side, s, 120)
+                        val lo = grid.lowMid(side, s, 120)
+                        s >= 120 && !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
+                            hi - lo >= ScalpStrategy.FLOOR_MIN_RANGE_DOLLARS - EPS &&
+                            hi - lo <= ScalpStrategy.FLOOR_MAX_RANGE_DOLLARS + EPS &&
+                            gridMid <= lo + 0.005 + EPS
+                    }
+                    ScalpStrategy.TREND_PULLBACK -> {
+                        val d120 = grid.move(side, s, 120)
+                        spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d120.isNaN() && !d10.isNaN() &&
+                            d120 >= ScalpStrategy.PULLBACK_TREND_DOLLARS - EPS && d10 <= -ScalpStrategy.PULLBACK_DIP_DOLLARS + EPS
+                    }
+                    ScalpStrategy.FLOW_FOLLOW -> {
+                        val mine = grid.takerBought(side, s, 30)
+                        val other = grid.takerBought(if (yes) "NO" else "YES", s, 30)
+                        mine >= ScalpStrategy.FLOW_MIN_CONTRACTS && mine >= ScalpStrategy.FLOW_RATIO * other
+                    }
+                    ScalpStrategy.WHALE_FOLLOW ->
+                        grid.biggestTakerBuy(side, s, 5) >= ScalpStrategy.WHALE_CONTRACTS - EPS
+                    ScalpStrategy.QUIET_MAKER -> {
+                        // Flat: the highest and lowest mid of the last 30 s are the same, with at least half of them quoted.
+                        val hi = grid.highMid(side, s, 30)
+                        val lo = grid.lowMid(side, s, 30)
+                        s >= 90 && !hi.isNaN() && !lo.isNaN() && hi - lo <= EPS && !grid.avgMid(side, s, 30).isNaN()
+                    }
+                    ScalpStrategy.OPENING_DRIVE -> {
+                        val since = if (s in 120..240) grid.move(side, s, s - 60) else Double.NaN
+                        !since.isNaN() && since >= ScalpStrategy.DRIVE_DOLLARS - EPS
+                    }
+                    ScalpStrategy.LATE_TIEBREAK -> {
+                        val d60 = grid.move(side, s, 60)
+                        s >= 720 && !d60.isNaN() && d60 >= ScalpStrategy.TIEBREAK_MOVE_DOLLARS - EPS
+                    }
+                    ScalpStrategy.HEAVY_FAVORITE -> s >= 720
+                    ScalpStrategy.PANIC_FADE ->
+                        !d10.isNaN() && d10 <= -ScalpStrategy.PANIC_DROP_DOLLARS + EPS &&
+                            grid.takerBought(if (yes) "NO" else "YES", s, 10) >= ScalpStrategy.PANIC_CONTRACTS
+                    ScalpStrategy.STEADY_CLIMB -> {
+                        val d60 = grid.move(side, s, 60)
+                        !d10.isNaN() && !d30.isNaN() && !d60.isNaN() &&
+                            d10 >= 0.01 - EPS && d30 >= 0.03 - EPS && d60 >= 0.04 - EPS
+                    }
+                    // The two book strategies need the live book (the prints show no sizes).
+                    ScalpStrategy.PENNY_SCALPER ->
+                        queue != null && spread <= 0.01 + EPS && queue <= ScalpStrategy.PENNY_MAX_QUEUE + EPS
+                    ScalpStrategy.BOOK_IMBALANCE ->
+                        queue != null && askQty != null && askQty > 0.0 &&
+                            queue >= ScalpStrategy.IMBALANCE_MIN_CONTRACTS && queue >= ScalpStrategy.IMBALANCE_RATIO * askQty
+                    ScalpStrategy.LATE_COMEBACK ->
+                        s >= 600 && !d30.isNaN() && d30 >= ScalpStrategy.COMEBACK_MOVE_DOLLARS - EPS
                 }
                 if (fire == null) {
                     val m = model ?: continue
@@ -635,7 +700,7 @@ class ScalperStore(context: Context) {
         val raw = prefs.getString(KEY, null) ?: return ScalperState.fresh()
         val saved = runCatching { json.decodeFromString(ScalperState.serializer(), raw) }.getOrNull()
         // An older record (1.8.4: no won / lost / fee totals; 1.8.5–1.8.8: seven strategies only) is not
-        // mixed into the arena: its trade files are archived and a new record starts for all fifteen.
+        // mixed into the arena: its trade files are archived and a new record starts for the whole arena (strategies added later simply start at zero).
         return ScalperState.upgraded(saved) { log.archive() }
     }
 
@@ -661,16 +726,16 @@ data class ScalperSummary(
     val note: String
 ) {
     companion object {
-        const val TITLE = "Strategy arena · 15 at once · PAPER ONLY"
+        const val TITLE = "Strategy arena · 30 at once · PAPER ONLY"
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"
         const val NOTE =
-            "Fifteen strategies at once on the same live Bitcoin window and the same real trade prints, " +
+            "Thirty strategies at once on the same live Bitcoin window and the same real trade prints, " +
                 "10 contracts an order, no caps; the best P&L is on top. Resting orders fill only after the " +
                 "queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee; " +
                 "\"hold\" strategies ride to the settlement. In brackets: what a filled scalp of that kind made " +
-                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0, " +
+                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or 1.9.4, " +
                 "no history yet). Needs Live signals on. Never sends an order."
 
         fun of(state: ScalperState, working: Pair<Int, Int> = 0 to 0): ScalperSummary {
