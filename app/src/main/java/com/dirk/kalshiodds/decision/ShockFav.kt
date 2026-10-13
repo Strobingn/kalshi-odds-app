@@ -14,7 +14,10 @@ import kotlin.math.sqrt
  * PAPER ONLY. No LLM. Taker fills at the displayed touch, capped at displayed size, Kalshi taker fee both legs.
  */
 object ShockFav {
-    const val VERSION = "sf57-v1"
+    const val VERSION = "sf58-v1"
+    /** 0.3.58: paper entries fill at the first quote ≥ 2 s after the signal (bt59 delay test), at that quote's ask. */
+    const val ENTRY_DELAY_MS = 2_000L
+    const val ENTRY_GIVE_UP_MS = 6_000L
     const val PREFIX = "sf"
     const val CLIP = 10
 
@@ -60,26 +63,26 @@ object ShockFav {
     }
 
     val VARIANTS: List<Params> = listOf(
-        Params("sf01", "Shock base", oos = "+$0.14/trade (−0.03…+0.31) n=480"),
-        Params("sf02", "Shock fast 3s", xBp = 6.0, yS = 3, lag = 0.06, maxHoldS = 60, oos = "+$0.41 (+0.18…+0.67) n=177"),
-        Params("sf03", "Shock big move", xBp = 10.0, yS = 15, maxHoldS = 120, oos = "−$0.00 (−0.27…+0.25) n=223"),
-        Params("sf04", "Shock wide lag", lag = 0.08, oos = "+$0.32 (+0.09…+0.55) n=291"),
-        Params("sf05", "Shock quick exit", maxHoldS = 45, oos = "+$0.03 (−0.10…+0.16) n=530"),
-        Params("sf06", "Shock long hold", maxHoldS = 300, oos = "+$0.17 (−0.07…+0.39) n=412"),
-        Params("sf07", "Shock hold to close", maxHoldS = 900, settle = true, oos = "+$0.25 (−0.20…+0.70) n=330"),
-        Params("sf08", "Shock tight catch-up", conv = 0.03, oos = "+$0.15 (−0.01…+0.31) n=492"),
-        Params("sf09", "Shock BTC only", coins = setOf("BTC"), oos = "+$0.09 (−0.15…+0.35) n=94"),
-        Params("sf10", "Shock ETH+SOL", coins = setOf("ETH", "SOL"), oos = "+$0.15 (−0.04…+0.34) n=386"),
-        Params("sf11", "Shock calm regime", volLo = 1.0, oos = "+$0.06 (−0.45…+0.52) n=75"),
-        Params("sf12", "Shock hot regime", volHi = 1.0, oos = "+$0.16 (−0.02…+0.35) n=408"),
-        Params("sf13", "Shock + 30s momentum", momoBp = 2.0, oos = "−$0.09 (−0.35…+0.18) n=184"),
-        Params("sf14", "Multi-shock", multiS = 30, oos = "−$0.36 (−0.75…+0.03) n=68"),
-        Params("sf15", "Shock mid-window", tauLo = 180.0, tauHi = 720.0, oos = "+$0.14 (−0.07…+0.35) n=319"),
-        Params("sf16", "Late fav base", shock = false, fav = true, oos = "+$1.61 (+0.63…+2.64) n=35"),
-        Params("sf17", "Late fav 60s-avg fair", shock = false, fav = true, brti = true, oos = "+$0.17 (−0.38…+0.71) n=150"),
-        Params("sf18", "Late fav wide window", shock = false, fav = true, favTmax = 90.0, fmin = 0.85, gap = 0.08, oos = "−$0.16 (−1.05…+0.80) n=82"),
-        Params("sf19", "Late fav strict", shock = false, fav = true, fmin = 0.95, amax = 0.95, oos = "+$1.72 (+0.66…+2.83) n=29"),
-        Params("sf20", "Combo shock→fav", shock = true, fav = true, favHold = true, oos = "+$0.25 (+0.07…+0.43) n=515")
+        Params("sf01", "Shock base", oos = "2s delay: -0.31/trade (-0.44…-0.18) n=473"),
+        Params("sf02", "Shock fast 3s", xBp = 6.0, yS = 3, lag = 0.06, maxHoldS = 60, oos = "2s delay: -0.44/trade (-0.60…-0.29) n=181"),
+        Params("sf03", "Shock big move", xBp = 15.0, yS = 10, maxHoldS = 120, oos = "2s delay: -0.06/trade (-0.54…+0.43) n=44"),
+        Params("sf04", "Shock wide lag", lag = 0.10, oos = "2s delay: -0.30/trade (-0.54…-0.07) n=193"),
+        Params("sf05", "Shock quick exit", maxHoldS = 45, oos = "2s delay: -0.30/trade (-0.39…-0.21) n=521"),
+        Params("sf06", "Shock long hold", maxHoldS = 300, oos = "2s delay: -0.27/trade (-0.48…-0.06) n=408"),
+        Params("sf07", "Shock hold to close", maxHoldS = 900, settle = true, oos = "2s delay: -0.26/trade (-0.72…+0.17) n=330"),
+        Params("sf08", "Shock tight catch-up", conv = 0.02, oos = "2s delay: -0.31/trade (-0.43…-0.18) n=477"),
+        Params("sf09", "Shock BTC only", coins = setOf("BTC"), oos = "2s delay: -0.25/trade (-0.48…-0.02) n=92"),
+        Params("sf10", "Shock ETH+SOL", coins = setOf("ETH", "SOL"), xBp = 8.0, oos = "2s delay: -0.34/trade (-0.60…-0.09) n=137"),
+        Params("sf11", "Shock calm regime", volLo = 0.8, oos = "2s delay: -0.48/trade (-1.44…+0.31) n=15"),
+        Params("sf12", "Shock hot regime", volHi = 1.25, oos = "2s delay: -0.25/trade (-0.42…-0.08) n=314"),
+        Params("sf13", "Shock + 30s momentum", momoBp = 5.0, oos = "2s delay: -0.31/trade (-0.58…-0.07) n=112"),
+        Params("sf14", "Multi-shock", multiS = 30, oos = "2s delay: -0.45/trade (-0.75…-0.17) n=68"),
+        Params("sf15", "Shock mid-window", tauLo = 180.0, tauHi = 720.0, oos = "2s delay: -0.29/trade (-0.45…-0.14) n=316"),
+        Params("sf16", "Late fav base", shock = false, fav = true, oos = "2s delay: +0.95/trade (-0.13…+2.10) n=31"),
+        Params("sf17", "Late fav 60s-avg fair", shock = false, fav = true, brti = true, gap = 0.03, oos = "2s delay: -0.04/trade (-0.53…+0.42) n=158"),
+        Params("sf18", "Late fav wide window", shock = false, fav = true, favTmax = 120.0, fmin = 0.90, gap = 0.08, oos = "2s delay: +0.21/trade (-0.61…+1.04) n=79"),
+        Params("sf19", "Late fav strict", shock = false, fav = true, fmin = 0.95, amax = 0.95, oos = "2s delay: +1.31/trade (+0.29…+2.47) n=26"),
+        Params("sf20", "Combo shock→fav", shock = true, fav = true, favHold = true, oos = "2s delay: -0.22/trade (-0.37…-0.07) n=504")
     )
     private val BY_CODE = VARIANTS.associateBy { it.code }
 
@@ -97,7 +100,26 @@ object ShockFav {
             for (d in 0..3) { val s = sec - d; val i = (s and MASK).toInt(); if (secs[i] == s) return px[i] }
             return null
         }
-        companion object { const val N = 128; const val MASK = 127L }
+        /** bt58 σ: RMS of consecutive 1 s log returns over the trailing 900 s (null under 120 returns). Cached per second. */
+        private var sigSec = Long.MIN_VALUE
+        private var sigVal: Double? = null
+        fun sigma900(sec: Long): Double? {
+            if (sec == sigSec) return sigVal
+            var ss = 0.0; var n = 0
+            for (s in sec - 899..sec) {
+                val i = (s and MASK).toInt(); val j = ((s - 1) and MASK).toInt()
+                if (secs[i] == s && secs[j] == s - 1) { val r = ln(px[i] / px[j]); ss += r * r; n++ }
+            }
+            sigSec = sec; sigVal = if (n < 120) null else maxOf(sqrt(ss / n), 1e-6)
+            return sigVal
+        }
+        companion object { const val N = 1024; const val MASK = 1023L }
+    }
+
+    /** bt58 fair: Φ(ln(S·e^(−basis)/K) / (σ·√τ)), basis = ln(spot at window open / strike) when seen, else 0. */
+    fun fairYes(spot: Double, strike: Double, sigma: Double, tauS: Double, basis: Double): Double {
+        val z = ln(spot * exp(-basis) / strike) / (sigma * sqrt(maxOf(tauS, 1.0)))
+        return ScalpMath.phi(z.coerceIn(-8.0, 8.0))
     }
 
     /** Signed Y-second log return in bp, or null without data. */
@@ -168,7 +190,6 @@ object ShockFav {
         return ScalpMath.phi((mean - strike) / sd)
     }
 
-    @Suppress("unused") private fun e(x: Double) = exp(x)
 }
 
 internal object ScalpMath {

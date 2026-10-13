@@ -703,6 +703,12 @@ class ScalpBook(
 
     // ---------------- 0.3.57 sf57: twenty shock / late-favourite paper scalpers ----------------
     private val sfSpot = HashMap<String, ShockFav.SpotRing>()
+    private val sfBasis = HashMap<String, Double>()
+
+    /** 0.3.58: feed the sf spot ring from the spot stream every second (not only on book ticks), like the backtest. */
+    fun tickSpot(coin: String, spot: Double?, nowMs: Long) = synchronized(lock) {
+        if (spot != null && spot.isFinite() && spot > 0.0) sfSpot.getOrPut(coin) { ShockFav.SpotRing() }.put(nowMs / 1000L, spot)
+    }
 
     /**
      * One conflated quote → all twenty sf57 variants (paper). Called from the paper lane (never Main). Cheap: one scan
@@ -717,10 +723,34 @@ class ScalpBook(
         val sec = q.nowMs / 1000L
         val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
         q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
-        val fairYes = q.fair("YES") ?: return@synchronized emptyList()
+        // 0.3.58: same fair as bt58 — 900 s 1 s-return σ from the ring, open basis to strike, raw τ.
+        val strike = q.strike?.takeIf { it > 0.0 && it.isFinite() } ?: return@synchronized emptyList()
+        val sNow = ring.at(sec) ?: return@synchronized emptyList()
+        val sig = ring.sigma900(sec) ?: return@synchronized emptyList()
+        val basis = sfBasis.getOrPut(key) {
+            val osec = (q.closeMs - 900_000L) / 1000L
+            ring.at(osec)?.let { kotlin.math.ln(it / strike) } ?: 0.0
+        }
+        if (sfBasis.size > 200) sfBasis.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { sfBasis.remove(it) }
+        val fairYes = ShockFav.fairYes(sNow, strike, sig, q.tauS, basis)
         val mine = _trades.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
         val changed = ArrayList<ScalpTrade>()
         val live = q.nowMs < q.closeMs && q.fresh()
+        // 0.3.58 delayed entry: fill at the first quote ≥ 2 s after the signal, at that ask, depth-capped.
+        for (t in mine) {
+            if (t.state != ScalpState.PENDING_ENTRY) continue
+            val age = q.nowMs - t.signalAtMs
+            if (q.nowMs >= q.closeMs || age > ShockFav.ENTRY_GIVE_UP_MS) {
+                changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill within ${ShockFav.ENTRY_GIVE_UP_MS / 1000}s"); continue
+            }
+            if (age < ShockFav.ENTRY_DELAY_MS || !q.fresh()) continue
+            val ask = q.ask(t.side) ?: continue
+            val n = minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+            if (n <= 0) continue
+            if (ask > 0.99) { changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; ask ${"%.2f".format(ask)} too high at fill"); continue }
+            changed += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
+                note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
+        }
         // exits first (shock legs; fav legs hold to settlement)
         for (t in mine) {
             if (t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) continue
@@ -737,7 +767,7 @@ class ScalpBook(
             changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
         }
         if (enabled && live) {
-            val sigma = q.sigmaPerSec
+            val sigma: Double? = sig
             var openCost = openCostUsd()
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
@@ -752,11 +782,11 @@ class ScalpBook(
                     }
                 }
                 if (p.fav && mine.none { it.variantId == p.favId } && q.tauS <= p.favTmax && q.tauS >= p.favTmin) {
-                    val fy = if (p.brti && q.strike != null && sigma != null && q.spot != null) {
+                    val fy = if (p.brti && sigma != null) {
                         brtiFair ?: run {
                             val m = (60.0 - q.tauS).toInt().coerceIn(0, 60)
                             val obs = (sec - m + 1..sec).mapNotNull { ring.at(it) }
-                            ShockFav.brtiFairYes(q.spot, q.strike, sigma, q.tauS, obs).also { brtiFair = it }
+                            ShockFav.brtiFairYes(sNow * kotlin.math.exp(-basis), strike, sigma, q.tauS, obs.map { it * kotlin.math.exp(-basis) }).also { brtiFair = it }
                         }
                     } else fairYes
                     for (side in listOf("YES", "NO")) {
@@ -781,8 +811,8 @@ class ScalpBook(
         val cost = ask * n + ScalpRule.orderFee(n, ask)
         if (openCost + cost > bankroll + 1e-9) return null
         return ScalpTrade(
-            id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.OPEN, signalAtMs = q.nowMs,
-            signalAsk = ask, fairAtSignal = fair, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
+            id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+            signalAsk = ask, fairAtSignal = fair,
             note = String.format(Locale.US, "%s %s · %s · fair %.0f¢ vs ask %.0f¢ · %s", p.code, p.label, what, fair * 100, ask * 100, ShockFav.VERSION),
             ruleVersion = "${ScalpRule.VERSION}|$vid|P"
         )

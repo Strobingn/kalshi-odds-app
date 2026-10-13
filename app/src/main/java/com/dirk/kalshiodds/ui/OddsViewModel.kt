@@ -184,6 +184,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     val s = _state.value.settings
                     val live = _state.value.snapshot?.allMarkets.orEmpty()
                     if (s.paperTradingEnabled && live.isNotEmpty()) {
+                        // 0.3.58: 1 Hz spot into the sf ring for every coin (shock/σ/basis need every second, not only book ticks).
+                        val now1 = container.clock.nowMs()
+                        live.filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
+                            .groupBy { com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) }
+                            .forEach { (coin, ms) -> runCatching { container.scalp.tickSpot(coin, settlementFor(ms.first().ticker, now1).spot, now1) } }
                         val open = container.scalp.openTickers()
                         val withOpen = live.filter { it.ticker in open }
                         if (withOpen.isNotEmpty()) runScalp(withOpen, s)
