@@ -1046,11 +1046,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * Auto-trade entry. Runs only when armed in Settings; AutoTradeEngine
      * enforces the stake / position / daily-order / cooldown / loss-limit
-     * caps. Each [AutoStrategy] scalper holds at most one position, so up to
-     * four strategies ride in parallel and the Settings board shows which one
-     * wins. Manual Buy cards and paper tickets stay on their existing paths.
-     * Orders go through [TicketSession.autoApprove] — the same placement code
-     * as Approve.
+     * caps. All 24 [AutoStrategy] scouts race for the
+     * [com.dirk.kalshiodds.signal.config.SignalConstants.AUTO_MAX_OPEN_POSITIONS]
+     * open slots — each holds at most one position, and the Settings
+     * leaderboard shows which model actually wins. Manual Buy cards and
+     * paper tickets stay on their existing paths. Orders go through
+     * [TicketSession.autoApprove] — the same placement code as Approve.
      */
     private fun maybeAutoEnter(
         s: OddsUiState,
@@ -1092,9 +1093,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         for (strategy in AutoStrategy.entries) {
             val openNow = store.openPositions()
             val candidate = tickets
-                .filter { !it.isSell && !it.paperOnly && it.canApprove }
-                .filter { it.kind != com.dirk.kalshiodds.signal.trade.TicketKind.MANUAL }
-                .filter { it.kind in strategy.kinds }
+                .filter { it.canApprove && strategy.matches(it) }
                 .maxByOrNull { it.netEvUsd ?: (it.netEdgePp ?: 0.0) }
                 ?: continue
             val market = marketsByTicker[candidate.ticker] ?: continue

@@ -19,6 +19,7 @@ import com.dirk.kalshiodds.signal.ws.KalshiWsAuth
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
+import com.dirk.kalshiodds.signal.trade.AutoTradeStore
 import com.dirk.kalshiodds.signal.trade.PayoutGate
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -54,7 +55,8 @@ data class SettingsUiState(
     val pendingAutoArm: Boolean = false,
     val autoArmDraft: String = "",
     val autoArmError: String? = null,
-    val autoStatusLine: String? = null
+    val autoStatusLine: String? = null,
+    val autoBoard: List<AutoTradeStore.StrategyStatus> = emptyList()
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -325,16 +327,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setAutoMaxStake(v: Double) = viewModelScope.launch { prefs.updateAutoMaxStakeUsd(v) }
     fun setAutoDailyLoss(v: Double) = viewModelScope.launch { prefs.updateAutoDailyLossLimitUsd(v) }
 
-    /** Today’s order count / estimated P&L + per-strategy leaderboard. */
+    /** Today’s order count / estimated P&L + the 24-scout strategy leaderboard. */
     fun refreshAutoStatus() {
         val armed = _state.value.settings.autoTradeEnabled
+        val nowMs = System.currentTimeMillis()
         _state.update {
             it.copy(
                 autoStatusLine = if (armed) {
-                    container.autoTrade.strategyBoard(System.currentTimeMillis())
+                    container.autoTrade.statusLine(nowMs)
                 } else {
                     null
-                }
+                },
+                autoBoard = container.autoTrade.boardEntries()
             )
         }
     }

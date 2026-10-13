@@ -8,20 +8,131 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * The strategy scalpers that run in parallel when auto-trade is armed.
- * Each watches a different ticket family and holds at most one open
- * position, so up to [SignalConstants.AUTO_MAX_OPEN_POSITIONS] strategies
- * ride at once — the Settings board shows which one is actually winning.
+ * The strategy scouts that compete when auto-trade is armed. Each watches
+ * for its own style of ticket and holds at most one open position; all of
+ * them race for [SignalConstants.AUTO_MAX_OPEN_POSITIONS] open slots, so the
+ * Settings leaderboard answers the only question that matters: which model
+ * wins. [blurb] is shown in Settings so every model explains itself.
+ *
+ * Every matcher is a plain predicate over fields the ticket already carries
+ * (kind, side, price, net edge, net EV, model vs implied, visible depth) —
+ * no new engines, no new math. Proposed buy tickets always price at 20¢ or
+ * cheaper and always carry 3+ points of net edge, so every band below can
+ * actually fire.
  */
-enum class AutoStrategy(val label: String, val kinds: Set<TicketKind>) {
-    /** Bread-and-butter configured edge tickets. */
-    MOMENTUM("Momentum", setOf(TicketKind.CONFIGURED)),
-    /** Hunter prints ($1 can settle big). */
-    HUNTER("Hunter", setOf(TicketKind.HUNTER)),
-    /** Cheap long-shots where the AI beats implied after fees. */
-    VALUE("Value", setOf(TicketKind.HUNTER_VALUE)),
-    /** Whatever has the highest net EV right now, any family. */
-    BEST_EV("Best-EV", setOf(TicketKind.CONFIGURED, TicketKind.HUNTER, TicketKind.HUNTER_VALUE))
+enum class AutoStrategy(
+    val label: String,
+    val blurb: String,
+    private val matcher: (TradeTicket) -> Boolean
+) {
+    MOMENTUM(
+        "Momentum",
+        "The baseline model. Buys standard configured-edge tickets — sub-5¢ prints that clear the 20x payout gate and your edge threshold. Every other scalper is judged against this one."
+    ) { it.kind == TicketKind.CONFIGURED },
+    HUNTER(
+        "Hunter",
+        "Buys ultra-cheap prints where a $1 stake can settle at $25 or more. Loses most clips by design; one win pays for a pile of losses."
+    ) { it.kind == TicketKind.HUNTER },
+    VALUE(
+        "Value",
+        "Buys long-shots at 20¢ or less when the AI beats the implied chance after fees and margin. The slow grinder of the cheap-book families."
+    ) { it.kind == TicketKind.HUNTER_VALUE },
+    BEST_EV(
+        "Best-EV",
+        "Takes whichever live ticket has the highest net expected value right now, any family. The pure math pick — if the model is calibrated, this should top the board."
+    ) { true },
+    DEEP_VALUE(
+        "Deep Value",
+        "Only long-shots at 10¢ or cheaper — 9-to-1 or better on a win. Can be wrong nine times out of ten and still break even. Pure lottery discipline."
+    ) { it.kind == TicketKind.HUNTER_VALUE && it.limitPrice <= 0.10 + 1e-9 },
+    VALUE_UPPER(
+        "Value Upper",
+        "The expensive half of the value family: long-shots priced 10–20¢. Pays less per win than Deep Value but should land more often."
+    ) {
+        it.kind == TicketKind.HUNTER_VALUE &&
+            it.limitPrice > 0.10 + 1e-9 && it.limitPrice <= 0.20 + 1e-9
+    },
+    DIRT_CHEAP(
+        "Dirt Cheap",
+        "Anything priced 3¢ or under, any family. Maximum-multiple lottery tickets — the cheapest prints the book ever shows."
+    ) { it.limitPrice <= 0.03 + 1e-9 },
+    UP_ONLY(
+        "Up Only",
+        "Buys YES at any price, nothing else. A one-direction book that isolates how good the model's upside calls are."
+    ) { it.side == "YES" },
+    DOWN_ONLY(
+        "Down Only",
+        "Buys NO at any price, nothing else. The mirror of Up Only — isolates the model at calling failed moves."
+    ) { it.side == "NO" },
+    CHEAP_UP(
+        "Cheap Up",
+        "YES tickets at 5¢ or less — the deepest underdog side. Wins pay 20x or better; tests whether the model spots cheap upside the crowd ignores."
+    ) { it.side == "YES" && it.limitPrice <= 0.05 + 1e-9 },
+    CHEAP_DOWN(
+        "Cheap Down",
+        "NO tickets at 5¢ or less — betting against near-certain-looking YES prices. Profits when an overhyped favorite face-plants."
+    ) { it.side == "NO" && it.limitPrice <= 0.05 + 1e-9 },
+    BIG_EDGE(
+        "Big Edge",
+        "Only fires when the model beats the market by 8+ net points after fees. Rare and aggressive — the 'the market is just wrong' bet."
+    ) { (it.netEdgePp ?: 0.0) >= 8.0 },
+    MID_EDGE(
+        "Mid Edge",
+        "Takes 5–8 point net edges. The middle ground between trade frequency and selectivity."
+    ) { (it.netEdgePp ?: 0.0) >= 5.0 && (it.netEdgePp ?: 0.0) < 8.0 },
+    SMALL_EDGE(
+        "Small Edge",
+        "Grinds tiny 3–5 point net edges. Trades often, wins a little at a time. Very fee-sensitive — tests whether small signals survive costs."
+    ) { (it.netEdgePp ?: 0.0) >= 3.0 && (it.netEdgePp ?: 0.0) < 5.0 },
+    FEE_AWARE(
+        "Fee Aware",
+        "Only takes tickets whose base $5 clip already shows at least $1 of net EV after estimated fees. Filters out trades where costs eat the whole edge."
+    ) { (it.netEvUsd ?: 0.0) >= 1.0 },
+    EV_PER_CONTRACT(
+        "EV / Contract",
+        "Only tickets worth 5¢ or more of net EV per contract. Dollar-agnostic — measures the quality of each contract, not the clip size."
+    ) { (it.netEvPerContract ?: 0.0) >= 0.05 },
+    MOONSHOT(
+        "Moonshot",
+        "Only tickets paying 25x the stake or better on a win, from any family. Hunter-class multiples only."
+    ) { it.stakeUsd > 1e-9 && it.maxPayoutUsd >= 25.0 * it.stakeUsd },
+    PREMIUM_PAYOUT(
+        "Premium Payout",
+        "Only tickets paying 10x or better on a win. The multiples-only book — no grinders allowed."
+    ) { it.stakeUsd > 1e-9 && it.maxPayoutUsd >= 10.0 * it.stakeUsd },
+    CONTRARIAN(
+        "Contrarian",
+        "Only fires when the model's probability sits 10+ points from the market price, betting the disagreement. The maximum-contrarian signal."
+    ) {
+        val model = it.modelChance
+        val implied = it.impliedChance
+        model != null && implied != null && kotlin.math.abs(model - implied) >= 0.10
+    },
+    LONGSHOT_MODEL(
+        "Model Long-shot",
+        "Only trades where the model itself prices the chosen side at 15% or less. Picks the tickets the AI thinks are true long-shots."
+    ) { (it.modelChance ?: 1.0) <= 0.15 + 1e-9 },
+    HUNTER_PLUS(
+        "Hunter Plus",
+        "Hunter tickets with a 5+ point net edge. Cheap-print hunting with a quality filter — fewer shots, better shots."
+    ) { it.kind == TicketKind.HUNTER && (it.netEdgePp ?: 0.0) >= 5.0 },
+    VALUE_PLUS(
+        "Value Plus",
+        "Value long-shots with a 5+ point net edge. Hunter Plus's filter applied to the 20¢-or-less family."
+    ) { it.kind == TicketKind.HUNTER_VALUE && (it.netEdgePp ?: 0.0) >= 5.0 },
+    CONFIGURED_CHEAP(
+        "Configured Cheap",
+        "Standard edge tickets at 2¢ or less — the cheaper half of Momentum's universe, where payouts reach 50x."
+    ) { it.kind == TicketKind.CONFIGURED && it.limitPrice <= 0.02 + 1e-9 },
+    DEEP_BOOK(
+        "Deep Book",
+        "Only trades where 50+ contracts sit visible at the ask. No thin-book traps — size and fills come first."
+    ) { (it.visibleContracts ?: 0) >= 50 };
+
+    /** True when [ticket] is a live buy in this scout's lane. */
+    fun matches(ticket: TradeTicket): Boolean =
+        !ticket.isSell && !ticket.paperOnly &&
+            ticket.kind != TicketKind.MANUAL && matcher(ticket)
 }
 
 /**
@@ -44,6 +155,15 @@ class AutoTradeStore(context: Context) {
         val contracts: Int,
         val entryPrice: Double,
         val costUsd: Double
+    )
+
+    /** One row of the Settings leaderboard. */
+    data class StrategyStatus(
+        val strategy: String,
+        val label: String,
+        val blurb: String,
+        val pnlUsd: Double,
+        val position: OpenPosition?
     )
 
     private val prefs = context.applicationContext
@@ -145,30 +265,31 @@ class AutoTradeStore(context: Context) {
         return "PAUSED — $paused\n$base"
     }
 
-    /**
-     * Multi-line Settings board: overall status plus one line per strategy
-     * scalper — its all-time auto P&L and what it is riding right now.
-     */
-    fun strategyBoard(nowMs: Long): String {
+    /** Settings leaderboard: every scout ranked by all-time realized P&L. */
+    fun boardEntries(): List<StrategyStatus> {
         val open = openPositions()
-        val lines = mutableListOf(statusLine(nowMs))
-        for (strategy in AutoStrategy.entries) {
-            val pos = open.firstOrNull { it.strategy == strategy.name }
-            val riding = if (pos != null) {
-                String.format(
-                    Locale.US,
-                    "riding %s %s ×%d @ %.0f¢",
-                    pos.side,
-                    pos.ticker,
-                    pos.contracts,
-                    pos.entryPrice * 100.0
-                )
-            } else {
-                "flat"
-            }
-            lines.add("${strategy.label}: ${AutoTradeEngine.fmtSignedUsd(strategyPnl(strategy.name))} · $riding")
+        val rows = AutoStrategy.entries.map { strategy ->
+            StrategyStatus(
+                strategy = strategy.name,
+                label = strategy.label,
+                blurb = strategy.blurb,
+                pnlUsd = strategyPnl(strategy.name),
+                position = open.firstOrNull { it.strategy == strategy.name }
+            )
+        }.sortedByDescending { it.pnlUsd }
+        val legacyPnl = strategyPnl(LEGACY)
+        val legacyPos = open.firstOrNull { it.strategy.isBlank() }
+        return if (legacyPnl != 0.0 || legacyPos != null) {
+            rows + StrategyStatus(
+                strategy = LEGACY,
+                label = "Legacy",
+                blurb = "Positions opened before the strategy tags existed.",
+                pnlUsd = legacyPnl,
+                position = legacyPos
+            )
+        } else {
+            rows
         }
-        return lines.joinToString("\n")
     }
 
     private fun rollDayLocked(nowMs: Long) {
@@ -216,6 +337,7 @@ class AutoTradeStore(context: Context) {
         private const val KEY_OPEN = "open_positions"
         private const val KEY_COOLDOWN_PREFIX = "cooldown_"
         private const val KEY_PNL_PREFIX = "strategy_pnl_"
+        private const val LEGACY = "LEGACY"
     }
 }
 
