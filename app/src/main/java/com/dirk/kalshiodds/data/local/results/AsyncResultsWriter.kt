@@ -20,7 +20,7 @@ class AsyncResultsWriter(
     private val maxBatch: Int = 48
 ) {
     private val job = SupervisorJob()
-    private val scope = scope ?: CoroutineScope(job + Dispatchers.IO)
+    private val scope = scope ?: CoroutineScope(job + Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("results-writer"))
     private val snapshots = ConcurrentLinkedQueue<ScoredSnapshotRow>()
     private val alerts = ConcurrentLinkedQueue<AlertRow>()
     private val scorecards = ConcurrentLinkedQueue<ScorecardRow>()

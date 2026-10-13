@@ -59,7 +59,7 @@ class AppContainer(context: Context) {
     /** 0.3.37 deterministic decision layer: calibration + gate + prediction ledger. No LLM. */
     val decisions = com.dirk.kalshiodds.decision.DecisionRuntime(
         sink = predictionLedger,
-        scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO),
+        scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("decisions")),
         longshot = com.dirk.kalshiodds.decision.LongshotResidual.loadAsset(app)
     ).also { it.refitIfDue() }
     val ladder = com.dirk.kalshiodds.decision.LadderStore(app)

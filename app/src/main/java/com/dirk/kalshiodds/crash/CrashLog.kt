@@ -19,9 +19,12 @@ object CrashLog {
     const val MAX_FILES = 20
     @Volatile private var dir: File? = null
     @Volatile private var installed = false
+    @Volatile var versionName: String = ""
+    const val SYNCED = "synced_crashes"
 
     fun install(context: Context, versionName: String = "") {
         dir = File(context.applicationContext.filesDir, DIR).also { it.mkdirs() }
+        if (versionName.isNotBlank()) this.versionName = versionName
         if (installed) return
         installed = true
         val previous = Thread.getDefaultUncaughtExceptionHandler()
@@ -32,21 +35,21 @@ object CrashLog {
     }
 
     /** Writes synchronously (the process is about to die). Visible for tests. */
-    fun write(threadName: String, error: Throwable, versionName: String = "", nowMs: Long = System.currentTimeMillis()): File? {
+    fun write(threadName: String, error: Throwable, versionName: String = "", nowMs: Long = System.currentTimeMillis(), fatal: Boolean = true): File? {
         val d = dir ?: return null
         d.mkdirs()
         val sw = StringWriter()
         error.printStackTrace(PrintWriter(sw))
         val f = File(d, "crash-$nowMs.txt")
         f.writeText(buildString {
-            append("${error.javaClass.name}: ${error.message}\n")
+            append((if (fatal) "" else "[non-fatal] ") + "${error.javaClass.name}: ${error.message}\n")
             append("time ${stamp(nowMs)} · thread $threadName")
             if (versionName.isNotBlank()) append(" · app $versionName")
             append(" · sdk ${runCatching { android.os.Build.VERSION.SDK_INT }.getOrDefault(0)}\n")
             append(runCatching { HeapInfo.line() }.getOrDefault("Heap ?") + "\n\n")
             append(sw.toString())
         })
-        File(d, PENDING).writeText(f.name)
+        if (fatal) File(d, PENDING).writeText(f.name)
         files().drop(MAX_FILES).forEach { it.delete() }
         return f
     }
@@ -73,6 +76,24 @@ object CrashLog {
 
     /** All crash files, newest first, as one shareable text. */
     fun exportAll(): String = files().joinToString("\n\n==========\n\n") { read(it) }
+
+    /** 0.3.64: crash files not yet uploaded, as diphunter_sync rows of kind "crash" (stack trace truncated to 8 KB). */
+    fun unsyncedRecords(): List<com.dirk.kalshiodds.data.supabase.SyncMerge.Record> {
+        val d = dir ?: return emptyList()
+        val done = runCatching { File(d, SYNCED).readLines().toSet() }.getOrDefault(emptySet())
+        return files().filter { it.name !in done }.take(10).map { f ->
+            val ms = f.name.removePrefix("crash-").removeSuffix(".txt").toLongOrNull() ?: f.lastModified()
+            val text = read(f)
+            com.dirk.kalshiodds.data.supabase.SyncMerge.Record(key = "crash:$ms", kind = "crash", updatedAtMs = ms,
+                payload = org.json.JSONObject().put("atMs", ms).put("version", versionName).put("headline", headline(f))
+                    .put("fatal", !text.startsWith("[non-fatal]")).put("trace", text.take(8_000)).toString())
+        }
+    }
+    fun markSynced(keys: Collection<String>) {
+        val d = dir ?: return
+        val names = keys.map { "crash-" + it.removePrefix("crash:") + ".txt" }
+        runCatching { File(d, SYNCED).appendText(names.joinToString("\n", postfix = "\n")) }
+    }
 
     fun clear() { dir?.listFiles()?.forEach { it.delete() } }
 

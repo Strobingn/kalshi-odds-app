@@ -101,6 +101,8 @@ data class OddsUiState(
  * Crypto series only (BTC / ETH / SOL + extra crypto tickers).
  */
 class OddsViewModel(application: Application) : AndroidViewModel(application) {
+    /** 0.3.64: all VM loops (scalp lane, rollover, conflator) under SupervisorJob + exception handler. */
+    private val vmScope = com.dirk.kalshiodds.crash.SafeScopes.child(viewModelScope.coroutineContext, "odds-vm")
 
     private val container = KalshiOddsApp.from(application).container
     private val repository = container.repository
@@ -149,7 +151,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val paperLane: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
 
     /** 0.3.50: per-coin conflation (newest wins, one job per coin, bounded) instead of the 0.3.49 Main debouncer. */
-    private val marketEvents = com.dirk.kalshiodds.signal.engine.CoinEvalConflator(viewModelScope, paperLane) { _, tickers -> onMarketEvents(tickers) }
+    private val marketEvents = com.dirk.kalshiodds.signal.engine.CoinEvalConflator(vmScope, paperLane) { _, tickers -> onMarketEvents(tickers) }
     @Volatile private var lastHomeLiveMs = 0L
     private val restPaperPending = java.util.concurrent.atomic.AtomicReference<List<MarketUiModel>?>(null)
 
@@ -176,7 +178,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 if (com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series) == indexId) marketEvents.fire(m.ticker)
             }
         }
-        viewModelScope.launch(paperLane) {
+        vmScope.launch(paperLane) {
             while (isActive) {
                 delay(com.dirk.kalshiodds.signal.engine.MarketEventDebouncer.EXIT_TIMER_MS)
                 // 1 s timer only for exits / time stops on open scalps + the status line.
@@ -209,7 +211,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     fun setScalpTabVisible(visible: Boolean) {
         scalpTabVisible = visible
         if (visible && scalpTabJob?.isActive != true) {
-            scalpTabJob = viewModelScope.launch(Dispatchers.Default) {
+            scalpTabJob = vmScope.launch(Dispatchers.Default) {
                 while (isActive && scalpTabVisible) {
                     runCatching { refreshScalpTab() }
                     delay(SCALP_TAB_REFRESH_MS)
@@ -288,7 +290,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
         _scalpAlgo.value = ScalpAlgoDetail(model = model)
-        viewModelScope.launch(Dispatchers.Default) {
+        vmScope.launch(Dispatchers.Default) {
             runCatching {
                 val now = container.clock.nowMs()
                 val trades = container.scalp.snapshot()
@@ -312,12 +314,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val st = _scalpTab.value
         val t = st.selectedTicker ?: return
         submitPaperOrder(t, st.side, if (buy) "BUY" else "SELL", cents.toDouble(), qty, market = false)
-        viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+        vmScope.launch(paperLane) { runCatching { refreshScalpTab() } }
     }
 
-    fun ladderCancel(id: String) { cancelPaperOrder(id); viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+    fun ladderCancel(id: String) { cancelPaperOrder(id); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
 
-    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
 
     /** One tap: sell everything held on the selected side at entry + [plusCents]. */
     fun sellOwnedAt(plusCents: Int) {
@@ -329,7 +331,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         submitPaperOrder(t, st.side, "SELL", px * 100.0, st.heldContracts, market = false)
-        viewModelScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+        vmScope.launch(paperLane) { runCatching { refreshScalpTab() } }
     }
 
     private fun feedStatusLine(now: Long = System.currentTimeMillis()): String {
@@ -349,7 +351,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         startEventDriven()
         ticketSession.onStart()
         _state.update { it.copy(paper = paperBook.snapshot()) }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
                     val lastError = tickets.lastError
@@ -380,21 +382,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 shadowBook.state.collect { shadow ->
                     _state.update { it.copy(shadow = shadow) }
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
                     HomeScorecardSummary.of(
@@ -406,20 +408,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
                 container.support.bootstrap(_state.value.settings)
                 publishSupportState()
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching { restorePersistedState() }
             startPolling()
             startLastMinuteLoop()
             startD3Loop()
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 repository.cachedSnapshot.collect { cached ->
                     if (cached == null) return@collect
@@ -442,7 +444,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 prefs.settings.collectLatest { settings ->
                     hub.settings = settings
@@ -466,7 +468,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         bindRollover()
         startPositionLoop()
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 com.dirk.kalshiodds.update.UpdateAvailability.offer.collect { offer ->
                     _state.update {
@@ -475,7 +477,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.status.collect { status ->
                     val prev = lastWsState
@@ -485,7 +487,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         prev != null &&
                         prev != WsConnectionState.CONNECTED
                     ) {
-                        viewModelScope.launch {
+                        vmScope.launch {
                             runCatching { container.rollover.refreshFromRest() }
                             container.rollover.onReconnect()
                         }
@@ -493,7 +495,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.alerts.collect { alerts ->
                     _state.update { it.copy(recentAlerts = alerts) }
@@ -501,7 +503,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.scores.collect { scores ->
                     when (overlayThrottle.onEvent(scores)) {
@@ -513,7 +515,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         OverlayThrottle.Decision.SCHEDULE_TRAILING -> {
                             val waitMs = overlayThrottle.remainingMs()
                             scoreOverlayJob?.cancel()
-                            scoreOverlayJob = viewModelScope.launch {
+                            scoreOverlayJob = vmScope.launch {
                                 delay(waitMs)
                                 overlayThrottle.takeTrailing()?.let { applyScoreOverlay(it) }
                             }
@@ -598,18 +600,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLiveSignals(enabled: Boolean) {
-        viewModelScope.launch { prefs.updateLiveSignals(enabled) }
+        vmScope.launch { prefs.updateLiveSignals(enabled) }
     }
 
     private fun bindRollover() {
         if (rolloverBound) return
         rolloverBound = true
         container.rollover.addListener { event -> applyRolloverEvent(event) }
-        container.rollover.start(viewModelScope)
+        container.rollover.start(vmScope)
     }
 
     fun onForeground() {
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching { container.rollover.refreshFromRest() }
         }
     }
@@ -625,7 +627,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (event.droppedTickers.isNotEmpty()) {
             ticketSession.voidTickers(event.droppedTickers)
-            viewModelScope.launch {
+            vmScope.launch {
                 runCatching { repository.scoreSettlementsNow(now) }
             }
         }
@@ -640,7 +642,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun refresh() {
         if (!refreshGate.tryAcquire()) return
-        viewModelScope.launch {
+        vmScope.launch {
             try {
                 _state.update { it.copy(isLoading = true, userMessage = null) }
                 val result = try {
@@ -692,7 +694,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startPolling() {
         pollJob?.cancel()
-        pollJob = viewModelScope.launch {
+        pollJob = vmScope.launch {
             while (isActive) {
                 val headless = !com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
                 if (headless) {
@@ -843,7 +845,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resumeAlerts() {
-        viewModelScope.launch {
+        vmScope.launch {
             container.support.resumeAlerts()
             publishSupportState()
             scheduleRebuildTickets(immediate = true)
@@ -887,7 +889,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun approveTicket(ticketId: String) {
-        viewModelScope.launch {
+        vmScope.launch {
             val settings = _state.value.settings
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             when (
@@ -911,7 +913,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun approveSellTicket(ticketId: String, count: Int, price: Double) {
-        viewModelScope.launch {
+        vmScope.launch {
             val settings = _state.value.settings
             if (!settings.tradingCredentialsConfigured()) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
@@ -931,11 +933,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelWorkingOrder(orderId: String) {
-        viewModelScope.launch { ticketSession.cancelWorking(orderId) }
+        vmScope.launch { ticketSession.cancelWorking(orderId) }
     }
 
     fun setPaperTrading(enabled: Boolean) {
-        viewModelScope.launch { prefs.updatePaperTrading(enabled) }
+        vmScope.launch { prefs.updatePaperTrading(enabled) }
     }
 
     fun resetPaperBook() {
@@ -943,7 +945,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val snap = _state.value.settings
         val start = snap.paperBankrollStartUsd
         paperBook.reset(start)
-        viewModelScope.launch(Dispatchers.IO) {
+        vmScope.launch(Dispatchers.IO) {
             runCatching {
                 container.archive.insertSettingsChange(
                     com.dirk.kalshiodds.data.local.history.SettingsChange(
@@ -1166,7 +1168,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun scheduleRebuildTickets(immediate: Boolean = false) {
         ticketRebuildJob?.cancel()
-        ticketRebuildJob = viewModelScope.launch {
+        ticketRebuildJob = vmScope.launch {
             if (!immediate) delay(com.dirk.kalshiodds.signal.service.LiveSignalsPolicy.TICKET_REBUILD_DEBOUNCE_MS)
             runCatching { rebuildTickets() }
         }
@@ -1226,7 +1228,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
         }
-        d3Job = viewModelScope.launch {
+        d3Job = vmScope.launch {
             runCatching {
                 val schedule = withContext(Dispatchers.IO) { container.d3Markets.loadSchedule() }
                 container.d3Engine.applySchedule(schedule)
@@ -1325,7 +1327,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startLastMinuteLoop() {
         lastMinuteJob?.cancel()
-        lastMinuteJob = viewModelScope.launch {
+        lastMinuteJob = vmScope.launch {
             runCatching { refreshMinuteVol() }
             var lastMinuteBucket = 0L
             while (isActive) {
@@ -1457,7 +1459,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startPositionLoop() {
         positionJob?.cancel()
-        positionJob = viewModelScope.launch {
+        positionJob = vmScope.launch {
             var lastFetch = 0L
             var lastLimits = 0L
             while (isActive) {
@@ -1479,7 +1481,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun refreshPositions() {
-        viewModelScope.launch {
+        vmScope.launch {
             val settings = _state.value.settings
             if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) return@launch
             if (!settings.tradingCredentialsConfigured()) {
@@ -1679,7 +1681,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             _state.update { it.copy(userMessage = "Type REAL MONEY to cancel a real order") }
             return
         }
-        viewModelScope.launch {
+        vmScope.launch {
             val r = withContext(Dispatchers.IO) {
                 runCatching { container.tradeClient.cancelById(orderId, ticker) }
             }
@@ -1701,7 +1703,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     /** REST/alert paths: hand off to the paper lane, latest list wins (never queues behind itself). */
     private fun runPaperAutopilot(live: List<MarketUiModel>) {
         if (restPaperPending.getAndSet(live) != null) return
-        viewModelScope.launch(paperLane) {
+        vmScope.launch(paperLane) {
             val batch = restPaperPending.getAndSet(null) ?: return@launch
             runPaperAutopilotNow(batch)
         }
@@ -1983,7 +1985,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (targets.isEmpty()) return
         targets.forEach { backfillStarted[it.ticker] = now }
         backfillJob?.cancel()
-        backfillJob = viewModelScope.launch(Dispatchers.IO) {
+        backfillJob = vmScope.launch(Dispatchers.IO) {
             for (m in targets) {
                 if (!isActive) break
                 val end = m.closeTimeEpochMs ?: now

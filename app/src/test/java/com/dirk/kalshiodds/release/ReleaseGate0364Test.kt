@@ -7,6 +7,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlinx.coroutines.launch
 
 class ReleaseGate0364Test {
     private val codes = (51..61).map { "sf$it" }
@@ -47,5 +48,19 @@ class ReleaseGate0364Test {
         assertEquals(Open50Model.predict(x), Open50Model.predict(x.copyOf()), 0.0)
         assertTrue(Open50Model.VERSION.startsWith("o50ai-v"))
         assertTrue(Open50Model.predict(x).isFinite())
+    }
+}
+
+class ReleaseGate0364CrashTest {
+    @Test
+    fun failingBackgroundCoroutineDoesNotCancelSiblings() = kotlinx.coroutines.runBlocking {
+        val parent = kotlinx.coroutines.SupervisorJob()
+        val scope = com.dirk.kalshiodds.crash.SafeScopes.child(parent + kotlinx.coroutines.Dispatchers.Default, "test")
+        val bad = scope.launch { error("boom") }
+        bad.join()
+        var ran = false
+        scope.launch { ran = true }.join()
+        assertTrue(ran)
+        parent.cancel()
     }
 }
