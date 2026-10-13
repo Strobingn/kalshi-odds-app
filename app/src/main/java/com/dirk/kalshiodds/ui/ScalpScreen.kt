@@ -63,6 +63,9 @@ fun ScalpScreen(
     val candidates = state.tickets.proposals
         .filter { it.kind == TicketKind.SCALP }
         .sortedBy { it.strategyVersion.orEmpty() }
+    val scorecards = ScalpSignal.Track.values().map { track ->
+        ScalpTrackScore.from(track, scalpFills.filter { it.strategyVersion == track.formulaVersion })
+    }
 
     LazyColumn(
         modifier = Modifier
@@ -88,7 +91,7 @@ fun ScalpScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Eight concurrent paper-only strategies on each 15-minute contract.",
+                        "Twenty concurrent paper-only hypotheses on each 15-minute contract.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = colors.textSecondary
                     )
@@ -106,6 +109,13 @@ fun ScalpScreen(
         }
 
         item {
+            SectionTitle("Model scoreboard", "Current paper run · realized outcomes only, not a profit forecast")
+        }
+        items(scorecards, key = { it.track.formulaVersion }) { scorecard ->
+            ScalpScorecard(scorecard)
+        }
+
+        item {
             SectionTitle("Live candidates", "Current executable-paper proposals")
         }
         if (candidates.isEmpty()) {
@@ -114,7 +124,7 @@ fun ScalpScreen(
                     if (state.settings.paperTradingEnabled) {
                         "Waiting for an open BTC window with an executable displayed ask. This is a quote requirement, not a stake or time cap."
                     } else {
-                        "Paper autopilot is paused. Turn it on above to allow all eight tracks to open paper positions."
+                        "Paper autopilot is paused. Turn it on above to allow all twenty tracks to open paper positions."
                     }
                 )
             }
@@ -191,7 +201,7 @@ private fun ScalpControlCard(
                 )
                 Text(
                     if (state.settings.paperTradingEnabled) {
-                        "All eight tracks may fill independently on the same 15-minute contract."
+                        "All twenty tracks may fill independently on the same 15-minute contract."
                     } else {
                         "No new paper positions will open until the autopilot is switched back on."
                     },
@@ -275,6 +285,42 @@ private fun ScalpCandidateCard(ticket: TradeTicket) {
                 ticket.strategySpotReturn5m?.let { "5m spot ${signed(it)}" },
                 ticket.strategyTimeToCloseSec?.let { "${timeLeft(it)} left" }
             ).ifEmpty { listOf("Waiting for live spot features") }.joinToString(" · "),
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary
+        )
+    }
+}
+
+@Composable
+private fun ScalpScorecard(scorecard: ScalpTrackScore) {
+    val colors = DipTheme.colors
+    val pnl = scorecard.realizedPnlUsd
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, colors.border, RoundedCornerShape(14.dp))
+            .background(colors.surface, RoundedCornerShape(14.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+                Text(scorecard.track.label, style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+                Text(scorecard.track.family, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+            }
+            Text(
+                if (scorecard.settled == 0) "NO RESULT YET" else signedMoney(pnl),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (scorecard.settled == 0) colors.textSecondary else pnlColor(pnl, colors),
+                fontWeight = FontWeight.Bold
+            )
+        }
+        Text(
+            if (scorecard.settled == 0) {
+                "${scorecard.fills} fills · ${scorecard.open} open · needs settled outcomes before ranking"
+            } else {
+                "${scorecard.fills} fills · ${scorecard.open} open · ${scorecard.wins}/${scorecard.settled} wins (${String.format(Locale.US, "%.0f", scorecard.winRate * 100)}%) · realized ${signedMoney(pnl)}"
+            },
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
@@ -405,3 +451,28 @@ private data class ArchivedScalpFill(
     val archivedAtMs: Long,
     val fill: PaperFill
 )
+
+private data class ScalpTrackScore(
+    val track: ScalpSignal.Track,
+    val fills: Int,
+    val open: Int,
+    val settled: Int,
+    val wins: Int,
+    val realizedPnlUsd: Double
+) {
+    val winRate: Double get() = if (settled == 0) 0.0 else wins.toDouble() / settled.toDouble()
+
+    companion object {
+        fun from(track: ScalpSignal.Track, fills: List<PaperFill>): ScalpTrackScore {
+            val settled = fills.filter { it.settled && it.won != null }
+            return ScalpTrackScore(
+                track = track,
+                fills = fills.size,
+                open = fills.count { !it.settled },
+                settled = settled.size,
+                wins = settled.count { it.won == true },
+                realizedPnlUsd = fills.mapNotNull { it.pnlUsd }.sum()
+            )
+        }
+    }
+}

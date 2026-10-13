@@ -58,7 +58,7 @@ fun TradeTicketsSection(
     onCancelOrder: (String) -> Unit
 ) {
     val colors = DipTheme.colors
-    // Scalp has its own dedicated tab and ledger. Leaving its eight parallel
+    // Scalp has its own dedicated tab and ledger. Leaving its twenty parallel
     // paper candidates here makes the approval surface look like a stack of
     // live limit orders even though none can be submitted to Kalshi.
     val proposals = tickets.proposals

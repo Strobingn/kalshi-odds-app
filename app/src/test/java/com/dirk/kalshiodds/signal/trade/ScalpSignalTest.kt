@@ -32,25 +32,43 @@ class ScalpSignalTest {
         assertEquals(660L, candidate.timeToCloseSec)
     }
 
-    @Test fun eightIndependentTracksProduceConcurrentSidesWithoutEntryGates() {
+    @Test fun twentyIndependentTracksProduceConcurrentSidesWithoutEntryGates() {
         val candidates = ScalpSignal.candidates(
             market(0.50, 0.004, 0.020).copy(predictedSide = "YES"),
             openedAt + 60_000L
         )
-        assertEquals(
-            listOf(
-                "scalp-v3-dip-hunter",
-                "scalp-v3-momentum-sniper",
-                "scalp-v3-extreme-reversal",
-                "scalp-v4-one-minute-reversal",
-                "scalp-v4-five-minute-trend",
-                "scalp-v4-fair-value-follower",
-                "scalp-v4-book-pressure",
-                "scalp-v4-market-favorite"
+        assertEquals(20, candidates.size)
+        assertEquals(ScalpSignal.Track.values().map { it.formulaVersion }, candidates.map { it.formulaVersion })
+        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", "YES", "YES", "YES"), candidates.take(8).map { it.side })
+    }
+
+    @Test fun modelAndMarketChannelsUseTheirOwnAvailableInputs() {
+        val candidates = ScalpSignal.candidates(
+            market(0.50, 0.004, 0.020).copy(
+                aiYesPercent = 70.0,
+                digitalFairPp = 30.0,
+                importedModelPp = 51.0,
+                mlpPp = 49.0,
+                cnnPp = 51.0,
+                gbmPp = 49.0,
+                survivalYesPp = 51.0,
+                mmShadowPp = 49.0,
+                oddsHistory = listOf(45f, 55f),
+                spotVsTargetUsd = -25.0
             ),
-            candidates.map { it.formulaVersion }
-        )
-        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", "YES", "YES", "YES"), candidates.map { it.side })
+            openedAt + 60_000L
+        ).associateBy { it.track }
+
+        assertEquals("NO", candidates.getValue(ScalpSignal.Track.FAIR_VALUE_DISLOCATION).side)
+        assertEquals("YES", candidates.getValue(ScalpSignal.Track.MODEL_DISLOCATION).side)
+        assertEquals("YES", candidates.getValue(ScalpSignal.Track.IMPORTED_MODEL).side)
+        assertEquals("NO", candidates.getValue(ScalpSignal.Track.MLP_CHANNEL).side)
+        assertEquals("YES", candidates.getValue(ScalpSignal.Track.CNN_CHANNEL).side)
+        assertEquals("NO", candidates.getValue(ScalpSignal.Track.GBM_CHANNEL).side)
+        assertEquals("YES", candidates.getValue(ScalpSignal.Track.SURVIVAL_CHANNEL).side)
+        assertEquals("NO", candidates.getValue(ScalpSignal.Track.MM_SHADOW).side)
+        assertEquals("YES", candidates.getValue(ScalpSignal.Track.ODDS_TAPE).side)
+        assertEquals("NO", candidates.getValue(ScalpSignal.Track.SPOT_TARGET).side)
     }
 
     @Test fun ticketCanOpenOutsideTheOldTimeAndSpotFilters() {

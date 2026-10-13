@@ -724,7 +724,7 @@ class TicketBuilderGateTest {
     }
 
     @Test
-    fun disablingLiveTicketsStillLeavesAllEightPaperScalpTracks() {
+    fun disablingLiveTicketsStillLeavesAllTwentyPaperScalpTracks() {
         val ctx = TicketBuilder.Context(
             settings = SignalSettings(ticketsEnabled = false, ticketRespectGates = false),
             alertsPaused = false

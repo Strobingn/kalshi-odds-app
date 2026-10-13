@@ -99,7 +99,7 @@ unresolved trading risks.
 
 ## 0.3.8
 
-- **Paper Buy / scalp experiment:** Paper mode Approve / Paper tap fills the isolated paper book with no Kalshi key. The dedicated bottom **Scalp** tab shows eight concurrent paper tracks, live candidates, open positions, exits, fees, high-water marks, and the full retained paper ledger. It starts at $100,000 and uses unrestricted synthetic credit; no paper path can place a Kalshi order.
+- **Paper Buy / scalp experiment:** Paper mode Approve / Paper tap fills the isolated paper book with no Kalshi key. The dedicated bottom **Scalp** tab runs twenty concurrent paper hypotheses per open 15-minute contract, shows each model's candidates, fills, settled count, win rate, realized P&L, exits, fees, high-water marks, and the retained paper ledger. It starts at $100,000 and uses unrestricted synthetic credit; no paper path can place a Kalshi order. The scoreboard is experimental evidence, not a profit forecast.
 - Offline edge-model training + one-tap **Get latest model** (the active
   `chat-GTP` workflow is manual and publishes `edge-model-chat-GTP`; activation
   requires a validated holdout win over the market and keeps rollback data).
