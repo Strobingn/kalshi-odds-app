@@ -99,8 +99,8 @@ class ReleaseGate0340ScalpTest {
         val b = ScalpBook(InMemoryScalpPersistence(), ScalpParams.GRID, InMemoryScalpTuneStore()) { "v${ids.incrementAndGet()}" }
         b.onQuote(q(close - 700_000L, 0.29, 0.30), true)
         assertTrue(b.allTrades().size > 1)
-        assertEquals(1, b.snapshot().size)
-        assertTrue(b.snapshot().all { it.isPrimary && it.variantId == ScalpParams.seedFor("BTC").id })
+        assertEquals(1, b.snapshot().filter { !it.variantId.endsWith("-h60") }.size) // 0.3.63: Fair-gap hold copy also fires
+        assertTrue(b.snapshot().filter { !it.variantId.endsWith("-h60") }.all { it.isPrimary && it.variantId == ScalpParams.seedFor("BTC").id })
         assertEquals(8, ScalpParams.GRID.size)
         // Every coin's walk-forward seed is inside the tuner grid.
         ScalpParams.COINS.forEach { assertTrue(ScalpParams.seedFor(it) in ScalpParams.GRID) }

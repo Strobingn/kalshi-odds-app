@@ -101,9 +101,9 @@ class ReleaseGate0340MultiStrategyTest {
         b.onQuote(q(t + 33_000L, 0.34, 0.35), true) // both fill
         b.onQuote(q(t + 36_000L, 0.34, 0.35), true) // same signal again: no second open per strategy/side
         // 0.3.50: the sixth model (maker-first dip) also runs as a primary; check the taker models here.
-        val open = b.snapshot().filter { it.state == ScalpState.OPEN && !it.isMaker && !it.variantId.endsWith("-h60") }
+        val open = b.snapshot().filter { it.state == ScalpState.OPEN && !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") }
         assertEquals(setOf(ScalpStrategy.FAIR_GAP, ScalpStrategy.DIP_HUNTER), open.map { it.strategy }.toSet())
-        assertEquals(2, b.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") }) // 0.3.61: dip-hold sibling also fires
+        assertEquals(2, b.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") }) // 0.3.61: dip-hold sibling also fires
         open.groupBy { it.strategy to it.side }.values.forEach { assertEquals(1, it.size) }
         assertTrue(open.all { it.isPrimary })
     }
@@ -130,7 +130,7 @@ class ReleaseGate0340MultiStrategyTest {
         val roomy = book(bankroll = 1_000.0)
         roomy.onQuote(q(t, 0.44, 0.45), true)
         roomy.onQuote(q(t + 30_000L, 0.34, 0.35), true)
-        assertEquals(2, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") })
+        assertEquals(2, roomy.snapshot().count { !it.isMaker && !it.variantId.endsWith("-h60") && !it.variantId.contains("-t99-") })
     }
 
     private fun closed(window: Int, variant: ScalpParams, cents: Double, i: Int): ScalpTrade {
