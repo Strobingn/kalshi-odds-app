@@ -9,7 +9,8 @@ import kotlinx.serialization.json.Json
  * On-device paper ledger. Isolated from live Approve / Kalshi keys.
  */
 class PaperBookStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val app = context.applicationContext
+    private val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val json = Json {
         ignoreUnknownKeys = true
         encodeDefaults = true
