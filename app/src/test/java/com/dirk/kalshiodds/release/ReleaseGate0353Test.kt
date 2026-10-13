@@ -15,7 +15,7 @@ import org.junit.Test
 
 class ReleaseGate0353Test {
     @Test fun eightModelsSharedBankroll() {
-        assertEquals(47, ScalpModels.ALL.size)
+        assertEquals(58, ScalpModels.ALL.size)
         assertEquals(20_000.0, ScalpModels.sliceUsd(20_000.0), 1e-9) // 0.3.54: no per-model split
     }
 

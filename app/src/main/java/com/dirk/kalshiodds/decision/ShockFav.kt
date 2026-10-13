@@ -25,7 +25,9 @@ object ShockFav {
     val MEDIAN_SIGMA: Map<String, Double> = mapOf("BTC" to 2.654e-5, "ETH" to 3.990e-5, "SOL" to 7.569e-5)
 
     /** 0.3.59 rule families. SHOCK_FAV = shock and/or late-fav legs; the rest are single-leg. */
-    enum class Kind { SHOCK_FAV, LAGGARD, FADE_MAKER, IMBALANCE, SIMPLE_DIP }
+    enum class Kind { SHOCK_FAV, LAGGARD, FADE_MAKER, IMBALANCE, SIMPLE_DIP, OPEN50 }
+    /** 0.3.64 Open 50 entry modes. */
+    enum class O50 { UPTICK, BOTH, MAKER, AI }
     /** 0.3.59: Scalp tab is Bitcoin only — sf scalpers trade BTC; ETH/SOL spot is signal input only. */
     const val TRADE_COIN = "BTC"
 
@@ -67,6 +69,10 @@ object ShockFav {
         /** 0.3.63 sf32: take profit only when the gain per contract after both taker fees exceeds tp. */
         val tpNet: Boolean = false,
         val group: String? = null,
+        /** 0.3.64 Open 50: entry mode, trailing drop below peak bid (null = off), net take-profit (null = off). */
+        val o50: O50? = null,
+        val trail: Double? = null,
+        val tpNetO50: Double? = null,
         /** Walk-forward test-day result of bt58 (per trade, $, 10-ct clips, after fees) and its 95 % CI, for the card. */
         val oos: String = ""
     ) {
@@ -78,8 +84,21 @@ object ShockFav {
             Kind.IMBALANCE -> String.format(java.util.Locale.US, "top-of-book size ≥%.0f%% one side, spread ≤2¢ → buy that side, hold %ds", imbR * 100, maxHoldS) +
                 (if (tpNet) String.format(java.util.Locale.US, "; take profit when gain after fees > %.0f¢", tp * 100) else "")
             Kind.SIMPLE_DIP -> String.format(java.util.Locale.US, "price only: ask ≥%.0f¢ below its 5-min average → buy; sell +%.0f¢, stop 15¢, out 60 s before close", dip * 100, tp * 100)
+            Kind.OPEN50 -> o50Summary()
             Kind.SHOCK_FAV -> summaryShockFav()
         } + (if (offUsHours) " · off-US hours" else "")
+        private fun o50Summary(): String = buildString {
+            append(when (o50) {
+                O50.UPTICK -> "5–30 s after open: buy the side that first ticks up"
+                O50.BOTH -> "5–30 s after open: buy both sides"
+                O50.MAKER -> "rest 49¢ bids both sides at open (fills only when ask trades through)"
+                O50.AI -> "5–30 s after open: GBM ${Open50Model.VERSION} predicts 60 s bid move; buy if net > ${Math.round(Open50Model.THRESHOLD * 100)}¢; exit if it predicts a drop"
+                null -> ""
+            })
+            trail?.let { append(String.format(java.util.Locale.US, "; sell %.0f¢ below peak bid", it * 100)) }
+            tpNetO50?.let { append(String.format(java.util.Locale.US, "; sell at +%.0f¢ net of fees", it * 100)) }
+            append("; stop 10¢, hold ≤3 min")
+        }
         private fun summaryShockFav(): String = buildString {
             if (shock) append(String.format(java.util.Locale.US, "shock ≥%.0fbp/%ds, lag ≥%.0f¢, hold ≤%ds", xBp, yS, lag * 100, maxHoldS))
             if (shock && fav) append(" + ")
@@ -91,6 +110,28 @@ object ShockFav {
     /** bt63 (BTC, 2 s delay, walk-forward) test-day results — filled from report63_btc.json. */
     private val SIMPLE_OOS: Map<String, String> = mapOf("sf41" to "BTC 2s delay: -0.41/trade (-0.47…-0.35) n=2122", "sf42" to "BTC 2s delay: -0.44/trade (-0.53…-0.35) n=1615", "sf43" to "BTC 2s delay: -0.41/trade (-0.48…-0.34) n=1716", "sf44" to "BTC 2s delay: -0.44/trade (-0.53…-0.34) n=1419")
     private val SIMPLE_NOEDGE: Map<String, Boolean> = mapOf("sf41" to true, "sf42" to true, "sf43" to true, "sf44" to true)
+    const val O50_OOS = "not backtested: live paper only"
+    const val O50_STOP = 0.10
+    const val O50_MAX_HOLD_S = 180.0
+    const val O50_MAKER_PX = 0.49
+    const val O50_MAKER_TTL_S = 60
+    fun isO50(code: String): Boolean = code.length >= 4 && code.take(4) in setOf("sf51", "sf52", "sf53", "sf54", "sf55", "sf56", "sf57", "sf58", "sf59", "sf60", "sf61")
+    /** Uptick side: YES mid vs mid at open, first ≥ 1¢ move picks the side. */
+    fun o50UptickSide(openMid: Double, mid: Double): String? = when {
+        mid >= openMid + 0.01 - 1e-9 -> "YES"; mid <= openMid - 0.01 + 1e-9 -> "NO"; else -> null }
+    fun o50InEntryWindow(tauS: Double): Boolean = (900.0 - tauS) in 5.0..30.0
+    /** Open 50 exit (no stop): trailing drop below peak, net TP, AI drop, max hold, τ < 30 s. */
+    fun o50Exit(p: Params, entry: Double, peakBid: Double, bid: Double, heldS: Double, tauS: Double, aiPred: Double? = null, clip: Int = CLIP): String? {
+        val net = (bid - entry) - (ScalpRule.orderFee(clip, bid) + ScalpRule.orderFee(clip, entry)) / clip
+        return when {
+            p.tpNetO50 != null && net >= p.tpNetO50 - 1e-9 -> "net take profit +${Math.round(p.tpNetO50 * 100)}¢"
+            p.trail != null && bid <= peakBid - p.trail + 1e-9 -> "trail ${Math.round(p.trail * 100)}¢ below peak"
+            aiPred != null && aiPred < -0.01 -> "model predicts drop"
+            heldS >= O50_MAX_HOLD_S -> "max hold 3 min"
+            tauS < 30.0 -> "τ < 30 s"
+            else -> null
+        }
+    }
     const val SIMPLE_WINDOW_MS = 300_000L
     const val SIMPLE_MIN_HISTORY_MS = 240_000L
     /** Pure Simple-dip entry rule. */
@@ -132,6 +173,18 @@ object ShockFav {
         Params("sf31", "Late fav strict off-US hours", shock = false, fav = true, fmin = 0.95, amax = 0.95, offUsHours = true, noEdge2s = false, oos = "BTC 2s delay: +1.43/trade (+0.23…+3.01) n=16"),
         // 0.3.63 queued copy + four Simple dip scalpers (price only; group "Simple").
         Params("sf32", "Book imbalance, net TP >2¢", kind = Kind.IMBALANCE, shock = false, imbR = 0.85, maxHoldS = 90, tp = 0.02, tpNet = true, noEdge2s = true, oos = "copy of sf30 + net take-profit; not separately backtested"),
+        // 0.3.64 Open 50 (paper, BTC, group "Open 50"): untested live-only cards, labelled no edge until data says otherwise.
+        Params("sf51", "Open 50 uptick trail 2¢", kind = Kind.OPEN50, shock = false, o50 = O50.UPTICK, trail = 0.02, group = "Open 50", oos = O50_OOS),
+        Params("sf52", "Open 50 uptick trail 3¢", kind = Kind.OPEN50, shock = false, o50 = O50.UPTICK, trail = 0.03, group = "Open 50", oos = O50_OOS),
+        Params("sf53", "Open 50 uptick +3¢ net", kind = Kind.OPEN50, shock = false, o50 = O50.UPTICK, tpNetO50 = 0.03, group = "Open 50", oos = O50_OOS),
+        Params("sf54", "Open 50 uptick +5¢ net", kind = Kind.OPEN50, shock = false, o50 = O50.UPTICK, tpNetO50 = 0.05, group = "Open 50", oos = O50_OOS),
+        Params("sf55", "Open 50 uptick +8¢ net", kind = Kind.OPEN50, shock = false, o50 = O50.UPTICK, tpNetO50 = 0.08, group = "Open 50", oos = O50_OOS),
+        Params("sf56", "Open 50 both sides trail 2¢", kind = Kind.OPEN50, shock = false, o50 = O50.BOTH, trail = 0.02, group = "Open 50", oos = O50_OOS),
+        Params("sf57", "Open 50 both sides trail 3¢", kind = Kind.OPEN50, shock = false, o50 = O50.BOTH, trail = 0.03, group = "Open 50", oos = O50_OOS),
+        Params("sf58", "Open 50 both sides +5¢ net", kind = Kind.OPEN50, shock = false, o50 = O50.BOTH, tpNetO50 = 0.05, group = "Open 50", oos = O50_OOS),
+        Params("sf59", "Open 50 maker 49¢ trail 2¢", kind = Kind.OPEN50, shock = false, o50 = O50.MAKER, trail = 0.02, group = "Open 50", oos = O50_OOS),
+        Params("sf60", "Open 50 maker 49¢ +3¢ net", kind = Kind.OPEN50, shock = false, o50 = O50.MAKER, tpNetO50 = 0.03, group = "Open 50", oos = O50_OOS),
+        Params("sf61", "Open 50 AI", kind = Kind.OPEN50, shock = false, o50 = O50.AI, trail = 0.02, group = "Open 50", oos = O50_OOS),
         Params("sf41", "Simple dip 5¢ → +8¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.05, tp = 0.08, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf41"), oos = SIMPLE_OOS.getValue("sf41")),
         Params("sf42", "Simple dip 5¢ → +15¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.05, tp = 0.15, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf42"), oos = SIMPLE_OOS.getValue("sf42")),
         Params("sf43", "Simple dip 10¢ → +8¢", kind = Kind.SIMPLE_DIP, shock = false, dip = 0.10, tp = 0.08, group = "Simple", noEdge2s = SIMPLE_NOEDGE.getValue("sf43"), oos = SIMPLE_OOS.getValue("sf43")),
@@ -141,11 +194,11 @@ object ShockFav {
 
     fun isShockFav(variantId: String): Boolean = variantId.length >= 4 && variantId.startsWith(PREFIX) && variantId[2].isDigit()
     /** 0.3.61 per-bet stop (¢ below entry, at the side's bid). bt61 train-chosen level per variant (BTC, 2 s delay); "none" or not studied → 25¢ (widest). */
-    val STOP_C: Map<String, Int> = mapOf("sf41" to 15, "sf42" to 15, "sf43" to 15, "sf44" to 15, "sf16" to 10, "sf18" to 10, "sf21" to 10, "sf23" to 10, "sf17" to 15, "sf19" to 15)
+    val STOP_C: Map<String, Int> = (listOf("sf51", "sf52", "sf53", "sf54", "sf55", "sf56", "sf57", "sf58", "sf59", "sf60", "sf61").associateWith { 10 }) + mapOf("sf41" to 15, "sf42" to 15, "sf43" to 15, "sf44" to 15, "sf16" to 10, "sf18" to 10, "sf21" to 10, "sf23" to 10, "sf17" to 15, "sf19" to 15)
     fun stopC(p: Params): Int = STOP_C[p.code] ?: 25
     /** True when bt61's train split chose a stop (else the 25¢ default is a backstop only). */
     fun stopTrainChosen(p: Params): Boolean = p.code in TRAIN_CHOSE
-    private val TRAIN_CHOSE = setOf("sf41", "sf42", "sf43", "sf44", "sf01", "sf02", "sf05", "sf07", "sf08", "sf09", "sf12", "sf15", "sf20", "sf16", "sf18", "sf21", "sf23", "sf17", "sf19")
+    private val TRAIN_CHOSE = setOf("sf51", "sf52", "sf53", "sf54", "sf55", "sf56", "sf57", "sf58", "sf59", "sf60", "sf61", "sf41", "sf42", "sf43", "sf44", "sf01", "sf02", "sf05", "sf07", "sf08", "sf09", "sf12", "sf15", "sf20", "sf16", "sf18", "sf21", "sf23", "sf17", "sf19")
     /** 0.3.61 labels (nothing deleted). */
     val TAGS: Map<String, String> = mapOf(
         "sf01" to "duplicate: identical trades to sf09 on the BTC-only tab",

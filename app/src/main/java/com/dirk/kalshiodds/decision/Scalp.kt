@@ -731,7 +731,26 @@ class ScalpBook(
         ShockFav.Kind.SIMPLE_DIP -> when {
             bid >= entry + p.tp - 1e-9 -> "take profit +${Math.round(p.tp * 100)}¢"
             tauS < 60.0 -> "60 s before close"; else -> null }
+        ShockFav.Kind.OPEN50 -> ShockFav.o50Exit(p, entry, bid, bid, heldS, tauS)
         ShockFav.Kind.FADE_MAKER -> when { bid >= entry + p.tp + 0.01 - 1e-9 -> "maker target"; tauS < 45.0 -> "τ < 45 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+    }
+
+    // 0.3.64 Open 50 state: YES mid at first quote after open, peak side bid per trade.
+    private val o50OpenMid = HashMap<String, Double>()
+    private val o50Peak = HashMap<String, Double>()
+
+    /** Open 50 AI features (see Open50Model), side-signed. Null without spot data. */
+    private fun o50Features(side: String, q: ScalpRule.Quote, sec: Long, sNow: Double, strike: Double, basis: Double, sig: Double, openMid: Double): DoubleArray? {
+        val g = if (side == "YES") 1.0 else -1.0
+        val b = sfSpot["BTC"] ?: return null
+        val ya = q.yesAsk ?: return null; val yb = q.yesBid ?: return null
+        val ask = q.ask(side) ?: return null; val bid = q.bid(side) ?: return null
+        val r = { ring: ShockFav.SpotRing?, y: Int -> ring?.let { ShockFav.moveBp(it, sec, y) } ?: 0.0 }
+        val bq = q.yesBidSize ?: 0.0; val aq = q.yesAskSize ?: 0.0
+        val im = if (bq + aq > 0) (bq - aq) / (bq + aq) else 0.0
+        return doubleArrayOf(g * r(b, 1), g * r(b, 5), g * r(b, 15), g * r(b, 60), sig / (ShockFav.MEDIAN_SIGMA["BTC"] ?: 2.654e-5),
+            g * kotlin.math.ln(sNow * kotlin.math.exp(-basis) / strike) * 1e4, g * r(sfSpot["ETH"], 15), g * r(sfSpot["SOL"], 15), g * im,
+            ask, ask - bid, g * ((ya + yb) / 2 - openMid), 900.0 - q.tauS)
     }
 
     private val simpleHist = HashMap<String, ArrayDeque<Triple<Long, Double, Double>>>()
@@ -752,6 +771,8 @@ class ScalpBook(
         val key = q.ticker.uppercase()
         val coin = ScalpParams.coinOf(q.ticker)
         val sec = q.nowMs / 1000L
+        if (q.tauS <= 900.0 && !o50OpenMid.containsKey(key)) o50OpenMid[key] = (ya + yb) / 2
+        if (o50OpenMid.size > 200) o50OpenMid.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { o50OpenMid.remove(it) }
         // 0.3.63 Simple dip: rolling 5-min side asks (price only), before any spot/fair early return.
         simpleHist.getOrPut(key) { ArrayDeque() }.let { h ->
             h.addLast(Triple(q.nowMs, ya, 1.0 - yb))
@@ -773,7 +794,7 @@ class ScalpBook(
         val fairYes = ShockFav.fairYes(sNow, strike, sig, q.tauS, basis)
         stepShadows(q, fairYes)
         val mine = _trades.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
-        val giveUpMs = { t: ScalpTrade -> if (ShockFav.byVariantId(t.variantId)?.kind == ShockFav.Kind.FADE_MAKER) Long.MAX_VALUE else ShockFav.ENTRY_GIVE_UP_MS }
+        val giveUpMs = { t: ScalpTrade -> if (ShockFav.byVariantId(t.variantId)?.let { it.kind == ShockFav.Kind.FADE_MAKER || it.o50 == ShockFav.O50.MAKER } == true) Long.MAX_VALUE else ShockFav.ENTRY_GIVE_UP_MS }
         val changed = ArrayList<ScalpTrade>()
         val live = q.nowMs < q.closeMs && q.fresh()
         // 0.3.58 delayed entry: fill at the first quote ≥ 2 s after the signal, at that ask, depth-capped.
@@ -785,6 +806,18 @@ class ScalpBook(
             }
             if (age < ShockFav.ENTRY_DELAY_MS || !q.fresh()) continue
             val pk = ShockFav.byVariantId(t.variantId)
+            if (pk?.o50 == ShockFav.O50.MAKER) {
+                // 0.3.64 Open 50 maker: resting 49¢ bid; filled only when the side ask trades THROUGH (≤ 48¢) — adverse-selection aware, fee 0.
+                if (q.nowMs - t.signalAtMs > ShockFav.O50_MAKER_TTL_S * 1000L || q.tauS <= 60.0) {
+                    changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, restingLimit = null, note = "${t.note}; 49¢ bid unfilled")
+                } else {
+                    val a = q.ask(t.side)
+                    if (a != null && a <= ShockFav.O50_MAKER_PX - 0.01 + 1e-9)
+                        changed += t.copy(state = ScalpState.OPEN, contracts = ShockFav.CLIP, entryPrice = ShockFav.O50_MAKER_PX, entryFeeUsd = 0.0, entryAtMs = q.nowMs,
+                            note = String.format(Locale.US, "%s; maker filled %d @ 49¢ (ask traded through)", t.note, ShockFav.CLIP))
+                }
+                continue
+            }
             if (pk?.kind == ShockFav.Kind.FADE_MAKER) {
                 // 0.3.59 maker: post at the side's bid 2 s after the signal; filled only when the ask trades THROUGH (≤ px − 1¢).
                 val px = t.restingLimit
@@ -823,6 +856,10 @@ class ScalpBook(
             val stopHit = t.state == ScalpState.OPEN && bid <= (t.entryPrice ?: 0.0) - stopC / 100.0 + 1e-9
             if (stopHit && t.isPrimary) {
                 val ep = t.entryPrice ?: 0.0
+                if (p.kind == ShockFav.Kind.OPEN50) {
+                    var pk = o50Peak[t.id] ?: bid
+                    addShadow(t, sf = true) { qq, h, b, _ -> pk = maxOf(pk, b); ShockFav.o50Exit(p, ep, pk, b, h, qq.tauS) != null }
+                } else
                 addShadow(t, sf = true) { qq, h, b, f -> if (favLeg) false else sfNoStopExit(p, ep, h, qq.tauS, b, f ?: b) != null }
             }
             if (favLeg && !stopHit && t.state == ScalpState.OPEN) continue
@@ -835,7 +872,12 @@ class ScalpBook(
             }
             val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
                 ?: (if (stopHit) "stop −${stopC}¢" else null)
-                ?: (if (favLeg) null else sfNoStopExit(p, t.entryPrice ?: 1.0, heldS, q.tauS, bid, sideFair)) ?: continue
+                ?: (if (p.kind == ShockFav.Kind.OPEN50) {
+                    val pk = maxOf(o50Peak[t.id] ?: bid, bid).also { o50Peak[t.id] = it }
+                    val ai = if (p.o50 == ShockFav.O50.AI) o50Features(t.side, q, sec, sNow, strike, basis, sig, o50OpenMid[key] ?: ((ya + yb) / 2))?.let { Open50Model.predict(it) } else null
+                    ShockFav.o50Exit(p, t.entryPrice ?: 1.0, pk, bid, heldS, q.tauS, ai, t.contracts.coerceAtLeast(1))
+                } else null)
+                ?: (if (favLeg || p.kind == ShockFav.Kind.OPEN50) null else sfNoStopExit(p, t.entryPrice ?: 1.0, heldS, q.tauS, bid, sideFair)) ?: continue
             val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
             val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
             if (n <= 0) { if (base !== t) changed += base; continue }
@@ -849,6 +891,35 @@ class ScalpBook(
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
             for (p in ShockFav.VARIANTS) {
+                if (p.kind == ShockFav.Kind.OPEN50) {
+                    // 0.3.64 Open 50: one shot per market per side, only 5–30 s after the open.
+                    if (!ShockFav.o50InEntryWindow(q.tauS)) continue
+                    val openMid = o50OpenMid[key] ?: continue
+                    val sides: List<String> = when (p.o50) {
+                        ShockFav.O50.BOTH, ShockFav.O50.MAKER -> listOf("YES", "NO")
+                        ShockFav.O50.UPTICK -> listOfNotNull(ShockFav.o50UptickSide(openMid, (ya + yb) / 2))
+                        ShockFav.O50.AI -> listOf("YES", "NO").mapNotNull { sd ->
+                            val a = q.ask(sd) ?: return@mapNotNull null; val b = q.bid(sd) ?: return@mapNotNull null
+                            val x = o50Features(sd, q, sec, sNow, strike, basis, sig, openMid) ?: return@mapNotNull null
+                            val net = Open50Model.predict(x) - (a - b) - (ScalpRule.orderFee(ShockFav.CLIP, a) + ScalpRule.orderFee(ShockFav.CLIP, b)) / ShockFav.CLIP
+                            if (net > Open50Model.THRESHOLD) sd to net else null
+                        }.maxByOrNull { it.second }?.let { listOf(it.first) } ?: emptyList()
+                        null -> emptyList()
+                    }
+                    if (p.o50 != ShockFav.O50.BOTH && p.o50 != ShockFav.O50.MAKER && mine.any { it.variantId.take(4) == p.code }) continue
+                    for (sd in sides) {
+                        val vid = if (sd == "NO" && (p.o50 == ShockFav.O50.BOTH || p.o50 == ShockFav.O50.MAKER)) p.code + "n" else p.shockId
+                        if (mine.any { it.variantId == vid }) continue
+                        val ask = q.ask(sd)?.takeIf { it in 0.05..0.95 } ?: continue
+                        val f = if (sd == "YES") fairYes else 1.0 - fairYes
+                        val what = if (p.o50 == ShockFav.O50.AI) "open 50 · ${Open50Model.VERSION}" else "open 50"
+                        sfEnter(q, p, vid, sd, ask, f, openCost, bankroll, what)?.let {
+                            val tr = if (p.o50 == ShockFav.O50.MAKER) it.copy(restingLimit = ShockFav.O50_MAKER_PX, restingSinceMs = q.nowMs) else it
+                            changed += tr; openCost += tr.entryCostUsd
+                        }
+                    }
+                    continue
+                }
                 if (p.kind != ShockFav.Kind.SHOCK_FAV) {
                     if (mine.any { it.variantId == p.shockId && isActive(it) }) continue
                     val side = when (p.kind) {
@@ -1141,6 +1212,8 @@ class ScalpBook(
     }
 
     private fun close(t: ScalpTrade, atMs: Long, reason: String?): ScalpTrade {
+        o50Peak.remove(t.id)
+        while (o50Peak.size > 500) o50Peak.remove(o50Peak.keys.first())
         val net = t.proceedsUsd - t.exitFeeUsd - t.entryCostUsd
         return t.copy(state = ScalpState.CLOSED, closedAtMs = atMs, netUsd = net, exitReason = reason)
     }

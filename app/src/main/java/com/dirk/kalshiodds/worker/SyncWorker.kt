@@ -55,6 +55,14 @@ class SyncWorker(
                 onSettings = { json -> settingsJson += json },
                 onPaper = { fill -> container.paper.book.upsertFromSync(fill) }
             )
+            // 0.3.64: upload crash / non-fatal coroutine traces as kind "crash".
+            runCatching {
+                val crashes = com.dirk.kalshiodds.crash.CrashLog.apply { attach(applicationContext) }.unsyncedRecords()
+                if (crashes.isNotEmpty()) {
+                    val out = SupabaseSync().pushBatches(hub, crashes)
+                    if ("crash" !in out.failedKinds && out.errors.isEmpty()) com.dirk.kalshiodds.crash.CrashLog.markSynced(crashes.map { it.key })
+                }
+            }
             if (result.acknowledgePaper) container.paper.book.acknowledgePaperSync(startedMs)
             // 0.3.56: only a successful upload advances the snapshot throttle.
             if (result.snapshotsOk) com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.commit(picked)

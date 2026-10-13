@@ -136,15 +136,15 @@ class ReleaseGate0350Test {
     @Test fun pipelineIsOffMainAndConflated() {
         val vm = src("ui/OddsViewModel.kt")
         assertTrue(vm.contains("Dispatchers.Default.limitedParallelism(1)"))
-        assertTrue(vm.contains("CoinEvalConflator(viewModelScope, paperLane)"))
+        assertTrue(vm.contains("CoinEvalConflator(vmScope, paperLane)"))
         assertFalse(vm.contains("MarketEventDebouncer(viewModelScope)"))
-        assertTrue(vm.contains("viewModelScope.launch(paperLane)"))
+        assertTrue(vm.contains("vmScope.launch(paperLane)"))
         // FGS start deadline: startForeground stays the first thing in onStartCommand / onCreate path (unchanged file)
         assertTrue(src("signal/service/LiveSignalsService.kt").contains("startForeground"))
     }
 
     @Test fun sixModelsWithSlices() {
-        assertEquals(47, ScalpModels.ALL.size)
+        assertEquals(58, ScalpModels.ALL.size)
         assertEquals(ScalpModels.Model.MAKER_DIP, ScalpModels.modelOf(ScalpModels.MAKER_DIP_PARAMS))
         assertTrue(ScalpModels.MAKER_DIP_PARAMS.maker)
         assertEquals(20_000.0, ScalpModels.sliceUsd(20_000.0), 1e-9) // 0.3.54 shared bankroll
@@ -162,7 +162,7 @@ class ReleaseGate0350Test {
         val trades = listOf(closed("a", "26OCT101000", 1.0, fg), closed("b", "26OCT101000", -0.5, mk), closed("c", "26OCT101015", 2.0, mk),
             closed("s", "26OCT101015", 99.0, mk).copy(ruleVersion = "${ScalpRule.VERSION}|$mk|S"))
         val lb = ScalpModels.leaderboard(trades)
-        assertEquals(47, lb.size)
+        assertEquals(58, lb.size)
         assertEquals(ScalpModels.Model.MAKER_DIP, lb.first().model)
         assertEquals(1.5, lb.first().netUsd, 1e-9) // shadow row excluded
         assertEquals(0.5, lb.first().winRate!!, 1e-9)

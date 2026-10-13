@@ -1249,7 +1249,7 @@ class KnownIssuesRegressionTest {
             File("src/main/java/com/dirk/kalshiodds/ui/OddsViewModel.kt")
         ).first { it.isFile }.readText()
         assertTrue(vm.contains("bindRollover"))
-        assertTrue(vm.contains("container.rollover.start(viewModelScope)"))
+        assertTrue(vm.contains("container.rollover.start(vmScope)"))
         assertTrue(vm.contains("applyRolloverEvent"))
         assertTrue(vm.contains("fun onForeground"))
         assertTrue(vm.contains("container.rollover.refreshFromRest()"))
