@@ -112,7 +112,7 @@ fun ScalpScreen(
                     )
                 }
                 Text(
-                    "Sells a 2¢ giveback after the bid has risen 2¢, and cuts a trade that is 3¢ under the entry. Nothing is held to settlement.",
+                    "Every book buys the cheap side, holds the rise, and sells the first real drop off the high. Nothing is held to settlement.",
                     style = MaterialTheme.typography.labelSmall,
                     color = colors.textSecondary
                 )
