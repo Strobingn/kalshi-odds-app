@@ -734,16 +734,35 @@ class ScalpBook(
         if (sfBasis.size > 200) sfBasis.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { sfBasis.remove(it) }
         val fairYes = ShockFav.fairYes(sNow, strike, sig, q.tauS, basis)
         val mine = _trades.value.filter { it.ticker == key && ShockFav.isShockFav(it.variantId) }
+        val giveUpMs = { t: ScalpTrade -> if (ShockFav.byVariantId(t.variantId)?.kind == ShockFav.Kind.FADE_MAKER) Long.MAX_VALUE else ShockFav.ENTRY_GIVE_UP_MS }
         val changed = ArrayList<ScalpTrade>()
         val live = q.nowMs < q.closeMs && q.fresh()
         // 0.3.58 delayed entry: fill at the first quote ≥ 2 s after the signal, at that ask, depth-capped.
         for (t in mine) {
             if (t.state != ScalpState.PENDING_ENTRY) continue
             val age = q.nowMs - t.signalAtMs
-            if (q.nowMs >= q.closeMs || age > ShockFav.ENTRY_GIVE_UP_MS) {
+            if (q.nowMs >= q.closeMs || age > giveUpMs(t)) {
                 changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill within ${ShockFav.ENTRY_GIVE_UP_MS / 1000}s"); continue
             }
             if (age < ShockFav.ENTRY_DELAY_MS || !q.fresh()) continue
+            val pk = ShockFav.byVariantId(t.variantId)
+            if (pk?.kind == ShockFav.Kind.FADE_MAKER) {
+                // 0.3.59 maker: post at the side's bid 2 s after the signal; filled only when the ask trades THROUGH (≤ px − 1¢).
+                val px = t.restingLimit
+                if (px == null) {
+                    val b = q.bid(t.side)?.takeIf { it in 0.05..0.95 }
+                    changed += if (b == null) t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no bid to join")
+                        else t.copy(restingLimit = Math.round(b * 100) / 100.0, restingSinceMs = q.nowMs, note = String.format(Locale.US, "%s; resting bid %.0f¢", t.note, b * 100))
+                } else if (q.nowMs - (t.restingSinceMs ?: q.nowMs) > pk.ttlS * 1000L || q.tauS <= 60.0) {
+                    changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, restingLimit = null, note = "${t.note}; maker bid unfilled")
+                } else {
+                    val a = q.ask(t.side)
+                    if (a != null && a <= px - 0.01 + 1e-9)
+                        changed += t.copy(state = ScalpState.OPEN, contracts = ShockFav.CLIP, entryPrice = px, entryFeeUsd = 0.0, entryAtMs = q.nowMs,
+                            note = String.format(Locale.US, "%s; maker filled %d @ %.0f¢ (ask traded through)", t.note, ShockFav.CLIP, px * 100))
+                }
+                continue
+            }
             val ask = q.ask(t.side) ?: continue
             val n = minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
             if (n <= 0) continue
@@ -758,20 +777,48 @@ class ScalpBook(
             val p = ShockFav.byVariantId(t.variantId) ?: continue
             val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
             val sideFair = if (t.side == "YES") fairYes else 1.0 - fairYes
-            val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT }
-                ?: ShockFav.shockExit(p, (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0, q.tauS, bid, sideFair) ?: continue
+            val heldS = (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000.0
+            if (p.kind == ShockFav.Kind.FADE_MAKER && t.state == ScalpState.OPEN) {
+                val tgt = (t.entryPrice ?: 0.0) + p.tp
+                if (bid >= tgt + 0.01 - 1e-9) { // resting ask at target traded through: maker exit, fee 0
+                    changed += close(t.copy(soldContracts = t.contracts, proceedsUsd = t.proceedsUsd + t.remaining * tgt), q.nowMs, "maker target +${Math.round(p.tp * 100)}¢")
+                    continue
+                }
+            }
+            val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: when (p.kind) {
+                ShockFav.Kind.SHOCK_FAV -> ShockFav.shockExit(p, heldS, q.tauS, bid, sideFair)
+                ShockFav.Kind.LAGGARD -> when {
+                    bid >= (t.entryPrice ?: 1.0) + p.tp - 1e-9 -> "take profit +${Math.round(p.tp * 100)}¢"
+                    q.tauS < 30.0 -> "τ < 30 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+                ShockFav.Kind.IMBALANCE -> when { q.tauS < 30.0 -> "τ < 30 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+                ShockFav.Kind.FADE_MAKER -> when { q.tauS < 45.0 -> "τ < 45 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
+            } ?: continue
             val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
             val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
             if (n <= 0) { if (base !== t) changed += base; continue }
             val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
             changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
         }
-        if (enabled && live) {
+        // 0.3.59: Scalp tab is Bitcoin only — sf entries on BTC markets only (other coins' spot is signal input).
+        if (enabled && live && coin == ShockFav.TRADE_COIN) {
             val sigma: Double? = sig
             var openCost = openCostUsd()
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
             for (p in ShockFav.VARIANTS) {
+                if (p.kind != ShockFav.Kind.SHOCK_FAV) {
+                    if (mine.any { it.variantId == p.shockId && isActive(it) }) continue
+                    val side = when (p.kind) {
+                        ShockFav.Kind.LAGGARD -> ShockFav.laggardSide(p, coin, sfSpot, sec, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
+                        ShockFav.Kind.IMBALANCE -> ShockFav.imbalanceSide(p, yb, ya, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
+                        ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, 5)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { if (it > 0) "NO" else "YES" } else null
+                        else -> null
+                    } ?: continue
+                    val ask = q.ask(side) ?: continue
+                    val f = if (side == "YES") fairYes else 1.0 - fairYes
+                    sfEnter(q, p, p.shockId, side, ask, f, openCost, bankroll, p.kind.name.lowercase().replace('_', ' '))?.let { changed += it; openCost += it.entryCostUsd }
+                    continue
+                }
                 if (p.shock && mine.none { it.variantId == p.shockId && isActive(it) }) {
                     val side = ShockFav.shockSide(p, coin, ring, sec, q.tauS, sigma)
                     if (side != null) {
@@ -792,7 +839,7 @@ class ScalpBook(
                     for (side in listOf("YES", "NO")) {
                         val f = if (side == "YES") fy else 1.0 - fy
                         val ask = q.ask(side) ?: continue
-                        if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin)) continue
+                        if (!ShockFav.favEntryOk(p, f, ask, q.tauS, coin, q.closeMs)) continue
                         sfEnter(q, p, p.favId, side, ask, f, openCost, bankroll, "late fav")?.let { changed += it; openCost += it.entryCostUsd }
                         break
                     }
@@ -806,7 +853,7 @@ class ScalpBook(
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
-        val n = minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
+        val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
         val cost = ask * n + ScalpRule.orderFee(n, ask)
         if (openCost + cost > bankroll + 1e-9) return null

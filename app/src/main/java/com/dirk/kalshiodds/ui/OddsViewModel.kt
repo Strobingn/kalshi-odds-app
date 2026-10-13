@@ -227,6 +227,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val markets = _state.value.snapshot?.allMarkets.orEmpty()
             .filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
             .filter { (it.closeTimeEpochMs ?: Long.MAX_VALUE) > now }
+            // 0.3.59: Scalp tab is Bitcoin only.
+            .filter { com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN }
             .sortedWith(compareBy({ it.closeTimeEpochMs ?: Long.MAX_VALUE }, { it.ticker }))
             .map { ScalpTabMarket(it.ticker, com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker), it.closeTimeEpochMs, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(it.ticker, it.closeTimeEpochMs)) }
             .distinctBy { it.ticker }
@@ -242,14 +244,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             next = next.copy(
                 leaderAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor),
                 leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor) }.orEmpty(),
-                leaderByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, withCi = false) },
+                leaderByCoin = emptyMap(),
                 algoAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor).associateBy { it.model },
                 algoToday = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now), withCi = false).associateBy { it.model },
-                algoByCoin = byCoinPerModel(trades, bidFor, null),
-                algoTodayByCoin = byCoinPerModel(trades, bidFor, com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now)),
-                leaderTodayByCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
-                    com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now), withCi = false)
-                },
+                algoByCoin = emptyMap(),
+                algoTodayByCoin = emptyMap(),
+                leaderTodayByCoin = emptyMap(),
                 windows = com.dirk.kalshiodds.decision.ScalpModels.perWindow(trades, cur.coin),
                 sliceUsd = com.dirk.kalshiodds.decision.ScalpModels.sliceUsd(runCatching { paperBook.snapshot().cashUsd }.getOrDefault(bankroll))
             )
@@ -1567,9 +1567,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      */
     private fun runScalp(live: List<MarketUiModel>, s: com.dirk.kalshiodds.signal.config.SignalSettings) {
         val now = container.clock.nowMs()
+        val openScalps = container.scalp.openTickers()
         live.forEach { market ->
             val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
             if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
+            // 0.3.59: scalpers trade Bitcoin only (ETH/SOL markets only to wind down positions opened before 0.3.59).
+            if (com.dirk.kalshiodds.decision.ScalpParams.coinOf(market.ticker) != com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN &&
+                market.ticker.uppercase() !in openScalps) return@forEach
             val book = hub.scoring.book.snapshotBook(market.ticker) ?: return@forEach
             val spot = settlementFor(market.ticker, now).spot
             val coin = when {

@@ -77,10 +77,8 @@ class AppContainer(context: Context) {
             ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),
         tuneStore = com.dirk.kalshiodds.decision.SharedPrefsScalpTuneStore(app),
         // 0.3.40: total open scalp cost ≤ free paper bankroll (cash not tied up in Autopilot paper bets).
-        bankrollUsd = {
-            runCatching { paper.book.snapshot().cashUsd }.getOrNull()
-                ?: com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
-        }
+        // 0.3.59 experiment: scalpers' paper bankroll is unlimited (no cash check). P&L still per algo; Autopilot unchanged.
+        bankrollUsd = { Double.POSITIVE_INFINITY }
     )
     /** Once-per-event trade notifications. */
     val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)

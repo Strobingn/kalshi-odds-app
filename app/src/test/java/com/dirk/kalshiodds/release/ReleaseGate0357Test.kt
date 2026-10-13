@@ -24,10 +24,10 @@ class ReleaseGate0357Test {
     }
 
     @Test fun twentyVariantsDistinctAndMapped() {
-        assertEquals(20, ShockFav.VARIANTS.size)
-        assertEquals(20, ShockFav.VARIANTS.map { it.code }.toSet().size)
-        assertEquals(28, ScalpModels.ALL.size)
-        assertEquals(20, ScalpModels.SF_MODELS.size)
+        assertEquals(29, ShockFav.VARIANTS.size)
+        assertEquals(29, ShockFav.VARIANTS.map { it.code }.toSet().size)
+        assertEquals(37, ScalpModels.ALL.size)
+        assertEquals(29, ScalpModels.SF_MODELS.size)
         assertTrue(ShockFav.isShockFav("sf07") && ShockFav.isShockFav("sf20f") && !ShockFav.isShockFav("fcride-h300"))
     }
 
@@ -37,16 +37,16 @@ class ReleaseGate0357Test {
         warm(book, t0, 100_000.0)
         // +10 bp in 5 s; book lags (YES ask 0.41 while fair is far higher)
         for (i in 0..4) book.tickSpot("BTC", 100_000.0, t0 + i * 1000L)
-        val out = book.onShockFavQuote(q(t0 + 5_000L, 100_100.0, 0.41, 0.39), true)
+        val out = book.onShockFavQuote(q(t0 + 5_000L, 100_100.0, 0.41, 0.39), true).filter { ShockFav.byVariantId(it.variantId)?.kind == ShockFav.Kind.SHOCK_FAV }
         assertTrue(out.isNotEmpty())
         out.forEach { assertEquals(ScalpState.PENDING_ENTRY, it.state); assertEquals("YES", it.side); assertTrue(ScalpModels.modelOf(it) in ScalpModels.SF_MODELS) }
         // 0.3.58: no fill before 2 s; then fill at the ask of that later quote, capped at its size
         assertTrue(book.onShockFavQuote(q(t0 + 6_000L, 100_100.0, 0.41, 0.39), true).none { it.state == ScalpState.OPEN })
-        val filled = book.onShockFavQuote(q(t0 + 7_100L, 100_100.0, 0.47, 0.45, size = 7.0), true).filter { it.state == ScalpState.OPEN }
+        val filled = book.onShockFavQuote(q(t0 + 7_100L, 100_100.0, 0.47, 0.45, size = 7.0), true).filter { it.state == ScalpState.OPEN && out.any { o -> o.id == it.id } }
         assertEquals(out.size, filled.size)
         filled.forEach { assertEquals(7, it.contracts); assertEquals(0.47, it.entryPrice!!, 1e-9) }
         val settled = book.settle(tk, "yes", close + 5_000L)
-        assertTrue(settled.all { it.state == ScalpState.CLOSED && it.netUsd != null })
+        assertTrue(settled.all { (it.state == ScalpState.CLOSED && it.netUsd != null) || it.state == ScalpState.NO_FILL })
     }
 
     @Test fun lateFavOncePerMarketAndDisabledMeansNothing() {
