@@ -51,7 +51,14 @@ fun ScalpCharts(accounts: List<ScalpAccount>) {
             fontWeight = FontWeight.Bold
         )
         Text(
-            String.format(Locale.US, "%d ahead · %d behind", ahead, behind),
+            String.format(
+                Locale.US,
+                "%d ahead · %d behind · best %+.0f · worst %+.0f",
+                ahead,
+                behind,
+                accounts.maxOfOrNull { it.pnlUsd() } ?: 0.0,
+                accounts.minOfOrNull { it.pnlUsd() } ?: 0.0
+            ),
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
