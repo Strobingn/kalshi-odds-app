@@ -1,0 +1,175 @@
+name: Train scalper model (Claude)
+
+# Retrains the ML scalper the app ships (app/src/main/assets/scalper_model.json) on the newest public trade
+# tape: the archived tape in the "scalper-data" release plus every settled KXBTC15M window Kalshi still lists.
+# The split rolls with the data (tools/research/scalp/splits.py): the newest SCALP_TEST_DAYS days are the test,
+# the 4 before them tune the threshold, everything older trains. gate_scalper.py then scores the new model and
+# the shipped one on the same test days; only a model that passes is copied into the app, checked by the Kotlin
+# scalper tests (parity with the Python evaluator) and committed to this branch. Paper data only, no API key.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Days of settled windows to train and test on"
+        default: "30"
+      test_days:
+        description: "Newest days held out as the test"
+        default: "7"
+  push:
+    branches: [claude/scalper-model-refresh]
+    paths:
+      - ".github/workflows/train-scalper-model.yml"
+      - "tools/research/scalp/splits.py"
+      - "tools/research/scalp/gate_scalper.py"
+      - "tools/research/scalp/train_compact.py"
+      - "tools/research/scalp/queue_ml.py"
+      - "tools/research/scalp/export_app_model.py"
+      - "tools/research/scalp/build_ml.py"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: train-scalper-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  PYTHONPATH: ${{ github.workspace }}/tools/research/scalp
+  SCALP_TEST_DAYS: ${{ inputs.test_days || '7' }}
+  SCALP_QUEUE_FROM: compact
+  DAYS: ${{ inputs.days || '30' }}
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install -q numpy pandas lightgbm scipy
+
+      - name: Gate checks
+        run: python3 tools/research/scalp/test_gate_scalper.py
+
+      - name: Restore the archived tape
+        run: |
+          mkdir -p work/tape/raw dl
+          gh release download scalper-data -p 'kxbtc15m_trade_tape_to_*.tar' -D dl || echo "(no archived tape)"
+          for f in dl/*.tar; do [ -f "$f" ] && tar -xf "$f" -C work/tape; done
+          if [ -f work/tape/markets.json ]; then mv work/tape/markets.json work/tape/markets_archive.json; fi
+          echo "archived windows: $(ls work/tape/raw | wc -l)"
+
+      # pull_tape skips every window already on disk, so only the newer ones are fetched.
+      - name: Pull the newest windows
+        working-directory: work
+        run: python3 -m pull_tape tape "$DAYS" 6
+
+      - name: Merge the window lists
+        working-directory: work
+        run: |
+          python3 - <<'EOF'
+          import json, os, time
+          days = float(os.environ["DAYS"])
+          lo = time.time() - days * 86400
+          mk = {}
+          for name in ("markets_archive.json", "markets.json"):
+              path = os.path.join("tape", name)
+              if os.path.exists(path):
+                  for m in json.load(open(path)):
+                      mk[m["ticker"]] = m
+          keep = [m for m in mk.values() if m["close"] >= lo and os.path.exists(os.path.join("tape", "raw", m["ticker"] + ".npz"))]
+          keep.sort(key=lambda m: -m["close"])
+          json.dump(keep, open(os.path.join("tape", "markets.json"), "w"))
+          print(len(keep), "windows with a tape in the last", days, "days")
+          EOF
+
+      - name: Coinbase closes
+        working-directory: work
+        run: python3 -m pull_cb "$(( DAYS + 2 ))"
+
+      - name: Build the dataset
+        working-directory: work
+        run: python3 -m build_ml tape ml_data.npz 2 | tail -n 3
+
+      - name: Train
+        working-directory: work
+        run: python3 -m train_compact | tee train.log
+
+      - name: Queue penalty
+        working-directory: work
+        run: python3 -m queue_ml tape | tee queue.log
+
+      - name: Export and parity fixture
+        working-directory: work
+        run: python3 -m export_app_model tape | tee export.log
+
+      - name: Gate
+        id: gate
+        working-directory: work
+        run: |
+          python3 -m gate_scalper ml_data.npz scalper_model.json ../app/src/main/assets/scalper_model.json gate.md gate.json
+          echo "promote=$(python3 -c 'import json; print(str(json.load(open("gate.json"))["promote"]).lower())')" >> "$GITHUB_OUTPUT"
+          {
+            cat gate.md
+            echo ""
+            echo "### Training"
+            echo '```'
+            tail -n 14 train.log
+            echo '```'
+            echo "### Queue penalty"
+            echo '```'
+            tail -n 9 export.log
+            echo '```'
+          } > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scalper-retrain-${{ github.run_number }}
+          path: |
+            work/scalper_model.json
+            work/scalper_parity.json
+            work/*.log
+            work/gate.*
+            work/report.md
+          if-no-files-found: ignore
+
+      - name: Copy into the app
+        if: steps.gate.outputs.promote == 'true'
+        run: |
+          cp work/scalper_model.json app/src/main/assets/scalper_model.json
+          cp work/scalper_parity.json app/src/test/resources/scalper_parity.json
+          mkdir -p docs
+          cp work/report.md docs/scalper-model-retrain.md
+
+      - uses: actions/setup-java@v4
+        if: steps.gate.outputs.promote == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.gate.outputs.promote == 'true'
+
+      - name: Kotlin scalper tests on the new model
+        if: steps.gate.outputs.promote == 'true'
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --tests 'com.dirk.kalshiodds.signal.scalper.*'
+
+      - name: Commit the new model
+        if: steps.gate.outputs.promote == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/assets/scalper_model.json app/src/test/resources/scalper_parity.json docs/scalper-model-retrain.md
+          range=$(python3 -c 'import json; print(" … ".join(json.load(open("work/gate.json"))["test"]))')
+          git commit -m "Scalper model retrained, tested on ${range}" -m "$(cat work/gate.md)"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

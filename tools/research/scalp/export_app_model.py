@@ -6,9 +6,10 @@
 Run in the working folder:  python3 -m export_app_model tape"""
 import json, os, sys, random, numpy as np
 import build_ml as M, scalp_b as B
+from splits import split
 TAPE=sys.argv[1] if len(sys.argv)>1 else 'tape'
 q=json.load(open('queue_ml_out.json')); pt=np.load('compact_pred_test.npy')[:,0]; meta=json.load(open('compact_meta.json')); theta=meta['theta']; FEATS=meta['feats']
-d=np.load('ml_data.npz',allow_pickle=True); Y=d['Y']; mkt=d['mkt'].astype(int); mday=d['mday']; days=sorted(set(mday)); TE=set(days[15:]); day=mday[mkt]
+d=np.load('ml_data.npz',allow_pickle=True); Y=d['Y']; mkt=d['mkt'].astype(int); mday=d['mday']; days=sorted(set(mday)); _,_,TE=split(days); day=mday[mkt]
 c=np.isin(day,list(TE))&~np.isnan(Y[:,4]); rows=np.where(c)[0]
 bym={}
 for i,r in enumerate(rows): bym.setdefault(mkt[r],[]).append(i)
