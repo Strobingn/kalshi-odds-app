@@ -29,6 +29,7 @@ import com.dirk.kalshiodds.domain.KalshiQuoteDisplay
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.paper.PaperArchive
 import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.ScalpReview
 import com.dirk.kalshiodds.signal.trade.ScalpSignal
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -66,6 +67,7 @@ fun ScalpScreen(
     val scorecards = ScalpSignal.Track.values().map { track ->
         ScalpTrackScore.from(track, scalpFills.filter { it.strategyVersion == track.formulaVersion })
     }
+    val reviewReady = scorecards.count { it.review.decision != ScalpReview.Decision.COLLECT }
 
     LazyColumn(
         modifier = Modifier
@@ -106,6 +108,10 @@ fun ScalpScreen(
                 onSetPaperTrading = onSetPaperTrading,
                 onResetPaper = onResetPaper
             )
+        }
+
+        item {
+            ReviewProtocolCard(scorecards = scorecards, reviewReady = reviewReady)
         }
 
         item {
@@ -166,6 +172,38 @@ fun ScalpScreen(
                 ScalpFillCard(archived.fill, archivedAtMs = archived.archivedAtMs)
             }
         }
+    }
+}
+
+@Composable
+private fun ReviewProtocolCard(scorecards: List<ScalpTrackScore>, reviewReady: Int) {
+    val colors = DipTheme.colors
+    val keeps = scorecards.count { it.review.decision == ScalpReview.Decision.KEEP }
+    val tweaks = scorecards.count { it.review.decision == ScalpReview.Decision.TWEAK }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(1.dp, colors.border, RoundedCornerShape(18.dp))
+            .background(colors.surface, RoundedCornerShape(18.dp))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            "30-minute experiment review",
+            style = MaterialTheme.typography.titleMedium,
+            color = colors.textPrimary,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            "$reviewReady/${scorecards.size} tracks have enough settled evidence · keep $keeps · tweak candidates $tweaks",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            "A track needs ${ScalpReview.MIN_SETTLED_FILLS} non-void settled fills across ${ScalpReview.MIN_DISTINCT_DAYS} UTC days. The review uses after-fee P&L per contract and resamples whole days; it labels the next named variant but does not erase, disable, or silently retune a live track.",
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary
+        )
     }
 }
 
@@ -324,6 +362,29 @@ private fun ScalpScorecard(scorecard: ScalpTrackScore) {
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
+        val reviewColor = when (scorecard.review.decision) {
+            ScalpReview.Decision.KEEP -> colors.up
+            ScalpReview.Decision.TWEAK -> colors.accentOrange
+            ScalpReview.Decision.COLLECT -> colors.textSecondary
+        }
+        Text(
+            scorecard.review.decision.label.uppercase(Locale.US),
+            style = MaterialTheme.typography.labelLarge,
+            color = reviewColor,
+            fontWeight = FontWeight.Bold
+        )
+        Text(
+            scorecard.review.explanation,
+            style = MaterialTheme.typography.bodySmall,
+            color = colors.textSecondary
+        )
+        if (scorecard.review.lower95PerContractUsd != null) {
+            Text(
+                "After-fee ${signedMoney(scorecard.review.meanPnlPerContractUsd ?: 0.0)}/ct · 95% day-resample floor ${signedMoney(scorecard.review.lower95PerContractUsd)}/ct",
+                style = MaterialTheme.typography.bodySmall,
+                color = colors.textSecondary
+            )
+        }
     }
 }
 
@@ -458,7 +519,8 @@ private data class ScalpTrackScore(
     val open: Int,
     val settled: Int,
     val wins: Int,
-    val realizedPnlUsd: Double
+    val realizedPnlUsd: Double,
+    val review: ScalpReview.Assessment
 ) {
     val winRate: Double get() = if (settled == 0) 0.0 else wins.toDouble() / settled.toDouble()
 
@@ -471,7 +533,8 @@ private data class ScalpTrackScore(
                 open = fills.count { !it.settled },
                 settled = settled.size,
                 wins = settled.count { it.won == true },
-                realizedPnlUsd = fills.mapNotNull { it.pnlUsd }.sum()
+                realizedPnlUsd = fills.mapNotNull { it.pnlUsd }.sum(),
+                review = ScalpReview.assess(fills)
             )
         }
     }

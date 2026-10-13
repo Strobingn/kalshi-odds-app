@@ -39,7 +39,7 @@ class ScalpSignalTest {
         )
         assertEquals(20, candidates.size)
         assertEquals(ScalpSignal.Track.values().map { it.formulaVersion }, candidates.map { it.formulaVersion })
-        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", "YES", "YES", "YES"), candidates.take(8).map { it.side })
+        assertEquals(listOf("YES", "YES", "NO", "NO", "YES", "YES", "NO", "YES"), candidates.take(8).map { it.side })
     }
 
     @Test fun modelAndMarketChannelsUseTheirOwnAvailableInputs() {

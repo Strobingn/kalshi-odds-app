@@ -19,11 +19,11 @@ object ScalpSignal {
     ) {
         DIP_HUNTER("scalp-v3-dip-hunter", "Dip Hunter", "Baseline"),
         MOMENTUM_SNIPER("scalp-v3-momentum-sniper", "Momentum Sniper", "Spot momentum"),
-        EXTREME_REVERSAL("scalp-v3-extreme-reversal", "Extreme Reversal", "Spot reversal"),
+        EXTREME_REVERSAL("scalp-v3-extreme-reversal", "5m Mean Reversion", "Spot reversal"),
         ONE_MINUTE_REVERSAL("scalp-v4-one-minute-reversal", "1m Mean Reversion", "Spot reversal"),
         FIVE_MINUTE_TREND("scalp-v4-five-minute-trend", "5m Trend Rider", "Spot momentum"),
         FAIR_VALUE_FOLLOWER("scalp-v4-fair-value-follower", "Fair Value Follower", "Fair value"),
-        BOOK_PRESSURE("scalp-v4-book-pressure", "Book Pressure", "Order book"),
+        BOOK_PRESSURE("scalp-v4-book-pressure", "Best-Ask Contrarian", "Order book"),
         MARKET_FAVORITE("scalp-v4-market-favorite", "Market Favorite", "Market baseline"),
         DUAL_HORIZON_MOMENTUM("scalp-v5-dual-horizon-momentum", "Dual-Horizon Momentum", "Spot momentum"),
         DUAL_HORIZON_REVERSAL("scalp-v5-dual-horizon-reversal", "Dual-Horizon Reversal", "Spot reversal"),
@@ -110,14 +110,30 @@ object ScalpSignal {
     }
 
     private fun dualHorizon(track: Track, market: MarketUiModel, follow: Boolean, nowMs: Long): Candidate {
-        val one = market.spotReturn1m?.takeIf { it.isFinite() }
-        val five = market.spotReturn5m?.takeIf { it.isFinite() }
+        val one = market.spotReturn1m?.takeIf { it.isFinite() && it > -1.0 }
+        val five = market.spotReturn5m?.takeIf { it.isFinite() && it > -1.0 }
         if (one != null && five != null) {
-            val combined = one + five
+            // `five` already contains the newest minute. Adding `one + five`
+            // counted that minute twice and gave the two-horizon tracks a
+            // misleadingly large short-term tilt. Recover the preceding four
+            // minutes first, then use the stronger non-overlapping segment.
+            val priorFour = ((1.0 + five) / (1.0 + one) - 1.0).takeIf { it.isFinite() }
+            if (priorFour == null) return fallback(track, "non-overlapping spot return unavailable", market, nowMs)
+            val combined = when {
+                sameDirection(one, priorFour) -> one + priorFour
+                kotlin.math.abs(priorFour) > kotlin.math.abs(one) -> priorFour
+                else -> one
+            }
             val trendSide = if (combined >= 0.0) "YES" else "NO"
             val side = if (follow) trendSide else opposite(trendSide)
-            val name = if (follow) "1m + 5m spot momentum" else "1m + 5m spot reversal"
-            return candidate(track, side, "$name (${formatReturn(combined)})", market, nowMs)
+            val name = if (follow) "1m / prior-4m spot momentum" else "1m / prior-4m spot reversal"
+            return candidate(
+                track,
+                side,
+                "$name (1m ${formatReturn(one)}, prior 4m ${formatReturn(priorFour)})",
+                market,
+                nowMs
+            )
         }
         return fallback(track, "dual-horizon spot unavailable", market, nowMs)
     }
@@ -131,18 +147,18 @@ object ScalpSignal {
     }
 
     private fun bookPressure(market: MarketUiModel, nowMs: Long): Candidate {
-        val yesBid = unit(market.yesBid)
-        val noBid = unit(market.noBid)
-        if (yesBid != null && noBid != null) {
+        val yesAsk = unit(market.yesAsk)
+        val noAsk = unit(market.noAsk)
+        if (yesAsk != null && noAsk != null) {
             return candidate(
                 Track.BOOK_PRESSURE,
-                if (yesBid >= noBid) "YES" else "NO",
-                "best-bid pressure (YES ${formatPrice(yesBid)} / NO ${formatPrice(noBid)})",
+                if (yesAsk <= noAsk) "YES" else "NO",
+                "cheaper executable ask (YES ${formatPrice(yesAsk)} / NO ${formatPrice(noAsk)})",
                 market,
                 nowMs
             )
         }
-        return fallback(Track.BOOK_PRESSURE, "best-bid pressure unavailable", market, nowMs)
+        return fallback(Track.BOOK_PRESSURE, "executable asks unavailable", market, nowMs)
     }
 
     private fun marketFavorite(market: MarketUiModel, nowMs: Long): Candidate {
@@ -211,6 +227,8 @@ object ScalpSignal {
 
     private fun side(yesPp: Double): String = if (yesPp >= 50.0) "YES" else "NO"
     private fun opposite(side: String): String = if (side == "YES") "NO" else "YES"
+    private fun sameDirection(a: Double, b: Double): Boolean =
+        (a >= 0.0 && b >= 0.0) || (a < 0.0 && b < 0.0)
     private fun percent(value: Double?): Double? = value?.takeIf { it.isFinite() && it in 0.0..100.0 }
     private fun unit(value: Double?): Double? = value?.takeIf { it.isFinite() && it in 0.0..1.0 }
     private fun formatReturn(value: Double): String = String.format(java.util.Locale.US, "%+.4f", value)
