@@ -1,6 +1,7 @@
 package com.dirk.kalshiodds.signal.paper
 
 import android.content.Context
+import com.dirk.kalshiodds.worker.PaperScalpSyncWorker
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
@@ -29,6 +30,9 @@ class PaperBookStore(context: Context) {
         runCatching {
             prefs.edit().putString(KEY, json.encodeToString(PaperBookState.serializer(), state)).apply()
         }
+        // KEEP coalesces rapid quote/high-water-mark updates into one network
+        // job. The worker uploads only the paper ledger, never Kalshi keys.
+        runCatching { PaperScalpSyncWorker.enqueueOnce(app) }
     }
 
     companion object {

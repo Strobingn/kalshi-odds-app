@@ -14,6 +14,7 @@ import com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive
 import com.dirk.kalshiodds.signal.service.LiveSignalsPolicy
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.worker.MarketRefreshScheduler
+import com.dirk.kalshiodds.worker.PaperScalpSyncWorker
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -59,6 +60,10 @@ class KalshiOddsApp : Application() {
         runCatching { SignalNotifier.ensureChannels(this) }
         runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
         runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this) }
+        // This is a separate, RLS-protected experiment ledger. It does not use
+        // the legacy generic cloud-sync settings and cannot reach Kalshi.
+        runCatching { PaperScalpSyncWorker.enqueuePeriodic(this) }
+        runCatching { PaperScalpSyncWorker.enqueueOnce(this) }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
         // a throw in Service.onCreate kills the whole process mid-session too

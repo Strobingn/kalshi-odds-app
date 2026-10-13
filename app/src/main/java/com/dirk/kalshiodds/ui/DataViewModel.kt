@@ -330,6 +330,7 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun syncLine(s: DataHubSettings): String? {
+        if (s.lastSyncMessage.startsWith("Paper scalp cloud")) return s.lastSyncMessage
         if (!s.supabaseConfigured) return "Supabase not configured — History stays on this phone."
         if (!s.syncEnabled) return "Cloud sync off"
         return s.lastSyncMessage.ifBlank { "Cloud sync ready — never uploads the Kalshi key." }

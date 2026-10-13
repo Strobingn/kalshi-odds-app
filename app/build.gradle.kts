@@ -22,6 +22,19 @@ android {
         versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
         versionName = "1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Supabase publishable keys are intentionally client-side keys. RLS on
+        // paper_scalp_sync, plus a per-installation capability, protects data;
+        // never put a service-role key or any Kalshi credential in an APK.
+        buildConfigField(
+            "String",
+            "PAPER_SCALP_SYNC_URL",
+            "\"https://yyksaouxgiyvnjsfnwks.supabase.co\""
+        )
+        buildConfigField(
+            "String",
+            "PAPER_SCALP_SYNC_PUBLISHABLE_KEY",
+            "\"sb_publishable_dw9e0tpbQa1z-paWXYBqww_syoPzpPm\""
+        )
     }
 
     signingConfigs {

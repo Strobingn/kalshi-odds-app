@@ -200,7 +200,7 @@ private fun ReviewProtocolCard(scorecards: List<ScalpTrackScore>, reviewReady: I
             color = colors.textPrimary
         )
         Text(
-            "A track needs ${ScalpReview.MIN_SETTLED_FILLS} non-void settled fills across ${ScalpReview.MIN_DISTINCT_DAYS} UTC days. The review uses after-fee P&L per contract and resamples whole days; it labels the next named variant but does not erase, disable, or silently retune a live track.",
+            "A track needs ${ScalpReview.MIN_SETTLED_FILLS} non-void settled fills across ${ScalpReview.MIN_DISTINCT_DAYS} UTC days. The review uses after-fee P&L per contract and resamples whole days; it labels the next named variant but does not erase, disable, or silently retune a live track. The paper ledger is also synced after changes and on Android's inexact 30-minute network schedule for the independent review.",
             style = MaterialTheme.typography.bodySmall,
             color = colors.textSecondary
         )
