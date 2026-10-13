@@ -178,7 +178,6 @@ private fun ScalpRow(rank: Int, account: ScalpAccount) {
                         } else {
                             Chip("FLAT", colors.textSecondary, colors.surfaceAlt)
                         }
-                        if (frozen) Chip("FROZEN", colors.accentOrange, colors.accentOrange.copy(alpha = 0.16f))
                     }
                 }
             }

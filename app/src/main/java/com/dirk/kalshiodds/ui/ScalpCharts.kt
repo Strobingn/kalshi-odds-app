@@ -221,7 +221,7 @@ private fun ComparisonTable(accounts: List<ScalpAccount>) {
                 String.format(Locale.US, "%.0f%%", a.sizeScale * 100.0),
                 if (pos == null) "flat" else String.format(Locale.US, "%s %.0f¢", pos.side, pos.lastBid * 100.0),
                 header = false,
-                pnl = a.pnlUsd()
+                pnlValue = a.pnlUsd()
             )
         }
     }
