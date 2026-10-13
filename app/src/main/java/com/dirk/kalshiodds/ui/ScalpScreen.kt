@@ -52,7 +52,7 @@ fun ScalpScreen(
             )
             Text(
                 "20 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets a slice of the cash on hand. " +
-                    "Trail 5¢ buys the side under 50¢, holds the rise, and sells when the bid drops 5¢ off the high. " +
+                    "Momentum is frozen — it made the most. Breakout 50 is frozen too. The red books are now variations of Momentum. " +
                     "Nothing here is sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary

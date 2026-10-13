@@ -178,6 +178,7 @@ class ScalpLab(
     private fun adapt(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent): ScalpIntent {
         val pos = account.position ?: return intent
         if (!pos.ticker.equals(tape.ticker, true)) return intent
+        if (account.id == "momentum" || account.id == "breakout_50") return intent
         val bid = ScalpCatalog.bid(tape, pos.side)
         if (tape.tteMs in 1..NINETY_SEC) return ScalpIntent.Sell(force = true)
         if (tape.elapsedMs >= SEVEN_MIN && bid + 1e-9 < pos.entry && intent is ScalpIntent.Hold) {
@@ -215,7 +216,8 @@ class ScalpLab(
     private fun buy(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent.Buy): ScalpAccount {
         val side = if (intent.side.equals("NO", true)) "NO" else "YES"
         val px = KalshiPrice.usable(if (side == "NO") tape.noAsk else tape.yesAsk) ?: return account
-        val fraction = (intent.fraction * account.sizeScale).coerceIn(0.01, 1.0)
+        val scale = if (account.id == "momentum" || account.id == "breakout_50") 1.0 else account.sizeScale
+        val fraction = (intent.fraction * scale).coerceIn(0.01, 1.0)
         // Cash on hand when the book still has money. The $20k start when it
         // is broke or negative, so a paper book can keep scalping.
         val bankroll = if (account.cashUsd >= 100.0) account.cashUsd else ScalpCatalog.START_CASH
