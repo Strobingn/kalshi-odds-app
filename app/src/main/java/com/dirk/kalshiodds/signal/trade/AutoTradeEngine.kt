@@ -27,107 +27,131 @@ enum class AutoStrategy(
 ) {
     MOMENTUM(
         "Momentum",
-        "The baseline model. Buys standard configured-edge tickets — sub-5¢ prints that clear the 20x payout gate and your edge threshold. Every other scalper is judged against this one."
-    ) { it.kind == TicketKind.CONFIGURED },
+        "The baseline model. Buys standard configured-edge tickets — sub-5¢ prints that clear the 20x payout gate and your edge threshold. Every other scalper is judged against this one.",
+        { it.kind == TicketKind.CONFIGURED }
+    ),
     HUNTER(
         "Hunter",
-        "Buys ultra-cheap prints where a $1 stake can settle at $25 or more. Loses most clips by design; one win pays for a pile of losses."
-    ) { it.kind == TicketKind.HUNTER },
+        "Buys ultra-cheap prints where a $1 stake can settle at $25 or more. Loses most clips by design; one win pays for a pile of losses.",
+        { it.kind == TicketKind.HUNTER }
+    ),
     VALUE(
         "Value",
-        "Buys long-shots at 20¢ or less when the AI beats the implied chance after fees and margin. The slow grinder of the cheap-book families."
-    ) { it.kind == TicketKind.HUNTER_VALUE },
+        "Buys long-shots at 20¢ or less when the AI beats the implied chance after fees and margin. The slow grinder of the cheap-book families.",
+        { it.kind == TicketKind.HUNTER_VALUE }
+    ),
     BEST_EV(
         "Best-EV",
-        "Takes whichever live ticket has the highest net expected value right now, any family. The pure math pick — if the model is calibrated, this should top the board."
-    ) { true },
+        "Takes whichever live ticket has the highest net expected value right now, any family. The pure math pick — if the model is calibrated, this should top the board.",
+        { true }
+    ),
     DEEP_VALUE(
         "Deep Value",
-        "Only long-shots at 10¢ or cheaper — 9-to-1 or better on a win. Can be wrong nine times out of ten and still break even. Pure lottery discipline."
-    ) { it.kind == TicketKind.HUNTER_VALUE && it.limitPrice <= 0.10 + 1e-9 },
+        "Only long-shots at 10¢ or cheaper — 9-to-1 or better on a win. Can be wrong nine times out of ten and still break even. Pure lottery discipline.",
+        { it.kind == TicketKind.HUNTER_VALUE && it.limitPrice <= 0.10 + 1e-9 }
+    ),
     VALUE_UPPER(
         "Value Upper",
-        "The expensive half of the value family: long-shots priced 10–20¢. Pays less per win than Deep Value but should land more often."
-    ) {
+        "The expensive half of the value family: long-shots priced 10–20¢. Pays less per win than Deep Value but should land more often.",
+        {
         it.kind == TicketKind.HUNTER_VALUE &&
             it.limitPrice > 0.10 + 1e-9 && it.limitPrice <= 0.20 + 1e-9
-    },
+        }
+    ),
     DIRT_CHEAP(
         "Dirt Cheap",
-        "Anything priced 3¢ or under, any family. Maximum-multiple lottery tickets — the cheapest prints the book ever shows."
-    ) { it.limitPrice <= 0.03 + 1e-9 },
+        "Anything priced 3¢ or under, any family. Maximum-multiple lottery tickets — the cheapest prints the book ever shows.",
+        { it.limitPrice <= 0.03 + 1e-9 }
+    ),
     UP_ONLY(
         "Up Only",
-        "Buys YES at any price, nothing else. A one-direction book that isolates how good the model's upside calls are."
-    ) { it.side == "YES" },
+        "Buys YES at any price, nothing else. A one-direction book that isolates how good the model's upside calls are.",
+        { it.side == "YES" }
+    ),
     DOWN_ONLY(
         "Down Only",
-        "Buys NO at any price, nothing else. The mirror of Up Only — isolates the model at calling failed moves."
-    ) { it.side == "NO" },
+        "Buys NO at any price, nothing else. The mirror of Up Only — isolates the model at calling failed moves.",
+        { it.side == "NO" }
+    ),
     CHEAP_UP(
         "Cheap Up",
-        "YES tickets at 5¢ or less — the deepest underdog side. Wins pay 20x or better; tests whether the model spots cheap upside the crowd ignores."
-    ) { it.side == "YES" && it.limitPrice <= 0.05 + 1e-9 },
+        "YES tickets at 5¢ or less — the deepest underdog side. Wins pay 20x or better; tests whether the model spots cheap upside the crowd ignores.",
+        { it.side == "YES" && it.limitPrice <= 0.05 + 1e-9 }
+    ),
     CHEAP_DOWN(
         "Cheap Down",
-        "NO tickets at 5¢ or less — betting against near-certain-looking YES prices. Profits when an overhyped favorite face-plants."
-    ) { it.side == "NO" && it.limitPrice <= 0.05 + 1e-9 },
+        "NO tickets at 5¢ or less — betting against near-certain-looking YES prices. Profits when an overhyped favorite face-plants.",
+        { it.side == "NO" && it.limitPrice <= 0.05 + 1e-9 }
+    ),
     BIG_EDGE(
         "Big Edge",
-        "Only fires when the model beats the market by 8+ net points after fees. Rare and aggressive — the 'the market is just wrong' bet."
-    ) { (it.netEdgePp ?: 0.0) >= 8.0 },
+        "Only fires when the model beats the market by 8+ net points after fees. Rare and aggressive — the 'the market is just wrong' bet.",
+        { (it.netEdgePp ?: 0.0) >= 8.0 }
+    ),
     MID_EDGE(
         "Mid Edge",
-        "Takes 5–8 point net edges. The middle ground between trade frequency and selectivity."
-    ) { (it.netEdgePp ?: 0.0) >= 5.0 && (it.netEdgePp ?: 0.0) < 8.0 },
+        "Takes 5–8 point net edges. The middle ground between trade frequency and selectivity.",
+        { (it.netEdgePp ?: 0.0) >= 5.0 && (it.netEdgePp ?: 0.0) < 8.0 }
+    ),
     SMALL_EDGE(
         "Small Edge",
-        "Grinds tiny 3–5 point net edges. Trades often, wins a little at a time. Very fee-sensitive — tests whether small signals survive costs."
-    ) { (it.netEdgePp ?: 0.0) >= 3.0 && (it.netEdgePp ?: 0.0) < 5.0 },
+        "Grinds tiny 3–5 point net edges. Trades often, wins a little at a time. Very fee-sensitive — tests whether small signals survive costs.",
+        { (it.netEdgePp ?: 0.0) >= 3.0 && (it.netEdgePp ?: 0.0) < 5.0 }
+    ),
     FEE_AWARE(
         "Fee Aware",
-        "Only takes tickets whose base $5 clip already shows at least $1 of net EV after estimated fees. Filters out trades where costs eat the whole edge."
-    ) { (it.netEvUsd ?: 0.0) >= 1.0 },
+        "Only takes tickets whose base $5 clip already shows at least $1 of net EV after estimated fees. Filters out trades where costs eat the whole edge.",
+        { (it.netEvUsd ?: 0.0) >= 1.0 }
+    ),
     EV_PER_CONTRACT(
         "EV / Contract",
-        "Only tickets worth 5¢ or more of net EV per contract. Dollar-agnostic — measures the quality of each contract, not the clip size."
-    ) { (it.netEvPerContract ?: 0.0) >= 0.05 },
+        "Only tickets worth 5¢ or more of net EV per contract. Dollar-agnostic — measures the quality of each contract, not the clip size.",
+        { (it.netEvPerContract ?: 0.0) >= 0.05 }
+    ),
     MOONSHOT(
         "Moonshot",
-        "Only tickets paying 25x the stake or better on a win, from any family. Hunter-class multiples only."
-    ) { it.stakeUsd > 1e-9 && it.maxPayoutUsd >= 25.0 * it.stakeUsd },
+        "Only tickets paying 25x the stake or better on a win, from any family. Hunter-class multiples only.",
+        { it.stakeUsd > 1e-9 && it.maxPayoutUsd >= 25.0 * it.stakeUsd }
+    ),
     PREMIUM_PAYOUT(
         "Premium Payout",
-        "Only tickets paying 10x or better on a win. The multiples-only book — no grinders allowed."
-    ) { it.stakeUsd > 1e-9 && it.maxPayoutUsd >= 10.0 * it.stakeUsd },
+        "Only tickets paying 10x or better on a win. The multiples-only book — no grinders allowed.",
+        { it.stakeUsd > 1e-9 && it.maxPayoutUsd >= 10.0 * it.stakeUsd }
+    ),
     CONTRARIAN(
         "Contrarian",
-        "Only fires when the model's probability sits 10+ points from the market price, betting the disagreement. The maximum-contrarian signal."
-    ) {
+        "Only fires when the model's probability sits 10+ points from the market price, betting the disagreement. The maximum-contrarian signal.",
+        {
         val model = it.modelChance
         val implied = it.impliedChance
         model != null && implied != null && kotlin.math.abs(model - implied) >= 0.10
-    },
+        }
+    ),
     LONGSHOT_MODEL(
         "Model Long-shot",
-        "Only trades where the model itself prices the chosen side at 15% or less. Picks the tickets the AI thinks are true long-shots."
-    ) { (it.modelChance ?: 1.0) <= 0.15 + 1e-9 },
+        "Only trades where the model itself prices the chosen side at 15% or less. Picks the tickets the AI thinks are true long-shots.",
+        { (it.modelChance ?: 1.0) <= 0.15 + 1e-9 }
+    ),
     HUNTER_PLUS(
         "Hunter Plus",
-        "Hunter tickets with a 5+ point net edge. Cheap-print hunting with a quality filter — fewer shots, better shots."
-    ) { it.kind == TicketKind.HUNTER && (it.netEdgePp ?: 0.0) >= 5.0 },
+        "Hunter tickets with a 5+ point net edge. Cheap-print hunting with a quality filter — fewer shots, better shots.",
+        { it.kind == TicketKind.HUNTER && (it.netEdgePp ?: 0.0) >= 5.0 }
+    ),
     VALUE_PLUS(
         "Value Plus",
-        "Value long-shots with a 5+ point net edge. Hunter Plus's filter applied to the 20¢-or-less family."
-    ) { it.kind == TicketKind.HUNTER_VALUE && (it.netEdgePp ?: 0.0) >= 5.0 },
+        "Value long-shots with a 5+ point net edge. Hunter Plus's filter applied to the 20¢-or-less family.",
+        { it.kind == TicketKind.HUNTER_VALUE && (it.netEdgePp ?: 0.0) >= 5.0 }
+    ),
     CONFIGURED_CHEAP(
         "Configured Cheap",
-        "Standard edge tickets at 2¢ or less — the cheaper half of Momentum's universe, where payouts reach 50x."
-    ) { it.kind == TicketKind.CONFIGURED && it.limitPrice <= 0.02 + 1e-9 },
+        "Standard edge tickets at 2¢ or less — the cheaper half of Momentum's universe, where payouts reach 50x.",
+        { it.kind == TicketKind.CONFIGURED && it.limitPrice <= 0.02 + 1e-9 }
+    ),
     DEEP_BOOK(
         "Deep Book",
-        "Only trades where 50+ contracts sit visible at the ask. No thin-book traps — size and fills come first."
-    ) { (it.visibleContracts ?: 0) >= 50 };
+        "Only trades where 50+ contracts sit visible at the ask. No thin-book traps — size and fills come first.",
+        { (it.visibleContracts ?: 0) >= 50 }
+    );
 
     /** True when [ticket] is a live buy in this scout's lane. */
     fun matches(ticket: TradeTicket): Boolean =
