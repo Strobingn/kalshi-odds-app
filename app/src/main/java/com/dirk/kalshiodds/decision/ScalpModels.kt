@@ -16,11 +16,34 @@ object ScalpModels {
         /** 0.3.53: buy the side the short-horizon forecaster says will rise, near 50¢; exit when the forecast turns. */
         FORECAST_RIDE("fcride", "Forecast ride", "near 50¢ (40–60¢), buy the side the deterministic short-horizon forecast says rises by more than spread + both fees; hold while it keeps pointing up"),
         /** 0.3.53: exact mirror of Forecast ride — trades against the forecast with the same band, exits, sizing and fees. */
-        FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: same band, exits, sizing and fees, but takes the side the forecast says falls")
+        FORECAST_FADE("fcfade", "Forecast fade", "mirror of Forecast ride: same band, exits, sizing and fees, but takes the side the forecast says falls"),
+        // 0.3.57 sf57: twenty shock-lag / late-favourite paper scalpers (see ShockFav).
+        SF01("sf01", "sf01 " + ShockFav.VARIANTS[0].label, ShockFav.VARIANTS[0].summary()),
+        SF02("sf02", "sf02 " + ShockFav.VARIANTS[1].label, ShockFav.VARIANTS[1].summary()),
+        SF03("sf03", "sf03 " + ShockFav.VARIANTS[2].label, ShockFav.VARIANTS[2].summary()),
+        SF04("sf04", "sf04 " + ShockFav.VARIANTS[3].label, ShockFav.VARIANTS[3].summary()),
+        SF05("sf05", "sf05 " + ShockFav.VARIANTS[4].label, ShockFav.VARIANTS[4].summary()),
+        SF06("sf06", "sf06 " + ShockFav.VARIANTS[5].label, ShockFav.VARIANTS[5].summary()),
+        SF07("sf07", "sf07 " + ShockFav.VARIANTS[6].label, ShockFav.VARIANTS[6].summary()),
+        SF08("sf08", "sf08 " + ShockFav.VARIANTS[7].label, ShockFav.VARIANTS[7].summary()),
+        SF09("sf09", "sf09 " + ShockFav.VARIANTS[8].label, ShockFav.VARIANTS[8].summary()),
+        SF10("sf10", "sf10 " + ShockFav.VARIANTS[9].label, ShockFav.VARIANTS[9].summary()),
+        SF11("sf11", "sf11 " + ShockFav.VARIANTS[10].label, ShockFav.VARIANTS[10].summary()),
+        SF12("sf12", "sf12 " + ShockFav.VARIANTS[11].label, ShockFav.VARIANTS[11].summary()),
+        SF13("sf13", "sf13 " + ShockFav.VARIANTS[12].label, ShockFav.VARIANTS[12].summary()),
+        SF14("sf14", "sf14 " + ShockFav.VARIANTS[13].label, ShockFav.VARIANTS[13].summary()),
+        SF15("sf15", "sf15 " + ShockFav.VARIANTS[14].label, ShockFav.VARIANTS[14].summary()),
+        SF16("sf16", "sf16 " + ShockFav.VARIANTS[15].label, ShockFav.VARIANTS[15].summary()),
+        SF17("sf17", "sf17 " + ShockFav.VARIANTS[16].label, ShockFav.VARIANTS[16].summary()),
+        SF18("sf18", "sf18 " + ShockFav.VARIANTS[17].label, ShockFav.VARIANTS[17].summary()),
+        SF19("sf19", "sf19 " + ShockFav.VARIANTS[18].label, ShockFav.VARIANTS[18].summary()),
+        SF20("sf20", "sf20 " + ShockFav.VARIANTS[19].label, ShockFav.VARIANTS[19].summary())
     }
 
     val ALL: List<Model> = Model.values().toList()
     val COUNT: Int get() = ALL.size
+    private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
+    val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) }
 
     /** Sixth model: the dip-hunter seed run maker-first (resting bid entry, resting ask exit). */
     val MAKER_DIP_PARAMS: ScalpParams = ScalpParams.STRATEGY_SEEDS.getValue(ScalpStrategy.DIP_HUNTER).copy(maker = true)
@@ -44,6 +67,7 @@ object ScalpModels {
         if (!t.isPrimary) return null
         if (t.variantId.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
         if (t.variantId.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
+        if (ShockFav.isShockFav(t.variantId)) return SF_BY_CODE[t.variantId.take(4)]
         val p = ScalpParams.byId(t.variantId) ?: return Model.FAIR_GAP
         return modelOf(p)
     }
@@ -79,7 +103,7 @@ object ScalpModels {
         val cost = closed.sumOf { it.entryCostUsd }
         val net = closed.sumOf { it.netUsd!! }
         val active = trades.filter { it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY }
-        val ci = ClusteredBootstrap.meanCi(
+        val ci = if (resamples <= 0) null else ClusteredBootstrap.meanCi(
             closed.filter { it.entryCostUsd > 0.0 }.map { it.windowKey to it.netUsd!! / it.entryCostUsd },
             resamples = resamples
         )
@@ -105,14 +129,14 @@ object ScalpModels {
     }
 
     /** Leaderboard (all six models, best net first). [coin] null = all coins; [windowKey] null = all-time. */
-    fun leaderboard(trades: List<ScalpTrade>, coin: String? = null, windowKey: String? = null, bidFor: (ScalpTrade) -> Double? = { null }, sinceMs: Long? = null): List<Row> {
+    fun leaderboard(trades: List<ScalpTrade>, coin: String? = null, windowKey: String? = null, bidFor: (ScalpTrade) -> Double? = { null }, sinceMs: Long? = null, withCi: Boolean = true): List<Row> {
         val byModel = trades.asSequence()
             .filter { sinceMs == null || (it.closedAtMs ?: it.signalAtMs) >= sinceMs }
             .filter { coin == null || it.coin == coin }
             .filter { windowKey == null || it.windowKey == windowKey }
             .mapNotNull { t -> modelOf(t)?.let { it to t } }
             .groupBy({ it.first }, { it.second })
-        return ALL.map { m -> row(m, byModel[m].orEmpty(), bidFor) }
+        return ALL.map { m -> row(m, byModel[m].orEmpty(), bidFor, if (withCi) 400 else 0) }
             .sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
     }
 

@@ -366,8 +366,8 @@ object ScalpBreakdown {
             if (mine.isEmpty()) return@flatMap listOf("${st.label} · no closed round trips yet")
             val r = rows(mine) { st.label }.single()
             listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
-        } + listOf(ScalpModels.Model.FORECAST_RIDE, ScalpModels.Model.FORECAST_FADE).flatMap { m ->
-            val mine = closed(trades).filter { ForecastScalp.isForecast(it) && it.algoLabel == m.label }
+        } + (listOf(ScalpModels.Model.FORECAST_RIDE, ScalpModels.Model.FORECAST_FADE) + ScalpModels.SF_MODELS).flatMap { m ->
+            val mine = closed(trades).filter { ScalpModels.modelOf(it) == m }
             if (mine.isEmpty()) return@flatMap listOf("${m.label} · no closed round trips yet")
             val r = rows(mine) { m.label }.single()
             listOf(fmt(r)) + byCoin(mine).map { "  " + fmt(it) } + byHourEt(mine).map { "  " + fmt(it) }
