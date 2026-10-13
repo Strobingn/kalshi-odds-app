@@ -171,19 +171,16 @@ class ScalpLab(
     }
 
     /**
-     * Safety net only. The rule owns the trail. This does not sell a rising
-     * trade, and it does not sell a 2¢ wiggle. It only gets a red trade out
-     * by minute 7, and anything still open in the last 90 seconds.
+     * Nothing holds to settlement. Once the bid is 2¢ under the high of this
+     * trade, every book sells, including Momentum and Breakout. Anything still
+     * open in the last 90 seconds is closed too.
      */
     private fun adapt(account: ScalpAccount, tape: ScalpTape, intent: ScalpIntent): ScalpIntent {
         val pos = account.position ?: return intent
         if (!pos.ticker.equals(tape.ticker, true)) return intent
-        if (account.id == "momentum" || account.id == "breakout_50") return intent
         val bid = ScalpCatalog.bid(tape, pos.side)
         if (tape.tteMs in 1..NINETY_SEC) return ScalpIntent.Sell(force = true)
-        if (tape.elapsedMs >= SEVEN_MIN && bid + 1e-9 < pos.entry && intent is ScalpIntent.Hold) {
-            return ScalpIntent.Sell(force = true)
-        }
+        if (pos.peakBid - bid + 1e-9 >= 0.02) return ScalpIntent.Sell(force = true)
         return intent
     }
 

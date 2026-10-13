@@ -52,7 +52,7 @@ fun ScalpScreen(
             )
             Text(
                 "20 algorithms on the Bitcoin 15-minute market. Each starts with \$20,000 paper and bets a slice of the cash on hand. " +
-                    "Momentum is frozen — it made the most. Breakout 50 is frozen too. The red books are now variations of Momentum. " +
+                    "Momentum is frozen on the way in — it made the most. Every book, including that one, sells once the bid is 2¢ under the high of the trade. Nothing is held to settlement. " +
                     "Nothing here is sent to Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
