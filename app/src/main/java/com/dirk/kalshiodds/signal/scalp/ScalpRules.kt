@@ -101,7 +101,7 @@ object ScalpCatalog {
         algo(
             "momentum",
             "Momentum",
-            "40% of cash after four rising bids under 80¢. Sells 3¢ off a high that cleared 4¢, or at minute 7. Frozen: this is the book that made the money."
+            "40% of cash after four rising bids under 80¢. Sells 3¢ off a high that cleared 4¢, or at minute 7."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {
@@ -209,7 +209,7 @@ object ScalpCatalog {
         algo(
             "breakout_50",
             "Breakout 50",
-            "50% of cash when YES crosses up through 50¢. Sells 5¢ up, or cuts back under 48¢. Frozen: second-best book."
+            "50% of cash when YES crosses up through 50¢. Sells 5¢ up, or cuts back under 48¢."
         ) { a, t ->
             val pos = a.position
             if (pos == null) {

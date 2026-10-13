@@ -134,7 +134,6 @@ private fun ScalpRow(rank: Int, account: ScalpAccount) {
     val pnl = account.pnlUsd()
     val pos = account.position
     val winRate = if (account.trades > 0) 100.0 * account.wins / account.trades else 0.0
-    val frozen = account.id == "momentum" || account.id == "breakout_50"
     val pnlColor = if (pnl >= 0.0) colors.up else colors.down
     Column(
         modifier = Modifier
