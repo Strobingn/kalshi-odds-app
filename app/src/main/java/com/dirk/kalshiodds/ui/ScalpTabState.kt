@@ -29,7 +29,11 @@ data class ScalpTabState(
     val openOrders: List<PriceLadder.Order> = emptyList(),
     val bookAgeMs: Long? = null,
     val secondsLeft: Long? = null,
-    val updatedAtMs: Long = 0L
+    val updatedAtMs: Long = 0L,
+    /** 0.3.67: background history index progress (null when idle). */
+    val migrateNote: String? = null,
+    /** 0.3.67 debug: last stats read. */
+    val debugTiming: String = ""
 )
 
 data class ScalpTabMarket(val ticker: String, val coin: String, val closeMs: Long?, val label: String)

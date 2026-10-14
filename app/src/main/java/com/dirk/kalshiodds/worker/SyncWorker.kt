@@ -37,14 +37,16 @@ class SyncWorker(
             val paper = container.paper.book.snapshot()
             val settings = container.preferences.hydrate()
             val picked = com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.select(store.recentSnapshots(4000))
-            // 0.3.65 scalp backlog: every closed primary trade after the ack watermark, oldest first — retried until it lands.
+            // 0.3.67: unsynced closed rows from SQLite by index (synced, closed_at_ms) — no in-memory scan.
             val ackPrefs = applicationContext.getSharedPreferences(SCALP_PREFS, Context.MODE_PRIVATE)
-            val ackMs = ackPrefs.getLong(KEY_SCALP_ACK, 0L)
-            val backlog = container.scalp.all.value.filter { it.isPrimary && it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && (it.closedAtMs ?: 0L) > ackMs }
-                .sortedBy { it.closedAtMs }
-            // 0.3.66: the newest closes ride every run (idempotent upsert) so fresh trades are never stuck behind the backlog.
-            val newest = container.scalp.all.value.asSequence().filter { it.isPrimary && it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.closedAtMs != null }
-                .sortedByDescending { it.closedAtMs }.take(SCALP_NEWEST).toList()
+            container.scalp.flushWrites()
+            // 0.3.67 one-time: rows at/before the 0.3.65–0.3.66 ack watermark are already in Supabase.
+            if (!ackPrefs.getBoolean(KEY_LEDGER_ACK_APPLIED, false)) {
+                val ack = ackPrefs.getLong(KEY_SCALP_ACK, 0L)
+                if (ack > 0L) (store as? com.dirk.kalshiodds.data.local.results.SqliteResultsStore)?.markSyncedUpTo(ack)
+                ackPrefs.edit().putBoolean(KEY_LEDGER_ACK_APPLIED, true).apply()
+            }
+            val newest = container.scalp.unsyncedClosed(SCALP_NEWEST)
             val result = SupabaseSync().roundTrip(
                 settings = hub,
                 local = SupabaseSync.LocalBundle(
@@ -71,21 +73,22 @@ class SyncWorker(
                     if ("crash" !in out.failedKinds && out.errors.isEmpty()) com.dirk.kalshiodds.crash.CrashLog.markSynced(crashes.map { it.key })
                 }
             }
-            // 0.3.66 backlog drain: oldest first, 500 rows per POST, up to SCALP_CHUNKS POSTs per run (0.3.65 sent 500 per
-            // 15-min run, slower than the scalpers close trades, so the backlog never caught up and nothing new appeared).
-            var left = backlog
+            if (result.scalpsOk && newest.isNotEmpty()) container.scalp.markSynced(newest.map { it.id })
+            // 0.3.67: push remaining unsynced pages from SQLite; markSynced advances the index (never deletes rows).
             var chunks = 0
-            while (left.isNotEmpty() && chunks < SCALP_CHUNKS) {
-                val chunk = left.take(SCALP_BATCH)
+            var left = 0
+            while (chunks < SCALP_CHUNKS) {
+                val chunk = container.scalp.unsyncedClosed(SCALP_BATCH)
+                if (chunk.isEmpty()) break
                 val recs = SupabaseSync().pack(SupabaseSync.LocalBundle(scalps = chunk))
                 val out = SupabaseSync().pushBatches(hub, recs)
-                if ("scalp" in out.failedKinds) break
-                val ack = chunk.maxOf { it.closedAtMs ?: 0L }
-                ackPrefs.edit().putLong(KEY_SCALP_ACK, ack).apply()
-                left = left.filter { (it.closedAtMs ?: 0L) > ack }
+                if ("scalp" in out.failedKinds) { left = chunk.size; break }
+                container.scalp.markSynced(chunk.map { it.id })
+                chunk.maxOfOrNull { it.closedAtMs ?: 0L }?.let { ackPrefs.edit().putLong(KEY_SCALP_ACK, it).apply() }
                 chunks++
             }
-            ackPrefs.edit().putInt(KEY_SCALP_UNSYNCED, left.size).apply()
+            if (left == 0) left = container.scalp.unsyncedClosed(1).size // 0 or 1 sentinel
+            ackPrefs.edit().putInt(KEY_SCALP_UNSYNCED, if (left == 0 && chunks > 0) 0 else left).apply()
             if (result.acknowledgePaper) container.paper.book.acknowledgePaperSync(startedMs)
             // 0.3.56: only a successful upload advances the snapshot throttle.
             if (result.snapshotsOk) com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.commit(picked)
@@ -104,6 +107,7 @@ class SyncWorker(
         const val SCALP_PREFS = "scalp_sync"
         const val KEY_SCALP_ACK = "ack_closed_ms"
         const val KEY_SCALP_UNSYNCED = "unsynced"
+        const val KEY_LEDGER_ACK_APPLIED = "ledger_ack_applied_0367"
         const val SCALP_BATCH = 500
         const val SCALP_CHUNKS = 12
         const val SCALP_NEWEST = 300

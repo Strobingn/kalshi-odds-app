@@ -170,10 +170,13 @@ fun ScalpTabContent(
         )
     }
 
-    LazyColumn(
+    LazyColumn(/* 0.3.67 stable keys throughout */ 
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+            st.migrateNote?.let { note -> item(key = "mig") { Text(note, style = MaterialTheme.typography.labelMedium, color = DipTheme.colors.textSecondary) } }
+            if (st.debugTiming.isNotBlank()) item(key = "dbg") { Text(st.debugTiming, style = MaterialTheme.typography.labelSmall, color = DipTheme.colors.textSecondary) }
+
         item(key = "hdr") {
             Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(ScalpTabCopy.TITLE, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = c.textPrimary)
@@ -473,7 +476,7 @@ private fun Ladder(
         Text("Waiting for the live book…", style = MaterialTheme.typography.bodyMedium, color = c.textSecondary)
         return
     }
-    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().height((ROW_DP * 13).dp)) {
+    LazyColumn(/* 0.3.67 stable keys throughout */ state = listState, modifier = Modifier.fillMaxWidth().height((ROW_DP * 13).dp)) {
         items(st.ladder, key = { it.cents }) { row ->
             var drag by remember(row.cents) { mutableFloatStateOf(0f) }
             val mine = row.myBuyQty + row.mySellQty > 0

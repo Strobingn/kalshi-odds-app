@@ -447,17 +447,6 @@ data class ScalpTrade(
     }
 }
 
-interface ScalpPersistence {
-    fun loadScalps(): List<ScalpTrade>
-    fun upsertScalp(trade: ScalpTrade)
-}
-
-class InMemoryScalpPersistence : ScalpPersistence {
-    private val rows = LinkedHashMap<String, ScalpTrade>()
-    override fun loadScalps(): List<ScalpTrade> = synchronized(rows) { rows.values.toList() }
-    override fun upsertScalp(trade: ScalpTrade) { synchronized(rows) { rows[trade.id] = trade } }
-}
-
 /**
  * Paper scalp book. Feed it one [ScalpRule.Quote] per market per tick ([onQuote]) and settlement results
  * ([settle]). A signal at time t can only fill on a later, fresh book at least [ScalpRule.LATENCY_MS] after t,
@@ -475,8 +464,14 @@ class ScalpBook(
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
-    private val _all = MutableStateFlow(ScalpMemory.bound(store.loadScalps().sortedByDescending { it.signalAtMs }))
+    // 0.3.67: only open/pending rows live in RAM; closed history stays in SQLite + scalp_stats.
+    private val _all = MutableStateFlow(store.loadActiveScalps().sortedByDescending { it.signalAtMs })
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
+    private val _stats = MutableStateFlow(store.loadStats())
+    val stats: StateFlow<List<ScalpStat>> = _stats.asStateFlow()
+    /** Coalesced by id — last write wins; drained by [flushWrites]. */
+    @Volatile private var _lastPruneBucket = -1L
+    private val writeQ = java.util.concurrent.ConcurrentHashMap<String, Pair<ScalpTrade, ScalpTrade?>>()
     /** Primary scalps only (what the Scalp screen, stats and ladder use). */
     val trades: StateFlow<List<ScalpTrade>> = _trades.asStateFlow()
     /** 0.3.43: primary + shadow (incl. maker-first variants), for the maker-vs-taker comparison. */
@@ -489,7 +484,7 @@ class ScalpBook(
     /** Current per-coin params version and its last out-of-sample result. */
     val tune: StateFlow<ScalpTuneState> = _tune.asStateFlow()
 
-    fun snapshot(): List<ScalpTrade> = _trades.value
+    fun snapshot(): List<ScalpTrade> = _trades.value // 0.3.67: open/pending primaries only
     /** Primary + shadow variants (tuner input). */
     fun allTrades(): List<ScalpTrade> = _all.value
 
@@ -531,6 +526,7 @@ class ScalpBook(
     private fun isActive(t: ScalpTrade) = t.state != ScalpState.CLOSED && t.state != ScalpState.NO_FILL
 
     fun onQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
+        if (q.nowMs / 15_000L != (_lastPruneBucket)) { _lastPruneBucket = q.nowMs / 15_000L; pruneClosed(q.nowMs) }
         _marks.value = (_marks.value + (q.ticker.uppercase() to q)).let { m ->
             if (m.size <= ScalpMemory.MAX_TICKERS) m else m.filterValues { it.closeMs > q.nowMs - 60_000L || it.ticker.equals(q.ticker, true) }
         }
@@ -1019,10 +1015,12 @@ class ScalpBook(
 
     /** Re-tune when enough new closed round trips (all variants) have accumulated. Deterministic. */
     fun maybeTune(nowMs: Long, force: Boolean = false): ScalpTuneState = synchronized(lock) {
-        val closed = _all.value.count { it.state == ScalpState.CLOSED && it.netUsd != null }
+        val closed = _stats.value.sumOf { it.n }
         val cur = _tune.value
         if (!force && closed - cur.closedAtLastRun < ScalpTuner.RETUNE_EVERY) return cur
-        val next = ScalpTuner.tune(_all.value, cur, nowMs).copy(closedAtLastRun = closed)
+        // Tuner needs closed history; pull a bounded page per primary from SQLite when retuning.
+        val hist = store.loadScalps().take(ScalpMemory.MAX_CLOSED)
+        val next = ScalpTuner.tune(hist, cur, nowMs).copy(closedAtLastRun = closed)
         _tune.value = next
         runCatching { tuneStore.save(next) }
         next
@@ -1299,17 +1297,52 @@ class ScalpBook(
     private fun save(t0: ScalpTrade) {
         val prev = _all.value.firstOrNull { it.id == t0.id }
         val t = if (liveExtras) withDetail(t0, prev) else t0
-        runCatching { store.upsertScalp(t) }
+        // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
+        writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
+        if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
         if (prev == null && liveExtras) spawnV2(t)
         val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
-        _all.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else ScalpMemory.boundIfNeeded(listOf(t) + cur)
+        _all.value = when {
+            idx >= 0 -> cur.toMutableList().also { it[idx] = t }
+            else -> listOf(t) + cur // closed rows stay only until their window ends (pruneClosed)
+        }
         if (t.isPrimary) {
             val pc = _trades.value
             val pi = pc.indexOfFirst { it.id == t.id }
-            _trades.value = if (pi >= 0) pc.toMutableList().also { it[pi] = t } else ScalpMemory.boundIfNeeded(listOf(t) + pc)
+            _trades.value = when {
+                pi >= 0 -> pc.toMutableList().also { it[pi] = t }
+                else -> listOf(t) + pc
+            }
         }
     }
+
+    /** 0.3.67: forget closed / no-fill rows once their 15-min window is over (+60 s). History is in SQLite. */
+    private fun pruneClosed(nowMs: Long) {
+        fun keep(t: ScalpTrade) = isActive(t) || (ScalpTicker.closeMs(t.ticker) ?: ((t.closedAtMs ?: t.signalAtMs) + 900_000L)) > nowMs - 60_000L
+        val a = _all.value
+        if (a.any { !keep(it) }) { _all.value = a.filter { keep(it) }; _trades.value = _trades.value.filter { keep(it) } }
+    }
+
+    /** Drain pending upserts (call off Main / off the quote lock). Returns rows written. */
+    fun flushWrites(): Int {
+        if (writeQ.isEmpty()) return 0
+        val batch = ArrayList<Pair<ScalpTrade, ScalpTrade?>>(writeQ.size)
+        val it = writeQ.entries.iterator()
+        while (it.hasNext()) { batch += it.next().value; it.remove() }
+        for (pair in batch) runCatching { store.upsertScalpAndStats(pair.first, pair.second) }
+        if (batch.isNotEmpty()) _stats.value = store.loadStats()
+        return batch.size
+    }
+
+    fun reloadStats() { _stats.value = store.loadStats() }
+    fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
+        store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
+    fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)
+    fun markSynced(ids: List<String>) = store.markSynced(ids)
+    fun migrateStatsChunk(limit: Int = 500): Int = store.migrateStatsChunk(limit).also { if (it > 0) _stats.value = store.loadStats() }
+    fun tradeCount(): Int = store.tradeCount()
+    fun statsMigrated(): Boolean = store.statsMigrated()
 
     // ---------------- 0.3.65 trade detail + v2 copies ----------------
     /** Peak side bid since entry, per open trade (all scalpers; v2 exits use it). */

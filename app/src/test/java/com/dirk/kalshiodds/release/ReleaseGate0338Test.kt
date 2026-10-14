@@ -260,10 +260,11 @@ class ReleaseGate0338Test {
         val sql = ScalpSchema.upgradeSql(7).joinToString("\n").uppercase()
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS"))
         assertFalse(sql.contains("DROP"))
-        assertFalse(sql.contains("ALTER"))
+        assertFalse(sql.contains("DROP TABLE"))
         assertFalse(sql.contains("DELETE"))
-        assertTrue(ScalpSchema.upgradeSql(8).isEmpty())
-        assertTrue(com.dirk.kalshiodds.AppIdentity.DB_VERSION >= 8) // 0.3.43 added paper_orders (v9), still additive
+        // 0.3.67: upgradeSql(8) adds ADD COLUMN / stats (additive ALTER); never DROP
+        assertTrue(ScalpSchema.upgradeSql(8).any { it.contains("scalp_stats") })
+        assertTrue(com.dirk.kalshiodds.AppIdentity.DB_VERSION >= 8)
     }
 
     @Test

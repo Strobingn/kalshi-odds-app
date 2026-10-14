@@ -1,5 +1,8 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.paging.compose.collectAsLazyPagingItems
+import androidx.paging.compose.itemKey
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -62,11 +65,14 @@ object ScalpAlgoCopy {
 @Composable
 fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val d by viewModel.scalpAlgo.collectAsStateWithLifecycle()
-    ScalpAlgoContent(d, onBack)
+    val model = d.model
+    val pagerFlow = androidx.compose.runtime.remember(model) { model?.let { viewModel.scalpTradePager(it) } }
+    val paged = pagerFlow?.collectAsLazyPagingItems()
+    ScalpAlgoContent(d, onBack, paged)
 }
 
 @Composable
-fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}) {
+fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: androidx.paging.compose.LazyPagingItems<ScalpTrade>? = null) {
     val c = DipTheme.colors
     val m = d.model
     LazyColumn(
@@ -129,9 +135,24 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}) {
                 }
             }
             item(key = "trades-h") {
-                Text("Trades (${d.trades.size}, newest first)", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+                Text(if (paged != null) "Trades (${d.allTime?.roundTrips ?: paged.itemCount}, newest first)" else "Trades (${d.trades.size}, newest first)",
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
             }
-            items(d.trades, key = { "t-" + it.id }) { t ->
+            if (paged != null) {
+                items(count = paged.itemCount, key = paged.itemKey { "t-" + it.id }) { i ->
+                    val t = paged[i] ?: return@items
+                FieldCard(accentColor = when { (t.netUsd ?: 0.0) > 0 -> c.up; (t.netUsd ?: 0.0) < 0 -> c.down; else -> null }) {
+                    Row(Modifier.fillMaxWidth()) {
+                        Text("${t.coin} · ${ScalpAlgoCopy.state(t)}", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1)
+                        Text(ScalpAlgoCopy.time(t.entryAtMs ?: t.signalAtMs), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1)
+                    }
+                    Text(ScalpAlgoCopy.priceLine(t), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text(ScalpAlgoCopy.moneyLine(t), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace,
+                        color = when { (t.netUsd ?: 0.0) > 0 -> c.up; (t.netUsd ?: 0.0) < 0 -> c.down; else -> c.textSecondary }, maxLines = 1)
+                    t.exitReason?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+                }
+                }
+            } else items(d.trades, key = { "t-" + it.id }) { t ->
                 FieldCard(accentColor = when { (t.netUsd ?: 0.0) > 0 -> c.up; (t.netUsd ?: 0.0) < 0 -> c.down; else -> null }) {
                     Row(Modifier.fillMaxWidth()) {
                         Text("${t.coin} · ${ScalpAlgoCopy.state(t)}", Modifier.weight(1f), fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1)

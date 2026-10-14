@@ -128,7 +128,7 @@ class HistoryViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun signalsPage(offset: Int, page: Int, cur: HistoryUiState): HistoryUiState {
-        val snaps = container.resultsStore.recentSnapshots(offset + page)
+        val snaps = container.resultsStore.recentSnapshots((offset + page).coerceAtMost(200))
         val settled = container.archive.recentSettled(null, 400)
         val all = HistoryAssembler.signals(snaps, settled)
         val sliced = HistoryPager.page(all, offset, page)
