@@ -1317,17 +1317,26 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         )
 
     /** Full export — no truncation (paged internally). */
-    fun ledgerCsv(): String {
-        val rows = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+    /** Small DBs / tests only — builds a String. Use [writeLedgerCsv] for exports. */
+    fun ledgerCsv(): String = java.io.StringWriter().also { writeLedgerCsv(it) }.toString()
+
+    /**
+     * 0.3.69: stream the ledger as CSV. Keyset pages (id > last, [pageSize] rows) are written straight to [out] and
+     * dropped, so memory stays at one page no matter how many rows. Returns rows written.
+     */
+    fun writeLedgerCsv(out: Appendable, pageSize: Int = 1_000): Long {
+        com.dirk.kalshiodds.data.local.ledger.LedgerCsv.writeHeader(out)
         var lastId = 0L
+        var n = 0L
         while (true) {
-            val page = queryLedger("id > ?", arrayOf(lastId.toString()), "id ASC", 20_000)
+            val page = queryLedger("id > ?", arrayOf(lastId.toString()), "id ASC", pageSize)
             if (page.isEmpty()) break
-            rows += page
+            page.forEach { com.dirk.kalshiodds.data.local.ledger.LedgerCsv.writeRow(out, it) }
+            n += page.size
             lastId = page.last().id
-            if (page.size < 20_000) break
+            if (page.size < pageSize) break
         }
-        return com.dirk.kalshiodds.data.local.ledger.LedgerCsv.render(rows)
+        return n
     }
 
     private fun cursorToLedger(c: Cursor): com.dirk.kalshiodds.data.local.ledger.LedgerRow {

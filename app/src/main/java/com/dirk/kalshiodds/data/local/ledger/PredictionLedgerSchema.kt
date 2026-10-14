@@ -289,15 +289,20 @@ data class LedgerRow(
 object LedgerCsv {
     val HEADER: List<String> = listOf("id") + PredictionLedgerSchema.COLUMNS.map { it.name }
 
+    /** Small lists / tests only. Exports stream via [writeHeader] + [writeRow] (0.3.69: no whole-CSV strings). */
     fun render(rows: List<LedgerRow>): String {
-        val sb = StringBuilder(HEADER.joinToString(",")).append('\n')
-        rows.forEach { row ->
-            val v = PredictionLedgerSchema.values(row)
-            sb.append(row.id)
-            PredictionLedgerSchema.COLUMNS.forEach { c -> sb.append(',').append(cell(v[c.name])) }
-            sb.append('\n')
-        }
+        val sb = StringBuilder()
+        writeHeader(sb); rows.forEach { writeRow(sb, it) }
         return sb.toString()
+    }
+
+    fun writeHeader(out: Appendable) { out.append(HEADER.joinToString(",")).append('\n') }
+
+    fun writeRow(out: Appendable, row: LedgerRow) {
+        val v = PredictionLedgerSchema.values(row)
+        out.append(row.id.toString())
+        PredictionLedgerSchema.COLUMNS.forEach { c -> out.append(',').append(cell(v[c.name])) }
+        out.append('\n')
     }
 
     private fun cell(v: Any?): String {

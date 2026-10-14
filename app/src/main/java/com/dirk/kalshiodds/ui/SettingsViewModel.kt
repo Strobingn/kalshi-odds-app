@@ -619,8 +619,8 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         settings = archive.recentSettingsChanges(400),
                         sessions = archive.recentSessions(200)
                     )
-                    val csv = ResultsExporter.csv(store.exportBundle()) + "\n# history json follows\n" + json
-                    ResultsFileExport.write(getApplication(), csv)
+                    val bundle = store.exportBundle()
+                    ResultsFileExport.writeStream(getApplication()) { w -> ResultsExporter.writeCsv(bundle, w); w.write("\n# history json follows\n"); w.write(json) }
                 }.getOrElse {
                     com.dirk.kalshiodds.data.local.results.ExportResult(
                         false,
