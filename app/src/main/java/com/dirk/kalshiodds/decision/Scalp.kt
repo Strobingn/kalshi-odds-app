@@ -566,6 +566,10 @@ class ScalpBook(
         mineAll.forEach { t -> if (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
         changed += stepV2(q)
         mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
+            // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
+            // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
+            // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
+            if (ShockFav.isShockFav(t.variantId)) { markAdverse(t, q)?.let { changed += it }; return@forEach }
             val p = ScalpParams.byId(t.variantId) ?: primary
             step(t, q, p)?.let { changed += it }
         }

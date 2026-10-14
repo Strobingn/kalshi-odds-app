@@ -404,11 +404,10 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                 if (store == null) {
                     com.dirk.kalshiodds.data.local.results.ExportResult(false, null, "Ledger database is unavailable")
                 } else {
-                    com.dirk.kalshiodds.data.local.results.ResultsFileExport.write(
-                        getApplication(),
-                        store.ledgerCsv(),
-                        namePrefix = "prediction-ledger"
-                    )
+                    // 0.3.69: stream pages → gzip file (was one ~84 MB String → OOM).
+                    com.dirk.kalshiodds.data.local.results.ResultsFileExport.writeStream(
+                        getApplication(), namePrefix = "prediction-ledger", gzip = true
+                    ) { w -> store.writeLedgerCsv(w) }
                 }
             }
             _state.update { it.copy(ledgerNote = result.message) }

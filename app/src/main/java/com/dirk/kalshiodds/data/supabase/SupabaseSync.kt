@@ -123,7 +123,7 @@ class SupabaseSync(
         val mb = bytes / 1_048_576.0
         val pct = mb / FREE_CAP_MB * 100.0
         val warn = pct >= 80.0
-        return String.format(java.util.Locale.US, "Supabase size: %.0f MB of %d MB free plan (%.0f%%)%s. Rows are never deleted. %s",
+        return String.format(java.util.Locale.US, "Supabase size: %.0f MB of %d MB free plan (%.0f%%)%s. Kashi rows older than 7 days are archived, then pruned after the archive is verified. %s",
             mb, FREE_CAP_MB, pct, if (warn) " — WARNING: over 80%, upgrade or export soon" else "", un) to warn
     }
 
