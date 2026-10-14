@@ -40,9 +40,8 @@ object ScalpCatalog {
     const val START_CASH = 20_000.0
 
     /**
-     * Every book is a Simple dip. Buy when the cheaper side has dipped from
-     * its high and the ask is under a cap. Sell when the bid is up a fixed
-     * amount from the entry. No trailing stop.
+     * The Dip books are the winners. Buy a dip under a cap, sell at a fixed
+     * profit. The Early books are the old idea, kept so they can be compared.
      */
     val ALL: List<ScalpAlgo> = listOf(
         dip("late_squeeze", "Dip 5→8 30%", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 8¢ up."),
@@ -57,14 +56,14 @@ object ScalpCatalog {
         dip("deep_value", "Dip 5→8 55", 0.05, 0.08, 0.55, 0.20, "Buy a 5¢ dip under 55¢. 20%. Sell when the bid is 8¢ up."),
         dip("dip_buy", "Dip 3→8", 0.03, 0.08, 0.52, 0.20, "Buy a 3¢ dip under 52¢. 20%. Sell when the bid is 8¢ up."),
         dip("wide_gap", "Dip 5→6", 0.05, 0.06, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 6¢ up."),
-        dip("burst", "Dip 5→8 30%", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 8¢ up."),
+        dip("burst", "Dip 5→8 30%b", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 8¢ up."),
         dip("reclaim", "Dip 5→15 30%", 0.05, 0.15, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 15¢ up."),
         dip("min_5_7", "Dip 5→8 35", 0.05, 0.08, 0.35, 0.20, "Buy a 5¢ dip under 35¢. 20%. Sell when the bid is 8¢ up."),
-        dip("dump_catch", "Dip 5→8 25%", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
-        dip("fade_spike", "Dip 5→15 25%", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 15¢ up."),
-        dip("gap_side", "Dip 5→8 15%", 0.05, 0.08, 0.52, 0.15, "Buy a 5¢ dip under 52¢. 15%. Sell when the bid is 8¢ up."),
-        dip("breakout_50", "Dip 5→8 20%", 0.05, 0.08, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 8¢ up."),
-        dip("momentum", "Dip 5→8 20%b", 0.05, 0.08, 0.50, 0.20, "Buy a 5¢ dip under 50¢. 20%. Sell when the bid is 8¢ up.")
+        dip("dump_catch", "Dip 5→8 25%b", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
+        windowed("fade_spike", "Early cheap", 0.50, 0.03, 0.20, 0L, SEVEN_MIN, "20% under 50¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("gap_side", "Early 40", 0.40, 0.03, 0.20, 0L, SEVEN_MIN, "20% under 40¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("breakout_50", "Early 50", 0.50, 0.05, 0.20, 0L, SEVEN_MIN, "20% under 50¢ in the first 7 minutes. Sells a 5¢ drop."),
+        windowed("momentum", "Early 45", 0.45, 0.04, 0.20, 0L, SEVEN_MIN, "20% under 45¢ in the first 7 minutes. Sells a 4¢ drop.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
@@ -147,8 +146,8 @@ object ScalpCatalog {
     }
 
     /**
-     * Buy the cheaper side when it is under 50¢ and rising. Sell when the
-     * bid is up a fixed amount. Can take the next one in the same window.
+     * Buy the cheaper side when it is [dip] under its high and under [maxAsk].
+     * Sell when the bid is [up] above the entry.
      */
     private fun dip(id: String, name: String, dip: Double, up: Double, maxAsk: Double, fraction: Double, rule: String) =
         algo(id, name, rule) { a, t ->
@@ -156,8 +155,8 @@ object ScalpCatalog {
             if (pos == null) {
                 val side = cheaper(t)
                 val aPx = ask(t, side)
-                val rising = rising(t, side)
-                if (aPx < 0.50 && rising) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
+                val high = if (side == "NO") t.noHigh else t.yesHigh
+                if (aPx < maxAsk && high - aPx + 1e-9 >= dip) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {
@@ -167,12 +166,6 @@ object ScalpCatalog {
                 }
             }
         }
-
-    private fun rising(t: ScalpTape, side: String): Boolean {
-        val bids = if (side == "NO") t.noBids else t.yesBids
-        if (bids.size < 2) return true
-        return bids.last() + 1e-9 >= bids[bids.size - 2]
-    }
 
     private fun algo(
         id: String,
