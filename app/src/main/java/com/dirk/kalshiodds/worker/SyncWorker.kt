@@ -37,6 +37,12 @@ class SyncWorker(
             val paper = container.paper.book.snapshot()
             val settings = container.preferences.hydrate()
             val picked = com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.select(store.recentSnapshots(4000))
+            // 0.3.65 scalp backlog: every closed primary trade after the ack watermark, oldest first (500 per run) — retried until it lands.
+            val ackPrefs = applicationContext.getSharedPreferences(SCALP_PREFS, Context.MODE_PRIVATE)
+            val ackMs = ackPrefs.getLong(KEY_SCALP_ACK, 0L)
+            val backlog = container.scalp.all.value.filter { it.isPrimary && it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && (it.closedAtMs ?: 0L) > ackMs }
+                .sortedBy { it.closedAtMs }
+            val scalpBatch = backlog.take(SCALP_BATCH)
             val result = SupabaseSync().roundTrip(
                 settings = hub,
                 local = SupabaseSync.LocalBundle(
@@ -47,7 +53,7 @@ class SyncWorker(
                     settingsChanges = archive.recentSettingsChanges(200),
                     paperFills = paper.fillsForSync(),
                     settingsSnapshot = SettingsRestore.snapshot(settings),
-                    scalps = container.scalp.all.value.filter { it.isPrimary && it.closedAtMs != null && it.closedAtMs!! >= hub.lastSyncAtMs - 3_600_000L },
+                    scalps = scalpBatch,
                     shadow = container.shadow.book.snapshot().tickets.filter { it.createdAtMs >= startedMs - 6 * 3_600_000L }
                 ),
                 store = store,
@@ -63,6 +69,8 @@ class SyncWorker(
                     if ("crash" !in out.failedKinds && out.errors.isEmpty()) com.dirk.kalshiodds.crash.CrashLog.markSynced(crashes.map { it.key })
                 }
             }
+            if (result.scalpsOk && scalpBatch.isNotEmpty()) ackPrefs.edit().putLong(KEY_SCALP_ACK, scalpBatch.maxOf { it.closedAtMs ?: 0L }).apply()
+            ackPrefs.edit().putInt(KEY_SCALP_UNSYNCED, if (result.scalpsOk) backlog.size - scalpBatch.size else backlog.size).apply()
             if (result.acknowledgePaper) container.paper.book.acknowledgePaperSync(startedMs)
             // 0.3.56: only a successful upload advances the snapshot throttle.
             if (result.snapshotsOk) com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.commit(picked)
@@ -78,6 +86,11 @@ class SyncWorker(
 
     companion object {
         const val UNIQUE = "diphunter_cloud_sync"
+        const val SCALP_PREFS = "scalp_sync"
+        const val KEY_SCALP_ACK = "ack_closed_ms"
+        const val KEY_SCALP_UNSYNCED = "unsynced"
+        const val SCALP_BATCH = 500
+        fun unsyncedScalps(context: Context): Int = context.getSharedPreferences(SCALP_PREFS, Context.MODE_PRIVATE).getInt(KEY_SCALP_UNSYNCED, 0)
         const val ONCE = "diphunter_cloud_sync_once"
 
         fun enqueuePeriodic(context: Context) {

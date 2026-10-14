@@ -351,6 +351,9 @@ object ScalpRule {
         SETTLED("held to settlement (no exit liquidity)")
     }
 
+    /** Per-contract gain after entry + exit taker fees on a 10-contract clip. */
+    fun netAfterFees(entry: Double, bid: Double, n: Int = CONTRACTS): Double = (bid - entry) - (orderFee(n, bid) + orderFee(n, entry)) / n
+
     /** Exit decision for an open scalp at this quote, or null to keep holding. */
     fun exitSignal(side: String, entry: Double, q: Quote, p: ScalpParams = ScalpParams.CLASSIC): ExitReason? {
         if (q.tauS <= TIME_STOP_S) return ExitReason.TIME_STOP
@@ -359,7 +362,8 @@ object ScalpRule {
         if (bid != null && bid > 0.0) {
             if (bid - entry >= p.target - 1e-12) return ExitReason.PROFIT_TARGET
             if (bid <= entry - p.stop + 1e-12) return ExitReason.STOP
-            if (fair != null && bid - feePerContract(CONTRACTS, bid) >= fair) return ExitReason.GAP_CLOSED
+            // 0.3.65: fair-value take-profit only when the round trip nets > $0 after both taker fees.
+            if (fair != null && bid - feePerContract(CONTRACTS, bid) >= fair && netAfterFees(entry, bid) > 1e-9) return ExitReason.GAP_CLOSED
         }
         if (fair != null && fair <= entry - p.turnDown + 1e-12) return ExitReason.TURN_DOWN
         return null
@@ -424,13 +428,14 @@ data class ScalpTrade(
     val strategy: ScalpStrategy get() = ScalpParams.byId(variantId)?.strategy ?: ScalpStrategy.FAIR_GAP
     /** 0.3.54: display/breakdown label — forecast trades are their own algos, never "Fair-gap". */
     val algoLabel: String get() = when {
+        ScalpV2.isV2(variantId) -> ScalpModels.modelOf(this)?.label ?: "v2"
         variantId.startsWith(ForecastScalp.RIDE_PREFIX) -> ScalpModels.Model.FORECAST_RIDE.label
         variantId.startsWith(ForecastScalp.FADE_PREFIX) -> ScalpModels.Model.FORECAST_FADE.label
         ShockFav.isShockFav(variantId) -> ShockFav.byVariantId(variantId)?.let { "${it.code} ${it.label}" } ?: variantId
         else -> strategy.label
     }
     /** Strategy for per-strategy grouping, null for forecast trades (grouped separately). */
-    val strategyOrNull: ScalpStrategy? get() = if (ForecastScalp.isForecast(this) || ShockFav.isShockFav(variantId)) null else strategy
+    val strategyOrNull: ScalpStrategy? get() = if (ForecastScalp.isForecast(this) || ShockFav.isShockFav(variantId) || ScalpV2.isV2(variantId)) null else strategy
 
     /** Mark-to-bid P&L after the exit fee for what is still held. */
     fun unrealizedUsd(bid: Double?): Double? {
@@ -493,6 +498,7 @@ class ScalpBook(
 
     /** Cost tied up in open primary scalps (pending entries reserve ask × clip + entry fee). */
     fun openCostUsd(): Double = _trades.value.sumOf { t ->
+        if (ScalpV2.isV2(t.variantId)) return@sumOf 0.0 // 0.3.65: v2 copies never crowd out originals
         when (t.state) {
             ScalpState.PENDING_ENTRY -> t.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, t.signalAsk)
             ScalpState.OPEN, ScalpState.PENDING_EXIT -> (t.entryPrice ?: 0.0) * t.remaining + t.entryFeeUsd
@@ -543,7 +549,10 @@ class ScalpBook(
         stepShadows(q, null)
         val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
         // Step every open scalp first (one per market side per variant).
-        mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) }.forEach { t ->
+        // 0.3.65: peak bid for every open trade (stored on close) + v2 lane.
+        mineAll.forEach { t -> if (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
+        changed += stepV2(q)
+        mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
             val p = ScalpParams.byId(t.variantId) ?: primary
             step(t, q, p)?.let { changed += it }
         }
@@ -721,7 +730,7 @@ class ScalpBook(
      */
     /** sf exit rule without the stop (shared by live exits and the no-stop shadow). Maker target handled by the caller. */
     private fun sfNoStopExit(p: ShockFav.Params, entry: Double, heldS: Double, tauS: Double, bid: Double, sideFair: Double): String? = when (p.kind) {
-        ShockFav.Kind.SHOCK_FAV -> ShockFav.shockExit(p, heldS, tauS, bid, sideFair)
+        ShockFav.Kind.SHOCK_FAV -> ShockFav.shockExit(p, heldS, tauS, bid, sideFair, entry)
         ShockFav.Kind.LAGGARD -> when {
             bid >= entry + p.tp - 1e-9 -> "take profit +${Math.round(p.tp * 100)}¢"
             tauS < 30.0 -> "τ < 30 s"; heldS >= p.maxHoldS -> "max hold ${p.maxHoldS}s"; else -> null }
@@ -753,6 +762,28 @@ class ScalpBook(
             ask, ask - bid, g * ((ya + yb) / 2 - openMid), 900.0 - q.tauS)
     }
 
+    /** 0.3.65: Open 50 price-only entries (uptick / both / maker), one per variant per side per window ticker. */
+    private fun o50PriceEntries(q: ScalpRule.Quote, key: String, ya: Double, yb: Double): List<ScalpTrade> {
+        if (!ShockFav.o50InEntryWindow(q.tauS)) return emptyList()
+        val openMid = o50OpenMid[key] ?: return emptyList()
+        val mine = _trades.value.filter { it.ticker == key && ShockFav.isO50(it.variantId) }
+        val out = ArrayList<ScalpTrade>()
+        for (p in ShockFav.VARIANTS) {
+            if (p.kind != ShockFav.Kind.OPEN50 || p.o50 == ShockFav.O50.AI) continue
+            val sides = ShockFav.o50Sides(p, openMid, (ya + yb) / 2)
+            if (p.o50 == ShockFav.O50.UPTICK && mine.any { it.variantId.take(4) == p.code }) continue
+            for (sd in sides) {
+                val vid = ShockFav.o50VariantId(p, sd)
+                if (mine.any { it.variantId == vid } || out.any { it.variantId == vid }) continue
+                val ask = q.ask(sd)?.takeIf { it in 0.05..0.95 } ?: continue
+                sfEnter(q, p, vid, sd, ask, 0.5, 0.0, Double.MAX_VALUE, "open 50")?.let {
+                    out += if (p.o50 == ShockFav.O50.MAKER) it.copy(restingLimit = ShockFav.O50_MAKER_PX, restingSinceMs = q.nowMs) else it
+                }
+            }
+        }
+        return out
+    }
+
     private val simpleHist = HashMap<String, ArrayDeque<Triple<Long, Double, Double>>>()
 
     /** Side whose ask sits ≥ p.dip below its own 5-min average ask (needs ≥ 4 min of history, τ ≥ 120 s, ask 5–95¢). */
@@ -773,6 +804,9 @@ class ScalpBook(
         val sec = q.nowMs / 1000L
         if (q.tauS <= 900.0 && !o50OpenMid.containsKey(key)) o50OpenMid[key] = (ya + yb) / 2
         if (o50OpenMid.size > 200) o50OpenMid.keys.filter { (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { o50OpenMid.remove(it) }
+        // 0.3.65 Open 50 (non-AI): fresh chance at EVERY 15-min open — needs only the book, not spot/σ/strike.
+        val o50Early = if (enabled && q.nowMs < q.closeMs && q.fresh() && coin == ShockFav.TRADE_COIN) o50PriceEntries(q, key, ya, yb) else emptyList()
+        o50Early.forEach { save(it) }
         // 0.3.63 Simple dip: rolling 5-min side asks (price only), before any spot/fair early return.
         simpleHist.getOrPut(key) { ArrayDeque() }.let { h ->
             h.addLast(Triple(q.nowMs, ya, 1.0 - yb))
@@ -892,6 +926,7 @@ class ScalpBook(
             var brtiFair: Double? = null
             for (p in ShockFav.VARIANTS) {
                 if (p.kind == ShockFav.Kind.OPEN50) {
+                    if (p.o50 != ShockFav.O50.AI) continue // 0.3.65: handled in o50PriceEntries
                     // 0.3.64 Open 50: one shot per market per side, only 5–30 s after the open.
                     if (!ShockFav.o50InEntryWindow(q.tauS)) continue
                     val openMid = o50OpenMid[key] ?: continue
@@ -971,7 +1006,7 @@ class ScalpBook(
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
         val cost = ask * n + ScalpRule.orderFee(n, ask)
-        if (openCost + cost > bankroll + 1e-9) return null
+        if (p.kind != ShockFav.Kind.OPEN50 && openCost + cost > bankroll + 1e-9) return null // 0.3.65: Open 50 unlimited paper
         return ScalpTrade(
             id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
             signalAsk = ask, fairAtSignal = fair,
@@ -1259,8 +1294,11 @@ class ScalpBook(
         add.size
     }
 
-    private fun save(t: ScalpTrade) {
+    private fun save(t0: ScalpTrade) {
+        val prev = _all.value.firstOrNull { it.id == t0.id }
+        val t = withDetail(t0, prev)
         runCatching { store.upsertScalp(t) }
+        if (prev == null) spawnV2(t)
         val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
         _all.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else ScalpMemory.boundIfNeeded(listOf(t) + cur)
@@ -1269,6 +1307,90 @@ class ScalpBook(
             val pi = pc.indexOfFirst { it.id == t.id }
             _trades.value = if (pi >= 0) pc.toMutableList().also { it[pi] = t } else ScalpMemory.boundIfNeeded(listOf(t) + pc)
         }
+    }
+
+    // ---------------- 0.3.65 trade detail + v2 copies ----------------
+    /** Peak side bid since entry, per open trade (all scalpers; v2 exits use it). */
+    private val peakBid = HashMap<String, Double>()
+    private val v2Armed = HashSet<String>()
+
+    private fun bookStr(q: ScalpRule.Quote?, side: String): String {
+        if (q == null) return "n/a"
+        return String.format(Locale.US, "yb=%.2f×%.0f ya=%.2f×%.0f bid=%.2f ask=%.2f spot=%s strike=%s fair=%s tau=%.0fs",
+            q.yesBid ?: Double.NaN, q.yesBidSize ?: 0.0, q.yesAsk ?: Double.NaN, q.yesAskSize ?: 0.0,
+            q.bid(side) ?: Double.NaN, q.ask(side) ?: Double.NaN, q.spot?.let { "%.2f".format(Locale.US, it) } ?: "n/a",
+            q.strike?.let { "%.2f".format(Locale.US, it) } ?: "n/a", q.fair(side)?.let { "%.3f".format(Locale.US, it) } ?: "n/a", q.tauS)
+    }
+
+    /** Appends entry / exit book snapshots, peak bid and stop level to the persisted note (once each). */
+    private fun withDetail(t: ScalpTrade, prev: ScalpTrade?): ScalpTrade {
+        val q = _marks.value[t.ticker.uppercase()]
+        var note = t.note
+        if (t.state == ScalpState.OPEN && prev?.state != ScalpState.OPEN && !note.contains("entryBook[")) {
+            note += " · entryBook[" + bookStr(q, t.side) + "]"
+            t.entryPrice?.let { peakBid[t.id] = q?.bid(t.side) ?: it }
+        }
+        if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && !note.contains("exitBook[")) {
+            val stop = ScalpModels.modelOf(t)?.let { ScalpModels.stopLabel(it) } ?: "n/a"
+            note += " · exitBook[" + bookStr(q, t.side) + "]" + String.format(Locale.US, " · peakBid=%s · stopLevel=%s · fees=%.2f",
+                peakBid[t.id]?.let { "%.2f".format(Locale.US, it) } ?: "n/a", stop, t.entryFeeUsd + t.exitFeeUsd)
+            peakBid.remove(t.id); v2Armed.remove(t.id)
+        }
+        while (peakBid.size > 2_000) peakBid.remove(peakBid.keys.first())
+        return if (note === t.note) t else t.copy(note = note)
+    }
+
+    /** New primary signal of an original (BTC, not v2, model has a v2 copy) → a v2 pending entry with the same side. */
+    private fun spawnV2(t: ScalpTrade) {
+        if (!t.isPrimary || ScalpV2.isV2(t.variantId) || t.coin != ShockFav.TRADE_COIN) return
+        if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
+        val m = ScalpModels.modelOf(t) ?: return
+        ScalpModels.v2Of(m) ?: return
+        val stop = ScalpV2.stopFor(t.variantId)
+        save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
+            signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
+            note = String.format(Locale.US, "v2 copy of %s (%s) · ask ≤ 50¢ · v2stop=%.2f", m.label, t.variantId, stop),
+            ruleVersion = "${ScalpRule.VERSION}|${ScalpV2.v2Id(t.variantId)}|P"))
+    }
+
+    /** v2 lane: 2 s delayed taker entry if ask ≤ 50¢ (else no fill after 6 s); exits per [ScalpV2.exit]; otherwise settles. */
+    private fun stepV2(q: ScalpRule.Quote): List<ScalpTrade> {
+        val key = q.ticker.uppercase()
+        val out = ArrayList<ScalpTrade>()
+        for (t in _all.value) {
+            if (t.ticker != key || !ScalpV2.isV2(t.variantId) || !isActive(t)) continue
+            when (t.state) {
+                ScalpState.PENDING_ENTRY -> {
+                    val age = q.nowMs - t.signalAtMs
+                    if (q.nowMs >= q.closeMs || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill (ask > 50¢ or no size) within 6s"); continue }
+                    if (age < ScalpV2.ENTRY_DELAY_MS || !q.fresh()) continue
+                    val ask = q.ask(t.side)
+                    if (!ScalpV2.entryOk(ask)) continue
+                    val n = minOf(ScalpV2.CLIP, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+                    if (n <= 0) continue
+                    out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask!!), entryAtMs = q.nowMs,
+                        note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
+                }
+                ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
+                    if (q.nowMs >= q.closeMs || !q.fresh()) continue
+                    val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
+                    val entry = t.entryPrice ?: continue
+                    val stop = Regex("v2stop=([0-9.]+)").find(t.note)?.groupValues?.get(1)?.toDoubleOrNull() ?: ScalpV2.stopFor(ScalpV2.originalView(t).variantId)
+                    val pk = maxOf(peakBid[t.id] ?: bid, bid).also { peakBid[t.id] = it }
+                    val wasArmed = t.id in v2Armed
+                    if (ScalpV2.armed(entry, bid, stop, t.contracts)) v2Armed += t.id
+                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: ScalpV2.exit(entry, stop, pk, bid, wasArmed, t.contracts) ?: continue
+                    val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
+                    val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
+                    if (n <= 0) { if (base !== t) out += base; continue }
+                    val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+                    out += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
+                }
+                else -> {}
+            }
+        }
+        out.forEach { save(it) }
+        return out
     }
 
     private class SpotVol {

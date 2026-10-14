@@ -48,7 +48,10 @@ data class DataUiState(
     val modelBusy: Boolean = false,
     val ledgerNote: String? = null,
     val championReport: String? = null,
-    val cfFeedLine: String? = null
+    val cfFeedLine: String? = null,
+    /** 0.3.65 Supabase size vs free cap + unsynced scalp count. */
+    val storageLine: String? = null,
+    val storageWarn: Boolean = false
 )
 
 class DataViewModel(application: Application) : AndroidViewModel(application) {
@@ -100,7 +103,22 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshStorage() {
+        viewModelScope.launch {
+            val (line, warn) = withContext(Dispatchers.IO) {
+                runCatching {
+                    val hub = _state.value.settings
+                    com.dirk.kalshiodds.data.supabase.SupabaseSync().storageLine(
+                        com.dirk.kalshiodds.data.supabase.SupabaseSync().dbSizeBytes(hub),
+                        com.dirk.kalshiodds.worker.SyncWorker.unsyncedScalps(getApplication()))
+                }.getOrElse { "Supabase size: unavailable" to false }
+            }
+            _state.update { it.copy(storageLine = line, storageWarn = warn) }
+        }
+    }
+
     fun refreshStats() {
+        refreshStorage()
         viewModelScope.launch {
             val stats = withContext(Dispatchers.IO) { runCatching { archive.stats() }.getOrElse { DataStats() } }
             _state.update { it.copy(stats = stats, modelNote = modelLabel()) }

@@ -43,7 +43,9 @@ class SupabaseSync(
         /** Safe to drop the paper sync tail. False when the paper batch failed. */
         val acknowledgePaper: Boolean = false,
         /** 0.3.56: the snapshot batch landed (or there was none) — safe to commit SnapshotUploadFilter. */
-        val snapshotsOk: Boolean = false
+        val snapshotsOk: Boolean = false,
+        /** 0.3.65: the scalp batch landed (or there was none) — safe to advance the scalp ack watermark. */
+        val scalpsOk: Boolean = false
     )
 
     data class PushOutcome(
@@ -114,6 +116,17 @@ class SupabaseSync(
         return PushOutcome(pushed, errors, paperOk, failed)
     }
 
+    /** 0.3.65 Data-tab line: size vs the 500 MB free-plan cap, warning at 80 %. */
+    fun storageLine(bytes: Long?, unsyncedScalps: Int): Pair<String, Boolean> {
+        val un = "Scalp trades waiting to upload: $unsyncedScalps"
+        if (bytes == null) return "Supabase size: unavailable. $un" to false
+        val mb = bytes / 1_048_576.0
+        val pct = mb / FREE_CAP_MB * 100.0
+        val warn = pct >= 80.0
+        return String.format(java.util.Locale.US, "Supabase size: %.0f MB of %d MB free plan (%.0f%%)%s. Rows are never deleted. %s",
+            mb, FREE_CAP_MB, pct, if (warn) " — WARNING: over 80%, upgrade or export soon" else "", un) to warn
+    }
+
     fun pack(bundle: LocalBundle): List<SyncMerge.Record> {
         val out = ArrayList<SyncMerge.Record>()
         // 0.3.55: only meaningful snapshot changes (or one per ticker per 5 min), compact payload (no note, 0.1pp).
@@ -139,6 +152,13 @@ class SupabaseSync(
                 .putFinite("feesUsd", t.entryFeeUsd + t.exitFeeUsd).putFinite("netUsd", t.netUsd)
                 .put("entryAtMs", t.entryAtMs ?: JSONObject.NULL).put("closedAtMs", at)
                 .put("exitReason", t.exitReason ?: "")
+                // 0.3.65 full detail: signal, fees per leg, exit decision time, adverse marks, note (entry/exit book, spot, fair, model, peak bid, stop).
+                .put("signalAtMs", t.signalAtMs).putFinite("signalAsk", t.signalAsk).putFinite("fairAtSignal", t.fairAtSignal)
+                .putFinite("entryFeeUsd", t.entryFeeUsd).putFinite("exitFeeUsd", t.exitFeeUsd).put("soldContracts", t.soldContracts)
+                .put("exitDecidedAtMs", t.exitDecidedAtMs ?: JSONObject.NULL).putFinite("adverse30", t.adverse30).putFinite("adverse60", t.adverse60)
+                .put("stopLevel", com.dirk.kalshiodds.decision.ScalpModels.modelOf(t)?.let { com.dirk.kalshiodds.decision.ScalpModels.stopLabel(it) } ?: "")
+                .put("group", if (com.dirk.kalshiodds.decision.ScalpV2.isV2(t.variantId)) "v2" else (com.dirk.kalshiodds.decision.ShockFav.byVariantId(t.variantId)?.group ?: ""))
+                .put("note", t.note.take(2_000))
             out.add(rec("scalp:${t.id}", "scalp", at, payload))
         }
         bundle.shadow.forEach { s ->
@@ -274,7 +294,8 @@ class SupabaseSync(
                 pushed = pushed.pushed,
                 advanced = pushed.errors.isEmpty() || pushed.pushed > 0,
                 acknowledgePaper = pushed.paperOk,
-                snapshotsOk = "snapshot" !in pushed.failedKinds
+                snapshotsOk = "snapshot" !in pushed.failedKinds,
+                scalpsOk = "scalp" !in pushed.failedKinds
             )
         } catch (t: Throwable) {
             Status(ok = false, message = t.message?.takeIf { it.isNotBlank() } ?: "Sync failed")
@@ -319,6 +340,20 @@ class SupabaseSync(
         return arr.toString()
     }
 
+    /** 0.3.65 read-only: database size in bytes via the db_size_bytes() RPC (pg_database_size). Null on failure. */
+    fun dbSizeBytes(settings: DataHubSettings): Long? {
+        if (!settings.supabaseConfigured) return null
+        val req = Request.Builder()
+            .url("${settings.supabaseUrl.trimEnd('/')}/rest/v1/rpc/db_size_bytes")
+            .header("apikey", settings.supabaseAnonKey)
+            .header("Authorization", "Bearer ${settings.supabaseAnonKey}")
+            .header("Content-Type", "application/json")
+            .header("User-Agent", NetworkModule.USER_AGENT)
+            .post("{}".toRequestBody(JSON))
+            .build()
+        return runCatching { execute(req).trim().trim('"').toLong() }.getOrNull()
+    }
+
     private fun restUpsert(settings: DataHubSettings, table: String, body: String) {
         val url = "${settings.supabaseUrl.trimEnd('/')}/rest/v1/$table"
         val req = Request.Builder()
@@ -348,6 +383,7 @@ class SupabaseSync(
     }
 
     companion object {
+        const val FREE_CAP_MB = 500
         const val TABLE = "diphunter_sync"
         /** 0.3.60: kinds merged back on pull (everything except snapshot / scalp / shadow, which are push-only). */
         val PULL_KINDS = listOf("alert", "paper", "ticket", "settings", "settings_snapshot")
