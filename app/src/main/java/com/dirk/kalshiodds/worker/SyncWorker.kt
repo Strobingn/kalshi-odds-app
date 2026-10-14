@@ -37,12 +37,14 @@ class SyncWorker(
             val paper = container.paper.book.snapshot()
             val settings = container.preferences.hydrate()
             val picked = com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.select(store.recentSnapshots(4000))
-            // 0.3.65 scalp backlog: every closed primary trade after the ack watermark, oldest first (500 per run) — retried until it lands.
+            // 0.3.65 scalp backlog: every closed primary trade after the ack watermark, oldest first — retried until it lands.
             val ackPrefs = applicationContext.getSharedPreferences(SCALP_PREFS, Context.MODE_PRIVATE)
             val ackMs = ackPrefs.getLong(KEY_SCALP_ACK, 0L)
             val backlog = container.scalp.all.value.filter { it.isPrimary && it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && (it.closedAtMs ?: 0L) > ackMs }
                 .sortedBy { it.closedAtMs }
-            val scalpBatch = backlog.take(SCALP_BATCH)
+            // 0.3.66: the newest closes ride every run (idempotent upsert) so fresh trades are never stuck behind the backlog.
+            val newest = container.scalp.all.value.asSequence().filter { it.isPrimary && it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.closedAtMs != null }
+                .sortedByDescending { it.closedAtMs }.take(SCALP_NEWEST).toList()
             val result = SupabaseSync().roundTrip(
                 settings = hub,
                 local = SupabaseSync.LocalBundle(
@@ -53,7 +55,7 @@ class SyncWorker(
                     settingsChanges = archive.recentSettingsChanges(200),
                     paperFills = paper.fillsForSync(),
                     settingsSnapshot = SettingsRestore.snapshot(settings),
-                    scalps = scalpBatch,
+                    scalps = newest,
                     shadow = container.shadow.book.snapshot().tickets.filter { it.createdAtMs >= startedMs - 6 * 3_600_000L }
                 ),
                 store = store,
@@ -69,8 +71,21 @@ class SyncWorker(
                     if ("crash" !in out.failedKinds && out.errors.isEmpty()) com.dirk.kalshiodds.crash.CrashLog.markSynced(crashes.map { it.key })
                 }
             }
-            if (result.scalpsOk && scalpBatch.isNotEmpty()) ackPrefs.edit().putLong(KEY_SCALP_ACK, scalpBatch.maxOf { it.closedAtMs ?: 0L }).apply()
-            ackPrefs.edit().putInt(KEY_SCALP_UNSYNCED, if (result.scalpsOk) backlog.size - scalpBatch.size else backlog.size).apply()
+            // 0.3.66 backlog drain: oldest first, 500 rows per POST, up to SCALP_CHUNKS POSTs per run (0.3.65 sent 500 per
+            // 15-min run, slower than the scalpers close trades, so the backlog never caught up and nothing new appeared).
+            var left = backlog
+            var chunks = 0
+            while (left.isNotEmpty() && chunks < SCALP_CHUNKS) {
+                val chunk = left.take(SCALP_BATCH)
+                val recs = SupabaseSync().pack(SupabaseSync.LocalBundle(scalps = chunk))
+                val out = SupabaseSync().pushBatches(hub, recs)
+                if ("scalp" in out.failedKinds) break
+                val ack = chunk.maxOf { it.closedAtMs ?: 0L }
+                ackPrefs.edit().putLong(KEY_SCALP_ACK, ack).apply()
+                left = left.filter { (it.closedAtMs ?: 0L) > ack }
+                chunks++
+            }
+            ackPrefs.edit().putInt(KEY_SCALP_UNSYNCED, left.size).apply()
             if (result.acknowledgePaper) container.paper.book.acknowledgePaperSync(startedMs)
             // 0.3.56: only a successful upload advances the snapshot throttle.
             if (result.snapshotsOk) com.dirk.kalshiodds.data.supabase.SnapshotUploadFilter.commit(picked)
@@ -90,6 +105,8 @@ class SyncWorker(
         const val KEY_SCALP_ACK = "ack_closed_ms"
         const val KEY_SCALP_UNSYNCED = "unsynced"
         const val SCALP_BATCH = 500
+        const val SCALP_CHUNKS = 12
+        const val SCALP_NEWEST = 300
         fun unsyncedScalps(context: Context): Int = context.getSharedPreferences(SCALP_PREFS, Context.MODE_PRIVATE).getInt(KEY_SCALP_UNSYNCED, 0)
         const val ONCE = "diphunter_cloud_sync_once"
 

@@ -174,11 +174,17 @@ object ScalpModels {
     /** Model of a primary trade; null for shadow tuning variants. */
     fun modelOf(t: ScalpTrade): Model? {
         if (!t.isPrimary) return null
-        if (ScalpV2.isV2(t.variantId)) return modelOf(ScalpV2.originalView(t))?.let { v2Of(it) }
-        if (t.variantId.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
-        if (t.variantId.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
-        if (ShockFav.isShockFav(t.variantId)) return SF_BY_CODE[t.variantId.take(4)]
-        val p = ScalpParams.byId(t.variantId) ?: return Model.FAIR_GAP
+        // 0.3.66: no per-trade copy for v2 rows (was t.copy() per trade per board pass); cached per variant id.
+        return MODEL_BY_VARIANT.getOrPut(t.variantId) { modelOfVariant(t.variantId) ?: NONE } as? Model
+    }
+    private val NONE = Any()
+    private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
+    private fun modelOfVariant(vid: String): Model? {
+        if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
+        if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
+        if (vid.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
+        if (ShockFav.isShockFav(vid)) return SF_BY_CODE[vid.take(4)]
+        val p = ScalpParams.byId(vid) ?: return Model.FAIR_GAP
         return modelOf(p)
     }
 
@@ -285,10 +291,11 @@ object ScalpModels {
         )
     }
 
+    private val EXIT_NUM_RX = Regex("[−+-]?\\d+(\\.\\d+)?[¢s%]?")
     /** "stop 40% · trail 30% · settled 20%" — top 4 exit reasons over closed trades. */
     fun exitBreakdown(closed: List<ScalpTrade>): String {
         if (closed.isEmpty()) return ""
-        fun norm(r: String?): String = (r ?: "?").substringBefore(" → ").replace(Regex("[−+-]?\\d+(\\.\\d+)?[¢s%]?"), "#").trim().take(28)
+        fun norm(r: String?): String = (r ?: "?").substringBefore(" → ").replace(EXIT_NUM_RX, "#").trim().take(28)
         return closed.groupingBy { norm(it.exitReason) }.eachCount().entries.sortedByDescending { it.value }.take(4)
             .joinToString(" · ") { "${it.key} ${Math.round(it.value * 100.0 / closed.size)}%" }
     }

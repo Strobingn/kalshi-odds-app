@@ -206,6 +206,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     val scalpTab: StateFlow<ScalpTabState> = _scalpTab.asStateFlow()
     @Volatile private var scalpTabVisible = false
     @Volatile private var scalpTabBoardsAtMs = 0L
+    @Volatile private var scalpTabCiAtMs = 0L
+    @Volatile private var scalpTabBoardsInput: List<com.dirk.kalshiodds.decision.ScalpTrade>? = null
+    @Volatile private var scalpTabBoardsCoin: String? = null
     private var scalpTabJob: kotlinx.coroutines.Job? = null
 
     fun setScalpTabVisible(visible: Boolean) {
@@ -240,14 +243,25 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val marks = container.scalp.marks.value
         val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
         var next = cur.copy(markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
-        if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS) {
+        // 0.3.66: boards only when the trade list actually changed (≤ every 10 s); one all-time pass shared by the
+        // leaderboard and the per-scalper cards; bootstrap CIs at most once a minute. 0.3.65 rebuilt four boards with
+        // CIs over ~7k trades × 115 scalpers every 3 s, which pinned the CPU and starved the paper (scalp) lane.
+        if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS && (trades !== scalpTabBoardsInput || cur.coin != scalpTabBoardsCoin || now - scalpTabBoardsAtMs >= SCALP_TAB_CI_MS)) {
             scalpTabBoardsAtMs = now
+            scalpTabBoardsInput = trades
+            scalpTabBoardsCoin = cur.coin
             val bankroll = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+            val withCi = now - scalpTabCiAtMs >= SCALP_TAB_CI_MS
+            if (withCi) scalpTabCiAtMs = now
+            val prevCi = cur.algoAllTime
+            val allTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, withCi = withCi)
+                .map { r -> if (withCi) r else r.copy(perTradeCi = prevCi[r.model]?.perTradeCi, roiCi = prevCi[r.model]?.roiCi) }
+            val allByModel = allTime.associateBy { it.model }
             next = next.copy(
-                leaderAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor),
-                leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor) }.orEmpty(),
+                leaderAllTime = if (cur.coin == null) allTime else com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor, withCi = false),
+                leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor, withCi = false) }.orEmpty(),
                 leaderByCoin = emptyMap(),
-                algoAllTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor).associateBy { it.model },
+                algoAllTime = allByModel,
                 algoToday = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now), withCi = false).associateBy { it.model },
                 algoByCoin = emptyMap(),
                 algoTodayByCoin = emptyMap(),
@@ -2086,6 +2100,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
         const val HOME_LIVE_THROTTLE_MS = 250L
         const val SCALP_TAB_REFRESH_MS = 500L
-        const val SCALP_TAB_BOARDS_MS = 3_000L
+        const val SCALP_TAB_BOARDS_MS = 10_000L
+        const val SCALP_TAB_CI_MS = 60_000L
     }
 }
