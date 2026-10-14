@@ -470,9 +470,9 @@ class ScalpBook(
     private val tuneStore: ScalpTuneStore = InMemoryScalpTuneStore(),
     /** Paper bankroll: total open primary scalp cost (entries + fees, pending included) never exceeds it. */
     private val bankrollUsd: () -> Double = { com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD },
-    private val idFactory: () -> String = { UUID.randomUUID().toString() },
     /** 0.3.65 app-only extras: v2 copies + entry/exit detail notes (off in legacy unit-test books). */
-    private val liveExtras: Boolean = false
+    private val liveExtras: Boolean = false,
+    private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
     private val _all = MutableStateFlow(ScalpMemory.bound(store.loadScalps().sortedByDescending { it.signalAtMs }))
