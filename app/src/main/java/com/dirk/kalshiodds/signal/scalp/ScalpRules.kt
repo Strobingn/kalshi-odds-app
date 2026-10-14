@@ -44,26 +44,26 @@ object ScalpCatalog {
      * money: buy a 5¢ dip under a cap, sell when the bid is up a fixed amount.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        windowed("late_squeeze", "Early cheap", 0.50, 0.03, 0.12, 0L, SEVEN_MIN, "12% under 50¢ in the first 7 minutes. Sells a 3¢ drop and takes the next one."),
-        windowed("all_in_cheap", "Early 40", 0.40, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 40¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("all_in_under_50", "Early 50", 0.50, 0.05, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 5¢ drop."),
-        windowed("first_5", "First 5", 0.50, 0.03, 0.10, 0L, FIVE_MIN, "10% under 50¢ in the first 5 minutes. Sells a 3¢ drop, or a loser at minute 5."),
-        dip("no_cap", "Dip 5→8", 0.05, 0.08, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 8¢ up."),
-        dip("slow_trail", "Dip 5→15", 0.05, 0.15, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 15¢ up."),
-        dip("tight_spread", "Dip 5→6", 0.05, 0.06, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 6¢ up."),
-        dip("tight_4c", "Dip 5→10", 0.05, 0.10, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 10¢ up."),
-        dip("penny_press", "Dip 4→8", 0.04, 0.08, 0.50, 0.10, "Buy a 4¢ dip under 50¢. Sell when the bid is 8¢ up."),
-        dip("deep_value", "Dip 6→8", 0.06, 0.08, 0.50, 0.10, "Buy a 6¢ dip under 50¢. Sell when the bid is 8¢ up."),
-        dip("dip_buy", "Dip 5→8 45", 0.05, 0.08, 0.45, 0.10, "Buy a 5¢ dip under 45¢. Sell when the bid is 8¢ up."),
-        dip("wide_gap", "Dip 5→8 40", 0.05, 0.08, 0.40, 0.10, "Buy a 5¢ dip under 40¢. Sell when the bid is 8¢ up."),
-        dip("burst", "Dip 5→12", 0.05, 0.12, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 12¢ up."),
-        dip("reclaim", "Dip 3→8", 0.03, 0.08, 0.52, 0.10, "Buy a 3¢ dip under 52¢. Sell when the bid is 8¢ up."),
-        dip("min_5_7", "Dip 5→8 55", 0.05, 0.08, 0.55, 0.10, "Buy a 5¢ dip under 55¢. Sell when the bid is 8¢ up."),
-        dip("dump_catch", "Dip 5→8 12%", 0.05, 0.08, 0.52, 0.12, "Buy a 5¢ dip under 52¢. 12%. Sell when the bid is 8¢ up."),
-        dip("fade_spike", "Dip 5→15 12%", 0.05, 0.15, 0.52, 0.12, "Buy a 5¢ dip under 52¢. 12%. Sell when the bid is 15¢ up."),
-        dip("gap_side", "Dip 5→8 6%", 0.05, 0.08, 0.52, 0.06, "Buy a 5¢ dip under 52¢. 6%. Sell when the bid is 8¢ up."),
-        dip("breakout_50", "Dip 5→8 15%", 0.05, 0.08, 0.52, 0.15, "Buy a 5¢ dip under 52¢. 15%. Sell when the bid is 8¢ up."),
-        dip("momentum", "Dip 5→8 35", 0.05, 0.08, 0.35, 0.10, "Buy a 5¢ dip under 35¢. Sell when the bid is 8¢ up.")
+        windowed("late_squeeze", "Early cheap", 0.50, 0.03, 0.20, 0L, SEVEN_MIN, "20% under 50¢ in the first 7 minutes. Sells a 3¢ drop and takes the next one."),
+        windowed("all_in_cheap", "Early 40", 0.40, 0.03, 0.20, 0L, SEVEN_MIN, "20% under 40¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("all_in_under_50", "Early 50", 0.50, 0.05, 0.20, 0L, SEVEN_MIN, "20% under 50¢ in the first 7 minutes. Sells a 5¢ drop."),
+        windowed("first_5", "First 5", 0.50, 0.03, 0.20, 0L, FIVE_MIN, "20% under 50¢ in the first 5 minutes. Sells a 3¢ drop, or a loser at minute 5."),
+        dip("no_cap", "Dip 5→8", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
+        dip("slow_trail", "Dip 5→15", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 15¢ up."),
+        dip("tight_spread", "Dip 5→6", 0.05, 0.06, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 6¢ up."),
+        dip("tight_4c", "Dip 5→10", 0.05, 0.10, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 10¢ up."),
+        dip("penny_press", "Dip 4→8", 0.04, 0.08, 0.50, 0.20, "Buy a 4¢ dip under 50¢. 20%. Sell when the bid is 8¢ up."),
+        dip("deep_value", "Dip 6→8", 0.06, 0.08, 0.50, 0.20, "Buy a 6¢ dip under 50¢. 20%. Sell when the bid is 8¢ up."),
+        dip("dip_buy", "Dip 5→8 45", 0.05, 0.08, 0.45, 0.20, "Buy a 5¢ dip under 45¢. 20%. Sell when the bid is 8¢ up."),
+        dip("wide_gap", "Dip 5→8 40", 0.05, 0.08, 0.40, 0.20, "Buy a 5¢ dip under 40¢. 20%. Sell when the bid is 8¢ up."),
+        dip("burst", "Dip 5→12", 0.05, 0.12, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 12¢ up."),
+        dip("reclaim", "Dip 3→8", 0.03, 0.08, 0.52, 0.20, "Buy a 3¢ dip under 52¢. 20%. Sell when the bid is 8¢ up."),
+        dip("min_5_7", "Dip 5→8 55", 0.05, 0.08, 0.55, 0.20, "Buy a 5¢ dip under 55¢. 20%. Sell when the bid is 8¢ up."),
+        dip("dump_catch", "Dip 5→8 25%", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
+        dip("fade_spike", "Dip 5→15 25%", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 15¢ up."),
+        dip("gap_side", "Dip 5→8 15%", 0.05, 0.08, 0.52, 0.15, "Buy a 5¢ dip under 52¢. 15%. Sell when the bid is 8¢ up."),
+        dip("breakout_50", "Dip 5→8 30%", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 8¢ up."),
+        dip("momentum", "Dip 5→8 35", 0.05, 0.08, 0.35, 0.20, "Buy a 5¢ dip under 35¢. 20%. Sell when the bid is 8¢ up.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
