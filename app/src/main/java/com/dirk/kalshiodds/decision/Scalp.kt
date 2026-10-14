@@ -470,7 +470,9 @@ class ScalpBook(
     private val tuneStore: ScalpTuneStore = InMemoryScalpTuneStore(),
     /** Paper bankroll: total open primary scalp cost (entries + fees, pending included) never exceeds it. */
     private val bankrollUsd: () -> Double = { com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD },
-    private val idFactory: () -> String = { UUID.randomUUID().toString() }
+    private val idFactory: () -> String = { UUID.randomUUID().toString() },
+    /** 0.3.65 app-only extras: v2 copies + entry/exit detail notes (off in legacy unit-test books). */
+    private val liveExtras: Boolean = false
 ) {
     private val lock = Any()
     private val _all = MutableStateFlow(ScalpMemory.bound(store.loadScalps().sortedByDescending { it.signalAtMs }))
@@ -1296,9 +1298,9 @@ class ScalpBook(
 
     private fun save(t0: ScalpTrade) {
         val prev = _all.value.firstOrNull { it.id == t0.id }
-        val t = withDetail(t0, prev)
+        val t = if (liveExtras) withDetail(t0, prev) else t0
         runCatching { store.upsertScalp(t) }
-        if (prev == null) spawnV2(t)
+        if (prev == null && liveExtras) spawnV2(t)
         val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
         _all.value = if (idx >= 0) cur.toMutableList().also { it[idx] = t } else ScalpMemory.boundIfNeeded(listOf(t) + cur)

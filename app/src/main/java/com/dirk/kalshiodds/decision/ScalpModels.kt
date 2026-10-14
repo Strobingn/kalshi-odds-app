@@ -184,7 +184,7 @@ object ScalpModels {
 
     /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
     fun stopLabel(m: Model): String {
-        if (isV2(m)) return originalOf(m)?.let { "v2 · " + stopLabel(it) + " · sell after +stop net, 2¢ off peak" } ?: "v2"
+        if (isV2(m)) return originalOf(m)?.let { stopLabel(it) + " · v2: sell after +stop net, 2¢ off peak" } ?: "stop v2"
         ShockFav.byVariantId(m.code)?.let { p -> return "stop ${ShockFav.stopC(p)}¢" + if (ShockFav.stopTrainChosen(p)) "" else " (default)" }
         return when (m) {
             Model.FORECAST_RIDE, Model.FORECAST_FADE -> "stop ${ForecastScalp.STOP_C}¢ (default)"
