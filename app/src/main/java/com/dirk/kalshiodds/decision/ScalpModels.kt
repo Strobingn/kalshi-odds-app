@@ -136,6 +136,30 @@ object ScalpModels {
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[v2.code.removePrefix(ScalpV2.PREFIX)]?.takeIf { isV2(v2) }
     fun isV2(m: Model): Boolean = m.code.startsWith(ScalpV2.PREFIX)
+    /** Stable id for the incremental stats table (model code, or variantId when unknown). */
+    fun scalperIdOf(t: ScalpTrade): String? = if (!t.isPrimary) null else (modelOf(t)?.code ?: t.variantId)
+    fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
+    fun modelByCode(code: String): Model? = ALL.firstOrNull { it.code == code }
+    /** Build a Row from the incremental stats (+ optional today daily). No bootstrap. */
+    fun rowFromStat(st: ScalpStat, today: ScalpDaily? = null, openN: Int = st.openN): Row {
+        val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP
+        val ci = st.perTradeCi()
+        return Row(
+            model = m, netUsd = st.netUsd, roundTrips = st.n, wins = st.wins,
+            winRate = st.winRate, avgWinUsd = null, avgLossUsd = null, roi = null, roiCi = null,
+            open = openN, unrealizedUsd = 0.0, noFills = 0, grossWinUsd = 0.0, grossLossUsd = 0.0,
+            losses = (st.n - st.wins).coerceAtLeast(0), openContracts = 0, feesUsd = st.feesUsd,
+            stopSavedUsd = 0.0, stopsHit = 0, stopLabel = stopLabel(m),
+            bestUsd = st.bestUsd, worstUsd = st.worstUsd,
+            perTradeCi = ci?.let { ClusteredBootstrap.Ci(st.perTrade ?: 0.0, it.first, it.second, st.n, st.n) },
+            exitReasons = ""
+        )
+    }
+    fun leaderboardFromStats(stats: List<ScalpStat>, openBy: Map<String, Int> = emptyMap()): List<Row> =
+        ALL.map { m ->
+            val st = stats.firstOrNull { it.scalperId == m.code } ?: ScalpStat(m.code)
+            rowFromStat(st, openN = openBy[m.code] ?: st.openN)
+        }.sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
     val V2_MODELS: List<Model> get() = ALL.filter { isV2(it) }
     private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
     private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }

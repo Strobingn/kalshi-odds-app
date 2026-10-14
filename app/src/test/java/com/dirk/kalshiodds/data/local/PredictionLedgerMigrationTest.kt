@@ -93,7 +93,7 @@ class PredictionLedgerMigrationTest {
                 settlementSource = "cfbenchmarks_value",
                 secondsRemaining = 40.0,
                 spot = 100.0,
-                targetStrike = 99.0,
+                targetStrike = 109.0,
                 zDistance = 0.2,
                 rawModelProb = 0.6,
                 calibratedProb = null,
@@ -122,7 +122,7 @@ class PredictionLedgerMigrationTest {
         assertTrue(csv.contains("KXBTC15M-OLD"))
         assertFalse(csv.contains("BEGIN PRIVATE KEY"))
         val again = SQLiteDatabase.openDatabase(file.path, null, SQLiteDatabase.OPEN_READONLY)
-        assertEquals(9, again.version)
+        assertEquals(10, again.version)
         // 0.3.38: the additive scalp_trades table exists after upgrading an old DB.
         val scalp = again.rawQuery("SELECT COUNT(*) FROM scalp_trades", null)
         assertTrue(scalp.moveToFirst())

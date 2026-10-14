@@ -220,6 +220,6 @@ class ReleaseGate0343MigrationTest {
         assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS PAPER_ORDERS"))
         assertFalse(sql.contains("DROP")); assertFalse(sql.contains("ALTER")); assertFalse(sql.contains("DELETE"))
         assertTrue(com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.upgradeSql(9).isEmpty())
-        assertEquals(9, com.dirk.kalshiodds.AppIdentity.DB_VERSION)
+        assertEquals(10, com.dirk.kalshiodds.AppIdentity.DB_VERSION)
     }
 }

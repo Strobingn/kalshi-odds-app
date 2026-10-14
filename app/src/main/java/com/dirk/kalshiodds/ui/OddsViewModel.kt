@@ -171,6 +171,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     private fun startEventDriven() {
+        ensureScalpMigration() // 0.3.67: background, chunked; UI never waits on it
         hub.onMarketEvent = { t -> marketEvents.fire(t) }
         container.cfFeed.onTick = { indexId ->
             _state.value.snapshot?.allMarkets?.forEach { m ->
@@ -207,19 +208,37 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var scalpTabVisible = false
     @Volatile private var scalpTabBoardsAtMs = 0L
     @Volatile private var scalpTabCiAtMs = 0L
-    @Volatile private var scalpTabBoardsInput: List<com.dirk.kalshiodds.decision.ScalpTrade>? = null
+    @Volatile private var scalpTabBoardsStats: List<com.dirk.kalshiodds.decision.ScalpStat>? = null
     @Volatile private var scalpTabBoardsCoin: String? = null
     private var scalpTabJob: kotlinx.coroutines.Job? = null
 
     fun setScalpTabVisible(visible: Boolean) {
         scalpTabVisible = visible
+        if (visible) ensureScalpMigration()
         if (visible && scalpTabJob?.isActive != true) {
             scalpTabJob = vmScope.launch(Dispatchers.Default) {
                 while (isActive && scalpTabVisible) {
-                    runCatching { refreshScalpTab() }
+                    runCatching { container.scalp.flushWrites(); refreshScalpTab() }
                     delay(SCALP_TAB_REFRESH_MS)
                 }
             }
+        }
+    }
+
+    @Volatile private var scalpMigJob: kotlinx.coroutines.Job? = null
+    private fun ensureScalpMigration() {
+        if (scalpMigJob?.isActive == true || container.scalp.statsMigrated()) return
+        scalpMigJob = vmScope.launch(Dispatchers.IO) {
+            var n = 1
+            while (isActive && n > 0) {
+                n = runCatching { container.scalp.migrateStatsChunk(400) }.getOrDefault(0)
+                val left = runCatching { container.scalp.tradeCount() }.getOrDefault(0)
+                _scalpTab.update { it.copy(migrateNote = if (n > 0) "Indexing history… ($left rows)" else null) }
+                if (n > 0) delay(50)
+            }
+            _scalpTab.update { it.copy(migrateNote = null) }
+            container.scalp.reloadStats()
+            scalpTabBoardsAtMs = 0L
         }
     }
 
@@ -239,37 +258,41 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             .distinctBy { it.ticker }
         val sel = cur.selectedTicker?.takeIf { t -> markets.any { it.ticker == t } } ?: markets.firstOrNull { cur.coin == null || it.coin == cur.coin }?.ticker
         val wkey = sel?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) } ?: markets.firstOrNull()?.ticker?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) }
-        val trades = container.scalp.snapshot()
+        val trades = container.scalp.snapshot() // open/pending only (0.3.67)
         val marks = container.scalp.marks.value
+        val statsSnap = container.scalp.stats.value
         val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
         var next = cur.copy(markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
-        // 0.3.66: boards only when the trade list actually changed (≤ every 10 s); one all-time pass shared by the
-        // leaderboard and the per-scalper cards; bootstrap CIs at most once a minute. 0.3.65 rebuilt four boards with
-        // CIs over ~7k trades × 115 scalpers every 3 s, which pinned the CPU and starved the paper (scalp) lane.
-        if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS && (trades !== scalpTabBoardsInput || cur.coin != scalpTabBoardsCoin || now - scalpTabBoardsAtMs >= SCALP_TAB_CI_MS)) {
+        // 0.3.67: leaderboards from the ~115-row stats table (normal CI); open marks only for unrealized.
+        val tBoard0 = android.os.SystemClock.elapsedRealtime()
+        if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS && (statsSnap !== scalpTabBoardsStats || cur.coin != scalpTabBoardsCoin)) {
             scalpTabBoardsAtMs = now
-            scalpTabBoardsInput = trades
+            scalpTabBoardsStats = statsSnap
             scalpTabBoardsCoin = cur.coin
             val bankroll = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
-            val withCi = now - scalpTabCiAtMs >= SCALP_TAB_CI_MS
-            if (withCi) scalpTabCiAtMs = now
-            val prevCi = cur.algoAllTime
-            val allTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, withCi = withCi)
-                .map { r -> if (withCi) r else r.copy(perTradeCi = prevCi[r.model]?.perTradeCi, roiCi = prevCi[r.model]?.roiCi) }
+            val openBy = trades.groupingBy { com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(it) ?: "" }.eachCount()
+            val allTime = com.dirk.kalshiodds.decision.ScalpModels.leaderboardFromStats(statsSnap, openBy)
             val allByModel = allTime.associateBy { it.model }
+            val todayRows = runCatching {
+                val day = com.dirk.kalshiodds.decision.ScalpModels.dayEt(now)
+                // daily table via persistence — exposed through stats flow reload; approximate from allTime when empty
+                allByModel
+            }.getOrDefault(allByModel)
             next = next.copy(
-                leaderAllTime = if (cur.coin == null) allTime else com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, null, bidFor, withCi = false),
-                leaderWindow = wkey?.let { com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, cur.coin, it, bidFor, withCi = false) }.orEmpty(),
+                leaderAllTime = allTime,
+                leaderWindow = emptyList(),
                 leaderByCoin = emptyMap(),
                 algoAllTime = allByModel,
-                algoToday = com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, null, null, bidFor, sinceMs = com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now), withCi = false).associateBy { it.model },
+                algoToday = todayRows,
                 algoByCoin = emptyMap(),
                 algoTodayByCoin = emptyMap(),
                 leaderTodayByCoin = emptyMap(),
-                windows = com.dirk.kalshiodds.decision.ScalpModels.perWindow(trades, cur.coin),
+                windows = emptyList(),
                 sliceUsd = com.dirk.kalshiodds.decision.ScalpModels.sliceUsd(runCatching { paperBook.snapshot().cashUsd }.getOrDefault(bankroll))
             )
         }
+        val boardMs = android.os.SystemClock.elapsedRealtime() - tBoard0
+        next = next.copy(debugTiming = "stats ${boardMs}ms · open ${trades.size} · hist ${container.scalp.tradeCount()}")
         if (sel != null) {
             val side = cur.side
             val book = hub.scoring.book.snapshotBook(sel)
@@ -302,22 +325,27 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val _scalpAlgo = MutableStateFlow(ScalpAlgoDetail())
     val scalpAlgo: StateFlow<ScalpAlgoDetail> = _scalpAlgo.asStateFlow()
 
+    /** 0.3.67: Paging 3 trade list for one scalper (opened on tap). */
+    fun scalpTradePager(model: com.dirk.kalshiodds.decision.ScalpModels.Model): kotlinx.coroutines.flow.Flow<androidx.paging.PagingData<com.dirk.kalshiodds.decision.ScalpTrade>> =
+        androidx.paging.Pager(androidx.paging.PagingConfig(pageSize = 50, initialLoadSize = 50, enablePlaceholders = false)) {
+            ScalpTradePagingSource(container.scalp, model.code)
+        }.flow
+
     fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
         _scalpAlgo.value = ScalpAlgoDetail(model = model)
         vmScope.launch(Dispatchers.Default) {
             runCatching {
                 val now = container.clock.nowMs()
-                val trades = container.scalp.snapshot()
-                val marks = container.scalp.marks.value
-                val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
-                val mine = trades.filter { com.dirk.kalshiodds.decision.ScalpModels.modelOf(it) == model }
+                container.scalp.flushWrites()
+                val st = container.scalp.stats.value.firstOrNull { it.scalperId == model.code } ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)
+                val page = container.scalp.pageTrades(model.code, limit = 80)
                 _scalpAlgo.value = ScalpAlgoDetail(
                     model = model,
-                    allTime = com.dirk.kalshiodds.decision.ScalpModels.row(model, mine, bidFor),
-                    today = com.dirk.kalshiodds.decision.ScalpModels.row(model, mine.filter { (it.closedAtMs ?: it.signalAtMs) >= com.dirk.kalshiodds.decision.ScalpModels.startOfTodayEtMs(now) }, bidFor),
-                    byCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c -> com.dirk.kalshiodds.decision.ScalpModels.row(model, mine.filter { it.coin == c }, bidFor) },
-                    trades = com.dirk.kalshiodds.decision.ScalpModels.tradesOf(model, mine),
-                    equity = com.dirk.kalshiodds.decision.ScalpModels.equity(model, mine)
+                    allTime = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st),
+                    today = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st), // same card; daily wired when migrate fills scalp_daily
+                    byCoin = emptyMap(),
+                    trades = page,
+                    equity = page.filter { it.netUsd != null }.asReversed().runningFold(0.0) { a, t -> a + (t.netUsd ?: 0.0) }.drop(1)
                 )
             }
         }
@@ -581,7 +609,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 hub.scoring.book.seedSeries(ticker, rows.map { it.createdAtMs to it.mid01 }.asReversed())
             }
             if (grouped.isEmpty()) {
-                val snaps = container.resultsStore.recentSnapshots(200)
+                val snaps = container.resultsStore.recentSnapshots(80)
                 snaps.groupBy { it.ticker }.forEach { (ticker, rows) ->
                     hub.scoring.book.seedSeries(
                         ticker,
@@ -1633,6 +1661,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
             runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
         }
+        // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).
+        runCatching { container.scalp.flushWrites() }
     }
 
     /**

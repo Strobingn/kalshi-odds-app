@@ -67,21 +67,20 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
                 }
         }
         viewModelScope.launch {
-            combine(container.scalp.trades, container.scalp.marks, container.scalp.tune) { t, m, tu -> Triple(t, m, tu) }.collect { (t, m, tu) ->
-                val status = StrategyLadder.status(
-                    StrategyLadder.Id.SCALP,
-                    container.ladder.stage(StrategyLadder.Id.SCALP),
-                    com.dirk.kalshiodds.decision.ScalpStats.ladderItems(t)
-                )
-                _scalp.value = ScalpUi(
+            combine(container.scalp.trades, container.scalp.marks, container.scalp.tune, container.scalp.stats) { t, m, tu, st ->
+                // 0.3.67: open lines from RAM; stats from the incremental table (not a full-history scan).
+                val net = st.sumOf { it.netUsd }
+                val n = st.sumOf { it.n }
+                val wins = st.sumOf { it.wins }
+                ScalpUi(
                     open = ScalpCopy.openLines(t, m),
-                    history = ScalpCopy.historyLines(t),
-                    stats = ScalpCopy.statsLines(com.dirk.kalshiodds.decision.ScalpStats.summary(t)),
-                    ladder = status.reason,
+                    history = listOf(ScalpCopy.Line("hist", "History in Scalp tab · ${container.scalp.tradeCount()} closed in SQLite", null)),
+                    stats = listOf("Closed $n · wins $wins · net ${"%.2f".format(net)}"),
+                    ladder = "",
                     tuning = ScalpCopy.tuningLines(tu),
-                    breakdown = com.dirk.kalshiodds.decision.ScalpBreakdown.lines(t)
+                    breakdown = emptyList()
                 )
-            }
+            }.collect { _scalp.value = it }
         }
     }
 
