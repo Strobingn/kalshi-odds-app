@@ -1084,10 +1084,14 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     override fun loadWindows(limitWindows: Int): List<com.dirk.kalshiodds.decision.ScalpWindowAgg> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpWindowAgg>()
         runCatching {
-            db.readableDatabase.rawQuery(
-                "SELECT window_key, scalper_id, n, net_usd, close_ms FROM ${ST.WINDOWS} WHERE window_key IN " +
-                    "(SELECT window_key FROM ${ST.WINDOWS} GROUP BY window_key ORDER BY MAX(COALESCE(close_ms,0)) DESC LIMIT $limitWindows)", null).use { c ->
-                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpWindowAgg(c.getString(0), c.getString(1), c.getInt(2), c.getDouble(3), if (c.isNull(4)) null else c.getLong(4))
+            // 0.3.68: one pass down the close_ms index; stop at the first row of window limit+1 (no GROUP BY over every window).
+            val keys = HashSet<String>()
+            db.readableDatabase.rawQuery("SELECT window_key, scalper_id, n, net_usd, close_ms FROM ${ST.WINDOWS} ORDER BY close_ms DESC LIMIT ${(limitWindows + 1) * (com.dirk.kalshiodds.decision.ScalpModels.COUNT + 4)}", null).use { c ->
+                while (c.moveToNext()) {
+                    val k = c.getString(0)
+                    if (keys.add(k) && keys.size > limitWindows) break
+                    out += com.dirk.kalshiodds.decision.ScalpWindowAgg(k, c.getString(1), c.getInt(2), c.getDouble(3), if (c.isNull(4)) null else c.getLong(4))
+                }
             }
         }
         return out

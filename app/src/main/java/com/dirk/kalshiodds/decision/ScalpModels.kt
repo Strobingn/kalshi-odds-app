@@ -156,7 +156,8 @@ object ScalpModels {
     /** Stable id for the incremental stats table (model code, or variantId when unknown). */
     fun scalperIdOf(t: ScalpTrade): String? = if (!t.isPrimary) null else (modelOf(t)?.code ?: t.variantId)
     fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
-    fun modelByCode(code: String): Model? = ALL.firstOrNull { it.code == code }
+    fun modelByCode(code: String): Model? = BY_CODE[code]
+    private val BY_CODE: Map<String, Model> by lazy { ALL.associateBy { it.code } }
     /** Build a Row from the incremental stats (+ exit counts). No trade scan, no bootstrap. */
     fun rowFromStat(st: ScalpStat, openN: Int = st.openN, exits: List<ScalpExitAgg> = emptyList(), unrealizedUsd: Double = 0.0): Row {
         val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP
