@@ -51,6 +51,8 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
     val scalpTrades: StateFlow<List<com.dirk.kalshiodds.decision.ScalpTrade>> = container.scalp.trades
     /** 0.3.43 open paper limit orders (manual + scalp strategies). */
     val scalpAll: StateFlow<List<com.dirk.kalshiodds.decision.ScalpTrade>> = container.scalp.all
+    /** 0.3.68: summary totals come from scalp_stats. */
+    val scalpStats: StateFlow<List<com.dirk.kalshiodds.decision.ScalpStat>> = container.scalp.stats
     val paperOrders: StateFlow<List<com.dirk.kalshiodds.signal.paper.PaperOrder>> = container.paperOrders.orders
     fun cancelPaperOrder(id: String) { container.paperOrders.cancel(id) }
     fun editPaperOrder(id: String, limitCents: Double?, qty: Int?) { container.paperOrders.edit(id, limitCents?.div(100.0), qty) }

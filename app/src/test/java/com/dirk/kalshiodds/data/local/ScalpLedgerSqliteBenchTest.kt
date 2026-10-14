@@ -35,9 +35,11 @@ class ScalpLedgerSqliteBenchTest {
         val t0 = System.nanoTime()
         for (i in n - 200 until n) store.upsertScalpAndStats(trade(i), null)
         val closeMs = (System.nanoTime() - t0) / 1e6 / 200
-        val tl = System.nanoTime()
+        val tc = System.nanoTime()
         var stats = store.loadStats()
         var lb = ScalpModels.leaderboardFromStats(stats)
+        val coldMs = (System.nanoTime() - tc) / 1e6 // first read (JIT + cursor warm-up), reported, not gated
+        val tl = System.nanoTime()
         repeat(10) {
             // 0.3.68 full Scalp-tab read: stats + exits + today + 48 windows → all boards
             stats = store.loadStats()
@@ -54,7 +56,7 @@ class ScalpLedgerSqliteBenchTest {
         val page = store.pageTrades(vids[0], null, null, 50)
         val page2 = store.pageTrades(vids[0], page.last().closedAtMs, page.last().id, 50)
         val pageMs = (System.nanoTime() - tp) / 1e6 / 2
-        println("SQLITE_BENCH rows=$n bulkS=$bulkS closeMs=$closeMs statsReadMs=$readMs pageMs=$pageMs scalpers=${stats.size} board=${lb.size}")
+        println("SQLITE_BENCH coldReadMs=$coldMs rows=$n bulkS=$bulkS closeMs=$closeMs statsReadMs=$readMs pageMs=$pageMs scalpers=${stats.size} board=${lb.size}")
         assertEquals(n, stats.sumOf { it.n })
         // aggregates equal a brute-force pass for one scalper
         val all = (0 until n).map { trade(it) }.filter { ScalpModels.scalperIdOf(it) == vids[0] }

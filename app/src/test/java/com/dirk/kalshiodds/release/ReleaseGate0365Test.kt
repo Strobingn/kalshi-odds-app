@@ -16,7 +16,7 @@ class ReleaseGate0365Test {
     @Test fun v2CopyForEveryOriginalExceptSf29() {
         val originals = ScalpModels.ALL.filter { !ScalpModels.isV2(it) }
         assertEquals(58, originals.size)
-        assertEquals(57, ScalpModels.V2_MODELS.size)
+        assertEquals(57 + 16, ScalpModels.V2_MODELS.size) // 0.3.68: +16 tweak/size copies of v2 sf41–44
         assertNull(ScalpModels.v2Of(ScalpModels.Model.SF29))
         listOf(ScalpModels.Model.SF30, ScalpModels.Model.SF32, ScalpModels.Model.SF41, ScalpModels.Model.DIP_HUNTER, ScalpModels.Model.MOMENTUM,
             ScalpModels.Model.FAIR_GAP, ScalpModels.Model.CF_REPRICE, ScalpModels.Model.FORECAST_RIDE, ScalpModels.Model.MAKER_DIP).forEach {
