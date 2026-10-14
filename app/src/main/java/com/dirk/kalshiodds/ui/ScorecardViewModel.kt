@@ -69,8 +69,8 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
-                    val csv = ResultsExporter.csv(container.resultsStore.exportBundle())
-                    ResultsFileExport.write(getApplication(), csv)
+                    val bundle = container.resultsStore.exportBundle()
+                    ResultsFileExport.writeStream(getApplication()) { w -> ResultsExporter.writeCsv(bundle, w) }
                 }.getOrElse {
                     com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
                 }

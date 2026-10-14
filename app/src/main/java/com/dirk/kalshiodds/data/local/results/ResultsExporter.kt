@@ -115,7 +115,10 @@ object ResultsExporter {
         return root.toString()
     }
 
-    fun csv(bundle: ResultsBundle): String = buildString {
+    fun csv(bundle: ResultsBundle): String = java.io.StringWriter().also { writeCsv(bundle, it) }.toString()
+
+    /** 0.3.69: stream the CSV into [out] (exports write straight to the file). */
+    fun writeCsv(bundle: ResultsBundle, out: Appendable) = with(out) {
         appendLine("# Kalshi Trader results export")
         appendLine("# Approve-gated tickets only — never unsupervised bets.")
         appendLine()
