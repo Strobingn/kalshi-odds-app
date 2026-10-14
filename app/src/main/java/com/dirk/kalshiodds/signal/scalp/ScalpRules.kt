@@ -45,10 +45,10 @@ object ScalpCatalog {
      * amount from the entry. No trailing stop.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        dip("late_squeeze", "Dip 5→8", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
-        dip("all_in_cheap", "Dip 5→15", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 15¢ up."),
-        dip("all_in_under_50", "Dip 5→8 50", 0.05, 0.08, 0.50, 0.25, "Buy a 5¢ dip under 50¢. 25%. Sell when the bid is 8¢ up."),
-        dip("first_5", "Dip 5→8 45", 0.05, 0.08, 0.45, 0.20, "Buy a 5¢ dip under 45¢. 20%. Sell when the bid is 8¢ up."),
+        dip("late_squeeze", "Dip 5→8 30%", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 8¢ up."),
+        dip("all_in_cheap", "Dip 5→8 25%", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
+        dip("all_in_under_50", "Dip 5→15 25%", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 15¢ up."),
+        dip("first_5", "Dip 5→8", 0.05, 0.08, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 8¢ up."),
         dip("no_cap", "Dip 5→10", 0.05, 0.10, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 10¢ up."),
         dip("slow_trail", "Dip 5→12", 0.05, 0.12, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 12¢ up."),
         dip("tight_spread", "Dip 4→8", 0.04, 0.08, 0.50, 0.20, "Buy a 4¢ dip under 50¢. 20%. Sell when the bid is 8¢ up."),
