@@ -60,11 +60,11 @@ object ScalpCatalog {
         windowed("first_5", "First 5", 0.50, 0.04, 0.10, 0L, FIVE_MIN, "10% under 50¢ in the first 5 minutes. Sells a 4¢ drop, or a loser at minute 5."),
         windowed("min_5_7", "Minutes 5–7", 0.45, 0.04, 0.10, FIVE_MIN, SEVEN_MIN, "10% under 45¢ between minute 5 and 7. Sells a 4¢ drop."),
         windowed("late_squeeze", "Early cheap", 0.50, 0.03, 0.12, 0L, SEVEN_MIN, "12% under 50¢ in the first 7 minutes. Sells a 3¢ drop and takes the next one."),
+        windowed("dump_catch", "Early 40", 0.40, 0.03, 0.12, 0L, SEVEN_MIN, "Same as Early cheap but under 40¢. 12%. Sells a 3¢ drop."),
+        windowed("fade_spike", "Early any", 0.55, 0.03, 0.10, 0L, SEVEN_MIN, "Same idea as Early cheap, under 55¢, first 7 minutes. 10%. Sells a 3¢ drop."),
         cheap("gap_side", "Gap 40", 0.40, 0.04, 0.10, "10% under 40¢. Sells a 4¢ drop."),
         cheap("breakout_50", "Break 45", 0.45, 0.04, 0.10, "10% under 45¢. Sells a 4¢ drop."),
-        cheap("dump_catch", "Bounce 35", 0.35, 0.04, 0.10, "10% under 35¢. Sells a 4¢ drop."),
         cheap("momentum", "Ride 50", 0.50, 0.04, 0.12, "12% under 50¢. Sells a 4¢ drop off the high."),
-        cheap("fade_spike", "Fade 30", 0.30, 0.03, 0.10, "10% under 30¢. Sells a 3¢ drop.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
