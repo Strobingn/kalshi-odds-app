@@ -38,7 +38,7 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(83, BuildConfig.VERSION_CODE)
+        assertEquals(84, BuildConfig.VERSION_CODE)
         assertEquals("0.3.69", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
@@ -55,7 +55,7 @@ class AppIdentityTest {
         assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
         assertTrue(gradle.contains("versionCode = 84"))
-        assertTrue(gradle.contains("versionName = \"0.3.68\""))
+        assertTrue(gradle.contains("versionName = \"0.3.69\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
             File("src/main/AndroidManifest.xml")
