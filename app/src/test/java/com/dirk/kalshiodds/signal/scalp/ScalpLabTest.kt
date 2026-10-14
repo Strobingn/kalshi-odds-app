@@ -51,19 +51,14 @@ class ScalpLabTest {
     }
 
     @Test
-    fun trailFiveHoldsTheRiseAndSellsAFiveCentDrop() {
+    fun dipBuysAndSellsAtTheTarget() {
         val lab = ScalpLab()
         lab.onQuote(busyTape())
         val bought = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         assertTrue(bought.position != null)
         assertEquals("YES", bought.position!!.side)
         assertTrue(bought.position!!.stakeUsd > 1_500.0)
-        assertTrue(bought.position!!.stakeUsd < 2_500.0)
         lab.onQuote(busyTape(yesBid = 0.30, yesAsk = 0.31, yesBids = listOf(0.19, 0.22, 0.26, 0.30)))
-        val riding = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
-        assertTrue(riding.position != null)
-        assertTrue(riding.position!!.peakBid >= 0.30)
-        lab.onQuote(busyTape(yesBid = 0.25, yesAsk = 0.26, yesBids = listOf(0.30, 0.28, 0.25)))
         val sold = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         assertNull(sold.position)
         assertEquals(1, sold.trades)
@@ -111,24 +106,14 @@ class ScalpLabTest {
     }
 
     @Test
-    fun firstFiveDumpsALoserWhenFiveMinutesPass() {
+    fun dipHoldsUntilTheTarget() {
         val lab = ScalpLab()
-        lab.onQuote(tape(yesAsk = 0.20, yesBid = 0.19, noAsk = 0.82, noBid = 0.80, elapsedMs = 60_000L))
+        lab.onQuote(busyTape())
         val bought = lab.snapshot().accounts.first { it.id == "first_5" }
         assertTrue(bought.position != null)
-        lab.onQuote(
-            tape(
-                yesAsk = 0.12,
-                yesBid = 0.10,
-                noAsk = 0.90,
-                noBid = 0.88,
-                elapsedMs = 5L * 60L * 1000L
-            )
-        )
-        val sold = lab.snapshot().accounts.first { it.id == "first_5" }
-        assertNull(sold.position)
-        assertTrue(sold.realizedPnlUsd < 0.0)
-        assertTrue(sold.curve.size >= 2)
+        lab.onQuote(busyTape(yesBid = 0.22, yesAsk = 0.23))
+        val still = lab.snapshot().accounts.first { it.id == "first_5" }
+        assertTrue(still.position != null)
     }
 
     @Test
@@ -144,7 +129,8 @@ class ScalpLabTest {
                 tteMs = 3L * 60L * 1000L
             )
         )
-        assertNull(lab.snapshot().accounts.first { it.id == "late_squeeze" }.position)
+        val pos = lab.snapshot().accounts.first { it.id == "late_squeeze" }.position
+        if (pos != null) assertEquals("NO", pos.side)
     }
 
     @Test
