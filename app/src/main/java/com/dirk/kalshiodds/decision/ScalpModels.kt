@@ -69,10 +69,76 @@ object ScalpModels {
         SF58("sf58", "Open 50 · sf58 " + ShockFav.v("sf58").label, ShockFav.v("sf58").summary()),
         SF59("sf59", "Open 50 · sf59 " + ShockFav.v("sf59").label, ShockFav.v("sf59").summary()),
         SF60("sf60", "Open 50 · sf60 " + ShockFav.v("sf60").label, ShockFav.v("sf60").summary()),
-        SF61("sf61", "Open 50 · sf61 " + ShockFav.v("sf61").label, ShockFav.v("sf61").summary())
+        SF61("sf61", "Open 50 · sf61 " + ShockFav.v("sf61").label, ShockFav.v("sf61").summary()),
+        // 0.3.65 v2 copies (group 'v2'): same entries as the original, ask ≤ 50¢, original's stop, sell only once net gain ≥ stop then 2¢ off peak.
+        V2_FAIR_GAP("v2-fair", "v2 · Fair-gap", V2_BLURB),
+        V2_DIP_HUNTER("v2-dip", "v2 · Dip-hunter", V2_BLURB),
+        V2_MOMENTUM("v2-momo", "v2 · Momentum-sniper", V2_BLURB),
+        V2_EXTREME_REVERSION("v2-xrev", "v2 · Extreme-reversion", V2_BLURB),
+        V2_CF_REPRICE("v2-cfr", "v2 · CF-reprice", V2_BLURB),
+        V2_MAKER_DIP("v2-mkdip", "v2 · Maker dip-rebound", V2_BLURB),
+        V2_FORECAST_RIDE("v2-fcride", "v2 · Forecast ride", V2_BLURB),
+        V2_FORECAST_FADE("v2-fcfade", "v2 · Forecast fade", V2_BLURB),
+        V2_DIP_HOLD("v2-diph60", "v2 · Dip-hunter hold", V2_BLURB),
+        V2_MOMO_HOLD("v2-momoh60", "v2 · Momentum-sniper hold", V2_BLURB),
+        V2_FAIR_HOLD("v2-fairh60", "v2 · Fair-gap hold", V2_BLURB),
+        V2_DIP_NOTP("v2-dipnotp", "v2 · Dip-hunter no TP", V2_BLURB),
+        V2_MOMO_NOTP("v2-momonotp", "v2 · Momentum-sniper no TP", V2_BLURB),
+        V2_SF01("v2-sf01", "v2 · sf01 " + ShockFav.v("sf01").label, V2_BLURB),
+        V2_SF02("v2-sf02", "v2 · sf02 " + ShockFav.v("sf02").label, V2_BLURB),
+        V2_SF03("v2-sf03", "v2 · sf03 " + ShockFav.v("sf03").label, V2_BLURB),
+        V2_SF04("v2-sf04", "v2 · sf04 " + ShockFav.v("sf04").label, V2_BLURB),
+        V2_SF05("v2-sf05", "v2 · sf05 " + ShockFav.v("sf05").label, V2_BLURB),
+        V2_SF06("v2-sf06", "v2 · sf06 " + ShockFav.v("sf06").label, V2_BLURB),
+        V2_SF07("v2-sf07", "v2 · sf07 " + ShockFav.v("sf07").label, V2_BLURB),
+        V2_SF08("v2-sf08", "v2 · sf08 " + ShockFav.v("sf08").label, V2_BLURB),
+        V2_SF09("v2-sf09", "v2 · sf09 " + ShockFav.v("sf09").label, V2_BLURB),
+        V2_SF10("v2-sf10", "v2 · sf10 " + ShockFav.v("sf10").label, V2_BLURB),
+        V2_SF11("v2-sf11", "v2 · sf11 " + ShockFav.v("sf11").label, V2_BLURB),
+        V2_SF12("v2-sf12", "v2 · sf12 " + ShockFav.v("sf12").label, V2_BLURB),
+        V2_SF13("v2-sf13", "v2 · sf13 " + ShockFav.v("sf13").label, V2_BLURB),
+        V2_SF14("v2-sf14", "v2 · sf14 " + ShockFav.v("sf14").label, V2_BLURB),
+        V2_SF15("v2-sf15", "v2 · sf15 " + ShockFav.v("sf15").label, V2_BLURB),
+        V2_SF16("v2-sf16", "v2 · sf16 " + ShockFav.v("sf16").label, V2_BLURB),
+        V2_SF17("v2-sf17", "v2 · sf17 " + ShockFav.v("sf17").label, V2_BLURB),
+        V2_SF18("v2-sf18", "v2 · sf18 " + ShockFav.v("sf18").label, V2_BLURB),
+        V2_SF19("v2-sf19", "v2 · sf19 " + ShockFav.v("sf19").label, V2_BLURB),
+        V2_SF20("v2-sf20", "v2 · sf20 " + ShockFav.v("sf20").label, V2_BLURB),
+        V2_SF21("v2-sf21", "v2 · sf21 " + ShockFav.v("sf21").label, V2_BLURB),
+        V2_SF22("v2-sf22", "v2 · sf22 " + ShockFav.v("sf22").label, V2_BLURB),
+        V2_SF23("v2-sf23", "v2 · sf23 " + ShockFav.v("sf23").label, V2_BLURB),
+        V2_SF24("v2-sf24", "v2 · sf24 " + ShockFav.v("sf24").label, V2_BLURB),
+        V2_SF27("v2-sf27", "v2 · sf27 " + ShockFav.v("sf27").label, V2_BLURB),
+        V2_SF28("v2-sf28", "v2 · sf28 " + ShockFav.v("sf28").label, V2_BLURB),
+        V2_SF30("v2-sf30", "v2 · sf30 " + ShockFav.v("sf30").label, V2_BLURB),
+        V2_SF31("v2-sf31", "v2 · sf31 " + ShockFav.v("sf31").label, V2_BLURB),
+        V2_SF32("v2-sf32", "v2 · sf32 " + ShockFav.v("sf32").label, V2_BLURB),
+        V2_SF41("v2-sf41", "v2 · sf41 " + ShockFav.v("sf41").label, V2_BLURB),
+        V2_SF42("v2-sf42", "v2 · sf42 " + ShockFav.v("sf42").label, V2_BLURB),
+        V2_SF43("v2-sf43", "v2 · sf43 " + ShockFav.v("sf43").label, V2_BLURB),
+        V2_SF44("v2-sf44", "v2 · sf44 " + ShockFav.v("sf44").label, V2_BLURB),
+        V2_SF51("v2-sf51", "v2 · sf51 " + ShockFav.v("sf51").label, V2_BLURB),
+        V2_SF52("v2-sf52", "v2 · sf52 " + ShockFav.v("sf52").label, V2_BLURB),
+        V2_SF53("v2-sf53", "v2 · sf53 " + ShockFav.v("sf53").label, V2_BLURB),
+        V2_SF54("v2-sf54", "v2 · sf54 " + ShockFav.v("sf54").label, V2_BLURB),
+        V2_SF55("v2-sf55", "v2 · sf55 " + ShockFav.v("sf55").label, V2_BLURB),
+        V2_SF56("v2-sf56", "v2 · sf56 " + ShockFav.v("sf56").label, V2_BLURB),
+        V2_SF57("v2-sf57", "v2 · sf57 " + ShockFav.v("sf57").label, V2_BLURB),
+        V2_SF58("v2-sf58", "v2 · sf58 " + ShockFav.v("sf58").label, V2_BLURB),
+        V2_SF59("v2-sf59", "v2 · sf59 " + ShockFav.v("sf59").label, V2_BLURB),
+        V2_SF60("v2-sf60", "v2 · sf60 " + ShockFav.v("sf60").label, V2_BLURB),
+        V2_SF61("v2-sf61", "v2 · sf61 " + ShockFav.v("sf61").label, V2_BLURB)
     }
 
+    const val V2_BLURB = "v2: original's entries, only when ask ≤ 50¢; keep its stop; no time limit; sell only after the gain after fees reaches the stop size, then 2¢ off the peak bid"
     val ALL: List<Model> = Model.values().toList()
+    /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
+    fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
+    fun originalOf(v2: Model): Model? = ORIG_BY_CODE[v2.code.removePrefix(ScalpV2.PREFIX)]?.takeIf { isV2(v2) }
+    fun isV2(m: Model): Boolean = m.code.startsWith(ScalpV2.PREFIX)
+    val V2_MODELS: List<Model> get() = ALL.filter { isV2(it) }
+    private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
+    private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
     val COUNT: Int get() = ALL.size
     private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
     val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) }
@@ -108,6 +174,7 @@ object ScalpModels {
     /** Model of a primary trade; null for shadow tuning variants. */
     fun modelOf(t: ScalpTrade): Model? {
         if (!t.isPrimary) return null
+        if (ScalpV2.isV2(t.variantId)) return modelOf(ScalpV2.originalView(t))?.let { v2Of(it) }
         if (t.variantId.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
         if (t.variantId.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
         if (ShockFav.isShockFav(t.variantId)) return SF_BY_CODE[t.variantId.take(4)]
@@ -117,6 +184,7 @@ object ScalpModels {
 
     /** 0.3.61: per-bet stop shown on each card / leaderboard row. */
     fun stopLabel(m: Model): String {
+        if (isV2(m)) return originalOf(m)?.let { stopLabel(it) + " · v2: sell after +stop net, 2¢ off peak" } ?: "stop v2"
         ShockFav.byVariantId(m.code)?.let { p -> return "stop ${ShockFav.stopC(p)}¢" + if (ShockFav.stopTrainChosen(p)) "" else " (default)" }
         return when (m) {
             Model.FORECAST_RIDE, Model.FORECAST_FADE -> "stop ${ForecastScalp.STOP_C}¢ (default)"
@@ -131,7 +199,7 @@ object ScalpModels {
     }
     private fun legacyStop(m: Model): String = ScalpStrategy.values().firstOrNull { modelOf(it) == m }
         ?.let { "stop ${Math.round(ScalpParams.STRATEGY_SEEDS.getValue(it).stop * 100)}¢" } ?: "stop ${Math.round(MAKER_DIP_PARAMS.stop * 100)}¢"
-    fun tag(m: Model): String? = ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }
+    fun tag(m: Model): String? = (if (isV2(m)) "group: v2" else null) ?: ShockFav.TAGS[m.code] ?: ShockFav.byVariantId(m.code)?.group?.let { "group: $it" }
     /** Σ (actual − no-stop shadow) over closed trades whose note carries "nostop=±x.xx". Positive = the stop saved money. */
     fun stopSaved(trades: List<ScalpTrade>): Pair<Double, Int> {
         var s = 0.0; var n = 0
@@ -167,7 +235,12 @@ object ScalpModels {
         /** 0.3.61: Σ(actual − no-stop shadow) over stopped trades (+ = stop saved money) and how many stops fired. */
         val stopSavedUsd: Double = 0.0,
         val stopsHit: Int = 0,
-        val stopLabel: String = ""
+        val stopLabel: String = "",
+        /** 0.3.65: best / worst closed trade, $/trade CI (market-clustered), top exit reasons. */
+        val bestUsd: Double? = null,
+        val worstUsd: Double? = null,
+        val perTradeCi: ClusteredBootstrap.Ci? = null,
+        val exitReasons: String = ""
     ) {
         val holding: Boolean get() = openContracts > 0
     }
@@ -204,8 +277,30 @@ object ScalpModels {
             feesUsd = closed.sumOf { it.entryFeeUsd + it.exitFeeUsd },
             stopSavedUsd = ss.first,
             stopsHit = ss.second,
-            stopLabel = stopLabel(model)
+            stopLabel = stopLabel(model),
+            bestUsd = closed.maxOfOrNull { it.netUsd!! },
+            worstUsd = closed.minOfOrNull { it.netUsd!! },
+            perTradeCi = if (resamples <= 0) null else ClusteredBootstrap.meanCi(closed.map { it.windowKey to it.netUsd!! }, resamples = minOf(resamples, 200)),
+            exitReasons = exitBreakdown(closed)
         )
+    }
+
+    /** "stop 40% · trail 30% · settled 20%" — top 4 exit reasons over closed trades. */
+    fun exitBreakdown(closed: List<ScalpTrade>): String {
+        if (closed.isEmpty()) return ""
+        fun norm(r: String?): String = (r ?: "?").substringBefore(" → ").replace(Regex("[−+-]?\\d+(\\.\\d+)?[¢s%]?"), "#").trim().take(28)
+        return closed.groupingBy { norm(it.exitReason) }.eachCount().entries.sortedByDescending { it.value }.take(4)
+            .joinToString(" · ") { "${it.key} ${Math.round(it.value * 100.0 / closed.size)}%" }
+    }
+
+    /** 0.3.65 v2 vs original comparison rows (all v2 models, original alongside). */
+    fun v2Compare(rows: Map<Model, Row>): List<ScalpV2.Compare> = V2_MODELS.mapNotNull { v ->
+        val o = originalOf(v) ?: return@mapNotNull null
+        val vr = rows[v] ?: row(v, emptyList(), resamples = 0)
+        val orr = rows[o] ?: row(o, emptyList(), resamples = 0)
+        val vpt = if (vr.roundTrips > 0) vr.netUsd / vr.roundTrips else 0.0
+        val opt = if (orr.roundTrips > 0) orr.netUsd / orr.roundTrips else 0.0
+        ScalpV2.Compare(v, o, vr, orr, ScalpV2.status(vr.roundTrips, vpt, opt))
     }
 
     /** Leaderboard (all six models, best net first). [coin] null = all coins; [windowKey] null = all-time. */

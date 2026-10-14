@@ -256,6 +256,11 @@ fun DataScreen(
             }
             state.priceLogNote?.let { Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium) }
 
+            Section("Cloud storage")
+            Text(state.storageLine ?: "Supabase size: checking…", style = MaterialTheme.typography.bodyMedium,
+                color = if (state.storageWarn) com.dirk.kalshiodds.ui.theme.DownColor else colors.textSecondary)
+            OutlinedButton(onClick = viewModel::refreshStorage, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Refresh size") }
+
             Section("Prediction ledger")
             Text(
                 state.cfFeedLine ?: "CF Benchmarks feed is off until Live signals connect with your Kalshi key. Coinbase is the fallback and is marked in the ledger.",

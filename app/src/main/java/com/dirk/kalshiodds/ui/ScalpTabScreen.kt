@@ -196,6 +196,7 @@ fun ScalpTabContent(
             }
             // 0.3.59: one combined Bitcoin leaderboard (no per-coin boards).
             item(key = "board") { CombinedBoard(ScalpModels.combinedBoard(st.algoAllTime)) }
+            item(key = "v2cmp") { V2CompareCard(ScalpModels.v2Compare(st.algoAllTime)) }
         }
         item(key = "ladder-card") {
             FieldCard {
@@ -300,6 +301,10 @@ internal fun AlgoCard(
         StatPair("Won", r?.let { ScalpTabCopy.money(it.grossWinUsd) } ?: "—", "Lost", r?.let { ScalpTabCopy.money(it.grossLossUsd) } ?: "—")
         StatPair("Wins / losses", r?.let { "${it.wins} / ${it.losses}" } ?: "—", "Win rate", ScalpTabCopy.pct(r?.winRate))
         StatPair("Avg win", r?.avgWinUsd?.let { ScalpTabCopy.money(it) } ?: "—", "Avg loss", r?.avgLossUsd?.let { ScalpTabCopy.money(it) } ?: "—")
+        StatPair("Best", r?.bestUsd?.let { ScalpTabCopy.money(it) } ?: "—", "Worst", r?.worstUsd?.let { ScalpTabCopy.money(it) } ?: "—")
+        StatPair("$/trade", r?.perTradeCi?.let { ScalpTabCopy.money(it.mean) } ?: "—", "95% CI", r?.perTradeCi?.let { ScalpTabCopy.money(it.lo) + "…" + ScalpTabCopy.money(it.hi) } ?: "—")
+        StatPair("Fees", r?.let { ScalpTabCopy.money(it.feesUsd) } ?: "—", "Today trades", today?.roundTrips?.toString() ?: "0")
+        r?.exitReasons?.takeIf { it.isNotBlank() }?.let { Text("Exits: $it", style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis) }
         StatPair("Open", r?.let { "${it.openContracts} ct" } ?: "—", "Unrealized", r?.takeIf { it.open > 0 }?.let { ScalpTabCopy.money(it.unrealizedUsd) } ?: "—")
         Spacer(Modifier.height(4.dp))
     }
@@ -314,6 +319,31 @@ internal fun StatPair(l1: String, v1: String, l2: String, v2: String) {
         Spacer(Modifier.width(16.dp))
         Text(l2, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, color = c.textSecondary, maxLines = 1)
         Text(v2, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1, textAlign = TextAlign.End)
+    }
+}
+
+/** 0.3.65: each v2 copy next to its original — trades, net after fees, $/trade with 95 % CI, plain status. */
+@Composable
+private fun V2CompareCard(rows: List<com.dirk.kalshiodds.decision.ScalpV2.Compare>) {
+    val c = DipTheme.colors
+    FieldCard {
+        Text("v2 vs original · BTC 15m", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("v2 = original's entries only at ask ≤ 50¢, same stop, sell after gain ≥ stop then 2¢ off peak. Under 30 v2 trades = not enough data.",
+            style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+        Spacer(Modifier.height(6.dp))
+        rows.forEach { cmp ->
+            fun line(r: ScalpModels.Row): String {
+                val ci = r.perTradeCi
+                return "${r.roundTrips} tr · net ${if (r.roundTrips > 0) ScalpTabCopy.money(r.netUsd) else "—"} · " +
+                    (ci?.let { "${ScalpTabCopy.money(it.mean)}/tr (${ScalpTabCopy.money(it.lo)}…${ScalpTabCopy.money(it.hi)})" } ?: "—/tr")
+            }
+            val col = when (cmp.status) { "beating original" -> c.up; "losing to original" -> c.down; else -> c.textSecondary }
+            Text(cmp.original.label, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("v2: " + line(cmp.v2Row), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("orig: " + line(cmp.origRow), style = MaterialTheme.typography.labelSmall, fontFamily = FontFamily.Monospace, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(cmp.status, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = col)
+            Spacer(Modifier.height(4.dp))
+        }
     }
 }
 
