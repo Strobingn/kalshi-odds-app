@@ -983,61 +983,76 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     // ---------------- 0.3.67 scalp ledger: indexed SQLite + incremental stats ----------------
     private val ST = com.dirk.kalshiodds.data.local.paper.ScalpSchema
 
-    /** Upsert + (on the close transition) per-scalper totals and daily bucket, in ONE transaction. */
+    /** Upsert + (on the close transition) every aggregate table, in ONE transaction. */
     override fun upsertScalpAndStats(trade: com.dirk.kalshiodds.decision.ScalpTrade, prev: com.dirk.kalshiodds.decision.ScalpTrade?) {
         val w = db.writableDatabase
         w.beginTransaction()
         try {
             var prevState: String? = null
-            var prevSid: String? = null
+            var prevAgg = 0
             var exists = false
-            w.rawQuery("SELECT state, scalper_id FROM ${ST.TABLE} WHERE id = ?", arrayOf(trade.id)).use { c ->
-                if (c.moveToFirst()) { exists = true; prevState = c.getString(0); prevSid = if (c.isNull(1)) null else c.getString(1) }
+            w.rawQuery("SELECT state, agg_v FROM ${ST.TABLE} WHERE id = ?", arrayOf(trade.id)).use { c ->
+                if (c.moveToFirst()) { exists = true; prevState = c.getString(0); prevAgg = c.getInt(1) }
             }
             upsertScalp(trade)
-            applyStats(w, trade, exists, prevState, prevSid)
+            // A row not yet indexed by this generation is left for the background indexer (it counts it once, whole).
+            if (!exists || prevAgg >= ST.AGG_V) {
+                applyAgg(w, trade, wasOpen = exists && prevState != "CLOSED" && prevState != "NO_FILL",
+                    wasClosed = exists && prevState == "CLOSED", wasNoFill = exists && prevState == "NO_FILL")
+                w.execSQL("UPDATE ${ST.TABLE} SET agg_v = ? WHERE id = ?", arrayOf<Any>(ST.AGG_V, trade.id))
+            }
             w.setTransactionSuccessful()
         } finally { w.endTransaction() }
     }
 
-    private fun applyStats(w: SQLiteDatabase, t: com.dirk.kalshiodds.decision.ScalpTrade, exists: Boolean, prevState: String?, prevSid: String?) {
+    /** Apply one row's contribution (transitions only) to scalp_stats / scalp_daily / scalp_exits / scalp_windows. */
+    private fun applyAgg(w: SQLiteDatabase, t: com.dirk.kalshiodds.decision.ScalpTrade, wasOpen: Boolean, wasClosed: Boolean, wasNoFill: Boolean) {
         val sid = com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(t) ?: return
-        val closed = com.dirk.kalshiodds.decision.ScalpState.CLOSED.name
-        val nofill = com.dirk.kalshiodds.decision.ScalpState.NO_FILL.name
-        val wasOpen = exists && prevState != closed && prevState != nofill
-        val nowOpen = t.state.name != closed && t.state.name != nofill
-        // an un-migrated legacy closed row being re-saved still needs counting once
-        val wasCounted = exists && prevState == closed && prevSid != null
-        val nowClosed = t.state.name == closed && t.netUsd != null && t.netUsd.isFinite()
+        val nowOpen = t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && t.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL
         w.execSQL("INSERT OR IGNORE INTO ${ST.STATS}(scalper_id) VALUES (?)", arrayOf(sid))
         if (nowOpen && !wasOpen) w.execSQL("UPDATE ${ST.STATS} SET open_n = open_n + 1 WHERE scalper_id = ?", arrayOf(sid))
         if (!nowOpen && wasOpen) w.execSQL("UPDATE ${ST.STATS} SET open_n = MAX(open_n - 1, 0) WHERE scalper_id = ?", arrayOf(sid))
-        if (nowClosed && !wasCounted) {
-            val net = t.netUsd!!
-            val fees = t.entryFeeUsd + t.exitFeeUsd
-            val win = if (net > 0.0) 1 else 0
-            w.execSQL(
-                "UPDATE ${ST.STATS} SET n = n + 1, wins = wins + ?, net_usd = net_usd + ?, fees_usd = fees_usd + ?, " +
-                    "best_usd = CASE WHEN best_usd IS NULL OR ? > best_usd THEN ? ELSE best_usd END, " +
-                    "worst_usd = CASE WHEN worst_usd IS NULL OR ? < worst_usd THEN ? ELSE worst_usd END, " +
-                    "sum_sq = sum_sq + ?, last_closed_at_ms = MAX(COALESCE(last_closed_at_ms, 0), ?) WHERE scalper_id = ?",
-                arrayOf<Any>(win, net, fees, net, net, net, net, net * net, t.closedAtMs ?: 0L, sid)
-            )
-            val day = com.dirk.kalshiodds.decision.ScalpModels.dayEt(t.closedAtMs ?: 0L)
-            w.execSQL("INSERT OR IGNORE INTO ${ST.DAILY}(scalper_id, day_et) VALUES (?, ?)", arrayOf(sid, day))
-            w.execSQL("UPDATE ${ST.DAILY} SET n = n + 1, wins = wins + ?, net_usd = net_usd + ?, fees_usd = fees_usd + ? WHERE scalper_id = ? AND day_et = ?",
-                arrayOf<Any>(win, net, fees, sid, day))
-        }
+        if (t.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL && !wasNoFill) w.execSQL("UPDATE ${ST.STATS} SET no_fills = no_fills + 1 WHERE scalper_id = ?", arrayOf(sid))
+        if (wasClosed) return
+        val d = com.dirk.kalshiodds.decision.ScalpCloseDelta.of(t) ?: return
+        val win = if (d.win) 1 else 0
+        val lose = 1 - win
+        val neg = if (d.net < 0) 1 else 0
+        val ss = d.stopSaved
+        w.execSQL(
+            "UPDATE ${ST.STATS} SET n = n + 1, wins = wins + ?, net_usd = net_usd + ?, fees_usd = fees_usd + ?, " +
+                "best_usd = CASE WHEN best_usd IS NULL OR ? > best_usd THEN ? ELSE best_usd END, " +
+                "worst_usd = CASE WHEN worst_usd IS NULL OR ? < worst_usd THEN ? ELSE worst_usd END, " +
+                "sum_sq = sum_sq + ?, last_closed_at_ms = MAX(COALESCE(last_closed_at_ms, 0), ?), " +
+                "sum_win = sum_win + ?, sum_loss = sum_loss + ?, n_loss = n_loss + ?, neg_sum = neg_sum + ?, neg_n = neg_n + ?, " +
+                "cost_sum = cost_sum + ?, stop_saved_sum = stop_saved_sum + ?, stop_saved_n = stop_saved_n + ? WHERE scalper_id = ?",
+            arrayOf<Any>(win, d.net, d.fees, d.net, d.net, d.net, d.net, d.net * d.net, d.closedAtMs,
+                win * d.net, lose * d.net, lose, neg * d.net, neg, d.cost, ss ?: 0.0, if (ss != null) 1 else 0, sid)
+        )
+        w.execSQL("INSERT OR IGNORE INTO ${ST.DAILY}(scalper_id, day_et) VALUES (?, ?)", arrayOf(sid, d.day))
+        w.execSQL(
+            "UPDATE ${ST.DAILY} SET n = n + 1, wins = wins + ?, net_usd = net_usd + ?, fees_usd = fees_usd + ?, sum_sq = sum_sq + ?, " +
+                "sum_win = sum_win + ?, sum_loss = sum_loss + ?, n_loss = n_loss + ?, neg_sum = neg_sum + ?, neg_n = neg_n + ?, cost_sum = cost_sum + ?, " +
+                "best_usd = CASE WHEN best_usd IS NULL OR ? > best_usd THEN ? ELSE best_usd END, " +
+                "worst_usd = CASE WHEN worst_usd IS NULL OR ? < worst_usd THEN ? ELSE worst_usd END WHERE scalper_id = ? AND day_et = ?",
+            arrayOf<Any>(win, d.net, d.fees, d.net * d.net, win * d.net, lose * d.net, lose, neg * d.net, neg, d.cost, d.net, d.net, d.net, d.net, sid, d.day)
+        )
+        w.execSQL("INSERT OR IGNORE INTO ${ST.EXITS}(scalper_id, reason) VALUES (?, ?)", arrayOf(sid, d.reason))
+        w.execSQL("UPDATE ${ST.EXITS} SET n = n + 1 WHERE scalper_id = ? AND reason = ?", arrayOf(sid, d.reason))
+        w.execSQL("INSERT OR IGNORE INTO ${ST.WINDOWS}(window_key, scalper_id, close_ms) VALUES (?, ?, ?)", arrayOf<Any?>(d.windowKey, sid, d.windowCloseMs))
+        w.execSQL("UPDATE ${ST.WINDOWS} SET n = n + 1, net_usd = net_usd + ? WHERE window_key = ? AND scalper_id = ?", arrayOf<Any>(d.net, d.windowKey, sid))
     }
 
     override fun loadStats(): List<com.dirk.kalshiodds.decision.ScalpStat> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpStat>()
         runCatching {
-            db.readableDatabase.rawQuery("SELECT scalper_id, n, wins, net_usd, fees_usd, best_usd, worst_usd, sum_sq, last_closed_at_ms, open_n FROM ${ST.STATS}", null).use { c ->
+            db.readableDatabase.rawQuery("SELECT scalper_id, n, wins, net_usd, fees_usd, best_usd, worst_usd, sum_sq, last_closed_at_ms, open_n, " +
+                "sum_win, sum_loss, n_loss, neg_sum, neg_n, cost_sum, stop_saved_sum, stop_saved_n, no_fills FROM ${ST.STATS}", null).use { c ->
                 while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpStat(
                     c.getString(0), c.getInt(1), c.getInt(2), c.getDouble(3), c.getDouble(4),
                     if (c.isNull(5)) null else c.getDouble(5), if (c.isNull(6)) null else c.getDouble(6),
-                    c.getDouble(7), if (c.isNull(8)) null else c.getLong(8), c.getInt(9))
+                    c.getDouble(7), if (c.isNull(8)) null else c.getLong(8), c.getInt(9),
+                    c.getDouble(10), c.getDouble(11), c.getInt(12), c.getDouble(13), c.getInt(14), c.getDouble(15), c.getDouble(16), c.getInt(17), c.getInt(18))
             }
         }
         return out
@@ -1046,8 +1061,33 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     override fun loadDaily(dayEt: String): List<com.dirk.kalshiodds.decision.ScalpDaily> {
         val out = ArrayList<com.dirk.kalshiodds.decision.ScalpDaily>()
         runCatching {
-            db.readableDatabase.rawQuery("SELECT scalper_id, day_et, n, wins, net_usd, fees_usd FROM ${ST.DAILY} WHERE day_et = ?", arrayOf(dayEt)).use { c ->
-                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpDaily(c.getString(0), c.getString(1), c.getInt(2), c.getInt(3), c.getDouble(4), c.getDouble(5))
+            db.readableDatabase.rawQuery("SELECT scalper_id, day_et, n, wins, net_usd, fees_usd, sum_sq, sum_win, sum_loss, n_loss, neg_sum, neg_n, cost_sum, best_usd, worst_usd " +
+                "FROM ${ST.DAILY} WHERE day_et = ?", arrayOf(dayEt)).use { c ->
+                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpDaily(c.getString(0), c.getString(1), c.getInt(2), c.getInt(3), c.getDouble(4), c.getDouble(5),
+                    c.getDouble(6), c.getDouble(7), c.getDouble(8), c.getInt(9), c.getDouble(10), c.getInt(11), c.getDouble(12),
+                    if (c.isNull(13)) null else c.getDouble(13), if (c.isNull(14)) null else c.getDouble(14))
+            }
+        }
+        return out
+    }
+
+    override fun loadExits(): List<com.dirk.kalshiodds.decision.ScalpExitAgg> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpExitAgg>()
+        runCatching {
+            db.readableDatabase.rawQuery("SELECT scalper_id, reason, n FROM ${ST.EXITS}", null).use { c ->
+                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpExitAgg(c.getString(0), c.getString(1), c.getInt(2))
+            }
+        }
+        return out
+    }
+
+    override fun loadWindows(limitWindows: Int): List<com.dirk.kalshiodds.decision.ScalpWindowAgg> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpWindowAgg>()
+        runCatching {
+            db.readableDatabase.rawQuery(
+                "SELECT window_key, scalper_id, n, net_usd, close_ms FROM ${ST.WINDOWS} WHERE window_key IN " +
+                    "(SELECT window_key FROM ${ST.WINDOWS} GROUP BY window_key ORDER BY MAX(COALESCE(close_ms,0)) DESC LIMIT $limitWindows)", null).use { c ->
+                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpWindowAgg(c.getString(0), c.getString(1), c.getInt(2), c.getDouble(3), if (c.isNull(4)) null else c.getLong(4))
             }
         }
         return out
@@ -1094,19 +1134,19 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         runCatching { db.writableDatabase.execSQL("UPDATE ${ST.TABLE} SET synced = 1 WHERE synced = 0 AND state = 'CLOSED' AND closed_at_ms <= ?", arrayOf<Any>(closedAtMs)) }
     }
 
-    /** 0.3.67 background migration: legacy rows (scalper_id NULL) → tagged + counted into stats, [limit] per transaction. */
+    /** 0.3.67/0.3.68 background indexer: rows with agg_v < AGG_V → tagged + counted whole, [limit] per transaction. */
     override fun migrateStatsChunk(limit: Int): Int {
         val w = db.writableDatabase
-        val rows = runCatching { scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id IS NULL LIMIT $limit", null) }.getOrDefault(emptyList())
+        val rows = runCatching { scalpRows("SELECT * FROM ${ST.TABLE} WHERE agg_v < ${ST.AGG_V} LIMIT $limit", null) }.getOrDefault(emptyList())
         if (rows.isEmpty()) return 0
         w.beginTransaction()
         try {
+            val mark = w.compileStatement("UPDATE ${ST.TABLE} SET scalper_id = ?, agg_v = ${ST.AGG_V} WHERE id = ? AND agg_v < ${ST.AGG_V}")
             for (t in rows) {
                 val sid = com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(t)
-                w.execSQL("UPDATE ${ST.TABLE} SET scalper_id = ? WHERE id = ?", arrayOf(sid ?: "", t.id))
-                if (sid == null) continue
-                // Pretend the prior row was the opposite state so open_n / n each advance exactly once.
-                applyStats(w, t, exists = true, prevState = com.dirk.kalshiodds.decision.ScalpState.CLOSED.name, prevSid = null)
+                mark.clearBindings(); mark.bindString(1, sid ?: ""); mark.bindString(2, t.id)
+                if (mark.executeUpdateDelete() != 1) continue // counted meanwhile by the live path
+                if (sid != null) applyAgg(w, t, wasOpen = false, wasClosed = false, wasNoFill = false)
             }
             w.setTransactionSuccessful()
         } finally { w.endTransaction() }
@@ -1118,10 +1158,11 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
     }.getOrDefault(0)
 
     fun unmigratedCount(): Int = runCatching {
-        db.readableDatabase.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE} WHERE scalper_id IS NULL", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+        db.readableDatabase.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE} WHERE agg_v < ${ST.AGG_V}", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
     }.getOrDefault(0)
 
     override fun statsMigrated(): Boolean = unmigratedCount() == 0
+    @androidx.annotation.VisibleForTesting internal fun writableForTest(): SQLiteDatabase = db.writableDatabase
 
     private val paperOrderJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -1381,6 +1422,9 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             if (oldVersion < 8) createScalpTable(db)
             if (oldVersion < 9) createPaperOrderTable(db)
             if (oldVersion < 10) createScalpTable(db)
+            // 0.3.68: move (rename) the 0.3.67 aggregates aside; fresh tables rebuilt by the background indexer.
+            if (oldVersion == 10) com.dirk.kalshiodds.data.local.paper.ScalpSchema.moveV10Sql().forEach { runCatching { db.execSQL(it) } }
+            if (oldVersion < 11) createScalpTable(db)
             applyPaperFillColumns(db)
         }
 
@@ -1554,7 +1598,7 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 10
+        const val DB_VERSION = 11
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400

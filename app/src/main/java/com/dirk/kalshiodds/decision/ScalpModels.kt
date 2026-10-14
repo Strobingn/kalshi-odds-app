@@ -140,26 +140,30 @@ object ScalpModels {
     fun scalperIdOf(t: ScalpTrade): String? = if (!t.isPrimary) null else (modelOf(t)?.code ?: t.variantId)
     fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
     fun modelByCode(code: String): Model? = ALL.firstOrNull { it.code == code }
-    /** Build a Row from the incremental stats (+ optional today daily). No bootstrap. */
-    fun rowFromStat(st: ScalpStat, today: ScalpDaily? = null, openN: Int = st.openN): Row {
+    /** Build a Row from the incremental stats (+ exit counts). No trade scan, no bootstrap. */
+    fun rowFromStat(st: ScalpStat, openN: Int = st.openN, exits: List<ScalpExitAgg> = emptyList(), unrealizedUsd: Double = 0.0): Row {
         val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP
         val ci = st.perTradeCi()
         return Row(
             model = m, netUsd = st.netUsd, roundTrips = st.n, wins = st.wins,
-            winRate = st.winRate, avgWinUsd = null, avgLossUsd = null, roi = null, roiCi = null,
-            open = openN, unrealizedUsd = 0.0, noFills = 0, grossWinUsd = 0.0, grossLossUsd = 0.0,
-            losses = (st.n - st.wins).coerceAtLeast(0), openContracts = 0, feesUsd = st.feesUsd,
-            stopSavedUsd = 0.0, stopsHit = 0, stopLabel = stopLabel(m),
+            winRate = st.winRate, avgWinUsd = st.avgWin, avgLossUsd = st.avgLoss, roi = st.roi, roiCi = null,
+            open = openN, unrealizedUsd = unrealizedUsd, noFills = st.noFills, grossWinUsd = st.sumWin, grossLossUsd = st.negSum,
+            losses = st.negN, openContracts = 0, feesUsd = st.feesUsd,
+            stopSavedUsd = st.stopSavedSum, stopsHit = st.stopSavedN, stopLabel = stopLabel(m),
             bestUsd = st.bestUsd, worstUsd = st.worstUsd,
             perTradeCi = ci?.let { ClusteredBootstrap.Ci(st.perTrade ?: 0.0, it.first, it.second, st.n, st.n) },
-            exitReasons = ""
+            exitReasons = exitBreakdownFrom(exits)
         )
     }
-    fun leaderboardFromStats(stats: List<ScalpStat>, openBy: Map<String, Int> = emptyMap()): List<Row> =
-        ALL.map { m ->
-            val st = stats.firstOrNull { it.scalperId == m.code } ?: ScalpStat(m.code)
-            rowFromStat(st, openN = openBy[m.code] ?: st.openN)
+    fun leaderboardFromStats(stats: List<ScalpStat>, openBy: Map<String, Int> = emptyMap(), exits: List<ScalpExitAgg> = emptyList(),
+                             unrealBy: Map<String, Double> = emptyMap()): List<Row> {
+        val byId = stats.associateBy { it.scalperId }
+        val ex = exits.groupBy { it.scalperId }
+        return ALL.map { m ->
+            val st = byId[m.code] ?: ScalpStat(m.code)
+            rowFromStat(st, openN = openBy[m.code] ?: st.openN, exits = ex[m.code].orEmpty(), unrealizedUsd = unrealBy[m.code] ?: 0.0)
         }.sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
+    }
     val V2_MODELS: List<Model> get() = ALL.filter { isV2(it) }
     private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
     private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
@@ -317,10 +321,16 @@ object ScalpModels {
 
     private val EXIT_NUM_RX = Regex("[−+-]?\\d+(\\.\\d+)?[¢s%]?")
     /** "stop 40% · trail 30% · settled 20%" — top 4 exit reasons over closed trades. */
+    fun normExit(r: String?): String = (r ?: "?").substringBefore(" → ").replace(EXIT_NUM_RX, "#").trim().take(28)
+    /** 0.3.68: same string as [exitBreakdown], from the per-reason counts table. */
+    fun exitBreakdownFrom(counts: List<ScalpExitAgg>): String {
+        val total = counts.sumOf { it.n }
+        if (total == 0) return ""
+        return counts.sortedByDescending { it.n }.take(4).joinToString(" · ") { "${it.reason} ${Math.round(it.n * 100.0 / total)}%" }
+    }
     fun exitBreakdown(closed: List<ScalpTrade>): String {
         if (closed.isEmpty()) return ""
-        fun norm(r: String?): String = (r ?: "?").substringBefore(" → ").replace(EXIT_NUM_RX, "#").trim().take(28)
-        return closed.groupingBy { norm(it.exitReason) }.eachCount().entries.sortedByDescending { it.value }.take(4)
+        return closed.groupingBy { normExit(it.exitReason) }.eachCount().entries.sortedByDescending { it.value }.take(4)
             .joinToString(" · ") { "${it.key} ${Math.round(it.value * 100.0 / closed.size)}%" }
     }
 
@@ -365,6 +375,21 @@ object ScalpModels {
     fun best(rows: List<Row>): Model? = rows.filter { it.roundTrips > 0 }.maxByOrNull { it.netUsd }?.model
 
     data class WindowRow(val windowKey: String, val closeMs: Long?, val netByModel: Map<Model, Double>, val tripsByModel: Map<Model, Int>, val best: Model?)
+
+    /** 0.3.68: window list from the per-window aggregate table. */
+    fun windowsFromAgg(aggs: List<ScalpWindowAgg>, limit: Int = 48): List<WindowRow> =
+        aggs.groupBy { it.windowKey }.map { (w, rows) ->
+            val net = rows.mapNotNull { r -> modelByCode(r.scalperId)?.let { it to r.netUsd } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+            val n = rows.mapNotNull { r -> modelByCode(r.scalperId)?.let { it to r.n } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+            WindowRow(w, rows.firstNotNullOfOrNull { it.closeMs }, net, n, net.maxByOrNull { it.value }?.key)
+        }.sortedByDescending { it.closeMs ?: 0L }.take(limit)
+
+    /** 0.3.68: one window's leaderboard from the per-window aggregate (net + trips only). */
+    fun windowBoardFromAgg(aggs: List<ScalpWindowAgg>, windowKey: String): List<Row> {
+        val mine = aggs.filter { it.windowKey == windowKey }.associateBy { it.scalperId }
+        return ALL.map { m -> val a = mine[m.code]; rowFromStat(ScalpStat(m.code, n = a?.n ?: 0, netUsd = a?.netUsd ?: 0.0), openN = 0) }
+            .sortedWith(compareByDescending<Row> { it.netUsd }.thenByDescending { it.roundTrips })
+    }
 
     /** Per 15-minute window: each model's net, and which did best. Newest first, at most [limit] windows. */
     fun perWindow(trades: List<ScalpTrade>, coin: String? = null, limit: Int = 48): List<WindowRow> {

@@ -68,18 +68,8 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch {
             combine(container.scalp.trades, container.scalp.marks, container.scalp.tune, container.scalp.stats) { t, m, tu, st ->
-                // 0.3.67: open lines from RAM; stats from the incremental table (not a full-history scan).
-                val net = st.sumOf { it.netUsd }
-                val n = st.sumOf { it.n }
-                val wins = st.sumOf { it.wins }
-                ScalpUi(
-                    open = ScalpCopy.openLines(t, m),
-                    history = listOf(ScalpCopy.Line("hist", "History in Scalp tab · ${container.scalp.tradeCount()} closed in SQLite", null)),
-                    stats = listOf("Closed $n · wins $wins · net ${"%.2f".format(net)}"),
-                    ladder = "",
-                    tuning = ScalpCopy.tuningLines(tu),
-                    breakdown = emptyList()
-                )
+                // 0.3.68: Decision-view scalp section from aggregates (stats + exits + recent windows), open lines from RAM.
+                kotlinx.coroutines.withContext(Dispatchers.IO) { ScalpAggUi.build(container.scalp, t, m, tu, st) }
             }.collect { _scalp.value = it }
         }
     }

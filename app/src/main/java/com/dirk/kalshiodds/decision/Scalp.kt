@@ -1336,6 +1336,10 @@ class ScalpBook(
     }
 
     fun reloadStats() { _stats.value = store.loadStats() }
+    /** 0.3.68 aggregate reads (≈ hundreds of rows, indexed). Call off Main. */
+    fun loadExits() = store.loadExits()
+    fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
+    fun loadDaily(dayEt: String) = store.loadDaily(dayEt)
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
     fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)

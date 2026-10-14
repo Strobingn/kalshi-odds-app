@@ -50,7 +50,8 @@ class ReleaseGate0367Test {
         rows.drop(1100).forEach { store.upsertScalpAndStats(it, null) }
         val stats = store.loadStats()
         val tLb0 = System.nanoTime()
-        repeat(20) { ScalpModels.leaderboardFromStats(stats) }
+        val exits = store.loadExits(); val wins = store.loadWindows(48)
+        repeat(20) { ScalpModels.leaderboardFromStats(stats, exits = exits); ScalpModels.windowsFromAgg(wins); store.loadDaily(ScalpModels.dayEt(base)) }
         val lbMs = (System.nanoTime() - tLb0) / 1e6 / 20.0
         println("BENCH closeMs=$closeMs lbMs=$lbMs scalpers=${stats.size} n=${stats.sumOf { it.n }}")
         assertTrue("close+stats $closeMs ms", closeMs < 5.0)

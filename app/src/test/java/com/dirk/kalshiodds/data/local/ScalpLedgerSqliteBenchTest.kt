@@ -37,8 +37,18 @@ class ScalpLedgerSqliteBenchTest {
         val closeMs = (System.nanoTime() - t0) / 1e6 / 200
         val tl = System.nanoTime()
         var stats = store.loadStats()
-        repeat(9) { stats = store.loadStats() }
-        val lb = ScalpModels.leaderboardFromStats(stats)
+        var lb = ScalpModels.leaderboardFromStats(stats)
+        repeat(10) {
+            // 0.3.68 full Scalp-tab read: stats + exits + today + 48 windows → all boards
+            stats = store.loadStats()
+            val ex = store.loadExits()
+            val today = store.loadDaily(ScalpModels.dayEt(base + (n - 1) * 1000L)).associateBy { it.scalperId }
+            val win = store.loadWindows(48)
+            lb = ScalpModels.leaderboardFromStats(stats, exits = ex)
+            ScalpModels.ALL.forEach { m -> today[m.code]?.let { ScalpModels.rowFromStat(it.asStat()) } }
+            ScalpModels.windowsFromAgg(win)
+            ScalpModels.windowBoardFromAgg(win, win.first().windowKey)
+        }
         val readMs = (System.nanoTime() - tl) / 1e6 / 10
         val tp = System.nanoTime()
         val page = store.pageTrades(vids[0], null, null, 50)
@@ -46,6 +56,23 @@ class ScalpLedgerSqliteBenchTest {
         val pageMs = (System.nanoTime() - tp) / 1e6 / 2
         println("SQLITE_BENCH rows=$n bulkS=$bulkS closeMs=$closeMs statsReadMs=$readMs pageMs=$pageMs scalpers=${stats.size} board=${lb.size}")
         assertEquals(n, stats.sumOf { it.n })
+        // aggregates equal a brute-force pass for one scalper
+        val all = (0 until n).map { trade(it) }.filter { ScalpModels.scalperIdOf(it) == vids[0] }
+        val st0 = stats.first { it.scalperId == vids[0] }
+        val w = all.filter { it.netUsd!! > 0 }
+        assertEquals(w.size, st0.wins)
+        assertEquals(w.sumOf { it.netUsd!! } / w.size, st0.avgWin!!, 1e-9)
+        val l = all.filter { it.netUsd!! <= 0 }
+        assertEquals(l.sumOf { it.netUsd!! } / l.size, st0.avgLoss!!, 1e-9)
+        assertEquals(all.sumOf { it.netUsd!! } / all.sumOf { it.entryCostUsd }, st0.roi!!, 1e-9)
+        assertTrue(lb.first { it.model.code == vids[0] }.exitReasons.isNotBlank())
+        // background re-index (agg_v reset) rebuilds identical totals
+        store.writableForTest().execSQL("UPDATE scalp_trades SET agg_v = 0")
+        store.writableForTest().execSQL("DELETE FROM scalp_stats") // test DB only
+        store.writableForTest().execSQL("DELETE FROM scalp_daily"); store.writableForTest().execSQL("DELETE FROM scalp_exits"); store.writableForTest().execSQL("DELETE FROM scalp_windows")
+        while (store.migrateStatsChunk(2000) > 0) {}
+        val st1 = store.loadStats().first { it.scalperId == vids[0] }
+        assertEquals(st0.n, st1.n); assertEquals(st0.netUsd, st1.netUsd, 1e-6); assertEquals(st0.sumWin, st1.sumWin, 1e-6); assertEquals(st0.costSum, st1.costSum, 1e-6)
         assertEquals(50, page2.size)
         assertTrue(page2.first().closedAtMs!! < page.last().closedAtMs!!)
         assertTrue("stats read $readMs", readMs < 50.0)
