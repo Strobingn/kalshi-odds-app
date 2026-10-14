@@ -40,31 +40,31 @@ object ScalpCatalog {
     const val START_CASH = 20_000.0
 
     /**
-     * Every book does the same job. Buy the cheap side. Hold while it rises.
-     * Sell the first real drop off the high. They only differ in how cheap,
-     * how much of a drop, and how big the bet is.
+     * Every book is an Early cheap variation. Buy the cheaper side under a
+     * cap in the first 7 minutes. Hold the rise. Sell a small drop off the
+     * high. Early cheap itself is left alone.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        cheap("all_in_cheap", "Cheap 40", 0.40, 0.05, 0.10, "10% under 40¢. Sells a 5¢ drop off the high."),
-        cheap("no_cap", "Under 50", 0.50, 0.05, 0.10, "10% under 50¢. Sells a 5¢ drop off the high."),
-        cheap("all_in_under_50", "Trail 5¢", 0.50, 0.05, 0.10, "10% under 50¢. Holds the rise. Sells a 5¢ drop."),
-        cheap("slow_trail", "Slow trail", 0.45, 0.05, 0.10, "10% under 45¢. Holds the rise. Sells a 5¢ drop."),
-        cheap("tight_spread", "Tight 3¢", 0.40, 0.03, 0.10, "10% under 40¢. Sells a 3¢ drop off the high."),
-        cheap("tight_4c", "Tight 4¢", 0.45, 0.04, 0.10, "10% under 45¢. Sells a 4¢ drop off the high."),
-        cheap("penny_press", "Penny 25", 0.25, 0.04, 0.08, "8% at 25¢ or less. Sells a 4¢ drop."),
-        cheap("deep_value", "Deep 20", 0.20, 0.04, 0.08, "8% at 20¢ or less. Sells a 4¢ drop."),
-        cheap("dip_buy", "Dip 35", 0.35, 0.04, 0.10, "10% under 35¢. Sells a 4¢ drop."),
-        cheap("wide_gap", "Wide 30", 0.30, 0.05, 0.10, "10% under 30¢. Sells a 5¢ drop."),
-        cheap("burst", "Quick 2¢", 0.40, 0.02, 0.08, "8% under 40¢. Sells the first 2¢ drop."),
-        cheap("reclaim", "Reclaim 4¢", 0.45, 0.04, 0.10, "10% under 45¢. Sells a 4¢ drop."),
-        windowed("first_5", "First 5", 0.50, 0.04, 0.10, 0L, FIVE_MIN, "10% under 50¢ in the first 5 minutes. Sells a 4¢ drop, or a loser at minute 5."),
-        windowed("min_5_7", "Minutes 5–7", 0.45, 0.04, 0.10, FIVE_MIN, SEVEN_MIN, "10% under 45¢ between minute 5 and 7. Sells a 4¢ drop."),
         windowed("late_squeeze", "Early cheap", 0.50, 0.03, 0.12, 0L, SEVEN_MIN, "12% under 50¢ in the first 7 minutes. Sells a 3¢ drop and takes the next one."),
-        windowed("dump_catch", "Early 40", 0.40, 0.03, 0.12, 0L, SEVEN_MIN, "Same as Early cheap but under 40¢. 12%. Sells a 3¢ drop."),
-        windowed("fade_spike", "Early any", 0.55, 0.03, 0.10, 0L, SEVEN_MIN, "Same idea as Early cheap, under 55¢, first 7 minutes. 10%. Sells a 3¢ drop."),
-        cheap("gap_side", "Gap 40", 0.40, 0.04, 0.10, "10% under 40¢. Sells a 4¢ drop."),
-        cheap("breakout_50", "Break 45", 0.45, 0.04, 0.10, "10% under 45¢. Sells a 4¢ drop."),
-        cheap("momentum", "Ride 50", 0.50, 0.04, 0.12, "12% under 50¢. Sells a 4¢ drop off the high."),
+        windowed("all_in_cheap", "Early 40", 0.40, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 40¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("no_cap", "Early 45", 0.45, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 45¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("all_in_under_50", "Early 50", 0.50, 0.05, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 5¢ drop."),
+        windowed("slow_trail", "Early 35", 0.35, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 35¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("tight_spread", "Early 30", 0.30, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 30¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("tight_4c", "Early 25", 0.25, 0.03, 0.08, 0L, SEVEN_MIN, "8% under 25¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("penny_press", "Early 20", 0.20, 0.03, 0.08, 0L, SEVEN_MIN, "8% under 20¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("deep_value", "Early 55", 0.55, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 55¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("dip_buy", "Early 2¢", 0.50, 0.02, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 2¢ drop."),
+        windowed("wide_gap", "Early 4¢", 0.50, 0.04, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 4¢ drop."),
+        windowed("burst", "Early big", 0.50, 0.03, 0.15, 0L, SEVEN_MIN, "15% under 50¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("reclaim", "Early small", 0.50, 0.03, 0.06, 0L, SEVEN_MIN, "6% under 50¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("first_5", "First 5", 0.50, 0.03, 0.10, 0L, FIVE_MIN, "10% under 50¢ in the first 5 minutes. Sells a 3¢ drop, or a loser at minute 5."),
+        windowed("min_5_7", "Minutes 5–7", 0.50, 0.03, 0.10, FIVE_MIN, SEVEN_MIN, "10% under 50¢ between minute 5 and 7. Sells a 3¢ drop."),
+        windowed("dump_catch", "Early 40b", 0.40, 0.04, 0.12, 0L, SEVEN_MIN, "12% under 40¢ in the first 7 minutes. Sells a 4¢ drop."),
+        windowed("fade_spike", "Early any", 0.55, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 55¢ in the first 7 minutes. Sells a 3¢ drop."),
+        windowed("gap_side", "Early 45b", 0.45, 0.04, 0.10, 0L, SEVEN_MIN, "10% under 45¢ in the first 7 minutes. Sells a 4¢ drop."),
+        windowed("breakout_50", "Early 50b", 0.50, 0.04, 0.12, 0L, SEVEN_MIN, "12% under 50¢ in the first 7 minutes. Sells a 4¢ drop."),
+        windowed("momentum", "Early 35b", 0.35, 0.04, 0.12, 0L, SEVEN_MIN, "12% under 35¢ in the first 7 minutes. Sells a 4¢ drop.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
