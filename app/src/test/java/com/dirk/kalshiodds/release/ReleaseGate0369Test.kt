@@ -42,3 +42,12 @@ class ReleaseGate0369Test {
         }
     }
 }
+
+class GreenSize0369Test {
+    @Test fun greenScalpersOnlyAfterEnoughProfitableTrades() {
+        val store = com.dirk.kalshiodds.decision.InMemoryScalpPersistence()
+        val book = ScalpBook(store = store, liveExtras = false, bankrollUsd = { Double.POSITIVE_INFINITY })
+        assertTrue(!book.isGreen("sf41"))
+        assertTrue(ScalpBook.GREEN_CLIP in 25..50)
+    }
+}

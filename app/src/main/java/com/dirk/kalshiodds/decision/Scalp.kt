@@ -484,6 +484,17 @@ class ScalpBook(
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
     private val _stats = MutableStateFlow(store.loadStats())
     val stats: StateFlow<List<ScalpStat>> = _stats.asStateFlow()
+
+    // 0.3.69 "green size": a scalper that is net positive after fees (≥ GREEN_MIN_TRADES closes) buys GREEN_CLIP
+    // contracts per trade instead of its normal clip, filled by walking real book depth. Losers unchanged.
+    private var greenSrc: List<ScalpStat>? = null
+    private var greenIds: Set<String> = emptySet()
+    fun isGreen(scalperId: String?): Boolean {
+        val st = _stats.value
+        if (st !== greenSrc) { greenSrc = st; greenIds = st.filter { it.n >= GREEN_MIN_TRADES && it.netUsd > 0.0 }.map { it.scalperId }.toSet() }
+        return scalperId != null && scalperId in greenIds
+    }
+    private fun greenOf(t: ScalpTrade): Boolean = isGreen(ScalpModels.scalperIdOf(t))
     /** Coalesced by id — last write wins; drained by [flushWrites]. */
     @Volatile private var _lastPruneBucket = -1L
     private val writeQ = java.util.concurrent.ConcurrentHashMap<String, Pair<ScalpTrade, ScalpTrade?>>()
@@ -887,6 +898,13 @@ class ScalpBook(
                 continue
             }
             val ask = q.ask(t.side) ?: continue
+            if (ask <= 0.99 && greenOf(t)) {
+                val (gn, usd, fee) = walkBuy(q, t.side, GREEN_CLIP, 0.99)
+                if (gn <= 0) continue
+                changed += t.copy(state = ScalpState.OPEN, contracts = gn, entryPrice = usd / gn, entryFeeUsd = fee, entryAtMs = q.nowMs,
+                    note = String.format(Locale.US, "%s; green size: walked book %d/%d avg %.2f¢", t.note, gn, GREEN_CLIP, usd / gn * 100))
+                continue
+            }
             val n = minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
             if (n <= 0) continue
             if (ask > 0.99) { changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; ask ${"%.2f".format(ask)} too high at fill"); continue }
@@ -929,8 +947,15 @@ class ScalpBook(
                     ShockFav.o50Exit(p, t.entryPrice ?: 1.0, pk, bid, heldS, q.tauS, ai, t.contracts.coerceAtLeast(1))
                 } else null)
                 ?: (if (favLeg || p.kind == ShockFav.Kind.OPEN50) null else sfNoStopExit(p, t.entryPrice ?: 1.0, heldS, q.tauS, bid, sideFair)) ?: continue
-            val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
             val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
+            if (t.contracts > ShockFav.CLIP) { // 0.3.69 green-size position: sell down the real bid levels
+                val (sn, usd, fee) = walkSell(q, t.side, t.remaining)
+                if (sn <= 0) { if (base !== t) changed += base; continue }
+                val nx = base.copy(soldContracts = base.soldContracts + sn, proceedsUsd = base.proceedsUsd + usd, exitFeeUsd = base.exitFeeUsd + fee)
+                changed += if (nx.remaining <= 0) close(nx, q.nowMs, reason) else nx
+                continue
+            }
+            val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
             if (n <= 0) { if (base !== t) changed += base; continue }
             val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
             changed += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
@@ -1132,7 +1157,12 @@ class ScalpBook(
      * (hold-to-settle legs → settlement) for the full clip at the bid with taker fee. Result written into the closed
      * trade's note as "nostop=±x.xx" (no schema change). In memory only; an app restart drops unresolved shadows.
      */
-    companion object ShadowLimits { const val MAX_SHADOWS = 500 }
+    companion object ShadowLimits {
+        const val MAX_SHADOWS = 500
+        /** 0.3.69 green size: contracts per trade for scalpers net positive after fees. */
+        const val GREEN_CLIP = 25
+        const val GREEN_MIN_TRADES = 20
+    }
     private class Shadow(val tradeId: String, val ticker: String, val side: String, val n: Int, val cost: Double, val entryAtMs: Long,
                          val sf: Boolean, val exit: (ScalpRule.Quote, Double, Double, Double?) -> Boolean) { var value: Double? = null }
     private val shadows = LinkedHashMap<String, Shadow>()
@@ -1417,6 +1447,20 @@ class ScalpBook(
         }
     }
 
+    /** Lift ask levels (best first) up to [maxPx] for [want] contracts → (filled, $ cost, fees per level). */
+    private fun walkBuy(q: ScalpRule.Quote, side: String, want: Int, maxPx: Double): Triple<Int, Double, Double> {
+        var n = 0; var usd = 0.0; var fee = 0.0
+        for ((px, sz) in q.askLadder(side)) { if (n >= want || px > maxPx + 1e-9) break; val k = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { n += k; usd += k * px; fee += ScalpRule.orderFee(k, px) } }
+        return Triple(n, usd, fee)
+    }
+
+    /** Hit bid levels (best first) for up to [want] contracts → (sold, $ proceeds, fees per level). */
+    private fun walkSell(q: ScalpRule.Quote, side: String, want: Int): Triple<Int, Double, Double> {
+        var n = 0; var usd = 0.0; var fee = 0.0
+        for ((px, sz) in q.bidLadder(side)) { if (n >= want || px <= 0.0) break; val k = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { n += k; usd += k * px; fee += ScalpRule.orderFee(k, px) } }
+        return Triple(n, usd, fee)
+    }
+
     /** v2 lane: 2 s delayed taker entry if ask ≤ 50¢ (else no fill after 6 s); exits per [ScalpV2.exit]; otherwise settles. */
     private fun stepV2(q: ScalpRule.Quote): List<ScalpTrade> {
         val key = q.ticker.uppercase()
@@ -1428,7 +1472,7 @@ class ScalpBook(
                     val age = q.nowMs - t.signalAtMs
                     if (q.nowMs >= q.closeMs || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill (ask above max or no size) within 6s"); continue }
                     if (age < ScalpV2.ENTRY_DELAY_MS || !q.fresh()) continue
-                    val sp = ScalpV2.spec(t.variantId)
+                    val sp = ScalpV2.spec(t.variantId).let { if (greenOf(t)) it.copy(clip = maxOf(it.clip, GREEN_CLIP), walk = true) else it }
                     val ask = q.ask(t.side)
                     if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
                     if (sp.walk) {
@@ -1454,7 +1498,7 @@ class ScalpBook(
                     val pk = maxOf(peakBid[t.id] ?: bid, bid).also { peakBid[t.id] = it }
                     val wasArmed = t.id in v2Armed
                     if (ScalpV2.armed(entry, bid, stop, t.contracts)) v2Armed += t.id
-                    val sp = ScalpV2.spec(t.variantId)
+                    val sp = ScalpV2.spec(t.variantId).let { if (t.contracts > ScalpV2.CLIP) it.copy(walk = true) else it }
                     val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: ScalpV2.exit(entry, stop, pk, bid, wasArmed, t.contracts, sp.trail) ?: continue
                     val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
                     val next = if (sp.walk) {
