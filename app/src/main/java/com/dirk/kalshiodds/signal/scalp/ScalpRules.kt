@@ -147,8 +147,8 @@ object ScalpCatalog {
     }
 
     /**
-     * Buy the cheaper side when it is [dip] under its high and under [maxAsk].
-     * Sell when the bid is [up] above the entry. Cut a 3¢ drop that never rose.
+     * Buy the cheaper side when it is under 50¢ and rising. Sell when the
+     * bid is up a fixed amount. Can take the next one in the same window.
      */
     private fun dip(id: String, name: String, dip: Double, up: Double, maxAsk: Double, fraction: Double, rule: String) =
         algo(id, name, rule) { a, t ->
@@ -156,8 +156,8 @@ object ScalpCatalog {
             if (pos == null) {
                 val side = cheaper(t)
                 val aPx = ask(t, side)
-                val high = if (side == "NO") t.noHigh else t.yesHigh
-                if (aPx < maxAsk && high - aPx + 1e-9 >= dip) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
+                val rising = rising(t, side)
+                if (aPx < 0.50 && rising) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {
@@ -167,6 +167,12 @@ object ScalpCatalog {
                 }
             }
         }
+
+    private fun rising(t: ScalpTape, side: String): Boolean {
+        val bids = if (side == "NO") t.noBids else t.yesBids
+        if (bids.size < 2) return true
+        return bids.last() + 1e-9 >= bids[bids.size - 2]
+    }
 
     private fun algo(
         id: String,
