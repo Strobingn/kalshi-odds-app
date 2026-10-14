@@ -40,31 +40,30 @@ object ScalpCatalog {
     const val START_CASH = 20_000.0
 
     /**
-     * Every book is an Early cheap variation. Buy the cheaper side under a
-     * cap in the first 7 minutes. Hold the rise. Sell a small drop off the
-     * high. Early cheap itself is left alone.
+     * Early cheap is left alone. The rest copy the books that are making
+     * money: buy a 5¢ dip under a cap, sell when the bid is up a fixed amount.
      */
     val ALL: List<ScalpAlgo> = listOf(
         windowed("late_squeeze", "Early cheap", 0.50, 0.03, 0.12, 0L, SEVEN_MIN, "12% under 50¢ in the first 7 minutes. Sells a 3¢ drop and takes the next one."),
         windowed("all_in_cheap", "Early 40", 0.40, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 40¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("no_cap", "Early 45", 0.45, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 45¢ in the first 7 minutes. Sells a 3¢ drop."),
         windowed("all_in_under_50", "Early 50", 0.50, 0.05, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 5¢ drop."),
-        windowed("slow_trail", "Early 35", 0.35, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 35¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("tight_spread", "Early 30", 0.30, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 30¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("tight_4c", "Early 25", 0.25, 0.03, 0.08, 0L, SEVEN_MIN, "8% under 25¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("penny_press", "Early 20", 0.20, 0.03, 0.08, 0L, SEVEN_MIN, "8% under 20¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("deep_value", "Early 55", 0.55, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 55¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("dip_buy", "Early 2¢", 0.50, 0.02, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 2¢ drop."),
-        windowed("wide_gap", "Early 4¢", 0.50, 0.04, 0.10, 0L, SEVEN_MIN, "10% under 50¢ in the first 7 minutes. Sells a 4¢ drop."),
-        windowed("burst", "Early big", 0.50, 0.03, 0.15, 0L, SEVEN_MIN, "15% under 50¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("reclaim", "Early small", 0.50, 0.03, 0.06, 0L, SEVEN_MIN, "6% under 50¢ in the first 7 minutes. Sells a 3¢ drop."),
         windowed("first_5", "First 5", 0.50, 0.03, 0.10, 0L, FIVE_MIN, "10% under 50¢ in the first 5 minutes. Sells a 3¢ drop, or a loser at minute 5."),
-        windowed("min_5_7", "Minutes 5–7", 0.50, 0.03, 0.10, FIVE_MIN, SEVEN_MIN, "10% under 50¢ between minute 5 and 7. Sells a 3¢ drop."),
-        windowed("dump_catch", "Early 40b", 0.40, 0.04, 0.12, 0L, SEVEN_MIN, "12% under 40¢ in the first 7 minutes. Sells a 4¢ drop."),
-        windowed("fade_spike", "Early any", 0.55, 0.03, 0.10, 0L, SEVEN_MIN, "10% under 55¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("gap_side", "Early 45b", 0.45, 0.04, 0.10, 0L, SEVEN_MIN, "10% under 45¢ in the first 7 minutes. Sells a 4¢ drop."),
-        windowed("breakout_50", "Early 50b", 0.50, 0.04, 0.12, 0L, SEVEN_MIN, "12% under 50¢ in the first 7 minutes. Sells a 4¢ drop."),
-        windowed("momentum", "Early 35b", 0.35, 0.04, 0.12, 0L, SEVEN_MIN, "12% under 35¢ in the first 7 minutes. Sells a 4¢ drop.")
+        dip("no_cap", "Dip 5→8", 0.05, 0.08, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 8¢ up."),
+        dip("slow_trail", "Dip 5→15", 0.05, 0.15, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 15¢ up."),
+        dip("tight_spread", "Dip 5→6", 0.05, 0.06, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 6¢ up."),
+        dip("tight_4c", "Dip 5→10", 0.05, 0.10, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 10¢ up."),
+        dip("penny_press", "Dip 4→8", 0.04, 0.08, 0.50, 0.10, "Buy a 4¢ dip under 50¢. Sell when the bid is 8¢ up."),
+        dip("deep_value", "Dip 6→8", 0.06, 0.08, 0.50, 0.10, "Buy a 6¢ dip under 50¢. Sell when the bid is 8¢ up."),
+        dip("dip_buy", "Dip 5→8 45", 0.05, 0.08, 0.45, 0.10, "Buy a 5¢ dip under 45¢. Sell when the bid is 8¢ up."),
+        dip("wide_gap", "Dip 5→8 40", 0.05, 0.08, 0.40, 0.10, "Buy a 5¢ dip under 40¢. Sell when the bid is 8¢ up."),
+        dip("burst", "Dip 5→12", 0.05, 0.12, 0.52, 0.10, "Buy a 5¢ dip under 52¢. Sell when the bid is 12¢ up."),
+        dip("reclaim", "Dip 3→8", 0.03, 0.08, 0.52, 0.10, "Buy a 3¢ dip under 52¢. Sell when the bid is 8¢ up."),
+        dip("min_5_7", "Dip 5→8 55", 0.05, 0.08, 0.55, 0.10, "Buy a 5¢ dip under 55¢. Sell when the bid is 8¢ up."),
+        dip("dump_catch", "Dip 5→8 12%", 0.05, 0.08, 0.52, 0.12, "Buy a 5¢ dip under 52¢. 12%. Sell when the bid is 8¢ up."),
+        dip("fade_spike", "Dip 5→15 12%", 0.05, 0.15, 0.52, 0.12, "Buy a 5¢ dip under 52¢. 12%. Sell when the bid is 15¢ up."),
+        dip("gap_side", "Dip 5→8 6%", 0.05, 0.08, 0.52, 0.06, "Buy a 5¢ dip under 52¢. 6%. Sell when the bid is 8¢ up."),
+        dip("breakout_50", "Dip 5→8 15%", 0.05, 0.08, 0.52, 0.15, "Buy a 5¢ dip under 52¢. 15%. Sell when the bid is 8¢ up."),
+        dip("momentum", "Dip 5→8 35", 0.05, 0.08, 0.35, 0.10, "Buy a 5¢ dip under 35¢. Sell when the bid is 8¢ up.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
@@ -145,6 +144,29 @@ object ScalpCatalog {
             else -> ScalpIntent.Hold
         }
     }
+
+    /**
+     * Buy the cheaper side when it is [dip] under its high and under [maxAsk].
+     * Sell when the bid is [up] above the entry. Cut a 3¢ drop that never rose.
+     */
+    private fun dip(id: String, name: String, dip: Double, up: Double, maxAsk: Double, fraction: Double, rule: String) =
+        algo(id, name, rule) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                val side = cheaper(t)
+                val aPx = ask(t, side)
+                val high = if (side == "NO") t.noHigh else t.yesHigh
+                if (aPx < maxAsk && high - aPx + 1e-9 >= dip) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
+            } else {
+                val b = bid(t, pos.side)
+                when {
+                    b + 1e-9 >= pos.entry + up -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - 0.03 -> ScalpIntent.Sell(force = true)
+                    t.tteMs in 1..90_000L -> ScalpIntent.Sell(force = true)
+                    else -> ScalpIntent.Hold
+                }
+            }
+        }
 
     private fun algo(
         id: String,
