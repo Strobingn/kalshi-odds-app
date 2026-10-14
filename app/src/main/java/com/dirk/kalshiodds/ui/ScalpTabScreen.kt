@@ -196,7 +196,7 @@ fun ScalpTabContent(
             }
             // 0.3.59: one combined Bitcoin leaderboard (no per-coin boards).
             item(key = "board") { CombinedBoard(ScalpModels.combinedBoard(st.algoAllTime)) }
-            item(key = "v2cmp") { V2CompareCard(ScalpModels.v2Compare(st.algoAllTime)) }
+            item(key = "v2cmp") { val cmp = androidx.compose.runtime.remember(st.algoAllTime) { ScalpModels.v2Compare(st.algoAllTime) }; V2CompareCard(cmp) }
         }
         item(key = "ladder-card") {
             FieldCard {
