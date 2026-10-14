@@ -51,6 +51,8 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
     val scalpTrades: StateFlow<List<com.dirk.kalshiodds.decision.ScalpTrade>> = container.scalp.trades
     /** 0.3.43 open paper limit orders (manual + scalp strategies). */
     val scalpAll: StateFlow<List<com.dirk.kalshiodds.decision.ScalpTrade>> = container.scalp.all
+    /** 0.3.68: summary totals come from scalp_stats. */
+    val scalpStats: StateFlow<List<com.dirk.kalshiodds.decision.ScalpStat>> = container.scalp.stats
     val paperOrders: StateFlow<List<com.dirk.kalshiodds.signal.paper.PaperOrder>> = container.paperOrders.orders
     fun cancelPaperOrder(id: String) { container.paperOrders.cancel(id) }
     fun editPaperOrder(id: String, limitCents: Double?, qty: Int?) { container.paperOrders.edit(id, limitCents?.div(100.0), qty) }
@@ -68,18 +70,8 @@ class DecisionViewModel(application: Application) : AndroidViewModel(application
         }
         viewModelScope.launch {
             combine(container.scalp.trades, container.scalp.marks, container.scalp.tune, container.scalp.stats) { t, m, tu, st ->
-                // 0.3.67: open lines from RAM; stats from the incremental table (not a full-history scan).
-                val net = st.sumOf { it.netUsd }
-                val n = st.sumOf { it.n }
-                val wins = st.sumOf { it.wins }
-                ScalpUi(
-                    open = ScalpCopy.openLines(t, m),
-                    history = listOf(ScalpCopy.Line("hist", "History in Scalp tab · ${container.scalp.tradeCount()} closed in SQLite", null)),
-                    stats = listOf("Closed $n · wins $wins · net ${"%.2f".format(net)}"),
-                    ladder = "",
-                    tuning = ScalpCopy.tuningLines(tu),
-                    breakdown = emptyList()
-                )
+                // 0.3.68: Decision-view scalp section from aggregates (stats + exits + recent windows), open lines from RAM.
+                kotlinx.coroutines.withContext(Dispatchers.IO) { ScalpAggUi.build(container.scalp, t, m, tu, st) }
             }.collect { _scalp.value = it }
         }
     }

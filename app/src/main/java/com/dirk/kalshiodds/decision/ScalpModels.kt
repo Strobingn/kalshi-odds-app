@@ -127,42 +127,64 @@ object ScalpModels {
         V2_SF58("v2-sf58", "v2 · sf58 " + ShockFav.v("sf58").label, V2_BLURB),
         V2_SF59("v2-sf59", "v2 · sf59 " + ShockFav.v("sf59").label, V2_BLURB),
         V2_SF60("v2-sf60", "v2 · sf60 " + ShockFav.v("sf60").label, V2_BLURB),
-        V2_SF61("v2-sf61", "v2 · sf61 " + ShockFav.v("sf61").label, V2_BLURB)
+        V2_SF61("v2-sf61", "v2 · sf61 " + ShockFav.v("sf61").label, V2_BLURB),
+        // 0.3.68: tweak + size copies of v2 sf41–44 (see ScalpV2.EXTRA_SPECS).
+        V2_SF41T1("v2-sf41t1", "v2 · sf41 tweak 1 · " + ScalpV2.spec("v2-sf41t1").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF41T2("v2-sf41t2", "v2 · sf41 tweak 2 · " + ScalpV2.spec("v2-sf41t2").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF41X5("v2-sf41x5", "v2 · sf41 5 contracts · " + ScalpV2.spec("v2-sf41x5").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF41X10("v2-sf41x10", "v2 · sf41 10 contracts · " + ScalpV2.spec("v2-sf41x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF42T1("v2-sf42t1", "v2 · sf42 tweak 1 · " + ScalpV2.spec("v2-sf42t1").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF42T2("v2-sf42t2", "v2 · sf42 tweak 2 · " + ScalpV2.spec("v2-sf42t2").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF42X5("v2-sf42x5", "v2 · sf42 5 contracts · " + ScalpV2.spec("v2-sf42x5").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF42X10("v2-sf42x10", "v2 · sf42 10 contracts · " + ScalpV2.spec("v2-sf42x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF43T1("v2-sf43t1", "v2 · sf43 tweak 1 · " + ScalpV2.spec("v2-sf43t1").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF43T2("v2-sf43t2", "v2 · sf43 tweak 2 · " + ScalpV2.spec("v2-sf43t2").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF43X5("v2-sf43x5", "v2 · sf43 5 contracts · " + ScalpV2.spec("v2-sf43x5").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF43X10("v2-sf43x10", "v2 · sf43 10 contracts · " + ScalpV2.spec("v2-sf43x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF44T1("v2-sf44t1", "v2 · sf44 tweak 1 · " + ScalpV2.spec("v2-sf44t1").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF44T2("v2-sf44t2", "v2 · sf44 tweak 2 · " + ScalpV2.spec("v2-sf44t2").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF44X5("v2-sf44x5", "v2 · sf44 5 contracts · " + ScalpV2.spec("v2-sf44x5").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB),
+        V2_SF44X10("v2-sf44x10", "v2 · sf44 10 contracts · " + ScalpV2.spec("v2-sf44x10").let { s -> if (s.walk) "${s.clip} contracts, book-walk fills" else "ask ≤ ${Math.round(s.maxAsk * 100)}¢ · trail ${Math.round(s.trail * 100)}¢ · stop ${Math.round((s.stop ?: 0.0) * 100)}¢" }, V2_BLURB)
     }
 
     const val V2_BLURB = "v2: original's entries, only when ask ≤ 50¢; keep its stop; no time limit; sell only after the gain after fees reaches the stop size, then 2¢ off the peak bid"
     val ALL: List<Model> = Model.values().toList()
     /** 0.3.65: v2 copy of an original model (null when none, e.g. sf29 or a v2 itself). */
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
-    fun originalOf(v2: Model): Model? = ORIG_BY_CODE[v2.code.removePrefix(ScalpV2.PREFIX)]?.takeIf { isV2(v2) }
+    fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
     fun isV2(m: Model): Boolean = m.code.startsWith(ScalpV2.PREFIX)
     /** Stable id for the incremental stats table (model code, or variantId when unknown). */
     fun scalperIdOf(t: ScalpTrade): String? = if (!t.isPrimary) null else (modelOf(t)?.code ?: t.variantId)
     fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
-    fun modelByCode(code: String): Model? = ALL.firstOrNull { it.code == code }
-    /** Build a Row from the incremental stats (+ optional today daily). No bootstrap. */
-    fun rowFromStat(st: ScalpStat, today: ScalpDaily? = null, openN: Int = st.openN): Row {
+    fun modelByCode(code: String): Model? = BY_CODE[code]
+    private val BY_CODE: Map<String, Model> by lazy { ALL.associateBy { it.code } }
+    /** Build a Row from the incremental stats (+ exit counts). No trade scan, no bootstrap. */
+    fun rowFromStat(st: ScalpStat, openN: Int = st.openN, exits: List<ScalpExitAgg> = emptyList(), unrealizedUsd: Double = 0.0): Row {
         val m = modelByCode(st.scalperId) ?: Model.FAIR_GAP
         val ci = st.perTradeCi()
         return Row(
             model = m, netUsd = st.netUsd, roundTrips = st.n, wins = st.wins,
-            winRate = st.winRate, avgWinUsd = null, avgLossUsd = null, roi = null, roiCi = null,
-            open = openN, unrealizedUsd = 0.0, noFills = 0, grossWinUsd = 0.0, grossLossUsd = 0.0,
-            losses = (st.n - st.wins).coerceAtLeast(0), openContracts = 0, feesUsd = st.feesUsd,
-            stopSavedUsd = 0.0, stopsHit = 0, stopLabel = stopLabel(m),
+            winRate = st.winRate, avgWinUsd = st.avgWin, avgLossUsd = st.avgLoss, roi = st.roi, roiCi = null,
+            open = openN, unrealizedUsd = unrealizedUsd, noFills = st.noFills, grossWinUsd = st.sumWin, grossLossUsd = st.negSum,
+            losses = st.negN, openContracts = 0, feesUsd = st.feesUsd,
+            stopSavedUsd = st.stopSavedSum, stopsHit = st.stopSavedN, stopLabel = stopLabel(m),
             bestUsd = st.bestUsd, worstUsd = st.worstUsd,
             perTradeCi = ci?.let { ClusteredBootstrap.Ci(st.perTrade ?: 0.0, it.first, it.second, st.n, st.n) },
-            exitReasons = ""
+            exitReasons = exitBreakdownFrom(exits)
         )
     }
-    fun leaderboardFromStats(stats: List<ScalpStat>, openBy: Map<String, Int> = emptyMap()): List<Row> =
-        ALL.map { m ->
-            val st = stats.firstOrNull { it.scalperId == m.code } ?: ScalpStat(m.code)
-            rowFromStat(st, openN = openBy[m.code] ?: st.openN)
+    fun leaderboardFromStats(stats: List<ScalpStat>, openBy: Map<String, Int> = emptyMap(), exits: List<ScalpExitAgg> = emptyList(),
+                             unrealBy: Map<String, Double> = emptyMap()): List<Row> {
+        val byId = stats.associateBy { it.scalperId }
+        val ex = exits.groupBy { it.scalperId }
+        return ALL.map { m ->
+            val st = byId[m.code] ?: ScalpStat(m.code)
+            rowFromStat(st, openN = openBy[m.code] ?: st.openN, exits = ex[m.code].orEmpty(), unrealizedUsd = unrealBy[m.code] ?: 0.0)
         }.sortedWith(compareByDescending<Row> { it.netUsd + it.unrealizedUsd }.thenByDescending { it.roundTrips })
+    }
     val V2_MODELS: List<Model> get() = ALL.filter { isV2(it) }
     private val ORIG_BY_CODE: Map<String, Model> by lazy { ALL.filter { !isV2(it) }.associateBy { it.code } }
-    private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
+    private val V2_BY_ORIG: Map<Model, Model> by lazy { ALL.filter { isV2(it) && !ScalpV2.isExtra(it.code) }.mapNotNull { v -> ORIG_BY_CODE[v.code.removePrefix(ScalpV2.PREFIX)]?.let { it to v } }.toMap() }
     val COUNT: Int get() = ALL.size
     private val SF_BY_CODE: Map<String, Model> by lazy { ALL.filter { it.code.startsWith(ShockFav.PREFIX) }.associateBy { it.code } }
     val SF_MODELS: List<Model> get() = ALL.filter { it.code.startsWith(ShockFav.PREFIX) }
@@ -204,6 +226,7 @@ object ScalpModels {
     private val NONE = Any()
     private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private fun modelOfVariant(vid: String): Model? {
+        if (ScalpV2.isExtra(vid)) return ALL.firstOrNull { it.code == vid }
         if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
         if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE
         if (vid.startsWith(ForecastScalp.FADE_PREFIX)) return Model.FORECAST_FADE
@@ -317,10 +340,16 @@ object ScalpModels {
 
     private val EXIT_NUM_RX = Regex("[−+-]?\\d+(\\.\\d+)?[¢s%]?")
     /** "stop 40% · trail 30% · settled 20%" — top 4 exit reasons over closed trades. */
+    fun normExit(r: String?): String = (r ?: "?").substringBefore(" → ").replace(EXIT_NUM_RX, "#").trim().take(28)
+    /** 0.3.68: same string as [exitBreakdown], from the per-reason counts table. */
+    fun exitBreakdownFrom(counts: List<ScalpExitAgg>): String {
+        val total = counts.sumOf { it.n }
+        if (total == 0) return ""
+        return counts.sortedByDescending { it.n }.take(4).joinToString(" · ") { "${it.reason} ${Math.round(it.n * 100.0 / total)}%" }
+    }
     fun exitBreakdown(closed: List<ScalpTrade>): String {
         if (closed.isEmpty()) return ""
-        fun norm(r: String?): String = (r ?: "?").substringBefore(" → ").replace(EXIT_NUM_RX, "#").trim().take(28)
-        return closed.groupingBy { norm(it.exitReason) }.eachCount().entries.sortedByDescending { it.value }.take(4)
+        return closed.groupingBy { normExit(it.exitReason) }.eachCount().entries.sortedByDescending { it.value }.take(4)
             .joinToString(" · ") { "${it.key} ${Math.round(it.value * 100.0 / closed.size)}%" }
     }
 
@@ -365,6 +394,21 @@ object ScalpModels {
     fun best(rows: List<Row>): Model? = rows.filter { it.roundTrips > 0 }.maxByOrNull { it.netUsd }?.model
 
     data class WindowRow(val windowKey: String, val closeMs: Long?, val netByModel: Map<Model, Double>, val tripsByModel: Map<Model, Int>, val best: Model?)
+
+    /** 0.3.68: window list from the per-window aggregate table. */
+    fun windowsFromAgg(aggs: List<ScalpWindowAgg>, limit: Int = 48): List<WindowRow> =
+        aggs.groupBy { it.windowKey }.map { (w, rows) ->
+            val net = rows.mapNotNull { r -> modelByCode(r.scalperId)?.let { it to r.netUsd } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+            val n = rows.mapNotNull { r -> modelByCode(r.scalperId)?.let { it to r.n } }.groupBy({ it.first }, { it.second }).mapValues { it.value.sum() }
+            WindowRow(w, rows.firstNotNullOfOrNull { it.closeMs }, net, n, net.maxByOrNull { it.value }?.key)
+        }.sortedByDescending { it.closeMs ?: 0L }.take(limit)
+
+    /** 0.3.68: one window's leaderboard from the per-window aggregate (net + trips only). */
+    fun windowBoardFromAgg(aggs: List<ScalpWindowAgg>, windowKey: String): List<Row> {
+        val mine = aggs.filter { it.windowKey == windowKey }.associateBy { it.scalperId }
+        return ALL.map { m -> val a = mine[m.code]; rowFromStat(ScalpStat(m.code, n = a?.n ?: 0, netUsd = a?.netUsd ?: 0.0), openN = 0) }
+            .sortedWith(compareByDescending<Row> { it.netUsd }.thenByDescending { it.roundTrips })
+    }
 
     /** Per 15-minute window: each model's net, and which did best. Newest first, at most [limit] windows. */
     fun perWindow(trades: List<ScalpTrade>, coin: String? = null, limit: Int = 48): List<WindowRow> {

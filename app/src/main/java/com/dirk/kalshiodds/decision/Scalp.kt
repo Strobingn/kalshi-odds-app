@@ -143,8 +143,21 @@ object ScalpRule {
         /** Age of the latest CF tick (ms). Null = no CF feed → CF-reprice is NO TRADE. */
         val cfAgeMs: Long? = null,
         /** True when the orderbook for this ticker had a sequence gap and has not been re-snapshotted. */
-        val bookGap: Boolean = false
+        val bookGap: Boolean = false,
+        /** 0.3.68: full ladders (best first) for depth-walking multi-contract paper fills. Empty = top of book only. */
+        val yesBidsDesc: List<Pair<Double, Double>> = emptyList(),
+        val noBidsDesc: List<Pair<Double, Double>> = emptyList()
     ) {
+        /** Asks to lift for [side], best (lowest) first. YES asks come from NO bids, NO asks from YES bids. */
+        fun askLadder(side: String): List<Pair<Double, Double>> {
+            val src = if (side == "YES") noBidsDesc else yesBidsDesc
+            return if (src.isEmpty()) listOfNotNull(ask(side)?.let { a -> askSize(side)?.let { a to it } }) else src.map { (1.0 - it.first) to it.second }
+        }
+        /** Bids to hit for [side], best (highest) first. */
+        fun bidLadder(side: String): List<Pair<Double, Double>> {
+            val src = if (side == "YES") yesBidsDesc else noBidsDesc
+            return if (src.isEmpty()) listOfNotNull(bid(side)?.let { b -> bidSize(side)?.let { b to it } }) else src
+        }
         val tauS: Double get() = (closeMs - nowMs) / 1000.0
         fun cfFresh(): Boolean = cfSpot != null && cfAgeMs != null && cfAgeMs in 0..CF_MAX_AGE_MS
         fun cfFair(side: String): Double? = if (!cfFresh()) null else
@@ -188,7 +201,9 @@ object ScalpRule {
             yesAskSize = nb?.second,
             spot = spot,
             strike = strike,
-            sigmaPerSec = sigmaPerSec
+            sigmaPerSec = sigmaPerSec,
+            yesBidsDesc = yesBids.filter { it.second > 0.0 }.sortedByDescending { it.first }.take(20),
+            noBidsDesc = noBids.filter { it.second > 0.0 }.sortedByDescending { it.first }.take(20)
         )
     }
 
@@ -1336,6 +1351,10 @@ class ScalpBook(
     }
 
     fun reloadStats() { _stats.value = store.loadStats() }
+    /** 0.3.68 aggregate reads (≈ hundreds of rows, indexed). Call off Main. */
+    fun loadExits() = store.loadExits()
+    fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
+    fun loadDaily(dayEt: String) = store.loadDaily(dayEt)
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
     fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)
@@ -1381,11 +1400,17 @@ class ScalpBook(
         if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
         val m = ScalpModels.modelOf(t) ?: return
         ScalpModels.v2Of(m) ?: return
-        val stop = ScalpV2.stopFor(t.variantId)
-        save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
-            signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
-            note = String.format(Locale.US, "v2 copy of %s (%s) · ask ≤ 50¢ · v2stop=%.2f", m.label, t.variantId, stop),
-            ruleVersion = "${ScalpRule.VERSION}|${ScalpV2.v2Id(t.variantId)}|P"))
+        val origStop = ScalpV2.stopFor(t.variantId)
+        // 0.3.68: plain v2 copy + (for sf41–44) tweak and size copies; each carries its own params in the note.
+        for (sp in listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)) {
+            val stop = sp.stop ?: origStop
+            save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
+                signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
+                note = String.format(Locale.US, "v2 copy of %s (%s)%s · ask ≤ %.0f¢ · trail %.0f¢ · clip %d%s · v2stop=%.2f",
+                    m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
+                    if (sp.walk) " depth-walk" else "", stop),
+                ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
+        }
     }
 
     /** v2 lane: 2 s delayed taker entry if ask ≤ 50¢ (else no fill after 6 s); exits per [ScalpV2.exit]; otherwise settles. */
@@ -1397,11 +1422,22 @@ class ScalpBook(
             when (t.state) {
                 ScalpState.PENDING_ENTRY -> {
                     val age = q.nowMs - t.signalAtMs
-                    if (q.nowMs >= q.closeMs || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill (ask > 50¢ or no size) within 6s"); continue }
+                    if (q.nowMs >= q.closeMs || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill (ask above max or no size) within 6s"); continue }
                     if (age < ScalpV2.ENTRY_DELAY_MS || !q.fresh()) continue
+                    val sp = ScalpV2.spec(t.variantId)
                     val ask = q.ask(t.side)
-                    if (!ScalpV2.entryOk(ask)) continue
-                    val n = minOf(ScalpV2.CLIP, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+                    if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
+                    if (sp.walk) {
+                        // 0.3.68: lift real ask levels up to max ask; partial fill allowed, avg price gets worse with depth.
+                        val (n, usd) = ScalpV2.walk(q.askLadder(t.side), sp.clip) { it <= sp.maxAsk + 1e-9 }
+                        if (n <= 0) continue
+                        val avg = usd / n
+                        val fee = q.askLadder(t.side).let { lv -> var left = n; var f = 0.0; for ((px, sz) in lv) { if (left <= 0) break; val k = minOf(left, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { f += ScalpRule.orderFee(k, px); left -= k } }; f }
+                        out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = avg, entryFeeUsd = fee, entryAtMs = q.nowMs,
+                            note = String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask!! * 100, age / 1000.0))
+                        continue
+                    }
+                    val n = minOf(sp.clip, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
                     if (n <= 0) continue
                     out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask!!), entryAtMs = q.nowMs,
                         note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
@@ -1414,11 +1450,20 @@ class ScalpBook(
                     val pk = maxOf(peakBid[t.id] ?: bid, bid).also { peakBid[t.id] = it }
                     val wasArmed = t.id in v2Armed
                     if (ScalpV2.armed(entry, bid, stop, t.contracts)) v2Armed += t.id
-                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: ScalpV2.exit(entry, stop, pk, bid, wasArmed, t.contracts) ?: continue
-                    val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
+                    val sp = ScalpV2.spec(t.variantId)
+                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: ScalpV2.exit(entry, stop, pk, bid, wasArmed, t.contracts, sp.trail) ?: continue
                     val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
-                    if (n <= 0) { if (base !== t) out += base; continue }
-                    val next = base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+                    val next = if (sp.walk) {
+                        // 0.3.68: hit real bid levels down the book (any price — it is an exit); partial = rest next quote.
+                        var left = t.remaining; var usd = 0.0; var fee = 0.0; var n = 0
+                        for ((px, sz) in q.bidLadder(t.side)) { if (left <= 0 || px <= 0.0) break; val k = minOf(left, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { usd += k * px; fee += ScalpRule.orderFee(k, px); n += k; left -= k } }
+                        if (n <= 0) { if (base !== t) out += base; continue }
+                        base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + usd, exitFeeUsd = base.exitFeeUsd + fee)
+                    } else {
+                        val n = minOf(t.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
+                        if (n <= 0) { if (base !== t) out += base; continue }
+                        base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
+                    }
                     out += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
                 }
                 else -> {}

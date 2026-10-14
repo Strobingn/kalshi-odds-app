@@ -14,8 +14,8 @@ android {
         applicationId = "com.dirk.kalshiodds.kashi"
         minSdk = 26
         targetSdk = 35
-        versionCode = 82
-        versionName = "0.3.67"
+        versionCode = 83
+        versionName = "0.3.68"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -126,7 +126,7 @@ dependencies {
 
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.10.0")
-    // 0.3.67: Paging 3 for scalp trade history (keyset pages from SQLite)
+    // 0.3.68: Paging 3 for scalp trade history (keyset pages from SQLite)
     implementation("androidx.paging:paging-runtime-ktx:3.3.6")
     implementation("androidx.paging:paging-compose:3.3.6")
 

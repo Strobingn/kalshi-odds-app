@@ -80,6 +80,22 @@ object ScalpData {
     fun closed(trades: List<ScalpTrade>): List<ScalpTrade> =
         trades.filter { it.state == ScalpState.CLOSED && it.netUsd?.isFinite() == true }.sortedBy { it.closedAtMs ?: it.signalAtMs }
 
+    /** 0.3.68: closed totals from scalp_stats (closed rows no longer live in RAM since 0.3.67); open from the live book. */
+    fun summaryFromStats(stats: List<com.dirk.kalshiodds.decision.ScalpStat>, trades: List<ScalpTrade>): Summary {
+        val n = stats.sumOf { it.n }; val wins = stats.sumOf { it.wins }; val negN = stats.sumOf { it.negN }
+        val net = stats.sumOf { it.netUsd }; val top = stats.mapNotNull { it.bestUsd }.filter { it > 0.0 }.maxOrNull()
+        val sumWin = stats.sumOf { it.sumWin }; val negSum = stats.sumOf { it.negSum }
+        return Summary(
+            roundTrips = n,
+            open = trades.count { it.state == ScalpState.OPEN || it.state == ScalpState.PENDING_EXIT || it.state == ScalpState.PENDING_ENTRY },
+            netUsd = net, grossWinsUsd = sumWin, grossLossesUsd = negSum, wins = wins, losses = negN,
+            breakeven = (n - wins - negN).coerceAtLeast(0),
+            avgWinUsd = if (wins > 0) sumWin / wins else null, avgLossUsd = if (negN > 0) negSum / negN else null,
+            biggestWinUsd = top, biggestLossUsd = stats.mapNotNull { it.worstUsd }.filter { it < 0.0 }.minOrNull(),
+            netExTopWinUsd = net - (top ?: 0.0), feesUsd = stats.sumOf { it.feesUsd }
+        )
+    }
+
     fun summary(trades: List<ScalpTrade>): Summary {
         val c = closed(trades)
         val nets = c.map { it.netUsd!! }
@@ -146,8 +162,9 @@ fun ScalpDataScreen(viewModel: DecisionViewModel, onBack: () -> Unit, onOpenScal
     val trades by viewModel.scalpTrades.collectAsState()
     val paperOrders by viewModel.paperOrders.collectAsState()
     val scalpAll by viewModel.scalpAll.collectAsState()
+    val scalpStats by viewModel.scalpStats.collectAsState()
     ScalpDataContent(
-        trades = trades, scalpAll = scalpAll, paperOrders = paperOrders, onBack = onBack, onOpenScalp = onOpenScalp,
+        trades = trades, scalpAll = scalpAll, stats = scalpStats, paperOrders = paperOrders, onBack = onBack, onOpenScalp = onOpenScalp,
         onReset = viewModel::resetPaperBankrollTo20k, onEdit = viewModel::editPaperOrder, onCancel = viewModel::cancelPaperOrder
     )
 }
@@ -164,8 +181,8 @@ data class ScalpDataView(
     val rows: List<LazyListKeys.Keyed<ScalpCopy.Line>>
 ) {
     companion object {
-        fun of(trades: List<ScalpTrade>, all: List<ScalpTrade>): ScalpDataView {
-            val s = ScalpData.summary(trades)
+        fun of(trades: List<ScalpTrade>, all: List<ScalpTrade>, stats: List<com.dirk.kalshiodds.decision.ScalpStat>? = null): ScalpDataView {
+            val s = if (stats != null) ScalpData.summaryFromStats(stats, trades) else ScalpData.summary(trades)
             return ScalpDataView(
                 summary = s,
                 summaryLines = ScalpData.summaryLines(s),
@@ -189,11 +206,12 @@ fun ScalpDataContent(
     onOpenScalp: () -> Unit,
     onReset: () -> Unit,
     onEdit: (String, Double?, Int?) -> Unit,
-    onCancel: (String) -> Unit
+    onCancel: (String) -> Unit,
+    stats: List<com.dirk.kalshiodds.decision.ScalpStat>? = null
 ) {
     val colors = DipTheme.colors
-    val view by androidx.compose.runtime.produceState<ScalpDataView?>(null, trades, scalpAll) {
-        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ScalpDataView.of(trades, scalpAll) }
+    val view by androidx.compose.runtime.produceState<ScalpDataView?>(null, trades, scalpAll, stats) {
+        value = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { ScalpDataView.of(trades, scalpAll, stats) }
     }
     var shown by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ScalpData.PAGE) }
     val v = view
