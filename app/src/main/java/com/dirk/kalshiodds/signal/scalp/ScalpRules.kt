@@ -40,8 +40,8 @@ object ScalpCatalog {
     const val START_CASH = 20_000.0
 
     /**
-     * The Dip books are the winners. Buy a dip under a cap, sell at a fixed
-     * profit. The Early books are the old idea, kept so they can be compared.
+     * The Dip books that were making money. Buy a dip under a cap, sell at a
+     * fixed profit. No Early books.
      */
     val ALL: List<ScalpAlgo> = listOf(
         dip("late_squeeze", "Dip 5→8 30%", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 8¢ up."),
@@ -60,10 +60,10 @@ object ScalpCatalog {
         dip("reclaim", "Dip 5→15 30%", 0.05, 0.15, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell when the bid is 15¢ up."),
         dip("min_5_7", "Dip 5→8 35", 0.05, 0.08, 0.35, 0.20, "Buy a 5¢ dip under 35¢. 20%. Sell when the bid is 8¢ up."),
         dip("dump_catch", "Dip 5→8 25%b", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 8¢ up."),
-        windowed("fade_spike", "Early cheap", 0.50, 0.03, 0.20, 0L, SEVEN_MIN, "20% under 50¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("gap_side", "Early 40", 0.40, 0.03, 0.20, 0L, SEVEN_MIN, "20% under 40¢ in the first 7 minutes. Sells a 3¢ drop."),
-        windowed("breakout_50", "Early 50", 0.50, 0.05, 0.20, 0L, SEVEN_MIN, "20% under 50¢ in the first 7 minutes. Sells a 5¢ drop."),
-        windowed("momentum", "Early 45", 0.45, 0.04, 0.20, 0L, SEVEN_MIN, "20% under 45¢ in the first 7 minutes. Sells a 4¢ drop.")
+        dip("fade_spike", "Dip 5→15 25%b", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell when the bid is 15¢ up."),
+        dip("gap_side", "Dip 5→8 15%", 0.05, 0.08, 0.52, 0.15, "Buy a 5¢ dip under 52¢. 15%. Sell when the bid is 8¢ up."),
+        dip("breakout_50", "Dip 5→8 20%", 0.05, 0.08, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell when the bid is 8¢ up."),
+        dip("momentum", "Dip 5→8 20%b", 0.05, 0.08, 0.50, 0.20, "Buy a 5¢ dip under 50¢. 20%. Sell when the bid is 8¢ up.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
