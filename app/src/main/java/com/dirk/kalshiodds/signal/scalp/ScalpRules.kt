@@ -40,30 +40,30 @@ object ScalpCatalog {
     const val START_CASH = 20_000.0
 
     /**
-     * The Dip books that were making money. Buy a dip under a cap, sell at a
-     * fixed profit. No Early books.
+     * Trail books copy the v2 combo: buy under 50¢, wait until the gain
+     * reaches [arm], then sell [trail] off the peak. The rest stay fixed-target.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        dip("late_squeeze", "Under 50 → +8", 0.05, 0.08, 0.50, 0.30, "Buy under 50¢ anytime. 30%. Sell when the bid is 8¢ up."),
-        dip("all_in_cheap", "Under 50 → +8 25%", 0.05, 0.08, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 8¢ up."),
-        dip("all_in_under_50", "Under 50 → +15", 0.05, 0.15, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 15¢ up."),
-        dip("first_5", "Under 50 → +8 20%", 0.05, 0.08, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 8¢ up."),
-        dip("no_cap", "Under 50 → +10", 0.05, 0.10, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 10¢ up."),
-        dip("slow_trail", "Under 50 → +12", 0.05, 0.12, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 12¢ up."),
-        dip("tight_spread", "Under 50 → +6", 0.05, 0.06, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 6¢ up."),
-        dip("tight_4c", "Under 50 → +8 20%b", 0.05, 0.08, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 8¢ up."),
-        dip("penny_press", "Under 40 → +8", 0.05, 0.08, 0.40, 0.20, "Buy under 40¢ anytime. 20%. Sell when the bid is 8¢ up."),
-        dip("deep_value", "Under 45 → +8", 0.05, 0.08, 0.45, 0.20, "Buy under 45¢ anytime. 20%. Sell when the bid is 8¢ up."),
-        dip("dip_buy", "Under 50 → +8 15%", 0.05, 0.08, 0.50, 0.15, "Buy under 50¢ anytime. 15%. Sell when the bid is 8¢ up."),
-        dip("wide_gap", "Under 50 → +8 30%b", 0.05, 0.08, 0.50, 0.30, "Buy under 50¢ anytime. 30%. Sell when the bid is 8¢ up."),
-        dip("burst", "Under 50 → +8 30%c", 0.05, 0.08, 0.50, 0.30, "Buy under 50¢ anytime. 30%. Sell when the bid is 8¢ up."),
-        dip("reclaim", "Under 50 → +15 30%", 0.05, 0.15, 0.50, 0.30, "Buy under 50¢ anytime. 30%. Sell when the bid is 15¢ up."),
-        dip("min_5_7", "Under 35 → +8", 0.05, 0.08, 0.35, 0.20, "Buy under 35¢ anytime. 20%. Sell when the bid is 8¢ up."),
-        dip("dump_catch", "Under 50 → +8 25%b", 0.05, 0.08, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 8¢ up."),
-        dip("fade_spike", "Under 50 → +15 25%", 0.05, 0.15, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 15¢ up."),
-        dip("gap_side", "Under 50 → +8 15%b", 0.05, 0.08, 0.50, 0.15, "Buy under 50¢ anytime. 15%. Sell when the bid is 8¢ up."),
-        dip("breakout_50", "Under 50 → +8 20%c", 0.05, 0.08, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 8¢ up."),
-        dip("momentum", "Under 50 → +8 20%d", 0.05, 0.08, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 8¢ up.")
+        trail("late_squeeze", "Trail 8→2", 0.08, 0.02, 0.50, 0.30, "Buy under 50¢. 30%. After +8¢, sell 2¢ off the peak."),
+        trail("all_in_cheap", "Trail 10→2", 0.10, 0.02, 0.50, 0.25, "Buy under 50¢. 25%. After +10¢, sell 2¢ off the peak."),
+        trail("all_in_under_50", "Trail 15→2", 0.15, 0.02, 0.50, 0.25, "Buy under 50¢. 25%. After +15¢, sell 2¢ off the peak."),
+        trail("first_5", "Trail 6→2", 0.06, 0.02, 0.50, 0.20, "Buy under 50¢. 20%. After +6¢, sell 2¢ off the peak."),
+        trail("no_cap", "Trail 12→2", 0.12, 0.02, 0.50, 0.25, "Buy under 50¢. 25%. After +12¢, sell 2¢ off the peak."),
+        trail("slow_trail", "Trail 8→3", 0.08, 0.03, 0.50, 0.25, "Buy under 50¢. 25%. After +8¢, sell 3¢ off the peak."),
+        trail("tight_spread", "Trail 10→3", 0.10, 0.03, 0.50, 0.20, "Buy under 50¢. 20%. After +10¢, sell 3¢ off the peak."),
+        trail("tight_4c", "Trail 5→2", 0.05, 0.02, 0.50, 0.20, "Buy under 50¢. 20%. After +5¢, sell 2¢ off the peak."),
+        trail("penny_press", "Trail 8→2 40", 0.08, 0.02, 0.40, 0.20, "Buy under 40¢. 20%. After +8¢, sell 2¢ off the peak."),
+        trail("deep_value", "Trail 10→2 45", 0.10, 0.02, 0.45, 0.20, "Buy under 45¢. 20%. After +10¢, sell 2¢ off the peak."),
+        trail("dip_buy", "Trail 8→2 15%", 0.08, 0.02, 0.50, 0.15, "Buy under 50¢. 15%. After +8¢, sell 2¢ off the peak."),
+        trail("wide_gap", "Trail 20→2", 0.20, 0.02, 0.50, 0.30, "Buy under 50¢. 30%. After +20¢, sell 2¢ off the peak."),
+        trail("burst", "Trail 8→2 30%", 0.08, 0.02, 0.50, 0.30, "Buy under 50¢. 30%. After +8¢, sell 2¢ off the peak."),
+        trail("reclaim", "Trail 15→2 30%", 0.15, 0.02, 0.50, 0.30, "Buy under 50¢. 30%. After +15¢, sell 2¢ off the peak."),
+        trail("min_5_7", "Trail 8→2 35", 0.08, 0.02, 0.35, 0.20, "Buy under 35¢. 20%. After +8¢, sell 2¢ off the peak."),
+        dip("dump_catch", "Under 50 → +8", 0.05, 0.08, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 8¢ up."),
+        dip("fade_spike", "Under 50 → +15", 0.05, 0.15, 0.50, 0.25, "Buy under 50¢ anytime. 25%. Sell when the bid is 15¢ up."),
+        dip("gap_side", "Under 50 → +10", 0.05, 0.10, 0.50, 0.15, "Buy under 50¢ anytime. 15%. Sell when the bid is 10¢ up."),
+        dip("breakout_50", "Under 50 → +8 20%", 0.05, 0.08, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 8¢ up."),
+        dip("momentum", "Under 50 → +12", 0.05, 0.12, 0.50, 0.20, "Buy under 50¢ anytime. 20%. Sell when the bid is 12¢ up.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
@@ -160,6 +160,27 @@ object ScalpCatalog {
                 val b = bid(t, pos.side)
                 when {
                     b + 1e-9 >= pos.entry + up -> ScalpIntent.Sell(force = true)
+                    t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
+                    else -> ScalpIntent.Hold
+                }
+            }
+        }
+
+    /**
+     * Buy under [maxAsk]. Hold until the bid is [arm] above the entry, then
+     * sell when it falls [trail] off the peak. Closes in the last minute.
+     */
+    private fun trail(id: String, name: String, arm: Double, trail: Double, maxAsk: Double, fraction: Double, rule: String) =
+        algo(id, name, rule) { a, t ->
+            val pos = a.position
+            if (pos == null) {
+                val side = cheaper(t)
+                if (ask(t, side) < maxAsk) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
+            } else {
+                val b = bid(t, pos.side)
+                val armed = pos.peakBid + 1e-9 >= pos.entry + arm
+                when {
+                    armed && pos.peakBid - b + 1e-9 >= trail -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }
