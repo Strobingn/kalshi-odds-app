@@ -187,8 +187,20 @@ class AutoTradeStore(context: Context) {
         val label: String,
         val blurb: String,
         val pnlUsd: Double,
+        /** Realized P&L from actual sells only — the honest scalping number. */
+        val scalpPnlUsd: Double,
+        /** Realized P&L from settlement outcomes — luck, not scalping skill. */
+        val settlementPnlUsd: Double,
+        val closedTrades: Int,
         val position: OpenPosition?
-    )
+    ) {
+        /**
+         * True once the model has closed enough trades for its rank to mean
+         * anything. Below the floor a couple of lucky prints can crown a
+         * loser, so unranked rows sit under the ranked board.
+         */
+        val ranked: Boolean get() = closedTrades >= SignalConstants.AUTO_BOARD_MIN_TRADES
+    }
 
     private val prefs = context.applicationContext
         .getSharedPreferences("autotrade_guard", Context.MODE_PRIVATE)
@@ -240,17 +252,92 @@ class AutoTradeStore(context: Context) {
             .apply()
     }
 
-    /** Per-strategy realized P&L (all-time since armed) for the leaderboard. */
+    /**
+     * Per-strategy realized P&L from a SELL close (all-time since armed).
+     * Counts one closed trade and books the delta to the total and the
+     * scalp column — never to settlement.
+     */
     fun noteStrategyRealized(strategy: String, deltaUsd: Double) = synchronized(lock) {
-        val key = KEY_PNL_PREFIX + strategy
+        addPnlLocked(KEY_PNL_PREFIX + strategy, deltaUsd)
+        addPnlLocked(KEY_SCALP_PREFIX + strategy, deltaUsd)
+        bumpTradeLocked(strategy)
+    }
+
+    fun strategyPnl(strategy: String): Double = synchronized(lock) {
+        java.lang.Double.longBitsToDouble(prefs.getLong(KEY_PNL_PREFIX + strategy, 0L))
+    }
+
+    fun strategyScalpPnl(strategy: String): Double = synchronized(lock) {
+        java.lang.Double.longBitsToDouble(prefs.getLong(KEY_SCALP_PREFIX + strategy, 0L))
+    }
+
+    fun strategySettlementPnl(strategy: String): Double = synchronized(lock) {
+        java.lang.Double.longBitsToDouble(prefs.getLong(KEY_SETTLE_PREFIX + strategy, 0L))
+    }
+
+    fun strategyTrades(strategy: String): Int = synchronized(lock) {
+        prefs.getInt(KEY_TRADES_PREFIX + strategy, 0)
+    }
+
+    /**
+     * Settlement close for an open auto position: books the outcome to the
+     * settlement bucket — never the scalp column — so expiry coin-flips
+     * cannot inflate a scalper's rank (the kashi harness's leaderboard
+     * illusion). Counts a closed trade and feeds the daily-loss limit.
+     * Idempotent per ticker: the position is removed as it is booked, and
+     * a ticker can hold at most one auto position.
+     */
+    fun noteSettlement(ticker: String, result: String, feeRate: Double, nowMs: Long) = synchronized(lock) {
+        val outcome = result.lowercase().trim()
+        if (outcome != "yes" && outcome != "no" && outcome != "void") return
+        val all = openPositionsLocked()
+        val hit = all.firstOrNull { it.ticker.equals(ticker, ignoreCase = true) } ?: return
+        writeOpenLocked(all - hit)
+        val won = outcome != "void" && hit.side.equals(outcome, ignoreCase = true)
+        val payout = when {
+            outcome == "void" -> hit.costUsd
+            won -> hit.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD
+            else -> 0.0
+        }
+        val entryFee = AutoTradeEngine.feeEstimate(hit.contracts, hit.entryPrice, feeRate)
+        val pnl = if (outcome == "void") 0.0 else payout - hit.costUsd - entryFee
+        val strategy = hit.strategy.ifBlank { LEGACY }
+        addPnlLocked(KEY_PNL_PREFIX + strategy, pnl)
+        addPnlLocked(KEY_SETTLE_PREFIX + strategy, pnl)
+        bumpTradeLocked(strategy)
+        rollDayLocked(nowMs)
+        val today = java.lang.Double.longBitsToDouble(prefs.getLong(KEY_REALIZED_TODAY, 0L))
+        prefs.edit()
+            .putLong(KEY_REALIZED_TODAY, java.lang.Double.doubleToRawLongBits(today + pnl))
+            .apply()
+    }
+
+    private fun addPnlLocked(key: String, deltaUsd: Double) {
         val cur = java.lang.Double.longBitsToDouble(prefs.getLong(key, 0L))
         prefs.edit()
             .putLong(key, java.lang.Double.doubleToRawLongBits(cur + deltaUsd))
             .apply()
     }
 
-    fun strategyPnl(strategy: String): Double = synchronized(lock) {
-        java.lang.Double.longBitsToDouble(prefs.getLong(KEY_PNL_PREFIX + strategy, 0L))
+    private fun bumpTradeLocked(strategy: String) {
+        val key = KEY_TRADES_PREFIX + strategy
+        prefs.edit().putInt(key, prefs.getInt(key, 0) + 1).apply()
+    }
+
+    /**
+     * Sweep settled outcomes from the prediction log — catches settlements
+     * the app slept through. Idempotent: booked positions leave the open
+     * set, so repeat sweeps are no-ops.
+     */
+    fun settleFromLog(
+        entries: List<com.dirk.kalshiodds.prediction.PredictionLogEntry>,
+        feeRate: Double,
+        nowMs: Long
+    ) {
+        entries.forEach { e ->
+            val o = e.outcome ?: return@forEach
+            noteSettlement(e.ticker, o, feeRate, nowMs)
+        }
     }
 
     fun cooldownRemainingMs(ticker: String, nowMs: Long): Long = synchronized(lock) {
@@ -289,7 +376,11 @@ class AutoTradeStore(context: Context) {
         return "PAUSED — $paused\n$base"
     }
 
-    /** Settings leaderboard: every scout ranked by all-time realized P&L. */
+    /**
+     * Settings leaderboard. Ranked rows ([StrategyStatus.ranked] = enough
+     * closed trades) sort by scalp P&L only — settlement lottery stays out
+     * of the ranking. Unproven models follow, closest to ranking first.
+     */
     fun boardEntries(): List<StrategyStatus> {
         val open = openPositions()
         val rows = AutoStrategy.entries.map { strategy ->
@@ -298,21 +389,32 @@ class AutoTradeStore(context: Context) {
                 label = strategy.label,
                 blurb = strategy.blurb,
                 pnlUsd = strategyPnl(strategy.name),
+                scalpPnlUsd = strategyScalpPnl(strategy.name),
+                settlementPnlUsd = strategySettlementPnl(strategy.name),
+                closedTrades = strategyTrades(strategy.name),
                 position = open.firstOrNull { it.strategy == strategy.name }
             )
-        }.sortedByDescending { it.pnlUsd }
+        }
+        val ranked = rows.filter { it.ranked }.sortedByDescending { it.scalpPnlUsd }
+        val warming = rows.filterNot { it.ranked }.sortedWith(
+            compareByDescending<StrategyStatus> { it.closedTrades }
+                .thenByDescending { it.scalpPnlUsd }
+        )
         val legacyPnl = strategyPnl(LEGACY)
         val legacyPos = open.firstOrNull { it.strategy.isBlank() }
         return if (legacyPnl != 0.0 || legacyPos != null) {
-            rows + StrategyStatus(
+            ranked + warming + StrategyStatus(
                 strategy = LEGACY,
                 label = "Legacy",
                 blurb = "Positions opened before the strategy tags existed.",
                 pnlUsd = legacyPnl,
+                scalpPnlUsd = strategyScalpPnl(LEGACY),
+                settlementPnlUsd = strategySettlementPnl(LEGACY),
+                closedTrades = strategyTrades(LEGACY),
                 position = legacyPos
             )
         } else {
-            rows
+            ranked + warming
         }
     }
 
@@ -361,6 +463,9 @@ class AutoTradeStore(context: Context) {
         private const val KEY_OPEN = "open_positions"
         private const val KEY_COOLDOWN_PREFIX = "cooldown_"
         private const val KEY_PNL_PREFIX = "strategy_pnl_"
+        private const val KEY_SCALP_PREFIX = "strategy_scalp_"
+        private const val KEY_SETTLE_PREFIX = "strategy_settle_"
+        private const val KEY_TRADES_PREFIX = "strategy_trades_"
         private const val LEGACY = "LEGACY"
     }
 }

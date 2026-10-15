@@ -242,4 +242,18 @@ object SignalConstants {
 
     /** Consecutive order errors before auto-trade pauses itself. */
     const val AUTO_MAX_CONSEC_ERRORS = 2
+
+    /**
+     * Minimum visible contracts at the exit bid before an auto entry fires.
+     * The V2 scalp harness's biggest leak was entering markets whose bid
+     * vanished before the exit — "held to settlement (no exit liquidity)".
+     * When the book is loaded, an auto buy needs real size on the exit side.
+     */
+    const val AUTO_MIN_EXIT_BID_CONTRACTS = 25.0
+
+    /**
+     * Closed trades a strategy needs before the leaderboard ranks it. Below
+     * this, a couple of lucky settlement coin-flips can crown a loser.
+     */
+    const val AUTO_BOARD_MIN_TRADES = 30
 }
