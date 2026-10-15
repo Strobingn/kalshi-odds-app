@@ -47,6 +47,8 @@ object ScalpSettings {
     /** Fraction of cash per entry. */
     var fraction: Double = 0.25
 }
+
+object ScalpCatalog {
     /** Each paper book. Not live cash. A book may trade through zero. */
     const val START_CASH = 20_000.0
 
