@@ -104,6 +104,7 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
         val sec = at / 1000
         times[sec] = (times[sec] ?: 0) + 1
         times.keys.removeAll { it < sec - 3600 }
+        Unit
     }
 }
 class SavedScalpControls(context: Context) : ScalpControlsRepository {
