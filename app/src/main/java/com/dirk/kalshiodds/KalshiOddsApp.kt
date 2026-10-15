@@ -75,6 +75,7 @@ class KalshiOddsApp : Application() {
         appScope.launch(Dispatchers.IO) {
             runCatching { MarketRefreshScheduler.enqueue(this@KalshiOddsApp) }
             runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this@KalshiOddsApp) }
+            runCatching { container.archive.repairInterruptedSessions(container.sessionId, System.currentTimeMillis()) }
             runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
         }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {

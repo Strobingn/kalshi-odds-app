@@ -38,11 +38,23 @@ object ProcessExitLog {
     /** Does not replace a saved exception or announce routine user/update kills as an app crash. */
     internal fun record(context: Context, entry: Entry, trace: () -> String = { "" }): Boolean {
         val dir = File(context.applicationContext.filesDir, CrashLog.DIR).also { it.mkdirs() }
-        val marker = File(dir, "last-system-exit")
+        val marker = File(context.applicationContext.filesDir, "kashi-last-system-exit")
         val last = runCatching { marker.readText().toLong() }.getOrDefault(0L)
         if (entry.atMs <= last) return false
-        val file = File(dir, "crash-${entry.atMs}.txt")
-        if (!file.exists()) file.writeText(buildString {
+        val nearbyJava = if (entry.reason == ApplicationExitInfo.REASON_CRASH) dir.listFiles { f ->
+            f.name.startsWith("crash-") && f.name.endsWith(".txt")
+        }.orEmpty().filter { f ->
+            val at = f.name.removePrefix("crash-").removeSuffix(".txt").toLongOrNull() ?: 0L
+            kotlin.math.abs(entry.atMs - at) <= 30_000 &&
+                f.useLines { lines -> lines.firstOrNull().orEmpty().let { !it.startsWith("[") } }
+        }.minByOrNull { f -> kotlin.math.abs(entry.atMs - (f.name.removePrefix("crash-").removeSuffix(".txt").toLongOrNull() ?: 0L)) } else null
+        val file = nearbyJava ?: File(dir, "crash-${entry.atMs}.txt")
+        if (nearbyJava != null) {
+            nearbyJava.appendText("\n[Android exit metadata] ${reasonLabel(entry.reason)} · status ${entry.status} · pid ${entry.pid} · time ${CrashLog.stamp(entry.atMs)}\n")
+        } else if (!file.exists()) file.writeText(buildString {
+            val fatal = entry.reason in setOf(ApplicationExitInfo.REASON_CRASH, ApplicationExitInfo.REASON_CRASH_NATIVE,
+                ApplicationExitInfo.REASON_ANR, ApplicationExitInfo.REASON_INITIALIZATION_FAILURE)
+            if (!fatal) append("[non-fatal] ")
             append("[system exit] ${reasonLabel(entry.reason)} · status ${entry.status}\n")
             append("time ${CrashLog.stamp(entry.atMs)} · process ${entry.process} · pid ${entry.pid}\n")
             append("Android reason ${entry.reason} · importance ${entry.importance}\n")
