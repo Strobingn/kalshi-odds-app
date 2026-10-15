@@ -42,11 +42,24 @@ class ReleaseGate0357Test {
         out.forEach { assertEquals(ScalpState.PENDING_ENTRY, it.state); assertEquals("YES", it.side); assertTrue(ScalpModels.modelOf(it) in ScalpModels.SF_MODELS) }
         // 0.3.58: no fill before 2 s; then fill at the ask of that later quote, capped at its size
         assertTrue(book.onShockFavQuote(q(t0 + 6_000L, 100_100.0, 0.41, 0.39), true).none { it.state == ScalpState.OPEN })
-        val filled = book.onShockFavQuote(q(t0 + 7_100L, 100_100.0, 0.47, 0.45, size = 7.0), true).filter { it.state == ScalpState.OPEN && out.any { o -> o.id == it.id } }
+        val filled = book.onShockFavQuote(q(t0 + 7_100L, 100_100.0, 0.42, 0.40, size = 7.0), true).filter { it.state == ScalpState.OPEN && out.any { o -> o.id == it.id } }
         assertEquals(out.size, filled.size)
-        filled.forEach { assertEquals(7, it.contracts); assertEquals(0.47, it.entryPrice!!, 1e-9) }
+        filled.forEach { assertEquals(7, it.contracts); assertEquals(0.42, it.entryPrice!!, 1e-9) }
         val settled = book.settle(tk, "yes", close + 5_000L)
         assertTrue(settled.all { (it.state == ScalpState.CLOSED && it.netUsd != null) || it.state == ScalpState.NO_FILL })
+    }
+
+    @Test fun delayedShockDoesNotChaseAnAskBeyondSavedSlippage() {
+        val book = ScalpBook(bankrollUsd = { 20_000.0 })
+        val t0 = close - 600_000L
+        warm(book, t0, 100_000.0)
+        for (i in 0..4) book.tickSpot("BTC", 100_000.0, t0 + i * 1000L)
+        val out = book.onShockFavQuote(q(t0 + 5_000L, 100_100.0, .41, .39), true)
+            .filter { ShockFav.byVariantId(it.variantId)?.kind == ShockFav.Kind.SHOCK_FAV }
+        assertTrue(out.isNotEmpty())
+        val later = book.onShockFavQuote(q(t0 + 7100, 100_100.0, .47, .45), true)
+        assertTrue(later.none { t -> t.state == ScalpState.OPEN && out.any { it.id == t.id } })
+        assertTrue(out.all { signal -> book.snapshot().any { it.id == signal.id && it.state == ScalpState.NO_FILL } })
     }
 
     @Test fun lateFavOncePerMarketAndDisabledMeansNothing() {
@@ -80,3 +93,4 @@ class ReleaseGate0357Test {
         assertTrue(out.size <= 0) // one reserved 10-ct clip @41¢ costs > $3
     }
 }
+

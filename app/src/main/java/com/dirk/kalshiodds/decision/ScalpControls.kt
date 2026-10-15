@@ -92,7 +92,7 @@ object ScalpControlSpec {
             Key.MIN_ASK to (if (sf != null || v2) 1.0 else if (p?.strategy == ScalpStrategy.EXTREME_REVERSION) 2.0 else 10.0),
             Key.MAX_ASK to (if (v2) sp.maxAsk * 100 else if (p?.strategy == ScalpStrategy.EXTREME_REVERSION) 15.0 else 99.0),
             Key.SPREAD to 2.0, Key.MIN_LEFT to (if (v2) 60.0 else if (fav) sf!!.favTmin else p?.tauMinS ?: 0.0),
-            Key.MAX_LEFT to (if (fav) sf!!.favTmax else p?.tauMaxS ?: 900.0), Key.WIN_PROFIT to 0.0,
+            Key.MAX_LEFT to (if (v2) 900.0 else if (fav) sf!!.favTmax else p?.tauMaxS ?: 900.0), Key.WIN_PROFIT to 0.0,
             Key.STOP to stop * 100, Key.TARGET to (if (v2 || fav || p?.hold60 == true) 0.0 else (sf?.tpNetO50 ?: sf?.tp ?: p?.target ?: .08) * 100),
             Key.TRAIL to (if (v2) sp.trail * 100 else (sf?.trail ?: 0.0) * 100), Key.ARM to stop * 100,
             Key.HOLD to (if (v2 || fav || p?.hold60 == true) 0.0 else sf?.maxHoldS?.toDouble() ?: if (raw.startsWith("fcr")) 60.0 else 0.0),
