@@ -254,8 +254,28 @@ class ScoringEngine(
         val settlementIndex = cfBenchmarksForSeries(tick.series)
         // Use the current CF index as spot. The partial final-minute average
         // is a locked arithmetic settlement component, not a spot quote.
-        val settlementSpot = settlementIndex?.valueUsd ?: spotFeat?.lastPrice
-        settlementSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
+        val freshSettlementIndex = settlementIndex?.takeIf { it.isFresh(nowMs) }
+        val settlementSpot = freshSettlementIndex?.valueUsd ?: spotFeat?.lastPrice
+        settlementSpot?.let {
+            book.noteSpot(
+                ticker = tick.ticker,
+                spotUsd = it,
+                nowMs = nowMs,
+                source = if (freshSettlementIndex != null) {
+                    TickBook.SpotSource.KALSHI_CF
+                } else {
+                    TickBook.SpotSource.EXTERNAL_FALLBACK
+                }
+            )
+        }
+        // Kalshi forwards the CF Benchmarks index used for crypto settlement.
+        // Prefer returns measured from that tape whenever it is fresh. Public
+        // exchange returns remain a separate fallback when the index feed is
+        // unavailable or a reconnect left a history gap.
+        val settlementReturns = freshSettlementIndex
+            ?.let { book.settlementSpotReturns(tick.ticker) }
+        val spotReturn1m = settlementReturns?.oneMinute ?: spotFeat?.spotReturn1m
+        val spotReturn5m = settlementReturns?.fiveMinutes ?: spotFeat?.spotReturn5m
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
@@ -289,7 +309,7 @@ class ScoringEngine(
         }.getOrNull()
         val mlpPp = ai?.yes?.times(100.0)
         val tteFrac = ((tteSec ?: 900L).toDouble() / 900.0).coerceIn(0.0, 1.0)
-        val spotRet = spotFeat?.let { it.spotReturn1m ?: it.spotReturn5m }
+        val spotRet = spotReturn1m ?: spotReturn5m
         heavy.pushFrame(
             ticker = tick.ticker,
             mid = mid01,
@@ -408,8 +428,17 @@ class ScoringEngine(
         val cancelFeat = pulse?.let { (it.cancelSpike + it.quotePull) / 2.0 }
         val cancelAdjPp = cancelFeat?.let { (midPp + 7.0 * it).coerceIn(2.0, 98.0) }
 
-        val spotAdjPp = SpotFeatureMath.adjustPp(midPp, spotFeat)
-        val spotLabel = SpotFeatureMath.label(spotFeat)
+        val spotAdjPp = SpotFeatureMath.adjustPp(
+            midPp = midPp,
+            spotReturn1m = spotReturn1m,
+            spotReturn5m = spotReturn5m,
+            fundingRate = spotFeat?.fundingRate,
+            realizedVol15m = spotFeat?.realizedVol15m
+        )
+        val spotLabel = SpotFeatureMath.settlementLabel(
+            settlementReturns?.oneMinute,
+            settlementReturns?.fiveMinutes
+        ) ?: SpotFeatureMath.label(spotFeat)
 
         val adapterState = adapter
         val baseW = blendWeights(
@@ -666,7 +695,7 @@ class ScoringEngine(
                     spread = spread,
                     momentum = momForMl,
                     realizedVol01 = volForMl,
-                    crossAssetRet = spotFeat?.spotReturn5m,
+                    crossAssetRet = spotReturn5m,
                     nowMs = nowMs,
                     digitalFair = digitalFairPp?.div(100.0)
                 )
@@ -738,8 +767,8 @@ class ScoringEngine(
             .joinToString(" · ")
             .ifBlank { null }
         val tape = TapeConflict.evaluate(
-            spotReturn1m = spotFeat?.spotReturn1m,
-            spotReturn5m = spotFeat?.spotReturn5m,
+            spotReturn1m = spotReturn1m,
+            spotReturn5m = spotReturn5m,
             modelSide = predictedSide,
             yesAsk = tick.yesAsk,
             noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
@@ -825,8 +854,8 @@ class ScoringEngine(
             halfSpread = ev.halfSpread,
             spotLabel = combinedSpotLabel,
             spotPp = spotAdjPp,
-            spotReturn1m = spotFeat?.spotReturn1m,
-            spotReturn5m = spotFeat?.spotReturn5m,
+            spotReturn1m = spotReturn1m,
+            spotReturn5m = spotReturn5m,
             adapterReady = adapterState.ready,
             featureDevs = featureDevs,
             mlpPp = mlpPp,

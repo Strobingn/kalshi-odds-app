@@ -288,6 +288,37 @@ class TickBookMathTest {
     }
 
     @Test
+    fun settlementSpotReturnsUseTheTimestampedIndexTape() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-CF"
+        book.noteSpot(ticker, 100.0, nowMs = 0L, source = TickBook.SpotSource.KALSHI_CF)
+        book.noteSpot(ticker, 101.0, nowMs = 60_000L, source = TickBook.SpotSource.KALSHI_CF)
+        book.noteSpot(ticker, 104.0, nowMs = 240_000L, source = TickBook.SpotSource.KALSHI_CF)
+        book.noteSpot(ticker, 105.0, nowMs = 300_000L, source = TickBook.SpotSource.KALSHI_CF)
+        val returns = book.settlementSpotReturns(ticker)
+        assertEquals((105.0 / 104.0) - 1.0, returns.oneMinute!!, 1e-12)
+        assertEquals(0.05, returns.fiveMinutes!!, 1e-12)
+    }
+
+    @Test
+    fun settlementSpotReturnsRejectAReconnectionGap() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-CF-GAP"
+        book.noteSpot(ticker, 100.0, nowMs = 0L, source = TickBook.SpotSource.KALSHI_CF)
+        book.noteSpot(ticker, 105.0, nowMs = 300_000L, source = TickBook.SpotSource.KALSHI_CF)
+        assertEquals(null, book.settlementSpotReturns(ticker).fiveMinutes)
+    }
+
+    @Test
+    fun settlementSpotReturnsNeverMixAnExternalFallbackIntoTheCfTape() {
+        val book = TickBook()
+        val ticker = "KXBTC15M-CF-SOURCE"
+        book.noteSpot(ticker, 100.0, nowMs = 0L)
+        book.noteSpot(ticker, 110.0, nowMs = 300_000L, source = TickBook.SpotSource.KALSHI_CF)
+        assertEquals(null, book.settlementSpotReturns(ticker).fiveMinutes)
+    }
+
+    @Test
     fun lastTickKeepsSpreadWhenTradeAndMetaArrive() {
         val book = TickBook()
         val ticker = "KXBTC15M-BOOK"

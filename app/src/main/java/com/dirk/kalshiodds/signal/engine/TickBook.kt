@@ -38,7 +38,10 @@ class TickBook(private val maxPoints: Int = 80) {
     private val spotsByTicker = linkedMapOf<String, ArrayDeque<SpotSample>>()
     private val lastSpotByTicker = linkedMapOf<String, Double>()
     private val maxBidPoints = 240
-    private val maxSpotPoints = 180
+    // CF Benchmarks emits roughly once per second. Keep a little more than
+    // fifteen minutes so the scoring path can derive its 1m/5m context from
+    // the same Kalshi-forwarded settlement index, rather than a proxy venue.
+    private val maxSpotPoints = 1_000
 
     data class BidSample(
         val tMs: Long,
@@ -49,7 +52,20 @@ class TickBook(private val maxPoints: Int = 80) {
 
     data class SpotSample(
         val tMs: Long,
-        val spotUsd: Double
+        val spotUsd: Double,
+        val source: SpotSource = SpotSource.EXTERNAL_FALLBACK
+    )
+
+    enum class SpotSource { KALSHI_CF, EXTERNAL_FALLBACK }
+
+    /**
+     * Returns computed from the timestamped settlement-price tape. A null
+     * return means the in-app tape has a gap; callers may then use an external
+     * context feed, but must not pretend that it is the settlement index.
+     */
+    data class SpotReturns(
+        val oneMinute: Double? = null,
+        val fiveMinutes: Double? = null
     )
 
     /**
@@ -139,25 +155,56 @@ class TickBook(private val maxPoints: Int = 80) {
     }
 
     /**
-     * Last Coinbase/Binance print for [ticker]. Used so the hero spot
-     * panel has a dashed TARGET line in real USD space.
+     * Last settlement-index price for [ticker], normally Kalshi-forwarded CF
+     * Benchmarks. It drives the hero's real-USD target context and never
+     * changes a Kalshi contract quote.
      */
     @Synchronized
-    fun noteSpot(ticker: String, spotUsd: Double?, nowMs: Long = System.currentTimeMillis()) {
+    fun noteSpot(
+        ticker: String,
+        spotUsd: Double?,
+        nowMs: Long = System.currentTimeMillis(),
+        source: SpotSource = SpotSource.EXTERNAL_FALLBACK
+    ) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         val px = spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return
         lastSpotByTicker[ticker] = px
         val q = spotsByTicker.getOrPut(ticker) { ArrayDeque() }
         val last = q.lastOrNull()
-        if (last != null && nowMs - last.tMs < 400L && kotlin.math.abs(last.spotUsd - px) < 0.01) {
+        if (last != null && last.source == source && nowMs - last.tMs < 400L && kotlin.math.abs(last.spotUsd - px) < 0.01) {
             return
         }
-        q.addLast(SpotSample(nowMs, px))
+        q.addLast(SpotSample(nowMs, px, source))
         while (q.size > maxSpotPoints) q.removeFirst()
     }
 
     @Synchronized
     fun lastSpot(ticker: String): Double? = lastSpotByTicker[ticker]
+
+    /**
+     * Calculate 1m and 5m returns from the local settlement-index tape.
+     * The earlier observation must be within fifteen seconds of the target
+     * lookback. This prevents a reconnect gap from becoming a fabricated
+     * short-horizon move.
+     */
+    @Synchronized
+    fun settlementSpotReturns(ticker: String): SpotReturns {
+        val samples = spotsByTicker[ticker]
+            ?.filter { it.source == SpotSource.KALSHI_CF }
+            .orEmpty()
+        val latest = samples.lastOrNull() ?: return SpotReturns()
+        fun returnFor(lookbackMs: Long): Double? {
+            val target = latest.tMs - lookbackMs
+            val earlier = samples.lastOrNull { it.tMs <= target } ?: return null
+            if (target - earlier.tMs > MAX_SPOT_LOOKBACK_SKEW_MS) return null
+            if (!latest.spotUsd.isFinite() || !earlier.spotUsd.isFinite() || earlier.spotUsd <= 0.0) return null
+            return (latest.spotUsd / earlier.spotUsd - 1.0).takeIf { it.isFinite() }
+        }
+        return SpotReturns(
+            oneMinute = returnFor(ONE_MINUTE_MS),
+            fiveMinutes = returnFor(FIVE_MINUTES_MS)
+        )
+    }
 
     private fun recordBid(tick: MarketTick, nowMs: Long) {
         val (yesBid, yesAsk) = QuoteSanity.usablePair(tick.yesBid, tick.yesAsk)
@@ -651,6 +698,9 @@ class TickBook(private val maxPoints: Int = 80) {
     companion object {
         /** Last N ticks used for velocity / acceleration (user: 10–20). */
         const val VELOCITY_LOOKBACK = 16
+        private const val ONE_MINUTE_MS = 60_000L
+        private const val FIVE_MINUTES_MS = 5 * ONE_MINUTE_MS
+        private const val MAX_SPOT_LOOKBACK_SKEW_MS = 15_000L
 
         fun leadersFor(targetSeries: String): List<String> {
             return when (targetSeries) {
