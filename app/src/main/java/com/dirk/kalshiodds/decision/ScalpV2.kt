@@ -39,11 +39,11 @@ object ScalpV2 {
 
     /** Bounded paper experiment. Positive / inconclusive books keep their existing entry, stop and trail. */
     data class Plan(val spec: Spec, val stop: Double, val arm: Double, val adjusted: Boolean, val note: String)
-    fun plan(id: String, windows: List<ScalpWindowAgg>, nowMs: Long, scalperId: String = id): Plan {
+    fun plan(id: String, windows: List<ScalpWindowAgg>, nowMs: Long, scalperId: String = id, unfinishedWindows: Set<String> = emptySet()): Plan {
         val base = spec(id)
         val stop = base.stop ?: stopFor(base.base)
         val rows = windows.filter { it.scalperId == scalperId &&
-            it.n > 0 && it.netUsd.isFinite() && it.closeMs != null && it.closeMs <= nowMs }
+            it.windowKey !in unfinishedWindows && it.n > 0 && it.netUsd.isFinite() && it.closeMs != null && it.closeMs <= nowMs }
             .sortedByDescending { it.closeMs }.take(24)
         val n = rows.sumOf { it.n }
         val values = rows.map { it.netUsd / it.n }

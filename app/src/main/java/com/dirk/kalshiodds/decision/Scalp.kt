@@ -1407,7 +1407,10 @@ class ScalpBook(
         // 0.3.68: plain v2 copy + (for sf41–44) tweak and size copies; each carries its own params in the note.
         for (seed in listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)) {
             val model = ScalpModels.modelOf(t.copy(ruleVersion = "${ScalpRule.VERSION}|${seed.id}|P"))
-            val plan = ScalpV2.plan(seed.id, v2Evidence, t.signalAtMs, model?.code ?: seed.id)
+            // A closed contract is not complete evidence while this model still awaits an exit/settlement.
+            val unfinished = _all.value.asSequence().filter { isActive(it) && ScalpModels.modelOf(it) == model }
+                .map { it.windowKey }.toSet()
+            val plan = ScalpV2.plan(seed.id, v2Evidence, t.signalAtMs, model?.code ?: seed.id, unfinished)
             val sp = plan.spec
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,

@@ -42,6 +42,7 @@ class ScalpV2AdaptiveTest {
         assertFalse(ScalpV2.plan("v2-sf41", rows.map { it.copy(closeMs = now + 1) }, now).adjusted)
         assertFalse(ScalpV2.plan("v2-sf41", rows.map { it.copy(netUsd = Double.NaN) }, now).adjusted)
         assertTrue(ScalpV2.plan("v2-any-variant", rows, now, "v2-sf41").adjusted)
+        assertFalse(ScalpV2.plan("v2-sf41", rows, now, unfinishedWindows = setOf("w1")).adjusted)
     }
 
     @Test fun fallbackUsesOriginalAndCheapStopsRemainReachable() {
