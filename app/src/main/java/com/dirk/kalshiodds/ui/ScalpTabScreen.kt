@@ -211,7 +211,7 @@ fun ScalpTabContent(
             val rows = st.algoAllTime.values.filter { ScalpModels.isV2(it.model) == v2Only }
             val today = st.algoToday.values.filter { ScalpModels.isV2(it.model) == v2Only }
             item(key = "swarm-summary") { SwarmScalpSummary(rows, today) }
-            item(key = "swarm-curve") { SwarmScalpCurve(st.windows, v2Only) }
+            item(key = "swarm-curve") { SwarmScalpCurve(st.windows, v2Only, st.updatedAtMs.takeIf { it > 0 } ?: System.currentTimeMillis()) }
             val positions = st.activeScalps.filter { com.dirk.kalshiodds.decision.ScalpV2.isV2(it.variantId) == v2Only }
             item(key = "open-title") { Text("Open positions · ${positions.size}", color = c.textPrimary, fontWeight = FontWeight.SemiBold) }
             if (positions.isEmpty()) item(key = "flat") { Text("No open positions in this group", color = c.textSecondary) }

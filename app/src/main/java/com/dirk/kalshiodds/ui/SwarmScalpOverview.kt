@@ -45,13 +45,13 @@ internal fun SwarmScalpSummary(rows: List<ScalpModels.Row>, today: List<ScalpMod
         Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = DipTheme.colors.textPrimary) }
 }
 @Composable
-internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean) {
+internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, nowMs: Long = System.currentTimeMillis()) {
     val c = DipTheme.colors
-    val points = windows.filter { it.closeMs != null }.sortedBy { it.closeMs }.map { w ->
+    val points = windows.filter { it.closeMs != null && it.closeMs <= nowMs }.sortedBy { it.closeMs }.map { w ->
         w.closeMs!! to w.netByModel.filterKeys { ScalpModels.isV2(it) == v2 }.values.sum()
     }
     val curve = points.runningFold(0.0) { a, p -> a + p.second }
-    SwarmCard("Realized P&L · last ${points.size} recorded windows") {
+    SwarmCard("Realized P&L · last ${points.size} completed windows") {
         if (points.size < 2) Text("The curve appears after two recorded windows. No synthetic trades or interpolated results.", color = c.textSecondary)
         else {
             val low = minOf(0.0, curve.min()); val high = maxOf(0.0, curve.max()); val span = (high - low).coerceAtLeast(.01)
@@ -77,7 +77,7 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean) 
                 Text(label(times.first()), style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
                 Text(label(times.last()) + " ET", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
             }
-            Text("Starts at $0 for this range; excludes open P&L. Each point is the recorded result for that contract window.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Text("Starts at $0 for this range; excludes current-window and open P&L. Each point is the recorded result for that contract window.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
     }
 }

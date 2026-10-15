@@ -1493,11 +1493,13 @@ class ScalpBook(
                 }
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
                     if (q.nowMs >= q.closeMs) continue
+                    val maxHold = ScalpV2.savedNumber(t.note, "v2hold", 0.0)
+                    val holdExpired = maxHold > 0 && q.nowMs - (t.entryAtMs ?: t.signalAtMs) >= maxHold * 1000
                     if (!ScalpV2.fresh(q)) {
                         // Time-based risk decisions do not require liquidity; execution always does.
-                        if (t.state == ScalpState.OPEN && q.tauS <= ScalpV2.EXIT_BY_S)
+                        if (t.state == ScalpState.OPEN && (q.tauS <= ScalpV2.EXIT_BY_S || holdExpired))
                             out += t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs,
-                                exitReason = "v2 exit before close: stale or gapped book")
+                                exitReason = if (holdExpired) "V2 user max hold reached" else "v2 exit before close: stale or gapped book")
                         continue
                     }
                     val bid = q.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 }
@@ -1515,8 +1517,7 @@ class ScalpBook(
                     val note = ScalpV2.tag(ScalpV2.tag(t.note, "v2peak", String.format(Locale.US, "%.6f", pk)), "v2armed", if (armed) "1" else "0")
                     val marked = t.copy(note = note)
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
-                    val hold = ScalpV2.savedNumber(t.note, "v2hold", 0.0)
-                    val timeExit = if (hold > 0 && q.nowMs - (t.entryAtMs ?: t.signalAtMs) >= hold * 1000) "V2 user max hold reached" else null
+                    val timeExit = if (holdExpired) "V2 user max hold reached" else null
                     val priceExit = bid?.let {
                         ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail)
                             ?: if (target > 0 && ScalpRule.netAfterFees(entry, it, t.contracts) >= target) "V2 user net take-profit" else null
