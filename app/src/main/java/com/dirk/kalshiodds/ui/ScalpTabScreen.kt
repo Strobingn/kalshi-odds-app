@@ -28,6 +28,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -42,6 +44,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,7 +69,7 @@ object ScalpTabCopy {
     fun stopSaved(r: ScalpModels.Row?): String = if (r == null || r.stopsHit == 0) "no stops hit yet"
         else (if (r.stopSavedUsd >= 0) "stop saved " else "stop cost ") + money(kotlin.math.abs(r.stopSavedUsd)) + " vs no-stop (${r.stopsHit} stop" + (if (r.stopsHit == 1) ")" else "s)")
     const val TITLE = "Scalp"
-    const val PAPER_NOTE = "Paper only. Six models run on every BTC/ETH/SOL 15-min window, each with its own bankroll slice. " +
+    const val PAPER_NOTE = "Paper only. Models run as parallel experiments on 15-minute markets. Totals combine model results after fees. " +
         "Tap a ladder row to place a paper limit at that price; tap your order to cancel; drag it to reprice. " +
         "Limits fill at exactly your price when touched, capped by depth, and cancel at window close. " +
         "Real-money orders only from the Real Money tab (Approve + typed REAL MONEY). No LLM in any decision."
@@ -126,8 +129,11 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
         onDispose { viewModel.setScalpTabVisible(false) }
     }
     val st by viewModel.scalpTab.collectAsStateWithLifecycle()
+    val book = com.dirk.kalshiodds.KalshiOddsApp.from(androidx.compose.ui.platform.LocalContext.current).container.scalp
+    val controls by book.controls.state.collectAsStateWithLifecycle()
     ScalpTabContent(
         st = st,
+        controlConfigs = controls,
         onOpenScalpData = onOpenScalpData,
         onOpenScalpRules = onOpenScalpRules,
         onSelectMarket = viewModel::selectScalpMarket,
@@ -154,12 +160,23 @@ fun ScalpTabContent(
     onSellOwnedAt: (Int) -> Unit = {},
     onOpenAlgo: (ScalpModels.Model) -> Unit = {},
     /** Previews only: hide the coin cards to render the ladder card in view. */
-    showCoinCards: Boolean = true
+    showCoinCards: Boolean = true,
+    controlConfigs: Map<String, com.dirk.kalshiodds.decision.ScalpControlSpec.Config> = emptyMap()
 ) {
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }
     var buyMode by remember { mutableStateOf(true) }
     var info by remember { mutableStateOf(false) }
     val c = DipTheme.colors
+    var pageName by rememberSaveable(showCoinCards) { mutableStateOf(if (showCoinCards) "MODELS" else "LADDER") }
+    var filterName by rememberSaveable { mutableStateOf("ALL") }
+    var todayOnly by rememberSaveable { mutableStateOf(false) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var fullBoard by rememberSaveable { mutableStateOf(false) }
+    var compareV2 by rememberSaveable { mutableStateOf(false) }
+    val page = ScalpLabUi.Page.valueOf(pageName)
+    val filter = ScalpLabUi.Filter.valueOf(filterName)
+    val rows = if (todayOnly) st.algoToday else st.algoAllTime
+    val models = remember(rows, st.algoAllTime, filter, query) { ScalpLabUi.ranked(rows, st.algoAllTime, filter, query) }
 
     if (info) {
         AlertDialog(
@@ -186,69 +203,120 @@ fun ScalpTabContent(
                     modifier = Modifier.border(1.dp, c.border, RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp)
                 )
                 Spacer(Modifier.weight(1f))
-                TextButton(onClick = onOpenScalpData) { Text("Scalp Data", maxLines = 1) }
+                TextButton(onClick = onOpenScalpData) { Text("Data", maxLines = 1) }
+                TextButton(onClick = onOpenScalpRules) { Text("Rules") }
                 IconButton(onClick = { info = true }) { Icon(Icons.Outlined.Info, contentDescription = "How it works", tint = c.textSecondary) }
             }
         }
-        if (showCoinCards) {
-            item(key = "algo-h") {
-                Text("Algorithms", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        item(key = "pages") {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ScalpLabUi.Page.entries.forEach { tab ->
+                    FilterChip(selected = page == tab, onClick = { pageName = tab.name },
+                        label = { Text(tab.label) }, modifier = Modifier.weight(1f))
+                }
             }
-            items(ScalpModels.CARD_ORDER, key = { "algo-" + it.code }) { m ->
-                AlgoCard(m, st.algoAllTime[m], st.algoToday[m], emptyMap()) { onOpenAlgo(m) }
-            }
-            // 0.3.59: one combined Bitcoin leaderboard (no per-coin boards).
-            item(key = "board") { CombinedBoard(ScalpModels.combinedBoard(st.algoAllTime)) }
-            item(key = "v2cmp") { val cmp = androidx.compose.runtime.remember(st.algoAllTime) { ScalpModels.v2Compare(st.algoAllTime) }; V2CompareCard(cmp) }
         }
-        item(key = "ladder-card") {
-            FieldCard {
-                Text("Trade the ladder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-                Spacer(Modifier.height(8.dp))
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(st.markets, key = { it.ticker }) { m ->
-                        Pill(m.label, selected = st.selectedTicker == m.ticker) { onSelectMarket(m.ticker) }
+        if (page != ScalpLabUi.Page.LADDER) {
+            item(key = "period") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = !todayOnly, onClick = { todayOnly = false }, label = { Text("All-time") })
+                    FilterChip(selected = todayOnly, onClick = { todayOnly = true }, label = { Text("Today (ET)") })
+                }
+            }
+            item(key = "overview") { ScalpLabOverview(rows, st.algoAllTime, todayOnly) }
+        }
+        if (page == ScalpLabUi.Page.MODELS) {
+            item(key = "find-model") {
+                OutlinedTextField(value = query, onValueChange = { query = it }, modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Find a model") }, placeholder = { Text("Name, code or strategy") }, singleLine = true,
+                    shape = RoundedCornerShape(14.dp),
+                    trailingIcon = { if (query.isNotEmpty()) TextButton(onClick = { query = "" }) { Text("Clear") } })
+            }
+            item(key = "filters") {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(ScalpLabUi.Filter.entries.toList(), key = { it.name }) { f ->
+                        FilterChip(selected = filter == f, onClick = { filterName = f.name }, label = { Text(f.label) })
                     }
                 }
-                Spacer(Modifier.height(10.dp))
-                Segmented(
-                    left = "UP", right = "DOWN", leftSelected = st.side == "YES",
-                    onLeft = { onSelectSide("YES") }, onRight = { onSelectSide("NO") }
-                )
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    BigButton("Buy", c.upButton, selected = buyMode, modifier = Modifier.weight(1f)) { buyMode = true }
-                    BigButton("Sell", c.downButton, selected = !buyMode, modifier = Modifier.weight(1f)) { buyMode = false }
+            }
+            item(key = "algo-h") {
+                Text("${models.size} models · ranked by net P&L", style = MaterialTheme.typography.labelMedium, color = c.textSecondary)
+            }
+            if (models.isEmpty()) item(key = "empty") {
+                ScalpLabCard { Text("No models match these filters.", color = c.textSecondary) }
+            }
+            items(models, key = { "algo-" + it.code }) { m ->
+                ScalpLabModelCard(models.indexOf(m) + 1, m, rows[m], st.algoAllTime[m], controlConfigs[m.code]) { onOpenAlgo(m) }
+            }
+        }
+        if (page == ScalpLabUi.Page.COMPARE) {
+            item(key = "comparison") { ScalpLabComparison(rows, onOpenAlgo) }
+            item(key = "board-toggle") {
+                OutlinedButton(onClick = { fullBoard = !fullBoard }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (fullBoard) "Hide full leaderboard" else "Full leaderboard")
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    PriceLadder.PRESET_SIZES.forEach { n -> Pill("$n", selected = qty == n, modifier = Modifier.weight(1f)) { qty = n } }
+            }
+            if (fullBoard) item(key = "board") { CombinedBoard(ScalpModels.combinedBoard(rows), todayOnly) }
+            item(key = "v2-toggle") {
+                OutlinedButton(onClick = { compareV2 = !compareV2 }, modifier = Modifier.fillMaxWidth()) {
+                    Text(if (compareV2) "Hide V2 comparison" else "V2 vs original")
                 }
-                Spacer(Modifier.height(10.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    val dot = when (ScalpTabCopy.live(st.bookAgeMs)) {
-                        ScalpTabCopy.Live.GREEN -> c.up
-                        ScalpTabCopy.Live.AMBER -> c.accentOrange
-                        ScalpTabCopy.Live.RED -> c.down
+            }
+            if (compareV2) item(key = "v2cmp") {
+                val cmp = remember(rows) { ScalpModels.v2Compare(rows) }
+                V2CompareCard(cmp)
+            }
+        }
+        if (page == ScalpLabUi.Page.LADDER) {
+            item(key = "ladder-card") {
+                ScalpLabCard {
+                    Text("Trade the ladder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+                    Spacer(Modifier.height(8.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(st.markets, key = { it.ticker }) { m ->
+                            Pill(m.label, selected = st.selectedTicker == m.ticker) { onSelectMarket(m.ticker) }
+                        }
                     }
-                    Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
-                    Spacer(Modifier.width(6.dp))
-                    Text(if (ScalpTabCopy.live(st.bookAgeMs) == ScalpTabCopy.Live.GREEN) "Live" else "Stale",
-                        style = MaterialTheme.typography.labelMedium, color = c.textSecondary, maxLines = 1)
-                    Spacer(Modifier.weight(1f))
-                    Text(ScalpTabCopy.timeLeft(st.secondsLeft), style = MaterialTheme.typography.labelMedium, color = c.textSecondary, maxLines = 1)
-                }
-                if (st.heldContracts > 0) {
                     Spacer(Modifier.height(10.dp))
-                    Text("You own ${st.heldContracts} @ ${ScalpTabCopy.cents(st.heldEntry)} — sell all at:",
-                        style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(6.dp))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        PriceLadder.EXIT_PRESETS_CENTS.forEach { x -> Pill("+$x¢", selected = false, modifier = Modifier.weight(1f)) { onSellOwnedAt(x) } }
+                    Segmented(
+                        left = "UP", right = "DOWN", leftSelected = st.side == "YES",
+                        onLeft = { onSelectSide("YES") }, onRight = { onSelectSide("NO") }
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        BigButton("Buy", c.upButton, selected = buyMode, modifier = Modifier.weight(1f)) { buyMode = true }
+                        BigButton("Sell", c.downButton, selected = !buyMode, modifier = Modifier.weight(1f)) { buyMode = false }
                     }
+                    Spacer(Modifier.height(10.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        PriceLadder.PRESET_SIZES.forEach { n -> Pill("$n", selected = qty == n, modifier = Modifier.weight(1f)) { qty = n } }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val dot = when (ScalpTabCopy.live(st.bookAgeMs)) {
+                            ScalpTabCopy.Live.GREEN -> c.up
+                            ScalpTabCopy.Live.AMBER -> c.accentOrange
+                            ScalpTabCopy.Live.RED -> c.down
+                        }
+                        Box(Modifier.size(10.dp).clip(CircleShape).background(dot))
+                        Spacer(Modifier.width(6.dp))
+                        Text(if (ScalpTabCopy.live(st.bookAgeMs) == ScalpTabCopy.Live.GREEN) "Live" else "Stale",
+                            style = MaterialTheme.typography.labelMedium, color = c.textSecondary, maxLines = 1)
+                        Spacer(Modifier.weight(1f))
+                        Text(ScalpTabCopy.timeLeft(st.secondsLeft), style = MaterialTheme.typography.labelMedium, color = c.textSecondary, maxLines = 1)
+                    }
+                    if (st.heldContracts > 0) {
+                        Spacer(Modifier.height(10.dp))
+                        Text("You own ${st.heldContracts} @ ${ScalpTabCopy.cents(st.heldEntry)} — sell all at:",
+                            style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.height(6.dp))
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            PriceLadder.EXIT_PRESETS_CENTS.forEach { x -> Pill("+$x¢", selected = false, modifier = Modifier.weight(1f)) { onSellOwnedAt(x) } }
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+                    Ladder(st, buyMode, qty, onPlace, onCancel, onReprice)
                 }
-                Spacer(Modifier.height(12.dp))
-                Ladder(st, buyMode, qty, onPlace, onCancel, onReprice)
             }
         }
         item(key = "end") { Spacer(Modifier.height(16.dp)) }
@@ -351,10 +419,10 @@ private fun V2CompareCard(rows: List<com.dirk.kalshiodds.decision.ScalpV2.Compar
 }
 
 @Composable
-private fun CombinedBoard(rows: List<ScalpModels.Row>) {
+private fun CombinedBoard(rows: List<ScalpModels.Row>, todayOnly: Boolean = false) {
     val c = DipTheme.colors
     FieldCard {
-        Text("Leaderboard · BTC 15m · all-time on this phone", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+        Text("Leaderboard · " + (if (todayOnly) "today (ET)" else "all-time on this phone"), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
         // 0.3.68: totals from the scalp_stats rows behind this board (was 0 / 0 / $0 after 0.3.67 moved history to SQLite).
         val tn = rows.sumOf { it.roundTrips }; val tw = rows.sumOf { it.wins }; val tl = rows.sumOf { it.losses }; val tnet = rows.sumOf { it.netUsd }
         Text("$tn round trips · $tw wins / $tl losses · net ${ScalpTabCopy.money(tnet)} after fees", style = MaterialTheme.typography.labelMedium,
@@ -528,3 +596,4 @@ private fun LadderHeader(t: String, m: Modifier, align: TextAlign) =
 private fun LadderCell(t: String, m: Modifier, align: TextAlign, color: Color, bold: Boolean = false) =
     Text(t, m, style = MaterialTheme.typography.bodyMedium, fontFamily = FontFamily.Monospace, color = color, textAlign = align,
         fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, maxLines = 1, softWrap = false)
+
