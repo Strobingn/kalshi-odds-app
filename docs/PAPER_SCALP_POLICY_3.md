@@ -36,7 +36,7 @@ All-time ledger totals differ from bounded observed chart history. Net equity in
 
 The monitor writes bounded local JSONL segments (about 32 MB per production/demo feed, four roughly 8 MB segments). Each segment starts with the virtual ledger, pending orders, consumed liquidity and one-second lookback books. Quote, pause, expiry and official-settlement events contain resulting balances, equity, fees and trade counters. The recorder stores no API keys or real portfolio data. Recording errors are visible; after an error a fresh checkpoint starts a new segment.
 
-Menu → **Export recorded books & trades** saves a ZIP through the Android document picker. Each segment can be replayed by `PaperScalpReplay.run` through the same engine, checking every recorded balance. Do not sum cumulative totals across segments or combine production and demo. A recording gap is missing evidence. Replay parity verifies accounting and reproducibility, not a profitable signal.
+Menu → **Export recorded books & trades** saves a ZIP through the Android document picker. Export captures complete file prefixes and releases the recording lock before writing to the document provider, so a slow destination does not hold up the paper engine. Each segment can be replayed by `PaperScalpReplay.run` through the same engine, checking every recorded balance. Do not sum cumulative totals across segments or combine production and demo. A recording gap is missing evidence. Replay parity verifies accounting and reproducibility, not a profitable signal.
 
 On a machine with the Android project configured, inspect an exported JSONL segment with:
 
@@ -44,4 +44,4 @@ On a machine with the Android project configured, inspect an exported JSONL segm
 PAPER_REPLAY_PATH=/absolute/path/segment.jsonl ./gradlew :app:testDebugUnitTest --tests 'com.dirk.kalshiodds.signal.scalp.PaperScalpReplayTest.externalRecordedSegmentsCanBeCheckedWithoutInventingData'
 ```
 
-The source regressions use synthetic adverse/noise/recovery/trend scenarios and validate execution, costs, signal direction, quote-rate behavior, missing data, stop persistence, migration and replay tamper detection. Native Paparazzi renders cover normal/narrow large-font phones, performance, feed gaps, positions and trades. Screenshots use synthetic data; their displayed returns are not performance evidence.
+The source regressions use synthetic adverse/noise/recovery/trend scenarios and validate execution, costs, signal direction, quote-rate behavior, missing data, stop persistence, migration and replay tamper detection. Android storage tests check ZIP export/replay, production/demo separation, visible recording errors, recovery checkpoints and empty exports. Native Paparazzi renders cover normal/narrow large-font phones, performance, feed gaps, positions and trades. Screenshots use synthetic data; their displayed returns are not performance evidence.

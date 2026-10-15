@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -38,6 +39,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.scalp.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -56,7 +58,7 @@ private val labColors = darkColorScheme(primary = ink, onPrimary = Color.Black, 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> Unit, onPause: (Boolean) -> Unit,
-                     onExport: () -> Unit = {}, initialTab: Int = 0) {
+                     onExport: () -> Unit = {}, initialTab: Int = 0, clock: () -> Long = System::currentTimeMillis) {
     var tab by rememberSaveable { mutableIntStateOf(initialTab) }
     var family by rememberSaveable { mutableStateOf("adaptive") }
     var allocation by rememberSaveable { mutableIntStateOf(35) }
@@ -67,8 +69,11 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
     var menu by remember { mutableStateOf(false) }
     var settings by remember { mutableStateOf(false) }
     var picker by remember { mutableStateOf(false) }
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
+    val currentClock by rememberUpdatedState(clock)
+    var now by remember { mutableLongStateOf(clock()) }
+    LaunchedEffect(Unit) { while (true) { delay(1000); now = currentClock() } }
+    val scroll = rememberSaveable(tab, saver = LazyListState.Saver) { LazyListState() }
+    val uiScope = rememberCoroutineScope()
     val account = state.accounts.firstOrNull { it.id == "$family-$allocation" } ?: state.accounts.firstOrNull() ?: return
     val series = remember(state.accounts, state.lastQuoteMs, allocation, newOnly, hours, drawdown) {
         PaperPerformance.series(state, allocation, newOnly, hours.takeIf { it > 0 }, drawdown)
@@ -102,7 +107,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                     Text("${state.source.replaceFirstChar { it.uppercase() }} data · ${if (!state.monitoring) "monitor off" else if (age == null) "connecting" else if (age > 3) "stale ${age}s" else "${age}s ago"}${if (state.paused) " · entries paused" else ""}", style = MaterialTheme.typography.labelSmall, color = mutedInk)
                 }
                 TabRow(tab, containerColor = page, contentColor = ink) {
-                    listOf("Performance", "Positions", "Trades").forEachIndexed { i, title -> Tab(tab == i, onClick = { tab = i }, text = { Text(title) }) }
+                    listOf("Results", "Positions", "Trades").forEachIndexed { i, title -> Tab(tab == i, onClick = { tab = i }, text = { Text(title) }) }
                 }
                 val problem = when {
                     state.status.contains("error", true) || state.status.contains("backoff", true) -> state.status
@@ -110,7 +115,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                     else -> null
                 }
                 if (problem != null) Text(problem, Modifier.fillMaxWidth().background(Color(0xFF292929)).padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
+                LazyColumn(Modifier.fillMaxSize(), state = scroll, contentPadding = PaddingValues(bottom = 28.dp)) {
                     item {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box {
@@ -163,8 +168,8 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                             }
                             Row(Modifier.fillMaxWidth().border(1.dp, rule).padding(horizontal = 20.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Stat("${if (newOnly && hours == 0) "Rule" else "Shown"} drawdown", dollars(dd), Modifier.weight(1f))
-                                Stat("Fees paid", dollars(fee), Modifier.weight(1f))
-                                Stat("Closed", closed.toString(), Modifier.weight(1f))
+                                Stat(if (newOnly) "Fees · new rules" else "Fees · total", dollars(fee), Modifier.weight(1f))
+                                Stat(if (newOnly) "Closes · new rules" else "Closes · total", closed.toString(), Modifier.weight(1f))
                             }
                         }
                         item {
@@ -178,7 +183,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                         items(PaperPerformance.families, key = { it.first }) { (id, label) ->
                             val a = state.accounts.firstOrNull { it.id == "$id-$allocation" }
                             val value = a?.let { if (newOnly && it.policyVersion == 3) it.equity() - it.policyStartEquity else if (newOnly) 0.0 else it.pnl() } ?: 0.0
-                            Column(Modifier.fillMaxWidth().clickable { choose(id) }.background(if (id == family) Color(0xFF202020) else page).padding(horizontal = 20.dp, vertical = 14.dp)) {
+                            Column(Modifier.fillMaxWidth().clickable { choose(id); uiScope.launch { scroll.animateScrollToItem(0) } }.background(if (id == family) Color(0xFF202020) else page).padding(horizontal = 20.dp, vertical = 14.dp)) {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text(label, fontWeight = if (id == family) FontWeight.Bold else FontWeight.Normal)
                                     Text(signed(value), fontFamily = FontFamily.Monospace)
@@ -260,7 +265,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
 }
 @Composable private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = mutedInk)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = mutedInk, minLines = 2)
         Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
     }
 }

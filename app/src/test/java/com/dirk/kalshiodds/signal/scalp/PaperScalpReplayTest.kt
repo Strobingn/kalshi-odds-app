@@ -47,9 +47,10 @@ class PaperScalpReplayTest {
         assertThrows(IllegalArgumentException::class.java) { PaperScalpReplay.run(sequenceOf(PaperReplayEvent("checkpoint", 1, policy = 99))) }
     }
     @Test fun externalRecordedSegmentsCanBeCheckedWithoutInventingData() {
-        val path = System.getenv("PAPER_REPLAY_PATH") ?: return
+        val path = System.getenv("PAPER_REPLAY_PATH")
+        org.junit.Assume.assumeNotNull(path)
         val json = Json { ignoreUnknownKeys = true }
-        java.io.File(path).useLines { lines ->
+        java.io.File(requireNotNull(path)).useLines { lines ->
             val report = PaperScalpReplay.run(lines.filter { it.isNotBlank() }.map { json.decodeFromString<PaperReplayEvent>(it) })
             assertTrue(report.checkedEvents > 0)
             println("Observed replay checked ${report.checkedEvents} events: ${report.accounts}")

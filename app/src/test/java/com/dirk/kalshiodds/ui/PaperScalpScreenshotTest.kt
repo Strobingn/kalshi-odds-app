@@ -8,26 +8,27 @@ import org.junit.Test
 
 /** Synthetic rendering fixtures only. No screenshot is evidence of a strategy's profitability. */
 class PaperScalpScreenshotTest {
+    private val renderTime = 1_792_035_000_000L
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6.copy(softButtons = false),
         theme = "android:Theme.Material3.DayNight.NoActionBar")
-    @Test fun emptyPhone() = paparazzi.snapshot(name = "performance_empty") { PaperScalpScreen(PaperScalpState(), {}, {}, {}) }
-    @Test fun populatedPhone() = paparazzi.snapshot(name = "performance_phone") { PaperScalpScreen(fixture(), {}, {}, {}) }
+    @Test fun emptyPhone() = paparazzi.snapshot(name = "performance_empty") { PaperScalpScreen(PaperScalpState(), {}, {}, {}, clock = { renderTime }) }
+    @Test fun populatedPhone() = paparazzi.snapshot(name = "performance_phone") { PaperScalpScreen(fixture(), {}, {}, {}, clock = { renderTime }) }
     @Test fun populatedTall() {
         paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 5400))
-        paparazzi.snapshot(name = "performance_full") { PaperScalpScreen(fixture(), {}, {}, {}) }
+        paparazzi.snapshot(name = "performance_full") { PaperScalpScreen(fixture(), {}, {}, {}, clock = { renderTime }) }
     }
     @Test fun narrowLargeFont() {
         paparazzi.unsafeUpdateConfig(deviceConfig = DeviceConfig.PIXEL_6.copy(softButtons = false, screenWidth = 945, screenHeight = 2400, fontScale = 1.3f))
-        paparazzi.snapshot(name = "performance_large_font") { PaperScalpScreen(fixture(), {}, {}, {}) }
+        paparazzi.snapshot(name = "performance_large_font") { PaperScalpScreen(fixture(), {}, {}, {}, clock = { renderTime }) }
     }
-    @Test fun openPositions() = paparazzi.snapshot(name = "position_detail") { PaperScalpScreen(fixture(), {}, {}, {}, initialTab = 1) }
-    @Test fun tradeLedger() = paparazzi.snapshot(name = "trade_ledger") { PaperScalpScreen(fixture(), {}, {}, {}, initialTab = 2) }
+    @Test fun openPositions() = paparazzi.snapshot(name = "position_detail") { PaperScalpScreen(fixture(), {}, {}, {}, initialTab = 1, clock = { renderTime }) }
+    @Test fun tradeLedger() = paparazzi.snapshot(name = "trade_ledger") { PaperScalpScreen(fixture(), {}, {}, {}, initialTab = 2, clock = { renderTime }) }
     @Test fun missingFeedGap() {
         val state = fixture().let { it.copy(accounts = it.accounts.map { a -> a.copy(curve = a.curve.filterIndexed { i, _ -> i !in 14..22 }) }) }
-        paparazzi.snapshot(name = "performance_feed_gap") { PaperScalpScreen(state, {}, {}, {}) }
+        paparazzi.snapshot(name = "performance_feed_gap") { PaperScalpScreen(state, {}, {}, {}, clock = { renderTime }) }
     }
     private fun fixture(): PaperScalpState {
-        val now = 1_792_035_000_000L
+        val now = renderTime
         return PaperScalpState(lastQuoteMs = now, status = "Synthetic render fixture", monitoring = true,
             recorderNote = "Replay recording on · synthetic fixture", accounts = PaperScalpCatalog.ALL.map { spec ->
             val f = PaperPerformance.families.indexOfFirst { it.first == spec.family }
