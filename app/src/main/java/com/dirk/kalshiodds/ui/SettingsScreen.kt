@@ -431,12 +431,25 @@ fun SettingsContent(
 
             Section("Trade feed")
             ToggleRow("Subscribe public trades", s.subscribeTrades, { viewModel?.setSubscribeTrades(it) })
-            ToggleRow("Stream spot (Coinbase WebSocket)", s.spotStreamEnabled, { viewModel?.setSpotStream(it) })
+            ToggleRow("Bitcoin price from Kalshi only", s.kalshiPriceOnly, { viewModel?.setKalshiPriceOnly(it) })
             Text(
-                "Live Coinbase spot re-scores a market as soon as spot moves. Off or disconnected: 25-second REST spot.",
+                if (s.kalshiPriceOnly) {
+                    "Spot, returns and volatility come from the CF Benchmarks index Kalshi streams to your API key " +
+                        "(the index these markets settle on). Needs Live signals; no Coinbase or Binance."
+                } else {
+                    "Spot comes from Coinbase (WebSocket below) and the Binance / Coinbase REST poll."
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
+            if (!s.kalshiPriceOnly) {
+                ToggleRow("Stream spot (Coinbase WebSocket)", s.spotStreamEnabled, { viewModel?.setSpotStream(it) })
+                Text(
+                    "Live Coinbase spot re-scores a market as soon as spot moves. Off or disconnected: 25-second REST spot.",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
             ToggleRow("Record market data (1s)", s.recordMarketData, { viewModel?.setRecordMarketData(it) })
             Text(
                 "While Live signals runs: BTC spot, KXBTC15M top of book, trades and settlements to daily files on this phone (capped at 300 MB, oldest days deleted). Export them from Data.",

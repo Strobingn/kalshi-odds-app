@@ -235,6 +235,16 @@ class LiveSignalsService : Service() {
                     runCatching {
                         val now = System.currentTimeMillis()
                         container.cfIndex.onUpdate(v, now)
+                        // "Bitcoin price from Kalshi only": the index is the live spot (it replaces the Coinbase stream).
+                        if (container.hub.settings.kalshiPriceOnly) {
+                            com.dirk.kalshiodds.signal.external.CfIndexBook.assetOf(v.indexId)?.let { asset ->
+                                container.spotBook.source = com.dirk.kalshiodds.signal.external.KalshiSpot.SOURCE
+                                if (container.spotBook.onPrint(asset, v.value, now)) {
+                                    val nanos = runCatching { android.os.SystemClock.elapsedRealtimeNanos() }.getOrElse { System.nanoTime() }
+                                    container.hub.ingestSpot(asset, v.value, nanos)
+                                }
+                            }
+                        }
                         // Record the settlement index too: training on the
                         // real CF source needs 2-4 weeks of these first.
                         com.dirk.kalshiodds.signal.external.CfIndexBook.assetOf(v.indexId)?.let { asset ->

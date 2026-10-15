@@ -84,7 +84,7 @@ class CfIndexBook {
      */
     fun std1m(asset: String, nowMs: Long): Double? = synchronized(lock) {
         val ring = history[asset.uppercase()] ?: return null
-        val from = nowMs / 1000L - HISTORY_S
+        val from = nowMs / 1000L - STD_WINDOW_S
         var n = 0
         var ss = 0.0
         var prev: Pair<Long, Double>? = null
@@ -99,6 +99,29 @@ class CfIndexBook {
             prev = p
         }
         if (n < MIN_RETURNS) null else kotlin.math.sqrt(ss / n * 60.0)
+    }
+
+    /**
+     * One-minute closes of the index, oldest first: the last value of every
+     * finished minute that had one (a silent minute has no bar, like an
+     * exchange candle), then the latest value as the bar still forming.
+     */
+    fun minuteCloses(asset: String, nowMs: Long): List<Double> = synchronized(lock) {
+        val ring = history[asset.uppercase()] ?: return emptyList()
+        val curMin = nowMs / 60_000L
+        val out = ArrayList<Double>(64)
+        var lastMin = Long.MIN_VALUE
+        var lastVal = Double.NaN
+        for (p in ring) {
+            val m = p.first / 60L
+            if (m >= curMin) break
+            if (m != lastMin && lastMin != Long.MIN_VALUE) out += lastVal
+            lastMin = m
+            lastVal = p.second
+        }
+        if (lastMin != Long.MIN_VALUE) out += lastVal
+        ring.lastOrNull()?.let { out += it.second }
+        out
     }
 
     /** Mean ln(index) over [fromMs, toMs] from the 1-second history, or null with no sample. */
@@ -123,8 +146,11 @@ class CfIndexBook {
     companion object {
         const val MAX_AGE_MS = 5_000L
 
-        /** One-second index history kept per asset: 15 minutes and a margin. */
-        const val HISTORY_S = 960L
+        /** One-second index history kept per asset: the 60 one-minute bars [KalshiSpot] needs, and a margin. */
+        const val HISTORY_S = 3_780L
+
+        /** Seconds of 1-second returns [std1m] reads (Kashi's 900). */
+        const val STD_WINDOW_S = 900L
 
         /** One-second returns [std1m] needs before it answers (Kashi's 120). */
         const val MIN_RETURNS = 120

@@ -18,7 +18,9 @@ data class StreamSpot(
      * market just opened): the 15-minute sign-reversal feature. */
     val return15m: Double?,
     val barStd1m: Double?,
-    val ewmaReturns: Int
+    val ewmaReturns: Int,
+    /** Where the prints came from: the Coinbase stream, or Kalshi's CF index ([KalshiSpot.SOURCE]). */
+    val source: String = SpotMerge.SOURCE
 )
 
 /**
@@ -37,6 +39,10 @@ class SpotStreamBook(
     private val newTape: () -> SpotTape = { SpotTape() }
 ) {
     private val tapes = HashMap<String, SpotTape>()
+
+    /** Source label for [StreamSpot.source]; set by whoever feeds the book. */
+    @Volatile
+    var source: String = SpotMerge.SOURCE
     private val aliveMs = HashMap<String, Long>()
 
     /** Records a trade print. False when the tape rejected it (bad tick). */
@@ -89,7 +95,8 @@ class SpotStreamBook(
             return5m = tape.returnOver(300_000L, nowMs),
             return15m = tape.returnOver(900_000L, nowMs),
             barStd1m = tape.barStd1m(),
-            ewmaReturns = tape.returnCount
+            ewmaReturns = tape.returnCount,
+            source = source
         )
     }
 
@@ -168,7 +175,7 @@ object SpotMerge {
             trainerVolAtMs = rest?.trainerVolAtMs ?: 0L,
             fundingRate = rest?.fundingRate,
             lastPrice = stream.lastPrice,
-            source = if (usedRest) "$SOURCE+${rest!!.source}" else SOURCE,
+            source = if (usedRest) "${stream.source}+${rest!!.source}" else stream.source,
             fetchedAtMs = stream.lastPrintMs
         )
     }

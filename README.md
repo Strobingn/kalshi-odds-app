@@ -19,6 +19,17 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.10.0 (claude/scalper-model-refresh): Bitcoin prices from Kalshi only, everywhere
+
+- New setting **Bitcoin price from Kalshi only** (Settings → Trade feed, on by default). The CF Benchmarks
+  index Kalshi streams to your API key (the index the 15-minute markets settle on) becomes the app's spot:
+  it feeds the live spot book that re-scores markets (replacing the Coinbase WebSocket) and the spot
+  features the signals and models read (replacing the Binance / Coinbase REST poll): 1- and 5-minute
+  returns and the trainer's EWMA σ, from 1-minute bars of the index (`KalshiSpot`, `CfIndexBook` keeps an
+  hour of it). No funding rate (Kalshi has none). Needs Live signals; the model's 60-bar σ is ready about
+  an hour after the stream starts. Off: the Coinbase / Binance feeds as before.
+- Still from Coinbase: the optional history backfill on the Data screen (Kalshi has no past spot prices).
+
 ## 1.9.9 (claude/scalper-model-refresh): the arena runs on Kalshi data only
 
 - Every number the arena trades on now comes from Kalshi through your API key's WebSocket: the trade prints

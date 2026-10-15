@@ -99,7 +99,12 @@ class AppContainer(context: Context) {
         heavyStore = heavyStore,
         results = resultsWriter
     )
-    val external = ExternalMarketCache()
+    /** Spot features: from Kalshi's index stream when "Bitcoin price from Kalshi only" is on, else the exchange poll. */
+    val external = ExternalMarketCache(
+        kalshi = { now ->
+            if (hub.settings.kalshiPriceOnly) com.dirk.kalshiodds.signal.external.KalshiSpot.snapshot(cfIndex, now) else null
+        }
+    )
     /** Paper-only late-favorite tracker (edge_search H2). Never orders. */
     val lateFavorite = com.dirk.kalshiodds.signal.latefav.LateFavoriteStore(app)
     /** Paper-only flow-fade tracker (docs/flow-fade-2026-10-04.md). Never orders. */

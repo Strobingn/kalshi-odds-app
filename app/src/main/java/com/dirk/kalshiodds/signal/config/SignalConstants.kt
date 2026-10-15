@@ -133,6 +133,13 @@ object SignalConstants {
     /** Settings → "Stream spot (Coinbase WebSocket)". REST stays the fallback. */
     const val DEFAULT_SPOT_STREAM = true
 
+    /**
+     * Bitcoin (and ETH / SOL) prices from Kalshi only: the CF Benchmarks index
+     * Kalshi streams on the Live signals WebSocket replaces the Coinbase stream
+     * and the Binance / Coinbase REST poll ([com.dirk.kalshiodds.signal.external.KalshiSpot]).
+     */
+    const val DEFAULT_KALSHI_PRICE_ONLY = true
+
     /** Streamed spot with no print / heartbeat for this long is ignored (REST wins). */
     const val SPOT_STREAM_STALE_MS = 5_000L
 
