@@ -149,7 +149,12 @@ private fun ScalpSettingsCard() {
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
-        Text("Settings", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Text(
+            String.format(Locale.US, "Next buy: dip %.0f¢ · ask < %.0f¢ · size %.0f%% · TP %.0f¢ · SL %.0f¢",
+                dip.value * 100, maxAsk.value * 100, frac.value * 100, tp.value * 100, sl.value * 100),
+            style = MaterialTheme.typography.labelSmall,
+            color = colors.accentBlue
+        )
         SettingSlider("Take profit", tp.value, 0.02, 0.25) { tp.value = it; ScalpSettings.takeProfit = it }
         SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it }
         SettingSlider("Dip", dip.value, 0.02, 0.15) { dip.value = it; ScalpSettings.dip = it }
