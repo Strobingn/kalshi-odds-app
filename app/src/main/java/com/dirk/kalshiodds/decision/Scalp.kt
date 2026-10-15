@@ -1512,15 +1512,15 @@ class ScalpBook(
                     val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, 0.99)
                     val wasArmed = t.id in v2Armed || ScalpV2.savedNumber(t.note, "v2armed", 0.0) == 1.0
                     // Reconstruct arming from the persisted peak, including after process death.
-                    val armed = wasArmed || ScalpV2.armed(entry, pk, arm, t.contracts)
+                    val armed = wasArmed || ScalpV2.netPerContract(t, pk) >= arm - 1e-9
                     if (armed) v2Armed += t.id
                     val note = ScalpV2.tag(ScalpV2.tag(t.note, "v2peak", String.format(Locale.US, "%.6f", pk)), "v2armed", if (armed) "1" else "0")
                     val marked = t.copy(note = note)
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
                     val timeExit = if (holdExpired) "V2 user max hold reached" else null
                     val priceExit = bid?.let {
-                        ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm)
-                            ?: if (target > 0 && ScalpRule.netAfterFees(entry, it, t.contracts) >= target) "V2 user net take-profit" else null
+                        ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it))
+                            ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target) "V2 user net take-profit" else null
                     }
                     val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
                     if (reason == null) { if (marked != t) out += marked; continue }

@@ -69,6 +69,11 @@ class ScalpControlsTest {
         assertTrue(cfg.dipOk(listOf(.5, .5, .5), .45))
         assertFalse(cfg.dipOk(listOf(.4, .4, .4), .45))
     }
+    @Test fun profitTargetsUseActualEntryFees() {
+        val t = source().copy(state = ScalpState.OPEN, contracts = 3, entryPrice = .10, entryFeeUsd = .03)
+        assertEquals((.45 - .03 - .30 - .03) / 3, ScalpV2.netPerContract(t, .15), 1e-9)
+        assertNull(ScalpV2.exit(.10, .06, .20, .15, false, 3, .02, .04, netGain = .03))
+    }
     @Test fun depthBudgetIncludesRoundedFeesAtEachLevel() {
         val (n, usd, fees) = ScalpControls(maxStakeUsd = .32).walkBuy(listOf(.09 to 1.0, .095 to 1.0, .1 to 10.0), 10, .1)
         assertEquals(3, n)
