@@ -75,7 +75,7 @@ object SignalConstants {
 
     const val GITHUB_OWNER = "Strobingn"
     const val GITHUB_REPO = "kalshi-odds-app"
-    const val EDGE_MODEL_RELEASE_TAG = "edge-model-chat-GTP"
+    const val EDGE_MODEL_RELEASE_TAG = "edge-model-latest"
 
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true
@@ -90,9 +90,15 @@ object SignalConstants {
     const val DEFAULT_DRAWDOWN_USD = 50.0
     const val DEFAULT_RESUME_ON_NEW_SESSION = true
 
-    const val MIN_ADAPTER_SAMPLES = 8
+    /**
+     * At a Brier near 0.16, 8 outcomes cannot tell a useful channel from noise
+     * (the old gate); weights drifted toward whatever won last.
+     */
+    const val MIN_ADAPTER_SAMPLES = 100
     const val ADAPTER_LEARNING_RATE = 0.08
-    const val ADAPTER_WEIGHT_EMA = 0.15
+    const val ADAPTER_WEIGHT_EMA = 0.05
+    /** Per-update pull of each channel weight back toward the prior 1.0. */
+    const val ADAPTER_PRIOR_PULL = 0.01
 
     const val EXTERNAL_CACHE_MS = 25_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
@@ -103,23 +109,27 @@ object SignalConstants {
     /**
      * Hard all-in cap on a live Approve, including Kalshi fees.
      * `count` is the largest integer with count×P + fee ≤ this.
+     * 0.3.16: $10 default and hard cap (user may pick less).
      */
-    const val LIVE_ALL_IN_CAP_USD = 5.0
-
-    /** Hide / disable a ticket when profit-if-win is below this. */
-    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 10.0
-
-    /** Default USD risked on one approved ticket. */
-    const val DEFAULT_TICKET_STAKE_USD = 5.0
+    const val LIVE_ALL_IN_CAP_USD = 10.0
 
     /**
-     * Soft cap: Settings may lower freely. Raising above this requires an
-     * explicit typed confirmation in Settings.
+     * Min-profit-if-win is gone in 0.3.16. Kept at 0 so leftover prefs
+     * and History restore cannot block a ticket.
      */
-    const val TICKET_STAKE_SOFT_CAP_USD = 5.0
+    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 0.0
 
-    /** Hard ceiling so this never becomes a large auto-bot. */
-    const val TICKET_STAKE_HARD_CAP_USD = 25.0
+    /** Default USD risked on one approved ticket. */
+    const val DEFAULT_TICKET_STAKE_USD = 10.0
+
+    /**
+     * Soft cap equals the hard cap — Settings may lower freely; no RAISE
+     * phrase is needed because nothing above $10 is allowed.
+     */
+    const val TICKET_STAKE_SOFT_CAP_USD = 10.0
+
+    /** Hard ceiling: $10 max bet. */
+    const val TICKET_STAKE_HARD_CAP_USD = 10.0
 
     /** Minimum stake the slider / prefs will accept. */
     const val TICKET_STAKE_MIN_USD = 1.0

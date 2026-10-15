@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
     private val historyViewModel: com.dirk.kalshiodds.ui.HistoryViewModel by viewModels()
+    private val scalpViewModel: com.dirk.kalshiodds.ui.ScalpViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -107,6 +108,8 @@ class MainActivity : ComponentActivity() {
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
+                                onOpenScalp = { navigator.open(AppRoutes.SCALP) },
+                                scalpViewModel = scalpViewModel,
                                 onOpenChart = {
                                     chartTicker = it.ticker
                                     navigator.open(AppRoutes.CHART)
@@ -150,6 +153,12 @@ class MainActivity : ComponentActivity() {
                         signalHistory = {
                             com.dirk.kalshiodds.ui.SignalHistoryScreen(
                                 cards = com.dirk.kalshiodds.ui.signalHistoryCards(oddsState.recentAlerts),
+                                onBack = { navigator.back() }
+                            )
+                        },
+                        scalp = {
+                            com.dirk.kalshiodds.ui.ScalpScreen(
+                                viewModel = scalpViewModel,
                                 onBack = { navigator.back() }
                             )
                         },

@@ -147,7 +147,7 @@ class PaperTileBuyTest {
     @Test
     fun liveCapUnchanged() {
         assertEquals(10.0, HomeCopy.TILE_STAKE_USD, 1e-9)
-        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
         assertNotNull(PaperTileBuy::place)
     }
 }

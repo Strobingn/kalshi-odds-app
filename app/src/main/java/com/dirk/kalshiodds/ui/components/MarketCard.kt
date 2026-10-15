@@ -216,8 +216,16 @@ fun MarketCard(
                 color = colors.textSecondary
             )
 
+            LastMinutePlayBox(market = market, call = call, nowMs = clock)
             Text(
-                text = call.label,
+                text = when {
+                    call.headline == BetCall.Headline.NO_BET && !call.noBetReason.isNullOrBlank() ->
+                        call.noBetReason!!
+                    market.lastMinute != null ->
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.headline(market.lastMinute)
+                    call.headline != BetCall.Headline.NO_BET -> call.label
+                    else -> call.label
+                },
                 style = MaterialTheme.typography.titleMedium,
                 color = headlineColor,
                 fontWeight = FontWeight.Bold
@@ -259,7 +267,7 @@ fun MarketCard(
             } else {
                 if (disagreement != null && call.headline == BetCall.Headline.NO_BET) {
                     DisagreementWarning(disagreement)
-                } else if (disagreement == null) {
+                } else if (disagreement == null && market.lastMinute == null) {
                     call.noBetReason?.let {
                         Text(
                             text = it,
@@ -891,6 +899,146 @@ private fun StatusChip(status: String?) {
         color = color,
         fontWeight = FontWeight.Bold
     )
+}
+
+private fun lastMinuteFallback(
+    market: MarketUiModel,
+    nowMs: Long
+): com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot {
+    val close = market.closeTimeEpochMs
+    val tau = if (close != null) ((close - nowMs) / 1000L).toInt() else 900
+    return when {
+        tau <= 0 -> com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot(
+            phase = com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.NO_PLAY,
+            tauSec = 0,
+            startsInMs = null
+        )
+        tau > 60 -> com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot(
+            phase = com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.WAITING,
+            tauSec = tau,
+            startsInMs = (tau - 60).toLong() * 1000L
+        )
+        else -> com.dirk.kalshiodds.signal.lastminute.LastMinuteSnapshot(
+            phase = com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.LIVE,
+            tauSec = tau,
+            startsInMs = null
+        )
+    }
+}
+
+@Composable
+internal fun LastMinutePlayBox(
+    market: MarketUiModel,
+    call: BetCall.Decision,
+    nowMs: Long
+) {
+    val snap = market.lastMinute ?: lastMinuteFallback(market, nowMs)
+    val colors = DipTheme.colors
+    val fired = snap.phase == com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.FIRED
+    val border = when {
+        fired && call.headline == BetCall.Headline.BET_DOWN -> colors.down
+        fired && call.headline == BetCall.Headline.BET_UP -> colors.up
+        else -> MaterialTheme.colorScheme.outline
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(if (fired) 2.dp else 1.dp, border, RoundedCornerShape(12.dp))
+            .background(
+                if (fired && call.headline == BetCall.Headline.BET_DOWN) colors.downContainer
+                else if (fired) colors.upContainer.copy(alpha = if (call.headline == BetCall.Headline.BET_UP) 1f else 0.35f)
+                else Color.Transparent,
+                RoundedCornerShape(12.dp)
+            )
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.TITLE,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Bold,
+            color = colors.textSecondary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.UNPROVEN_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
+        when (snap.phase) {
+            com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.WAITING -> {
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.waiting(snap.startsInMs),
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.LIVE -> {
+                snap.flip?.noBetLine?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.textSecondary
+                    )
+                }
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.sideLiveLine(snap.up),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.up,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.sideLiveLine(snap.down),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.down,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.FIRED -> {
+                if (call.headline == BetCall.Headline.NO_BET) {
+                    Text(
+                        call.noBetReason
+                            ?: snap.flip?.noBetLine
+                            ?: com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.NO_PLAY,
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = colors.textSecondary
+                    )
+                } else snap.fired?.let {
+                    Text(
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.buyLine(it),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = if (it.side.equals("NO", true)) colors.down else colors.up
+                    )
+                    Text(
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.modelEvLine(it.evPerDollar),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                    if (it.depthLimited) {
+                        Text(
+                            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.DEPTH_LIMITED,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = colors.accentOrange
+                        )
+                    }
+                }
+            }
+            com.dirk.kalshiodds.signal.lastminute.LastMinutePhase.NO_PLAY -> {
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.NO_PLAY,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.spotSourceLine(snap),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+    }
 }
 
 private fun formatCompact(value: Double?): String {

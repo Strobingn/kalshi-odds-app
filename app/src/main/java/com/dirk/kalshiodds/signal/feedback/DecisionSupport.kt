@@ -34,16 +34,15 @@ class DecisionSupport(
         mutex.withLock {
             scoring.adapter = runCatching { adapterStore.read() }.getOrElse { OnlineAdapter.identity() }
             val rawGuard = runCatching { guardrailStore.read() }.getOrElse { Guardrails.identity() }
-            val entries = runCatching { logStore.readAll() }.getOrElse { emptyList() }
-            val corrected = Guardrails.migrateIfNeeded(rawGuard, entries, thresholds(settings))
             val started = Guardrails.onNewSession(
-                corrected,
+                rawGuard,
                 thresholds(settings),
                 sessionId,
                 System.currentTimeMillis()
             )
             scoring.guardrails = started
             runCatching { guardrailStore.write(started) }
+            val entries = runCatching { logStore.readAll() }.getOrElse { emptyList() }
             scoring.allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor)
             restoreHeavy(entries, settings)
         }

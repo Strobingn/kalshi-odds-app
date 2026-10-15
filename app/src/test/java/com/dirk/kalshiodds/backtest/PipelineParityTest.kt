@@ -89,7 +89,7 @@ class PipelineParityTest {
     }
 
     @Test
-    fun resolveSidePrefersHeroOverFade() {
+    fun resolveSidePrefersEvPickOverHero() {
         val m = MarketUiModel(
             ticker = "KXBTC15M-X",
             title = "BTC",
@@ -114,7 +114,9 @@ class PipelineParityTest {
             primaryHeroSide = "YES",
             netEdgePp = -2.0
         )
-        assertEquals("YES", TicketBuilder.resolveSide(m))
+        // The scored side (best net EV at the ask) wins; the tape hero is only a fallback.
+        assertEquals("NO", TicketBuilder.resolveSide(m))
+        assertEquals("YES", TicketBuilder.resolveSide(m.copy(predictedSide = null)))
         assertFalse(
             TicketBuilder.modelBeatsImplied(
                 model = 0.32,

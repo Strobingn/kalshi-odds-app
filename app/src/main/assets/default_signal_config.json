@@ -26,7 +26,7 @@
   "resumeOnNewSession": true,
   "ticketsEnabled": true,
   "paperTradingEnabled": true,
-  "ticketStakeUsd": 5.0,
+  "ticketStakeUsd": 10.0,
   "ticketRespectGates": true,
   "heavyMlEnabled": false,
   "sequenceModelEnabled": true,

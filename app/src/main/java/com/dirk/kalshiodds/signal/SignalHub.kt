@@ -68,7 +68,6 @@ class SignalHub(
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
     private val lastBookScoredMs = ConcurrentHashMap<String, Long>()
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
-    private val lastSnapshotPersistMs = ConcurrentHashMap<String, Long>()
     private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
@@ -122,6 +121,20 @@ class SignalHub(
 
     @Volatile
     var wsLive: Boolean = false
+
+    /**
+     * Optional hook fed EVERY scored tick (WS, REST, and book-derived alike).
+     * Wired by AppContainer to the experimental scalper engine. The engine
+     * gates on its own settings snapshot and `running` flag, so a null hook
+     * or an engine whose service has not started is always inert. Must never
+     * throw — failures are swallowed here.
+     */
+    @Volatile
+    var scoredTickHook: ((MarketTick) -> Unit)? = null
+
+    private fun dispatchScoredTick(tick: MarketTick) {
+        scoredTickHook?.let { hook -> runCatching { hook(tick) } }
+    }
 
     fun setWatchTickers(tickers: Set<String>) {
         _watchTickers.value = tickers
@@ -269,6 +282,7 @@ class SignalHub(
         }
         val processed = elapsedNanos()
         val latencyMs = (processed - t0) / 1_000_000.0
+        dispatchScoredTick(tick)
         _status.update {
             it.copy(
                 lastTickLatencyMs = latencyMs.coerceAtLeast(0.0),
@@ -289,6 +303,7 @@ class SignalHub(
         persistScore(tick, scored)
         persistOddsMid(ticker, scored.marketMidPp)
         persistChartTick(tick)
+        dispatchScoredTick(tick)
     }
 
     private fun persistOddsMid(ticker: String, marketMidPp: Double) {
@@ -369,10 +384,8 @@ class SignalHub(
             }.getOrDefault(false)
             if (!logged) forwardLoggedTickers.remove(tick.ticker)
         }
-        val lastSnapshot = lastSnapshotPersistMs[tick.ticker] ?: 0L
-        if (now - lastSnapshot >= 5_000L) {
-            lastSnapshotPersistMs[tick.ticker] = now
-            runCatching { results?.enqueueSnapshot(
+        runCatching {
+            results?.enqueueSnapshot(
                 ScoredSnapshotRow(
                     ticker = tick.ticker,
                     series = tick.series,
@@ -388,7 +401,7 @@ class SignalHub(
                     heavyMl = scored.heavyMl,
                     note = scored.ensembleNote
                 )
-            ) }
+            )
         }
         // SQLite/text already have the row. Skip the DataStore JSON rewrite
         // when heap is tight or another write is in flight — that rewrite is
@@ -401,14 +414,14 @@ class SignalHub(
                 runCatching {
                     val predictedSide = SignalStance.resolve(
                         storedSide = scored.predictedSide,
-                        modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+                        modelYes = scored.importedModelPp ?: scored.fairValuePp,
                         marketYes = scored.marketMidPp,
                         fairYes = scored.fairValuePp
                     ).storedSide
                     val sideYes = when (predictedSide?.trim()?.uppercase()) {
                         "YES" -> true
                         "NO" -> false
-                        else -> (scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp) > 50.0
+                        else -> (scored.importedModelPp ?: scored.fairValuePp) > 50.0
                     }
                     val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
                         sideYes = sideYes,
@@ -438,14 +451,15 @@ class SignalHub(
                             midVolPp = scored.midVolPp,
                             pFill = scored.pFill,
                             wouldAlert = scored.passedFilter &&
-                                kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp(),
+                                (scored.netEdgePp ?: Double.NEGATIVE_INFINITY) >= settings.effectiveEdgeThresholdPp(),
                             mlpYes = scored.mlpPp?.div(100.0),
                             cnnYes = scored.cnnPp?.div(100.0),
                             gbmYes = scored.gbmPp?.div(100.0),
                             entryAsk = sized.entryAsk,
                             contracts = sized.contracts,
                             stakeUsd = sized.stakeUsd,
-                            feeUsd = sized.feeUsd
+                            feeUsd = sized.feeUsd,
+                            rawFairYes = scored.rawFairValuePp / 100.0
                         )
                     )
                 }

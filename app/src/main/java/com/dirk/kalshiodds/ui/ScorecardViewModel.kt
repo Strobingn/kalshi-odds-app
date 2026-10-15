@@ -117,10 +117,13 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
     val snapshot: StateFlow<ScorecardUi> = combine(
         container.logStore.entriesFlow,
         container.paper.book.state,
-        container.adapterStore.stateFlow,
+        container.lastMinuteStore.state,
         container.guardrailStore.stateFlow,
-        combine(_exportMessage, _modelNote, container.resultsWriter.forwardRevision) { export, note, _ -> export to note }
-    ) { entries, paper, adapter, guard, notes ->
+        combine(_exportMessage, _modelNote, container.adapterStore.stateFlow,
+            container.resultsWriter.forwardRevision) { export, note, adapter, _ ->
+            Triple(export, note, adapter)
+        }
+    ) { entries, paper, lastMinute, guard, notes ->
         val settings = container.hub.settings
         val (windows, forwardRows, ticketRows) = withContext(Dispatchers.IO) {
             Triple(
@@ -130,7 +133,7 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
             )
         }
         ScorecardUi(
-            view = ScorecardCopy.of(entries, paper, windows),
+            view = ScorecardCopy.of(entries, paper, windows, lastMinutePicks = lastMinute.picks),
             metrics = ScorecardMetrics.compute(
                 entries = entries,
                 calibration = container.scoring.calibration,
@@ -138,10 +141,12 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
                 edgeThresholdPp = settings.effectiveEdgeThresholdPp(),
                 minConfidence = settings.minConfidence,
                 requireUncertaintyPass = settings.uncertaintyGateEnabled,
-                maxUncertainty = settings.maxUncertainty
+                maxUncertainty = settings.maxUncertainty,
+                fills = paper.fills + paper.archived.flatMap { it.fills },
+                settledWindows = windows
             ),
             allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor),
-            adapter = adapter,
+            adapter = notes.third,
             guardrails = guard,
             extendedLine = extendedLine(),
             exportMessage = notes.first,

@@ -33,25 +33,29 @@ import kotlin.math.tanh
  *
  * | Feature                         | Early | Late | Notes |
  * |---------------------------------|------:|-----:|-------|
- * | AI (TFLite / fallback MLP)      |  0.30 | 0.20 | Then temperature + reliability-bin calibration |
+ * | AI (TFLite / fallback MLP)      |  0    |  0   | Off until retrained (see [W_AI]); still shown |
  * | Volume-flow + aggressor         |  0.12 | 0.14 | Taker side when the trade feed provides it |
- * | Related crypto mid              |  0.08 | 0.04 | BTC ↔ ETH ↔ SOL last mid |
+ * | Related crypto mid              |  0    |  0   | Removed (different strike) |
  * | Tick velocity `Δmid/Δt` + accel |  0.10 | 0.14 | Last N ticker/trade/REST ticks |
  * | Order-book imbalance            |  0.10 | 0.14 | Near-mid bid vs ask |
  * | Cross-asset lead–lag            |  0.10 | 0.06 | BTC leads ETH/SOL (~3s); reverse when useful |
  * | Depth near mid / decay          |  0.10 | 0.14 | Size in 3¢ band vs 15¢ band |
  * | Quote pull / cancel spike       |  0.10 | 0.14 | Sudden best-quote moves, large cancels |
- * | External spot / fund / rvol     |  0.08 | 0.06 | Public Binance/Coinbase; drops out if stale |
+ * | External spot / fund / rvol     |  0.08 | 0.06 | Coinbase USD (+ live [spotStream]); drops out if stale |
  *
  * When spot is present the row is included and the rest **renormalize**.
  * [OnlineAdapter] then reweights channels from the user's settlements.
  *
- * Regime nudges (before renormalize): TREND ↑vel/lead-lag; CHOP ↓vel ↑AI;
- * VOL_SPIKE ↑micro ↓AI; QUIET ↑related ↓flow.
+ * Regime nudges (before renormalize): TREND ↑vel/lead-lag; CHOP ↓vel;
+ * VOL_SPIKE ↑micro.
  *
- * `delta = calibratedFair − marketMid` (percentage points).
- * Alerts fire only when |delta| ≥ threshold **and** the skip filter passes
- * (confidence, liquidity, spread).
+ * Then: [Calibrator] (raw blend, per time bucket) → [DirectionSanity]
+ * (halfway to the time/vol-aware digital when spot is clearly past the
+ * strike) → the imported market-offset [edgeModel], which replaces the blend
+ * when one is active → side = [NetExpectedValue.bestSide] at the real asks.
+ *
+ * Alerts fire only when the picked side's **net EV at its ask** (after fees)
+ * ≥ threshold **and** the skip filter passes (confidence, liquidity, spread).
  */
 class ScoringEngine(
     private val model: DipHunterModel = DipHunterModel(context = null),
@@ -62,6 +66,11 @@ class ScoringEngine(
 ) {
     @Volatile
     var edgeModel: com.dirk.kalshiodds.prediction.EdgeModel? = null
+
+    /** Live Coinbase spot; overlays [external] on every score when fresh. */
+    @Volatile
+    var spotStream: com.dirk.kalshiodds.signal.external.SpotStream? = null
+
     data class Score(
         val fairValuePp: Double,
         val marketMidPp: Double,
@@ -140,8 +149,7 @@ class ScoringEngine(
         val modelLeanSide: String? = null,
         val digitalFairPp: Double? = null,
         val importedModelPp: Double? = null,
-        val modelEdgeQualified: Boolean = true,
-        val blendWeight: Double? = null
+        val modelEdgeQualified: Boolean = true
     )
 
     data class BlendWeights(
@@ -232,7 +240,9 @@ class ScoringEngine(
                 }
             }
         }
-        val spotFeat = external.forSeries(tick.series)
+        val spotFeat = external.forSeries(tick.series)?.let { base ->
+            spotStream?.overlay(base) ?: base
+        }
         spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
@@ -351,9 +361,8 @@ class ScoringEngine(
         val flow = (0.65 * rawFlow + 0.35 * aggressor).coerceIn(-1.0, 1.0)
         val momentumPp = book.momentumPp(tick.ticker)
         val flowAdjPp = (midPp + 8.0 * tanh(flow) + 0.35 * momentumPp).coerceIn(2.0, 98.0)
-        // Another coin's YES midpoint is a different event probability.
-        // Keep this channel out of the fair-value blend until its predictive
-        // contribution is fitted against same-market settlement outcomes.
+        // Related-crypto channel removed: it blended another coin's YES mid
+        // (a different strike) in as this market's P(YES).
         val relatedPp: Double? = null
 
         val velAdjPp = vel?.let {
@@ -404,47 +413,24 @@ class ScoringEngine(
         ) ?: return null
         val w = OnlineAdapter.scaleBlend(baseW, adapterState)
 
-        val rawFair = (
-            (aiPp ?: 0.0) * w.ai +
-                flowAdjPp * w.flow +
-                (relatedPp ?: 0.0) * w.related +
-                (velAdjPp ?: 0.0) * w.velocity +
-                (imbAdjPp ?: 0.0) * w.imbalance +
-                (leadLagAdjPp ?: 0.0) * w.leadLag +
-                (depthAdjPp ?: 0.0) * w.depth +
-                (cancelAdjPp ?: 0.0) * w.cancel +
-                (spotAdjPp ?: 0.0) * w.spot
-            ).coerceIn(2.0, 98.0)
+        val blendPp = (aiPp ?: 0.0) * w.ai +
+            flowAdjPp * w.flow +
+            (relatedPp ?: 0.0) * w.related +
+            (velAdjPp ?: 0.0) * w.velocity +
+            (imbAdjPp ?: 0.0) * w.imbalance +
+            (leadLagAdjPp ?: 0.0) * w.leadLag +
+            (depthAdjPp ?: 0.0) * w.depth +
+            (cancelAdjPp ?: 0.0) * w.cancel +
+            (spotAdjPp ?: 0.0) * w.spot
+        val rawFair = tailScaledFairPp(blendPp, mid01)
 
         val calState = calibration
-        val afterTemp = Calibrator.applyPp(rawFair, calState)
-        var fair = OnlineAdapter.applyPp(afterTemp, adapterState).coerceIn(2.0, 98.0)
+        // One calibrator, fit on the *raw* blend per time bucket. (The old chain
+        // stacked a second Platt fit from OnlineAdapter on the same outcomes.)
+        var fair = Calibrator.applyPp(rawFair, calState, tte.name).coerceIn(FAIR_MIN_PP, FAIR_MAX_PP)
         var delta = fair - midPp
         var predictedSide = if (delta >= 0) "YES" else "NO"
-
-        var ev = NetExpectedValue.compute(
-            fairYes = fair / 100.0,
-            mid = mid01,
-            spreadDollars = spread,
-            feeRate = settings.feeRate,
-            preferSide = predictedSide,
-            stakeUsd = settings.ticketStakeUsd
-        )
         val liquidityObs = listOfNotNull(volume, oi, depthNear).maxOrNull()
-        var size = PositionSizer.suggest(
-            fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
-            contractPrice = ev.contractPrice,
-            bankrollUsd = settings.bankrollUsd,
-            mode = PositionSizer.modeOf(settings.useKelly),
-            kellyFraction = settings.kellyFraction,
-            fixedFraction = settings.fixedFraction,
-            maxFraction = settings.maxBankrollFraction,
-            liquidity = liquidityObs,
-            depthNearMid = depthNear,
-            spreadDollars = spread,
-            maxSpreadCents = settings.maxSpreadCents,
-            netEvPositive = ev.netEv > 0.0
-        )
 
         val muteReason = if (settings.autoMute) {
             allowlist.muteReason(tick.series, regime.name, tte.name)
@@ -536,42 +522,87 @@ class ScoringEngine(
         }
         val strikeUsd = tick.floorStrike ?: book.strike(tick.ticker)
             ?: DirectionSanity.parseStrike(tick.ticker)
+        // σ: EWMA of completed 1m returns (sigmaFromCloses); old snapshots fall back to the 16-bar std.
+        val sigmaAnnual = spotFeat?.sigmaAnnual ?: spotFeat?.realizedVol15m?.let { barStd ->
+            if (!barStd.isFinite() || barStd <= 0.0) null
+            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
+                .coerceIn(0.01, 5.0)
+        }
+        val tteSeconds = (tteSec ?: 900L).toDouble()
+        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
+            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
+                spot = spotFeat.lastPrice!!,
+                strike = strikeUsd,
+                tteSeconds = tteSeconds,
+                sigmaAnnual = sigmaAnnual
+            )?.times(100.0)
+        } else {
+            null
+        }
         val dir = DirectionSanity.apply(
             spotUsd = spotFeat?.lastPrice,
             strikeUsd = strikeUsd,
             spotReturn = spotRet,
             fairPp = fair,
-            predictedSide = predictedSide
+            predictedSide = predictedSide,
+            digitalPp = digitalFairPp
         )
         if (dir.applied) {
             fair = dir.fairPp
             predictedSide = dir.side
             delta = fair - midPp
         }
-        if (extOut?.fairBlendYes != null || dir.applied) {
-            ev = NetExpectedValue.compute(
-                fairYes = fair / 100.0,
-                mid = mid01,
-                spreadDollars = spread,
-                feeRate = settings.feeRate,
-                preferSide = predictedSide,
-                stakeUsd = settings.ticketStakeUsd
+        var importedModelPp: Double? = null
+        val loaded = edgeModel
+        if (loaded != null) {
+            // Fitted market-offset model: logit(mid) + what held-out data earned.
+            // It replaces the hand-set blend outright (activation required it to
+            // beat the mid out of sample; the blend never has).
+            val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
+                com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
+                    marketMid = mid01,
+                    spread = spread,
+                    spot = spotFeat?.lastPrice,
+                    strike = strikeUsd,
+                    tteSeconds = tteSeconds,
+                    sigmaAnnual = sigmaAnnual,
+                    spotReturn1m = spotFeat?.spotReturn1m,
+                    spotReturn5m = spotFeat?.spotReturn5m,
+                    nowMs = nowMs
+                )
             )
-            size = PositionSizer.suggest(
-                fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
-                contractPrice = ev.contractPrice,
-                bankrollUsd = settings.bankrollUsd,
-                mode = PositionSizer.modeOf(settings.useKelly),
-                kellyFraction = settings.kellyFraction,
-                fixedFraction = settings.fixedFraction,
-                maxFraction = settings.maxBankrollFraction,
-                liquidity = liquidityObs,
-                depthNearMid = depthNear,
-                spreadDollars = spread,
-                maxSpreadCents = settings.maxSpreadCents,
-                netEvPositive = ev.netEv > 0.0
-            )
+            val pYes = loaded.predictYes(feats, mid01)
+            importedModelPp = pYes * 100.0
+            fair = (pYes * 100.0).coerceIn(0.5, 99.5)
+            delta = fair - midPp
         }
+        // Side = the one whose win chance beats its *ask* + fee by the most
+        // (the probability lean, with negative net EV, when neither does).
+        val ev = NetExpectedValue.pick(
+            fairYes = fair / 100.0,
+            yesAsk = tick.yesAsk,
+            noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
+            mid = mid01,
+            spreadDollars = spread,
+            feeRate = settings.feeRate,
+            stakeUsd = settings.ticketStakeUsd
+        )
+        predictedSide = ev.side
+        val modelEdgeQualified = loaded == null || ev.netEv >= loaded.evMargin
+        val size = PositionSizer.suggest(
+            fairSide = if (predictedSide == "YES") fair / 100.0 else 1.0 - fair / 100.0,
+            contractPrice = ev.contractPrice,
+            bankrollUsd = settings.bankrollUsd,
+            mode = PositionSizer.modeOf(settings.useKelly),
+            kellyFraction = settings.kellyFraction,
+            fixedFraction = settings.fixedFraction,
+            maxFraction = settings.maxBankrollFraction,
+            liquidity = liquidityObs,
+            depthNearMid = depthNear,
+            spreadDollars = spread,
+            maxSpreadCents = settings.maxSpreadCents,
+            netEvPositive = ev.netEv > 0.0
+        )
         val combinedSpotLabel = listOfNotNull(spotLabel, dir.note).joinToString(" · ").ifBlank { null }
         val filter = SkipFilter.evaluate(
             confidence = confidence,
@@ -598,51 +629,6 @@ class ScoringEngine(
             extBlocked != null -> extBlocked
             else -> filter.reason
         }
-        val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
-            if (!barStd.isFinite() || barStd <= 0.0) null
-            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
-                .coerceIn(0.01, 5.0)
-        }
-        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
-            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
-                spot = spotFeat.lastPrice!!,
-                strike = strikeUsd,
-                tteSeconds = (tteSec ?: 900L).toDouble(),
-                sigmaAnnual = sigmaAnnual
-            )?.times(100.0)
-        } else {
-            null
-        }
-        var importedModelPp: Double? = null
-        var modelEdgeQualified = true
-        var importedBlendW: Double? = null
-        val loaded = edgeModel
-        if (loaded != null) {
-            val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
-                com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
-                    spot = spotFeat?.lastPrice,
-                    strike = strikeUsd,
-                    tteSeconds = (tteSec ?: 900L).toDouble(),
-                    sigmaAnnual = sigmaAnnual,
-                    marketMid = mid01,
-                    imbalance = imb,
-                    spread = spread,
-                    momentum = momForMl,
-                    realizedVol01 = volForMl,
-                    crossAssetRet = spotFeat?.spotReturn5m,
-                    nowMs = nowMs,
-                    digitalFair = digitalFairPp?.div(100.0)
-                )
-            )
-            val pYes = loaded.predictYes(feats)
-            importedModelPp = pYes * 100.0
-            importedBlendW = loaded.blendWeight.toDouble()
-            modelEdgeQualified = loaded.qualifiesEdge(pYes, mid01, settings.feeRate)
-            val blended = loaded.blendWithMarket(pYes, mid01)
-            fair = (0.55 * (fair / 100.0) + 0.45 * blended).times(100.0).coerceIn(2.0, 98.0)
-            delta = fair - midPp
-            predictedSide = if (delta >= 0) "YES" else "NO"
-        }
         val tape = TapeConflict.evaluate(
             spotReturn1m = spotFeat?.spotReturn1m,
             spotReturn5m = spotFeat?.spotReturn5m,
@@ -656,7 +642,7 @@ class ScoringEngine(
             priorStreak = tapeStreak[tick.ticker] ?: 0,
             yesBid = tick.yesBid,
             noBid = tick.noBid,
-            modelYesPercent = importedModelPp ?: aiPp
+            modelYesPercent = importedModelPp ?: fair
         )
         tapeStreak[tick.ticker] = tape.disagreementStreak
         lastPrimarySide[tick.ticker] = tape.primarySide
@@ -770,8 +756,7 @@ class ScoringEngine(
             modelLeanSide = if (tape.conflict) tape.modelSide else null,
             digitalFairPp = digitalFairPp,
             importedModelPp = importedModelPp,
-            modelEdgeQualified = modelEdgeQualified,
-            blendWeight = importedBlendW
+            modelEdgeQualified = modelEdgeQualified
         )
     }
 
@@ -785,20 +770,18 @@ class ScoringEngine(
         if (!scored.passedFilter) return null
         if (scored.muted) return null
         if (guardrails.paused) return null
-        val edgeForAlert = if (settings.rankByNetEv) {
-            scored.netEdgePp ?: scored.deltaPp
-        } else {
-            scored.deltaPp
-        }
         if (settings.isSittingOut()) return null
-        if (abs(edgeForAlert) < settings.effectiveEdgeThresholdPp()) return null
+        // Net EV of the picked side at its ask, after fees — never |fair − mid|,
+        // which fired on favorites whose price already matched their win rate.
+        val netEdge = scored.netEdgePp ?: return null
+        if (netEdge < settings.effectiveEdgeThresholdPp()) return null
         if (edgeModel != null && !scored.modelEdgeQualified) return null
         val last = lastAlertMs[tick.ticker] ?: 0L
         if (nowMs - last < settings.debounceMs) return null
         lastAlertMs[tick.ticker] = nowMs
         val stance = SignalStance.resolve(
             storedSide = scored.predictedSide,
-            modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
+            modelYes = scored.importedModelPp ?: scored.fairValuePp,
             marketYes = scored.marketMidPp,
             fairYes = scored.fairValuePp
         )
@@ -980,11 +963,15 @@ class ScoringEngine(
     }
 
     companion object {
-        // The shipped MLP trails the market midpoint in the recorded backtest.
-        // It remains visible for diagnostics but cannot tilt trade fair value.
+        /**
+         * 0 until retrained: the 8-feature MLP was fit on 1,120 BTC + WTI oil rows,
+         * its volatility/volume inputs are defined differently on the phone than in
+         * training, and it had the worst out-of-sample Brier of every forecast.
+         */
         const val W_AI = 0.0
         const val W_FLOW = 0.12
-        const val W_RELATED = 0.08
+        /** Removed: another coin's YES mid is not this market's P(YES) (different strike). */
+        const val W_RELATED = 0.0
         const val W_VELOCITY = 0.10
         const val W_IMBALANCE = 0.10
         const val W_LEADLAG = 0.10
@@ -993,7 +980,7 @@ class ScoringEngine(
 
         const val W_AI_LATE = 0.0
         const val W_FLOW_LATE = 0.14
-        const val W_RELATED_LATE = 0.04
+        const val W_RELATED_LATE = 0.0
         const val W_VELOCITY_LATE = 0.14
         const val W_IMBALANCE_LATE = 0.14
         const val W_LEADLAG_LATE = 0.06
@@ -1001,6 +988,23 @@ class ScoringEngine(
         const val W_CANCEL_LATE = 0.14
         const val W_SPOT = 0.08
         const val W_SPOT_LATE = 0.06
+
+        const val FAIR_MIN_PP = 0.5
+        const val FAIR_MAX_PP = 99.5
+
+        /**
+         * Treat the blend's percentage-point nudges as log-odds nudges: scale the
+         * net nudge by 4·m·(1−m) (dp ≈ p(1−p)·dlogit). Full size at 50¢, ~2% of
+         * it at 1¢. The raw-pp version (plus a 2% floor) invented a 13% win
+         * chance at a 5¢ ask, which an EV-at-ask picker then bought; in the
+         * 2026-09-27 backtest this cut the blend's out-of-sample log-loss gap to
+         * the mid from 0.0015 to 0.0004. Python twin: pipeline.tail_scaled_fair_pp.
+         */
+        fun tailScaledFairPp(blendPp: Double, mid01: Double): Double {
+            val m = mid01.coerceIn(0.005, 0.995)
+            val fair = m * 100.0 + (blendPp - m * 100.0) * 4.0 * m * (1.0 - m)
+            return fair.coerceIn(FAIR_MIN_PP, FAIR_MAX_PP)
+        }
 
         /** Book deltas update depth immediately; re-score at most this often. */
         const val BOOK_SCORE_MIN_INTERVAL_MS = 250L

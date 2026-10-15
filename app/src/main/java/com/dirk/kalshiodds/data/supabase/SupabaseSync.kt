@@ -221,11 +221,15 @@ class SupabaseSync(
                         stakeUsd = o.optDouble("stakeUsd"),
                         contracts = o.optInt("contracts"),
                         limitPrice = o.optDouble("limitPrice"),
-                        source = "supabase",
+                        source = o.optString("source").ifBlank { "supabase" },
                         createdAtMs = o.optLong("createdAtMs", rec.updatedAtMs),
                         settled = o.optBoolean("settled"),
                         pnlUsd = o.optDouble("pnlUsd").takeIf { o.has("pnlUsd") },
-                        note = o.optString("note")
+                        note = o.optString("note"),
+                        aiPct = o.optDouble("aiPct").takeIf { o.has("aiPct") },
+                        aiConfidence = o.optDouble("aiConfidence").takeIf { o.has("aiConfidence") },
+                        marketPct = o.optDouble("marketPct").takeIf { o.has("marketPct") },
+                        pickSource = o.optString("pickSource").takeIf { it.isNotBlank() }
                     )
                     onPaper(fill)
                 }

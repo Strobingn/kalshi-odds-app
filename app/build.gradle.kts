@@ -11,16 +11,16 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        applicationId = "com.strobingn.bitcoinswarm"
         minSdk = 26
         targetSdk = 35
-        // GitHub Actions run numbers increase with each branch push, so a
-        // new APK updates this separate installation without version downgrades.
-        versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.0"
+        versionCode = 33
+        versionName = "0.3.18"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Compile-time paper-only lock for the bitcoin-swarm experiment branch:
+        // no code path can reach live scalping when this is false. There is
+        // intentionally no product-flavor escape hatch.
+        buildConfigField("boolean", "SCALP_LIVE_TRADING", "false")
     }
 
     signingConfigs {

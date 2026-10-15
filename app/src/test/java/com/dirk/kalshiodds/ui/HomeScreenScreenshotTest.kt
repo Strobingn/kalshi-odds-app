@@ -335,6 +335,181 @@ class HomeScreenScreenshotTest {
     fun darkSettings() = snapSettings("settings_dark", dark = true)
 
     @Test
+    fun deadWindowNoBetFlip() {
+        paparazzi.snapshot(name = "dead_window_no_bet_flip") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.deadWindowLotteryBtc(),
+                        decision = com.dirk.kalshiodds.signal.trade.BetCall.decide(
+                            HomeFixtures.deadWindowLotteryBtc(),
+                            HomeFixtures.settings(true),
+                            HomeFixtures.NOW_MS
+                        ),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("dead_window_no_bet_flip")
+    }
+
+    @Test
+    fun closeWindowStillEligible() {
+        paparazzi.snapshot(name = "close_window_eligible") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.closeWindowEligibleBtc(),
+                        decision = com.dirk.kalshiodds.signal.trade.BetCall.decide(
+                            HomeFixtures.closeWindowEligibleBtc(),
+                            HomeFixtures.settings(true),
+                            HomeFixtures.NOW_MS
+                        ),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("close_window_eligible")
+    }
+
+    @Test
+    fun homeDeadWindow() = snap(
+        "home_dead_window_no_bet",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.deadWindowLotteryBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        )
+    )
+
+    @Test
+    fun lastMinuteCardWaiting() {
+        paparazzi.snapshot(name = "last_minute_card_waiting") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteWaitingBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_waiting")
+    }
+
+    @Test
+    fun lastMinuteCardLive() {
+        paparazzi.snapshot(name = "last_minute_card_live") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteLiveBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_live")
+    }
+
+    @Test
+    fun lastMinuteCardFired() {
+        paparazzi.snapshot(name = "last_minute_card_fired") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteFiredBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_fired")
+    }
+
+    @Test
+    fun lastMinuteConfirmUnproven() = snapSell(
+        "last_minute_confirm_unproven",
+        dark = true,
+        HomeFixtures.lastMinuteTicket()
+    )
+
+    @Test
+    fun lastMinuteScorecardSection() = snapScorecard(
+        "last_minute_scorecard_section",
+        dark = true,
+        ui = HomeFixtures.lastMinuteScorecardUi(),
+        height = 2200
+    )
+
+    @Test
+    fun lastMinuteSettings() = snapSettings("last_minute_settings", dark = false)
+
+    @Test
     fun beforeLightActionable() = snapBefore("before_0_3_11_light_actionable", dark = false, keyed = true)
 
     @Test

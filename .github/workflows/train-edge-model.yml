@@ -1,10 +1,9 @@
 name: Train edge model
 
 on:
-  # Schedules only fire from the default branch; workflow_dispatch works on any
-  # branch when you run the workflow from that branch in the Actions UI.
   schedule:
-    - cron: "17 8 * * *"
+    # Monday 08:17 UTC — weekly retrain on fresh settled Kalshi data.
+    - cron: "17 8 * * 1"
   workflow_dispatch:
     inputs:
       days:
@@ -18,75 +17,57 @@ permissions:
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # Fetching ~30 days of 1m candles for ~8.6k markets takes a while on a cold cache.
+    timeout-minutes: 150
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Sanitize branch name
-        id: meta
+      - name: Trainer + backtest port tests (no look-ahead, no fixture fallback)
         run: |
-          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-      - name: Trainer tests (no look-ahead)
-        run: |
-          if [ -f ml/test_train_edge.py ]; then python3 ml/test_train_edge.py; fi
-          if [ -f ml/test_publish_model.py ]; then python3 ml/test_publish_model.py; fi
+          python3 ml/test_train_edge.py
+          python3 tools/backtest/test_parity.py
+      - name: Restore market cache
+        uses: actions/cache@v4
+        with:
+          path: tools/backtest/cache
+          key: kalshi-15m-cache-${{ github.run_id }}
+          restore-keys: kalshi-15m-cache-
       - name: Train
-        run: |
-          # Prefer BTC/ETH/SOL when the trainer supports --series; else plain train.
-          if python3 ml/train_edge.py --help 2>&1 | grep -q -- '--series'; then
-            python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} \
-              --series KXBTC15M,KXETH15M,KXSOL15M \
-              --out ml/edge_model.json --manifest ml/edge_model_manifest.json
-          else
-            python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} \
-              --out ml/edge_model.json --manifest ml/edge_model_manifest.json
-          fi
+        # Exits non-zero (and skips publishing) when there is not enough real data.
+        run: python3 ml/train_edge.py --fetch --days ${{ github.event.inputs.days || '30' }} --cache tools/backtest/cache --out ml/edge_model.json --manifest ml/edge_model_manifest.json
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
-          name: edge-model-json-${{ steps.meta.outputs.branch }}
+          name: edge-model-json
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
-            ml/fixtures/parity_sample.json
-          if-no-files-found: warn
-      - name: Publish rolling release for this branch
+          if-no-files-found: error
+      - name: Publish rolling release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="edge-model-${{ steps.meta.outputs.branch }}"
-          # Prefer dedicated publisher when present (beat-market gate).
-          if [ -f ml/publish_model.py ]; then
-            python3 ml/publish_model.py --github \
-              --model ml/edge_model.json \
-              --manifest ml/edge_model_manifest.json || {
-                echo "publish_model refused (likely failed beat-market gate) — skipping release"
-                exit 0
-              }
-            exit 0
-          fi
-          gh release delete "$tag" --yes --cleanup-tag || true
+          gh release delete edge-model-latest --yes || true
           NOTES=$(python3 - <<'PY'
           import json, pathlib
           p = pathlib.Path("ml/edge_model_manifest.json")
           m = json.loads(p.read_text()) if p.is_file() else {}
           print(
-              "Edge model\n\n"
-              f"- version: {m.get('version')}\n"
-              f"- trained_at: {m.get('trained_at')}\n"
-              f"- n_samples: {m.get('n_samples') or m.get('n_rows')}\n"
-              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\n"
-              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\n"
-              f"- beats_market: {m.get('beats_market') or m.get('beat_market')}"
+              "Weekly edge model\\n\\n"
+              f"- version: {m.get('version')}\\n"
+              f"- trained_at: {m.get('trained_at')}\\n"
+              f"- n_samples: {m.get('n_samples')}\\n"
+              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\\n"
+              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\\n"
+              f"- beats_market: {m.get('beats_market')}"
           )
           PY
           )
-          gh release create "$tag" \
+          gh release create edge-model-latest \
             ml/edge_model.json \
             ml/edge_model_manifest.json \
-            --title "Edge model (${{ github.ref_name }})" \
+            --title "Edge model (latest)" \
             --notes "$NOTES"

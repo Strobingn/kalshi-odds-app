@@ -8,7 +8,7 @@ import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
- * Download the branch-only `edge-model-chat-GTP` release (manifest + model JSON).
+ * Download the rolling `edge-model-latest` release (manifest + model JSON).
  * Public repos work without a token. Private repos need a GitHub token
  * (classic `repo` or fine-grained Contents: Read) — never the Kalshi key.
  */

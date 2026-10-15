@@ -11,21 +11,15 @@ import org.junit.Test
 class NoBetMinProfitCopyTest {
 
     @Test
-    fun noBetHeadlineReadsTheActualMinProfitSetting() {
-        val clip = LiveOrderSizer.size(0.34)
+    fun minProfitGateIsOff() {
+        val clip = LiveOrderSizer.size(0.63)
         assertTrue(clip.ok)
-        for (minProfit in listOf(10.0, 20.0, 15.0)) {
-            val msg = LiveOrderSizer.belowMinProfitMessage(clip.profitIfWinUsd, minProfit)
-            val expected = String.format(java.util.Locale.US, "$%.0f", minProfit)
-            assertTrue(msg, msg.contains(expected))
-            val line = HomeCopy.noBetHeadline(msg)
-            assertTrue(line, line.startsWith("NO BET this window"))
-            assertTrue(line, line.contains(expected))
-        }
+        assertFalse(LiveOrderSizer.belowMinProfit(clip.profitIfWinUsd, 0.0))
+        assertFalse(LiveOrderSizer.belowMinProfit(0.10, 0.0))
     }
 
     @Test
-    fun screenshotWindowUsesTwentyWhenThatIsTheSetting() {
+    fun screenshotWindowIsLastMinuteWaitingNotMinProfit() {
         val market = HomeFixtures.screenshotPhoneBtc()
         val settings = SignalSettings(minProfitIfWinUsd = 20.0)
         val decision = BetCall.decide(market, settings, HomeFixtures.NOW_MS)
@@ -33,7 +27,8 @@ class NoBetMinProfitCopyTest {
         val line = HomeCopy.thisWindowHeadline(decision, market, HomeFixtures.NOW_MS)
         assertTrue(line, line.startsWith("NO BET this window"))
         val reason = decision.noBetReason.orEmpty()
-        assertTrue(reason, reason.contains("$20") || line.contains("$20"))
-        assertFalse(reason, reason.contains("$10 minimum"))
+        assertTrue(reason, reason.contains("waiting") || reason.contains("Last-minute"))
+        assertFalse(reason, reason.contains("$20"))
+        assertFalse(reason, reason.contains("minimum"))
     }
 }

@@ -69,6 +69,28 @@ object DigitalOptionFairValue {
         return (std * sqrt(barsPerYear)).coerceIn(0.01, 5.0)
     }
 
+    /** Returns used by [sigmaFromCloses] (Python: pipeline.SIGMA_BARS). */
+    const val SIGMA_BARS = 60
+
+    /** EWMA half-life in 1m bars (Python: pipeline.SIGMA_HALFLIFE_BARS). */
+    const val SIGMA_HALFLIFE_BARS = 10.0
+
+    /**
+     * σ for the digital from **completed** 1m closes: EWMA of squared log
+     * returns (no demeaning), half-life [SIGMA_HALFLIFE_BARS], over the last
+     * [SIGMA_BARS] returns, annualized. Beat the old 16-bar sample std on
+     * held-out log-loss in the 2026-09-27 backtest. Null with < 4 returns.
+     */
+    fun sigmaFromCloses(closes: List<Double>): Double? {
+        val rets = logReturns(closes.takeLast(SIGMA_BARS + 1))
+        if (rets.size < 4) return null
+        val lam = Math.pow(0.5, 1.0 / SIGMA_HALFLIFE_BARS)
+        var v = rets[0] * rets[0]
+        for (i in 1 until rets.size) v = lam * v + (1.0 - lam) * rets[i] * rets[i]
+        if (!v.isFinite() || v <= 0.0) return null
+        return (sqrt(v) * sqrt(SECONDS_PER_YEAR / 60.0)).coerceIn(0.01, 5.0)
+    }
+
     fun logReturns(closes: List<Double>): List<Double> {
         if (closes.size < 2) return emptyList()
         val out = ArrayList<Double>(closes.size - 1)

@@ -66,8 +66,9 @@ fun SignalHistoryScreen(
                     )
                 }
             } else {
-                items(cards, key = { "${it.title}-${it.call}-${it.modelLine}" }) { card ->
-                    SignalSummaryCard(card)
+                val keyed = LazyListKeys.keyed(cards) { it.stableKey }
+                items(keyed, key = { it.key }) { row ->
+                    SignalSummaryCard(row.value)
                 }
             }
         }

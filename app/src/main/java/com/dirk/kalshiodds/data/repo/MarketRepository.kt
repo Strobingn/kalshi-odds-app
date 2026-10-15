@@ -71,6 +71,9 @@ data class MarketsSnapshot(
         }
         return copy(btc = btc.apply(), eth = eth.apply(), sol = sol.apply(), extra = extra.apply())
     }
+
+    fun mapMarkets(transform: (MarketUiModel) -> MarketUiModel): MarketsSnapshot =
+        copy(btc = btc.map(transform), eth = eth.map(transform), sol = sol.map(transform), extra = extra.map(transform))
 }
 
 class MarketRepository(
@@ -181,6 +184,9 @@ class MarketRepository(
             logPredictions(ethUi, SeriesKind.ETH, now)
             logPredictions(solUi, SeriesKind.SOL, now)
             logPredictions(extraUi, SeriesKind.CRYPTO, now)
+            (btcUi + extraUi).forEach { m ->
+                m.closeTimeEpochMs?.let { scorer.noteCloseTime(m.ticker, it) }
+            }
             runCatching { scorer.maybeScore(now) }
             refreshScorecard()
             MarketsSnapshot(

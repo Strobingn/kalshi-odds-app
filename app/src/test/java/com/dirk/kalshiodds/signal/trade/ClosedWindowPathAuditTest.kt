@@ -46,9 +46,15 @@ class ClosedWindowPathAuditTest {
             "com/dirk/kalshiodds/signal/trade/BetCall.kt",
             "com/dirk/kalshiodds/signal/trade/LiveOrderGates.kt",
             "com/dirk/kalshiodds/data/api/KalshiTradeClient.kt",
-            "com/dirk/kalshiodds/ui/OddsViewModel.kt"
+            "com/dirk/kalshiodds/ui/OddsViewModel.kt",
+            // Scalp swarm: force-exit at window close (chip state) and the
+            // settings chips that surface it. Both are display-only; scalp
+            // exits never build order tickets.
+            "com/dirk/kalshiodds/signal/scalp/ScalpEngine.kt",
+            "com/dirk/kalshiodds/ui/SettingsScreen.kt"
         )
-        val files = hits.map { it.path }.toSet()
+        // Windows walks yield '\' separators; normalize so the audit is platform-neutral.
+        val files = hits.map { it.path.replace('\\', '/') }.toSet()
         assertEquals(
             "Unexpected WINDOW_CLOSED / MARKET_CLOSED files: ${files - expected}",
             expected,

@@ -9,14 +9,14 @@ class KalshiQuoteDisplayTest {
     fun centsAndMultiplierMatchKalshiHero() {
         assertEquals(64, KalshiQuoteDisplay.cents(0.64))
         assertEquals(37, KalshiQuoteDisplay.cents(0.37))
-        // $5 stake, order-level fee. 64¢: C=7, cost $4.60, 7/4.60 = 1.52x
-        // 37¢: C=13, cost $5.03, 13/5.03 = 2.58x
+        // $10 stake, order-level fee. 64¢: C=15, cost $9.85, 15/9.85 = 1.52x
+        // 37¢: C=27, cost $10.44, 27/10.44 = 2.59x
         val upMult = KalshiQuoteDisplay.multiplier(0.64)!!
         val downMult = KalshiQuoteDisplay.multiplier(0.37)!!
-        assertEquals(7.0 / 4.60, upMult, 1e-9)
-        assertEquals(13.0 / 5.03, downMult, 1e-9)
+        assertEquals(15.0 / 9.85, upMult, 1e-9)
+        assertEquals(27.0 / 10.44, downMult, 1e-9)
         assertEquals("Up 64¢ · 1.52x", KalshiQuoteDisplay.buttonLabel(true, 0.64))
-        assertEquals("Down 37¢ · 2.58x", KalshiQuoteDisplay.buttonLabel(false, 0.37))
+        assertEquals("Down 37¢ · 2.59x", KalshiQuoteDisplay.buttonLabel(false, 0.37))
         assertEquals(1.5625, KalshiQuoteDisplay.grossMultiplier(0.64)!!, 1e-6)
     }
 

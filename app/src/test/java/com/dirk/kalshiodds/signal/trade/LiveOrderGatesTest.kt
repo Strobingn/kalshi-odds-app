@@ -25,10 +25,10 @@ class LiveOrderGatesTest {
         )) {
             assertTrue(need, need in ids)
         }
-        assertEquals("$5 including fees", LiveOrderGates.defaultOf("live_all_in_cap"))
-        assertEquals("$10", LiveOrderGates.defaultOf("min_profit_if_win"))
-        assertEquals(5.0, LiveOrderGates.LIVE_ALL_IN, 1e-9)
-        assertEquals(10.0, LiveOrderGates.MIN_PROFIT, 1e-9)
+        assertEquals("$10 including fees", LiveOrderGates.defaultOf("live_all_in_cap"))
+        assertEquals("removed", LiveOrderGates.defaultOf("min_profit_if_win"))
+        assertEquals(10.0, LiveOrderGates.LIVE_ALL_IN, 1e-9)
+        assertEquals(0.0, LiveOrderGates.MIN_PROFIT, 1e-9)
         LiveOrderGates.catalog.forEach {
             assertTrue(it.id, it.reason.isNotBlank())
             assertTrue(it.id, it.default.isNotBlank())

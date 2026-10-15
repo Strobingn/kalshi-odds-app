@@ -30,7 +30,10 @@ import kotlinx.coroutines.withTimeoutOrNull
  * Foreground service that owns the Kalshi ticker + orderbook WebSocket and the
  * scoring loop while "Live signals" is on. Survives Activity onStop / process
  * reclaim via START_STICKY, onTaskRemoved restart, and a WorkManager watchdog.
- * Analysis / alerts only — no order channels, no auto-fire.
+ * Manual tickets stay approve-gated. The ONE exception is the experimental
+ * opt-in scalper (default OFF, paper by default, hard caps) whose engine
+ * lifecycle is bound to this service — it cannot trade while this service
+ * is not running.
  *
  * Crash contract: startForeground is the first thing in onCreate and is
  * wrapped; pipeline / WS / notification failures never kill the process.
@@ -75,9 +78,24 @@ class LiveSignalsService : Service() {
         if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
             return handleExplicitStop()
         }
+        if (intent?.action == LiveSignalsPolicy.ACTION_RESUME) {
+            LiveSignalsKeepAlive.setTimeoutPaused(this, false)
+        }
         explicitStop = false
+        LiveSignalsKeepAlive.setTimeoutPaused(this, false)
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this)
+                .cancel(SignalNotifier.PAUSED_NOTIFICATION_ID)
+        }
         if (pipelineJob == null || pipelineJob?.isActive != true) {
             pipelineJob = scope.launch { runPipeline() }
+        }
+        // Experimental scalper: lives strictly inside the Live signals
+        // session. No other component (boot receiver, workers, process
+        // start) may start the engine — until start() runs, onTick is inert.
+        runCatching {
+            val engine = KalshiOddsApp.from(this).container.scalpEngine
+            scope.launch { runCatching { engine.start() } }
         }
         if (metadataJob == null || metadataJob?.isActive != true) {
             metadataJob = scope.launch { runMetadataLoop() }
@@ -347,7 +365,8 @@ class LiveSignalsService : Service() {
         if (LiveSignalsPolicy.shouldRestartAfterKill(
                 LiveSignalsKeepAlive.isEnabled(this),
                 explicitStop,
-                foregroundFailed
+                foregroundFailed,
+                LiveSignalsKeepAlive.isTimeoutPaused(this)
             )
         ) {
             LiveSignalsKeepAlive.startService(this)
@@ -355,35 +374,52 @@ class LiveSignalsService : Service() {
         }
     }
 
+    /**
+     * API 34 `shortService` timeout. We do not use shortService, but must
+     * still [stopSelf] if the system delivers this callback.
+     */
     @Suppress("UNUSED_PARAMETER")
     override fun onTimeout(startId: Int) {
-        handleDataSyncTimeout()
+        handleForegroundTimeout()
     }
 
+    /**
+     * Android 15 `dataSync` / `mediaProcessing` 6h-per-24h timeout.
+     * Official contract: [stopSelf] within a few seconds. Never re-promote.
+     */
     @Suppress("UNUSED_PARAMETER")
     override fun onTimeout(startId: Int, fgsType: Int) {
-        handleDataSyncTimeout()
+        handleForegroundTimeout()
     }
 
-    private fun handleDataSyncTimeout() {
-        // API 35 dataSync time-box. Re-promote as dataSync; never specialUse.
-        if (LiveSignalsPolicy.shouldRestartAfterKill(
-                LiveSignalsKeepAlive.isEnabled(this),
-                explicitStop,
-                foregroundFailed
-            )
-        ) {
-            promoteToForeground()
-        } else {
+    private fun handleForegroundTimeout() {
+        if (!LiveSignalsPolicy.timeoutRequiresStopSelf()) {
             stopSelf()
+            return
         }
+        explicitStop = true
+        runCatching { LiveSignalsKeepAlive.setTimeoutPaused(this, true) }
+        tearDownPipeline()
+        releaseWakeLock()
+        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
+            .getOrElse { SignalNotifier(this) }
+        val paused = runCatching { notifier.pausedNotification() }.getOrNull()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        if (paused != null) {
+            runCatching {
+                androidx.core.app.NotificationManagerCompat.from(this)
+                    .notify(SignalNotifier.PAUSED_NOTIFICATION_ID, paused)
+            }
+        }
+        stopSelf()
     }
 
     override fun onDestroy() {
         val restart = LiveSignalsPolicy.shouldRestartAfterKill(
             LiveSignalsKeepAlive.isEnabled(this),
             explicitStop,
-            foregroundFailed
+            foregroundFailed,
+            LiveSignalsKeepAlive.isTimeoutPaused(this)
         )
         tearDownPipeline()
         releaseWakeLock()
@@ -399,6 +435,7 @@ class LiveSignalsService : Service() {
     private fun tearDownPipeline() {
         runCatching { client?.stop() }
         client = null
+        runCatching { KalshiOddsApp.from(this).container.scalpEngine.stop() }
         pipelineJob?.cancel()
         pipelineJob = null
         metadataJob?.cancel()

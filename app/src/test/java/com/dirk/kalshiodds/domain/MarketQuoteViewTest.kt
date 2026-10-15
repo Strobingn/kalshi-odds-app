@@ -39,8 +39,8 @@ class MarketQuoteViewTest {
         assertEquals(0.175, KalshiFee.raw(10, 0.50), 1e-12)
         assertEquals(0.18, KalshiFee.total(10, 0.50), 1e-9)
         val m = KalshiQuoteDisplay.multiplier(0.50)!!
-        assertEquals(10.0 / 5.18, m, 1e-9)
-        assertEquals(1.9305019305019305, m, 1e-9)
+        assertEquals(20.0 / 10.35, m, 1e-9)
+        assertEquals(1.9323671497584543, m, 1e-9)
     }
 
     @Test
@@ -52,8 +52,8 @@ class MarketQuoteViewTest {
         assertEquals(0.003465, KalshiFee.raw(5, 0.99), 1e-12)
         assertEquals(0.01, KalshiFee.total(5, 0.99), 1e-9)
         val m = KalshiQuoteDisplay.multiplier(0.99)!!
-        assertEquals(5.0 / 4.96, m, 1e-9)
-        assertEquals(1.0080645161290323, m, 1e-9)
+        assertEquals(10.0 / 9.91, m, 1e-9)
+        assertEquals(1.0090817356205852, m, 1e-9)
     }
 
     @Test
@@ -145,17 +145,17 @@ class MarketQuoteViewTest {
     @Test
     fun handComputedMultiplesAtFiveDollarStakeMatchDisplay() {
         val cases = listOf(
-            Triple(0.001, "0.1¢", 5000.0 / 5.35),
-            Triple(0.01, "1¢", 500.0 / 5.35),
-            Triple(0.015, "1.5¢", 333.0 / 5.34),
-            Triple(0.018, "1.8¢", 277.0 / 5.33),
-            Triple(0.099, "9.9¢", 50.0 / 5.27),
-            Triple(0.10, "10¢", 50.0 / 5.32),
-            Triple(0.105, "10.5¢", 47.0 / 5.25),
-            Triple(0.25, "25¢", 20.0 / 5.27),
-            Triple(0.50, "50¢", 10.0 / 5.18),
-            Triple(0.905, "90.5¢", 5.0 / 4.56),
-            Triple(0.99, "99¢", 5.0 / 4.96)
+            Triple(0.001, "0.1¢", 10000.0 / 10.70),
+            Triple(0.01, "1¢", 1000.0 / 10.70),
+            Triple(0.015, "1.5¢", 666.0 / 10.68),
+            Triple(0.018, "1.8¢", 555.0 / 10.68),
+            Triple(0.099, "9.9¢", 101.0 / 10.63),
+            Triple(0.10, "10¢", 100.0 / 10.63),
+            Triple(0.105, "10.5¢", 95.0 / 10.60),
+            Triple(0.25, "25¢", 40.0 / 10.53),
+            Triple(0.50, "50¢", 20.0 / 10.35),
+            Triple(0.905, "90.5¢", 11.0 / 10.03),
+            Triple(0.99, "99¢", 10.0 / 9.91)
         )
         for ((ask, label, expected) in cases) {
             val q = MarketQuoteView.of(yesBid = null, yesAsk = ask, noBid = null, noAsk = ask)
@@ -178,7 +178,7 @@ class MarketQuoteViewTest {
             }
         }
         assertEquals("Down 1.5¢ · 62.36x", KalshiQuoteDisplay.buttonLabel(false, 0.015))
-        assertEquals("Down 10¢ · 9.40x", KalshiQuoteDisplay.buttonLabel(false, 0.10))
+        assertEquals("Down 10¢ · 9.41x", KalshiQuoteDisplay.buttonLabel(false, 0.10))
         assertEquals("Down 25¢ · 3.80x", KalshiQuoteDisplay.buttonLabel(false, 0.25))
     }
 
@@ -272,7 +272,7 @@ class MarketQuoteViewTest {
         assertTrue(oneFive.upMultiple!! < 200.0)
         val twentyFive = MarketQuoteView.of(yesBid = null, yesAsk = KalshiPrice.parseDollars("25.00"), noBid = null, noAsk = null)
         assertEquals("25¢", twentyFive.upHero)
-        assertEquals(20.0 / 5.27, twentyFive.upMultiple!!, 1e-9)
+        assertEquals(40.0 / 10.53, twentyFive.upMultiple!!, 1e-9)
         val deci = MarketQuoteView.of(yesBid = null, yesAsk = KalshiPrice.parseDollars("440"), noBid = null, noAsk = null)
         assertEquals("44¢", deci.upHero)
         assertNotNull(deci.upMultiple)

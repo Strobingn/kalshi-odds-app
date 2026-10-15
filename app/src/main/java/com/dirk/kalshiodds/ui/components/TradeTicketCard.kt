@@ -203,6 +203,7 @@ private fun ProposedTicketCard(
                         TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
                         TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
                         TicketKind.MANUAL -> "MANUAL BUY"
+                        TicketKind.LAST_MINUTE -> "LAST-MINUTE PLAY"
                         TicketKind.CONFIGURED -> "TICKET"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
                     } + " · " + TradeModeLabel.forApprove(
@@ -511,6 +512,15 @@ internal fun ApproveTicketDialog(
                         colors.accentOrange
                     }
                 )
+                if (ticket.kind == TicketKind.LAST_MINUTE && !ticket.isSell) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.CONFIRM_UNPROVEN,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentOrange
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 if (ticket.isSell && !paperSell && ticket.blockedReason == null) {
                     TicketMetricRow("Contracts", ticket.contracts.toString())

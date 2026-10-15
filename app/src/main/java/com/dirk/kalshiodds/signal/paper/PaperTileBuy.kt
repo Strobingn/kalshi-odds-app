@@ -71,6 +71,9 @@ object PaperTileBuy {
                 message = disabledReason(market, side) ?: HomeCopy.TEN_WINS_DASH
             )
         }
+        val yes = market.aiYesPercent
+        val aiPct = yes?.let { if (want == "NO") 100.0 - it else it }
+        val implied = clip.ask?.let { it * 100.0 }
         return book.fillTenDollar(
             ticker = market.ticker,
             side = want,
@@ -79,7 +82,13 @@ object PaperTileBuy {
             feeUsd = clip.feeUsd,
             allInUsd = clip.costUsd,
             source = SOURCE,
-            message = confirmMessage(want, clip)
+            message = confirmMessage(want, clip),
+            meta = PaperFillMeta(
+                aiPct = aiPct,
+                aiConfidence = market.aiConfidence,
+                marketPct = implied,
+                pickSource = PaperPickSource.MANUAL
+            )
         )
     }
 }

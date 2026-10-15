@@ -1,91 +1,66 @@
 package com.dirk.kalshiodds.prediction
 
 import com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue
-import java.util.Calendar
-import java.util.TimeZone
-import kotlin.math.ln
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 
 /**
- * Compact tabular features for the imported offline edge model.
- * Order **must** match `ml/train_edge.py` / the JSON `feature_names`.
+ * Schema-2 features for the market-offset [EdgeModel].
+ * Order and math **must** match `tools/backtest/pipeline.edge_features`.
+ *
+ * Time of day is **UTC** on both sides (the schema-1 trainer used the UTC hour
+ * while the phone used New York minutes — a 4–5 h skew).
  */
 object EdgeFeatures {
-    const val SIZE = 10
+    const val SIZE = 9
     val NAMES = listOf(
+        "digital_gap",
         "dist_to_strike_vol",
+        "spot_ret_1m",
+        "spot_ret_5m",
         "tte_frac",
-        "market_mid",
-        "imbalance",
         "spread",
-        "momentum",
-        "realized_vol",
-        "cross_asset",
-        "time_of_day",
-        "digital_fair"
+        "tod_sin",
+        "tod_cos",
+        "has_spot"
     )
 
     data class Raw(
+        val marketMid: Double,
+        val spread: Double? = null,
         val spot: Double? = null,
         val strike: Double? = null,
         val tteSeconds: Double? = null,
         val sigmaAnnual: Double? = null,
-        val marketMid: Double,
-        val imbalance: Double? = null,
-        val spread: Double? = null,
-        val momentum: Double? = null,
-        val realizedVol01: Double? = null,
-        val crossAssetRet: Double? = null,
-        val nowMs: Long = System.currentTimeMillis(),
-        val digitalFair: Double? = null
+        val spotReturn1m: Double? = null,
+        val spotReturn5m: Double? = null,
+        val nowMs: Long = System.currentTimeMillis()
     )
 
-    fun build(raw: Raw): FloatArray {
+    fun build(raw: Raw): DoubleArray {
         val tte = (raw.tteSeconds ?: 900.0).coerceIn(0.0, 1800.0)
-        val tteFrac = (tte / 900.0).toFloat().coerceIn(0f, 2f)
-        val dist = if (raw.spot != null && raw.strike != null && raw.sigmaAnnual != null) {
-            DigitalOptionFairValue.distanceVolUnits(raw.spot, raw.strike, tte, raw.sigmaAnnual)
-        } else {
-            null
+        var digital: Double? = null
+        var dist: Double? = null
+        if (raw.spot != null && raw.strike != null && raw.sigmaAnnual != null) {
+            digital = DigitalOptionFairValue.pFinishAbove(raw.spot, raw.strike, tte, raw.sigmaAnnual)
+            dist = DigitalOptionFairValue.distanceVolUnits(raw.spot, raw.strike, tte, raw.sigmaAnnual)
         }
-        val digital = raw.digitalFair
-            ?: if (raw.spot != null && raw.strike != null && raw.sigmaAnnual != null) {
-                DigitalOptionFairValue.pFinishAbove(raw.spot, raw.strike, tte, raw.sigmaAnnual)
-            } else {
-                null
-            }
-        val tod = timeOfDayFrac(raw.nowMs)
-        return floatArrayOf(
-            (dist ?: 0.0).toFloat().coerceIn(-8f, 8f),
-            tteFrac,
-            raw.marketMid.toFloat().coerceIn(0f, 1f),
-            (raw.imbalance ?: 0.0).toFloat().coerceIn(-1f, 1f),
-            (raw.spread ?: 0.0).toFloat().coerceIn(0f, 1f),
-            (raw.momentum ?: 0.0).toFloat().coerceIn(-1f, 1f),
-            (raw.realizedVol01 ?: 0.0).toFloat().coerceIn(0f, 1f),
-            (raw.crossAssetRet ?: 0.0).toFloat().coerceIn(-0.2f, 0.2f),
-            tod,
-            (digital ?: raw.marketMid).toFloat().coerceIn(0f, 1f)
+        val gap = digital?.let {
+            (EdgeModel.logitFromProb(it) - EdgeModel.logitFromProb(raw.marketMid)).coerceIn(-4.0, 4.0)
+        } ?: 0.0
+        val secOfDay = Math.floorMod(raw.nowMs / 1000L, 86_400L).toDouble()
+        val ang = 2.0 * PI * secOfDay / 86_400.0
+        return doubleArrayOf(
+            gap,
+            dist?.coerceIn(-8.0, 8.0) ?: 0.0,
+            raw.spotReturn1m?.coerceIn(-0.02, 0.02) ?: 0.0,
+            raw.spotReturn5m?.coerceIn(-0.05, 0.05) ?: 0.0,
+            (tte / 900.0).coerceIn(0.0, 1.0),
+            raw.spread?.coerceIn(0.0, 0.2) ?: 0.0,
+            sin(ang),
+            cos(ang),
+            if (digital != null) 1.0 else 0.0
         )
-    }
-
-    fun timeOfDayFrac(nowMs: Long, tz: TimeZone = TimeZone.getTimeZone("America/New_York")): Float {
-        val cal = Calendar.getInstance(tz)
-        cal.timeInMillis = nowMs
-        val minutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-        return (minutes / (24.0 * 60.0)).toFloat().coerceIn(0f, 1f)
-    }
-
-    fun seriesId(ticker: String): Int {
-        val u = ticker.uppercase()
-        return when {
-            u.contains("ETH") && !u.contains("BTC") -> 1
-            u.contains("SOL") -> 2
-            else -> 0
-        }
-    }
-
-    fun logMoneyness(spot: Double, strike: Double): Double? {
-        if (spot <= 0.0 || strike <= 0.0) return null
-        return ln(spot / strike)
     }
 }

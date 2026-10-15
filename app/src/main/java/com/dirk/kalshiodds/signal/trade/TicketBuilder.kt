@@ -2,10 +2,12 @@ package com.dirk.kalshiodds.signal.trade
 
 import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.domain.MarketLifecycle
+import com.dirk.kalshiodds.domain.MarketQuoteView
 import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
+import com.dirk.kalshiodds.signal.flip.FlipCheck
 import com.dirk.kalshiodds.signal.model.MarketTick
 import java.util.UUID
 
@@ -52,19 +54,25 @@ object TicketBuilder {
         if (!ctx.settings.ticketsEnabled) return emptyList()
         if (ctx.settings.isSittingOut()) return emptyList()
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
+        val lastMinute = live.mapNotNull { proposeLastMinute(it, ctx) }
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
-        return (hunter + value + configured)
+        return (lastMinute + hunter + value + configured)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
 
-    /** Cheap hunter tickets still require positive modeled value after costs. */
+    /**
+     * $1 → ≥$25 hunter. Quality gates do **not** hide a cheap print —
+     * detection is automatic, execution is still Approve-only.
+     */
     fun proposeHunter(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        return rankedValueSides(market, ctx).firstNotNullOfOrNull { side ->
+        val preferred = resolveSide(market)
+        val sides = listOfNotNull(preferred, "YES", "NO").distinct()
+        return sides.firstNotNullOfOrNull { side ->
             buildTicket(
                 market = market,
                 side = side,
@@ -79,13 +87,15 @@ object TicketBuilder {
 
     /**
      * Long-shot hunter: ask ≤ [SignalSettings.longShotMaxAsk] (default 20¢)
-     * **and** AI/fair beats implied by fees + margin. Sized at the $5 all-in
+     * **and** AI/fair beats implied by fees + margin. Sized at the $10 all-in
      * live cap. Approve still required.
      */
     fun proposeHunterValue(market: MarketUiModel, ctx: Context): TradeTicket? {
         if (!ctx.settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
-        return rankedValueSides(market, ctx).firstNotNullOfOrNull { side ->
+        val preferred = resolveSide(market)
+        val sides = listOfNotNull(preferred, "YES", "NO").distinct()
+        return sides.firstNotNullOfOrNull { side ->
             buildTicket(
                 market = market,
                 side = side,
@@ -98,7 +108,7 @@ object TicketBuilder {
         }
     }
 
-    /** Rebuild the same kind of ticket (live $5 cap, not bankroll win-target). */
+    /** Rebuild the same kind of ticket (live $10 cap, not bankroll win-target). */
     fun resizeForBankroll(ticket: TradeTicket, market: MarketUiModel, ctx: Context): TradeTicket {
         if (ticket.isSell) return ticket
         return when (ticket.kind) {
@@ -106,26 +116,41 @@ object TicketBuilder {
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
             TicketKind.CONFIGURED -> propose(market, ctx)
+            TicketKind.LAST_MINUTE -> proposeLastMinute(market, ctx)
             TicketKind.SELL -> ticket
         } ?: ticket
+    }
+
+    /** First last-minute fire on this window — sized at the $10 cap. */
+    fun proposeLastMinute(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val fired = market.lastMinute?.fired ?: return null
+        val side = if (fired.side.equals("NO", true)) "NO" else "YES"
+        val ask = liveAsk(market, side, ctx) ?: KalshiPrice.usable(fired.ask) ?: return null
+        val lm = market.lastMinute
+        if (!FlipCheck.allowsFired(fired, lm?.spotUsd ?: market.spotUsd, lm?.strikeUsd ?: market.floorStrike, ask)) {
+            return null
+        }
+        val stake = PayoutGate.clipStake(ctx.settings.ticketStakeUsd)
+        return buildLastMinuteTicket(market, fired, ctx, stake, ask)
     }
 
     fun propose(market: MarketUiModel, ctx: Context): TradeTicket? {
         val settings = ctx.settings
         if (!settings.ticketsEnabled) return null
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        val side = resolveSide(market) ?: return null
         val stake = PayoutGate.clipStake(settings.ticketStakeUsd)
-        return rankedValueSides(market, ctx).firstNotNullOfOrNull { side ->
-            buildTicket(
-                market = market,
-                side = side,
-                ctx = ctx,
-                stakeUsd = stake,
-                minPayoutUsd = SignalConstants.DEFAULT_MIN_PAYOUT_USD,
-                kind = TicketKind.CONFIGURED,
-                requireGates = settings.ticketRespectGates
-            )
-        }
+        return buildTicket(
+            market = market,
+            side = side,
+            ctx = ctx,
+            stakeUsd = stake,
+            minPayoutUsd = SignalConstants.DEFAULT_MIN_PAYOUT_USD,
+            kind = TicketKind.CONFIGURED,
+            requireGates = settings.ticketRespectGates
+        )
     }
 
     /**
@@ -326,7 +351,21 @@ object TicketBuilder {
             if (market.muted) return null
             if (ctx.alertsPaused) return null
         }
-        val ask = bestAsk(market, side, ctx) ?: return null
+        val ask = liveAsk(market, side, ctx) ?: return null
+        // Hunter / long-shot cards stay visible as detections. FlipCheck
+        // gates the Live $ pick (last-minute / configured), paper auto-fills,
+        // and alerts — not the cheap-print hunter card itself.
+        val gateFlip = kind == TicketKind.CONFIGURED
+        if (gateFlip && !FlipCheck.allowsMarketSide(
+                market = market,
+                side = side,
+                ask = ask,
+                nowMs = ctx.nowMs,
+                modelProb = modelProb(market, side)
+            )
+        ) {
+            return null
+        }
         if (kind == TicketKind.HUNTER) {
             val hunterMax = PayoutGate.maxLimitForPayout(
                 SignalConstants.HUNTER_STAKE_USD,
@@ -345,23 +384,10 @@ object TicketBuilder {
         val levels = askLevels(market, side, ctx.books[market.ticker])
         val quoted = quotedSize(market, side, ctx.books[market.ticker])
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
-        // For automatic suggestions, the actual $5 clip must fit at the
-        // quoted touch. The payout check below can require a much smaller
-        // $1 clip, so passing it alone does not make the displayed size real.
-        val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
-        val live = if (kind != TicketKind.MANUAL && liveBook != null) {
-            LiveOrderSizer.sizeWithinDepth(
-                ask,
-                kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
-                SignalConstants.LIVE_ALL_IN_CAP_USD,
-                ctx.settings.feeRate
-            )
-        } else {
-            LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
-        }
+        val live = LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
         if (!live.ok) {
             return if (kind == TicketKind.MANUAL) {
-                blocked(market, side, ctx, live.refusedReason ?: "Cannot size a $5 live order", stakeUsd)
+                blocked(market, side, ctx, live.refusedReason ?: "Cannot size a $10 live order", stakeUsd)
             } else {
                 null
             }
@@ -378,21 +404,15 @@ object TicketBuilder {
 
         val model01 = modelProb(market, side)
         val implied = live.price
-        val netPer = model01?.let { it - live.allInUsd / live.count }
-        val edge = netPer != null && netPer > AUTO_VALUE_MARGIN
-        // All automatic tickets need a buffer above the executable ask and
-        // the fee for the actual $5 clip. A cheap payoff is not itself edge.
-        if (kind != TicketKind.MANUAL && !edge) return null
+        val edge = modelBeatsImplied(model01, implied, ctx.settings.feeRate, stakeUsd = ctx.settings.ticketStakeUsd)
+        if (kind == TicketKind.HUNTER_VALUE && !edge) return null
 
         val yesLimit = if (side == "YES") live.price else (1.0 - live.price)
         val bookSide = if (side == "YES") "bid" else "ask"
-        val minProfit = ctx.settings.minProfitIfWinUsd
-        val belowMin = LiveOrderSizer.belowMinProfit(live.profitIfWinUsd, minProfit)
-        val blockedReason = if (belowMin) {
-            LiveOrderSizer.belowMinProfitMessage(live.profitIfWinUsd, minProfit)
-        } else {
-            null
-        }
+        val netPer = market.netEvDollars
+        val minProfit = 0.0
+        val belowMin = false
+        val blockedReason = null
         return TradeTicket(
             id = ctx.idFactory(),
             ticker = market.ticker,
@@ -407,11 +427,11 @@ object TicketBuilder {
             estimatedAvgFill = live.price,
             netEvUsd = netPer?.let { it * live.count },
             netEvPerContract = netPer,
-            netEdgePp = netPer?.times(100.0),
+            netEdgePp = market.netEdgePp,
             title = market.title,
             sizingNote = String.format(
                 java.util.Locale.US,
-                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · $5 cap",
+                "%d ct @ %.1f¢ · all-in $%.2f (fee $%.2f) · profit if win $%.2f · $10 cap",
                 live.count,
                 live.price * 100.0,
                 live.allInUsd,
@@ -420,15 +440,17 @@ object TicketBuilder {
             ),
             gateNote = when (kind) {
                 TicketKind.HUNTER ->
-                    "Hunter print ($1 can settle ≥$25) · live size is the $5 all-in cap · Approve still required"
+                    "Hunter print ($1 can settle ≥$25) · live size is the $10 all-in cap · Approve still required"
                 TicketKind.HUNTER_VALUE -> longShotNote(
                     ctx.settings.longShotMaxAsk,
                     implied,
                     model01,
-                    minProfit
+                    0.0
                 )
                 TicketKind.MANUAL ->
-                    "Manual buy · $5 all-in cap including fees · Approve still required"
+                    "Manual buy · $10 all-in cap including fees · Approve still required"
+                TicketKind.LAST_MINUTE ->
+                    "Last-minute strategy · $10 all-in · Approve + REAL MONEY still required"
                 TicketKind.CONFIGURED -> gateSummary(market, ctx)
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
@@ -437,6 +459,7 @@ object TicketBuilder {
             blockedReason = blockedReason,
             impliedChance = implied,
             modelChance = model01,
+            modelConfidence = market.aiConfidence,
             fairChance = market.digitalFairPp?.div(100.0),
             modelEdge = edge,
             profitIfWinUsd = live.profitIfWinUsd,
@@ -448,8 +471,7 @@ object TicketBuilder {
             winTargetCapped = true,
             winTargetNote = String.format(
                 java.util.Locale.US,
-                "≤$5 all-in · min profit $%.0f · wins $%.2f",
-                minProfit,
+                "$10 all-in · no min-profit gate · wins $%.2f",
                 live.profitIfWinUsd
             ),
             bankrollSource = ctx.bankrollSource,
@@ -479,29 +501,6 @@ object TicketBuilder {
         return m > p + fee + margin
     }
 
-    private const val AUTO_VALUE_MARGIN = 0.03
-
-    /** Rank the two actual buys independently; a hero direction is not an order price. */
-    private fun rankedValueSides(market: MarketUiModel, ctx: Context): List<String> =
-        listOf("YES", "NO").mapNotNull { side ->
-            val probability = modelProb(market, side) ?: return@mapNotNull null
-            if (probability !in 0.0..1.0) return@mapNotNull null
-            val ask = bestAsk(market, side, ctx) ?: return@mapNotNull null
-            val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
-            val clip = if (liveBook != null) {
-                LiveOrderSizer.sizeWithinDepth(
-                    ask,
-                    kotlin.math.floor((quotedSize(market, side, liveBook) ?: 0.0) + 1e-9).toInt(),
-                    SignalConstants.LIVE_ALL_IN_CAP_USD,
-                    ctx.settings.feeRate
-                )
-            } else {
-                LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
-            }
-            if (!clip.ok) return@mapNotNull null
-            side to (probability - clip.allInUsd / clip.count)
-        }.sortedByDescending { it.second }.map { it.first }
-
     fun longShotNote(
         maxAsk: Double,
         implied: Double?,
@@ -511,7 +510,67 @@ object TicketBuilder {
         val cap = String.format(java.util.Locale.US, "%.0f¢", maxAsk.coerceIn(0.05, 0.40) * 100.0)
         val mkt = implied?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
         val ai = model?.let { String.format(java.util.Locale.US, "%.0f%%", it * 100.0) } ?: "—"
-        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · $5 all-in · min profit \$${fmt(targetProfitUsd)} · Approve still required"
+        return "Long-shot · ask ≤ $cap · market $mkt · AI $ai · $10 all-in · no min-profit gate · Approve still required"
+    }
+
+    private fun buildLastMinuteTicket(
+        market: MarketUiModel,
+        fired: com.dirk.kalshiodds.signal.lastminute.LastMinuteFired,
+        ctx: Context,
+        stakeUsd: Double,
+        liveAsk: Double = fired.ask
+    ): TradeTicket {
+        val side = if (fired.side.equals("NO", true)) "NO" else "YES"
+        val ask = KalshiPrice.usable(liveAsk) ?: fired.ask
+        val (c, cost) = com.dirk.kalshiodds.signal.lastminute.LastMinuteMath.sizeBet(ask, stakeUsd)
+        val contracts = if (c > 0) c else fired.contracts
+        val costUsd = if (c > 0) cost else fired.costUsd
+        val fee = (costUsd - contracts * ask).coerceAtLeast(0.0)
+        val yesLimit = if (side == "YES") ask else (1.0 - ask)
+        val bookSide = if (side == "YES") "bid" else "ask"
+        val depthNote = if (fired.depthLimited) " · depth limited" else ""
+        val priced = fired.copy(
+            ask = ask,
+            contracts = contracts,
+            costUsd = costUsd,
+            feeUsd = fee,
+            profitIfWinUsd = if (contracts > 0) contracts - costUsd else 0.0
+        )
+        return TradeTicket(
+            id = ctx.idFactory(),
+            ticker = market.ticker,
+            side = side,
+            bookSide = bookSide,
+            stakeUsd = priced.costUsd,
+            limitPrice = ask,
+            yesLimitPrice = KalshiPrice.clipLimit(yesLimit),
+            contracts = priced.contracts,
+            estimatedFillUsd = priced.costUsd,
+            maxPayoutUsd = priced.contracts * SignalConstants.CONTRACT_SETTLEMENT_USD,
+            estimatedAvgFill = ask,
+            title = market.title,
+            sizingNote = com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.buyLine(priced) + depthNote,
+            gateNote = "Last-minute strategy · ${com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.modelEvLine(fired.evPerDollar)} · Approve + REAL MONEY still required",
+            createdAtMs = ctx.nowMs,
+            kind = TicketKind.LAST_MINUTE,
+            blockedReason = null,
+            impliedChance = ask,
+            modelChance = fired.winChance,
+            modelConfidence = market.aiConfidence,
+            fairChance = fired.winChance,
+            modelEdge = true,
+            profitIfWinUsd = priced.profitIfWinUsd,
+            feeUsd = priced.feeUsd,
+            allInUsd = priced.costUsd,
+            belowMinProfit = false,
+            minProfitIfWinUsd = 0.0,
+            winTargetUsd = 0.0,
+            winTargetCapped = true,
+            winTargetNote = "Last-minute · $${String.format(java.util.Locale.US, "%.2f", stakeUsd)} cap · no min-profit",
+            bankrollSource = ctx.bankrollSource,
+            bankrollUsd = ctx.bankrollUsd ?: ctx.settings.bankrollUsd,
+            visibleContracts = fired.depthContracts
+        )
     }
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "%.0f", v)
@@ -550,10 +609,13 @@ object TicketBuilder {
     }
 
     fun resolveSide(market: MarketUiModel): String? {
-        val primary = market.primaryHeroSide?.uppercase()
-        if (primary == "YES" || primary == "NO") return primary
+        // The scored side is the one with the best net EV at its ask. The tape
+        // hero (spot vs strike, else the favorite) only fills in when nothing
+        // was scored — preferring it bought the favorite whatever the price.
         val predicted = market.predictedSide?.uppercase()
         if (predicted == "YES" || predicted == "NO") return predicted
+        val primary = market.primaryHeroSide?.uppercase()
+        if (primary == "YES" || primary == "NO") return primary
         val net = market.netEdgePp ?: market.edgePp ?: return null
         return when {
             net > 0 -> "YES"
@@ -561,6 +623,22 @@ object TicketBuilder {
             else -> null
         }
     }
+
+    /**
+     * Live tile ask — same source as [MarketQuoteView] on the card.
+     * Last-minute tickets used to latch a stale fire price (0.70¢) while
+     * the tile showed 0.1¢. Tickets always re-read this.
+     */
+    fun liveAsk(market: MarketUiModel, side: String, ctx: Context): Double? {
+        val tile = MarketQuoteView.of(market)
+        val fromTile = if (side.equals("NO", true)) tile.noAsk else tile.yesAsk
+        if (fromTile != null) return fromTile
+        bookAsk(side, ctx.books[market.ticker])?.let { return it }
+        return bestAsk(market, side, ctx)
+    }
+
+    fun liveAsk(market: MarketUiModel, side: String): Double? =
+        liveAsk(market, side, Context(settings = SignalSettings(), alertsPaused = false))
 
     fun bestAsk(market: MarketUiModel, side: String): Double? =
         bestAsk(market, side, Context(settings = SignalSettings(), alertsPaused = false))
@@ -632,12 +710,8 @@ object TicketBuilder {
         } else {
             KalshiPrice.impliedAskFromOppositeBid(tick?.yesBid)
         }
-        // Prefer the live book to a tick or a REST quote. Taking the minimum
-        // across observations at different times can fabricate a cheap ask.
-        // A book with no sellers on this side must not fall back to an older
-        // quote that suggests a fill is available.
-        if (book != null && !book.isEmpty()) return bookAsk(side, book)
-        return fromTick ?: fromQuote
+        val fromBook = bookAsk(side, book)
+        return listOfNotNull(fromQuote, fromTick, fromBook).minOrNull()
     }
 
     /**

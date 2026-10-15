@@ -107,11 +107,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         )
     }
     private val backfillStarted = ConcurrentHashMap<String, Long>()
+    private val ticketForwardLogged = ConcurrentHashMap.newKeySet<String>()
     private var backfillJob: Job? = null
     private var lastWsState: WsConnectionState? = null
     private var rolloverBound = false
     private var lastRecordedTicketError: String? = null
-    private val ticketForwardLogged = ConcurrentHashMap.newKeySet<String>()
 
     init {
         ticketSession.onStart()
@@ -173,6 +173,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             runCatching { restorePersistedState() }
             startPolling()
+            startLastMinuteLoop()
         }
         viewModelScope.launch {
             runCatching {
@@ -440,8 +441,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             event,
             container.clock.nowMs()
         )
-        val overlaid = attachHistory(
-            pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
+        val overlaid = attachLastMinute(
+            attachHistory(
+                pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
+            )
         )
         _state.update {
             it.copy(
@@ -471,6 +474,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val snap = withContext(Dispatchers.IO) { container.external.refreshIfStale() }
             hub.applyExternal(snap)
         }
+        runCatching { refreshBrtiSpot() }
         runCatching {
             val s = _state.value.settings
             if (s.extendedAiEnabled && s.newsPulseEnabled) {
@@ -750,6 +754,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val ticketCtx = ticketContext(s, now)
+        val lastMinute = TicketBuilder.proposeLastMinute(target.copy(lastMinute = target.lastMinute), ticketCtx)
+            ?: s.tickets.proposals.firstOrNull {
+                it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.LAST_MINUTE &&
+                    it.ticker.equals(target.ticker, true) &&
+                    it.canApprove
+            }
+        if (lastMinute != null && lastMinute.side.equals(side, true)) {
+            ticketSession.addManual(lastMinute)
+            return
+        }
         val ticket = TicketBuilder.proposeManual(target, side, ticketCtx)
         if (ticket == null) {
             ticketSession.failSoft("Could not build a buy ticket — turn on trade tickets in Settings")
@@ -762,7 +776,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         runCatching {
             _state.update { s ->
                 val snap = s.snapshot ?: return@update s
-                s.copy(snapshot = attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp())))
+                s.copy(
+                    snapshot = attachLastMinute(
+                        attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp()))
+                    )
+                )
             }
             scheduleRebuildTickets()
             refreshPositionMarks()
@@ -845,6 +863,84 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ) ?: continue
             container.resultsWriter.enqueueTicketForward(row)
             ticketForwardLogged.add(ticket.ticker)
+        }
+    }
+
+    private var lastMinuteJob: Job? = null
+
+    private fun startLastMinuteLoop() {
+        lastMinuteJob?.cancel()
+        lastMinuteJob = viewModelScope.launch {
+            runCatching { refreshMinuteVol() }
+            var lastMinuteBucket = 0L
+            while (isActive) {
+                runCatching { refreshBrtiSpot() }
+                runCatching { tickLastMinute() }
+                val bucket = container.clock.nowMs() / 60_000L
+                if (bucket != lastMinuteBucket) {
+                    lastMinuteBucket = bucket
+                    runCatching { refreshMinuteVol() }
+                }
+                delay(1_000)
+            }
+        }
+    }
+
+    private suspend fun refreshBrtiSpot() {
+        val fallback = container.external.latest().btc
+        val quote = withContext(Dispatchers.IO) {
+            container.brti.fetchSpot(fallback?.lastPrice, fallback?.source)
+        }
+        if (quote != null) container.lastMinuteEngine.noteSpot(quote)
+    }
+
+    private suspend fun refreshMinuteVol() {
+        val candles = withContext(Dispatchers.IO) { container.brti.fetchMinuteCloses() }
+        if (candles.isNotEmpty()) {
+            container.lastMinuteEngine.replaceMinuteCloses(container.brti.logCloses(candles))
+        }
+    }
+
+    private fun tickLastMinute() {
+        val snap = _state.value.snapshot ?: return
+        val next = attachLastMinute(snap)
+        _state.update { it.copy(snapshot = next) }
+        scheduleRebuildTickets(immediate = true)
+    }
+
+    private fun attachLastMinute(snap: MarketsSnapshot): MarketsSnapshot {
+        val stake = _state.value.settings.ticketStakeUsd
+        container.lastMinuteEngine.forgetStale(snap.allMarkets.map { it.ticker }.toSet())
+        return snap.mapMarkets { market ->
+            val book = hub.scoring.book.snapshotBook(market.ticker)
+            val eval = container.lastMinuteEngine.tick(
+                market = market,
+                book = book,
+                stakeUsd = stake,
+                fallbackSpot = market.spotUsd,
+                fallbackSource = market.spotLabel
+            )
+            eval.fired?.let { fired ->
+                val liveAsk = com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(market, fired.side)
+                if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
+                        fired,
+                        eval.spotUsd ?: market.spotUsd,
+                        eval.strikeUsd ?: market.floorStrike,
+                        liveAsk
+                    )
+                ) {
+                    return@mapMarkets market.copy(lastMinute = eval)
+                }
+                val logged = container.lastMinuteStore.record(fired)
+                if (logged != null) {
+                    // Heads-up even when this Activity is in the foreground.
+                    runCatching { container.lastMinuteNotifier.notifyFired(fired) }
+                    if (_state.value.settings.paperTradingEnabled) {
+                        paperBook.considerLastMinute(fired, enabled = true, market = market)
+                    }
+                }
+            }
+            market.copy(lastMinute = eval)
         }
     }
 

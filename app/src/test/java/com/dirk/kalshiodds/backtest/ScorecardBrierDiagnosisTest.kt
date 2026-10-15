@@ -10,8 +10,8 @@ import kotlin.math.abs
 
 /**
  * The pre-0.3.12 mix printed 0/5 hits next to P(YES) Brier 0.003.
- * Hit rate and a calibrated probability answer different questions. A
- * correctly scored NO Brier equals the complementary P(YES) Brier.
+ * Production now scores hit + [ScorecardMetrics.WindowStats.brier] on the
+ * picked side; P(YES) Brier is [ScorecardMetrics.WindowStats.pUpBrier].
  */
 class ScorecardBrierDiagnosisTest {
 
@@ -39,11 +39,11 @@ class ScorecardBrierDiagnosisTest {
         assertEquals(0, rows.count { ForecastUnits.hit(it) })
         val side = rows.map { ForecastUnits.sideBrier(it) }.average()
         val yes = rows.map { ForecastUnits.brier(it) }.average()
-        assertEquals(yes, side, 1e-9)
+        assertTrue("picked-side Brier is ~0.893, not the P(YES) 0.003", abs(side - 0.893) < 0.002)
         assertEquals((0.945 - 1.0) * (0.945 - 1.0), yes, 1e-9)
         assertEquals(side, w.brier!!, 1e-9)
         assertEquals(yes, w.pUpBrier!!, 1e-9)
-        assertEquals("0.003", String.format(java.util.Locale.US, "%.3f", w.brier))
+        assertEquals("0.893", String.format(java.util.Locale.US, "%.3f", w.brier))
         assertEquals("0.003", String.format(java.util.Locale.US, "%.3f", w.pUpBrier))
     }
 }

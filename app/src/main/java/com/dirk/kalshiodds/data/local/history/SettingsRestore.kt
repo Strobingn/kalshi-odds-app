@@ -54,7 +54,7 @@ object SettingsRestore {
 
     fun label(s: SignalSettings): String =
         "stake $${s.ticketStakeUsd.toInt()} · long-shot ≤${(s.longShotMaxAsk * 100.0).toInt()}¢ · " +
-            "$5 all-in · min profit $${s.minProfitIfWinUsd.toInt()}"
+            "$10 all-in · no min-profit gate"
 
     private fun JSONObject.optDoubleOrNull(key: String): Double? {
         if (!has(key) || isNull(key)) return null

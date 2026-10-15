@@ -29,7 +29,7 @@ object ForwardTest {
         val crossed = bestYes != null && bestNo != null && bestYes.first + bestNo.first > 1.0 + 1e-9
         val opposite = if (side == "YES") bestNo else bestYes
         val ask = if (crossed) null else opposite?.first?.let { KalshiPrice.usable(1.0 - it) }
-        val clip = ask?.let { LiveOrderSizer.size(it, feeRate = feeRate) }?.takeIf { it.ok }
+        val clip = ask?.let { LiveOrderSizer.size(it, capUsd = 5.0, feeRate = feeRate) }?.takeIf { it.ok }
         val available = opposite?.second?.takeIf { it.isFinite() && it > 0.0 }
         return ForwardTestRow(
             ticker = ticker,

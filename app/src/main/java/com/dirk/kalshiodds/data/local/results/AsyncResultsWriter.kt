@@ -6,10 +6,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 
 /**
  * Batches SQLite / text-log writes off the scoring and UI threads.
@@ -38,11 +38,13 @@ class AsyncResultsWriter(
 
     fun enqueueSnapshot(row: ScoredSnapshotRow) {
         snapshots.add(row)
+        textLog?.append(ResultsExporter.logLine(row))
         schedule()
     }
 
     fun enqueueAlert(row: AlertRow) {
         alerts.add(row)
+        textLog?.append(ResultsExporter.logLine(row))
         schedule()
     }
 
@@ -53,6 +55,7 @@ class AsyncResultsWriter(
 
     fun enqueueTicket(row: TicketAttemptRow) {
         tickets.add(row)
+        textLog?.append(ResultsExporter.logLine(row))
         schedule()
     }
 
@@ -127,15 +130,11 @@ class AsyncResultsWriter(
                 val next = snapshots.poll() ?: break
                 batch.add(next)
             }
-            if (batch.isNotEmpty()) {
-                batch.forEach { textLog?.append(ResultsExporter.logLine(it)) }
-                store.insertSnapshots(batch)
-            }
+            if (batch.isNotEmpty()) store.insertSnapshots(batch)
         }
         runCatching {
             while (true) {
                 val next = alerts.poll() ?: break
-                textLog?.append(ResultsExporter.logLine(next))
                 store.insertAlert(next)
             }
         }
@@ -148,7 +147,6 @@ class AsyncResultsWriter(
         runCatching {
             while (true) {
                 val next = tickets.poll() ?: break
-                textLog?.append(ResultsExporter.logLine(next))
                 store.insertTicket(next)
             }
         }

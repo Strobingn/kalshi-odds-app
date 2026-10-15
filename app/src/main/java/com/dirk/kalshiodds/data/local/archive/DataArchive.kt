@@ -76,6 +76,7 @@ interface DataArchive {
     fun insertPricePath(rows: List<PricePathRow>)
     fun insertSpotCandles(rows: List<SpotCandleRow>)
     fun insertFills(rows: List<ImportedFill>)
+    fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>)
     fun insertBidSnapshots(rows: List<OddsMidRow>)
     fun insertChartTicks(rows: List<ChartTickRow>)
     fun chartTicks(ticker: String, startMs: Long, endMs: Long, limit: Int = 240): List<ChartTickRow>

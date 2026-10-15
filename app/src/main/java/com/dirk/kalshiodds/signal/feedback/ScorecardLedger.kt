@@ -7,6 +7,7 @@ import com.dirk.kalshiodds.domain.KalshiPrice
 import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperPickSource
 import com.dirk.kalshiodds.signal.paper.PaperTileBuy
 import com.dirk.kalshiodds.signal.trade.KalshiFee
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
@@ -74,7 +75,8 @@ object ScorecardLedger {
         val losses: Int,
         val settledCount: Int,
         val hitRate: Double?,
-        val pnlUsd: Double
+        val pnlUsd: Double,
+        val note: String? = null
     )
 
     data class PickRow(
@@ -96,7 +98,10 @@ object ScorecardLedger {
         val finalUsd: Double?,
         val source: String,
         val noBetWouldHave: Boolean = false,
-        val entryNotRecorded: Boolean = false
+        val entryNotRecorded: Boolean = false,
+        val pickSource: String? = null,
+        val aiConfidence: Double? = null,
+        val confidenceLegacy: Boolean = false
     )
 
     data class Snapshot(
@@ -108,6 +113,7 @@ object ScorecardLedger {
         val byPrice: List<Bucket>,
         val byTime: List<Bucket>,
         val byConfidence: List<Bucket>,
+        val bySource: List<Bucket> = emptyList(),
         val picks: List<PickRow>,
         val cumulativePnl: List<Pair<Long, Double>>,
         val openCount: Int,
@@ -126,7 +132,9 @@ object ScorecardLedger {
     const val UNKNOWN_PRICE_LABEL = "Unknown price"
     const val UNKNOWN_TIME_LABEL = "Unknown time"
     const val UNKNOWN_CONF_LABEL = "Unknown confidence"
+    const val UNKNOWN_CONF_NOTE = "logged before the app saved confidence"
     const val UNKNOWN_SIDE_LABEL = "Unknown side"
+    const val SOURCE_TITLE = "By source"
     const val ENTRY_NOT_RECORDED = "entry not recorded"
 
     /**
@@ -173,8 +181,9 @@ object ScorecardLedger {
         val settledFills = fills.filter {
             isScorecardTicker(it.ticker) && it.settled && it.won != null
         }
-        val aiFills = settledFills.filter { isAiSource(it.source) }
-        val manualFills = settledFills.filter { !isAiSource(it.source) }
+        val scoredFills = settledFills.filter { !isLastMinuteSource(it) }
+        val aiFills = scoredFills.filter { isAiSource(it.source) }
+        val manualFills = scoredFills.filter { !isAiSource(it.source) }
         val windowByTicker = windows.associateBy { it.ticker.uppercase(Locale.US) }
 
         val unusedAiFills = aiFills.toMutableList()
@@ -225,6 +234,7 @@ object ScorecardLedger {
             byPrice = priceBuckets(allMoneyRows),
             byTime = timeBuckets(allMoneyRows, zoneId),
             byConfidence = confidenceBuckets(allMoneyRows),
+            bySource = sourceBuckets(allMoneyRows),
             picks = displayPicks,
             cumulativePnl = cumulative(allMoneyRows),
             openCount = btcEntries.count { it.outcome == null },
@@ -237,9 +247,20 @@ object ScorecardLedger {
         if (s == PaperTileBuy.SOURCE) return false
         if (s.startsWith("tile")) return false
         if (s.contains("manual")) return false
+        if (PaperPickSource.parse(s) == PaperPickSource.LAST_MINUTE) return false
+        if (PaperPickSource.parse(s) == PaperPickSource.MANUAL) return false
         return s.startsWith("ai") || s.contains("ai hunter") || s.contains("ai ticket") ||
-            s.contains("ai signal") || s.contains("hunter") && !s.contains("paper buy")
+            s.contains("ai signal") || s.contains("hunter") && !s.contains("paper buy") ||
+            PaperPickSource.parse(s) == PaperPickSource.TICKET ||
+            PaperPickSource.parse(s) == PaperPickSource.LONG_SHOT ||
+            PaperPickSource.parse(s) == PaperPickSource.AI_ALERT
     }
+
+    fun isLastMinuteSource(fill: PaperFill): Boolean =
+        PaperPickSource.of(fill) == PaperPickSource.LAST_MINUTE
+
+    fun isLastMinuteSource(source: String?, pickSource: String? = null): Boolean =
+        PaperPickSource.of(source, pickSource) == PaperPickSource.LAST_MINUTE
 
     fun priceBandKey(ask01: Double?): String? {
         val cents = ask01?.takeIf { it.isFinite() && it > 0.0 }?.times(100.0) ?: return null
@@ -415,6 +436,9 @@ object ScorecardLedger {
         }
         val at = entry.settledAtMs ?: entry.closeTimeMs ?: entry.timestampMs
         val sized = sizePick(entry, fill, won)
+        val entryAi = ForecastUnits.sideProbability01(entry) * 100.0
+        val entryMkt = ForecastUnits.probability01(entry.marketMid) * 100.0
+        val aiPct = fill?.aiPct ?: entryAi
         return PickRow(
             kind = kind,
             ticker = entry.ticker,
@@ -423,8 +447,8 @@ object ScorecardLedger {
             windowEt = WindowLabel.of(entry.ticker, entry.closeTimeMs ?: at),
             settledAtMs = at,
             entryAsk = sized.entryAsk,
-            aiPct = ForecastUnits.sideProbability01(entry) * 100.0,
-            marketPct = ForecastUnits.probability01(entry.marketMid) * 100.0,
+            aiPct = aiPct,
+            marketPct = fill?.marketPct ?: entryMkt,
             stakeUsd = sized.stakeUsd,
             contracts = sized.contracts,
             feeUsd = sized.feeUsd,
@@ -432,9 +456,13 @@ object ScorecardLedger {
             pnlUsd = sized.pnlUsd,
             strikeUsd = window?.strikeUsd,
             finalUsd = null,
-            source = fill?.source ?: if (noBetWouldHave) "NO BET would-have" else "AI pick",
+            source = fill?.pickSource ?: fill?.source ?: if (noBetWouldHave) "NO BET would-have" else "AI pick",
             noBetWouldHave = noBetWouldHave,
-            entryNotRecorded = sized.entryNotRecorded
+            entryNotRecorded = sized.entryNotRecorded,
+            pickSource = fill?.pickSource ?: fill?.let { PaperPickSource.of(it)?.label }
+                ?: if (noBetWouldHave) null else PaperPickSource.TICKET.label,
+            aiConfidence = fill?.aiConfidence ?: entry.confidence,
+            confidenceLegacy = false
         )
     }
 
@@ -448,6 +476,12 @@ object ScorecardLedger {
         val entry = entries.firstOrNull { it.ticker.equals(fill.ticker, true) }
         val won = fill.won == true
         val ask = fill.limitPrice.takeIf { it > 0.0 }
+        val storedAi = fill.aiPct
+        val lookupAi = entry?.let { ForecastUnits.sideProbability01(it) * 100.0 }
+        val aiPct = storedAi ?: lookupAi
+        val storedMkt = fill.marketPct
+        val lookupMkt = entry?.let { ForecastUnits.probability01(it.marketMid) * 100.0 }
+        val sourceKind = PaperPickSource.of(fill)
         return PickRow(
             kind = kind,
             ticker = fill.ticker,
@@ -456,8 +490,8 @@ object ScorecardLedger {
             windowEt = WindowLabel.of(fill.ticker, fill.createdAtMs),
             settledAtMs = fill.createdAtMs,
             entryAsk = ask,
-            aiPct = entry?.let { ForecastUnits.sideProbability01(it) * 100.0 },
-            marketPct = entry?.let { ForecastUnits.probability01(it.marketMid) * 100.0 },
+            aiPct = aiPct,
+            marketPct = storedMkt ?: lookupMkt,
             stakeUsd = fill.stakeUsd,
             contracts = fill.contracts.takeIf { it > 0 },
             feeUsd = feeUsd(fill),
@@ -465,8 +499,11 @@ object ScorecardLedger {
             pnlUsd = fill.pnlUsd ?: 0.0,
             strikeUsd = window?.strikeUsd,
             finalUsd = null,
-            source = fill.source,
-            entryNotRecorded = ask == null
+            source = fill.pickSource ?: fill.source,
+            entryNotRecorded = ask == null,
+            pickSource = fill.pickSource ?: sourceKind?.label,
+            aiConfidence = fill.aiConfidence ?: entry?.confidence,
+            confidenceLegacy = aiPct == null
         )
     }
 
@@ -558,7 +595,21 @@ object ScorecardLedger {
     private fun confidenceBuckets(rows: List<PickRow>): List<Bucket> {
         val groups = rows.groupBy { confidenceBandKey(it.aiPct) }
         return CONFIDENCE_BANDS.map { (key, label) -> bucket(key, label, groups[key].orEmpty()) } +
-            bucket(UNKNOWN_KEY, UNKNOWN_CONF_LABEL, groups[null].orEmpty())
+            bucket(
+                UNKNOWN_KEY,
+                UNKNOWN_CONF_LABEL,
+                groups[null].orEmpty(),
+                note = UNKNOWN_CONF_NOTE.takeIf { groups[null].orEmpty().isNotEmpty() }
+            )
+    }
+
+    private fun sourceBuckets(rows: List<PickRow>): List<Bucket> {
+        val groups = rows.groupBy { PaperPickSource.of(it.source, it.pickSource) }
+        val known = PaperPickSource.SCORECARD_ORDER.map { src ->
+            bucket(src.name.lowercase(Locale.US), src.label, groups[src].orEmpty())
+        }
+        val unknown = rows.filter { PaperPickSource.of(it.source, it.pickSource) == null }
+        return known + bucket(UNKNOWN_KEY, "Unknown source", unknown)
     }
 
     private fun timeBuckets(rows: List<PickRow>, zoneId: ZoneId): List<Bucket> {
@@ -573,7 +624,12 @@ object ScorecardLedger {
             bucket(UNKNOWN_KEY, UNKNOWN_TIME_LABEL, groups[null].orEmpty())
     }
 
-    private fun bucket(key: String, label: String, rows: List<PickRow>): Bucket {
+    private fun bucket(
+        key: String,
+        label: String,
+        rows: List<PickRow>,
+        note: String? = null
+    ): Bucket {
         val wins = rows.count { it.won }
         val n = rows.size
         return Bucket(
@@ -583,7 +639,8 @@ object ScorecardLedger {
             losses = (n - wins).coerceAtLeast(0),
             settledCount = n,
             hitRate = rate(wins, n),
-            pnlUsd = rows.sumOf { it.pnlUsd ?: 0.0 }
+            pnlUsd = rows.sumOf { it.pnlUsd ?: 0.0 },
+            note = note
         )
     }
 

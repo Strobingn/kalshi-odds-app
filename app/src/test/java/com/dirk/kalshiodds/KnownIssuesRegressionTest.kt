@@ -84,9 +84,10 @@ class KnownIssuesRegressionTest {
         val side = fade.map { ForecastUnits.sideBrier(it) }.average()
         val yes = fade.map { ForecastUnits.brier(it) }.average()
         val pSide = 1.0 - 0.945
-        assertEquals(pSide * pSide, side, 1e-9)
+        assertEquals((pSide - 1.0) * (pSide - 1.0), side, 1e-9)
+        assertTrue("side-Brier ~0.893, not the P(YES) 0.003", abs(side - 0.893) < 0.002)
+        assertFalse(abs(side - 0.003) < 0.001)
         assertEquals((0.945 - 1.0) * (0.945 - 1.0), yes, 1e-9)
-        assertEquals(yes, side, 1e-9)
         val card = ScorecardMetrics.window(fade)
         assertEquals(0, card.hits)
         assertEquals(5, card.total)
@@ -341,8 +342,8 @@ class KnownIssuesRegressionTest {
             )
             leftoverClient.createLimit(leftover, "cid-fat")
             val fatBody = leftoverApi.creates.single()
-            assertTrue(v2AllIn(fatBody) <= 5.0 + 1e-9)
-            assertTrue(fatBody.count.toDouble() <= 19.0 + 1e-9)
+            assertTrue(v2AllIn(fatBody) <= 10.0 + 1e-9)
+            assertTrue(fatBody.count.toDouble() <= 40.0 + 1e-9)
 
             for (cents in 1..99) {
                 val ask = cents / 100.0
@@ -357,7 +358,7 @@ class KnownIssuesRegressionTest {
                 client.createLimit(ticket, "cid-$cents")
                 val body = api.creates.single()
                 val allIn = v2AllIn(body)
-                assertTrue("all-in $allIn at ${cents}c body=$body", allIn <= 5.0 + 1e-9)
+                assertTrue("all-in $allIn at ${cents}c body=$body", allIn <= 10.0 + 1e-9)
             }
 
             val liveNote = TicketBuilder.proposeManual(
@@ -367,7 +368,7 @@ class KnownIssuesRegressionTest {
             )!!.winTargetNote.orEmpty()
             assertFalse(liveNote.contains("$50"))
             assertFalse(liveNote.contains("win target", ignoreCase = true))
-            assertTrue(liveNote.contains("$5 all-in"))
+            assertTrue(liveNote.contains("$10 all-in"))
 
             val liveCopy = listOf(
                 HomeCopy.allInProfit(
@@ -451,7 +452,8 @@ class KnownIssuesRegressionTest {
         assertTrue(copy.detail.contains("DOWN"))
         assertTrue(copy.detail.contains("UP"))
         assertTrue(copy.detail.contains("Market + spot"))
-        val decision = BetCall.decide(disagree, SignalSettings(), nowMs)
+        val fired = HomeFixtures.withLastMinuteFire(disagree, "NO")
+        val decision = BetCall.decide(fired, SignalSettings(), nowMs)
         assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
         assertTrue(decision.isActionable)
         assertNotNull(DisagreementLabel.of(disagree))
@@ -983,7 +985,7 @@ class KnownIssuesRegressionTest {
         ).first { it.isFile }
         val home = homeSrc.readText()
         val thisWindow = home.indexOf("ThisWindowCard")
-        val coins = home.indexOf("items(coinCards")
+        val coins = home.indexOf("items(keyedCoins")
         assertTrue(thisWindow >= 0 && coins > thisWindow)
         assertTrue(home.contains("scorecard = state.scorecardSummary"))
         assertTrue(home.contains("onOpenScorecard"))
@@ -1486,7 +1488,7 @@ class KnownIssuesRegressionTest {
         assertFalse(home.contains("Icons.Default.Folder"))
         assertTrue(home.contains("scorecard = state.scorecardSummary"))
         val thisWindow = home.indexOf("ThisWindowCard")
-        val coins = home.indexOf("items(coinCards")
+        val coins = home.indexOf("items(keyedCoins")
         assertTrue("scorecard line is above the Bitcoin card, visible without scroll on 1080x2340", thisWindow in 0 until coins)
         assertTrue(home.contains("SIGNAL_HISTORY"))
         assertTrue(home.contains("onOpenSignalHistory"))
@@ -1588,7 +1590,7 @@ class KnownIssuesRegressionTest {
         assertEquals(20.25, HomeCopy.tenDollarWins(0.31).profitUsd!!, 1e-9)
         assertEquals("\$10 wins +\$20.25", HomeCopy.tileTenDollarUp(at31))
         assertEquals("\$10 wins +\$3.70", HomeCopy.tileTenDollarDown(at31))
-        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
         val loading = card.substringAfter("fun NextWindowLoadingCard").substringBefore("fun MarketCard")
         assertFalse(loading.contains("tileAi"))
         assertFalse(loading.contains("AI "))
@@ -1637,7 +1639,7 @@ class KnownIssuesRegressionTest {
             "Paper: UP ${out.contracts} @ 20c",
             HomeCopy.paperPositionLine(book.snapshot(), market.ticker)
         )
-        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
     }
 
     /** Same paint path as [com.dirk.kalshiodds.ui.OddsViewModel.applyResult] / applyRolloverEvent. */

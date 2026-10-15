@@ -7,7 +7,10 @@ import kotlinx.serialization.json.Json
 /**
  * On-device paper ledger. Isolated from live Approve / Kalshi keys.
  */
-class PaperBookStore(context: Context) {
+class PaperBookStore(
+    context: Context,
+    private val sqlPersist: ((List<PaperFill>) -> Unit)? = null
+) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val json = Json {
         ignoreUnknownKeys = true
@@ -28,6 +31,9 @@ class PaperBookStore(context: Context) {
     private fun save(state: PaperBookState) {
         runCatching {
             prefs.edit().putString(KEY, json.encodeToString(PaperBookState.serializer(), state)).apply()
+        }
+        runCatching {
+            sqlPersist?.invoke(state.fills + state.archived.flatMap { it.fills })
         }
     }
 

@@ -38,6 +38,13 @@ object LiveSignalsKeepAlive {
         prefs(context).edit().putBoolean(LiveSignalsPolicy.PREFS_ENABLED_KEY, enabled).commit()
     }
 
+    fun isTimeoutPaused(context: Context): Boolean =
+        prefs(context).getBoolean(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY, false)
+
+    fun setTimeoutPaused(context: Context, paused: Boolean) {
+        prefs(context).edit().putBoolean(LiveSignalsPolicy.PREFS_TIMEOUT_PAUSED_KEY, paused).commit()
+    }
+
     /**
      * Safe FGS start. Never throws — [android.app.ForegroundServiceStartNotAllowedException]
      * and OEM failures are caught so the UI process stays up.
@@ -77,14 +84,20 @@ object LiveSignalsKeepAlive {
 
     /** Start only when the user left Live signals on. Never throws. */
     fun ensureService(context: Context) {
-        if (isEnabled(context)) startService(context)
+        if (!LiveSignalsPolicy.shouldStartFromBackground(isEnabled(context), isTimeoutPaused(context))) {
+            return
+        }
+        startService(context)
     }
 
     /**
      * UI-visible start. Preferred over [ensureService] from Application.onCreate.
+     * Clears an Android 15 dataSync timeout pause — bringing the app to the
+     * foreground resets the 6h timer if we had to fall back to dataSync.
      */
     fun ensureServiceFromUi(context: Context) {
         markUiInForeground(true)
+        setTimeoutPaused(context, false)
         if (LiveSignalsPolicy.shouldPromoteFromUiForeground(isEnabled(context))) {
             startService(context)
         }
@@ -107,7 +120,9 @@ object LiveSignalsKeepAlive {
     }
 
     fun enqueueSoon(context: Context) {
-        if (!isEnabled(context)) return
+        if (!LiveSignalsPolicy.shouldStartFromBackground(isEnabled(context), isTimeoutPaused(context))) {
+            return
+        }
         val req = OneTimeWorkRequestBuilder<LiveSignalsWatchdogWorker>()
             .setInitialDelay(LiveSignalsPolicy.WATCHDOG_SOON_SECONDS, TimeUnit.SECONDS)
             .build()

@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.domain
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
+
 /**
  * Single current quote used by the hero, bid/ask line, chart labels,
  * buy buttons, and payout multiple. Never mix AI mids into these fields.
@@ -32,7 +34,7 @@ data class MarketQuoteView(
         fun of(
             market: MarketUiModel,
             feeRate: Double = 0.07,
-            stakeUsd: Double = 5.0
+            stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
         ): MarketQuoteView =
             of(market.yesBid, market.yesAsk, market.noBid, market.noAsk, feeRate, stakeUsd)
 
@@ -43,7 +45,7 @@ data class MarketQuoteView(
             noBid: Double?,
             noAsk: Double?,
             feeRate: Double = 0.07,
-            stakeUsd: Double = 5.0
+            stakeUsd: Double = SignalConstants.DEFAULT_TICKET_STAKE_USD
         ): MarketQuoteView {
             val snap = ConsistentQuote.fromSameUpdate(yesBid, yesAsk, noBid, noAsk)
                 ?: ConsistentQuote.Snap(yesBid, yesAsk, noBid, noAsk)
