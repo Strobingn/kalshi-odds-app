@@ -433,7 +433,7 @@ fun SettingsContent(
             ToggleRow("Subscribe public trades", s.subscribeTrades, { viewModel?.setSubscribeTrades(it) })
             ToggleRow("Stream spot (Coinbase WebSocket)", s.spotStreamEnabled, { viewModel?.setSpotStream(it) })
             Text(
-                "Live Coinbase spot re-scores a market as soon as spot moves. Off or disconnected: 25-second REST spot.",
+                "Live Coinbase spot re-scores the model. The scalp books use Kalshi bid and ask only.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
