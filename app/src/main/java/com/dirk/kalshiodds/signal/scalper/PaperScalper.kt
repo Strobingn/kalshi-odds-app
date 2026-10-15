@@ -354,7 +354,9 @@ class PaperScalper(
     private val closeMs: (String) -> Long?,
     val engine: ScalperEngine = ScalperEngine(),
     /** Called first by [reset]: the store archives the trade files; false when that did not complete. */
-    private val onReset: () -> Boolean = { true }
+    private val onReset: () -> Boolean = { true },
+    /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
+    private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null }
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -468,17 +470,24 @@ class PaperScalper(
      */
     private fun decide(ticker: String, grid: PrintGrid, nowMs: Long): List<ScalpEvent> {
         val s = grid.secondOf(nowMs) - 1
-        if (s < PrintGrid.MIN_DECISION_SECOND || s > PrintGrid.MAX_DECISION_SECOND) return emptyList()
+        // The late favourites trade inside the last minute; everything else stops at minute 13.
+        if (s < PrintGrid.MIN_DECISION_SECOND || s > LATE_LAST_SECOND) return emptyList()
         // Slot 0 is the last second looked at (dozens of prints share a second); then one slot per strategy.
         val last = lastDecision.getOrPut(ticker) { IntArray(STRATEGIES.size + 1) { -1_000 } }
         if (last[0] == s) return emptyList()
         last[0] = s
-        val due = STRATEGIES.filter { s - last[it.ordinal + 1] >= it.cadenceSeconds }
+        val tte = PrintGrid.SECONDS - s
+        val due = STRATEGIES.filter { st ->
+            s - last[st.ordinal + 1] >= st.cadenceSeconds &&
+                (st.fav?.let { tte in it.tteMin..it.tteMax } ?: (s <= PrintGrid.MAX_DECISION_SECOND))
+        }
         if (due.isEmpty()) return emptyList()
         for (st in due) last[st.ordinal + 1] = s
         if (!grid.warm(s)) return emptyList()
         val events = ArrayList<ScalpEvent>()
         val top = topOfBook(ticker)
+        val fairY = if (due.any { it.fav != null }) runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() } else null
+        val usHours = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneOffset.UTC).hour in 13..20
         for (side in SIDES) {
             val yes = side == "YES"
             val realBid = (if (yes) top?.yesBid else top?.noBid)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
@@ -614,6 +623,12 @@ class PaperScalper(
                             queue >= ScalpStrategy.IMBALANCE_MIN_CONTRACTS && queue >= ScalpStrategy.IMBALANCE_RATIO * askQty
                     ScalpStrategy.LATE_COMEBACK ->
                         s >= 600 && !d30.isNaN() && d30 >= ScalpStrategy.COMEBACK_MOVE_DOLLARS - EPS
+                    ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
+                    ScalpStrategy.KASHI_FAV_LAST30, ScalpStrategy.KASHI_FAV_NIGHT -> {
+                        val f = st.fav!!
+                        val fair = fairY?.let { if (yes) it else 1.0 - it }
+                        fair != null && fair >= f.fairMin - EPS && fair - ask >= f.gap - EPS && !(f.offUsHours && usHours)
+                    }
                 }
                 if (fire == null) {
                     val m = model ?: continue
@@ -656,6 +671,9 @@ class PaperScalper(
         private val SIDES = listOf("YES", "NO")
         private val STRATEGIES = ScalpStrategy.values().toList()
         private const val EPS = 1e-9
+
+        /** Last decision second: 10 s before the close, the end of Kashi's late-favourite window. */
+        const val LATE_LAST_SECOND = PrintGrid.SECONDS - 10
 
         /** Farthest the cached book's mid may sit from the live print mid before the book is ignored. */
         const val BOOK_GRID_TOLERANCE = 0.03
@@ -727,16 +745,16 @@ data class ScalperSummary(
     val note: String
 ) {
     companion object {
-        const val TITLE = "Strategy arena · 30 at once · PAPER ONLY"
+        val TITLE = "Strategy arena · ${ScalpStrategy.values().size} at once · PAPER ONLY"
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"
         const val NOTE =
-            "Thirty strategies at once on the same live Bitcoin window and the same real trade prints, " +
+            "Every strategy at once on the same live Bitcoin window and the same real trade prints, " +
                 "10 contracts an order, no caps; the best P&L is on top. Resting orders fill only after the " +
                 "queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee; " +
                 "\"hold\" strategies ride to the settlement. In brackets: what a filled scalp of that kind made " +
-                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or 1.9.4, " +
+                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or later, " +
                 "no history yet). Needs Live signals on. Never sends an order."
 
         fun of(state: ScalperState, working: Pair<Int, Int> = 0 to 0): ScalperSummary {

@@ -118,8 +118,36 @@ class AppContainer(context: Context) {
         closeMs = { t ->
             scoring.book.closeTime(t) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(t)
         },
-        onReset = { scalperStore.log.archive() }
+        onReset = { scalperStore.log.archive() },
+        fairYes = { t, now -> scalperFairYes(t, now) }
     )
+
+    /**
+     * YES fair price for the arena's late favourites: the CF Benchmarks index
+     * (what Kalshi settles on) when fresh, else Coinbase, the stream's 1-minute
+     * volatility and, in the final minute, the settlement average so far.
+     */
+    private fun scalperFairYes(ticker: String, nowMs: Long): Double? {
+        val coin = com.dirk.kalshiodds.signal.scalper.ScalperState.coinOf(ticker)
+        val close = scoring.book.closeTime(ticker) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(ticker) ?: return null
+        val strike = scoring.book.strike(ticker) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(ticker)
+        val stream = spotBook.latest(coin, nowMs)
+        val spot = cfIndex.fresh(coin, nowMs)?.value ?: stream?.lastPrice
+        val observed = if (close - nowMs < 60_000L) {
+            cfIndex.finalMinuteAverage(coin, close, nowMs)?.takeIf { it > 0.0 }?.let { kotlin.math.ln(it) }
+                ?: spotBook.meanLogPrice(coin, close - 60_000L, nowMs)
+        } else {
+            null
+        }
+        return com.dirk.kalshiodds.signal.scalper.ScalpFair.fairYes(
+            spot = spot,
+            strike = strike,
+            tteSeconds = (close - nowMs) / 1000.0,
+            std1m = stream?.barStd1m,
+            coin = coin,
+            observedMeanLog = observed
+        )
+    }
     /** Paper limit orders resting against the real book, filled by real trades. Never orders. */
     val paperLimits: com.dirk.kalshiodds.signal.limit.PaperLimitBook by lazy {
         com.dirk.kalshiodds.signal.limit.PaperLimitBook(

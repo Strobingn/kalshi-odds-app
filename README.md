@@ -19,6 +19,23 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.7 (claude/scalper-model-refresh): Kashi's late favourites, and a cleaner arena
+
+- **Five strategies copied from Kashi V2** (`ShockFav.kt` sf16 / sf19 / sf21 / sf23 / sf31), the only family
+  there with an out-of-sample result above zero after fees (BTC, 2 s entry delay, 2026-10-05 → 10-10: sf19,
+  sf21 and sf31 about +$1.40 a 10-contract trade, sf23 +$1.79; 10–16 trades each, so small). In the last
+  minute they buy the side the live Bitcoin price makes a 90–97% favourite while its ask is still 3–5¢ under
+  that, and hold it to the settlement; Kashi's stops (10–25¢ at the bid) are the only exit. The fair price
+  comes from the CF Benchmarks index (Coinbase when it is stale), the stream's 1-minute volatility and, in
+  the final minute, the settlement average so far (`ScalpFair`). 35 strategies now run at once.
+- **The arena screen, rebuilt after the Swarm / Kashi scalp screens.** Four tabs (Overview, Strategies,
+  Analysis, Trades) instead of seven chips; a hero card with the net after fees and a figure grid; one large
+  bankroll chart; strategies as two-line rows with a P&L stripe, sparkline and net; trades with the strategy
+  as a pill and monospace prices. The deeper charts sit under Analysis (Race, Breakdown, Edge, Execution,
+  Timing) and behind "More charts" on a strategy's page; every chart's explanation opens from its ⓘ. Profit
+  is the same green and loss the same red everywhere.
+- Research: `docs/scalper-smart-exit.md` (selling scalps early does not help; wider stops did better).
+
 ## 1.9.6 (claude/scalper-model-refresh): review fixes for the 30-strategy arena
 
 - *Skill or luck?* now resamples whole market windows, not single trades: trades in one window share its

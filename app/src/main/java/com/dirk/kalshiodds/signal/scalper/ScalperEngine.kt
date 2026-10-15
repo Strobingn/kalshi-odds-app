@@ -61,7 +61,9 @@ enum class ScalpStrategy(
     val hold: Boolean = false,
     val entryMin: Double = PrintGrid.MIN_PRICE,
     val entryMax: Double = PrintGrid.MAX_PRICE,
-    val origin: String = "Claude"
+    val origin: String = "Claude",
+    /** Kashi's late-favourite rule; null for every other strategy. */
+    val fav: FavSpec? = null
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -209,7 +211,53 @@ enum class ScalpStrategy(
     LATE_COMEBACK(
         "Late comeback · buy, hold", true, 0.0, 0.0, 0L, 5, 1, null,
         hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4"
+    ),
+
+    /**
+     * Kashi's late favourites (`ShockFav.kt` sf16 / sf19 / sf21 / sf23 / sf31,
+     * 0.3.70): in the last minute, the side the live Bitcoin price makes a
+     * heavy favourite ([FavSpec.fairMin], from [ScalpFair]) while its ask is
+     * still at least [FavSpec.gap] under that fair price. Buy now, hold to the
+     * settlement; the only exit is Kashi's stop at the bid. On Kashi's
+     * out-of-sample test (BTC, 2 s entry delay, 2026-10-05 → 10-10, before its
+     * stops were added) sf19 / sf21 / sf31 made about +$1.40 a 10-contract
+     * trade and sf23 +$1.79, intervals above zero but on 10–16 trades each;
+     * sf16's interval crossed zero.
+     */
+    KASHI_FAV_BASE(
+        "Kashi late fav · base", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf16", fav = FavSpec(20, 60, 0.90, 0.05)
+    ),
+    KASHI_FAV_STRICT(
+        "Kashi late fav · strict", true, 0.0, 0.15, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf19", fav = FavSpec(20, 60, 0.95, 0.05)
+    ),
+    KASHI_FAV_97(
+        "Kashi late fav · 97%", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf21", fav = FavSpec(20, 60, 0.97, 0.03)
+    ),
+    KASHI_FAV_LAST30(
+        "Kashi late fav · last 30 s", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf23", fav = FavSpec(10, 30, 0.95, 0.05)
+    ),
+    KASHI_FAV_NIGHT(
+        "Kashi late fav · off US hours", true, 0.0, 0.25, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf31",
+        fav = FavSpec(20, 60, 0.95, 0.05, offUsHours = true)
     );
+
+    /**
+     * Kashi's late-favourite entry: [tteMin]–[tteMax] seconds left, the side's
+     * fair price at least [fairMin] and at least [gap] above its ask;
+     * [offUsHours] skips 13:00–20:59 UTC.
+     */
+    data class FavSpec(
+        val tteMin: Int,
+        val tteMax: Int,
+        val fairMin: Double,
+        val gap: Double,
+        val offUsHours: Boolean = false
+    )
 
     companion object {
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
@@ -579,11 +627,12 @@ class ScalperEngine(val config: Config = Config()) {
                 }
                 continue
             }
-            if (o.strategy.hold) continue
+            // A hold has no time-out; it stops out only when it has a stop (Kashi's late favourites).
+            if (o.strategy.hold && o.strategy.stopDollars <= 0.0) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
             val stopped = bid <= o.price - o.strategy.stopDollars + EPS
-            val timedOut = nowMs - filledAt >= o.strategy.timeoutMs
+            val timedOut = !o.strategy.hold && nowMs - filledAt >= o.strategy.timeoutMs
             if (stopped || timedOut) {
                 it.remove()
                 val fee = if (bid > 0.0) KalshiFee.total(o.contracts, bid, config.feeRate) else 0.0

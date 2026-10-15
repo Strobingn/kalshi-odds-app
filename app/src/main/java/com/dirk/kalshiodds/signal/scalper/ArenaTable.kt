@@ -21,7 +21,7 @@ object ArenaTable {
         BUY_NOW("Buy now"),
         RESTING("Resting"),
         HOLD("Hold to close"),
-        NEW("New in 1.9.4"),
+        NEW("New"),
         TRADED("Has traded")
     }
 
@@ -164,6 +164,12 @@ object ArenaTable {
         ScalpStrategy.PENNY_SCALPER -> "A 1¢ spread with at most 200 contracts ahead on the bid (needs the live book)."
         ScalpStrategy.BOOK_IMBALANCE -> "The bid shows 3× the ask's size and 300+ contracts (needs the live book)."
         ScalpStrategy.LATE_COMEBACK -> "Minutes 10–13, an underdog at 20–40¢ up 4¢ or more in 30 seconds."
+        ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
+        ScalpStrategy.KASHI_FAV_LAST30, ScalpStrategy.KASHI_FAV_NIGHT -> {
+            val f = st.fav!!
+            "${f.tteMin}–${f.tteMax} s left, the live Bitcoin price makes the side at least ${c(f.fairMin)} to win, " +
+                "and its ask is ${c(f.gap)} or more under that" + (if (f.offUsHours) "; not 13:00–21:00 UTC." else ".")
+        }
     }
 
     private fun c(d: Double): String = "${Math.round(d * 100)}¢"
@@ -172,7 +178,10 @@ object ArenaTable {
     fun rules(st: ScalpStrategy): List<String> {
         val entry = if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
         else "Rests a bid and waits up to 20 s for sellers to reach it (no fee)."
-        val exit = if (st.hold) "Holds to the settlement: $1 if its side wins, $0 if not."
+        val exit = if (st.hold) {
+            "Holds to the settlement: $1 if its side wins, $0 if not" +
+                (if (st.stopDollars > 0.0) ", unless the bid falls ${c(st.stopDollars)} below the entry (sold, taker fee)." else ".")
+        }
         else "Out at +${c(st.targetDollars)} (resting offer), or sold at the bid at −${c(st.stopDollars)} " +
             "or after ${st.timeoutMs / 1000} s (taker fee)."
         val band = if (st.entryMin != PrintGrid.MIN_PRICE || st.entryMax != PrintGrid.MAX_PRICE) {
