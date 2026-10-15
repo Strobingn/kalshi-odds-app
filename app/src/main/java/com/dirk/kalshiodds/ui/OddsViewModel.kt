@@ -139,7 +139,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     _state.update { cur ->
                         val notice = tickets.lastError
-                        ?.takeIf { com.dirk.kalshiodds.signal.trade.TicketSession.isWindowClosedError(it) }
+                            ?.takeIf { com.dirk.kalshiodds.signal.trade.TicketSession.isWindowClosedError(it) }
                         val userMessage = when {
                             notice != null && cur.userMessage != notice -> notice
                             notice == null &&
@@ -1272,7 +1272,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             closeTimeLocal = null,
             closeTimeEpochMs = pos.closeTimeEpochMs,
             status = "active",
-            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticker.ticker).label
+            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticket.ticker).label
         )
     }
 
