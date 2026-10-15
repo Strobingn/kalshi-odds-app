@@ -29,9 +29,19 @@ class CfIndexBook {
     private val lock = Any()
     private val latest = HashMap<String, CfIndex>()
 
+    /** Per asset, the index once a second (the last value of each second), newest last, [HISTORY_S] kept. */
+    private val history = HashMap<String, ArrayDeque<Pair<Long, Double>>>()
+
     fun onUpdate(v: KalshiWsMessages.Parsed.IndexValue, nowMs: Long) {
         val asset = assetOf(v.indexId) ?: return
         synchronized(lock) {
+            if (v.value.isFinite() && v.value > 0.0) {
+                val ring = history.getOrPut(asset) { ArrayDeque() }
+                val sec = nowMs / 1000L
+                if (ring.isNotEmpty() && ring.last().first == sec) ring.removeLast()
+                ring.addLast(sec to v.value)
+                while (ring.isNotEmpty() && ring.first().first < sec - HISTORY_S) ring.removeFirst()
+            }
             val prev = latest[asset]
             latest[asset] = CfIndex(
                 asset = asset,
@@ -66,10 +76,58 @@ class CfIndexBook {
         return cur.finalMinuteAvg
     }
 
-    fun clear() = synchronized(lock) { latest.clear() }
+    /**
+     * Std of 1-minute log returns of the index, from its 1-second changes over
+     * the last [HISTORY_S] seconds (Kashi's estimator: RMS of 1 s returns,
+     * scaled to a minute). Needs [MIN_RETURNS] one-second returns; seconds
+     * the feed skipped are left out, not filled.
+     */
+    fun std1m(asset: String, nowMs: Long): Double? = synchronized(lock) {
+        val ring = history[asset.uppercase()] ?: return null
+        val from = nowMs / 1000L - HISTORY_S
+        var n = 0
+        var ss = 0.0
+        var prev: Pair<Long, Double>? = null
+        for (p in ring) {
+            if (p.first < from) continue
+            val q = prev
+            if (q != null && p.first - q.first == 1L) {
+                val r = kotlin.math.ln(p.second / q.second)
+                ss += r * r
+                n++
+            }
+            prev = p
+        }
+        if (n < MIN_RETURNS) null else kotlin.math.sqrt(ss / n * 60.0)
+    }
+
+    /** Mean ln(index) over [fromMs, toMs] from the 1-second history, or null with no sample. */
+    fun meanLog(asset: String, fromMs: Long, toMs: Long): Double? = synchronized(lock) {
+        val ring = history[asset.uppercase()] ?: return null
+        val a = fromMs / 1000L
+        val b = toMs / 1000L
+        var n = 0
+        var sum = 0.0
+        for (p in ring) if (p.first in a..b) {
+            sum += kotlin.math.ln(p.second)
+            n++
+        }
+        if (n == 0) null else sum / n
+    }
+
+    fun clear() = synchronized(lock) {
+        latest.clear()
+        history.clear()
+    }
 
     companion object {
         const val MAX_AGE_MS = 5_000L
+
+        /** One-second index history kept per asset: 15 minutes and a margin. */
+        const val HISTORY_S = 960L
+
+        /** One-second returns [std1m] needs before it answers (Kashi's 120). */
+        const val MIN_RETURNS = 120
         const val FINAL_MINUTE_MS = 60_000L
 
         /** Settlement indices for the BTC / ETH / SOL 15-minute series. */

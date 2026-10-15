@@ -19,6 +19,15 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.9 (claude/scalper-model-refresh): the arena runs on Kalshi data only
+
+- Every number the arena trades on now comes from Kalshi through your API key's WebSocket: the trade prints
+  and the order book (as before), and for the late favourites the CF Benchmarks index Kalshi streams (the
+  index these markets settle on), Kalshi's strike and, in the final minute, Kalshi's running settlement
+  average. The index's volatility is now worked out from that same stream (1-second changes over the last
+  15 minutes, `CfIndexBook.std1m`) instead of Coinbase, and there is no Coinbase fallback: while Kalshi's
+  index is stale, the late favourites do not trade.
+
 ## 1.9.8 (claude/scalper-model-refresh): change every strategy's settings, reset the paper record
 
 - **Per-strategy settings** (after grok-bitcoin's scalp sliders, but one set per strategy): open a strategy

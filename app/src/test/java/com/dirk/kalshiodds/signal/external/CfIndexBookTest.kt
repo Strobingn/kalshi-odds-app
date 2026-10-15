@@ -87,4 +87,25 @@ class CfIndexBookTest {
         book.onUpdate(plain, nowMs = close - 10_000L)
         assertNull(book.finalMinuteAverage("BTC", close, close - 10_000L + 1))
     }
+
+    private fun tick(v: Double) = KalshiWsMessages.Parsed.IndexValue("BRTI", v, null, null, null, null, null, null)
+
+    @Test
+    fun volatilityComesFromTheIndexItselfOncePerSecond() {
+        val book = CfIndexBook()
+        assertNull(book.std1m("BTC", 0L))
+        // Alternating ±1 bp a second for 200 s: 1 s returns of ±1e-4, so the 1-minute std is 1e-4·√60.
+        var px = 100_000.0
+        for (s in 0 until 200) {
+            px *= if (s % 2 == 0) 1.0001 else 1.0 / 1.0001
+            book.onUpdate(tick(px * 0.999), s * 1000L + 100L) // an earlier print in the same second is replaced
+            book.onUpdate(tick(px), s * 1000L + 900L)
+        }
+        val sd = book.std1m("BTC", 199_900L)!!
+        assertEquals(1e-4 * kotlin.math.sqrt(60.0), sd, 1e-6)
+        assertNull("not enough history yet", CfIndexBook().also { b -> for (s in 0 until 50) b.onUpdate(tick(100.0 + s), s * 1000L) }.std1m("BTC", 50_000L))
+        val mean = book.meanLog("BTC", 190_000L, 199_999L)!!
+        assertTrue(kotlin.math.abs(mean - kotlin.math.ln(100_000.0)) < 1e-3)
+        assertNull(book.meanLog("ETH", 0L, 1L))
+    }
 }

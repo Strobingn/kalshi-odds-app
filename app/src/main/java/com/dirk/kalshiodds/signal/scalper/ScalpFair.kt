@@ -5,15 +5,15 @@ import kotlin.math.sqrt
 
 /**
  * The YES fair price the late-favourite strategies trade on: the chance the
- * settlement average finishes at or above the strike, from the live spot
- * (the CF Benchmarks index when fresh, else Coinbase), the trailing 1-minute
- * volatility and, inside the final minute, the part of the average already
- * fixed ([DigitalOptionFairValue.pSettleAtLeast]). Pure.
+ * settlement average finishes at or above the strike, from Kalshi's CF
+ * Benchmarks index stream, its trailing 1-minute volatility and, inside the
+ * final minute, the part of the average already fixed
+ * ([DigitalOptionFairValue.pSettleAtLeast]). Pure.
  */
 object ScalpFair {
 
     /**
-     * Std of 1-minute log returns used while the spot stream's own estimate
+     * Std of 1-minute log returns used while the index's own estimate
      * warms up, BTC only: Kashi's fallback (2.9e-5 per √s, `Scalp.kt`) in
      * one-minute units.
      */
@@ -30,7 +30,9 @@ object ScalpFair {
         tteSeconds: Double,
         std1m: Double?,
         coin: String,
-        observedMeanLog: Double? = null
+        observedMeanLog: Double? = null,
+        /** Log noise between [spot] and the settlement value; the coin's Coinbase figure by default. */
+        indexNoise: Double = DigitalOptionFairValue.indexNoiseLog(coin)
     ): Double? {
         val s = spot?.takeIf { it.isFinite() && it > 0.0 } ?: return null
         val k = strike?.takeIf { it.isFinite() && it > 0.0 } ?: return null
@@ -44,7 +46,7 @@ object ScalpFair {
             tteSeconds = tteSeconds,
             sigmaAnnual = annual,
             observedMeanLog = observedMeanLog,
-            indexNoise = DigitalOptionFairValue.indexNoiseLog(coin)
+            indexNoise = indexNoise
         )
     }
 }

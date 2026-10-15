@@ -124,19 +124,20 @@ class AppContainer(context: Context) {
     )
 
     /**
-     * YES fair price for the arena's late favourites: the CF Benchmarks index
-     * (what Kalshi settles on) when fresh, else Coinbase, the stream's 1-minute
-     * volatility and, in the final minute, the settlement average so far.
+     * YES fair price for the arena's late favourites, from Kalshi only: the CF
+     * Benchmarks index Kalshi streams on its WebSocket (the index these markets
+     * settle on), its own 1-second volatility, the strike Kalshi publishes and,
+     * in the final minute, Kalshi's running settlement average. Null (no trade)
+     * while the index is stale: there is no Coinbase fallback.
      */
     private fun scalperFairYes(ticker: String, nowMs: Long): Double? {
         val coin = com.dirk.kalshiodds.signal.scalper.ScalperState.coinOf(ticker)
         val close = scoring.book.closeTime(ticker) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(ticker) ?: return null
         val strike = scoring.book.strike(ticker) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(ticker)
-        val stream = spotBook.latest(coin, nowMs)
-        val spot = cfIndex.fresh(coin, nowMs)?.value ?: stream?.lastPrice
+        val spot = cfIndex.fresh(coin, nowMs)?.value ?: return null
         val observed = if (close - nowMs < 60_000L) {
             cfIndex.finalMinuteAverage(coin, close, nowMs)?.takeIf { it > 0.0 }?.let { kotlin.math.ln(it) }
-                ?: spotBook.meanLogPrice(coin, close - 60_000L, nowMs)
+                ?: cfIndex.meanLog(coin, close - 60_000L, nowMs)
         } else {
             null
         }
@@ -144,9 +145,10 @@ class AppContainer(context: Context) {
             spot = spot,
             strike = strike,
             tteSeconds = (close - nowMs) / 1000.0,
-            std1m = stream?.barStd1m,
+            std1m = cfIndex.std1m(coin, nowMs),
             coin = coin,
-            observedMeanLog = observed
+            observedMeanLog = observed,
+            indexNoise = com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_NOISE_LOG
         )
     }
     /** Paper limit orders resting against the real book, filled by real trades. Never orders. */
