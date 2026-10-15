@@ -35,7 +35,18 @@ sealed class ScalpIntent {
     data object Hold : ScalpIntent()
 }
 
-object ScalpCatalog {
+object ScalpSettings {
+    /** Sell when the bid is this much above the entry. */
+    var takeProfit: Double = 0.08
+    /** Sell when the bid is this much below the entry. */
+    var stopLoss: Double = 0.05
+    /** Buy when the cheaper side is this much under its high. */
+    var dip: Double = 0.05
+    /** Max ask to buy. */
+    var maxAsk: Double = 0.52
+    /** Fraction of cash per entry. */
+    var fraction: Double = 0.25
+}
     /** Each paper book. Not live cash. A book may trade through zero. */
     const val START_CASH = 20_000.0
 
@@ -156,12 +167,12 @@ object ScalpCatalog {
                 val side = cheaper(t)
                 val aPx = ask(t, side)
                 val high = if (side == "NO") t.noHigh else t.yesHigh
-                if (aPx < maxAsk && high - aPx + 1e-9 >= dip) ScalpIntent.Buy(side, fraction) else ScalpIntent.Hold
+                if (aPx < ScalpSettings.maxAsk && high - aPx + 1e-9 >= ScalpSettings.dip) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {
-                    b + 1e-9 >= pos.entry + up -> ScalpIntent.Sell(force = true)
-                    b + 1e-9 <= pos.entry - 0.05 -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 >= pos.entry + ScalpSettings.takeProfit -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - ScalpSettings.stopLoss -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }

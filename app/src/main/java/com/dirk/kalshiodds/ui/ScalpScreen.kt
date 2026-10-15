@@ -15,7 +15,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Slider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import com.dirk.kalshiodds.signal.scalp.ScalpSettings
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -120,11 +123,59 @@ fun ScalpScreen(
                 OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
                     Text("Reset all 20 to \$20,000")
                 }
+                ScalpSettingsCard()
             }
         }
         itemsIndexed(ranked, key = { _, account -> account.id }) { index, account ->
             ScalpRow(rank = index + 1, account = account)
         }
+    }
+}
+
+@Composable
+private fun ScalpSettingsCard() {
+    val colors = DipTheme.colors
+    val tp = remember { mutableStateOf(ScalpSettings.takeProfit) }
+    val sl = remember { mutableStateOf(ScalpSettings.stopLoss) }
+    val dip = remember { mutableStateOf(ScalpSettings.dip) }
+    val maxAsk = remember { mutableStateOf(ScalpSettings.maxAsk) }
+    val frac = remember { mutableStateOf(ScalpSettings.fraction) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Settings", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        SettingSlider("Take profit", tp.value, 0.02, 0.25) { tp.value = it; ScalpSettings.takeProfit = it }
+        SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it }
+        SettingSlider("Dip", dip.value, 0.02, 0.15) { dip.value = it; ScalpSettings.dip = it }
+        SettingSlider("Max ask", maxAsk.value, 0.30, 0.70) { maxAsk.value = it; ScalpSettings.maxAsk = it }
+        SettingSlider("Size", frac.value, 0.05, 0.50) { frac.value = it; ScalpSettings.fraction = it }
+    }
+}
+
+@Composable
+private fun SettingSlider(label: String, value: Double, min: Double, max: Double, onChange: (Double) -> Unit) {
+    val colors = DipTheme.colors
+    Column {
+        Text(
+            if (label == "Size") String.format(Locale.US, "%s  %.0f%%", label, value * 100)
+            else String.format(Locale.US, "%s  %.0f¢", label, value * 100),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.toDouble()) },
+            valueRange = min.toFloat()..max.toFloat(),
+            colors = androidx.compose.material3.SliderDefaults.colors(
+                thumbColor = colors.accentBlue,
+                activeTrackColor = colors.accentBlue
+            )
+        )
     }
 }
 
