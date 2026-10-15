@@ -476,6 +476,7 @@ class ScalpBook(
     private val bankrollUsd: () -> Double = { com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD },
     /** 0.3.65 app-only extras: v2 copies + entry/exit detail notes (off in legacy unit-test books). */
     private val liveExtras: Boolean = false,
+    private val controls: ScalpControlsRepository = MemoryScalpControls(),
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
@@ -556,7 +557,7 @@ class ScalpBook(
         val hist = history.getOrPut(key) { ArrayDeque() }
         val recent = hist.toList()
         hist.addLast(ScalpRule.Snap(q.nowMs, q.yesBid, q.yesAsk, ScalpRule.fairYes(q.spot, q.strike, q.sigmaPerSec, q.tauS)))
-        while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > 2 * ScalpRule.LOOKBACK_MS) hist.removeFirst()
+        while (hist.isNotEmpty() && q.nowMs - hist.first().atMs > maxOf(2 * ScalpRule.LOOKBACK_MS, controls.state.value.windowSeconds * 1000L)) hist.removeFirst()
         if (q.nowMs >= q.closeMs) history.remove(key)
         // 0.3.50: bounded — forget closed windows' history/marks (they used to accumulate forever).
         if (history.size > ScalpMemory.MAX_TICKERS) history.keys.filter { it != key && (ScalpTicker.closeMs(it) ?: Long.MAX_VALUE) < q.nowMs }.forEach { history.remove(it) }
@@ -580,7 +581,7 @@ class ScalpBook(
                 .sumOf { it.signalAsk * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, it.signalAsk) }
             for (p in run) {
                 val mine = mineAll.filter { it.variantId == p.id }.map { old -> changed.firstOrNull { it.id == old.id } ?: old }
-                if (mine.count { it.state != ScalpState.NO_FILL } >= ScalpRule.MAX_ENTRIES_PER_MARKET) continue
+                if (!liveExtras && mine.count { it.state != ScalpState.NO_FILL } >= ScalpRule.MAX_ENTRIES_PER_MARKET) continue
                 if (q.nowMs >= q.closeMs) continue
                 val lastClose = mine.mapNotNull { it.closedAtMs }.maxOrNull()
                 if (lastClose != null && q.nowMs - lastClose < ScalpRule.REENTRY_COOLDOWN_MS) continue
@@ -1346,10 +1347,18 @@ class ScalpBook(
         val batch = ArrayList<Pair<ScalpTrade, ScalpTrade?>>(writeQ.size)
         val it = writeQ.entries.iterator()
         while (it.hasNext()) { batch += it.next().value; it.remove() }
-        for (pair in batch) runCatching { store.upsertScalpAndStats(pair.first, pair.second) }
+        for (pair in batch) runCatching {
+            store.upsertScalpAndStats(pair.first, pair.second)
+            val (t, prev) = pair
+            if (ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED)
+                controls.recordOutcome(ScalpModels.modelOf(t)?.code ?: t.variantId, t)
+        }
         if (batch.isNotEmpty()) {
             _stats.value = store.loadStats()
-            if (liveExtras) v2Evidence = store.loadWindows(48)
+            if (liveExtras) {
+                v2Evidence = store.loadWindows(48)
+                synchronized(lock) { if (controlDay.isNotEmpty()) controlDailyNet = store.loadDaily(controlDay).filter { it.scalperId.startsWith("v2-") }.sumOf { it.netUsd } }
+            }
         }
         return batch.size
     }
@@ -1369,6 +1378,8 @@ class ScalpBook(
 
     // ---------------- 0.3.65 trade detail + v2 copies ----------------
     /** Peak side bid since entry, per open trade (all scalpers; v2 exits use it). */
+    private var controlDay = ""
+    private var controlDailyNet = 0.0
     private val peakBid = HashMap<String, Double>()
     private val v2Armed = HashSet<String>()
 
@@ -1410,7 +1421,14 @@ class ScalpBook(
             // A closed contract is not complete evidence while this model still awaits an exit/settlement.
             val unfinished = _all.value.asSequence().filter { isActive(it) && ScalpModels.modelOf(it) == model }
                 .map { it.windowKey }.toSet()
-            val plan = ScalpV2.plan(seed.id, v2Evidence, t.signalAtMs, model?.code ?: seed.id, unfinished)
+            val cfg = controls.state.value
+            if (model == null || !cfg.permits(model.code)) continue
+            val learned = ScalpV2.plan(seed.id, if (cfg.adaptive && !cfg.manual) v2Evidence else emptyList(), t.signalAtMs, model.code, unfinished)
+            val feedback = controls.feedback(model.code)
+            // Every completed trade updates this EWMA; completed-window evidence still controls promotion.
+            val informed = if (learned.adjusted && feedback.trades > 0 && feedback.recentNetPerContract < 0)
+                learned.copy(arm = (learned.arm + feedback.recentNetPerContract * .1).coerceIn(.01, learned.arm)) else learned
+            val plan = cfg.plan(informed)
             val sp = plan.spec
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
@@ -1418,7 +1436,8 @@ class ScalpBook(
                 note = String.format(Locale.US, "v2 copy of %s (%s)%s · ask ≤ %.0f¢ · trail %.0f¢ · clip %d%s · v2stop=%.4f",
                     m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
                     if (sp.walk) " depth-walk" else "", stop) +
-                    String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note),
+                    String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
+                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", if (cfg.manual) cfg.takeProfitCents / 100.0 else 0.0, cfg.maxHoldSeconds, sp.clip),
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
@@ -1427,30 +1446,49 @@ class ScalpBook(
     private fun stepV2(q: ScalpRule.Quote): List<ScalpTrade> {
         val key = q.ticker.uppercase()
         val out = ArrayList<ScalpTrade>()
+        val cfg = controls.state.value
+        val day = ScalpModels.dayEt(q.nowMs)
+        if (controlDay != day) {
+            controlDay = day
+            controlDailyNet = if (liveExtras) store.loadDaily(day).filter { it.scalperId.startsWith("v2-") }.sumOf { it.netUsd } else 0.0
+        }
+        val unflushedNet = writeQ.values.map { it.first to it.second }.filter { (t, prev) ->
+            ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED &&
+                ScalpModels.dayEt(t.closedAtMs ?: 0) == day }.sumOf { it.first.netUsd ?: 0.0 }
+        var openCount = _all.value.count { ScalpV2.isV2(it.variantId) && it.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT) }
         for (t in _all.value) {
             if (t.ticker != key || !ScalpV2.isV2(t.variantId) || !isActive(t)) continue
             when (t.state) {
                 ScalpState.PENDING_ENTRY -> {
                     val age = q.nowMs - t.signalAtMs
+                    val code = ScalpModels.modelOf(t)?.code ?: t.variantId
+                    val blocked = cfg.entryBlock(code, openCount, controls.entries(q.nowMs), controlDailyNet + unflushedNet)
+                    if (blocked != null) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; $blocked"); continue }
                     if (q.tauS <= ScalpV2.EXIT_BY_S || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: final minute, expired signal, or no executable entry"); continue }
                     if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
                     val seed = ScalpV2.spec(t.variantId)
-                    val sp = seed.copy(maxAsk = ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk))
-                    val ask = q.ask(t.side)
+                    val sp = seed.copy(maxAsk = ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk),
+                        clip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceIn(1, 1000))
+                    val ask = q.ask(t.side) ?: continue
                     if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
+                    val historyPrices = history[key].orEmpty().filter { it.atMs in (q.nowMs - cfg.windowSeconds * 1000L)..q.nowMs }
+                        .groupBy { it.atMs / 1000L }.values.map { it.maxBy { p -> p.atMs } }.sortedBy { it.atMs }
+                        .mapNotNull { if (t.side == "YES") it.yesBid else it.yesAsk?.let { a -> 1 - a } }
+                    if (!cfg.dipOk(historyPrices, ask)) continue
                     if (sp.walk) {
                         // 0.3.68: lift real ask levels up to max ask; partial fill allowed, avg price gets worse with depth.
-                        val (n, usd) = ScalpV2.walk(q.askLadder(t.side), sp.clip) { it <= sp.maxAsk + 1e-9 }
+                        val (n, usd, fee) = cfg.walkBuy(q.askLadder(t.side), sp.clip, sp.maxAsk)
                         if (n <= 0) continue
                         val avg = usd / n
-                        val fee = q.askLadder(t.side).let { lv -> var left = n; var f = 0.0; for ((px, sz) in lv) { if (left <= 0) break; val k = minOf(left, kotlin.math.floor(sz + 1e-9).toInt()); if (k > 0) { f += ScalpRule.orderFee(k, px); left -= k } }; f }
+                        controls.recordEntry(q.nowMs); openCount++
                         out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = avg, entryFeeUsd = fee, entryAtMs = q.nowMs,
-                            note = String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask!! * 100, age / 1000.0))
+                            note = String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask * 100, age / 1000.0))
                         continue
                     }
-                    val n = minOf(sp.clip, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+                    val n = minOf(cfg.affordableContracts(ask, sp.clip), kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
                     if (n <= 0) continue
-                    out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask!!), entryAtMs = q.nowMs,
+                    controls.recordEntry(q.nowMs); openCount++
+                    out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                         note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
                 }
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
@@ -1469,15 +1507,21 @@ class ScalpBook(
                         .also { peakBid[t.id] = it }
                     val sp = ScalpV2.spec(t.variantId)
                     val trail = ScalpV2.savedNumber(t.note, "v2trail", sp.trail).coerceIn(0.01, 0.10)
-                    val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, stop)
+                    val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, 0.99)
                     val wasArmed = t.id in v2Armed || ScalpV2.savedNumber(t.note, "v2armed", 0.0) == 1.0
                     // Reconstruct arming from the persisted peak, including after process death.
                     val armed = wasArmed || ScalpV2.armed(entry, pk, arm, t.contracts)
                     if (armed) v2Armed += t.id
                     val note = ScalpV2.tag(ScalpV2.tag(t.note, "v2peak", String.format(Locale.US, "%.6f", pk)), "v2armed", if (armed) "1" else "0")
                     val marked = t.copy(note = note)
-                    val priceExit = bid?.let { ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail) }
-                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
+                    val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
+                    val hold = ScalpV2.savedNumber(t.note, "v2hold", 0.0)
+                    val timeExit = if (hold > 0 && q.nowMs - (t.entryAtMs ?: t.signalAtMs) >= hold * 1000) "V2 user max hold reached" else null
+                    val priceExit = bid?.let {
+                        ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail)
+                            ?: if (target > 0 && ScalpRule.netAfterFees(entry, it, t.contracts) >= target) "V2 user net take-profit" else null
+                    }
+                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
                     if (reason == null) { if (marked != t) out += marked; continue }
                     val base = if (t.state == ScalpState.OPEN) marked.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else marked
                     val decided = base.exitDecidedAtMs ?: q.nowMs
