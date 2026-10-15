@@ -87,6 +87,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
     val paperScalpState = container.paperScalp.state
+    suspend fun exportPaperScalps(uri: android.net.Uri): String = withContext(Dispatchers.IO) { container.paperScalp.export(uri) }
     fun pausePaperScalps(paused: Boolean) { viewModelScope.launch(Dispatchers.IO) { container.paperScalp.pause(paused) } }
     fun startPaperScalps() { viewModelScope.launch {
         prefs.updateLiveSignals(true)
@@ -847,7 +848,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ctx = ticketContext(s, now)
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        _state.update { it.copy(scalpSummary = "Paper lab: fee-aware entries below 50¢, noise-aware stops, profit-armed trails and equity charts. Open Paper Scalp Lab.") }
+        _state.update { it.copy(scalpSummary = "Paper strategies: fixed-time signals, fees and stop risk included, observed performance comparison and replay export. Open Paper Scalp Lab.") }
         val tickets = TicketBuilder.proposeAll(live, ctx)
         captureTicketForward(tickets, live, ctx, now)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)

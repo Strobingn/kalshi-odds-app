@@ -11,7 +11,8 @@ import kotlin.math.sqrt
 
 object PaperScalpPolicy {
     const val START_CASH = 20_000.0
-    const val VERSION = 2
+    const val VERSION = 3
+    const val MIN_REWARD_RISK = 1.25
     const val TRAIL = .02
     const val MIN_NET_EDGE = .01
     const val LATENCY_MS = 250L // declared simulation assumption, not measured exchange latency
@@ -19,11 +20,11 @@ object PaperScalpPolicy {
     fun stop(entry: Double, highBid: Double, prior: Double = 0.0) = max(prior, max(.001, max(entry, highBid) - TRAIL))
     // New positions get room for ordinary spread/noise. Freeze distances at entry, never widen a live stop.
     fun distances(q: PaperDepth, side: String, history: List<PaperDepth>): Pair<Double, Double> {
-        val bids = (history.filter { q.atMs - it.atMs <= 30_000 }.map { it.bid(side) } + q.bid(side)).filter { it > 0 }
+        val bids = PaperScalpSignals.seconds(history, q).filter { q.atMs - it.atMs <= 30_000 }.map { it.bid(side) }.filter { it > 0 }
         val steps = bids.zipWithNext { a, b -> kotlin.math.abs(a - b) }.sorted()
         val noise = if (steps.isEmpty()) 0.0 else steps[(steps.lastIndex * .8).toInt()]
         val spread = ((q.ask(side) ?: q.bid(side)) - q.bid(side)).coerceAtLeast(0.0)
-        return max(.06, spread * 3 + noise * 3).coerceAtMost(.10) to max(TRAIL, noise * 2).coerceAtMost(.04)
+        return max(.04, spread * 2 + noise * 2).coerceAtMost(.08) to max(TRAIL, noise * 2).coerceAtMost(.04)
     }
     fun feePerContract(price: Double) = LiveOrderSizer.feeUsd(100, price) / 100
     fun bucket(price: Double) = when { price < .25 -> "<25"; price < .40 -> "25–40"; else -> "40–50" }
@@ -35,7 +36,7 @@ object PaperScalpCatalog {
     val ALL = listOf("cheap", "dip", "momentum", "forecast-fade", "adaptive").flatMap { family ->
         listOf(.15, .35, .70, 1.0).map { fraction ->
             PaperScalper("$family-${(fraction * 100).toInt()}", family, fraction,
-                "${when (family) { "cheap" -> "Fair-value discount"; "dip" -> "Dip reclaim"; "momentum" -> "Book momentum"; "forecast-fade" -> "Forecast fade"; else -> "Adaptive selector" }} · ${(fraction * 100).toInt()}% ceiling")
+                "${when (family) { "cheap" -> "Range recovery"; "dip" -> "Sweep reclaim"; "momentum" -> "Trend continuation"; "forecast-fade" -> "Forecast follow"; else -> "Adaptive mix" }} · ${(fraction * 100).toInt()}% ceiling")
         }
     }
 }
@@ -50,7 +51,7 @@ data class PaperScalpPosition(val id: String, val ticker: String, val side: Stri
     val lastBid: Double, val markAtMs: Long, val stop: Double,
     val exitReason: String? = null, val triggerMs: Long? = null, val triggerRevision: Long? = null,
     val netProceeds: Double = 0.0, val exitFees: Double = 0.0,
-    val policyVersion: Int = 1, val riskDistance: Double = .02, val trailDistance: Double = .02, val trailArmed: Boolean = false)
+    val policyVersion: Int = 1, val riskDistance: Double = .02, val trailDistance: Double = .02, val trailArmed: Boolean = false, val targetBid: Double = 0.0, val plannedRiskUsd: Double = 0.0)
 @Serializable
 data class PaperScalpResult(val id: String, val ticker: String, val setup: String, val side: String,
     val count: Int, val entry: Double, val netUsd: Double, val feesUsd: Double, val maxFavorable: Double,
@@ -58,7 +59,7 @@ data class PaperScalpResult(val id: String, val ticker: String, val setup: Strin
 @Serializable
 data class PaperLiquidity(val ticker: String, val side: String, val price: Double, val displayed: Double, val available: Double)
 @Serializable
-data class PaperCurvePoint(val atMs: Long, val equity: Double, val realized: Double, val fees: Double, val peakEquity: Double = equity)
+data class PaperCurvePoint(val atMs: Long, val equity: Double, val realized: Double, val fees: Double, val peakEquity: Double = equity, val policyVersion: Int = 2)
 @Serializable
 data class PaperScalpAccount(val id: String, val cash: Double = PaperScalpPolicy.START_CASH,
     val positions: List<PaperScalpPosition> = emptyList(), val pending: List<PaperPending> = emptyList(),
@@ -69,36 +70,41 @@ data class PaperScalpAccount(val id: String, val cash: Double = PaperScalpPolicy
     val curve: List<PaperCurvePoint> = emptyList(), val policyStartedMs: Long = 0,
     val policyStartEquity: Double = 0.0, val policyStartRealized: Double = 0.0, val policyStartFees: Double = 0.0,
     val policyStartClosed: Int = 0, val policyStartWins: Int = 0,
-    val peakEquity: Double = 0.0, val maxDrawdown: Double = 0.0) {
+    val peakEquity: Double = 0.0, val maxDrawdown: Double = 0.0, val policyVersion: Int = 2) {
     fun equity() = cash + positions.sumOf { it.remaining * it.lastBid - LiveOrderSizer.feeUsd(it.remaining, it.lastBid) }
     fun pnl() = equity() - PaperScalpPolicy.START_CASH
 }
 @Serializable
 data class PaperScalpState(val accounts: List<PaperScalpAccount> = PaperScalpCatalog.ALL.map { PaperScalpAccount(it.id) },
-    val paused: Boolean = false, val source: String = "production", val status: String = "Waiting for books", val lastQuoteMs: Long = 0)
+    val paused: Boolean = false, val source: String = "production", val status: String = "Waiting for books", val lastQuoteMs: Long = 0, val monitoring: Boolean = false, val recorderNote: String = "")
 
 data class PaperLesson(val n: Int, val meanNet: Double, val sizeScale: Double, val target: Double,
-                       val windows: Int, val upperMean: Double) {
+                       val windows: Int, val upperMean: Double, val lowerMean: Double = -.10) {
     val label: String get() = "$n completed · $windows windows · ${"%+.2f".format(java.util.Locale.US, meanNet * 100)}¢/ct · size ${"%.0f".format(java.util.Locale.US, sizeScale * 100)}%"
 }
 object PaperScalpLearning {
-    fun lesson(results: List<PaperScalpResult>, setup: String, price: Double): PaperLesson {
-        val trades = results.filter { it.policyVersion == PaperScalpPolicy.VERSION && it.setup == setup && PaperScalpPolicy.bucket(it.entry) == PaperScalpPolicy.bucket(price) }.takeLast(80)
-        if (trades.isEmpty()) return PaperLesson(0, 0.0, 1.0, .04, 0, .10)
+    fun lesson(results: List<PaperScalpResult>, setup: String, price: Double, policy: Int = PaperScalpPolicy.VERSION): PaperLesson {
+        val trades = results.filter { it.policyVersion == policy && it.setup == setup && PaperScalpPolicy.bucket(it.entry) == PaperScalpPolicy.bucket(price) }.takeLast(80)
+        if (trades.isEmpty()) return PaperLesson(0, 0.0, .05, .04, 0, .10)
         val values = trades.map { it.netUsd / it.count }
         val mean = values.average()
         // Group by complete contract window: repeated scalps on one window are correlated.
         val blocks = trades.groupBy { it.ticker }.values.map { block -> block.sumOf { it.netUsd } / block.sumOf { it.count } }
         val se = if (blocks.size < 2) .10 else sqrt(blocks.sumOf { (it - blocks.average()) * (it - blocks.average()) } / (blocks.size - 1) / blocks.size)
-        val shrunk = values.sum() / (values.size + 5.0)
-        val scale = (1 + shrunk * 20).coerceIn(.10, 1.0)
+        val lower = mean - 2 * se
+        val scale = when {
+            trades.size < 8 || blocks.size < 3 -> .05
+            lower <= 0 -> .10
+            else -> (lower / .04).coerceIn(.10, 1.0)
+        }
         val wins = trades.filter { it.netUsd > 0 }.map { it.maxFavorable }.sorted()
         val target = if (wins.isEmpty()) .04 else wins[wins.size / 2].coerceIn(.03, .20)
-        return PaperLesson(trades.size, mean, scale, target, blocks.size, mean + 2 * se)
+        return PaperLesson(trades.size, mean, scale, target, blocks.size, mean + 2 * se, lower)
     }
 }
 
 /** A snapshot contains outcome BIDS. Asks are derived from the opposite bids; no trade endpoints exist here. */
+@Serializable
 data class PaperDepth(val ticker: String, val atMs: Long, val revision: Long, val closeMs: Long,
                       val yes: List<Pair<Double, Double>>, val no: List<Pair<Double, Double>>,
                       val fairYes: Double? = null) {
@@ -113,14 +119,15 @@ data class PaperDepth(val ticker: String, val atMs: Long, val revision: Long, va
 data class PaperFill(val count: Int = 0, val value: Double = 0.0, val fees: Double = 0.0, val levels: List<Pair<Double, Double>> = emptyList())
 object PaperBookWalk {
     /** Non-leveraged, fee-inclusive taker simulation. Size can use the whole available paper bankroll. */
-    fun buy(levels: List<Pair<Double, Double>>, limit: Double, budget: Double): PaperFill {
+    fun buy(levels: List<Pair<Double, Double>>, limit: Double, budget: Double, maxContracts: Int = Int.MAX_VALUE): PaperFill {
         if (!budget.isFinite() || budget <= 0 || !PaperScalpPolicy.below50(limit)) return PaperFill()
         var fill = PaperFill()
         for ((price, depth) in levels.sortedBy { it.first }) {
             if (price > limit + 1e-9 || !PaperScalpPolicy.below50(price)) break
             if (!depth.isFinite() || depth < 1) continue
             val funds = budget - fill.value - fill.fees
-            val maxVisible = floor(depth).coerceAtMost(Int.MAX_VALUE.toDouble()).toInt()
+            val maxVisible = minOf(floor(depth).coerceAtMost(Int.MAX_VALUE.toDouble()).toInt(), maxContracts - fill.count)
+            if (maxVisible <= 0) break
             var lo = 0
             var hi = minOf(maxVisible, floor(funds.coerceAtLeast(0.0) / price).coerceAtMost(Int.MAX_VALUE.toDouble()).toInt())
             while (lo < hi) {
@@ -146,7 +153,9 @@ object PaperBookWalk {
 /** All orders are virtual. Persisted high-water marks and triggered exits survive restarts. */
 class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
                          private val persist: (PaperScalpState) -> Unit = {},
-                         private val idFactory: () -> String = { UUID.randomUUID().toString() }) {
+                         private val idFactory: () -> String = { UUID.randomUUID().toString() },
+                         historySeed: List<PaperDepth> = emptyList(),
+                         private val eventSink: (PaperReplayFrame) -> Unit = {}) {
     private val _state = MutableStateFlow(initial.copy(accounts = PaperScalpCatalog.ALL.map { algo ->
         (initial.accounts.firstOrNull { it.id == algo.id } ?: PaperScalpAccount(algo.id)).let { a ->
             // Cancel old unfilled decisions; existing positions retain their original stop contract.
@@ -156,20 +165,40 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
     val state = _state.asStateFlow()
     private val histories = mutableMapOf<String, ArrayDeque<PaperDepth>>()
     private val lastRevision = mutableMapOf<String, Long>()
+    private var scannedRevision = Long.MIN_VALUE
+    private var scanned = PaperScalpSignals.Scan(emptyList(), "Waiting for history")
+    init {
+        historySeed.sortedBy { it.atMs }.forEach { q ->
+            histories.getOrPut(q.ticker) { ArrayDeque() }.addLast(q)
+            lastRevision[q.ticker] = maxOf(lastRevision[q.ticker] ?: Long.MIN_VALUE, q.revision)
+        }
+    }
+    @Synchronized fun replayHistory(): List<PaperDepth> = histories.values.flatMap { it.toList() }.groupBy { it.ticker to it.atMs / 1000 }.values.map { it.maxBy { q -> q.atMs } }.sortedBy { it.atMs }
+    private fun scan(q: PaperDepth, history: List<PaperDepth>): PaperScalpSignals.Scan {
+        if (scannedRevision != q.revision) { scanned = PaperScalpSignals.scan(q, history); scannedRevision = q.revision }
+        return scanned
+    }
     @Synchronized fun snapshot() = _state.value
-    @Synchronized fun setPaused(paused: Boolean) = publish(_state.value.copy(paused = paused))
+    @Synchronized fun setPaused(paused: Boolean) {
+        val before = _state.value
+        if (before.paused == paused) return
+        publish(before.copy(paused = paused))
+        record(before, replayHistory(), PaperReplayEvent("pause", before.lastQuoteMs, paused = paused))
+    }
     @Synchronized fun status(message: String) { _state.value = _state.value.copy(status = message) }
     @Synchronized fun openTickers() = _state.value.accounts.flatMap { it.positions.map { p -> p.ticker } }.toSet()
     @Synchronized fun flush() = persist(_state.value)
     @Synchronized fun onBook(q: PaperDepth, nowMs: Long = q.atMs) {
         if (!q.ticker.startsWith("KXBTC15M-") || !q.valid() || q.atMs > nowMs || nowMs - q.atMs > 3000 || q.atMs >= q.closeMs) return
         if (lastRevision[q.ticker]?.let { q.revision <= it } == true) return
+        val before = _state.value
+        val historyBefore = replayHistory()
         lastRevision[q.ticker] = q.revision
         val hist = histories.getOrPut(q.ticker) { ArrayDeque() }
         while (hist.firstOrNull()?.let { q.atMs - it.atMs > 180_000 } == true) hist.removeFirst()
         val recent = hist.toList()
         hist.addLast(q)
-        while (hist.size > 400) hist.removeFirst()
+        while (hist.size > 2000) hist.removeFirst()
         histories.keys.filter { it != q.ticker }.toList().forEach { histories.remove(it); lastRevision.remove(it) }
         val accounts = _state.value.accounts.map { old ->
             val a = baseline(old, nowMs)
@@ -177,6 +206,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             sample(next, nowMs, a.closed, force = next.positions.map { it.remaining } != a.positions.map { it.remaining })
         }
         publish(_state.value.copy(accounts = accounts, status = "Receiving fresh book depth", lastQuoteMs = nowMs))
+        record(before, historyBefore, PaperReplayEvent("book", nowMs, book = q))
     }
     private fun step(a: PaperScalpAccount, algo: PaperScalper, q: PaperDepth, history: List<PaperDepth>): PaperScalpAccount {
         var account = refreshLiquidity(a, q)
@@ -185,21 +215,25 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         if (pending != null && q.revision != pending.revision && q.atMs - pending.atMs >= PaperScalpPolicy.LATENCY_MS) {
             val rechecked = choose(algo, account, q, history)
             val proposed = if (_state.value.paused || q.atMs >= pending.closeMs || rechecked?.side != pending.side || rechecked?.setup != pending.setup) PaperFill()
-                else PaperBookWalk.buy(available(q, account).asks(pending.side), pending.limit, minOf(account.cash, pending.budget))
+                else PaperBookWalk.buy(available(q, account).asks(pending.side), pending.limit, minOf(account.cash, pending.budget), capacity(available(q, account), pending.side))
             val target = minOf(pending.expectedBid ?: 0.0, rechecked?.expectedBid ?: 0.0)
             val netAtTarget = proposed.count * target - LiveOrderSizer.feeUsd(proposed.count, target) - proposed.value - proposed.fees
-            val fill = if (proposed.count > 0 && netAtTarget >= proposed.count * PaperScalpPolicy.MIN_NET_EDGE) proposed else PaperFill()
+            val (entryRisk, entryTrail) = PaperScalpPolicy.distances(q, pending.side, history)
+            val entryPrice = if (proposed.count > 0) proposed.value / proposed.count else pending.limit
+            val stopPrice = max(.001, entryPrice - entryRisk)
+            val plannedRisk = proposed.value + proposed.fees - proposed.count * stopPrice + LiveOrderSizer.feeUsd(proposed.count, stopPrice)
+            val fill = if (proposed.count > 0 && netAtTarget >= max(proposed.count * .02, plannedRisk * PaperScalpPolicy.MIN_REWARD_RISK)) proposed else PaperFill()
             account = account.copy(pending = account.pending.filterNot { it == pending })
             acted = true
             if (fill.count > 0) {
                 account = consume(account, q.ticker, if (pending.side == "YES") "NO" else "YES", fill.levels.map { (px, n) -> (1 - px) to n })
                 val avg = fill.value / fill.count
                 val bid = q.bid(pending.side)
-                val (risk, trail) = PaperScalpPolicy.distances(q, pending.side, history)
+                val (risk, trail) = entryRisk to entryTrail
                 val position = PaperScalpPosition(idFactory(), q.ticker, pending.side, pending.setup,
                     fill.count, fill.count, avg, fill.value, fill.fees, q.atMs, q.closeMs,
                     bid, bid, bid, q.atMs, max(.001, avg - risk),
-                    policyVersion = PaperScalpPolicy.VERSION, riskDistance = risk, trailDistance = trail)
+                    policyVersion = PaperScalpPolicy.VERSION, riskDistance = risk, trailDistance = trail, targetBid = target, plannedRiskUsd = plannedRisk)
                 account = account.copy(cash = (account.cash - fill.value - fill.fees).coerceAtLeast(0.0),
                     positions = account.positions + position, fees = account.fees + fill.fees,
                     note = "BUY ${pending.side} ${fill.count} ct @ ${fmt(avg * 100)}¢; initial protective stop active")
@@ -208,12 +242,13 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         for (position in account.positions.filter { it.ticker == q.ticker }) {
             val bid = q.bid(position.side)
             var p = position.copy(highBid = max(position.highBid, bid), lowBid = minOf(position.lowBid, bid), lastBid = bid, markAtMs = q.atMs)
-            if (p.policyVersion < PaperScalpPolicy.VERSION) {
+            if (p.policyVersion < 2) {
                 p = p.copy(stop = PaperScalpPolicy.stop(p.entry, p.highBid, p.stop))
             } else {
                 val proposed = (p.highBid - p.trailDistance).coerceAtLeast(.001)
                 val netAtTrail = p.netProceeds + p.remaining * proposed - LiveOrderSizer.feeUsd(p.remaining, proposed) - p.entryValue - p.entryFee
-                val armed = p.trailArmed || netAtTrail >= p.count * PaperScalpPolicy.MIN_NET_EDGE
+                val armProfit = if (p.policyVersion >= 3) max(p.count * .02, p.plannedRiskUsd * .75) else p.count * PaperScalpPolicy.MIN_NET_EDGE
+                val armed = p.trailArmed || netAtTrail >= armProfit
                 p = p.copy(trailArmed = armed, stop = if (armed) max(p.stop, proposed) else p.stop)
             }
             if (p.exitReason == null) {
@@ -224,11 +259,12 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
                 val fading = history.lastOrNull()?.bid(p.side)?.let { bid < it - 1e-9 } == true
                 val reason = when {
                     bid <= p.stop + 1e-9 -> when {
-                        p.policyVersion < PaperScalpPolicy.VERSION -> "Legacy 2¢ trailing stop"
+                        p.policyVersion < 2 -> "Legacy 2¢ trailing stop"
                         p.trailArmed -> "Profit trailing stop"
                         else -> "Initial protective stop"
                     }
-                    netIfFullySold >= p.count * PaperScalpPolicy.MIN_NET_EDGE && (fairGone || (fading && bid - p.entry >= lesson.target)) -> "AI profit exit"
+                    p.policyVersion >= 3 && bid >= p.targetBid && netIfFullySold >= p.plannedRiskUsd * PaperScalpPolicy.MIN_REWARD_RISK -> "Planned target reached"
+                    p.policyVersion < 3 && netIfFullySold >= p.count * PaperScalpPolicy.MIN_NET_EDGE && (fairGone || (fading && bid - p.entry >= lesson.target)) -> "AI profit exit"
                     else -> null
                 }
                 if (reason != null) p = p.copy(exitReason = reason, triggerMs = q.atMs, triggerRevision = q.revision)
@@ -250,19 +286,21 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
         // No entry-minute, max-hold, bet-count, live-dollar cap, or approval gate.
         if (!acted && !_state.value.paused && account.positions.none { it.ticker == q.ticker } && account.pending.none { it.ticker == q.ticker } && account.cash > 0) {
             val candidate = choose(algo, account, q, history)
-            if (candidate == null) account = account.copy(note = "Waiting: need a fee-adjusted edge, confirmed signal and no loss cooldown")
+            if (candidate == null) account = account.copy(note = waitReason(algo, account, q, history))
             if (candidate != null) {
                 val (side, setup, ask) = candidate
                 val lesson = PaperScalpLearning.lesson(account.results, setup, ask)
                 val reserved = account.pending.sumOf { it.budget }
                 val budget = max(0.0, account.cash - reserved) * algo.fraction * lesson.sizeScale
-                if (PaperBookWalk.buy(available(q, account).asks(side), ask, budget).count > 0) account = account.copy(
+                if (PaperBookWalk.buy(available(q, account).asks(side), ask, budget, capacity(available(q, account), side)).count > 0) account = account.copy(
                     pending = account.pending + PaperPending(q.ticker, side, setup, ask, budget, q.atMs, q.revision, q.closeMs, PaperScalpPolicy.VERSION, candidate.expectedBid),
                     note = "AI chose $setup $side, budget $${fmt(budget)}; ${lesson.label}")
             }
         }
         return account
     }
+    private fun capacity(q: PaperDepth, side: String): Int = floor(q.bids(side).filter { it.first >= q.bid(side) - .01 }
+        .sumOf { it.second } * .25).coerceIn(0.0, Int.MAX_VALUE.toDouble()).toInt()
     private fun refreshLiquidity(a: PaperScalpAccount, q: PaperDepth): PaperScalpAccount {
         val old = a.liquidity.filter { it.ticker == q.ticker }
         val levels = listOf("YES" to q.yes, "NO" to q.no).flatMap { (side, levels) -> levels.map { (price, size) ->
@@ -282,57 +320,31 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             (l.available - used.filter { kotlin.math.abs(it.first - l.price) < 1e-8 }.sumOf { it.second }).coerceAtLeast(0.0)) })
     private data class Candidate(val side: String, val setup: String, val ask: Double, val score: Double, val expectedBid: Double)
     private fun choose(algo: PaperScalper, a: PaperScalpAccount, q: PaperDepth, history: List<PaperDepth>): Candidate? {
-        val losses = a.results.filter { it.policyVersion == PaperScalpPolicy.VERSION && it.ticker == q.ticker }
-        val lastLoss = losses.lastOrNull { it.netUsd < 0 }
-        if (lastLoss != null) {
-            val streak = losses.asReversed().takeWhile { it.netUsd < 0 }.size.coerceAtLeast(1)
-            if (q.atMs - lastLoss.atMs < minOf(300_000L, 60_000L * streak)) return null
-        }
-        val yb = q.bid("YES"); val ya = q.ask("YES")
-        val forecast = if (ya != null && yb > 0 && ya > yb) {
-            val sample = ShortHorizonForecaster.Sample(q.atMs, (yb + ya) / 2,
-                q.bids("YES").take(3).sumOf { it.second }, q.bids("NO").take(3).sumOf { it.second })
-            val samples = history.mapNotNull { h -> h.ask("YES")?.let { ShortHorizonForecaster.Sample(h.atMs, (h.bid("YES") + it) / 2, 0.0, 0.0) } }
-            ShortHorizonForecaster.predict("BTC", ShortHorizonForecaster.horizonFor("BTC"), ShortHorizonForecaster.features(sample, samples, q.closeMs))
-        } else null
-        val candidates = mutableListOf<Candidate>()
-        for (side in listOf("YES", "NO")) {
-            val ask = q.ask(side) ?: continue
-            val bid = q.bid(side)
-            if (!PaperScalpPolicy.below50(ask) || bid <= 0 || ask < bid || ask - bid >= .02 - 1e-9) continue
-            val recent = history.filter { q.atMs - it.atMs <= 30_000 }
-            val bids = recent.map { it.bid(side) }.filter { it > 0 }
-            val recentLow = bids.minOrNull()
-            val recentHigh = bids.maxOrNull()
-            val bounce = bids.size >= 3 && recentHigh!! - recentLow!! >= .03 && bid >= recentLow + .005 && bid > bids.last()
-            val rising = bids.size >= 3 && bid - bids.takeLast(3).first() >= .01 && bid > bids.last()
-            val fadeSide = forecast?.let { if (it < 0) "YES" else "NO" }
-            val setups = if (algo.family == "adaptive") listOf("cheap", "dip", "momentum", "forecast-fade") else listOf(algo.family)
-            for (setup in setups) {
-                val eligible = when (setup) { "cheap" -> q.fair(side) != null; "dip" -> bounce; "momentum" -> rising;
-                    "forecast-fade" -> fadeSide == side && kotlin.math.abs(forecast ?: 0.0) >= ask - bid + .01; else -> false }
-                if (!eligible) continue
-                val lesson = PaperScalpLearning.lesson(a.results, setup, ask)
-                // Cheap alone is not an edge. Require an estimated executable BID to cover both fees + 1¢ net.
-                // Range/momentum and the frozen forecast are hypotheses, not calibrated win probabilities.
-                val estimatedBid = when (setup) {
-                    "cheap" -> q.fair(side) ?: continue
-                    "dip" -> recentHigh ?: continue
-                    "momentum" -> bid + (bid - (bids.takeLast(3).firstOrNull() ?: bid)).coerceAtMost(.10)
-                    else -> bid + kotlin.math.abs(forecast ?: 0.0)
-                }.coerceIn(.001, .999)
-                val expectedNet = estimatedBid - ask - PaperScalpPolicy.feePerContract(ask) - PaperScalpPolicy.feePerContract(estimatedBid)
-                if (!expectedNet.isFinite() || expectedNet < PaperScalpPolicy.MIN_NET_EDGE) continue
-                if (setup != "cheap" && (recent.size < 3 || q.atMs - recent.first().atMs < 1000)) continue
-                if (lesson.n >= 8 && lesson.windows >= 3 && lesson.upperMean < 0) continue
-                val prior = expectedNet
-                val learned = lesson.meanNet * lesson.n / (lesson.n + 5.0)
-                val exploratory = .003 / sqrt(lesson.n + 1.0)
-                candidates += Candidate(side, setup, ask, prior + learned + exploratory, estimatedBid)
-            }
-        }
-        return candidates.maxByOrNull { it.score }
+        if (cooldown(a, q) > 0) return null
+        val setups = if (algo.family == "adaptive") listOf("cheap", "dip", "momentum", "forecast-fade") else listOf(algo.family)
+        return scan(q, history).signals.filter { it.setup in setups }.mapNotNull { signal ->
+            val lesson = PaperScalpLearning.lesson(a.results, signal.setup, signal.ask)
+            if (lesson.n >= 8 && lesson.windows >= 3 && lesson.upperMean < 0) return@mapNotNull null
+            Candidate(signal.side, signal.setup, signal.ask,
+                signal.rewardRisk + lesson.lowerMean * 10, signal.targetBid)
+        }.maxByOrNull { it.score }
     }
+    private fun waitReason(algo: PaperScalper, a: PaperScalpAccount, q: PaperDepth, history: List<PaperDepth>): String {
+        val remaining = cooldown(a, q)
+        if (remaining > 0) return "Loss cooldown · ${(remaining + 999) / 1000}s before another entry in this contract"
+        val scan = scan(q, history)
+        val matching = scan.signals.filter { algo.family == "adaptive" || it.setup == algo.family }
+        if (matching.any { signal -> PaperScalpLearning.lesson(a.results, signal.setup, signal.ask).let { it.n >= 8 && it.windows >= 3 && it.upperMean < 0 } })
+            return "Losing setup blocked by completed results across contract windows"
+        return if (scan.signals.isNotEmpty()) "${algo.name.substringBefore(" ·")} waiting: no qualified signal for this family" else scan.note
+    }
+    private fun cooldown(a: PaperScalpAccount, q: PaperDepth): Long {
+        val results = a.results.filter { it.policyVersion == PaperScalpPolicy.VERSION && it.ticker == q.ticker }
+        val lastLoss = results.lastOrNull { it.netUsd < 0 } ?: return 0
+        val streak = results.asReversed().takeWhile { it.netUsd < 0 }.size.coerceAtLeast(1)
+        return (minOf(300_000L, 60_000L * streak) - (q.atMs - lastLoss.atMs)).coerceAtLeast(0)
+    }
+
     private fun completed(a: PaperScalpAccount, p: PaperScalpPosition, now: Long, reason: String): PaperScalpAccount {
         val net = p.netProceeds - p.entryValue - p.entryFee
         val result = PaperScalpResult(p.id, p.ticker, p.setup, p.side, p.count, p.entry, net, p.entryFee + p.exitFees,
@@ -342,6 +354,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             note = "$reason · net $${fmt(net)}; feedback updated")
     }
     @Synchronized fun settle(ticker: String, yesWon: Boolean, atMs: Long) {
+        val before = _state.value
         val accounts = _state.value.accounts.map { account ->
             if (account.positions.none { it.ticker == ticker } && account.pending.none { it.ticker == ticker }) return@map account
             var a = baseline(account, atMs).copy(pending = account.pending.filterNot { it.ticker == ticker })
@@ -354,24 +367,33 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             sample(a, atMs, account.closed, force = a.closed != account.closed)
         }
         publish(_state.value.copy(accounts = accounts))
+        if (_state.value != before) record(before, replayHistory(), PaperReplayEvent("settle", atMs, ticker = ticker, yesWon = yesWon))
     }
-    private fun baseline(a: PaperScalpAccount, at: Long): PaperScalpAccount = if (a.policyStartedMs != 0L) a else a.copy(
+    private fun baseline(a: PaperScalpAccount, at: Long): PaperScalpAccount = if (a.policyStartedMs != 0L && a.policyVersion == PaperScalpPolicy.VERSION) a else a.copy(
+        policyVersion = PaperScalpPolicy.VERSION, maxDrawdown = 0.0,
         policyStartedMs = at, policyStartEquity = a.equity(), policyStartRealized = a.realized,
         policyStartFees = a.fees, policyStartClosed = a.closed, policyStartWins = a.wins, peakEquity = a.equity(),
-        curve = listOf(PaperCurvePoint(at, a.equity(), a.realized, a.fees)))
+        curve = (a.curve + PaperCurvePoint(at, a.equity(), a.realized, a.fees, a.equity(), PaperScalpPolicy.VERSION)).takeLast(1440))
     private fun sample(a: PaperScalpAccount, at: Long, priorClosed: Int, force: Boolean = false): PaperScalpAccount {
         val equity = a.equity()
         val peak = max(a.peakEquity, equity)
         val record = force || priorClosed != a.closed || a.curve.lastOrNull()?.let { at - it.atMs >= 15_000 } != false
         return a.copy(peakEquity = peak, maxDrawdown = max(a.maxDrawdown, peak - equity),
-            curve = if (record) (a.curve + PaperCurvePoint(at, equity, a.realized, a.fees, peak)).takeLast(1440) else a.curve)
+            curve = if (record) (a.curve + PaperCurvePoint(at, equity, a.realized, a.fees, peak, PaperScalpPolicy.VERSION)).takeLast(1440) else a.curve)
     }
     @Synchronized fun expirePending(nowMs: Long) {
+        val before = _state.value
         val accounts = _state.value.accounts.map { a ->
             val expired = a.pending.count { it.closeMs <= nowMs }
             if (expired == 0) a else a.copy(pending = a.pending.filter { it.closeMs > nowMs }, noFills = a.noFills + expired)
         }
-        if (accounts != _state.value.accounts) publish(_state.value.copy(accounts = accounts))
+        if (accounts != _state.value.accounts) {
+            publish(_state.value.copy(accounts = accounts))
+            record(before, replayHistory(), PaperReplayEvent("expire", nowMs))
+        }
+    }
+    private fun record(before: PaperScalpState, history: List<PaperDepth>, event: PaperReplayEvent) {
+        eventSink(PaperReplayFrame(before, history, event.copy(totals = _state.value.accounts.associate { it.id to PaperReplayTotals.from(it) })))
     }
     private fun publish(next: PaperScalpState) {
         if (next == _state.value) return

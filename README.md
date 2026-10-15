@@ -1,3 +1,7 @@
+## Bitcoin Edge 1.4.0 — performance dashboard and paper rules 3
+
+Performance now leads with a large multi-strategy comparison chart, real axes, touch inspection and visible feed gaps. Positions and trades have separate tabs. Rule 3 corrects forecast direction, removes probability-as-sale-price entries, uses fixed-time momentum, checks projected gain against fees and stop risk, and starts new setups with smaller exploratory sizing. Local book/ledger recordings can be exported and replayed exactly. Prior losses and stops are preserved. Profitability remains unverified; see [the audit, rules and replay instructions](docs/PAPER_SCALP_POLICY_3.md).
+
 ## Bitcoin Edge 1.3.0 — paper scalp policy 2
 
 The paper lab now charts observed equity, drawdown, strategy comparisons and net trade outcomes in grayscale. New entries require a fee-adjusted projected edge; new positions get a 6–10¢ initial protective stop and a 2–4¢ profit trail that arms after the proposed exit covers fees plus 1¢ net. Completed losses reduce sizing and delay re-entry. Existing balances/results and legacy stop commitments are preserved. These are experimental paper policies, not a demonstrated profitable edge. See [policy details and measurement limits](docs/PAPER_SCALP_POLICY_2.md).

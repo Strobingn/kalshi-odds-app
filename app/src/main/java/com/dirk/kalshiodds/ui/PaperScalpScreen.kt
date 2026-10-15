@@ -1,272 +1,392 @@
 package com.dirk.kalshiodds.ui
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.scalp.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlin.math.abs
-import kotlin.math.max
 
-private val paperColors = darkColorScheme(primary = Color.White, onPrimary = Color.Black,
-    secondary = Color(0xFFCCCCCC), onSecondary = Color.Black,
-    primaryContainer = Color(0xFF444444), onPrimaryContainer = Color.White,
-    secondaryContainer = Color(0xFF444444), onSecondaryContainer = Color.White, background = Color(0xFF101010),
-    surface = Color(0xFF1C1C1C), surfaceVariant = Color(0xFF2B2B2B), onSurface = Color(0xFFF4F4F4),
-    onSurfaceVariant = Color(0xFFBBBBBB), outline = Color(0xFF777777))
-private val families = listOf("adaptive" to "Adaptive", "cheap" to "Discount", "dip" to "Dip", "momentum" to "Momentum", "forecast-fade" to "Fade")
+private val ink = Color(0xFFF4F4F4)
+private val mutedInk = Color(0xFFAAAAAA)
+private val page = Color(0xFF101010)
+private val rule = Color(0xFF343434)
+private val chartInk = listOf(Color.White, Color(0xFFD5D5D5), Color(0xFFBBBBBB), Color(0xFF999999), Color(0xFF818181))
+private val labColors = darkColorScheme(primary = ink, onPrimary = Color.Black, secondary = ink,
+    background = page, surface = page, surfaceVariant = Color(0xFF222222), onSurface = ink,
+    onSurfaceVariant = mutedInk, primaryContainer = Color(0xFF383838), secondaryContainer = Color(0xFF383838),
+    onPrimaryContainer = ink, onSecondaryContainer = ink, outline = Color(0xFF666666))
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> Unit, onPause: (Boolean) -> Unit) {
+fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> Unit, onPause: (Boolean) -> Unit,
+                     onExport: suspend (Uri) -> String = { "Export is unavailable" }, initialTab: Int = 0) {
+    var tab by rememberSaveable { mutableIntStateOf(initialTab) }
     var family by rememberSaveable { mutableStateOf("adaptive") }
     var allocation by rememberSaveable { mutableIntStateOf(35) }
+    var hours by rememberSaveable { mutableIntStateOf(0) }
+    var newOnly by rememberSaveable { mutableStateOf(false) }
     var drawdown by rememberSaveable { mutableStateOf(false) }
-    var comparePolicyOnly by rememberSaveable { mutableStateOf(false) }
-    var details by rememberSaveable { mutableStateOf(false) }
-    val a = state.accounts.firstOrNull { it.id == "$family-$allocation" } ?: state.accounts.firstOrNull() ?: return
-    val started = a.policyStartedMs > 0
-    val change = if (started) a.equity() - a.policyStartEquity else 0.0
-    val closed = a.closed - a.policyStartClosed
-    val wins = a.wins - a.policyStartWins
+    var visible by rememberSaveable { mutableStateOf(PaperPerformance.families.map { it.first }) }
+    var menu by remember { mutableStateOf(false) }
+    var settings by remember { mutableStateOf(false) }
+    var picker by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(Unit) {
-        while (true) { delay(1000); now = System.currentTimeMillis() }
+    LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
+    val scope = rememberCoroutineScope()
+    val snackbar = remember { SnackbarHostState() }
+    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) scope.launch {
+            val result = runCatching { onExport(uri) }.getOrElse { "Export failed: ${it.message}" }
+            snackbar.showSnackbar(result)
+        }
     }
-    // Final live point is a real mark; older points are persisted observations, never a fabricated backtest.
-    val points = a.curve + if (started && state.lastQuoteMs > (a.curve.lastOrNull()?.atMs ?: 0))
-        listOf(PaperCurvePoint(state.lastQuoteMs, a.equity(), a.realized, a.fees, a.peakEquity)) else emptyList()
-    MaterialTheme(colorScheme = paperColors) {
-        Scaffold(topBar = { TopAppBar(title = { Text("Scalp lab") }, navigationIcon = {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-        }) }) { padding ->
-            LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("PAPER · POLICY 2", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                        Text(state.source.uppercase(Locale.US), style = MaterialTheme.typography.labelMedium)
-                    }
-                    Text(state.status, style = MaterialTheme.typography.bodySmall)
-                    Text(if (state.lastQuoteMs == 0L) "No book received" else "Book age ${((now - state.lastQuoteMs).coerceAtLeast(0) / 1000)}s${if (now - state.lastQuoteMs > 3000) " · STALE MARKS" else ""}", style = MaterialTheme.typography.labelSmall)
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = onStart) { Text("Start monitor") }
-                        OutlinedButton(onClick = { onPause(!state.paused) }) { Text(if (state.paused) "Resume entries" else "Pause entries") }
-                    }
-                    if (state.paused) Text("Entries paused · existing stops continue", style = MaterialTheme.typography.bodySmall)
-                }
-                item {
-                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        families.forEach { (id, label) -> FilterChip(selected = family == id, onClick = { family = id }, label = { Text(label) }) }
-                    }
-                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(15, 35, 70, 100).forEach { n -> FilterChip(selected = allocation == n, onClick = { allocation = n }, label = { Text("$n%") }) }
-                    }
-                    Text("Paper cash allocation ceiling · each book starts with $20,000", style = MaterialTheme.typography.labelSmall)
-                }
-                item {
-                    PaperPanel {
-                        Text("${families.first { it.first == family }.second} · $allocation%", style = MaterialTheme.typography.titleMedium)
-                        Text(money(change), style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-                        Text("Equity change since policy 2 started${if (!started) " · awaiting first quote" else ""}", style = MaterialTheme.typography.labelSmall)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(!drawdown, onClick = { drawdown = false }, label = { Text("Equity") })
-                            FilterChip(drawdown, onClick = { drawdown = true }, label = { Text("Drawdown") })
-                        }
-                        EquityPlot(points, a.policyStartEquity, drawdown)
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Metric("Max drawdown", money(-a.maxDrawdown))
-                            Metric("Fees · policy 2", money(-(a.fees - a.policyStartFees)))
-                        }
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Metric("Win rate", if (closed == 0) "—" else "${wins * 100 / closed}% · $closed trades")
-                            Metric("Current equity", dollars(a.equity()))
-                        }
-                        Text("All-time realized ${money(a.realized)} · fees ${dollars(a.fees)} · ${a.closed} closed", style = MaterialTheme.typography.labelSmall)
-                        Text("Policy 2 begins at the first quote after updating. Existing cash and losses are preserved.", style = MaterialTheme.typography.labelSmall)
+    val account = state.accounts.firstOrNull { it.id == "$family-$allocation" } ?: state.accounts.firstOrNull() ?: return
+    val series = remember(state.accounts, state.lastQuoteMs, allocation, newOnly, hours, drawdown) {
+        PaperPerformance.series(state, allocation, newOnly, hours.takeIf { it > 0 }, drawdown)
+    }
+    val age = if (state.lastQuoteMs == 0L) null else ((now - state.lastQuoteMs).coerceAtLeast(0) / 1000)
+    val pnl = if (newOnly) { if (account.policyVersion == PaperScalpPolicy.VERSION && account.policyStartedMs > 0) account.equity() - account.policyStartEquity else 0.0 } else account.pnl()
+    fun choose(id: String) { family = id; if (id !in visible) visible = visible + id }
+    MaterialTheme(colorScheme = labColors) {
+        Scaffold(containerColor = page, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
+            TopAppBar(title = { Text("Strategies", fontWeight = FontWeight.SemiBold) }, navigationIcon = {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            }, actions = {
+                Text("PAPER", style = MaterialTheme.typography.labelSmall, modifier = Modifier.border(1.dp, rule, RoundedCornerShape(4.dp)).padding(6.dp))
+                IconButton(onClick = {
+                    if (state.monitoring && !state.paused) onPause(true) else { onPause(false); onStart() }
+                }) { Icon(if (state.monitoring && !state.paused) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (state.monitoring && !state.paused) "Pause new entries; keep exits running" else "Start paper monitor") }
+                Box {
+                    IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Lab settings and export") }
+                    DropdownMenu(menu, onDismissRequest = { menu = false }) {
+                        DropdownMenuItem(text = { Text("Sizing & strategy rules") }, onClick = { menu = false; settings = true })
+                        DropdownMenuItem(text = { Text("Export recorded books & trades") }, onClick = { menu = false; export.launch("BitcoinEdge-paper-replay.zip") })
                     }
                 }
-                item {
-                    PaperPanel {
-                        Text("Compare strategies", style = MaterialTheme.typography.titleMedium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            FilterChip(!comparePolicyOnly, onClick = { comparePolicyOnly = false }, label = { Text("All-time") })
-                            FilterChip(comparePolicyOnly, onClick = { comparePolicyOnly = true }, label = { Text("Policy 2") })
+            }, colors = TopAppBarDefaults.topAppBarColors(containerColor = page))
+        }) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Canvas(Modifier.size(6.dp)) { drawCircle(if (age != null && age <= 3 && state.monitoring) ink else Color.Gray) }
+                    Spacer(Modifier.width(8.dp))
+                    Text("${state.source.replaceFirstChar { it.uppercase() }} data · ${if (!state.monitoring) "monitor off" else if (age == null) "connecting" else if (age > 3) "stale ${age}s" else "${age}s ago"}${if (state.paused) " · entries paused" else ""}", style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                }
+                TabRow(tab, containerColor = page, contentColor = ink) {
+                    listOf("Performance", "Positions", "Trades").forEachIndexed { i, title -> Tab(tab == i, onClick = { tab = i }, text = { Text(title) }) }
+                }
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
+                    item {
+                        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Box {
+                                TextButton(onClick = { picker = true }, contentPadding = PaddingValues(0.dp)) {
+                                    Text("${PaperPerformance.families.first { it.first == family }.second}  ▾", style = MaterialTheme.typography.titleMedium)
+                                }
+                                DropdownMenu(picker, onDismissRequest = { picker = false }) {
+                                    PaperPerformance.families.forEach { (id, label) -> DropdownMenuItem(text = { Text(label) }, onClick = { choose(id); picker = false }) }
+                                }
+                            }
+                            Spacer(Modifier.weight(1f))
+                            Text("$allocation% ceiling", style = MaterialTheme.typography.labelSmall, color = mutedInk, modifier = Modifier.clickable { settings = true }.padding(8.dp))
                         }
-                        Text("${if (comparePolicyOnly) "Equity change since update" else "Realized net after fees"} · $allocation% ceiling", style = MaterialTheme.typography.labelSmall)
-                        fun value(account: PaperScalpAccount?) = account?.let {
-                            if (comparePolicyOnly) { if (it.policyStartedMs > 0) it.equity() - it.policyStartEquity else 0.0 } else it.realized
-                        } ?: 0.0
-                        val rows = families.map { (id, label) -> Triple(id, label, state.accounts.firstOrNull { it.id == "$id-$allocation" }) }
-                        val scale = rows.maxOf { (_, _, account) -> abs(value(account)) }.coerceAtLeast(1.0)
-                        rows.forEach { (id, label, account) ->
-                            val pnl = value(account)
-                            TextButton(onClick = { family = id }, contentPadding = PaddingValues(0.dp), modifier = Modifier.fillMaxWidth()) {
-                                Column(Modifier.fillMaxWidth()) {
-                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                        Text(label, fontWeight = if (id == family) FontWeight.Bold else FontWeight.Normal)
-                                        Text(money(pnl))
-                                    }
-                                    Canvas(Modifier.fillMaxWidth().height(16.dp).semantics { contentDescription = "$label equity change ${money(pnl)}" }) {
-                                        val mid = size.width / 2
-                                        drawLine(Color.Gray, Offset(mid, 0f), Offset(mid, size.height), 1.dp.toPx())
-                                        val width = (abs(pnl) / scale * (mid - 4.dp.toPx())).toFloat()
-                                        drawRect(if (pnl < 0) Color.Gray else Color.White, Offset(if (pnl < 0) mid - width else mid, 4.dp.toPx()), Size(width, 8.dp.toPx()))
+                    }
+                    if (tab == 0) {
+                        item {
+                            Column(Modifier.padding(horizontal = 20.dp)) {
+                                Text(signed(pnl), style = MaterialTheme.typography.headlineLarge, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                Text(if (newOnly) "Equity change under the new rules" else "Net equity vs the original $20,000", style = MaterialTheme.typography.labelMedium, color = mutedInk)
+                                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                                    ModeText("Net return", !drawdown) { drawdown = false }
+                                    ModeText("Drawdown", drawdown) { drawdown = true }
+                                }
+                            }
+                            ComparisonChart(series.filter { it.id in visible }, family, account.policyStartedMs.takeIf { !newOnly && account.policyVersion == 3 }, drawdown)
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                                listOf(1 to "1H", 6 to "6H", 0 to "ALL").forEach { (h, name) -> ModeText(name, hours == h) { hours = h } }
+                                VerticalDivider(Modifier.height(28.dp), color = rule)
+                                ModeText("Recorded", !newOnly) { newOnly = false }
+                                ModeText("New rules", newOnly) { newOnly = true }
+                            }
+                            FlowRow(Modifier.padding(horizontal = 20.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                                PaperPerformance.families.forEachIndexed { index, (id, label) ->
+                                    Row(Modifier.clickable { visible = if (id in visible) visible.filterNot { it == id } else visible + id }.padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        LineKey(index, id in visible)
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(label, style = MaterialTheme.typography.labelMedium, color = if (id in visible) ink else Color.Gray)
                                     }
                                 }
                             }
                         }
-                        Text("← loss                         gain →", style = MaterialTheme.typography.labelSmall)
-                    }
-                }
-                item {
-                    PaperPanel {
-                        Text("Open positions · ${a.positions.size}", style = MaterialTheme.typography.titleMedium)
-                        if (a.positions.isEmpty()) Text(if (a.pending.isEmpty()) a.note else "${a.pending.size} entry decisions await a later book", style = MaterialTheme.typography.bodySmall)
-                        a.positions.forEach { p ->
-                            Text("${p.side} · ${p.remaining} contracts · ${p.setup}", fontWeight = FontWeight.Bold)
-                            Text(p.ticker, style = MaterialTheme.typography.labelSmall)
-                            StopRail(p)
-                            if (p.lastBid <= 0) Text("No executable bid · conservative zero mark", style = MaterialTheme.typography.labelSmall)
-                            Text(p.exitReason?.let { "$it · waiting for executable depth" } ?: when {
-                                p.policyVersion < 2 -> "Legacy position · original stop retained"
-                                p.trailArmed -> "Profit trail active · ${cents(p.trailDistance)} behind peak"
-                                else -> "Initial stop active · profit trail waiting for fees + 1¢ net"
-                            }, style = MaterialTheme.typography.bodySmall)
-                            if (now - p.markAtMs > 3000) Text("STALE · awaiting fresh depth or official settlement", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
-                }
-                item {
-                    PaperPanel {
-                        val recent = a.results.takeLast(20)
-                        Text("Recent trades · net after fees", style = MaterialTheme.typography.titleMedium)
-                        TradeBars(recent)
-                        val windows = recent.map { it.ticker }.distinct().size
-                        Text("${recent.size} trades / $windows contract windows · sizing copies share signals", style = MaterialTheme.typography.labelSmall)
-                        recent.takeLast(5).asReversed().forEach { trade ->
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("${trade.side} · ${trade.count} ct · ${clock(trade.atMs)}", style = MaterialTheme.typography.bodySmall)
-                                Text(money(trade.netUsd), fontWeight = FontWeight.Bold)
+                        item {
+                            val closed = if (newOnly) (account.closed - account.policyStartClosed).coerceAtLeast(0) else account.closed
+                            val fee = if (newOnly) account.fees - account.policyStartFees else account.fees
+                            val plotted = series.first { it.id == family }.points
+                            val dd = if (newOnly && hours == 0) account.maxDrawdown else {
+                                var peak = Double.NEGATIVE_INFINITY
+                                plotted.maxOfOrNull { p -> peak = maxOf(peak, p.value); peak - p.value } ?: 0.0
                             }
-                            Text("Policy ${trade.policyVersion} · ${trade.reason} · fees ${dollars(trade.feesUsd)}", style = MaterialTheme.typography.labelSmall)
+                            Row(Modifier.fillMaxWidth().border(1.dp, rule).padding(horizontal = 20.dp, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Stat("${if (newOnly && hours == 0) "Rule" else "Shown"} drawdown", dollars(dd), Modifier.weight(1f))
+                                Stat("Fees paid", dollars(fee), Modifier.weight(1f))
+                                Stat("Closed", closed.toString(), Modifier.weight(1f))
+                            }
                         }
-                        a.results.lastOrNull { it.policyVersion == 2 }?.let { last ->
-                            Text("Learning · ${last.setup} / ${PaperScalpPolicy.bucket(last.entry)}¢", style = MaterialTheme.typography.labelMedium)
-                            Text(PaperScalpLearning.lesson(a.results, last.setup, last.entry).label, style = MaterialTheme.typography.labelSmall)
+                        item {
+                            Text("Compare the books", Modifier.padding(start = 20.dp, top = 22.dp), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Same allocation · independent paper cash", Modifier.padding(horizontal = 20.dp, vertical = 6.dp), style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                            Row(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                                Text("STRATEGY", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                                Text("NET EQUITY", style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                            }
                         }
-                        if (recent.isEmpty()) Text("No completed trades yet.", style = MaterialTheme.typography.bodySmall)
-                    }
-                }
-                item {
-                    TextButton(onClick = { details = !details }) { Text(if (details) "Hide strategy details" else "Strategy & execution details") }
-                    if (details) {
-                        Text("New entries: price below 50¢, projected move covers both fees + 1¢ net. Initial stop 6–10¢ based on spread and recent noise; profit trail 2–4¢ arms after its exit level covers fees + 1¢ net. Distances freeze at entry; stops only tighten. Losses reduce size and pause re-entry in that contract for 1–5 minutes. Sufficient evidence of a losing setup blocks that setup/price bucket.", style = MaterialTheme.typography.bodySmall)
-                        Text("All orders are simulated against visible depth with fees and a minimum assumed 250ms delay. Missing bids and partial exits remain open. Forecasts and projected moves are experimental, not validated profit estimates. Curves retain the latest 1,440 observations, sampled every 15s and on fills; drawdown metrics track every processed quote. Stops need the monitor running and cannot guarantee a fill price.", style = MaterialTheme.typography.bodySmall)
+                        items(PaperPerformance.families, key = { it.first }) { (id, label) ->
+                            val a = state.accounts.firstOrNull { it.id == "$id-$allocation" }
+                            val value = a?.let { if (newOnly && it.policyVersion == 3) it.equity() - it.policyStartEquity else if (newOnly) 0.0 else it.pnl() } ?: 0.0
+                            Column(Modifier.fillMaxWidth().clickable { choose(id) }.background(if (id == family) Color(0xFF202020) else page).padding(horizontal = 20.dp, vertical = 14.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text(label, fontWeight = if (id == family) FontWeight.Bold else FontWeight.Normal)
+                                    Text(signed(value), fontFamily = FontFamily.Monospace)
+                                }
+                                Text(a?.note ?: "Waiting for data", style = MaterialTheme.typography.labelSmall, color = mutedInk, maxLines = 2, modifier = Modifier.padding(top = 4.dp))
+                            }
+                            HorizontalDivider(color = rule)
+                        }
+                        item {
+                            val results = account.results.filter { !newOnly || it.policyVersion == 3 }
+                            val positives = results.filter { it.netUsd > 0 }
+                            val negatives = results.filter { it.netUsd < 0 }
+                            val factor = if (negatives.isEmpty()) "—" else "%.2f".format(Locale.US, positives.sumOf { it.netUsd } / -negatives.sumOf { it.netUsd })
+                            Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                                Text("Trade quality", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                    Stat("Profit factor", factor, Modifier.weight(1f))
+                                    Stat("Avg win", if (positives.isEmpty()) "—" else dollars(positives.map { it.netUsd }.average()), Modifier.weight(1f))
+                                    Stat("Avg loss", if (negatives.isEmpty()) "—" else dollars(-negatives.map { it.netUsd }.average()), Modifier.weight(1f))
+                                }
+                                Text("Last ${results.size} retained closes · ${results.map { it.ticker }.distinct().size} contract windows. Sizing copies share signals. Paper profitability is unverified.", style = MaterialTheme.typography.bodySmall, color = mutedInk)
+                                Text("Charts contain observed marks only; gaps stay blank. Earlier rules remain in recorded history. Marks include an estimated exit fee and may exceed available exit depth.", style = MaterialTheme.typography.bodySmall, color = mutedInk)
+                                Text(state.recorderNote, style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                            }
+                        }
+                    } else if (tab == 1) {
+                        item {
+                            Column(Modifier.padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("${account.positions.size} open · ${account.pending.size} pending", style = MaterialTheme.typography.headlineSmall)
+                                Text("Available cash ${dollars(account.cash)}", color = mutedInk)
+                                Text(account.note, style = MaterialTheme.typography.bodySmall)
+                                if (account.positions.isEmpty()) Text("No open position in this book", Modifier.padding(vertical = 32.dp), color = mutedInk)
+                            }
+                        }
+                        items(account.positions, key = { it.id }) { p -> PositionDetail(p, now) }
+                    } else {
+                        item {
+                            Column(Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
+                                Text("Realized ${signed(account.realized)}", style = MaterialTheme.typography.headlineSmall)
+                                Text("${account.closed} closes · ${account.wins} wins · total fees ${dollars(account.fees)}", color = mutedInk, style = MaterialTheme.typography.bodySmall)
+                                Text("Latest ${account.results.size} retained trades. Each row includes fees.", color = mutedInk, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                        if (account.results.isEmpty()) item { Text("No completed trades yet", Modifier.padding(20.dp), color = mutedInk) }
+                        items(account.results.asReversed(), key = { it.id }) { trade ->
+                            Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("${trade.side} · ${trade.count} contracts", fontWeight = FontWeight.Bold)
+                                    Text(signed(trade.netUsd), fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                                }
+                                Text("${time(trade.atMs, true)} · rules ${trade.policyVersion} · entry ${cents(trade.entry)}", style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                                Text("${trade.reason} · fees ${dollars(trade.feesUsd)}", style = MaterialTheme.typography.bodySmall)
+                                Text(trade.ticker, style = MaterialTheme.typography.labelSmall, color = mutedInk)
+                            }
+                            HorizontalDivider(color = rule)
+                        }
                     }
                 }
             }
         }
+        if (settings) AlertDialog(onDismissRequest = { settings = false }, title = { Text("Paper strategy settings") }, text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("Allocation ceiling for the displayed books")
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(15, 35, 70, 100).forEach { n ->
+                    FilterChip(allocation == n, onClick = { allocation = n }, label = { Text("$n%") })
+                } }
+                Text("Rules 3 · range recovery, sweep reclaim, trend continuation, signed forecast follow and an adaptive mix. Every entry stays below 50¢ and must cover both fees plus at least 1.25× planned stop risk.", style = MaterialTheme.typography.bodySmall)
+                Text("Initial stop 4–8¢ from spread and 1s bid noise. Trail 2–4¢; arms after fees and at least 75% of planned risk are earned at its proposed stop. New setups explore with 5% of their allocation ceiling; size only grows with completed evidence across markets. Loss cooldowns remain active.", style = MaterialTheme.typography.bodySmall)
+                Text("Prior stops, cash and losses are retained. Updated-rule equity starts with the actual balance after upgrade; it includes any legacy positions still held. Charts retain 1,440 observations per book. No historic curve is invented.", style = MaterialTheme.typography.bodySmall)
+                Text("${state.status}\n${state.recorderNote}", style = MaterialTheme.typography.bodySmall)
+            }
+        }, confirmButton = { TextButton(onClick = { settings = false }) { Text("Done") } })
     }
 }
 
-@Composable private fun PaperPanel(content: @Composable ColumnScope.() -> Unit) {
-    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = paperColors.surface)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp), content = content) }
+@Composable private fun ModeText(label: String, selected: Boolean, click: () -> Unit) {
+    Text(label, Modifier.clickable(onClick = click).padding(vertical = 10.dp), style = MaterialTheme.typography.labelMedium,
+        color = if (selected) ink else mutedInk, fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal)
 }
-@Composable private fun Metric(label: String, value: String) {
-    Column { Text(label, style = MaterialTheme.typography.labelSmall); Text(value, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold) }
+@Composable private fun Stat(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(label, style = MaterialTheme.typography.labelSmall, color = mutedInk)
+        Text(value, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.SemiBold)
+    }
 }
-@Composable private fun EquityPlot(points: List<PaperCurvePoint>, baseline: Double, drawdown: Boolean) {
-    var cursor by remember(points.size, drawdown) { mutableStateOf<Int?>(null) }
-    var peak = baseline
-    val values = points.map { p -> peak = max(peak, p.peakEquity); if (drawdown) p.equity - peak else p.equity - baseline }
-    if (points.size < 2) {
-        Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) { Text("Chart starts with fresh observations", style = MaterialTheme.typography.bodySmall) }
+@Composable private fun LineKey(index: Int, enabled: Boolean) {
+    Canvas(Modifier.width(22.dp).height(12.dp)) {
+        drawLine(if (enabled) chartInk[index] else Color.DarkGray, Offset(0f, size.height / 2), Offset(size.width, size.height / 2),
+            2.dp.toPx(), pathEffect = pattern(index, density))
+    }
+}
+private fun pattern(index: Int, density: Float): PathEffect? = when (index) {
+    1 -> PathEffect.dashPathEffect(floatArrayOf(7f * density, 4f * density))
+    2 -> PathEffect.dashPathEffect(floatArrayOf(2f * density, 3f * density))
+    3 -> PathEffect.dashPathEffect(floatArrayOf(10f * density, 3f * density, 2f * density, 3f * density))
+    4 -> PathEffect.dashPathEffect(floatArrayOf(13f * density, 6f * density))
+    else -> null
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable private fun ComparisonChart(series: List<PaperPerformance.Series>, selected: String, changedAt: Long?, drawdown: Boolean) {
+    val points = series.flatMap { it.points }
+    if (points.isEmpty()) {
+        Box(Modifier.fillMaxWidth().height(260.dp).padding(20.dp).border(1.dp, rule), contentAlignment = Alignment.Center) {
+            Text(if (series.isEmpty()) "Select a strategy below" else "Start the monitor to record performance", color = mutedInk, style = MaterialTheme.typography.bodyMedium)
+        }
         return
     }
-    val lo = minOf(values.min(), 0.0)
-    val hi = maxOf(values.max(), 0.0)
-    val span = (hi - lo).coerceAtLeast(1.0)
-    val start = points.first().atMs
-    val duration = (points.last().atMs - start).coerceAtLeast(1)
-    val at = cursor ?: points.lastIndex
-    Text("${clock(points[at].atMs)} · ${if (drawdown) "drawdown" else "equity change"} ${money(values[at])}", style = MaterialTheme.typography.labelMedium)
-    Canvas(Modifier.fillMaxWidth().height(160.dp).semantics { contentDescription = "${if (drawdown) "Drawdown" else "Equity change"} chart, ${points.size} observations, latest ${money(values.last())}, low ${money(lo)}, high ${money(hi)}" }) {
-        fun y(v: Double) = (8.dp.toPx() + (size.height - 16.dp.toPx()) * (1 - (v - lo) / span)).toFloat()
-        for (i in 0..3) {
-            val yy = 8.dp.toPx() + (size.height - 16.dp.toPx()) * i / 3
-            drawLine(Color(0xFF414141), Offset(0f, yy), Offset(size.width, yy), 1.dp.toPx())
+    val axis = PaperPerformance.axis(series)
+    val axisWidth = if (LocalDensity.current.fontScale > 1.15f) 78.dp else 58.dp
+    val start = points.minOf { it.atMs }
+    val end = points.maxOf { it.atMs }
+    val duration = (end - start).coerceAtLeast(1000)
+    var cursor by remember(selected, drawdown) { mutableStateOf<Long?>(null) }
+    val liveStart by rememberUpdatedState(start)
+    val liveDuration by rememberUpdatedState(duration)
+    val inspected = cursor?.coerceIn(start, end)
+    Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 20.dp, top = 12.dp)) {
+        Row(Modifier.fillMaxWidth().height(246.dp)) {
+            Column(Modifier.width(axisWidth).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                val steps = ((axis.high - axis.low) / axis.step).toInt().coerceIn(1, 8)
+                for (i in 0..steps) Text(axisMoney(axis.high - (axis.high - axis.low) * i / steps), style = MaterialTheme.typography.labelSmall, color = mutedInk)
+            }
+            Canvas(Modifier.weight(1f).fillMaxHeight()
+                .semantics { contentDescription = "${if (drawdown) "Drawdown" else "Net equity"} comparison of ${series.joinToString { it.name }}, from ${time(start)} to ${time(end)}, axis ${signed(axis.low)} to ${signed(axis.high)}" }
+                .pointerInput(Unit) { detectTapGestures(onDoubleTap = { cursor = null }, onTap = { p -> cursor = liveStart + (p.x / size.width).coerceIn(0f, 1f).times(liveDuration).toLong() }) }
+                .pointerInput(Unit) { detectHorizontalDragGestures { change, _ -> change.consume(); cursor = liveStart + (change.position.x / size.width).coerceIn(0f, 1f).times(liveDuration).toLong() } }) {
+                val top = 7.dp.toPx(); val height = size.height - 14.dp.toPx()
+                fun y(value: Double) = (top + height * (axis.high - value) / (axis.high - axis.low)).toFloat()
+                fun x(at: Long) = ((at - start).toDouble() / duration * size.width).toFloat()
+                val steps = ((axis.high - axis.low) / axis.step).toInt().coerceIn(1, 8)
+                for (i in 0..steps) {
+                    val value = axis.high - (axis.high - axis.low) * i / steps
+                    drawLine(if (abs(value) < 1e-8) Color(0xFF646464) else rule, Offset(0f, y(value)), Offset(size.width, y(value)), 1.dp.toPx())
+                }
+                if (changedAt != null && changedAt > start && changedAt < end) drawLine(Color.Gray, Offset(x(changedAt), 0f), Offset(x(changedAt), size.height), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(2.dp.toPx(), 5.dp.toPx())))
+                series.sortedBy { if (it.id == selected) 1 else 0 }.forEach { line ->
+                    val index = PaperPerformance.families.indexOfFirst { it.first == line.id }
+                    val color = if (line.id == selected) Color.White else chartInk[index]
+                    PaperPerformance.segments(line.points).forEach { segment ->
+                        if (segment.size == 1) drawCircle(color, 2.dp.toPx(), Offset(x(segment[0].atMs), y(segment[0].value)))
+                        else {
+                            val path = Path()
+                            segment.forEachIndexed { i, p -> if (i == 0) path.moveTo(x(p.atMs), y(p.value)) else path.lineTo(x(p.atMs), y(p.value)) }
+                            drawPath(path, color, style = Stroke(if (line.id == selected) 2.5.dp.toPx() else 1.5.dp.toPx(), pathEffect = pattern(index, density)))
+                        }
+                    }
+                    line.points.lastOrNull()?.let { drawCircle(color, if (line.id == selected) 3.5.dp.toPx() else 2.dp.toPx(), Offset(x(it.atMs), y(it.value))) }
+                }
+                inspected?.let { at ->
+                    drawLine(ink.copy(alpha = .6f), Offset(x(at), 0f), Offset(x(at), size.height), 1.dp.toPx())
+                    series.forEach { line -> PaperPerformance.valueAt(line, at)?.let { p ->
+                        if (at - p.atMs <= 60_000) drawCircle(ink, 4.dp.toPx(), Offset(x(p.atMs), y(p.value)))
+                    } }
+                }
+            }
         }
-        drawLine(Color.Gray, Offset(0f, y(0.0)), Offset(size.width, y(0.0)), pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())))
-        val path = Path()
-        values.forEachIndexed { i, value ->
-            val x = ((points[i].atMs - start).toDouble() / duration * size.width).toFloat()
-            if (i == 0) path.moveTo(x, y(value)) else path.lineTo(x, y(value))
+        Row(Modifier.fillMaxWidth().padding(start = axisWidth, top = 8.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(time(start), style = MaterialTheme.typography.labelSmall, color = mutedInk)
+            Text(time(start + duration / 2), style = MaterialTheme.typography.labelSmall, color = mutedInk)
+            Text(time(end), style = MaterialTheme.typography.labelSmall, color = mutedInk)
         }
-        drawPath(path, Color.White, style = Stroke(2.dp.toPx()))
-        drawCircle(Color.White, 3.dp.toPx(), Offset(size.width, y(values.last())))
+        val at = inspected
+        if (at != null) {
+            Text("${time(at, true)} · double-tap to return to live", Modifier.padding(start = axisWidth, top = 10.dp), style = MaterialTheme.typography.labelSmall)
+            FlowRow(Modifier.padding(start = axisWidth, top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                series.forEach { line -> val p = PaperPerformance.valueAt(line, at)
+                    Text("${line.name} ${if (p == null || at - p.atMs > 60_000) "—" else signed(p.value)}", style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        } else Text(if (changedAt != null && changedAt > start && changedAt < end) "Dotted vertical line: rules changed · tap chart for values" else "Tap or drag the chart for exact values", Modifier.padding(start = axisWidth, top = 8.dp, bottom = 4.dp), style = MaterialTheme.typography.labelSmall, color = mutedInk)
     }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(clock(start), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
-        Text(clock(points.last().atMs), Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall)
-    }
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Low ${money(lo)}", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
-        Text("High ${money(hi)}", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall)
-    }
-    // Slider permits precise inspection without fighting vertical scrolling on a phone.
-    Slider(value = at.toFloat(), onValueChange = { cursor = it.toInt().coerceIn(points.indices) }, valueRange = 0f..points.lastIndex.toFloat())
 }
-@Composable private fun StopRail(p: PaperScalpPosition) {
-    val low = (minOf(p.stop, p.lastBid, p.entry) - .01).coerceAtLeast(0.0)
-    val high = (maxOf(p.entry, p.highBid, p.lastBid) + .01).coerceAtMost(1.0)
-    Canvas(Modifier.fillMaxWidth().height(40.dp).semantics { contentDescription = "Stop ${cents(p.stop)}, current bid ${cents(p.lastBid)}, entry ${cents(p.entry)}, peak ${cents(p.highBid)}" }) {
-        fun x(price: Double) = (size.width * ((price - low) / (high - low).coerceAtLeast(.01))).toFloat()
-        val y = size.height / 2
-        drawLine(Color.Gray, Offset(0f, y), Offset(size.width, y), 3.dp.toPx())
-        drawLine(Color.White, Offset(x(p.stop), y - 12.dp.toPx()), Offset(x(p.stop), y + 12.dp.toPx()), 3.dp.toPx())
-        drawLine(Color.LightGray, Offset(x(p.entry), y - 8.dp.toPx()), Offset(x(p.entry), y + 8.dp.toPx()), 2.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 3f)))
-        drawCircle(Color.White, 5.dp.toPx(), Offset(x(p.lastBid), y))
-    }
-    Text("│ Stop ${cents(p.stop)}   ● Bid ${cents(p.lastBid)}   ┆ Entry ${cents(p.entry)}", style = MaterialTheme.typography.labelSmall)
-}
-@Composable private fun TradeBars(results: List<PaperScalpResult>) {
-    if (results.isEmpty()) return
-    val scale = results.maxOf { abs(it.netUsd) }.coerceAtLeast(1.0)
-    Canvas(Modifier.fillMaxWidth().height(100.dp).semantics { contentDescription = "Last ${results.size} trade outcomes, ${results.count { it.netUsd > 0 }} wins, net ${money(results.sumOf { it.netUsd })}" }) {
-        val mid = size.height / 2
-        drawLine(Color.Gray, Offset(0f, mid), Offset(size.width, mid), 1.dp.toPx())
-        val step = size.width / results.size
-        results.forEachIndexed { i, trade ->
-            val height = (abs(trade.netUsd) / scale * (mid - 4.dp.toPx())).toFloat()
-            drawRect(if (trade.netUsd < 0) Color.Gray else Color.White, Offset(i * step + step * .15f, if (trade.netUsd >= 0) mid - height else mid), Size(step * .7f, height))
+@Composable private fun PositionDetail(p: PaperScalpPosition, now: Long) {
+    Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        HorizontalDivider(color = rule)
+        Text("${p.side} · ${p.remaining}/${p.count} contracts", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+        Text(p.ticker, style = MaterialTheme.typography.labelSmall, color = mutedInk)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Stat("Entry", cents(p.entry), Modifier.weight(1f)); Stat("Bid", if (p.lastBid > 0) cents(p.lastBid) else "None", Modifier.weight(1f)); Stat("Stop", cents(p.stop), Modifier.weight(1f))
         }
+        val low = (minOf(p.stop, p.lastBid.takeIf { it > 0 } ?: p.stop, p.entry) - .01).coerceAtLeast(0.0)
+        val high = (maxOf(p.entry, p.highBid, p.targetBid) + .01).coerceAtMost(1.0)
+        Canvas(Modifier.fillMaxWidth().height(32.dp)) {
+            fun x(v: Double) = ((v - low) / (high - low).coerceAtLeast(.01) * size.width).toFloat()
+            val y = size.height / 2
+            drawLine(Color.Gray, Offset(0f, y), Offset(size.width, y), 2.dp.toPx())
+            listOf(p.stop, p.entry).forEach { price -> drawLine(ink, Offset(x(price), y - 8.dp.toPx()), Offset(x(price), y + 8.dp.toPx()), 2.dp.toPx()) }
+            if (p.lastBid > 0) drawCircle(ink, 5.dp.toPx(), Offset(x(p.lastBid), y))
+            if (p.targetBid > 0) drawCircle(ink, 5.dp.toPx(), Offset(x(p.targetBid), y), style = Stroke(2.dp.toPx()))
+        }
+        Text("│ stop & entry   ● bid   ○ target ${if (p.targetBid > 0) cents(p.targetBid) else "legacy"}", style = MaterialTheme.typography.labelSmall, color = mutedInk)
+        Text(p.exitReason?.let { "$it · waiting for executable depth" } ?: if (p.trailArmed) "Profit trail armed · peak ${cents(p.highBid)}" else "Protective stop active · profit trail not armed", style = MaterialTheme.typography.bodySmall)
+        Text("Rules ${p.policyVersion} · initial planned risk ${dollars(p.plannedRiskUsd)} · fees paid ${dollars(p.entryFee + p.exitFees)}", style = MaterialTheme.typography.bodySmall, color = mutedInk)
+        if (now - p.markAtMs > 3000) Text("Stale bid mark · no fills until fresh depth or official settlement", style = MaterialTheme.typography.bodySmall)
     }
-    Text("Oldest → newest · above line = gain · below = loss", style = MaterialTheme.typography.labelSmall)
 }
-private fun money(value: Double) = String.format(Locale.US, "$%+,.2f", value)
+private fun signed(value: Double) = String.format(Locale.US, "$%+,.2f", value)
 private fun dollars(value: Double) = String.format(Locale.US, "$%,.2f", value)
 private fun cents(value: Double) = String.format(Locale.US, "%.1f¢", value * 100)
-private fun clock(at: Long) = SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(at))
+private fun time(at: Long, full: Boolean = false) = SimpleDateFormat(if (full) "MMM d HH:mm:ss" else "HH:mm", Locale.US).format(Date(at))
+private fun axisMoney(value: Double): String = when {
+    abs(value) >= 1000 -> String.format(Locale.US, "$%.1fk", value / 1000)
+    abs(value) >= 10 -> String.format(Locale.US, "$%.0f", value)
+    else -> String.format(Locale.US, "$%.1f", value)
+}

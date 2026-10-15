@@ -118,7 +118,7 @@ class MainActivity : ComponentActivity() {
                             val lab by oddsViewModel.paperScalpState.collectAsStateWithLifecycle()
                             com.dirk.kalshiodds.ui.PaperScalpScreen(lab,
                                 onBack = { navigator.back() }, onStart = oddsViewModel::startPaperScalps,
-                                onPause = oddsViewModel::pausePaperScalps)
+                                onPause = oddsViewModel::pausePaperScalps, onExport = oddsViewModel::exportPaperScalps)
                         },
                         settings = {
                             SettingsScreen(
