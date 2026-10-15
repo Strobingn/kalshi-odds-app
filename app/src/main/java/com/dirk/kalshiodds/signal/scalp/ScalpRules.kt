@@ -40,12 +40,18 @@ object ScalpSettings {
     var takeProfit: Double = 0.08
     /** Sell when the bid is this much below the entry. */
     var stopLoss: Double = 0.05
-    /** Buy when the cheaper side is this much under its high. */
-    var dip: Double = 0.05
     /** Max ask to buy. */
-    var maxAsk: Double = 0.52
+    var maxAsk: Double = 0.50
     /** Fraction of cash per entry. */
     var fraction: Double = 0.25
+    /** Minutes left above which the price is treated as range-bound. */
+    var rangeMinutes: Int = 10
+    /** Minutes left below which the price is treated as a rapid shift. */
+    var shiftMinutes: Int = 5
+    /** Bottom of the range to buy when time is long. */
+    var rangeLow: Double = 0.30
+    /** Top of the range to buy when time is long. */
+    var rangeHigh: Double = 0.75
 }
 
 object ScalpCatalog {
@@ -168,8 +174,11 @@ object ScalpCatalog {
             if (pos == null) {
                 val side = cheaper(t)
                 val aPx = ask(t, side)
-                val high = if (side == "NO") t.noHigh else t.yesHigh
-                if (aPx < ScalpSettings.maxAsk && high - aPx + 1e-9 >= ScalpSettings.dip) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
+                val mins = t.tteMs / 60_000.0
+                val falling = falling(t, side)
+                val inRange = mins > ScalpSettings.rangeMinutes && aPx in ScalpSettings.rangeLow..ScalpSettings.rangeHigh
+                val underCap = aPx < ScalpSettings.maxAsk
+                if ((underCap || inRange) && !falling) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {
@@ -202,6 +211,12 @@ object ScalpCatalog {
                 }
             }
         }
+
+    private fun falling(t: ScalpTape, side: String): Boolean {
+        val bids = if (side == "NO") t.noBids else t.yesBids
+        if (bids.size < 3) return false
+        return bids.last() + 1e-9 < bids[bids.size - 2] && bids[bids.size - 2] + 1e-9 < bids[bids.size - 3]
+    }
 
     private fun algo(
         id: String,

@@ -20,6 +20,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import com.dirk.kalshiodds.signal.scalp.ScalpSettings
+import androidx.compose.ui.platform.LocalContext
+import android.content.Context
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -136,11 +138,32 @@ fun ScalpScreen(
 @Composable
 private fun ScalpSettingsCard() {
     val colors = DipTheme.colors
-    val tp = remember { mutableStateOf(ScalpSettings.takeProfit) }
-    val sl = remember { mutableStateOf(ScalpSettings.stopLoss) }
-    val dip = remember { mutableStateOf(ScalpSettings.dip) }
-    val maxAsk = remember { mutableStateOf(ScalpSettings.maxAsk) }
-    val frac = remember { mutableStateOf(ScalpSettings.fraction) }
+    val ctx = LocalContext.current
+    val prefs = remember { ctx.getSharedPreferences("scalp_settings", Context.MODE_PRIVATE) }
+    val tp = remember { mutableStateOf(prefs.getFloat("tp", ScalpSettings.takeProfit.toFloat()).toDouble()) }
+    val sl = remember { mutableStateOf(prefs.getFloat("sl", ScalpSettings.stopLoss.toFloat()).toDouble()) }
+    val maxAsk = remember { mutableStateOf(prefs.getFloat("maxAsk", ScalpSettings.maxAsk.toFloat()).toDouble()) }
+    val frac = remember { mutableStateOf(prefs.getFloat("frac", ScalpSettings.fraction.toFloat()).toDouble()) }
+    val rangeMin = remember { mutableStateOf(prefs.getInt("rangeMin", ScalpSettings.rangeMinutes).toDouble()) }
+    val shiftMin = remember { mutableStateOf(prefs.getInt("shiftMin", ScalpSettings.shiftMinutes).toDouble()) }
+    val rangeLow = remember { mutableStateOf(prefs.getFloat("rangeLow", ScalpSettings.rangeLow.toFloat()).toDouble()) }
+    val rangeHigh = remember { mutableStateOf(prefs.getFloat("rangeHigh", ScalpSettings.rangeHigh.toFloat()).toDouble()) }
+    ScalpSettings.takeProfit = tp.value
+    ScalpSettings.stopLoss = sl.value
+    ScalpSettings.maxAsk = maxAsk.value
+    ScalpSettings.fraction = frac.value
+    ScalpSettings.rangeMinutes = rangeMin.value.toInt()
+    ScalpSettings.shiftMinutes = shiftMin.value.toInt()
+    ScalpSettings.rangeLow = rangeLow.value
+    ScalpSettings.rangeHigh = rangeHigh.value
+    fun save() {
+        prefs.edit()
+            .putFloat("tp", tp.value.toFloat()).putFloat("sl", sl.value.toFloat())
+            .putFloat("maxAsk", maxAsk.value.toFloat()).putFloat("frac", frac.value.toFloat())
+            .putInt("rangeMin", rangeMin.value.toInt()).putInt("shiftMin", shiftMin.value.toInt())
+            .putFloat("rangeLow", rangeLow.value.toFloat()).putFloat("rangeHigh", rangeHigh.value.toFloat())
+            .apply()
+    }
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -150,16 +173,19 @@ private fun ScalpSettingsCard() {
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(
-            String.format(Locale.US, "Next buy: dip %.0f¢ · ask < %.0f¢ · size %.0f%% · TP %.0f¢ · SL %.0f¢",
-                dip.value * 100, maxAsk.value * 100, frac.value * 100, tp.value * 100, sl.value * 100),
+            String.format(Locale.US, "Next buy: under %.0f¢ or %.0f–%.0f¢ with >%d min · size %.0f%% · TP %.0f¢ · SL %.0f¢",
+                maxAsk.value * 100, rangeLow.value * 100, rangeHigh.value * 100, rangeMin.value.toInt(), frac.value * 100, tp.value * 100, sl.value * 100),
             style = MaterialTheme.typography.labelSmall,
             color = colors.accentBlue
         )
-        SettingSlider("Take profit", tp.value, 0.02, 0.25) { tp.value = it; ScalpSettings.takeProfit = it }
-        SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it }
-        SettingSlider("Dip", dip.value, 0.02, 0.15) { dip.value = it; ScalpSettings.dip = it }
-        SettingSlider("Max ask", maxAsk.value, 0.30, 0.70) { maxAsk.value = it; ScalpSettings.maxAsk = it }
-        SettingSlider("Size", frac.value, 0.05, 0.50) { frac.value = it; ScalpSettings.fraction = it }
+        SettingSlider("Take profit", tp.value, 0.02, 0.25) { tp.value = it; ScalpSettings.takeProfit = it; save() }
+        SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it; save() }
+        SettingSlider("Max ask", maxAsk.value, 0.30, 0.70) { maxAsk.value = it; ScalpSettings.maxAsk = it; save() }
+        SettingSlider("Size", frac.value, 0.05, 0.50) { frac.value = it; ScalpSettings.fraction = it; save() }
+        SettingSlider("Range minutes", rangeMin.value, 5.0, 14.0) { rangeMin.value = it; ScalpSettings.rangeMinutes = it.toInt(); save() }
+        SettingSlider("Shift minutes", shiftMin.value, 1.0, 10.0) { shiftMin.value = it; ScalpSettings.shiftMinutes = it.toInt(); save() }
+        SettingSlider("Range low", rangeLow.value, 0.10, 0.50) { rangeLow.value = it; ScalpSettings.rangeLow = it; save() }
+        SettingSlider("Range high", rangeHigh.value, 0.50, 0.90) { rangeHigh.value = it; ScalpSettings.rangeHigh = it; save() }
     }
 }
 
