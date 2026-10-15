@@ -54,6 +54,13 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { /* in-app recent-signals list still works if denied */ }
 
+    private val paperReplayExport = registerForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null) lifecycleScope.launch {
+            val message = runCatching { oddsViewModel.exportPaperScalps(uri) }.getOrElse { "Export failed: ${it.message}" }
+            android.widget.Toast.makeText(this@MainActivity, message, android.widget.Toast.LENGTH_LONG).show()
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         SignalNotifier.ensureChannels(this)
@@ -118,7 +125,7 @@ class MainActivity : ComponentActivity() {
                             val lab by oddsViewModel.paperScalpState.collectAsStateWithLifecycle()
                             com.dirk.kalshiodds.ui.PaperScalpScreen(lab,
                                 onBack = { navigator.back() }, onStart = oddsViewModel::startPaperScalps,
-                                onPause = oddsViewModel::pausePaperScalps, onExport = oddsViewModel::exportPaperScalps)
+                                onPause = oddsViewModel::pausePaperScalps, onExport = { paperReplayExport.launch("BitcoinEdge-paper-replay.zip") })
                         },
                         settings = {
                             SettingsScreen(

@@ -1,8 +1,5 @@
 package com.dirk.kalshiodds.ui
 
-import android.net.Uri
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -41,7 +38,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.scalp.*
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -60,7 +56,7 @@ private val labColors = darkColorScheme(primary = ink, onPrimary = Color.Black, 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> Unit, onPause: (Boolean) -> Unit,
-                     onExport: suspend (Uri) -> String = { "Export is unavailable" }, initialTab: Int = 0) {
+                     onExport: () -> Unit = {}, initialTab: Int = 0) {
     var tab by rememberSaveable { mutableIntStateOf(initialTab) }
     var family by rememberSaveable { mutableStateOf("adaptive") }
     var allocation by rememberSaveable { mutableIntStateOf(35) }
@@ -73,14 +69,6 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
     var picker by remember { mutableStateOf(false) }
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { delay(1000); now = System.currentTimeMillis() } }
-    val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
-    val export = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
-        if (uri != null) scope.launch {
-            val result = runCatching { onExport(uri) }.getOrElse { "Export failed: ${it.message}" }
-            snackbar.showSnackbar(result)
-        }
-    }
     val account = state.accounts.firstOrNull { it.id == "$family-$allocation" } ?: state.accounts.firstOrNull() ?: return
     val series = remember(state.accounts, state.lastQuoteMs, allocation, newOnly, hours, drawdown) {
         PaperPerformance.series(state, allocation, newOnly, hours.takeIf { it > 0 }, drawdown)
@@ -89,7 +77,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
     val pnl = if (newOnly) { if (account.policyVersion == PaperScalpPolicy.VERSION && account.policyStartedMs > 0) account.equity() - account.policyStartEquity else 0.0 } else account.pnl()
     fun choose(id: String) { family = id; if (id !in visible) visible = visible + id }
     MaterialTheme(colorScheme = labColors) {
-        Scaffold(containerColor = page, snackbarHost = { SnackbarHost(snackbar) }, topBar = {
+        Scaffold(containerColor = page, topBar = {
             TopAppBar(title = { Text("Strategies", fontWeight = FontWeight.SemiBold) }, navigationIcon = {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             }, actions = {
@@ -102,7 +90,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                     IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "Lab settings and export") }
                     DropdownMenu(menu, onDismissRequest = { menu = false }) {
                         DropdownMenuItem(text = { Text("Sizing & strategy rules") }, onClick = { menu = false; settings = true })
-                        DropdownMenuItem(text = { Text("Export recorded books & trades") }, onClick = { menu = false; export.launch("BitcoinEdge-paper-replay.zip") })
+                        DropdownMenuItem(text = { Text("Export recorded books & trades") }, onClick = { menu = false; onExport() })
                     }
                 }
             }, colors = TopAppBarDefaults.topAppBarColors(containerColor = page))
@@ -116,6 +104,12 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                 TabRow(tab, containerColor = page, contentColor = ink) {
                     listOf("Performance", "Positions", "Trades").forEachIndexed { i, title -> Tab(tab == i, onClick = { tab = i }, text = { Text(title) }) }
                 }
+                val problem = when {
+                    state.status.contains("error", true) || state.status.contains("backoff", true) -> state.status
+                    state.recorderNote.contains("error", true) -> state.recorderNote
+                    else -> null
+                }
+                if (problem != null) Text(problem, Modifier.fillMaxWidth().background(Color(0xFF292929)).padding(horizontal = 20.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall)
                 LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 28.dp)) {
                     item {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -159,10 +153,11 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                             }
                         }
                         item {
-                            val closed = if (newOnly) (account.closed - account.policyStartClosed).coerceAtLeast(0) else account.closed
-                            val fee = if (newOnly) account.fees - account.policyStartFees else account.fees
+                            val currentRules = account.policyVersion == PaperScalpPolicy.VERSION && account.policyStartedMs > 0
+                            val closed = if (newOnly) { if (currentRules) (account.closed - account.policyStartClosed).coerceAtLeast(0) else 0 } else account.closed
+                            val fee = if (newOnly) { if (currentRules) account.fees - account.policyStartFees else 0.0 } else account.fees
                             val plotted = series.first { it.id == family }.points
-                            val dd = if (newOnly && hours == 0) account.maxDrawdown else {
+                            val dd = if (newOnly && hours == 0) { if (currentRules) account.maxDrawdown else 0.0 } else {
                                 var peak = Double.NEGATIVE_INFINITY
                                 plotted.maxOfOrNull { p -> peak = maxOf(peak, p.value); peak - p.value } ?: 0.0
                             }

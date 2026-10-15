@@ -87,9 +87,9 @@ object PaperScalpLearning {
         val trades = results.filter { it.policyVersion == policy && it.setup == setup && PaperScalpPolicy.bucket(it.entry) == PaperScalpPolicy.bucket(price) }.takeLast(80)
         if (trades.isEmpty()) return PaperLesson(0, 0.0, .05, .04, 0, .10)
         val values = trades.map { it.netUsd / it.count }
-        val mean = values.average()
         // Group by complete contract window: repeated scalps on one window are correlated.
         val blocks = trades.groupBy { it.ticker }.values.map { block -> block.sumOf { it.netUsd } / block.sumOf { it.count } }
+        val mean = if (policy >= 3) blocks.average() else values.average()
         val se = if (blocks.size < 2) .10 else sqrt(blocks.sumOf { (it - blocks.average()) * (it - blocks.average()) } / (blocks.size - 1) / blocks.size)
         val lower = mean - 2 * se
         val scale = when {
@@ -166,6 +166,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
     private val histories = mutableMapOf<String, ArrayDeque<PaperDepth>>()
     private val lastRevision = mutableMapOf<String, Long>()
     private var scannedRevision = Long.MIN_VALUE
+    private var scannedTicker = ""
     private var scanned = PaperScalpSignals.Scan(emptyList(), "Waiting for history")
     init {
         historySeed.sortedBy { it.atMs }.forEach { q ->
@@ -175,7 +176,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
     }
     @Synchronized fun replayHistory(): List<PaperDepth> = histories.values.flatMap { it.toList() }.groupBy { it.ticker to it.atMs / 1000 }.values.map { it.maxBy { q -> q.atMs } }.sortedBy { it.atMs }
     private fun scan(q: PaperDepth, history: List<PaperDepth>): PaperScalpSignals.Scan {
-        if (scannedRevision != q.revision) { scanned = PaperScalpSignals.scan(q, history); scannedRevision = q.revision }
+        if (scannedRevision != q.revision || scannedTicker != q.ticker) { scanned = PaperScalpSignals.scan(q, history); scannedRevision = q.revision; scannedTicker = q.ticker }
         return scanned
     }
     @Synchronized fun snapshot() = _state.value
@@ -254,7 +255,7 @@ class AdaptivePaperScalp(initial: PaperScalpState = PaperScalpState(),
             if (p.exitReason == null) {
                 val proceeds = PaperBookWalk.sell(available(q, account).bids(p.side), p.remaining)
                 val netIfFullySold = if (proceeds.count == p.remaining) p.netProceeds + proceeds.value - proceeds.fees - p.entryValue - p.entryFee else Double.NEGATIVE_INFINITY
-                val lesson = PaperScalpLearning.lesson(account.results, p.setup, p.entry)
+                val lesson = PaperScalpLearning.lesson(account.results, p.setup, p.entry, p.policyVersion)
                 val fairGone = q.fair(p.side)?.let { it <= bid } == true
                 val fading = history.lastOrNull()?.bid(p.side)?.let { bid < it - 1e-9 } == true
                 val reason = when {

@@ -24,7 +24,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
     private val json = Json { ignoreUnknownKeys = true }
     private val engines = ConcurrentHashMap<String, AdaptivePaperScalp>()
     private val saved = ConcurrentHashMap<String, Pair<Long, PaperScalpState>>()
-    private val _state = MutableStateFlow(runCatching { engine(source()).snapshot() }.getOrDefault(PaperScalpState()))
+    private val _state = MutableStateFlow(runCatching { engine(source()).snapshot() }.getOrElse { PaperScalpState(paused = true, status = "Paper ledger error: ${it.message}") })
     val state = _state.asStateFlow()
     private val http = OkHttpClient.Builder().connectTimeout(3, TimeUnit.SECONDS).readTimeout(3, TimeUnit.SECONDS).callTimeout(4, TimeUnit.SECONDS).build()
     private var marketTicker: String? = null

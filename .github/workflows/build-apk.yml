@@ -74,6 +74,14 @@ jobs:
       - name: Render paper dashboard
         run: ./gradlew :app:recordPaparazziDebug --tests 'com.dirk.kalshiodds.ui.PaperScalpScreenshotTest' --no-daemon
 
+      - name: Upload dashboard test reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dashboard-test-reports
+          path: app/build/test-results/testDebugUnitTest/*.xml
+          if-no-files-found: warn
+
       - name: Upload paper dashboard renders
         uses: actions/upload-artifact@v4
         with:

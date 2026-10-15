@@ -156,6 +156,15 @@ class AdaptivePaperScalpTest {
         val blocked = AdaptivePaperScalp(initial().copy(accounts = initial().accounts.map { if (it.id == "cheap-100") it.copy(results = losses) else it }))
         warm(blocked); blocked.onBook(q(33000)); assertTrue(account(blocked).pending.isEmpty())
     }
+    @Test fun manyWinsInOneWindowCannotOutvoteOtherLosingWindows() {
+        val base = PaperScalpResult("a", ticker, "cheap", "YES", 100, .4, 1.0, 3.0, .08, .03, "target", 1, 3)
+        val wins = (1..20).map { base.copy(id = "$it") }
+        val losses = listOf(base.copy(id = "b", ticker = "KXBTC15M-B", netUsd = -10.0), base.copy(id = "c", ticker = "KXBTC15M-C", netUsd = -10.0))
+        val lesson = PaperScalpLearning.lesson(wins + losses, "cheap", .4)
+        assertEquals(3, lesson.windows)
+        assertTrue(lesson.meanNet < 0)
+        assertTrue(lesson.sizeScale <= .10)
+    }
     @Test fun upgradePreservesBothLegacyStopTypesAndHistoricalLosses() {
         val active = account(entered()).positions.single()
         for (version in listOf(1, 2)) {
