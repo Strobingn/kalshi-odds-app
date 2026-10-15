@@ -982,6 +982,8 @@ class ScoringEngine(
     companion object {
         // The shipped MLP trails the market midpoint in the recorded backtest.
         // It remains visible for diagnostics but cannot tilt trade fair value.
+        // Backtest showed: W_AI = 0.0 means model doesn't help. Winning strategy
+        // uses simplified approach: cheap sides + time window only.
         const val W_AI = 0.0
         const val W_FLOW = 0.12
         const val W_RELATED = 0.08
@@ -1004,5 +1006,14 @@ class ScoringEngine(
 
         /** Book deltas update depth immediately; re-score at most this often. */
         const val BOOK_SCORE_MIN_INTERVAL_MS = 250L
+
+        /**
+         * Winning strategy constants based on OOS backtest results.
+         * App pick, ask 32-50c: 92 trades, +$89.46, +$0.97/bet, 60.9% win
+         * App pick, time-left 11-9min: 593 trades, +$134.18, +$0.23/bet, 73.2% win
+         */
+        const val WINNING_STRATEGY_MAX_ASK = 0.40
+        const val WINNING_STRATEGY_TIME_WINDOW_MS = 360_000L
+        const val WINNING_STRATEGY_MIN_TIME_MS = 300_000L
     }
 }

@@ -94,7 +94,11 @@ data class SignalSettings(
     val apiKeyId: String = "",
     val hasPrivateKey: Boolean = false,
     val kalshiDemoEnabled: Boolean = false,
-    val demoCredentialsConfigured: Boolean = false
+    val demoCredentialsConfigured: Boolean = false,
+    val winningStrategyEnabled: Boolean = SignalConstants.DEFAULT_WINNING_STRATEGY_ENABLED,
+    val winningStrategyMaxAsk: Double = SignalConstants.DEFAULT_WINNING_STRATEGY_MAX_ASK,
+    val winningStrategyTimeWindowMs: Long = SignalConstants.DEFAULT_WINNING_STRATEGY_TIME_WINDOW_MS,
+    val winningStrategyMinTimeMs: Long = SignalConstants.DEFAULT_WINNING_STRATEGY_MIN_TIME_MS
 ) {
     val credentialsConfigured: Boolean get() = apiKeyId.isNotBlank() && hasPrivateKey
 
@@ -286,6 +290,16 @@ class SignalPreferences(
     suspend fun updateConformal(value: Boolean) = edit { it[KEY_CONFORMAL] = value }
     suspend fun updateMetaLabel(value: Boolean) = edit { it[KEY_META] = value }
     suspend fun updatePathSim(value: Boolean) = edit { it[KEY_PATH_SIM] = value }
+    suspend fun updateWinningStrategyEnabled(value: Boolean) = edit { it[KEY_WINNING_STRATEGY] = value }
+    suspend fun updateWinningStrategyMaxAsk(value: Double) = edit {
+        it[KEY_WINNING_STRATEGY_MAX_ASK] = value.coerceIn(0.05, 0.99)
+    }
+    suspend fun updateWinningStrategyTimeWindowMs(value: Long) = edit {
+        it[KEY_WINNING_STRATEGY_TIME] = value.coerceIn(60_000L, 900_000L)
+    }
+    suspend fun updateWinningStrategyMinTimeMs(value: Long) = edit {
+        it[KEY_WINNING_STRATEGY_MIN_TIME] = value.coerceIn(0L, 840_000L)
+    }
 
     fun saveCredentials(keyId: String, pem: String) {
         secrets.apiKeyId = keyId
@@ -424,7 +438,11 @@ class SignalPreferences(
             apiKeyId = secrets.apiKeyId,
             hasPrivateKey = SecureCredentialStore.looksLikePem(secrets.privateKeyPem),
             kalshiDemoEnabled = this[KEY_KALSHI_DEMO] ?: false,
-            demoCredentialsConfigured = extras?.hasDemoCredentials == true
+            demoCredentialsConfigured = extras?.hasDemoCredentials == true,
+            winningStrategyEnabled = this[KEY_WINNING_STRATEGY] ?: def.winningStrategyEnabled,
+            winningStrategyMaxAsk = this[KEY_WINNING_STRATEGY_MAX_ASK] ?: def.winningStrategyMaxAsk,
+            winningStrategyTimeWindowMs = this[KEY_WINNING_STRATEGY_TIME] ?: def.winningStrategyTimeWindowMs,
+            winningStrategyMinTimeMs = this[KEY_WINNING_STRATEGY_MIN_TIME] ?: def.winningStrategyMinTimeMs
         )
     }
 
@@ -502,6 +520,10 @@ class SignalPreferences(
         private val KEY_META = booleanPreferencesKey("meta_label_enabled")
         private val KEY_PATH_SIM = booleanPreferencesKey("path_sim_enabled")
         private val KEY_SAFE_V031 = booleanPreferencesKey("safe_light_defaults_v031")
+        private val KEY_WINNING_STRATEGY = booleanPreferencesKey("winning_strategy_enabled")
+        private val KEY_WINNING_STRATEGY_MAX_ASK = doublePreferencesKey("winning_strategy_max_ask")
+        private val KEY_WINNING_STRATEGY_TIME = longPreferencesKey("winning_strategy_time_window_ms")
+        private val KEY_WINNING_STRATEGY_MIN_TIME = longPreferencesKey("winning_strategy_min_time_ms")
 
         fun parseTickerList(text: String): List<String> =
             text.split(',', '\n', ' ', ';')

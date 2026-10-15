@@ -55,7 +55,8 @@ object TicketBuilder {
         val hunter = live.mapNotNull { proposeHunter(it, ctx) }
         val value = live.mapNotNull { proposeHunterValue(it, ctx) }
         val configured = live.mapNotNull { propose(it, ctx) }
-        return (hunter + value + configured)
+        val winningStrategy = live.mapNotNull { proposeWinningStrategy(it, ctx) }
+        return (hunter + value + configured + winningStrategy)
             .distinctBy { "${it.kind}|${it.ticker}|${it.side}" }
             .sortedByDescending { it.maxPayoutUsd }
     }
@@ -681,6 +682,52 @@ object TicketBuilder {
         } else {
             book.yes.maxByOrNull { it.first }?.first?.let { KalshiPrice.impliedAskFromOppositeBid(it) }
         }
+    }
+
+    /**
+     * Winning strategy: only propose tickets for cheap sides in the right time window.
+     * Based on backtest results: app pick, ask 32-50c: +$0.97/bet, 60.9% win rate
+     * and app pick, time-left 11-9min: +$0.23/bet, 73.2% win rate
+     */
+    fun proposeWinningStrategy(market: MarketUiModel, ctx: Context): TradeTicket? {
+        if (!ctx.settings.ticketsEnabled) return null
+        if (!ctx.settings.winningStrategyEnabled) return null
+        if (!MarketLifecycle.isTradable(market, ctx.nowMs)) return null
+        
+        val config = WinningStrategy.Config(
+            enabled = true,
+            maxAskFilter = ctx.settings.winningStrategyMaxAsk,
+            timeWindowMs = ctx.settings.winningStrategyTimeWindowMs,
+            minTimeToCloseMs = ctx.settings.winningStrategyMinTimeMs,
+            minProfitIfWinUsd = ctx.settings.minProfitIfWinUsd
+        )
+        
+        val closeTime = market.closeTimeEpochMs ?: return null
+        val timeLeft = closeTime - ctx.nowMs
+        
+        // Check if we're in the time window
+        if (timeLeft !in config.minTimeToCloseMs..config.timeWindowMs) return null
+        
+        // Find the cheap side (if any)
+        val yesAsk = market.yesAsk ?: return null
+        val noAsk = market.noAsk ?: return null
+        
+        val cheapSide = when {
+            yesAsk <= config.maxAskFilter && yesAsk <= noAsk -> "YES"
+            noAsk <= config.maxAskFilter && noAsk < yesAsk -> "NO"
+            else -> null
+        } ?: return null
+        
+        val stake = PayoutGate.clipStake(SignalConstants.HUNTER_STAKE_USD)
+        return buildTicket(
+            market = market,
+            side = cheapSide,
+            ctx = ctx,
+            stakeUsd = stake,
+            minPayoutUsd = SignalConstants.HUNTER_MIN_PAYOUT_USD,
+            kind = TicketKind.WINNING_STRATEGY,
+            requireGates = false
+        )
     }
 
     private fun gateSummary(market: MarketUiModel, ctx: Context): String {

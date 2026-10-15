@@ -145,6 +145,32 @@ object SignalConstants {
      */
     const val DEFAULT_LONG_SHOT_MAX_ASK = 0.20
 
+
+    // --- Winning Strategy Settings ---
+
+    /**
+     * Enable simplified winning strategy (cheap sides + time window)
+     * Default off - user must explicitly enable
+     */
+    const val DEFAULT_WINNING_STRATEGY_ENABLED = false
+
+    /**
+     * Max ask filter for winning strategy (default 40c)
+     * Based on backtest: app pick, ask 32-50c showed +$0.97/bet
+     */
+    const val DEFAULT_WINNING_STRATEGY_MAX_ASK = 0.40
+
+    /**
+     * Time window before close for winning strategy (default: 6 minutes = 360,000ms)
+     * Based on backtest: app pick, time-left 11-9min showed +$0.23/bet
+     */
+    const val DEFAULT_WINNING_STRATEGY_TIME_WINDOW_MS = 360_000L
+
+    /**
+     * Minimum time before close (default: 5 minutes = 300,000ms)
+     * Avoids the very end where fills get expensive
+     */
+    const val DEFAULT_WINNING_STRATEGY_MIN_TIME_MS = 300_000L
     /** Legacy $1 → $5 keys — kept so History restore can derive max ask. */
     const val HUNTER_VALUE_STAKE_USD = 1.0
     const val HUNTER_VALUE_PAYOUT_USD = 5.0
