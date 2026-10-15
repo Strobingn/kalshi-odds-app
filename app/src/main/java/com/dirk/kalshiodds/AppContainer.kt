@@ -120,11 +120,19 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            // Fast path: book auto-position settlement P&L (and free the
+            // slot) the moment the scorer learns the outcome, before the
+            // market vanishes from the tradable list.
+            autoTrade.noteSettlement(ticker, result, hub.settings.feeRate, System.currentTimeMillis())
+        },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
             paper.book.settleFromLog(logStore.readAll())
+            // Catch auto-position settlements the app slept through.
+            autoTrade.settleFromLog(logStore.readAll(), hub.settings.feeRate, System.currentTimeMillis())
             val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
                 logStore.readAll(),
                 feeRate = hub.settings.feeRate

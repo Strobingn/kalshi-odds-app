@@ -673,6 +673,21 @@ object TicketBuilder {
         }
     }
 
+    /**
+     * Visible size sitting at the best exit bid for [side], from the live
+     * book only (REST quotes and ticks carry no depth). Null when the book
+     * is not loaded; 0 when the book shows no bid on this side. Auto entries
+     * use this to refuse markets where the exit door is too small — the
+     * scalp harness's worst leak was buying into books whose bid vanished
+     * before the exit ("held to settlement — no exit liquidity").
+     */
+    fun bidDepthAtBest(market: MarketUiModel, side: String, ctx: Context): Double? {
+        val book = ctx.books[market.ticker]
+        if (book == null || book.isEmpty()) return null
+        val levels = if (side == "YES") book.yes else book.no
+        return levels.maxByOrNull { it.first }?.second ?: 0.0
+    }
+
     fun bestAsk(market: MarketUiModel, side: String, ctx: Context): Double? {
         val book = ctx.books[market.ticker]
         val tick = ctx.ticks[market.ticker]

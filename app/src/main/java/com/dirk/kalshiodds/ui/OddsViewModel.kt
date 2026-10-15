@@ -139,7 +139,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     _state.update { cur ->
                         val notice = tickets.lastError
-                            ?.takeIf { com.dirk.kalshiodds.signal.trade.TicketSession.isWindowClosedError(it) }
+                        ?.takeIf { com.dirk.kalshiodds.signal.trade.TicketSession.isWindowClosedError(it) }
                         val userMessage = when {
                             notice != null && cur.userMessage != notice -> notice
                             notice == null &&
@@ -1064,8 +1064,10 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val marketsByTicker = live.associateBy { it.ticker }
         val portfolioTickers = s.positions.map { it.ticker }.toSet()
         // Settled markets vanish from the portfolio AND the tradable list.
-        // Drop their entries so the position cap frees up. Settlement P&L is
-        // not knowable locally, so removals are P&L-neutral on purpose.
+        // Settlement P&L is booked by noteSettlement (fast path when the
+        // scorer fires, sweep from the prediction log after every score) —
+        // by the time a ticker is gone everywhere its outcome is already
+        // booked, so these removals simply free the position slot.
         if (marketsByTicker.isNotEmpty() && portfolioTickers.isNotEmpty()) {
             for (pos in store.openPositions()) {
                 val goneEverywhere = pos.ticker !in portfolioTickers && pos.ticker !in marketsByTicker
@@ -1102,6 +1104,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             // autoApprove places the resized ticket.
             val resized = TicketBuilder.resizeForAuto(candidate, market, ctx, s.settings.autoMaxStakeUsd)
             val liveAsk = TicketBuilder.bestAsk(market, resized.side, ctx)
+            // Exit-liquidity gate: never enter where no exit bid exists —
+            // "held to settlement (no exit liquidity)" was the scalp
+            // harness's biggest single leak. When the book is loaded,
+            // require real size sitting at the exit bid too.
+            if (TicketBuilder.freshBestBid(market, resized.side, ctx) == null) continue
+            val exitDepth = TicketBuilder.bidDepthAtBest(market, resized.side, ctx)
+            if (exitDepth != null &&
+                exitDepth < com.dirk.kalshiodds.signal.config.SignalConstants.AUTO_MIN_EXIT_BID_CONTRACTS
+            ) {
+                continue
+            }
             val block = AutoTradeEngine.entryBlockReason(
                 armed = s.settings.autoTradeEnabled,
                 credentialsConfigured = s.settings.tradingCredentialsConfigured(),
@@ -1259,7 +1272,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             closeTimeLocal = null,
             closeTimeEpochMs = pos.closeTimeEpochMs,
             status = "active",
-            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticket.ticker).label
+            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticker.ticker).label
         )
     }
 
