@@ -86,6 +86,41 @@ class ScalpControlsTest {
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
 class SavedScalpControlsTest {
+    @Test fun heavyTradeTrafficCoalescesDiskWritesAndKeepsEveryOutcome() {
+        val ctx = ApplicationProvider.getApplicationContext<Context>()
+        val prefs = ctx.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
+        prefs.edit().clear().commit()
+        val a = SavedScalpControls(ctx, flushDelayMs = 60_000)
+        val trade = ScalpTrade("t", "KXBTC15M-X", "YES", ScalpState.CLOSED, 0, .4, .5,
+            contracts = 2, netUsd = .10, closedAtMs = 10_000)
+        val workers = (0..3).map { worker -> Thread {
+            repeat(5000) { i ->
+                a.recordEntry(10_000)
+                if (i < 100) a.recordOutcome("v2-test-$worker", trade.copy(id = "$worker-$i"))
+            }
+        }.apply { start() } }
+        workers.forEach { it.join(10_000); assertFalse(it.isAlive) }
+        assertEquals(20_000, a.entries(10_000))
+        assertEquals(0, a.entries(3_611_000))
+        assertEquals(20_000, a.entries(10_000))
+        (0..3).forEach { assertEquals(100, a.feedback("v2-test-$it").trades) }
+        // The hot path updates memory, not the SharedPreferences map or lifecycle apply queue.
+        assertNull(prefs.getString("entry-buckets", null))
+        assertNull(prefs.getString("feedback:v2-test-0", null))
+        assertTrue(a.flushPending())
+        assertNotNull(prefs.getString("feedback:v2-test-0", null))
+        a.close()
+        val b = SavedScalpControls(ctx, flushDelayMs = 60_000)
+        assertEquals(20_000, b.entries(10_000))
+        (0..3).forEach { worker ->
+            b.recordOutcome("v2-test-$worker", trade.copy(id = "$worker-99"))
+            assertEquals(100, b.feedback("v2-test-$worker").trades)
+        }
+        repeat(4000) { b.recordEntry(20_000L + it * 1000L) }
+        assertEquals(3601, b.entries(4_019_000))
+        b.close()
+    }
+
     @Test fun controlsCountsAndEachOutcomeSurviveReopenWithoutDuplicateLearning() {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         ctx.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE).edit().clear().commit()

@@ -107,39 +107,118 @@ class MemoryScalpControls(initial: ScalpControls = ScalpControls()) : ScalpContr
         Unit
     }
 }
-class SavedScalpControls(context: Context) : ScalpControlsRepository {
+/**
+ * Trade bookkeeping stays in memory. A single delayed IO job commits the latest dirty
+ * values together, avoiding per-fill apply() work that Android drains on Main at lifecycle changes.
+ * Settings/feedback keys are unchanged, so 0.3.70 data is read without a migration/reset.
+ */
+class SavedScalpControls(context: Context, private val flushDelayMs: Long = 1_000L) : ScalpControlsRepository {
     private val prefs = context.applicationContext.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE)
     private val json = Json { ignoreUnknownKeys = true }
     override val state = MutableStateFlow(read())
     private fun read() = runCatching { json.decodeFromString<ScalpControls>(prefs.getString("settings", "{}")!!).normalized() }.getOrDefault(ScalpControls())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key -> if (key == "settings") state.value = read() }
+    private val lock = Any()
+    private val writerLock = Any()
+    private val writer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
+        Thread(task, "kashi-scalp-controls").apply { isDaemon = true }
+    }.apply { removeOnCancelPolicy = true }
+    private var scheduled: java.util.concurrent.ScheduledFuture<*>? = null
+    private var closed = false
+    private val times = java.util.TreeMap<Long, Int>().apply {
+        prefs.getString("entry-buckets", "").orEmpty().split(',').forEach { token ->
+            val at = token.substringBefore(':').toLongOrNull()
+            val count = token.substringAfter(':', "").toIntOrNull()
+            if (at != null && count != null && count > 0) put(at, count)
+        }
+        while (size > 3601) pollFirstEntry()
+    }
+    private val lessons = mutableMapOf<String, ScalpTradeFeedback>()
+    private val learned = mutableMapOf<String, LinkedHashSet<String>>()
+    private val dirty = mutableSetOf<String>()
+    private var entriesDirty = false
+    private var countAtSec = Long.MIN_VALUE
+    private var cachedCount = 0
     init { prefs.registerOnSharedPreferenceChangeListener(listener) }
     override fun save(value: ScalpControls) {
         val clean = value.normalized()
         prefs.edit().putString("settings", json.encodeToString(clean)).apply()
         state.value = clean
     }
-    private fun buckets() = prefs.getString("entry-buckets", "").orEmpty().split(',').mapNotNull { token ->
-        val pair = token.split(':')
-        val at = pair.getOrNull(0)?.toLongOrNull(); val n = pair.getOrNull(1)?.toIntOrNull()
-        if (at != null && n != null && n > 0) at to n else null
-    }.toMap().toMutableMap()
-    @Synchronized override fun entries(now: Long): Int = buckets().filterKeys { it in (now / 1000 - 3600)..(now / 1000) }.values.sum()
-    @Synchronized override fun recordEntry(at: Long) {
+    override fun entries(now: Long): Int = synchronized(lock) {
+        val sec = now / 1000
+        if (countAtSec != sec) {
+            cachedCount = times.subMap(sec - 3600, true, sec, true).values.sum()
+            countAtSec = sec
+        }
+        cachedCount
+    }
+    override fun recordEntry(at: Long) = synchronized(lock) {
+        check(!closed)
         val sec = at / 1000
-        val times = buckets().filterKeys { it in (sec - 3600)..sec }.toMutableMap()
+        times.headMap(sec - 3600, false).clear()
+        times.tailMap(sec, false).clear()
         times[sec] = (times[sec] ?: 0) + 1
-        prefs.edit().putString("entry-buckets", times.entries.joinToString(",") { "${it.key}:${it.value}" }).apply()
+        countAtSec = Long.MIN_VALUE
+        entriesDirty = true
+        scheduleLocked()
     }
-    override fun feedback(code: String): ScalpTradeFeedback = runCatching {
-        json.decodeFromString<ScalpTradeFeedback>(prefs.getString("feedback:$code", "{}")!!)
-    }.getOrDefault(ScalpTradeFeedback())
-    @Synchronized override fun recordOutcome(code: String, trade: ScalpTrade) {
-        val key = "learned:$code"
-        val seen = prefs.getString(key, "").orEmpty().split(',').filter { it.isNotBlank() }
-        if (trade.id in seen) return
-        prefs.edit().putString("feedback:$code", json.encodeToString(feedback(code).observe(trade)))
-            .putString(key, (seen + trade.id).takeLast(256).joinToString(",")).apply()
+    override fun feedback(code: String): ScalpTradeFeedback = synchronized(lock) {
+        lessons.getOrPut(code) { runCatching {
+            json.decodeFromString<ScalpTradeFeedback>(prefs.getString("feedback:$code", "{}")!!)
+        }.getOrDefault(ScalpTradeFeedback()) }
     }
-    fun close() { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    override fun recordOutcome(code: String, trade: ScalpTrade) = synchronized(lock) {
+        check(!closed)
+        if (trade.state != ScalpState.CLOSED || trade.netUsd?.isFinite() != true) return@synchronized
+        val seen = learned.getOrPut(code) { LinkedHashSet(prefs.getString("learned:$code", "").orEmpty()
+            .split(',').filter { it.isNotBlank() }.takeLast(256)) }
+        if (!seen.add(trade.id)) return@synchronized
+        while (seen.size > 256) seen.remove(seen.first())
+        lessons[code] = feedback(code).observe(trade)
+        dirty.add(code)
+        scheduleLocked()
+    }
+    /** Called only under lock; there is at most one scheduled/running writer. */
+    private fun scheduleLocked() {
+        if (scheduled != null || closed) return
+        scheduled = writer.schedule(Runnable {
+            try { flushPending() }
+            finally { synchronized(lock) {
+                scheduled = null
+                if (entriesDirty || dirty.isNotEmpty()) scheduleLocked()
+            } }
+        }, flushDelayMs.coerceAtLeast(1), java.util.concurrent.TimeUnit.MILLISECONDS)
+    }
+    /** IO only. Synchronous for shutdown/tests; normal callers only update cached values. */
+    internal fun flushPending(): Boolean = synchronized(writerLock) {
+        val pending = synchronized(lock) {
+            val values = linkedMapOf<String, String>()
+            if (entriesDirty) values["entry-buckets"] = times.entries.joinToString(",") { "${it.key}:${it.value}" }
+            dirty.forEach { code ->
+                values["feedback:$code"] = json.encodeToString(lessons.getValue(code))
+                values["learned:$code"] = learned.getValue(code).joinToString(",")
+            }
+            entriesDirty = false
+            dirty.clear()
+            values
+        }
+        if (pending.isEmpty()) return@synchronized true
+        val ok = runCatching {
+            val edit = prefs.edit()
+            pending.forEach { (key, value) -> edit.putString(key, value) }
+            edit.commit() // worker thread: does not enqueue lifecycle-blocking apply() work
+        }.getOrDefault(false)
+        if (!ok) synchronized(lock) {
+            if ("entry-buckets" in pending) entriesDirty = true
+            pending.keys.filter { it.startsWith("feedback:") }.forEach { dirty.add(it.removePrefix("feedback:")) }
+        }
+        ok
+    }
+    fun close() {
+        synchronized(lock) { closed = true; scheduled?.cancel(false) }
+        flushPending()
+        writer.shutdown()
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
+    }
 }

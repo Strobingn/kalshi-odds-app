@@ -488,6 +488,7 @@ class ScalpBook(
     val stats: StateFlow<List<ScalpStat>> = _stats.asStateFlow()
     /** Coalesced by id — last write wins; drained by [flushWrites]. */
     @Volatile private var _lastPruneBucket = -1L
+    private val flushLock = Any()
     private val writeQ = java.util.concurrent.ConcurrentHashMap<String, Pair<ScalpTrade, ScalpTrade?>>()
     /** Primary scalps only (what the Scalp screen, stats and ladder use). */
     val trades: StateFlow<List<ScalpTrade>> = _trades.asStateFlow()
@@ -1342,25 +1343,35 @@ class ScalpBook(
     }
 
     /** Drain pending upserts (call off Main / off the quote lock). Returns rows written. */
-    fun flushWrites(): Int {
-        if (writeQ.isEmpty()) return 0
+    fun flushWrites(): Int = synchronized(flushLock) {
+        if (writeQ.isEmpty()) return@synchronized 0
         val batch = ArrayList<Pair<ScalpTrade, ScalpTrade?>>(writeQ.size)
-        val it = writeQ.entries.iterator()
-        while (it.hasNext()) { batch += it.next().value; it.remove() }
-        for (pair in batch) runCatching {
-            store.upsertScalpAndStats(pair.first, pair.second)
-            val (t, prev) = pair
-            if (ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED)
-                controls.recordOutcome(ScalpModels.modelOf(t)?.code ?: t.variantId, t)
+        // Conditional removal never discards a newer update queued while we drain.
+        for ((id, pair) in writeQ.entries) if (writeQ.remove(id, pair)) batch += pair
+        var written = 0
+        for (pair in batch) {
+            try {
+                store.upsertScalpAndStats(pair.first, pair.second)
+                val (t, prev) = pair
+                if (ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED)
+                    controls.recordOutcome(ScalpModels.modelOf(t)?.code ?: t.variantId, t)
+                written++
+            } catch (e: Exception) {
+                // Preserve the newest row but retain the first transition for retry/learning.
+                writeQ.merge(pair.first.id, pair) { newer, failed -> newer.first to (failed.second ?: newer.second) }
+            }
         }
-        if (batch.isNotEmpty()) {
+        if (written > 0) {
             _stats.value = store.loadStats()
             if (liveExtras) {
                 v2Evidence = store.loadWindows(48)
-                synchronized(lock) { if (controlDay.isNotEmpty()) controlDailyNet = store.loadDaily(controlDay).filter { it.scalperId.startsWith("v2-") }.sumOf { it.netUsd } }
+                // Never take the quote lock here: save() may flush while holding it.
+                val before = controlDaily.get()
+                if (before.first.isNotEmpty()) controlDaily.compareAndSet(before,
+                    before.first to store.loadDaily(before.first).filter { it.scalperId.startsWith("v2-") }.sumOf { it.netUsd })
             }
         }
-        return batch.size
+        written
     }
 
     fun reloadStats() { _stats.value = store.loadStats() }
@@ -1378,8 +1389,7 @@ class ScalpBook(
 
     // ---------------- 0.3.65 trade detail + v2 copies ----------------
     /** Peak side bid since entry, per open trade (all scalpers; v2 exits use it). */
-    private var controlDay = ""
-    private var controlDailyNet = 0.0
+    private val controlDaily = java.util.concurrent.atomic.AtomicReference("" to 0.0)
     private val peakBid = HashMap<String, Double>()
     private val v2Armed = HashSet<String>()
 
@@ -1448,10 +1458,9 @@ class ScalpBook(
         val out = ArrayList<ScalpTrade>()
         val cfg = controls.state.value
         val day = ScalpModels.dayEt(q.nowMs)
-        if (controlDay != day) {
-            controlDay = day
-            controlDailyNet = if (liveExtras) store.loadDaily(day).filter { it.scalperId.startsWith("v2-") }.sumOf { it.netUsd } else 0.0
-        }
+        if (controlDaily.get().first != day) controlDaily.set(day to
+            if (liveExtras) store.loadDaily(day).filter { it.scalperId.startsWith("v2-") }.sumOf { it.netUsd } else 0.0)
+        val controlDailyNet = controlDaily.get().second
         val unflushedNet = writeQ.values.map { it.first to it.second }.filter { (t, prev) ->
             ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED &&
                 ScalpModels.dayEt(t.closedAtMs ?: 0) == day }.sumOf { it.first.netUsd ?: 0.0 }
@@ -1471,10 +1480,12 @@ class ScalpBook(
                         clip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceIn(1, 1000))
                     val ask = q.ask(t.side) ?: continue
                     if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
-                    val historyPrices = history[key].orEmpty().filter { it.atMs in (q.nowMs - cfg.windowSeconds * 1000L)..q.nowMs }
-                        .groupBy { it.atMs / 1000L }.values.map { it.maxBy { p -> p.atMs } }.sortedBy { it.atMs }
-                        .mapNotNull { if (t.side == "YES") it.yesBid else it.yesAsk?.let { a -> 1 - a } }
-                    if (!cfg.dipOk(historyPrices, ask)) continue
+                    if (cfg.dipCents > 0) {
+                        val historyPrices = history[key].orEmpty().filter { it.atMs in (q.nowMs - cfg.windowSeconds * 1000L)..q.nowMs }
+                            .groupBy { it.atMs / 1000L }.values.map { it.maxBy { p -> p.atMs } }.sortedBy { it.atMs }
+                            .mapNotNull { if (t.side == "YES") it.yesBid else it.yesAsk?.let { a -> 1 - a } }
+                        if (!cfg.dipOk(historyPrices, ask)) continue
+                    }
                     if (sp.walk) {
                         // 0.3.68: lift real ask levels up to max ask; partial fill allowed, avg price gets worse with depth.
                         val (n, usd, fee) = cfg.walkBuy(q.askLadder(t.side), sp.clip, sp.maxAsk)
