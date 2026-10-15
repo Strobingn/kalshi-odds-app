@@ -531,7 +531,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
-                value = s.maxBankrollFraction.toFloat(),
+                value = s.maxBankrollFraction.toFloat().coerceIn(1f, 50f),
                 onValueChange = { viewModel?.setMaxBankrollFraction(it.toDouble()) },
                 valueRange = 0.01f..0.15f,
                 steps = 13
@@ -791,7 +791,7 @@ fun SettingsContent(
                     "trading real Kalshi money at the armed stake (default $50 a clip, up to $250). " +
                     "Each scout buys only its own style of ticket, rides the move, and sells when the exit " +
                     "brain says it is turning down — no Approve tap. The leaderboard below ranks all 24 by " +
-                    "realized P&L and explains exactly what each one buys. Hard caps: stake ≤ your max below, " +
+                    "scalp P&L (sells only — settlement luck is booked separately) and explains exactly what each one buys. Hard caps: stake ≤ your max below, " +
                     "${SignalConstants.AUTO_MAX_OPEN_POSITIONS} open positions, " +
                     "${SignalConstants.AUTO_MAX_DAILY_ORDERS} orders/day, 2-minute cooldown per market, " +
                     "and the daily loss limit pauses everything. Every order is logged. " +
@@ -814,17 +814,19 @@ fun SettingsContent(
                 color = if (s.autoTradeEnabled) colors.textPrimary else colors.textSecondary,
                 fontWeight = if (s.autoTradeEnabled) FontWeight.Bold else null
             )
-            Section("Strategy leaderboard — 24 models ranked by P&L")
+            Section("Strategy leaderboard — 24 models ranked by scalp P&L")
             Text(
-                "Every scout explains itself below. Green or red is its all-time realized P&L; " +
-                    "the riding line shows what it holds right now. Sorted best first.",
+                "Ranked by realized P&L from actual sells only. Settlement outcomes are booked to " +
+                    "a separate line and never move a model's rank — a lucky expiry coin-flip is not " +
+                    "scalping skill. A model needs ${SignalConstants.AUTO_BOARD_MIN_TRADES} closed " +
+                    "trades before it ranks; unproven models sit below the board, closest first.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
             state.autoBoard.forEachIndexed { index, entry ->
                 val pnlColor = when {
-                    entry.pnlUsd > 0.0 -> colors.up
-                    entry.pnlUsd < 0.0 -> colors.down
+                    entry.scalpPnlUsd > 0.0 -> colors.up
+                    entry.scalpPnlUsd < 0.0 -> colors.down
                     else -> colors.textSecondary
                 }
                 Column(
@@ -836,14 +838,14 @@ fun SettingsContent(
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${index + 1}. ${entry.label}",
+                            if (entry.ranked) "${index + 1}. ${entry.label}" else "· ${entry.label}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = colors.textPrimary,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.weight(1f)
                         )
                         Text(
-                            AutoTradeEngine.fmtSignedUsd(entry.pnlUsd),
+                            AutoTradeEngine.fmtSignedUsd(entry.scalpPnlUsd),
                             style = MaterialTheme.typography.bodyMedium,
                             color = pnlColor,
                             fontWeight = FontWeight.Bold
@@ -851,6 +853,14 @@ fun SettingsContent(
                     }
                     Text(
                         entry.blurb,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = colors.textSecondary
+                    )
+                    Text(
+                        "scalp ${AutoTradeEngine.fmtSignedUsd(entry.scalpPnlUsd)} · " +
+                            "settlement ${AutoTradeEngine.fmtSignedUsd(entry.settlementPnlUsd)} · " +
+                            "${entry.closedTrades} closed trades" +
+                            if (entry.ranked) "" else " — needs ${SignalConstants.AUTO_BOARD_MIN_TRADES} to rank",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
