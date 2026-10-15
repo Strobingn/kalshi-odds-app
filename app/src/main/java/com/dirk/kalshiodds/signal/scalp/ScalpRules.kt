@@ -63,26 +63,26 @@ object ScalpCatalog {
      * fixed profit, stop out 5¢ under the entry.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        dip("late_squeeze", "Dip 5→8 30%", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell at +8¢. Stop 5¢ under."),
-        dip("all_in_cheap", "Dip 5→8 25%", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell at +8¢. Stop 5¢ under."),
-        dip("all_in_under_50", "Dip 5→15 25%", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell at +15¢. Stop 5¢ under."),
-        dip("first_5", "Dip 5→8", 0.05, 0.08, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("no_cap", "Dip 5→10", 0.05, 0.10, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell at +10¢. Stop 5¢ under."),
-        dip("slow_trail", "Dip 5→12", 0.05, 0.12, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell at +12¢. Stop 5¢ under."),
-        dip("tight_spread", "Dip 4→8", 0.04, 0.08, 0.50, 0.20, "Buy a 4¢ dip under 50¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("tight_4c", "Dip 6→8", 0.06, 0.08, 0.50, 0.20, "Buy a 6¢ dip under 50¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("penny_press", "Dip 5→8 40", 0.05, 0.08, 0.40, 0.20, "Buy a 5¢ dip under 40¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("deep_value", "Dip 5→8 55", 0.05, 0.08, 0.55, 0.20, "Buy a 5¢ dip under 55¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("dip_buy", "Dip 3→8", 0.03, 0.08, 0.52, 0.20, "Buy a 3¢ dip under 52¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("wide_gap", "Dip 5→6", 0.05, 0.06, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell at +6¢. Stop 5¢ under."),
-        dip("burst", "Dip 5→8 30%b", 0.05, 0.08, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell at +8¢. Stop 5¢ under."),
-        dip("reclaim", "Dip 5→15 30%", 0.05, 0.15, 0.52, 0.30, "Buy a 5¢ dip under 52¢. 30%. Sell at +15¢. Stop 5¢ under."),
-        dip("min_5_7", "Dip 5→8 35", 0.05, 0.08, 0.35, 0.20, "Buy a 5¢ dip under 35¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("dump_catch", "Dip 5→8 25%b", 0.05, 0.08, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell at +8¢. Stop 5¢ under."),
-        dip("fade_spike", "Dip 5→15 25%b", 0.05, 0.15, 0.52, 0.25, "Buy a 5¢ dip under 52¢. 25%. Sell at +15¢. Stop 5¢ under."),
-        dip("gap_side", "Dip 5→8 15%", 0.05, 0.08, 0.52, 0.15, "Buy a 5¢ dip under 52¢. 15%. Sell at +8¢. Stop 5¢ under."),
-        dip("breakout_50", "Dip 5→8 20%", 0.05, 0.08, 0.52, 0.20, "Buy a 5¢ dip under 52¢. 20%. Sell at +8¢. Stop 5¢ under."),
-        dip("momentum", "Dip 5→8 20%b", 0.05, 0.08, 0.50, 0.20, "Buy a 5¢ dip under 50¢. 20%. Sell at +8¢. Stop 5¢ under.")
+        dip("late_squeeze", "Open rise → 68", 0.0, 0.68, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 68¢."),
+        dip("all_in_cheap", "Open rise → 70", 0.0, 0.70, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 70¢."),
+        dip("all_in_under_50", "Open rise → 68 30%", 0.0, 0.68, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 68¢."),
+        dip("first_5", "Open rise → 70 20%", 0.0, 0.70, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 70¢."),
+        dip("no_cap", "Open rise → 65", 0.0, 0.65, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 65¢."),
+        dip("slow_trail", "Open rise → 72", 0.0, 0.72, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 72¢."),
+        dip("tight_spread", "Open rise → 68 15%", 0.0, 0.68, 0.55, 0.15, "Buy the rising side near 50¢. 15%. Sell at 68¢."),
+        dip("tight_4c", "Open rise → 70 30%", 0.0, 0.70, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 70¢."),
+        dip("penny_press", "Open rise → 68 40", 0.0, 0.68, 0.40, 0.20, "Buy the rising side under 40¢. Sell at 68¢."),
+        dip("deep_value", "Open rise → 70 45", 0.0, 0.70, 0.45, 0.20, "Buy the rising side under 45¢. Sell at 70¢."),
+        dip("dip_buy", "Open rise → 68 15%b", 0.0, 0.68, 0.55, 0.15, "Buy the rising side near 50¢. 15%. Sell at 68¢."),
+        dip("wide_gap", "Open rise → 70 15%", 0.0, 0.70, 0.55, 0.15, "Buy the rising side near 50¢. 15%. Sell at 70¢."),
+        dip("burst", "Open rise → 68 30%b", 0.0, 0.68, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 68¢."),
+        dip("reclaim", "Open rise → 70 30%b", 0.0, 0.70, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 70¢."),
+        dip("min_5_7", "Open rise → 68 35", 0.0, 0.68, 0.35, 0.20, "Buy the rising side under 35¢. Sell at 68¢."),
+        dip("dump_catch", "Open rise → 70 25%", 0.0, 0.70, 0.55, 0.25, "Buy the rising side near 50¢. 25%. Sell at 70¢."),
+        dip("fade_spike", "Open rise → 68 25%", 0.0, 0.68, 0.55, 0.25, "Buy the rising side near 50¢. 25%. Sell at 68¢."),
+        dip("gap_side", "Open rise → 70 20%b", 0.0, 0.70, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 70¢."),
+        dip("breakout_50", "Open rise → 68 20%", 0.0, 0.68, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 68¢."),
+        dip("momentum", "Open rise → 70 20%c", 0.0, 0.70, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 70¢.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
@@ -172,17 +172,17 @@ object ScalpCatalog {
         algo(id, name, rule) { a, t ->
             val pos = a.position
             if (pos == null) {
-                val side = cheaper(t)
-                val aPx = ask(t, side)
-                val mins = t.tteMs / 60_000.0
-                val falling = falling(t, side)
-                val inRange = mins > ScalpSettings.rangeMinutes && aPx in ScalpSettings.rangeLow..ScalpSettings.rangeHigh
-                val underCap = aPx < ScalpSettings.maxAsk
-                if ((underCap || inRange) && !falling) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
+                val side = rising(t)
+                if (side != null) {
+                    val aPx = ask(t, side)
+                    if (aPx in 0.45..0.55) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
+                } else {
+                    ScalpIntent.Hold
+                }
             } else {
                 val b = bid(t, pos.side)
                 when {
-                    b + 1e-9 >= pos.entry + ScalpSettings.takeProfit -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 >= 0.68 -> ScalpIntent.Sell(force = true)
                     b + 1e-9 <= pos.entry - ScalpSettings.stopLoss -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
@@ -211,6 +211,16 @@ object ScalpCatalog {
                 }
             }
         }
+
+    private fun rising(t: ScalpTape): String? {
+        val yesUp = t.yesBids.size >= 3 && t.yesBids.last() > t.yesBids[t.yesBids.size - 3]
+        val noUp = t.noBids.size >= 3 && t.noBids.last() > t.noBids[t.noBids.size - 3]
+        return when {
+            yesUp && !noUp -> "YES"
+            noUp && !yesUp -> "NO"
+            else -> null
+        }
+    }
 
     private fun falling(t: ScalpTape, side: String): Boolean {
         val bids = if (side == "NO") t.noBids else t.yesBids
