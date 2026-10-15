@@ -73,9 +73,9 @@ class KalshiOddsApp : Application() {
             LiveSignalsKeepAlive.ensureService(this)
         }
         appScope.launch(Dispatchers.IO) {
-            runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
             runCatching { MarketRefreshScheduler.enqueue(this@KalshiOddsApp) }
             runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this@KalshiOddsApp) }
+            runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
         }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
