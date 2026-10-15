@@ -115,7 +115,11 @@ object ScalpControlSpec {
             sf.kind == ShockFav.Kind.SIMPLE_DIP -> listOf(Key.TRIGGER)
             sf.kind == ShockFav.Kind.IMBALANCE -> listOf(Key.IMBALANCE)
             sf.kind == ShockFav.Kind.OPEN50 -> emptyList()
-            else -> listOf(Key.SHOCK, Key.LOOKBACK, Key.TRIGGER, Key.CONVERGENCE) + if (sf.fav) listOf(Key.FAIR) else emptyList()
+            sf.kind == ShockFav.Kind.LAGGARD || sf.kind == ShockFav.Kind.FADE_MAKER -> listOf(Key.SHOCK, Key.LOOKBACK)
+            else -> buildList {
+                if (sf.shock) addAll(listOf(Key.SHOCK, Key.LOOKBACK, Key.TRIGGER, Key.CONVERGENCE))
+                if (sf.fav) addAll(listOf(Key.TRIGGER, Key.FAIR))
+            }.distinct()
         }
         return common + signal
     }

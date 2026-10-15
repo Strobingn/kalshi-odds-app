@@ -47,6 +47,8 @@ class ScalpControlsTest {
         assertFalse(ScalpControlSpec.keys("v2-sf41").any { it.group == "Signal" })
         assertTrue(K.IMBALANCE in ScalpControlSpec.keys("sf30"))
         assertTrue(K.FORECAST in ScalpControlSpec.keys("fcride"))
+        assertFalse(K.SHOCK in ScalpControlSpec.keys("sf19"))
+        assertFalse(K.CONVERGENCE in ScalpControlSpec.keys("sf27"))
     }
     @Test fun invalidRangesAreRejectedAndPersistenceIsPerModel() {
         val store = MemoryScalpControlStore(); val controls = ScalpControls(store)

@@ -501,6 +501,9 @@ class ScalpBook(
     /** Current per-coin params version and its last out-of-sample result. */
     val tune: StateFlow<ScalpTuneState> = _tune.asStateFlow()
 
+    fun applyControls(code: String, config: ScalpControlSpec.Config) = synchronized(lock) { controls.apply(code, config) }
+    fun resetControls(code: String) = synchronized(lock) { controls.reset(code) }
+
     fun snapshot(): List<ScalpTrade> = _trades.value // 0.3.67: open/pending primaries only
     /** Primary + shadow variants (tuner input). */
     fun allTrades(): List<ScalpTrade> = _all.value
@@ -629,7 +632,7 @@ class ScalpBook(
         }
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
-        changed.filter { candidate -> candidate.isPrimary && _all.value.any { it.id == candidate.id } }
+        changed.filter { it.isPrimary }.mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
     }
 
     // ---- 0.3.53 Forecast ride / fade (paper only) ----
@@ -702,7 +705,7 @@ class ScalpBook(
             )
         }
         changed.forEach { save(it) }
-        changed.filter { candidate -> _all.value.any { it.id == candidate.id } }
+        changed.mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
     }
 
     private fun fcStep(t: ScalpTrade, q: ScalpRule.Quote, f: Double, horizon: Int): ScalpTrade? {
@@ -990,7 +993,7 @@ class ScalpBook(
                         ShockFav.Kind.LAGGARD -> ShockFav.laggardSide(p, coin, sfSpot, sec, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.IMBALANCE -> ShockFav.imbalanceSide(p, yb, ya, q.yesBidSize ?: 0.0, q.yesAskSize ?: 0.0, q.tauS)?.takeIf { sd -> q.ask(sd)?.let { it in 0.10..0.90 } == true }
                         ShockFav.Kind.SIMPLE_DIP -> simpleDipSide(key, p, q)
-                        ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, 5)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { if (it > 0) "NO" else "YES" } else null
+                        ShockFav.Kind.FADE_MAKER -> if (q.tauS in 120.0..870.0) ShockFav.moveBp(ring, sec, p.yS)?.takeIf { kotlin.math.abs(it) >= p.xBp }?.let { if (it > 0) "NO" else "YES" } else null
                         else -> null
                     } ?: continue
                     val ask = q.ask(side) ?: continue
@@ -1026,7 +1029,7 @@ class ScalpBook(
             }
         }
         changed.forEach { save(it) }
-        changed.filter { candidate -> _all.value.any { it.id == candidate.id } }
+        changed.mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
     }
 
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */

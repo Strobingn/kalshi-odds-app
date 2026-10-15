@@ -68,11 +68,12 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val model = d.model
     val pagerFlow = androidx.compose.runtime.remember(model) { model?.let { viewModel.scalpTradePager(it) } }
     val paged = pagerFlow?.collectAsLazyPagingItems()
-    val controls = com.dirk.kalshiodds.KalshiOddsApp.from(androidx.compose.ui.platform.LocalContext.current).container.scalp.controls
+    val book = com.dirk.kalshiodds.KalshiOddsApp.from(androidx.compose.ui.platform.LocalContext.current).container.scalp
+    val controls = book.controls
     val settings by controls.state.collectAsStateWithLifecycle()
     ScalpAlgoContent(d, onBack, paged, model?.let { settings[it.code] },
-        onApply = { config -> model?.let { controls.apply(it.code, config) } },
-        onReset = { model?.let { controls.reset(it.code) } })
+        onApply = { config -> model?.let { book.applyControls(it.code, config) } },
+        onReset = { model?.let { book.resetControls(it.code) } })
 }
 
 @Composable
