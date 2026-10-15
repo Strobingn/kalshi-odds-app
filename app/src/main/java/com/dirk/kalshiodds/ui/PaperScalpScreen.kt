@@ -21,8 +21,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.scalp.*
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,13 +45,17 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
     var family by rememberSaveable { mutableStateOf("adaptive") }
     var allocation by rememberSaveable { mutableIntStateOf(35) }
     var drawdown by rememberSaveable { mutableStateOf(false) }
+    var comparePolicyOnly by rememberSaveable { mutableStateOf(false) }
     var details by rememberSaveable { mutableStateOf(false) }
     val a = state.accounts.firstOrNull { it.id == "$family-$allocation" } ?: state.accounts.firstOrNull() ?: return
     val started = a.policyStartedMs > 0
     val change = if (started) a.equity() - a.policyStartEquity else 0.0
     val closed = a.closed - a.policyStartClosed
     val wins = a.wins - a.policyStartWins
-    val now = System.currentTimeMillis()
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) {
+        while (true) { delay(1000); now = System.currentTimeMillis() }
+    }
     // Final live point is a real mark; older points are persisted observations, never a fabricated backtest.
     val points = a.curve + if (started && state.lastQuoteMs > (a.curve.lastOrNull()?.atMs ?: 0))
         listOf(PaperCurvePoint(state.lastQuoteMs, a.equity(), a.realized, a.fees, a.peakEquity)) else emptyList()
@@ -105,11 +111,18 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                 item {
                     PaperPanel {
                         Text("Compare strategies", style = MaterialTheme.typography.titleMedium)
-                        Text("Equity change · same $allocation% ceiling · separate paper books", style = MaterialTheme.typography.labelSmall)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(!comparePolicyOnly, onClick = { comparePolicyOnly = false }, label = { Text("All-time") })
+                            FilterChip(comparePolicyOnly, onClick = { comparePolicyOnly = true }, label = { Text("Policy 2") })
+                        }
+                        Text("${if (comparePolicyOnly) "Equity change since update" else "Realized net after fees"} · $allocation% ceiling", style = MaterialTheme.typography.labelSmall)
+                        fun value(account: PaperScalpAccount?) = account?.let {
+                            if (comparePolicyOnly) { if (it.policyStartedMs > 0) it.equity() - it.policyStartEquity else 0.0 } else it.realized
+                        } ?: 0.0
                         val rows = families.map { (id, label) -> Triple(id, label, state.accounts.firstOrNull { it.id == "$id-$allocation" }) }
-                        val scale = rows.maxOf { (_, _, account) -> abs(account?.let { if (it.policyStartedMs > 0) it.equity() - it.policyStartEquity else 0.0 } ?: 0.0) }.coerceAtLeast(1.0)
+                        val scale = rows.maxOf { (_, _, account) -> abs(value(account)) }.coerceAtLeast(1.0)
                         rows.forEach { (id, label, account) ->
-                            val pnl = account?.let { if (it.policyStartedMs > 0) it.equity() - it.policyStartEquity else 0.0 } ?: 0.0
+                            val pnl = value(account)
                             TextButton(onClick = { family = id }, contentPadding = PaddingValues(0.dp), modifier = Modifier.fillMaxWidth()) {
                                 Column(Modifier.fillMaxWidth()) {
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -148,7 +161,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                 }
                 item {
                     PaperPanel {
-                        val recent = a.results.filter { it.policyVersion == 2 }.takeLast(20)
+                        val recent = a.results.takeLast(20)
                         Text("Recent trades · net after fees", style = MaterialTheme.typography.titleMedium)
                         TradeBars(recent)
                         val windows = recent.map { it.ticker }.distinct().size
@@ -158,13 +171,13 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                                 Text("${trade.side} · ${trade.count} ct · ${clock(trade.atMs)}", style = MaterialTheme.typography.bodySmall)
                                 Text(money(trade.netUsd), fontWeight = FontWeight.Bold)
                             }
-                            Text("${trade.reason} · fees ${dollars(trade.feesUsd)}", style = MaterialTheme.typography.labelSmall)
+                            Text("Policy ${trade.policyVersion} · ${trade.reason} · fees ${dollars(trade.feesUsd)}", style = MaterialTheme.typography.labelSmall)
                         }
-                        recent.lastOrNull()?.let { last ->
+                        a.results.lastOrNull { it.policyVersion == 2 }?.let { last ->
                             Text("Learning · ${last.setup} / ${PaperScalpPolicy.bucket(last.entry)}¢", style = MaterialTheme.typography.labelMedium)
                             Text(PaperScalpLearning.lesson(a.results, last.setup, last.entry).label, style = MaterialTheme.typography.labelSmall)
                         }
-                        if (recent.isEmpty()) Text("No policy 2 trades yet. Historic trades remain in the all-time totals.", style = MaterialTheme.typography.bodySmall)
+                        if (recent.isEmpty()) Text("No completed trades yet.", style = MaterialTheme.typography.bodySmall)
                     }
                 }
                 item {
@@ -216,8 +229,12 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
         drawCircle(Color.White, 3.dp.toPx(), Offset(size.width, y(values.last())))
     }
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text("${clock(start)} · low ${money(lo)}", style = MaterialTheme.typography.labelSmall)
-        Text("high ${money(hi)} · ${clock(points.last().atMs)}", style = MaterialTheme.typography.labelSmall)
+        Text(clock(start), Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+        Text(clock(points.last().atMs), Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall)
+    }
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("Low ${money(lo)}", Modifier.weight(1f), style = MaterialTheme.typography.labelSmall)
+        Text("High ${money(hi)}", Modifier.weight(1f), textAlign = TextAlign.End, style = MaterialTheme.typography.labelSmall)
     }
     // Slider permits precise inspection without fighting vertical scrolling on a phone.
     Slider(value = at.toFloat(), onValueChange = { cursor = it.toInt().coerceIn(points.indices) }, valueRange = 0f..points.lastIndex.toFloat())

@@ -35,7 +35,7 @@ class PaperScalpScreenshotTest {
             val trades = listOf(-18.0, 12.0, -9.0, 24.0, 31.0).mapIndexed { j, net ->
                 PaperScalpResult("t$j", "KXBTC15M-FIXTURE-${j / 2}", "dip", "YES", 100, .40, net, 3.4, .08, .03, "Profit trailing stop", now - (5 - j) * 5000, policyVersion = 2)
             }
-            PaperScalpAccount(spec.id, cash = 20_000 + change - 45.0, realized = change - 5.0,
+            PaperScalpAccount(spec.id, cash = 20_000 + change - 45.25, realized = change - 5.0,
                 fees = 12.0, closed = 5, wins = 3, results = trades, curve = curve,
                 policyStartedMs = curve.first().atMs, policyStartEquity = 20_000.0, peakEquity = peak, maxDrawdown = 40.0,
                 positions = listOf(PaperScalpPosition("p", "KXBTC15M-FIXTURE", "YES", "dip", 100, 100, .40, 40.0, 1.68,

@@ -14,7 +14,7 @@ The previous immediate entry-minus-2¢ trail left roughly 1¢ of bid movement af
 
 ## Dashboard and measurement
 
-The grayscale native dashboard has selectable family/allocation books, observed equity and drawdown curves with a scrub slider, divergent strategy comparison bars, a bid/entry/stop rail, and net trade outcome bars. All-time totals preserve old results; policy-2 change begins at the first observation after upgrade, including subsequent changes in any legacy positions still held. It is not a reset or clean randomized comparison.
+The grayscale native dashboard has selectable family/allocation books, observed equity and drawdown curves with a scrub slider, divergent strategy comparison bars with an all-time/policy-2 switch, a bid/entry/stop rail, and net trade outcome bars. Recent outcome bars include legacy trades with their policy version. All-time totals preserve old results; policy-2 change begins at the first observation after upgrade, including subsequent changes in any legacy positions still held. It is not a reset or clean randomized comparison.
 
 Each book retains 1,440 observed samples (15-second cadence and fills/settlements); no old curve is reconstructed. Samples carry the running equity peak so drawdown survives bounded-history retention. Full-quote maximum drawdown is tracked separately. Marks use the top bid less an estimated fee, so marked equity is not guaranteed executable liquidation value. Stale marks are labeled.
 
