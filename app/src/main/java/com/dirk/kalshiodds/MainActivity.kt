@@ -105,6 +105,7 @@ class MainActivity : ComponentActivity() {
                                 },
                                 onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
+                                onOpenScalp = { navigator.open(AppRoutes.PAPER_SCALP) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
                                 onOpenChart = {
@@ -112,6 +113,12 @@ class MainActivity : ComponentActivity() {
                                     navigator.open(AppRoutes.CHART)
                                 }
                             )
+                        },
+                        paperScalp = {
+                            val lab by oddsViewModel.paperScalpState.collectAsStateWithLifecycle()
+                            com.dirk.kalshiodds.ui.PaperScalpScreen(lab,
+                                onBack = { navigator.back() }, onStart = oddsViewModel::startPaperScalps,
+                                onPause = oddsViewModel::pausePaperScalps)
                         },
                         settings = {
                             SettingsScreen(

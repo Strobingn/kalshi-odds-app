@@ -67,6 +67,8 @@ class SignalHub(
     )
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
     private val lastBookScoredMs = ConcurrentHashMap<String, Long>()
+    private val bookRevisions = ConcurrentHashMap<String, Long>()
+    fun bookRevision(ticker: String): Long? = bookRevisions[ticker]
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
     private val lastSnapshotPersistMs = ConcurrentHashMap<String, Long>()
     private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
@@ -188,6 +190,7 @@ class SignalHub(
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         if (!settings.isWatchedTicker(ticker)) return
         runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
+        bookRevisions[ticker] = receiveElapsedNanos
         requestBookScore(ticker, receiveElapsedNanos)
     }
 
@@ -204,6 +207,7 @@ class SignalHub(
         // Apply on the WS thread under TickBook's lock — cheap. Scoring is
         // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
         runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }
+        bookRevisions[ticker] = receiveElapsedNanos
         requestBookScore(ticker, receiveElapsedNanos)
     }
 

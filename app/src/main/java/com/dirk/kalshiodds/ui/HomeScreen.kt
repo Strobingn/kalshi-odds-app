@@ -79,7 +79,8 @@ fun HomeScreen(
     onCancelOrder: (String) -> Unit,
     onResumeAlerts: () -> Unit = {},
     nowMs: Long = System.currentTimeMillis(),
-    versionLabel: String = AppVersion.label
+    versionLabel: String = AppVersion.label,
+    onOpenScalp: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val mode = TradeModeLabel.forApprove(state.settings)
@@ -220,9 +221,9 @@ fun HomeScreen(
                             }
                         }
                         item {
-                            Text("Bitcoin bounce research · all open-contract times", fontWeight = FontWeight.Bold)
-                            Text("BTC last-trade reversal 59.92%; VWAP check 43.9%. These are not Kalshi win rates. Experimental scalp entries use executable book quotes and the app's proxy fair model; live trades require Approve.", style = MaterialTheme.typography.labelMedium)
+                            Text("Autonomous paper scalping", fontWeight = FontWeight.Bold)
                             Text(state.scalpSummary, style = MaterialTheme.typography.labelMedium)
+                            Button(onClick = onOpenScalp) { Text("Open Paper Scalp Lab") }
                         }
                         item {
                     TradeTicketsSection(

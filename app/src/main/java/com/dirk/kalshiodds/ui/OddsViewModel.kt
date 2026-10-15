@@ -86,6 +86,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = container.preferences
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
+    val paperScalpState = container.paperScalp.state
+    fun pausePaperScalps(paused: Boolean) { viewModelScope.launch(Dispatchers.IO) { container.paperScalp.pause(paused) } }
+    fun startPaperScalps() { viewModelScope.launch {
+        prefs.updateLiveSignals(true)
+        com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.setEnabled(getApplication(), true)
+        com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.startService(getApplication())
+    } }
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -840,15 +847,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ctx = ticketContext(s, now)
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        val scalpTickets = container.scalp.observe(live, ctx, if (s.settings.kalshiDemoEnabled) "demo" else "live") { hub.hasFreshBook(it, now) }
-            .filterNot { candidate -> !candidate.isSell && s.tickets.working.any {
-                it.ticket.ticker == candidate.ticker && (it.fillCount > 0 || it.isResting || it.status in setOf("unknown", "submitting"))
-            } }
-        val exitIds = scalpTickets.map { it.id }.toSet()
-        ticketSession.snapshot().proposals.filter { it.id.startsWith("scalp-exit-") && it.id !in exitIds }
-            .forEach { ticketSession.dismiss(it.id) }
-        _state.update { it.copy(scalpSummary = container.scalp.summary()) }
-        val tickets = TicketBuilder.proposeAll(live, ctx) + scalpTickets
+        _state.update { it.copy(scalpSummary = "Autonomous paper lab: entries below 50¢, immediate 2¢ trail, adaptive sizing. Open Paper Scalp Lab.") }
+        val tickets = TicketBuilder.proposeAll(live, ctx)
         captureTicketForward(tickets, live, ctx, now)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {

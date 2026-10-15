@@ -46,6 +46,7 @@ class LiveSignalsService : Service() {
     private var client: KalshiWsClient? = null
     private var pipelineJob: Job? = null
     private var metadataJob: Job? = null
+    private var paperScalpJob: Job? = null
     private var rolloverJob: Job? = null
     @Volatile private var rolloverBound = false
     private var wakeLock: PowerManager.WakeLock? = null
@@ -87,6 +88,13 @@ class LiveSignalsService : Service() {
                 runCatching {
                     KalshiOddsApp.from(this@LiveSignalsService).container.rollover.start(this)
                 }
+            }
+        }
+        if (paperScalpJob?.isActive != true) paperScalpJob = scope.launch(Dispatchers.IO) {
+            val paper = KalshiOddsApp.from(this@LiveSignalsService).container.paperScalp
+            while (isActive) {
+                paper.tick()
+                delay(250)
             }
         }
         return START_STICKY
@@ -397,6 +405,9 @@ class LiveSignalsService : Service() {
     }
 
     private fun tearDownPipeline() {
+        paperScalpJob?.cancel()
+        paperScalpJob = null
+        runCatching { KalshiOddsApp.from(this).container.paperScalp.stopped() }
         runCatching { client?.stop() }
         client = null
         pipelineJob?.cancel()

@@ -17,9 +17,10 @@ object AppRoutes {
     const val HISTORY = "history"
     const val SIGNAL_HISTORY = "signal-history"
     const val CHART = "chart"
+    const val PAPER_SCALP = "paper-scalp"
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART
+        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, PAPER_SCALP
     )
 }
 

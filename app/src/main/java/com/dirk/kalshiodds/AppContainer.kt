@@ -79,6 +79,7 @@ class AppContainer(context: Context) {
     val paper = PaperBookStore(app)
     private val scalpJournal = com.dirk.kalshiodds.signal.trade.ScalpJournal(app)
     val scalp = com.dirk.kalshiodds.signal.trade.ScalpEngine(scalpJournal.load(), scalpJournal::save)
+    val paperScalp = com.dirk.kalshiodds.signal.scalp.PaperScalpRuntime(app, hub)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -125,9 +126,11 @@ class AppContainer(context: Context) {
         },
         model = model,
         logStore = logStore,
-        extraOpenTickers = { paper.book.openTickers() },
+        extraOpenTickers = { paper.book.openTickers() + paperScalp.openTickers() },
         onMarketSettled = { ticker, result ->
             paper.book.settle(ticker, result)
+            if (result.equals("yes", true) || result.equals("no", true))
+                paperScalp.settle(ticker, result.equals("yes", true), System.currentTimeMillis())
             if (result.equals("yes", true) || result.equals("no", true)) scalp.settle(ticker, result.equals("yes", true), source = if (hub.settings.kalshiDemoEnabled) "demo" else "live")
         },
         onCalibration = { hub.applyCalibration(it) },

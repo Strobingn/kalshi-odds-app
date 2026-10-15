@@ -1,6 +1,15 @@
 # Bitcoin Edge — Codex branch
 
-Independent Android app: **Bitcoin Edge**, package `com.wildlifewhisperer.bitcoinedge.codex`, version 1.1.1, versionCode `2000000 + GitHub run number`. Source namespace remains `com.dirk.kalshiodds`. Install alongside existing DipHunter builds; it has separate app data and keys. Updates use only the `bitcoin-edge-codex` release and `BitcoinEdge-Codex-*.apk` assets, preserving the committed signing certificate.
+## 1.2.0 autonomous paper scalp lab
+
+Open **Paper Scalp Lab** from Home and tap **Start monitor**. Twenty funded paper experiments compare five entry families at four sizing ceilings, up to all available paper cash. Each starts with $20,000, buys strictly below 50 cents, attaches an immediate 2-cent trailing stop, and learns sizing/selection from completed net trades. AI chooses timing without a fixed entry window, holding limit, bet-count limit, real-money $5 cap or approval prompt. Pause blocks new paper entries while continuing open-position exits.
+
+The lab has no real-order path. It runs in the foreground service while Live signals is on, including when this screen is closed. Fresh public book depth works without a trading key; WS is used when available. Production/demo journals stay separate. Stop gaps, partial fills, stale data, fees, virtual depth consumption, official settlement and process recovery are represented explicitly. Minimum simulated latency is 250ms, not measured execution. Results are hypothetical.
+
+The previous experimental scalp signal source no longer adds live tickets. Existing manual live limit orders are unchanged. The source review, known limitations and regression coverage are in [docs/PAPER_SCALP_REVIEW_2026-10-14.md](docs/PAPER_SCALP_REVIEW_2026-10-14.md). Earlier 1.1.x implementation notes below describe the prior scalp replay, which is retained for historical compatibility and is not the new lab or its learning data.
+
+
+Independent Android app: **Bitcoin Edge**, package `com.wildlifewhisperer.bitcoinedge.codex`, version 1.2.0, versionCode `2000000 + GitHub run number`. Source namespace remains `com.dirk.kalshiodds`. Install alongside existing DipHunter builds; it has separate app data and keys. Updates use only the `bitcoin-edge-codex` release and `BitcoinEdge-Codex-*.apk` assets, preserving the committed signing certificate.
 
 Entries and exits are evaluated across the complete exchange-open 15-minute contract. There is no 3–13 minute entry gate, 90-second holding limit, or forced late-window exit. Historical/model warmup and fresh liquidity checks still apply. No trades run merely because the app starts or a signal appears; real orders retain per-ticket Approve.
 
