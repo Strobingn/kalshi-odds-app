@@ -847,7 +847,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ctx = ticketContext(s, now)
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        _state.update { it.copy(scalpSummary = "Autonomous paper lab: entries below 50¢, immediate 2¢ trail, adaptive sizing. Open Paper Scalp Lab.") }
+        _state.update { it.copy(scalpSummary = "Paper lab: fee-aware entries below 50¢, noise-aware stops, profit-armed trails and equity charts. Open Paper Scalp Lab.") }
         val tickets = TicketBuilder.proposeAll(live, ctx)
         captureTicketForward(tickets, live, ctx, now)
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)

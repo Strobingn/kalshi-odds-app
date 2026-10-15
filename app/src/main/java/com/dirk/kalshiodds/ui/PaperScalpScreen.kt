@@ -136,6 +136,7 @@ fun PaperScalpScreen(state: PaperScalpState, onBack: () -> Unit, onStart: () -> 
                             Text("${p.side} · ${p.remaining} contracts · ${p.setup}", fontWeight = FontWeight.Bold)
                             Text(p.ticker, style = MaterialTheme.typography.labelSmall)
                             StopRail(p)
+                            if (p.lastBid <= 0) Text("No executable bid · conservative zero mark", style = MaterialTheme.typography.labelSmall)
                             Text(p.exitReason?.let { "$it · waiting for executable depth" } ?: when {
                                 p.policyVersion < 2 -> "Legacy position · original stop retained"
                                 p.trailArmed -> "Profit trail active · ${cents(p.trailDistance)} behind peak"
