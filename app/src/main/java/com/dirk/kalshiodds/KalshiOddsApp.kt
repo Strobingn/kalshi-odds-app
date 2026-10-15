@@ -75,6 +75,8 @@ class KalshiOddsApp : Application() {
         appScope.launch(Dispatchers.IO) {
             runCatching { MarketRefreshScheduler.enqueue(this@KalshiOddsApp) }
             runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this@KalshiOddsApp) }
+            runCatching { container.archive.repairInterruptedSessions(container.sessionId, System.currentTimeMillis()) }
+            runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
         }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
@@ -83,7 +85,7 @@ class KalshiOddsApp : Application() {
 
             override fun onStop(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.markUiInForeground(false)
-                runCatching { container.endSession() }
+                appScope.launch(Dispatchers.IO) { runCatching { container.endSession() } }
             }
         })
         appScope.launch {

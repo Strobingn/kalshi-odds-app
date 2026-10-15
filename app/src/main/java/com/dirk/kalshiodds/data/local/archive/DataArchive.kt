@@ -98,6 +98,8 @@ interface DataArchive {
     fun recentSettingsChanges(limit: Int, offset: Int = 0): List<SettingsChange>
     fun insertSession(row: HistorySession)
     fun closeSession(id: String, endedAtMs: Long, markets: Int = 0, signals: Int = 0, bets: Int = 0, pnlUsd: Double? = null)
+    /** Repair an unclosed earlier process session. End time is a recovery upper bound; retain its last saved totals. */
+    fun repairInterruptedSessions(currentSessionId: String, recoveredAtMs: Long): Int = 0
     fun recentSessions(limit: Int): List<HistorySession>
 }
 

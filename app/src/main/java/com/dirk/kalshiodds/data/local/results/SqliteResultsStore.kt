@@ -895,6 +895,15 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         )
     }
 
+    override fun repairInterruptedSessions(currentSessionId: String, recoveredAtMs: Long): Int =
+        db.writableDatabase.compileStatement(
+            "UPDATE $TABLE_SESSION SET ended_at_ms = MAX(started_at_ms, ?) WHERE id != ? AND ended_at_ms IS NULL"
+        ).use { statement ->
+            statement.bindLong(1, recoveredAtMs)
+            statement.bindString(2, currentSessionId)
+            statement.executeUpdateDelete()
+        }
+
     override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> {
         val out = ArrayList<com.dirk.kalshiodds.data.local.history.HistorySession>()
         db.readableDatabase.rawQuery(

@@ -54,7 +54,7 @@ object CrashLog {
         return f
     }
 
-    fun attach(context: Context) { if (dir == null) dir = File(context.applicationContext.filesDir, DIR).also { it.mkdirs() } }
+    fun attach(context: Context) { dir = File(context.applicationContext.filesDir, DIR).also { it.mkdirs() } }
 
     /** Newest first. */
     fun files(): List<File> = dir?.listFiles { f -> f.name.startsWith("crash-") && f.name.endsWith(".txt") }
