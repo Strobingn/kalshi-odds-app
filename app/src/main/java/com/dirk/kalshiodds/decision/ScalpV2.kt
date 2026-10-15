@@ -1,11 +1,11 @@
 package com.dirk.kalshiodds.decision
 
 /**
- * 0.3.65 'v2' copies (PAPER, BTC): each original's signals are copied as a separate trade that
+ * V2 copies (PAPER, BTC): each original's signals are copied as a separate trade that
  *  - buys only when the ask is ≤ 50¢ (2 s entry delay, displayed-size fill, 10-contract clip, taker fee),
- *  - keeps the original's stop,
- *  - has no max-hold / time limit and no bet-count limit (held to settlement otherwise),
- *  - does not sell until the gain after both fees reaches the stop size; then trails the peak bid and sells 2¢ off it.
+ *  - keeps positive/inconclusive settings; tests bounded adjustments after sustained losses,
+ *  - exits before the final minute unless fresh CF evidence supports a profitable hold,
+ *  - trails after the saved net-profit threshold, with the per-copy trail distance.
  * Deterministic, no LLM. Originals are untouched.
  */
 object ScalpV2 {
@@ -16,6 +16,59 @@ object ScalpV2 {
     const val GIVE_UP_MS = 6_000L
     const val CLIP = 10
     const val MIN_TRADES = 30
+    const val EXIT_DELAY_MS = 250L
+    const val EXIT_BY_S = 60.0
+    const val BOOK_MAX_AGE_MS = 3_000L
+
+    /** Stops must be reachable even when the original stop exceeds a cheap contract's entry price. */
+    fun stopPrice(entry: Double, distance: Double): Double = (entry - distance).coerceAtLeast(0.01)
+
+    fun fresh(q: ScalpRule.Quote): Boolean = !q.bookGap && q.nowMs - q.bookAtMs in 0..BOOK_MAX_AGE_MS
+
+    /** A conservative hold hypothesis, not knowledge of the settlement result. Missing CF data means exit. */
+    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int): String? {
+        if (q.tauS > EXIT_BY_S) return null
+        val bid = q.bid(side)
+        val fair = q.cfFair(side)
+        val hold = fresh(q) && bid != null && bid.isFinite() && bid >= 0.90 &&
+            fair != null && fair.isFinite() && fair >= 0.97 &&
+            fair > bid - ScalpRule.feePerContract(n.coerceAtLeast(1), bid) + 0.01 &&
+            ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) > 0.0
+        return if (hold) null else "v2 exit before close: no strong fresh winning evidence"
+    }
+
+    /** Bounded paper experiment. Positive / inconclusive books keep their existing entry, stop and trail. */
+    data class Plan(val spec: Spec, val stop: Double, val arm: Double, val adjusted: Boolean, val note: String)
+    fun plan(id: String, windows: List<ScalpWindowAgg>, nowMs: Long, scalperId: String = id, unfinishedWindows: Set<String> = emptySet()): Plan {
+        val base = spec(id)
+        val stop = base.stop ?: stopFor(base.base)
+        val rows = windows.filter { it.scalperId == scalperId &&
+            it.windowKey !in unfinishedWindows && it.n > 0 && it.netUsd.isFinite() && it.closeMs != null && it.closeMs <= nowMs }
+            .sortedByDescending { it.closeMs }.take(24)
+        val n = rows.sumOf { it.n }
+        val values = rows.map { it.netUsd / it.n }
+        val mean = values.takeIf { it.isNotEmpty() }?.average() ?: 0.0
+        val se = if (values.size < 2) Double.POSITIVE_INFINITY else
+            kotlin.math.sqrt(values.sumOf { (it - mean) * (it - mean) } / (values.size - 1) / values.size)
+        val losing = n >= MIN_TRADES && rows.size >= 3 && rows.sumOf { it.netUsd } < 0 && mean + 2 * se < 0
+        if (!losing) return Plan(base, stop, stop, false,
+            "v2ai=keep; $n closed / ${rows.size} completed windows; positive or inconclusive")
+        val revisedStop = minOf(stop, maxOf(0.04, stop * 0.8))
+        return Plan(base.copy(maxAsk = (base.maxAsk - 0.02).coerceAtLeast(0.02),
+            trail = minOf(base.trail, 0.02)), revisedStop, minOf(revisedStop, 0.04), true,
+            "v2ai=trial; $n closed / ${rows.size} completed windows; negative window mean + 2SE; bounded risk/entry/profit trial")
+    }
+
+    private val STOP_RX = Regex("v2stop=([0-9.]+)")
+    fun savedStop(t: ScalpTrade): Double = STOP_RX.find(t.note)?.groupValues?.get(1)?.toDoubleOrNull()
+        ?.takeIf { it.isFinite() && it in 0.01..0.99 } ?: (spec(t.variantId).stop ?: stopFor(baseOf(t.variantId)))
+    fun savedNumber(note: String, key: String, fallback: Double): Double =
+        Regex("(?:^|[ ;·])${Regex.escape(key)}=([0-9.]+)").find(note)?.groupValues?.get(1)?.toDoubleOrNull()
+            ?.takeIf { it.isFinite() } ?: fallback
+    fun tag(note: String, key: String, value: String): String {
+        val rx = Regex("${Regex.escape(key)}=[^ ;·]+")
+        return if (rx.containsMatchIn(note)) rx.replace(note, "$key=$value") else "$note · $key=$value"
+    }
 
     fun isV2(variantId: String): Boolean = variantId.startsWith(PREFIX)
 
@@ -79,7 +132,7 @@ object ScalpV2 {
 
     /** Exit reason or null. [wasArmed] persists across quotes (peak tracked by the caller). */
     fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL): String? = when {
-        bid <= entry - stop + 1e-9 -> "stop −${Math.round(stop * 100)}¢"
+        bid <= stopPrice(entry, stop) + 1e-9 -> "stop −${Math.round(stop * 100)}¢"
         (wasArmed || armed(entry, bid, stop, n)) && bid <= peakBid - trail + 1e-9 -> "v2 trail ${Math.round(trail * 100)}¢ off peak after +${Math.round(stop * 100)}¢ net"
         else -> null
     }

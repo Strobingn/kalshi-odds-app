@@ -483,6 +483,7 @@ class ScalpBook(
     private val _all = MutableStateFlow(store.loadActiveScalps().sortedByDescending { it.signalAtMs })
     private val _trades = MutableStateFlow(_all.value.filter { it.isPrimary })
     private val _stats = MutableStateFlow(store.loadStats())
+    @Volatile private var v2Evidence = if (liveExtras) store.loadWindows(48) else emptyList()
     val stats: StateFlow<List<ScalpStat>> = _stats.asStateFlow()
     /** Coalesced by id — last write wins; drained by [flushWrites]. */
     @Volatile private var _lastPruneBucket = -1L
@@ -563,7 +564,7 @@ class ScalpBook(
         val mineAll = _all.value.filter { it.ticker.equals(q.ticker, true) }
         // Step every open scalp first (one per market side per variant).
         // 0.3.65: peak bid for every open trade (stored on close) + v2 lane.
-        mineAll.forEach { t -> if (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
+        mineAll.forEach { t -> if ((!ScalpV2.isV2(t.variantId) || ScalpV2.fresh(q)) && (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT)) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
         changed += stepV2(q)
         mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
             val p = ScalpParams.byId(t.variantId) ?: primary
@@ -1346,7 +1347,10 @@ class ScalpBook(
         val it = writeQ.entries.iterator()
         while (it.hasNext()) { batch += it.next().value; it.remove() }
         for (pair in batch) runCatching { store.upsertScalpAndStats(pair.first, pair.second) }
-        if (batch.isNotEmpty()) _stats.value = store.loadStats()
+        if (batch.isNotEmpty()) {
+            _stats.value = store.loadStats()
+            if (liveExtras) v2Evidence = store.loadWindows(48)
+        }
         return batch.size
     }
 
@@ -1400,20 +1404,26 @@ class ScalpBook(
         if (t.state != ScalpState.PENDING_ENTRY && t.state != ScalpState.OPEN) return
         val m = ScalpModels.modelOf(t) ?: return
         ScalpModels.v2Of(m) ?: return
-        val origStop = ScalpV2.stopFor(t.variantId)
         // 0.3.68: plain v2 copy + (for sf41–44) tweak and size copies; each carries its own params in the note.
-        for (sp in listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)) {
-            val stop = sp.stop ?: origStop
+        for (seed in listOf(ScalpV2.spec(ScalpV2.v2Id(t.variantId))) + ScalpV2.extrasFor(t.variantId)) {
+            val model = ScalpModels.modelOf(t.copy(ruleVersion = "${ScalpRule.VERSION}|${seed.id}|P"))
+            // A closed contract is not complete evidence while this model still awaits an exit/settlement.
+            val unfinished = _all.value.asSequence().filter { isActive(it) && ScalpModels.modelOf(it) == model }
+                .map { it.windowKey }.toSet()
+            val plan = ScalpV2.plan(seed.id, v2Evidence, t.signalAtMs, model?.code ?: seed.id, unfinished)
+            val sp = plan.spec
+            val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
-                note = String.format(Locale.US, "v2 copy of %s (%s)%s · ask ≤ %.0f¢ · trail %.0f¢ · clip %d%s · v2stop=%.2f",
+                note = String.format(Locale.US, "v2 copy of %s (%s)%s · ask ≤ %.0f¢ · trail %.0f¢ · clip %d%s · v2stop=%.4f",
                     m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
-                    if (sp.walk) " depth-walk" else "", stop),
+                    if (sp.walk) " depth-walk" else "", stop) +
+                    String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note),
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
 
-    /** v2 lane: 2 s delayed taker entry if ask ≤ 50¢ (else no fill after 6 s); exits per [ScalpV2.exit]; otherwise settles. */
+    /** V2 paper lane: frozen per-entry adaptive params, protective stops, delayed exits and near-close re-evaluation. */
     private fun stepV2(q: ScalpRule.Quote): List<ScalpTrade> {
         val key = q.ticker.uppercase()
         val out = ArrayList<ScalpTrade>()
@@ -1422,9 +1432,10 @@ class ScalpBook(
             when (t.state) {
                 ScalpState.PENDING_ENTRY -> {
                     val age = q.nowMs - t.signalAtMs
-                    if (q.nowMs >= q.closeMs || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill (ask above max or no size) within 6s"); continue }
-                    if (age < ScalpV2.ENTRY_DELAY_MS || !q.fresh()) continue
-                    val sp = ScalpV2.spec(t.variantId)
+                    if (q.tauS <= ScalpV2.EXIT_BY_S || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: final minute, expired signal, or no executable entry"); continue }
+                    if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
+                    val seed = ScalpV2.spec(t.variantId)
+                    val sp = seed.copy(maxAsk = ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk))
                     val ask = q.ask(t.side)
                     if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
                     if (sp.walk) {
@@ -1443,16 +1454,39 @@ class ScalpBook(
                         note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
                 }
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
-                    if (q.nowMs >= q.closeMs || !q.fresh()) continue
-                    val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
+                    if (q.nowMs >= q.closeMs) continue
+                    if (!ScalpV2.fresh(q)) {
+                        // Time-based risk decisions do not require liquidity; execution always does.
+                        if (t.state == ScalpState.OPEN && q.tauS <= ScalpV2.EXIT_BY_S)
+                            out += t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs,
+                                exitReason = "v2 exit before close: stale or gapped book")
+                        continue
+                    }
+                    val bid = q.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 }
                     val entry = t.entryPrice ?: continue
-                    val stop = Regex("v2stop=([0-9.]+)").find(t.note)?.groupValues?.get(1)?.toDoubleOrNull() ?: ScalpV2.stopFor(ScalpV2.originalView(t).variantId)
-                    val pk = maxOf(peakBid[t.id] ?: bid, bid).also { peakBid[t.id] = it }
-                    val wasArmed = t.id in v2Armed
-                    if (ScalpV2.armed(entry, bid, stop, t.contracts)) v2Armed += t.id
+                    val stop = ScalpV2.savedStop(t)
+                    val pk = maxOf(peakBid[t.id] ?: 0.0, ScalpV2.savedNumber(t.note, "v2peak", 0.0), bid ?: 0.0)
+                        .also { peakBid[t.id] = it }
                     val sp = ScalpV2.spec(t.variantId)
-                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: ScalpV2.exit(entry, stop, pk, bid, wasArmed, t.contracts, sp.trail) ?: continue
-                    val base = if (t.state == ScalpState.OPEN) t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else t
+                    val trail = ScalpV2.savedNumber(t.note, "v2trail", sp.trail).coerceIn(0.01, 0.10)
+                    val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, stop)
+                    val wasArmed = t.id in v2Armed || ScalpV2.savedNumber(t.note, "v2armed", 0.0) == 1.0
+                    // Reconstruct arming from the persisted peak, including after process death.
+                    val armed = wasArmed || ScalpV2.armed(entry, pk, arm, t.contracts)
+                    if (armed) v2Armed += t.id
+                    val note = ScalpV2.tag(ScalpV2.tag(t.note, "v2peak", String.format(Locale.US, "%.6f", pk)), "v2armed", if (armed) "1" else "0")
+                    val marked = t.copy(note = note)
+                    val priceExit = bid?.let { ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail) }
+                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
+                    if (reason == null) { if (marked != t) out += marked; continue }
+                    val base = if (t.state == ScalpState.OPEN) marked.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else marked
+                    val decided = base.exitDecidedAtMs ?: q.nowMs
+                    val lastFill = ScalpV2.savedNumber(t.note, "v2fillbook", 0.0).toLong()
+                    // Trigger first; sell only on a later executable book. Repeated callbacks cannot refill depth.
+                    if (bid == null || q.nowMs - decided < ScalpV2.EXIT_DELAY_MS || q.bookAtMs <= maxOf(decided, lastFill)) {
+                        if (base != t) out += base
+                        continue
+                    }
                     val next = if (sp.walk) {
                         // 0.3.68: hit real bid levels down the book (any price — it is an exit); partial = rest next quote.
                         var left = t.remaining; var usd = 0.0; var fee = 0.0; var n = 0
@@ -1464,12 +1498,12 @@ class ScalpBook(
                         if (n <= 0) { if (base !== t) out += base; continue }
                         base.copy(soldContracts = base.soldContracts + n, proceedsUsd = base.proceedsUsd + n * bid, exitFeeUsd = base.exitFeeUsd + ScalpRule.orderFee(n, bid))
                     }
-                    out += if (next.remaining <= 0) close(next, q.nowMs, reason) else next
+                    val filled = next.copy(note = ScalpV2.tag(next.note, "v2fillbook", q.bookAtMs.toString()))
+                    out += if (filled.remaining <= 0) close(filled, q.nowMs, reason) else filled
                 }
                 else -> {}
             }
         }
-        out.forEach { save(it) }
         return out
     }
 
