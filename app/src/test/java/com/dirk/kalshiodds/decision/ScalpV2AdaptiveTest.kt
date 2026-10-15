@@ -4,6 +4,20 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ScalpV2AdaptiveTest {
+    @Test fun profitArmingUsesRecordedDepthFeesInsteadOfAnAveragePriceFee() {
+        // Ten one-contract fills can cost 20 cents; the single average-price estimate is 17 cents.
+        assertTrue(ScalpV2.armed(.40, .475, .04, 10))
+        assertFalse(ScalpV2.armed(.40, .475, .04, 10, .20))
+        assertEquals(.037, ScalpV2.netPerContract(.40, .475, 10, .20), 1e-9)
+        assertFalse(ScalpV2.armed(.40, .60, .04, 0, .20))
+    }
+
+    @Test fun recordedFeesAlsoApplyToCloseHoldProfitability() {
+        val near = q(close - 50_000L, .92).copy(yesAsk = .93, cfSpot = 100_100.0, cfAgeMs = 0L)
+        assertNull(ScalpV2.closeExit(near, "YES", .90, 10))
+        assertNotNull(ScalpV2.closeExit(near, "YES", .90, 10, .20))
+    }
+
     private val ticker = "KXBTC15M-26OCT122015-15"
     private val close = ScalpTicker.closeMs(ticker)!!
     private val now = close - 120_000L
@@ -125,3 +139,4 @@ class ScalpV2AdaptiveTest {
         assertEquals(ScalpState.NO_FILL, book.snapshot().first { it.id == "held" }.state)
     }
 }
+

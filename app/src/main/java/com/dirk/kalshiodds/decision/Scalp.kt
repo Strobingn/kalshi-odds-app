@@ -1469,12 +1469,12 @@ class ScalpBook(
                     val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, stop)
                     val wasArmed = t.id in v2Armed || ScalpV2.savedNumber(t.note, "v2armed", 0.0) == 1.0
                     // Reconstruct arming from the persisted peak, including after process death.
-                    val armed = wasArmed || ScalpV2.armed(entry, pk, arm, t.contracts)
+                    val armed = wasArmed || ScalpV2.armed(entry, pk, arm, t.contracts, t.entryFeeUsd)
                     if (armed) v2Armed += t.id
                     val note = ScalpV2.tag(ScalpV2.tag(t.note, "v2peak", String.format(Locale.US, "%.6f", pk)), "v2armed", if (armed) "1" else "0")
                     val marked = t.copy(note = note)
-                    val priceExit = bid?.let { ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail) }
-                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
+                    val priceExit = bid?.let { ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, t.entryFeeUsd) }
+                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts, t.entryFeeUsd)
                     if (reason == null) { if (marked != t) out += marked; continue }
                     val base = if (t.state == ScalpState.OPEN) marked.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else marked
                     val decided = base.exitDecidedAtMs ?: q.nowMs
@@ -1590,3 +1590,4 @@ object ScalpMemory {
         }
     }
 }
+

@@ -26,14 +26,15 @@ object ScalpV2 {
     fun fresh(q: ScalpRule.Quote): Boolean = !q.bookGap && q.nowMs - q.bookAtMs in 0..BOOK_MAX_AGE_MS
 
     /** A conservative hold hypothesis, not knowledge of the settlement result. Missing CF data means exit. */
-    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int): String? {
+    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int,
+                  entryFeeUsd: Double = ScalpRule.orderFee(n, entry)): String? {
         if (q.tauS > EXIT_BY_S) return null
         val bid = q.bid(side)
         val fair = q.cfFair(side)
         val hold = fresh(q) && bid != null && bid.isFinite() && bid >= 0.90 &&
             fair != null && fair.isFinite() && fair >= 0.97 &&
             fair > bid - ScalpRule.feePerContract(n.coerceAtLeast(1), bid) + 0.01 &&
-            ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) > 0.0
+            netPerContract(entry, bid, n, entryFeeUsd) > 0.0
         return if (hold) null else "v2 exit before close: no strong fresh winning evidence"
     }
 
@@ -128,12 +129,24 @@ object ScalpV2 {
     fun entryOk(ask: Double?, maxAsk: Double = MAX_ASK): Boolean = ask != null && ask > 0.0 && ask <= maxAsk + 1e-9
 
     /** Armed once the per-contract gain after both fees reaches the stop size. */
-    fun armed(entry: Double, bid: Double, stop: Double, n: Int = CLIP): Boolean = ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) >= stop - 1e-9
+    fun armed(entry: Double, bid: Double, stop: Double, n: Int = CLIP,
+              entryFeeUsd: Double = ScalpRule.orderFee(n, entry)): Boolean =
+        netPerContract(entry, bid, n, entryFeeUsd) >= stop - 1e-9
+
+    /** Use the recorded entry fee: depth fills round fees per level, not at the average entry price.
+     * The exit is still an estimate at this bid; actual depth and partial-fill fees are charged by the book.
+     */
+    fun netPerContract(entry: Double, bid: Double, n: Int, entryFeeUsd: Double): Double {
+        if (n <= 0 || !entry.isFinite() || !bid.isFinite() || !entryFeeUsd.isFinite() || entryFeeUsd < 0.0)
+            return Double.NEGATIVE_INFINITY
+        return bid - entry - (entryFeeUsd + ScalpRule.orderFee(n, bid)) / n
+    }
 
     /** Exit reason or null. [wasArmed] persists across quotes (peak tracked by the caller). */
-    fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL): String? = when {
+    fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL,
+             entryFeeUsd: Double = ScalpRule.orderFee(n, entry)): String? = when {
         bid <= stopPrice(entry, stop) + 1e-9 -> "stop −${Math.round(stop * 100)}¢"
-        (wasArmed || armed(entry, bid, stop, n)) && bid <= peakBid - trail + 1e-9 -> "v2 trail ${Math.round(trail * 100)}¢ off peak after +${Math.round(stop * 100)}¢ net"
+        (wasArmed || armed(entry, bid, stop, n, entryFeeUsd)) && bid <= peakBid - trail + 1e-9 -> "v2 trail ${Math.round(trail * 100)}¢ off peak after +${Math.round(stop * 100)}¢ net"
         else -> null
     }
 
@@ -146,3 +159,4 @@ object ScalpV2 {
         else -> "losing to original"
     }
 }
+

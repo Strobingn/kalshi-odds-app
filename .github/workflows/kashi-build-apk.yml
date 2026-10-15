@@ -41,6 +41,9 @@ jobs:
           python3 ml/test_train_edge_0337.py
           if [ -f ml/test_train_longshot.py ]; then python3 ml/test_train_longshot.py; fi
       - name: Unit tests
+        # Standard-library ledger audit; synthetic data verifies accounting and split isolation.
+        run: python3 -m unittest discover -s tools/scalp_lab -v
+      - name: Android unit tests
         run: ./gradlew testDebugUnitTest --stacktrace
       - name: Assemble debug APK + verify debug cert
         run: ./gradlew assembleDebug verifyDebugCert --stacktrace
@@ -58,3 +61,4 @@ jobs:
           name: KalshiTrader-kashi-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
+
