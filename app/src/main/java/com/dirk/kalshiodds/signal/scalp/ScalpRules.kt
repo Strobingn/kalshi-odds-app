@@ -174,11 +174,7 @@ object ScalpCatalog {
             if (pos == null) {
                 val side = cheaper(t)
                 val aPx = ask(t, side)
-                val mins = t.tteMs / 60_000.0
-                val window = mins in 9.0..11.0
-                val cheap = aPx <= 0.40
-                val deep = aPx <= 0.20
-                if ((window && cheap) || deep) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
+                if (aPx <= 0.50) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {

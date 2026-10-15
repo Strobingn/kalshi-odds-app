@@ -767,29 +767,14 @@ fun SettingsContent(
             ToggleRow("Meta-label take/skip", s.metaLabelEnabled, { viewModel?.setMetaLabel(it) })
             ToggleRow("Synthetic path simulator", s.pathSimEnabled, { viewModel?.setPathSim(it) })
 
-            Section("Paper book (visible on home)")
+            Section("Paper book (always on)")
             Text(
-                "Isolated from live money. Starts at \$20,000 and the balance can go negative. The AI buys under 50¢ only in the first 7 minutes, " +
-                    "while the contract is still moving. A lower price takes a larger share. If the book is down, it still sizes off \$20,000. " +
-                    "It holds the rise, then sells when the bid comes off the high or those 7 minutes flatten. " +
-                    "It does not sit through the rest of the window. Never calls Kalshi. " +
-                    "A cheap live position gets a sell ticket then — Approve is still required.",
+                "Paper trades every window. Starts at \$20,000. Never calls Kalshi.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Paper trading (buys the first 7 minutes under 50¢)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to \$20,000")
-            }
-            ToggleRow("Late-favorite paper tracker", s.lateFavoriteEnabled, { viewModel?.setLateFavorite(it) })
-            Text(
-                "Logs a \$5 paper bet on the side spot is on with ≤5 min left, |z| ≥ 1.5 and ask 80–97¢. " +
-                    "Paper only, never sent to Kalshi. Unproven: needs ~2,000 settled windows.",
-                style = MaterialTheme.typography.labelMedium,
-                color = colors.textSecondary
-            )
-            OutlinedButton(onClick = { viewModel?.resetLateFavorite() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset tracker")
             }
 
             Section("Live Approve tickets (Kalshi V2)")
