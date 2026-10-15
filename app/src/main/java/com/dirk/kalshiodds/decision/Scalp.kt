@@ -1494,7 +1494,6 @@ class ScalpBook(
                 else -> {}
             }
         }
-        out.forEach { save(it) }
         return out
     }
 

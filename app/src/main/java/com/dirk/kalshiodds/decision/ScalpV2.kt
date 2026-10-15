@@ -1,11 +1,11 @@
 package com.dirk.kalshiodds.decision
 
 /**
- * 0.3.65 'v2' copies (PAPER, BTC): each original's signals are copied as a separate trade that
+ * V2 copies (PAPER, BTC): each original's signals are copied as a separate trade that
  *  - buys only when the ask is ≤ 50¢ (2 s entry delay, displayed-size fill, 10-contract clip, taker fee),
- *  - keeps the original's stop,
+ *  - keeps positive/inconclusive settings; tests bounded adjustments after sustained losses,
  *  - exits before the final minute unless fresh CF evidence supports a profitable hold,
- *  - does not sell until the gain after both fees reaches the stop size; then trails the peak bid and sells 2¢ off it.
+ *  - trails after the saved net-profit threshold, with the per-copy trail distance.
  * Deterministic, no LLM. Originals are untouched.
  */
 object ScalpV2 {
