@@ -58,3 +58,10 @@ jobs:
           name: KalshiTrader-kashi-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
+      - name: Upload scalping UI previews
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scalping-ui-previews
+          path: app/build/reports/paparazzi/debug/
+          if-no-files-found: error

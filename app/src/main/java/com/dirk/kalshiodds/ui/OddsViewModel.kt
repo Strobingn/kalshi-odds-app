@@ -263,7 +263,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val marks = container.scalp.marks.value
         val statsSnap = container.scalp.stats.value
         val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
-        var next = cur.copy(markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
+        var next = cur.copy(controls = container.scalpControls.state.value, feedback = com.dirk.kalshiodds.decision.ScalpModels.V2_MODELS.associate { it.code to container.scalpControls.feedback(it.code) }, activeScalps = trades.filter { it.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL },
+            scalpBids = trades.mapNotNull { t -> bidFor(t)?.let { t.id to it } }.toMap(), markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
         // 0.3.67/0.3.68: everything from aggregate tables (stats, daily, exits, windows) — never a trade scan.
         val tBoard0 = android.os.SystemClock.elapsedRealtime()
         if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS && (statsSnap !== scalpTabBoardsStats || cur.coin != scalpTabBoardsCoin || wkey != scalpTabBoardsWkey)) {

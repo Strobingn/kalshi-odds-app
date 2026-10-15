@@ -127,13 +127,17 @@ object ScalpV2 {
 
     fun entryOk(ask: Double?, maxAsk: Double = MAX_ASK): Boolean = ask != null && ask > 0.0 && ask <= maxAsk + 1e-9
 
+    /** Uses the actual entry fees (including level-by-level rounding) and any partial proceeds. */
+    fun netPerContract(t: ScalpTrade, bid: Double): Double =
+        (t.proceedsUsd - t.exitFeeUsd + t.remaining * bid - ScalpRule.orderFee(t.remaining, bid) - t.entryCostUsd) / t.contracts.coerceAtLeast(1)
+
     /** Armed once the per-contract gain after both fees reaches the stop size. */
     fun armed(entry: Double, bid: Double, stop: Double, n: Int = CLIP): Boolean = ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) >= stop - 1e-9
 
     /** Exit reason or null. [wasArmed] persists across quotes (peak tracked by the caller). */
-    fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL): String? = when {
+    fun exit(entry: Double, stop: Double, peakBid: Double, bid: Double, wasArmed: Boolean, n: Int = CLIP, trail: Double = TRAIL, armThreshold: Double = stop, netGain: Double? = null): String? = when {
         bid <= stopPrice(entry, stop) + 1e-9 -> "stop −${Math.round(stop * 100)}¢"
-        (wasArmed || armed(entry, bid, stop, n)) && bid <= peakBid - trail + 1e-9 -> "v2 trail ${Math.round(trail * 100)}¢ off peak after +${Math.round(stop * 100)}¢ net"
+        (wasArmed || (netGain?.let { it >= armThreshold - 1e-9 } ?: armed(entry, bid, armThreshold, n))) && bid <= peakBid - trail + 1e-9 -> "v2 trail ${Math.round(trail * 100)}¢ off peak after +${Math.round(armThreshold * 100)}¢ net"
         else -> null
     }
 

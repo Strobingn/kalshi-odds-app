@@ -36,6 +36,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -66,6 +68,8 @@ fun SettingsScreen(
     scrollToApiKey: Boolean = false
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var scalpSettings by remember { mutableStateOf(false) }
+    if (scalpSettings) SwarmScalpSettingsDialog { scalpSettings = false }
     val exportKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? -> uri?.let { viewModel.backupCredentials(it) } }
@@ -84,6 +88,7 @@ fun SettingsScreen(
         scrollToApiKey = scrollToApiKey,
         onExportKeys = { exportKeys.launch("diphunter-kalshi-key.dhcred") },
         onImportKeys = { importKeys.launch(arrayOf("*/*")) },
+        onOpenScalpSettings = { scalpSettings = true },
         onCheckUpdate = { viewModel.checkForKashiUpdate() }
     )
 }
@@ -98,7 +103,8 @@ fun SettingsContent(
     viewModel: SettingsViewModel? = null,
     onExportKeys: () -> Unit = {},
     onImportKeys: () -> Unit = {},
-    onCheckUpdate: () -> Unit = {}
+    onCheckUpdate: () -> Unit = {},
+    onOpenScalpSettings: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val s = state.settings
@@ -143,6 +149,8 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
+            Section("Scalping")
+            OutlinedButton(onClick = onOpenScalpSettings, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Scalping settings · V2 paper strategies") }
             Section("App update")
             Text(
                 "Checks GitHub for the newest v0.3.*-debug release and downloads DipHunter-debug.apk. Tags like gtp-*, grokbot, and v1.x are ignored. The package id and debug cert are checked before the installer opens.",
