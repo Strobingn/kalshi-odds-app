@@ -1451,7 +1451,14 @@ class ScalpBook(
                         note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
                 }
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
-                    if (q.nowMs >= q.closeMs || !ScalpV2.fresh(q)) continue
+                    if (q.nowMs >= q.closeMs) continue
+                    if (!ScalpV2.fresh(q)) {
+                        // Time-based risk decisions do not require liquidity; execution always does.
+                        if (t.state == ScalpState.OPEN && q.tauS <= ScalpV2.EXIT_BY_S)
+                            out += t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs,
+                                exitReason = "v2 exit before close: stale or gapped book")
+                        continue
+                    }
                     val bid = q.bid(t.side)?.takeIf { it.isFinite() && it > 0.0 }
                     val entry = t.entryPrice ?: continue
                     val stop = ScalpV2.savedStop(t)

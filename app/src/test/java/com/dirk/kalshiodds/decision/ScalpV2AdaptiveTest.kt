@@ -101,6 +101,16 @@ class ScalpV2AdaptiveTest {
         assertEquals(ScalpState.CLOSED, book.snapshot().first { it.id == "held" }.state)
     }
 
+    @Test fun staleCloseBookTriggersRiskDecisionButCannotFill() {
+        val (book, _) = book(open())
+        book.onQuote(q(close - 50_000, .40).copy(bookGap = true), false)
+        val pending = book.snapshot().first { it.id == "held" }
+        assertEquals(ScalpState.PENDING_EXIT, pending.state)
+        assertEquals(0, pending.soldContracts)
+        book.onQuote(q(close - 49_000, .40), false)
+        assertEquals(ScalpState.CLOSED, book.snapshot().first { it.id == "held" }.state)
+    }
+
     @Test fun noFreshEntryInFinalMinuteOrFromStaleGappedOrSignalBook() {
         val pending = open().copy(state = ScalpState.PENDING_ENTRY, contracts = 0, entryPrice = null, entryAtMs = null,
             signalAtMs = now - 2_000)
