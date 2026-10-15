@@ -331,7 +331,7 @@ private fun V2CompareCard(rows: List<com.dirk.kalshiodds.decision.ScalpV2.Compar
     val c = DipTheme.colors
     FieldCard {
         Text("v2 vs original · BTC 15m", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
-        Text("v2 = original's entries only at ask ≤ 50¢, same stop, sell after gain ≥ stop then 2¢ off peak. Under 30 v2 trades = not enough data.",
+        Text("v2 keeps positive/inconclusive settings and tests bounded changes after sustained losses (30 trades, 3 completed windows). Protective stops always apply. Final-minute holds require strong fresh CF evidence; details are in each trade note. Under 30 v2 trades = not enough data.",
             style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
         Spacer(Modifier.height(6.dp))
         rows.forEach { cmp ->
