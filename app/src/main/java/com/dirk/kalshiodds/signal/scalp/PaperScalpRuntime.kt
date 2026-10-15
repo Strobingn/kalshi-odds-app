@@ -42,7 +42,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
     }
     @Synchronized private fun save(key: String, value: PaperScalpState) {
         val previous = saved[key]
-        fun material(s: PaperScalpState) = s.accounts.map { a -> a.copy(positions = a.positions.map { p -> p.copy(lastBid = 0.0, markAtMs = 0, lowBid = 0.0) }) }
+        fun material(s: PaperScalpState) = s.accounts.map { a -> a.copy(peakEquity = 0.0, maxDrawdown = 0.0, positions = a.positions.map { p -> p.copy(lastBid = 0.0, markAtMs = 0, lowBid = 0.0) }) }
         val now = System.currentTimeMillis()
         val important = previous == null || value.paused != previous.second.paused || material(value) != material(previous.second)
         if (!important && now - previous!!.first < 2000) return
