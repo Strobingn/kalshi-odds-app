@@ -19,6 +19,18 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.8 (claude/scalper-model-refresh): change every strategy's settings, reset the paper record
+
+- **Per-strategy settings** (after grok-bitcoin's scalp sliders, but one set per strategy): open a strategy
+  in the arena and its Settings card has an on / off switch and sliders for its main trigger (the dip size,
+  the flow size, the favourite's fair-price floor, the ML scalper's cut, …), contracts an order, take profit,
+  stop loss (holds can be given one), time-out, positions open at once, the price band and how often it
+  looks; "Back to its defaults" undoes them. Saved on the phone (`ScalpTuning`); an untouched strategy runs
+  exactly as shipped, and the rules text on its page shows your values.
+- **Arena settings** (the sliders icon at the top of the arena): every strategy's on / off switch with its
+  size and exits, "Put every strategy back to its defaults", and **Reset the paper record**, which archives
+  the trade files and starts every strategy again from $0 (your settings stay).
+
 ## 1.9.7 (claude/scalper-model-refresh): Kashi's late favourites, and a cleaner arena
 
 - **Five strategies copied from Kashi V2** (`ShockFav.kt` sf16 / sf19 / sf21 / sf23 / sf31), the only family

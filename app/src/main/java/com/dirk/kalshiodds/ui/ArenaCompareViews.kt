@@ -174,10 +174,10 @@ internal fun StrategyHeader(st: ScalpStrategy, d: ArenaTable.Detail) {
 }
 
 @Composable
-internal fun StrategyRules(st: ScalpStrategy) {
+internal fun StrategyRules(st: ScalpStrategy, tuned: com.dirk.kalshiodds.signal.scalper.Tuned? = null) {
     val colors = DipTheme.colors
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag("STRATEGY_RULES")) {
-        ArenaTable.rules(st).forEachIndexed { i, line ->
+        (if (tuned != null) ArenaTable.rules(st, tuned) else ArenaTable.rules(st)).forEachIndexed { i, line ->
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (i == 0) "When" else "•", style = MaterialTheme.typography.labelMedium, color = colors.accentBlue, modifier = Modifier.width(36.dp))
                 Text(line, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)

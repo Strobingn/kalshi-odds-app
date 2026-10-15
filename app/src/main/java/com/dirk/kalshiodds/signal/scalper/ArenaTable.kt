@@ -174,23 +174,27 @@ object ArenaTable {
 
     private fun c(d: Double): String = "${Math.round(d * 100)}¢"
 
-    /** How it gets in and out, built from the strategy's own settings. */
-    fun rules(st: ScalpStrategy): List<String> {
+    /** How it gets in and out, built from the strategy's settings (yours where you changed one). */
+    fun rules(st: ScalpStrategy, t: Tuned = Tuned(st, ScalpKnobs(), ScalpTuning.DEFAULT_CONTRACTS)): List<String> {
         val entry = if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
         else "Rests a bid and waits up to 20 s for sellers to reach it (no fee)."
         val exit = if (st.hold) {
             "Holds to the settlement: $1 if its side wins, $0 if not" +
-                (if (st.stopDollars > 0.0) ", unless the bid falls ${c(st.stopDollars)} below the entry (sold, taker fee)." else ".")
+                (if (t.stopDollars > 0.0) ", unless the bid falls ${c(t.stopDollars)} below the entry (sold, taker fee)." else ".")
+        } else {
+            "Out at +${c(t.targetDollars)} (resting offer), or sold at the bid at −${c(t.stopDollars)} " +
+                "or after ${t.timeoutMs / 1000} s (taker fee)."
         }
-        else "Out at +${c(st.targetDollars)} (resting offer), or sold at the bid at −${c(st.stopDollars)} " +
-            "or after ${st.timeoutMs / 1000} s (taker fee)."
-        val band = if (st.entryMin != PrintGrid.MIN_PRICE || st.entryMax != PrintGrid.MAX_PRICE) {
-            "Trades only between ${c(st.entryMin)} and ${c(st.entryMax)}."
+        val band = if (t.ownBand) {
+            "Trades only between ${c(t.entryMin)} and ${c(t.entryMax)}."
         } else {
             "Trades between ${c(PrintGrid.MIN_PRICE)} and ${c(PrintGrid.MAX_PRICE)}."
         }
-        val size = "10 contracts an order, up to ${st.maxPerSide} at once per side; looks every ${st.cadenceSeconds} s."
-        return listOf(signal(st), entry, exit, band, size)
+        val size = "${t.contracts} contracts an order, up to ${t.maxPerSide} at once per side; looks every ${t.cadenceSeconds} s."
+        val spec = ScalpTriggers.of(st)
+        val trigger = t.knobs.trigger
+        val signal = signal(st) + if (spec != null && trigger != null) " Your setting: ${spec.label.lowercase()} ${ScalpTriggers.text(spec, trigger)}." else ""
+        return listOf(signal, entry, exit, band, size) + if (!t.enabled) listOf("Switched off in its settings: it opens nothing new.") else emptyList()
     }
 
     /** Everything on the one-strategy page that is a number. */

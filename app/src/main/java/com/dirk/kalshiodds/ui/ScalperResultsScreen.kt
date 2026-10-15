@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -168,7 +169,22 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         message = message,
         feed = feed,
         chartTrades = chartTrades,
-        live = live
+        live = live,
+        tuning = container?.scalper?.engine?.tuning,
+        modelTheta = store?.model?.thetaCents,
+        onResetPaper = container?.scalper?.let { sc ->
+            {
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { runCatching { sc.reset() }.getOrDefault(false) }
+                    message = if (ok) {
+                        "Paper record reset: every strategy starts again from \$0 (the old trade files are archived)."
+                    } else {
+                        "Not reset: the trade files could not be archived, so nothing was changed. Try again."
+                    }
+                }
+                Unit
+            }
+        }
     )
 }
 
@@ -250,16 +266,35 @@ fun ScalperResultsScreen(
     today: java.time.LocalDate = java.time.LocalDate.now(),
     /** A strategy whose own page is open (screenshots); null = the arena. */
     initialOpen: ScalpStrategy? = null,
-    pageListState: LazyListState = rememberLazyListState()
+    pageListState: LazyListState = rememberLazyListState(),
+    /** Your per-strategy settings; null hides every settings control (screenshots). */
+    tuning: com.dirk.kalshiodds.signal.scalper.ScalpTuning? = null,
+    /** The ML scalper's own cut, shown as its trigger's default. */
+    modelTheta: Double? = null,
+    /** Clears the paper record (after a confirm); null hides the button. */
+    onResetPaper: (() -> Unit)? = null
 ) {
     var openName by rememberSaveable { mutableStateOf(initialOpen?.name) }
+    var settingsOpen by rememberSaveable { mutableStateOf(false) }
     val open = ScalpStrategy.values().firstOrNull { it.name == openName }
+    val hasBack = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current != null
     if (open != null) {
         // System back closes the page (screenshots have no back dispatcher, so only where there is one).
-        if (androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current != null) BackHandler { openName = null }
+        if (hasBack) BackHandler { openName = null }
         // Each strategy's page opens at its top, not where the last one was left.
         val pageState = remember(open) { if (open == initialOpen) pageListState else LazyListState() }
-        StrategyPage(open, state, chartTrades, pageState) { openName = null }
+        StrategyPage(open, state, chartTrades, pageState, tuning, modelTheta) { openName = null }
+        return
+    }
+    if (settingsOpen && tuning != null) {
+        if (hasBack) BackHandler { settingsOpen = false }
+        ArenaSettingsPage(
+            tuning = tuning,
+            message = message,
+            onResetPaper = onResetPaper,
+            onOpenStrategy = { st -> openName = st.name },
+            onBack = { settingsOpen = false }
+        )
         return
     }
     val colors = DipTheme.colors
@@ -340,6 +375,17 @@ fun ScalperResultsScreen(
                     if (onBack != null) {
                         IconButton(onClick = onBack) {
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                },
+                actions = {
+                    if (tuning != null) {
+                        IconButton(onClick = { settingsOpen = true }, modifier = Modifier.testTag("ARENA_SETTINGS_OPEN")) {
+                            Icon(
+                                Icons.Outlined.Tune,
+                                contentDescription = "Arena settings and reset",
+                                tint = colors.accentBlue
+                            )
                         }
                     }
                 },
@@ -788,6 +834,8 @@ internal fun StrategyPage(
     state: ScalperState,
     chartTrades: List<ScalpTrade>,
     listState: LazyListState,
+    tuning: com.dirk.kalshiodds.signal.scalper.ScalpTuning? = null,
+    modelTheta: Double? = null,
     onBack: () -> Unit
 ) {
     val colors = DipTheme.colors
@@ -851,7 +899,14 @@ internal fun StrategyPage(
                     if (curve.size >= 2) ScrubLineChart(curve, 0.0, height = 220.dp) { ScalperResults.money(it) } else Muted("Appears after its first closed trades.")
                 }
             }
-            item(key = "rules") { ChartCard("How it trades", "Its signal, entry, exit and limits.", "CHART_RULES") { StrategyRules(st) } }
+            item(key = "rules") {
+                ChartCard("How it trades", "Its signal, entry, exit and limits, with your settings.", "CHART_RULES") {
+                    StrategyRules(st, tuning?.tuned(st))
+                }
+            }
+            if (tuning != null) {
+                item(key = "settings") { StrategySettingsCard(st, tuning, modelTheta) }
+            }
             item(key = "numbers") { ChartCard("Every number", "Paper dollars after fees.", "CHART_NUMBERS") { StrategyNumbers(st, detail) } }
             item(key = "more_toggle") {
                 OutlinedButton(onClick = { more = !more }, modifier = Modifier.fillMaxWidth().height(48.dp).testTag("STRATEGY_MORE")) {

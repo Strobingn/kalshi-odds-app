@@ -118,6 +118,7 @@ class AppContainer(context: Context) {
         closeMs = { t ->
             scoring.book.closeTime(t) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(t)
         },
+        engine = com.dirk.kalshiodds.signal.scalper.ScalperEngine(tuning = scalperStore.tuning),
         onReset = { scalperStore.log.archive() },
         fairYes = { t, now -> scalperFairYes(t, now) }
     )

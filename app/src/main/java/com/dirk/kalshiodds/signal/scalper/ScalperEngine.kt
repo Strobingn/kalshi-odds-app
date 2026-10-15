@@ -409,7 +409,14 @@ sealed class ScalpEvent {
  * the ledger splits the results by strategy and by queue instead. Pure and deterministic; not thread-safe (the
  * [PaperScalper] holds the lock). There is no path from here to an order.
  */
-class ScalperEngine(val config: Config = Config()) {
+class ScalperEngine(
+    val config: Config = Config(),
+    /** Your per-strategy settings (sizes, exits, bands); untouched strategies run on their defaults. */
+    val tuning: ScalpTuning = ScalpTuning()
+) {
+    init {
+        tuning.defaultContracts = config.contracts
+    }
 
     data class Config(
         val contracts: Int = 10,
@@ -484,9 +491,10 @@ class ScalperEngine(val config: Config = Config()) {
         context: ScalpContext? = null
     ): ScalpEvent.Posted? {
         require(!strategy.taker) { "${strategy.name} buys at the ask: use buyNow" }
-        if (!inBand(strategy, price)) return null
+        val t = tuning.tuned(strategy)
+        if (!inBand(t, price)) return null
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
-        if (workingFor(strategy, ticker, want) >= strategy.maxPerSide) return null
+        if (workingFor(strategy, ticker, want) >= t.maxPerSide) return null
         val known = queueAhead != null && queueAhead.isFinite() && queueAhead >= 0.0
         val order = ScalpOrder(
             id = nextId++,
@@ -494,7 +502,7 @@ class ScalperEngine(val config: Config = Config()) {
             ticker = ticker,
             side = want,
             price = round4(price),
-            contracts = config.contracts,
+            contracts = t.contracts,
             queueAhead = if (known) queueAhead!! else config.unknownQueue,
             queueKnown = known,
             postedAtMs = nowMs,
@@ -522,9 +530,10 @@ class ScalperEngine(val config: Config = Config()) {
         context: ScalpContext? = null
     ): List<ScalpEvent> {
         require(strategy.taker) { "${strategy.name} rests a bid: use post" }
-        if (!inBand(strategy, askPrice)) return emptyList()
+        val t = tuning.tuned(strategy)
+        if (!inBand(t, askPrice)) return emptyList()
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
-        if (workingFor(strategy, ticker, want) >= strategy.maxPerSide) return emptyList()
+        if (workingFor(strategy, ticker, want) >= t.maxPerSide) return emptyList()
         val price = round4(askPrice)
         val order = ScalpOrder(
             id = nextId++,
@@ -532,8 +541,8 @@ class ScalperEngine(val config: Config = Config()) {
             ticker = ticker,
             side = want,
             price = price,
-            contracts = config.contracts,
-            entryFeeUsd = KalshiFee.total(config.contracts, price, config.feeRate),
+            contracts = t.contracts,
+            entryFeeUsd = KalshiFee.total(t.contracts, price, config.feeRate),
             queueAhead = 0.0,
             queueKnown = true,
             postedAtMs = nowMs,
@@ -543,7 +552,7 @@ class ScalperEngine(val config: Config = Config()) {
         )
         val w = Working(order)
         w.filledAtMs = nowMs
-        w.exitPrice = round4(price + strategy.targetDollars)
+        w.exitPrice = round4(price + t.targetDollars)
         w.exitQueue = offerQueue(want, w.exitPrice)?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
         byTicker.getOrPut(ticker) { ArrayList() }.add(w)
         return listOf(ScalpEvent.Posted(order), ScalpEvent.Filled(order, nowMs))
@@ -585,7 +594,7 @@ class ScalperEngine(val config: Config = Config()) {
                 if (abs(sidePrice - o.price) <= TICK_EPS) w.traded += contracts
                 if (through || w.traded >= o.queueAhead + o.contracts) {
                     w.filledAtMs = nowMs
-                    w.exitPrice = round4(o.price + o.strategy.targetDollars)
+                    w.exitPrice = round4(o.price + tuning.tuned(o.strategy).targetDollars)
                     val shown = if (o.queueKnown) exitQueue(o.side, w.exitPrice) else null
                     w.exitQueue = shown?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
                     events += ScalpEvent.Filled(o, nowMs)
@@ -627,12 +636,13 @@ class ScalperEngine(val config: Config = Config()) {
                 }
                 continue
             }
-            // A hold has no time-out; it stops out only when it has a stop (Kashi's late favourites).
-            if (o.strategy.hold && o.strategy.stopDollars <= 0.0) continue
+            // A hold has no time-out; it stops out only when it has a stop (Kashi's late favourites, or one you set).
+            val t = tuning.tuned(o.strategy)
+            if (o.strategy.hold && t.stopDollars <= 0.0) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
-            val stopped = bid <= o.price - o.strategy.stopDollars + EPS
-            val timedOut = !o.strategy.hold && nowMs - filledAt >= o.strategy.timeoutMs
+            val stopped = t.stopDollars > 0.0 && bid <= o.price - t.stopDollars + EPS
+            val timedOut = !o.strategy.hold && nowMs - filledAt >= t.timeoutMs
             if (stopped || timedOut) {
                 it.remove()
                 val fee = if (bid > 0.0) KalshiFee.total(o.contracts, bid, config.feeRate) else 0.0
@@ -683,11 +693,10 @@ class ScalperEngine(val config: Config = Config()) {
      * a strategy with its own band ([ScalpStrategy.entryMin] /
      * [ScalpStrategy.entryMax]) trades inside that band only.
      */
-    private fun inBand(strategy: ScalpStrategy, price: Double): Boolean {
+    private fun inBand(t: Tuned, price: Double): Boolean {
         if (!price.isFinite()) return false
-        val ownBand = strategy.entryMin != PrintGrid.MIN_PRICE || strategy.entryMax != PrintGrid.MAX_PRICE
-        val lo = if (ownBand) strategy.entryMin else config.minPrice
-        val hi = if (ownBand) strategy.entryMax else config.maxPrice
+        val lo = if (t.ownBand) t.entryMin else config.minPrice
+        val hi = if (t.ownBand) t.entryMax else config.maxPrice
         return price >= lo - EPS && price <= hi + EPS
     }
 
