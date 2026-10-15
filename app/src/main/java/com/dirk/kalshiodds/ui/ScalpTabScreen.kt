@@ -204,6 +204,10 @@ fun ScalpTabContent(
             TextButton(onClick = onOpenSettings) { Text("Scalping settings") }
         }
         if (showCoinCards && page == 0) {
+            item(key = "run-status") { Text(
+                (if (st.controls.enabled && !st.controls.killSwitch) "V2 entries on" else "V2 entries paused") +
+                    (if (st.controls.maxTradesPerHour == 0) " · unlimited trades" else " · ${st.controls.maxTradesPerHour}/hour") +
+                    (if (st.controls.manual) " · manual parameters" else " · strategy parameters"), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             item(key = "scope") { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("V2 strategies", v2Only) { v2Only = true }
                 Pill("Originals", !v2Only) { v2Only = false }
@@ -217,7 +221,7 @@ fun ScalpTabContent(
             if (positions.isEmpty()) item(key = "flat") { Text("No open positions in this group", color = c.textSecondary) }
             items(positions, key = { "swarm-open-" + it.id }) { SwarmOpenPosition(it, st.scalpBids[it.id]) }
             item(key = "by-strategy") { Text("By strategy · net after fees", color = c.textPrimary, fontWeight = FontWeight.SemiBold) }
-            items(rows.sortedByDescending { it.netUsd }, key = { "swarm-strategy-" + it.model.code }) { r -> SwarmStrategyRow(r, st.feedback[r.model.code]) { onOpenAlgo(r.model) } }
+            items(rows.sortedByDescending { it.netUsd }, key = { "swarm-strategy-" + it.model.code }) { r -> SwarmStrategyRow(r, st.feedback[r.model.code], enabled = !v2Only || st.controls.permits(r.model.code)) { onOpenAlgo(r.model) } }
             if (rows.isEmpty()) item(key = "no-results") { Text("No completed trades yet. Strategies and settings are available above.", color = c.textSecondary) }
         }
         if (showCoinCards && page == 1) {

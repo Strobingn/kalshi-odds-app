@@ -54,6 +54,11 @@ class ScalpControlsTest {
             assertTrue(held.exitReason!!.contains(if (target) "take-profit" else "max hold"))
         }
     }
+    @Test fun userArmingCanExceedStopAndTrailCanExceedTenCents() {
+        assertNull(ScalpV2.exit(.40, .06, .50, .47, false, 2, .02, armThreshold = .08))
+        assertNull(ScalpV2.exit(.40, .06, .70, .58, true, 2, .15, armThreshold = .04))
+        assertNotNull(ScalpV2.exit(.40, .06, .70, .54, true, 2, .15, armThreshold = .04))
+    }
     @Test fun gatesAndDipFilterHaveDefinedBoundaries() {
         val cfg = ScalpControls(maxOpen = 2, maxTradesPerHour = 3, maxDailyLossUsd = 5.0, dipCents = 2.0)
         assertNotNull(cfg.entryBlock("x", 2, 0, 0.0))

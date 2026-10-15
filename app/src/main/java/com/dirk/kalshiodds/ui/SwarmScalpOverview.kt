@@ -81,12 +81,12 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, 
         }
     }
 }
-@Composable internal fun SwarmStrategyRow(row: ScalpModels.Row, feedback: com.dirk.kalshiodds.decision.ScalpTradeFeedback? = null, onOpen: () -> Unit) {
+@Composable internal fun SwarmStrategyRow(row: ScalpModels.Row, feedback: com.dirk.kalshiodds.decision.ScalpTradeFeedback? = null, enabled: Boolean = true, onOpen: () -> Unit) {
     val c = DipTheme.colors
     SwarmCard {
         Row(Modifier.fillMaxWidth().clickable(onClick = onOpen)) {
             Column(Modifier.weight(1f)) {
-                Text(row.model.label, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                Text(row.model.label + if (enabled) "" else " · entries paused", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
                 Text("${row.wins} W · ${row.losses} L · ${row.roundTrips} trades · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 feedback?.let { Text("Learned: ${it.trades} trades · recent net ${String.format(Locale.US, "%+.2f¢/ct", it.recentNetPerContract * 100)}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall) }
             }

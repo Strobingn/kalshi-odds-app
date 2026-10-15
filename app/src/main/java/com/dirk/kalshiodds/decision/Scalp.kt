@@ -1508,7 +1508,7 @@ class ScalpBook(
                     val pk = maxOf(peakBid[t.id] ?: 0.0, ScalpV2.savedNumber(t.note, "v2peak", 0.0), bid ?: 0.0)
                         .also { peakBid[t.id] = it }
                     val sp = ScalpV2.spec(t.variantId)
-                    val trail = ScalpV2.savedNumber(t.note, "v2trail", sp.trail).coerceIn(0.01, 0.10)
+                    val trail = ScalpV2.savedNumber(t.note, "v2trail", sp.trail).coerceIn(0.01, 0.20)
                     val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, 0.99)
                     val wasArmed = t.id in v2Armed || ScalpV2.savedNumber(t.note, "v2armed", 0.0) == 1.0
                     // Reconstruct arming from the persisted peak, including after process death.
@@ -1519,7 +1519,7 @@ class ScalpBook(
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
                     val timeExit = if (holdExpired) "V2 user max hold reached" else null
                     val priceExit = bid?.let {
-                        ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail)
+                        ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm)
                             ?: if (target > 0 && ScalpRule.netAfterFees(entry, it, t.contracts) >= target) "V2 user net take-profit" else null
                     }
                     val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
