@@ -476,8 +476,8 @@ class ScalpBook(
     private val bankrollUsd: () -> Double = { com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD },
     /** 0.3.65 app-only extras: v2 copies + entry/exit detail notes (off in legacy unit-test books). */
     private val liveExtras: Boolean = false,
-    private val idFactory: () -> String = { UUID.randomUUID().toString() },
-    val controls: ScalpControls = ScalpControls()
+    val controls: ScalpControls = ScalpControls(),
+    private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
     // 0.3.67: only open/pending rows live in RAM; closed history stays in SQLite + scalp_stats.
@@ -629,7 +629,7 @@ class ScalpBook(
         }
         changed.forEach { save(it) }
         if (changed.any { it.state == ScalpState.CLOSED }) maybeTune(q.nowMs)
-        changed.filter { it.isPrimary }
+        changed.filter { candidate -> candidate.isPrimary && _all.value.any { it.id == candidate.id } }
     }
 
     // ---- 0.3.53 Forecast ride / fade (paper only) ----
@@ -702,7 +702,7 @@ class ScalpBook(
             )
         }
         changed.forEach { save(it) }
-        changed
+        changed.filter { candidate -> _all.value.any { it.id == candidate.id } }
     }
 
     private fun fcStep(t: ScalpTrade, q: ScalpRule.Quote, f: Double, horizon: Int): ScalpTrade? {
@@ -953,7 +953,7 @@ class ScalpBook(
             val bankroll = bankrollUsd()
             var brtiFair: Double? = null
             for (seed in ShockFav.VARIANTS) {
-            val p = controls.shock(seed)
+                val p = controls.shock(seed)
                 if (p.kind == ShockFav.Kind.OPEN50) {
                     if (p.o50 != ShockFav.O50.AI) continue // 0.3.65: handled in o50PriceEntries
                     // 0.3.64 Open 50: one shot per market per side, only 5–30 s after the open.
@@ -1026,7 +1026,7 @@ class ScalpBook(
             }
         }
         changed.forEach { save(it) }
-        changed
+        changed.filter { candidate -> _all.value.any { it.id == candidate.id } }
     }
 
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */

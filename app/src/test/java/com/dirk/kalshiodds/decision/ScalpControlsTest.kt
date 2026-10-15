@@ -19,6 +19,24 @@ class ScalpControlsTest {
     private fun held(c: ScalpControlSpec.Config = config()) = pending(c).copy(state = ScalpState.OPEN,
         contracts = 10, entryPrice = .40, entryFeeUsd = .17, entryAtMs = now - 5000)
 
+    @Test fun newSignalsSnapshotSavedSettingsAndPauseSuppressesNewCandidates() {
+        val controls = ScalpControls()
+        val saved = ScalpControlSpec.defaults("fair").set(K.CLIP, 5.0).set(K.DELAY, 2000.0)
+            .set(K.TARGET, 0.0).set(K.TURN, 0.0)
+        controls.apply("fair", saved)
+        val book = ScalpBook(variants = emptyList(), controls = controls)
+        val signal = q(now, .20)
+        val changes = book.onQuote(signal, true)
+        val pending = changes.first { ScalpControlSpec.code(it) == "fair" }
+        assertEquals(saved, ScalpControlSpec.frozen(pending))
+        controls.apply("fair", saved.set(K.CLIP, 9.0))
+        book.onQuote(signal.copy(nowMs = now + 2000, bookAtMs = now + 2000), false)
+        assertEquals(5, book.snapshot().first { it.id == pending.id }.contracts)
+        controls.apply("fair", saved.copy(enabled = false))
+        val paused = ScalpBook(variants = emptyList(), controls = controls)
+        assertFalse(paused.onQuote(signal, true).any { ScalpControlSpec.code(it) == "fair" })
+        assertFalse(paused.snapshot().any { ScalpControlSpec.code(it) == "fair" })
+    }
     @Test fun everyModelHasACompleteValidConfigurationAndOnlyApplicableSignalControls() {
         for (m in ScalpModels.ALL) {
             val c = ScalpControlSpec.defaults(m.code)
