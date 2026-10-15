@@ -50,6 +50,10 @@ class AuditTest(unittest.TestCase):
         trades, _ = audit([r, row('base', rule='v2|sf41|P'), row('keep', note='v2ai=keep; ok')])
         self.assertEqual({t.variant for t in trades}, {'v2-sf41:trial', 'v2-sf41:keep', 'sf41'})
 
+    def test_manual_setting_revisions_are_separate_cohorts(self):
+        trades, _ = audit([row('a', note='ctlrev=abc123'), row('b', note='ctlrev=def456')])
+        self.assertEqual({t.variant for t in trades}, {'v2-sf41:manual-abc123', 'v2-sf41:manual-def456'})
+
     def test_sqlite_is_read_only_and_json_input(self):
         with tempfile.TemporaryDirectory() as temp:
             p = Path(temp) / 'phone.sqlite'

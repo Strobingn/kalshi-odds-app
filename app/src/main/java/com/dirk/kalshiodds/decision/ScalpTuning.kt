@@ -54,7 +54,10 @@ data class ScalpParams(
      * 0.3.61 sibling: stop armed only after 60 s held, fair-value early exits (gap-closed / turn-down) off, no target or
      * time stop — hold to settlement unless the stop fires. Own id ("-h60"); originals unchanged.
      */
-    val hold60: Boolean = false
+    val hold60: Boolean = false,
+    val maxSpread: Double = ScalpRule.MAX_SPREAD,
+    val minAsk: Double = ScalpRule.ENTRY_LO,
+    val maxAsk: Double = ScalpRule.ENTRY_HI
 ) {
     /** Fair-gap ids keep the 0.3.40 format (g14-t12-…); other strategies are prefixed ("dip-g06-…"). */
     // 0.3.50: computed once per instance (was String.format on every access — hot in ScalpBook.onQuote).
@@ -395,3 +398,4 @@ object ScalpBreakdown {
             listOf(String.format(Locale.US, "Round trips per window: %.2f avg, %d max over %d windows", pw.avg, pw.max, pw.windows))
     }
 }
+

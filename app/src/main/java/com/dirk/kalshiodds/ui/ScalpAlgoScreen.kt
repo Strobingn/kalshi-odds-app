@@ -68,11 +68,17 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
     val model = d.model
     val pagerFlow = androidx.compose.runtime.remember(model) { model?.let { viewModel.scalpTradePager(it) } }
     val paged = pagerFlow?.collectAsLazyPagingItems()
-    ScalpAlgoContent(d, onBack, paged)
+    val controls = com.dirk.kalshiodds.KalshiOddsApp.from(androidx.compose.ui.platform.LocalContext.current).container.scalp.controls
+    val settings by controls.state.collectAsStateWithLifecycle()
+    ScalpAlgoContent(d, onBack, paged, model?.let { settings[it.code] },
+        onApply = { config -> model?.let { controls.apply(it.code, config) } },
+        onReset = { model?.let { controls.reset(it.code) } })
 }
 
 @Composable
-fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: androidx.paging.compose.LazyPagingItems<ScalpTrade>? = null) {
+fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: androidx.paging.compose.LazyPagingItems<ScalpTrade>? = null,
+    controlConfig: com.dirk.kalshiodds.decision.ScalpControlSpec.Config? = null,
+    onApply: ((com.dirk.kalshiodds.decision.ScalpControlSpec.Config) -> Unit)? = null, onReset: () -> Unit = {}) {
     val c = DipTheme.colors
     val m = d.model
     LazyColumn(
@@ -88,6 +94,7 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         }
         if (m != null) {
             item(key = "card") { AlgoCard(m, d.allTime, d.today, d.byCoin) {} }
+            if (onApply != null) item(key = "controls") { ScalpControlsCard(m.code, controlConfig, onApply, onReset) }
             item(key = "today") {
                 FieldCard {
                     Text("Today (ET)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
@@ -168,3 +175,4 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         item(key = "end") { Spacer(Modifier.height(16.dp)) }
     }
 }
+

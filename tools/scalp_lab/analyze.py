@@ -101,6 +101,9 @@ def audit(rows):
         cohort = re.search(r'v2ai=(keep|trial)', str(row.get('note', '')))
         if cohort:
             variant += ':' + cohort[1]
+        revision = re.search(r'(?:^|[ ;·])ctlrev=([a-f0-9]+)', str(row.get('note', '')))
+        if revision:
+            variant += ':manual-' + revision[1]
         n = integer(row.get('contracts'), 'contracts')
         sold = integer(field(row, 'sold_contracts'), 'sold_contracts')
         entry = finite(field(row, 'entry_price'), 'entry_price')

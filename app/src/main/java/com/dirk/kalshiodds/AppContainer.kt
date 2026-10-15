@@ -77,6 +77,7 @@ class AppContainer(context: Context) {
             ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),
         tuneStore = com.dirk.kalshiodds.decision.SharedPrefsScalpTuneStore(app),
         liveExtras = true,
+        controls = com.dirk.kalshiodds.decision.ScalpControls(com.dirk.kalshiodds.decision.PrefsScalpControlStore(app)),
         // 0.3.40: total open scalp cost ≤ free paper bankroll (cash not tied up in Autopilot paper bets).
         // 0.3.59 experiment: scalpers' paper bankroll is unlimited (no cash check). P&L still per algo; Autopilot unchanged.
         bankrollUsd = { Double.POSITIVE_INFINITY }
@@ -279,3 +280,4 @@ class AppContainer(context: Context) {
     }
 
 }
+
