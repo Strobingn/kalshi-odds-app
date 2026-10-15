@@ -531,7 +531,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
-                value = s.maxBankrollFraction.toFloat().coerceIn(1f, 50f),
+                value = s.maxBankrollFraction.toFloat(),
                 onValueChange = { viewModel?.setMaxBankrollFraction(it.toDouble()) },
                 valueRange = 0.01f..0.15f,
                 steps = 13
