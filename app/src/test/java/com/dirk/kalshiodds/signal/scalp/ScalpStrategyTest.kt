@@ -487,4 +487,389 @@ class ScalpStrategyTest {
             d.decide(drive, 54, 56, 0.0, null, 100_000L, spot = ScalpSpot(return15s = -0.001))
         )
     }
+
+    // ---- DOUBLE_DIP ----------------------------------------------------------
+
+    @Test
+    fun doubleDipEntersOnHigherSecondLowWithBalancedBook() {
+        val d = decider(ScalpStrategy.DOUBLE_DIP)
+        // Lows 40 then 42 (≥ +1¢ higher), mid 44 ≤ 45, book no longer ask-heavy.
+        val bottom = base().copy(
+            lastMidPp = 44.0,
+            windowMinPp = 40.0,
+            secondLowPp = 42.0,
+            velocityPpPerSec = -0.1,
+            accelerationPpPerSec2 = 0.1
+        )
+        val enter = d.decide(bottom, 43, 45, 0.1, null, 100_000L)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(45, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Second low not higher (exact retest / lower).
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bottom.copy(secondLowPp = 40.5), 43, 45, 0.1, null, 100_000L)
+        )
+        // Above the 45¢ cheap zone.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bottom.copy(lastMidPp = 46.0), 45, 47, 0.1, null, 100_000L)
+        )
+        // Book still ask-heavy — sellers not done.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bottom, 43, 45, -0.5, null, 100_000L)
+        )
+        // Falling knife.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bottom.copy(velocityPpPerSec = -0.8), 43, 45, 0.1, null, 100_000L)
+        )
+
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 45, entryTimeMs = 0L)
+        val tp = d.decide(base(), 49, 50, 0.1, pos, 60_000L)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(base(), 40, 41, 0.1, pos, 60_000L)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- CAPITULATION_FADE ---------------------------------------------------
+
+    @Test
+    fun capitulationFadesTheFirstUptickAfterAFlushLow() {
+        val d = decider(ScalpStrategy.CAPITULATION_FADE)
+        // 6¢ off the window high, the low printed 5s ago, first uptick now.
+        val snap = base().copy(
+            lastMidPp = 47.0,
+            prevMidPp = 46.0,
+            dropFromWindowMaxPp = 6.0,
+            windowMinAgeMs = 5_000L,
+            velocityPpPerSec = 0.2,
+            accelerationPpPerSec2 = 0.1
+        )
+        val enter = d.decide(snap, 46, 48, 0.0, null, 100_000L)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(48, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Stale low — this is a trend, not a flush.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(snap.copy(windowMinAgeMs = 60_000L), 46, 48, 0.0, null, 100_000L)
+        )
+        // Not the first uptick (prev already at/above).
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(snap.copy(prevMidPp = 47.5), 46, 48, 0.0, null, 100_000L)
+        )
+        // Barely off the high — no capitulation.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(snap.copy(dropFromWindowMaxPp = 2.0), 46, 48, 0.0, null, 100_000L)
+        )
+
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 48, entryTimeMs = 0L)
+        val tp = d.decide(base(), 51, 52, 0.0, pos, 30_000L)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(base(), 43, 44, 0.0, pos, 30_000L)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- WICK_BUY ------------------------------------------------------------
+
+    @Test
+    fun wickBuyFadesTheSweepAndExitsFast() {
+        val d = decider(ScalpStrategy.WICK_BUY)
+        // Mid swept 5¢ below the fast EMA, now back at/above it (46.5 ≥ 46).
+        val reclaimed = base().copy(
+            lastMidPp = 46.5,
+            shortEmaPp = 46.0,
+            maxDropFromShortEmaPp = 5.0,
+            velocityPpPerSec = 0.3,
+            accelerationPpPerSec2 = 0.2
+        )
+        val enter = d.decide(reclaimed, 45, 47, 0.0, null, 100_000L)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(47, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Sweep too small.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(reclaimed.copy(maxDropFromShortEmaPp = 3.0), 45, 47, 0.0, null, 100_000L)
+        )
+        // Still below the EMA — no reclaim yet.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(reclaimed.copy(lastMidPp = 45.0), 44, 46, 0.0, null, 100_000L)
+        )
+
+        // Tight 2¢ TP / 3¢ SL / 45s hold — the fastest exit ladder in the roster.
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 47, entryTimeMs = 0L)
+        val tp = d.decide(base(), 49, 50, 0.0, pos, 20_000L)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(base(), 43, 44, 0.0, pos, 20_000L)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+        val to = d.decide(base(), 46, 47, 0.0, pos, 46_000L)
+        assertEquals(ExitReason.TIMEOUT, (to as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- SPOT_DIVERGENCE -----------------------------------------------------
+
+    @Test
+    fun spotDivergenceBuysKalshiPanicAgainstFlatSpot() {
+        val d = decider(ScalpStrategy.SPOT_DIVERGENCE)
+        // Kalshi 3¢ off its window high while spot's 1m is +2bp (flat-to-up).
+        val panic = base().copy(
+            lastMidPp = 47.0,
+            dropFromWindowMaxPp = 3.0,
+            velocityPpPerSec = -0.1,
+            sampleCount = 25
+        )
+        val spotUp = ScalpSpot(return15s = 0.0002, return1m = 0.0002)
+        val enter = d.decide(panic, 46, 48, 0.0, null, 100_000L, spot = spotUp)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(48, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Spot falling too — the dip is information, not overreaction.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(panic, 46, 48, 0.0, null, 100_000L, spot = ScalpSpot(return1m = -0.001))
+        )
+        // No dip at all.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(panic.copy(dropFromWindowMaxPp = 1.0), 46, 48, 0.0, null, 100_000L, spot = spotUp)
+        )
+        // Still crashing — overreaction may not be done.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(panic.copy(velocityPpPerSec = -0.8), 46, 48, 0.0, null, 100_000L, spot = spotUp)
+        )
+
+        // Thesis exit: spot impulse decays → the divergence is spent.
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 48, entryTimeMs = 0L)
+        val faded = d.decide(base(), 47, 49, 0.0, pos, 30_000L, spot = ScalpSpot(return15s = 0.0001))
+        assertEquals(ExitReason.MOMENTUM_FADE, (faded as ScalpDecision.ScalpDecision.Exit).reason)
+        val tp = d.decide(base(), 51, 52, 0.0, pos, 30_000L, spot = spotUp)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- SPOT_REBOUND --------------------------------------------------------
+
+    @Test
+    fun spotReboundBuysTheKalshiLagOffTheSpotLow() {
+        val d = decider(ScalpStrategy.SPOT_REBOUND)
+        // Spot bounced 4bp off a low printed 20s ago, heating up (15s impulse
+        // 6bp > 1m pace 2bp); Kalshi still 3¢ off its high at +0.1¢/s.
+        val lagging = base().copy(
+            lastMidPp = 47.0,
+            dropFromWindowMaxPp = 3.0,
+            velocityPpPerSec = 0.1
+        )
+        val bounced = ScalpSpot(
+            return15s = 0.0006,
+            return1m = 0.0008,
+            sessionLowAgeMs = 20_000L,
+            sessionLowRebound = 0.0004
+        )
+        val enter = d.decide(lagging, 46, 48, 0.0, null, 100_000L, spot = bounced)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(48, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Stale low — the bounce is old news.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(lagging, 46, 48, 0.0, null, 100_000L, spot = bounced.copy(sessionLowAgeMs = 90_000L))
+        )
+        // Barely off the low — no rebound yet.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(lagging, 46, 48, 0.0, null, 100_000L, spot = bounced.copy(sessionLowRebound = 0.0001))
+        )
+        // Kalshi already ran — the lag is gone.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(lagging.copy(velocityPpPerSec = 0.5), 46, 48, 0.0, null, 100_000L, spot = bounced)
+        )
+        // Not heating up: 15s impulse below the 1m average pace.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(lagging, 46, 48, 0.0, null, 100_000L, spot = bounced.copy(return15s = 0.0001))
+        )
+
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 48, entryTimeMs = 0L)
+        val faded = d.decide(base(), 47, 49, 0.0, pos, 30_000L, spot = ScalpSpot(return15s = 0.0001))
+        assertEquals(ExitReason.MOMENTUM_FADE, (faded as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- IMBALANCE_FLIP ------------------------------------------------------
+
+    @Test
+    fun imbalanceFlipBuysTheRotationFromAskHeavyToBidHeavy() {
+        val d = decider(ScalpStrategy.IMBALANCE_FLIP)
+        // Book was −0.5 ask-heavy within the last 30s, now +0.3 bid-heavy.
+        val rotated = base().copy(velocityPpPerSec = 0.1)
+        val enter = d.decide(rotated, 49, 51, 0.3, null, 100_000L, imbalanceLow = -0.5)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(51, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Never ask-heavy recently — no rotation to fade into.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(rotated, 49, 51, 0.3, null, 100_000L, imbalanceLow = -0.2)
+        )
+        // Still ask-heavy now.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(rotated, 49, 51, -0.1, null, 100_000L, imbalanceLow = -0.5)
+        )
+        // Runaway tape overrides depth.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(rotated.copy(velocityPpPerSec = 1.5), 49, 51, 0.3, null, 100_000L, imbalanceLow = -0.5)
+        )
+
+        // Rotation unwound → fade exit; TP/SL ladder intact.
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 51, entryTimeMs = 0L)
+        val faded = d.decide(rotated, 50, 52, -0.1, pos, 30_000L, imbalanceLow = -0.5)
+        assertEquals(ExitReason.MOMENTUM_FADE, (faded as ScalpDecision.ScalpDecision.Exit).reason)
+        val tp = d.decide(rotated, 54, 55, 0.3, pos, 30_000L, imbalanceLow = -0.5)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(rotated, 46, 47, 0.3, pos, 30_000L, imbalanceLow = -0.5)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- SLOW_BLEED_FADE -----------------------------------------------------
+
+    @Test
+    fun slowBleedFadesTheExhaustedGrindWithFlatSpot() {
+        val d = decider(ScalpStrategy.SLOW_BLEED_FADE)
+        // 100 samples of −0.1¢/s drift, not accelerating, spot flat (+1bp).
+        val bleed = base().copy(
+            sampleCount = 100,
+            velocityPpPerSec = -0.1,
+            accelerationPpPerSec2 = 0.0
+        )
+        val flatSpot = ScalpSpot(return1m = 0.0001)
+        val enter = d.decide(bleed, 49, 51, 0.0, null, 100_000L, spot = flatSpot)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(51, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Too fast — that's DIP_HUNT's knife, not a bleed.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bleed.copy(velocityPpPerSec = -0.3), 49, 51, 0.0, null, 100_000L, spot = flatSpot)
+        )
+        // No bleed at all.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bleed.copy(velocityPpPerSec = -0.01), 49, 51, 0.0, null, 100_000L, spot = flatSpot)
+        )
+        // The bleed is accelerating into a collapse.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bleed.copy(accelerationPpPerSec2 = -0.1), 49, 51, 0.0, null, 100_000L, spot = flatSpot)
+        )
+        // Spot is moving — the bleed is information, not noise.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(bleed, 49, 51, 0.0, null, 100_000L, spot = ScalpSpot(return1m = 0.001))
+        )
+
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 51, entryTimeMs = 0L)
+        val tp = d.decide(base(), 55, 56, 0.0, pos, 60_000L, spot = flatSpot)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(base(), 46, 47, 0.0, pos, 60_000L, spot = flatSpot)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- VOLUME_DRYUP --------------------------------------------------------
+
+    @Test
+    fun volumeDryupBuysTheFirstLiftOnThinQuotes() {
+        val d = decider(ScalpStrategy.VOLUME_DRYUP)
+        // Spread 3¢ (quotes pulled), depth not ask-heavy, mid 46.5 is 0.5¢ off
+        // the window low, and this tick is an uptick.
+        val dry = base().copy(
+            lastMidPp = 46.5,
+            prevMidPp = 46.0,
+            windowMinPp = 46.0,
+            velocityPpPerSec = 0.1,
+            accelerationPpPerSec2 = 0.1
+        )
+        val enter = d.decide(dry, 45, 47, 0.1, null, 100_000L, spreadCents = 3)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(47, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Spread tight — activity has NOT dried up.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(dry, 45, 47, 0.1, null, 100_000L, spreadCents = 2)
+        )
+        // Remaining depth is ask-heavy.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(dry, 45, 47, -0.3, null, 100_000L, spreadCents = 3)
+        )
+        // Mid ran away from the low.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(dry.copy(lastMidPp = 49.0, prevMidPp = 48.0), 48, 50, 0.1, null, 100_000L, spreadCents = 3)
+        )
+        // No uptick.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(dry.copy(lastMidPp = 46.5, prevMidPp = 46.5), 45, 47, 0.1, null, 100_000L, spreadCents = 3)
+        )
+
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 47, entryTimeMs = 0L)
+        val tp = d.decide(base(), 50, 51, 0.1, pos, 30_000L, spreadCents = 3)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(base(), 43, 44, 0.1, pos, 30_000L, spreadCents = 3)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+    }
+
+    // ---- RANGE_ANCHOR --------------------------------------------------------
+
+    @Test
+    fun rangeAnchorBuysTheDefendedFloorTickUp() {
+        val d = decider(ScalpStrategy.RANGE_ANCHOR)
+        // 130 samples pinned in 44..48 (range 4¢), floor ≤45, tick up to 44.5.
+        val pinned = base().copy(
+            sampleCount = 130,
+            windowMinPp = 44.0,
+            windowMaxPp = 48.0,
+            lastMidPp = 44.5,
+            prevMidPp = 44.0
+        )
+        val enter = d.decide(pinned, 43, 45, 0.0, null, 100_000L)
+        assertTrue(enter is ScalpDecision.ScalpDecision.Enter)
+        assertEquals(45, (enter as ScalpDecision.ScalpDecision.Enter).entryPriceCents)
+
+        // Floor too high — not a cheap-zone anchor.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(pinned.copy(windowMinPp = 46.0, lastMidPp = 46.5, prevMidPp = 46.0), 45, 47, 0.0, null, 100_000L)
+        )
+        // Range too wide — the level isn't defended, it's drifting.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(pinned.copy(windowMaxPp = 52.0), 43, 45, 0.0, null, 100_000L)
+        )
+        // Not enough samples — the pin isn't established.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(pinned.copy(sampleCount = 100), 43, 45, 0.0, null, 100_000L)
+        )
+        // Still sitting on the floor — no tick up.
+        assertEquals(
+            ScalpDecision.ScalpDecision.Hold,
+            d.decide(pinned.copy(lastMidPp = 44.0, prevMidPp = 44.0), 43, 45, 0.0, null, 100_000L)
+        )
+
+        val pos = ScalpDecision.OpenPosition(entryPriceCents = 45, entryTimeMs = 0L)
+        val tp = d.decide(base(), 47, 48, 0.0, pos, 60_000L)
+        assertEquals(ExitReason.TARGET, (tp as ScalpDecision.ScalpDecision.Exit).reason)
+        val sl = d.decide(base(), 41, 42, 0.0, pos, 60_000L)
+        assertEquals(ExitReason.STOP, (sl as ScalpDecision.ScalpDecision.Exit).reason)
+    }
 }

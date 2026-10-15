@@ -51,7 +51,7 @@ sealed class ScalpEvent {
 
 /**
  * DipHunter scalper engine — the bitcoin-swarm experiment runs the whole
- * [ScalpStrategy] registry (11 strategies) concurrently on the same 15-minute
+ * [ScalpStrategy] registry (20 strategies) concurrently on the same 15-minute
  * window, each holding ONE position, trading the ENTIRE window.
  *
  * Hard rules baked in:
@@ -60,6 +60,10 @@ sealed class ScalpEvent {
  *   [scalpLiveTradingEnabled] is a compile-time BuildConfig constant (false
  *   on the bitcoin-swarm branch), so `settings.liveMode` can never route
  *   to [liveExecutor] and [LiveScalpExecutor] refuses anyway (belt + suspenders)
+ * - UNIVERSAL ENTRY GATE: any entry whose current mid is above
+ *   `settings.maxEntryCents` (default 50¢) is rejected BEFORE the strategy
+ *   decider runs — one shared gate for the whole roster and the
+ *   single-strategy mode. Exits are unaffected.
  * - guardrails checked BEFORE every entry ([ScalpGuardrails]) — trades/hour,
  *   daily-loss breaker + kill switch first, then maxOpenPositions (one slot
  *   per strategy so all can hold at once)
@@ -129,6 +133,16 @@ class ScalpEngine(
     @Volatile
     private var lastCloseTimeMs: Long? = null
 
+    /**
+     * Per-series ring of recent near-mid imbalances (timestamped), used to
+     * feed IMBALANCE_FLIP's "was ask-heavy within the last 30s" leg. Depth
+     * history is not part of [LocalOrderBook]'s instantaneous snapshot, so
+     * the engine tracks the minimum itself.
+     */
+    private val imbalanceHistoryMs = 30_000L
+    private val imbalanceHistoryMax = 90
+    private val imbalanceLowBySeries = java.util.concurrent.ConcurrentHashMap<String, ArrayDeque<Pair<Long, Double>>>()
+
     /** One feature window per strategy; rebuilt when the active set changes. */
     private val mathLock = Any()
     private var mathByStrategy: Map<ScalpStrategy, ScalpMath> = emptyMap()
@@ -184,10 +198,21 @@ class ScalpEngine(
             val entriesOpen = tick.closeTimeEpochMs?.let { it - tNow > windowCloseBufferMs } != false
 
             val math = mathFor(s, strategies)
+            // IMBALANCE_FLIP fuel: min near-mid imbalance over the last 30s,
+            // recorded once per tick (not per strategy).
+            val imbalanceLow = imbalance?.let { recordImbalanceLow(tick.series, tNow, it) }
+            val midPp = mid ?: lastMidPp
             for (strategy in strategies) {
                 val position = store.openPosition(strategy)
                 val lastEnd = lastTradeEndMs[strategy] ?: 0L
                 if (position == null && now() - lastEnd < debounceFor(s)) continue
+                // Universal entry gate: below the coin-flip line only. One
+                // shared check before ANY decider — strategies whose natural
+                // zone is above the gate simply never fire. Exits unaffected.
+                if (position == null) {
+                    val gate = s.maxEntryCents.toDouble()
+                    if (midPp == null || midPp > gate) continue
+                }
                 val features = math.getValue(strategy).snapshot(now())
                 val decision = deciderFor(eff, strategy).decide(
                     features = features,
@@ -200,7 +225,9 @@ class ScalpEngine(
                     nowMs = now(),
                     closeTimeEpochMs = tick.closeTimeEpochMs,
                     pulse = pulse,
-                    spot = spot
+                    spot = spot,
+                    spreadCents = askCents - bidCents,
+                    imbalanceLow = imbalanceLow
                 )
                 when (decision) {
                     is ScalpDecision.ScalpDecision.Enter -> if (entriesOpen) {
@@ -291,10 +318,28 @@ class ScalpEngine(
         }
         currentTicker = ticker
         lastTradeEndMs.clear()
+        imbalanceLowBySeries.clear()
     }
 
     /** Aggressive mode re-trades quickly; conservative keeps the long debounce. */
     private fun debounceFor(s: ScalpSettings): Long = if (s.aggressive) 5_000L else debounceMs
+
+    /**
+     * Push the current imbalance into the per-series ring and return the min
+     * over the trailing [imbalanceHistoryMs]. Prunes by time and caps the
+     * deque so a hot feed can't grow it without bound.
+     */
+    private fun recordImbalanceLow(series: String, nowMs: Long, imbalance: Double): Double {
+        val deque = imbalanceLowBySeries.getOrPut(series) { ArrayDeque() }
+        synchronized(deque) {
+            while (deque.isNotEmpty() && nowMs - deque.first().first > imbalanceHistoryMs) {
+                deque.removeFirst()
+            }
+            deque.addLast(nowMs to imbalance)
+            while (deque.size > imbalanceHistoryMax) deque.removeFirst()
+            return deque.minOf { it.second }
+        }
+    }
 
     private fun mathFor(s: ScalpSettings, strategies: List<ScalpStrategy>): Map<ScalpStrategy, ScalpMath> {
         val windowFor = { strat: ScalpStrategy ->

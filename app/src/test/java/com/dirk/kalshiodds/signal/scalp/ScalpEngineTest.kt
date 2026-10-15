@@ -269,75 +269,79 @@ class ScalpEngineTest {
      * Aggressive mode runs one state machine per strategy on the same tick
      * stream. Series (half-cent steps, 1s apart):
      * - 56 → 50 in 1.5¢ drops, then flat at 50: DIP_HUNT enters at the ask
-     *   (51¢) once the fall stabilizes (tick 9).
-     * - Bounce 51 → 52.5 → 54 with growing steps: MOMENTUM_SNIPER enters at
-     *   54¢ (velocity > 0.3¢/s, acceleration > 0) while DIP is still holding —
-     *   proving the strategies trade concurrently.
-     * - 54 → 56: DIP_HUNT exits TARGET at 55¢ (entry 51 + effective TP 4).
-     * - Ride at 56–56.5 then fade 54 → 52: MOMENTUM_SNIPER never reaches its
-     *   57¢ target bid and exits MOMENTUM_FADE at 51¢ (a small loser — the
-     *   fade cut, not the 5¢ stop).
-     * EXTREME_REVERSAL never sees an extreme (mids stay in 50–56.5).
+     *   (51¢) once the fall stabilizes (mid 50 passes the 50¢ entry gate).
+     * - Slide 49 → 47, sit at the low ×6, then the first uptick prints 48:
+     *   CAPITULATION_FADE (one of the nine new strategies) enters at 49¢
+     *   WHILE DIP_HUNT is still holding — the concurrency proof.
+     * - Ride 49 → 53: CAPITULATION_FADE exits TARGET at 52¢ (entry 49 + TP 3)
+     *   while DIP_HUNT (TP 4, entry 51) keeps holding.
+     * - 54 → 56: DIP_HUNT exits TARGET at 55¢.
+     * Only the two strategies are enabled so the round trips are exact; the
+     * full 20-strategy roster state is covered by ScalpStrategyDefaultsTest.
      */
     @Test
     fun aggressiveRunsMultipleStrategiesConcurrently() = runBlocking {
-        val h = Harness(ScalpSettings(enabled = true)) // aggressive defaults
+        val h = Harness(
+            ScalpSettings(
+                enabled = true,
+                enabledStrategies = setOf("DIP_HUNT", "CAPITULATION_FADE")
+            )
+        )
         h.engine.start()
 
         // Fall 56 → 50 (1.5¢/tick), then flat at 50 ×6.
         listOf(56.0, 54.5, 53.0, 51.5, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0, 50.0)
             .forEach { h.tickMid(it) }
-        // Bounce, ride, fade (capped at 56.5 → 56¢ bid, below the 57¢ target).
-        listOf(51.0, 52.5, 54.0, 56.0, 56.0, 56.0, 54.0, 52.0)
+        // Slide to 47, sit at the low ×6, first uptick to 48.
+        listOf(49.0, 48.0, 47.0, 47.0, 47.0, 47.0, 47.0, 47.0, 48.0)
+            .forEach { h.tickMid(it) }
+        // Ride: capitulation exits TARGET at bid 52 (mid 53), dip at bid 55 (mid 56).
+        listOf(49.0, 50.0, 51.0, 52.0, 53.0, 54.0, 55.0, 56.0)
             .forEach { h.tickMid(it) }
 
         val entered = h.events.filterIsInstance<ScalpEvent.Entered>()
         assertEquals("expected two entries, events=${h.events}", 2, entered.size)
-        val dipEntry = entered.first()
-        val momentumEntry = entered.last()
-        assertEquals(ScalpStrategy.DIP_HUNT, dipEntry.position.strategy)
+        val dipEntry = entered.first { it.position.strategy == ScalpStrategy.DIP_HUNT }
+        val capEntry = entered.first { it.position.strategy == ScalpStrategy.CAPITULATION_FADE }
         assertEquals(51, dipEntry.position.entryPriceCents)
-        assertEquals(ScalpStrategy.MOMENTUM_SNIPER, momentumEntry.position.strategy)
-        assertEquals(54, momentumEntry.position.entryPriceCents)
+        assertEquals(49, capEntry.position.entryPriceCents)
 
         val exited = h.events.filterIsInstance<ScalpEvent.Exited>()
         assertEquals("expected two exits, events=${h.events}", 2, exited.size)
 
-        // Concurrency proof: momentum entered while DIP was still holding.
+        // Concurrency proof: capitulation entered while DIP was still holding.
+        val dipExit = exited.first { it.position.strategy == ScalpStrategy.DIP_HUNT }
         assertTrue(
-            "momentum entry must precede the dip exit, events=${h.events}",
-            h.events.indexOf(momentumEntry) < h.events.indexOf(exited.first())
+            "capitulation entry must precede the dip exit, events=${h.events}",
+            h.events.indexOf(capEntry) < h.events.indexOf(dipExit)
         )
 
-        val dipExit = exited.first { it.position.strategy == ScalpStrategy.DIP_HUNT }
         assertEquals(ExitReason.TARGET, dipExit.reason)
         assertEquals(55, dipExit.position.exitPriceCents)
         assertTrue("dip target exit should be profitable", dipExit.pnlCents > 0)
 
-        val momentumExit = exited.first { it.position.strategy == ScalpStrategy.MOMENTUM_SNIPER }
-        assertEquals(ExitReason.MOMENTUM_FADE, momentumExit.reason)
-        assertEquals(51, momentumExit.position.exitPriceCents)
-        assertTrue("fade cut a loser before the stop", momentumExit.pnlCents < 0)
+        val capExit = exited.first { it.position.strategy == ScalpStrategy.CAPITULATION_FADE }
+        assertEquals(ExitReason.TARGET, capExit.reason)
+        assertEquals(52, capExit.position.exitPriceCents)
+        // Note: a 3¢ target at a ~49¢ entry is net-negative after Kalshi
+        // taker fees on both legs — the TP/SL ladder is the strategy default,
+        // profitability is a per-strategy tuning matter, not this test's.
 
         // Ledger: both round trips closed, no stragglers.
         assertTrue(h.ledger.openPositions().isEmpty())
         assertEquals(2, h.ledger.positions.size)
-        assertEquals(
-            setOf(ScalpStrategy.DIP_HUNT, ScalpStrategy.MOMENTUM_SNIPER),
-            h.ledger.positions.map { it.strategy }.toSet()
-        )
         h.ledger.positions.forEach {
             assertEquals(ScalpPositionStatus.CLOSED, it.status)
             assertEquals(ScalpMode.PAPER, it.mode)
         }
 
-        // UI state: flat overall, all three strategies reported flat.
+        // UI state: exactly the two enabled strategies are reported.
         val state = h.engine.currentState()
         assertEquals("FLAT", state.state)
         assertTrue(state.aggressive)
-        assertEquals(11, state.strategyStates.size)
+        assertEquals(2, state.strategyStates.size)
         assertTrue(
-            "all strategies flat, states=${state.strategyStates}",
+            "both strategies flat, states=${state.strategyStates}",
             state.strategyStates.all { it.state == "FLAT" }
         )
     }

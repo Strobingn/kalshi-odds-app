@@ -57,6 +57,44 @@ package com.dirk.kalshiodds.signal.scalp
  * - **OPEN_DRIVE** — opening drive. In the first 60s of a fresh window,
  *   if the opening velocity has been one-directional for ≥10s (and spot
  *   agrees when available), ride it. Hard 3-minute time stop.
+ * - **DOUBLE_DIP** — accumulation double bottom. Two distinct lows in the
+ *   window, the second ≥1¢ higher than the first, mid still ≤45¢, and the
+ *   book no longer ask-heavy (sellers done, buyers absorbing).
+ * - **CAPITULATION_FADE** — seller-exhaustion snap. Mid is ≥3¢ off the
+ *   window high AND the window low printed within the last 30s, then the
+ *   first uptick arrives with stabilizing tape: the forced seller is done.
+ * - **WICK_BUY** — liquidity sweep. Mid ran ≥4¢ below the fast EMA within
+ *   the window (stops swept) and this tick reclaims the EMA. Fastest time
+ *   constant in the roster.
+ * - **SPOT_DIVERGENCE** — Kalshi overreaction vs Coinbase. Kalshi mid is
+ *   ≥2¢ off its window high while spot's 1m return is flat-to-up (≥ −5bp):
+ *   the dip is venue-local panic, not information. Exit on spot-impulse
+ *   decay (MOMENTUM_FADE).
+ * - **SPOT_REBOUND** — spot bounces first. Spot is ≥2bp off its session low
+ *   (low ≤60s old) and heating up (15s impulse above the 1m average) while
+ *   Kalshi mid hasn't followed (still ≥2¢ off its high, velocity ≤0.2¢/s).
+ *   Buy the lag; exit on spot-impulse decay (MOMENTUM_FADE).
+ * - **IMBALANCE_FLIP** — book rotation. Near-mid depth swung from ask-heavy
+ *   (min imbalance ≤ −0.4 over the last 30s) to bid-heavy (≥ +0.2) while
+ *   mid ≤50¢: the side that was leaning on the book lifted its offers.
+ *   Exit when the imbalance decays below +0.05 (MOMENTUM_FADE).
+ * - **SLOW_BLEED_FADE** — exhaustion at a different time constant than
+ *   DIP_HUNT. Velocity sustained in the −0.05..−0.2¢/s bleed band for
+ *   ≥90s with flat spot (|1m| ≤5bp) and no accelerating collapse: the
+ *   grind down is running out of sellers.
+ * - **VOLUME_DRYUP** — quote activity collapse at the low. Spread has
+ *   widened to ≥3¢ (quotes pulled — no conviction either way) and the book
+ *   is not ask-heavy, with mid sitting ≤1.5¢ above the window low on the
+ *   first uptick. Thin books turn fast.
+ * - **RANGE_ANCHOR** — pinned at a floor. Window min ≤45¢, the whole
+ *   window range is tight (≤6¢), ≥2min of samples, and mid just ticked up
+ *   off the floor: the market keeps defending that level.
+ *
+ * UNIVERSAL ENTRY GATE (engine, not the deciders): every entry requires
+ * mid ≤50¢ — the YES side is only cheap below the coin-flip line. The
+ * roster respects it by construction; strategies whose natural zone is
+ * above 50¢ (FIFTY_FLIP at the cross, LATE_DRIFT at ≥58¢, EXTREME_REVERSAL
+ * at the ≥92¢ ceiling) simply never fire in aggressive mode.
  */
 enum class ScalpStrategy(
     val label: String,
@@ -79,7 +117,16 @@ enum class ScalpStrategy(
     SPOT_LEAD("Spot", 3.0, 4.0, 120_000L, 15),
     RANGE_FADE("Range", 3.0, 3.0, 240_000L, 60),
     LATE_DRIFT("Late Drift", 3.0, 4.0, 90_000L, 120),
-    OPEN_DRIVE("Open Drive", 4.0, 5.0, 180_000L, 30);
+    OPEN_DRIVE("Open Drive", 4.0, 5.0, 180_000L, 30),
+    DOUBLE_DIP("Double Dip", 4.0, 4.0, 300_000L, 90),
+    CAPITULATION_FADE("Capitulation", 3.0, 4.0, 120_000L, 30),
+    WICK_BUY("Wick Buy", 2.0, 3.0, 45_000L, 10),
+    SPOT_DIVERGENCE("Spot Div", 3.0, 4.0, 180_000L, 30),
+    SPOT_REBOUND("Spot Rebound", 3.0, 4.0, 120_000L, 15),
+    IMBALANCE_FLIP("Imb Flip", 3.0, 4.0, 120_000L, 30),
+    SLOW_BLEED_FADE("Slow Bleed", 4.0, 4.0, 300_000L, 120),
+    VOLUME_DRYUP("Dry-Up", 3.0, 3.0, 90_000L, 15),
+    RANGE_ANCHOR("Anchor", 2.0, 3.0, 180_000L, 150);
 
     companion object {
         fun parse(raw: String?): ScalpStrategy =

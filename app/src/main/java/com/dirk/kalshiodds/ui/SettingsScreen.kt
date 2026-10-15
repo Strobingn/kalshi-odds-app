@@ -43,6 +43,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
+import com.dirk.kalshiodds.signal.scalp.ScalpStrategy
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
@@ -413,7 +414,7 @@ fun SettingsContent(
                     )
                 }
                 ToggleRow(
-                    "Aggression (11 strategies concurrently)",
+                    "Aggression (${ScalpStrategy.values().size} strategies concurrently)",
                     state.scalp.aggressive,
                     { viewModel?.setScalpAggressive(it) }
                 )
@@ -499,6 +500,12 @@ fun SettingsContent(
                     valueText = String.format(Locale.US, "%d / hour", state.scalp.maxTradesPerHour),
                     onMinus = { viewModel?.setScalpTradesPerHour(state.scalp.maxTradesPerHour - 1) },
                     onPlus = { viewModel?.setScalpTradesPerHour(state.scalp.maxTradesPerHour + 1) }
+                )
+                StepperRow(
+                    label = "Entry gate",
+                    valueText = String.format(Locale.US, "mid ≤ %d¢ to buy", state.scalp.maxEntryCents),
+                    onMinus = { viewModel?.setScalpMaxEntryCents(state.scalp.maxEntryCents - 5) },
+                    onPlus = { viewModel?.setScalpMaxEntryCents(state.scalp.maxEntryCents + 5) }
                 )
                 Text(
                     String.format(Locale.US, "Daily loss limit  $%.0f", state.scalp.maxDailyLossUsd),

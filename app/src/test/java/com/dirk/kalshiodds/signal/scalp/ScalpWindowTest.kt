@@ -213,13 +213,17 @@ class ScalpWindowTest {
 
     @Test
     fun atLeastSixStrategiesEnterOnOneMixedSeries() = runBlocking {
-        // Constant +6bp spot impulse keeps SPOT_LEAD armed; a 300:50 book
+        // Constant +6bp spot impulse keeps SPOT_LEAD armed; +4bp 1m return is
+        // flat-to-up for SPOT_DIVERGENCE / SLOW_BLEED_FADE; a 300:50 book
         // gives imbalance +0.71 (BOOK_IMBALANCE fuel, FIFTY_FLIP support).
         // The intentional 40¢ crash realizes losses across the early riders;
         // widen the breaker so this test measures concurrency, not risk
         // management (the $10 daily-loss trip itself is covered by
         // ScalpGuardrailsTest).
-        val h = Harness(ScalpSettings(enabled = true, maxDailyLossUsd = 1_000.0), spot = ScalpSpot(return15s = 0.001))
+        val h = Harness(
+            ScalpSettings(enabled = true, maxDailyLossUsd = 1_000.0),
+            spot = ScalpSpot(return15s = 0.001, return1m = 0.0004)
+        )
         h.bidSize = 300.0
         h.askSize = 50.0
         h.closeTimeMs = 900_000L // far away: no close interference
@@ -230,7 +234,8 @@ class ScalpWindowTest {
         series += listOf(52.0, 56.0, 60.0, 64.0, 68.0, 72.0)  // t12..t17 drive +4/tick
         series += listOf(74.0, 78.0, 82.0, 86.0, 90.0, 94.0)  // t18..t23 constant drive to the ceiling
         series += listOf(89.0, 84.0, 79.0, 74.0, 69.0, 64.0, 59.0, 54.0) // crash
-        series += List(6) { 50.0 }                        // stabilize → DIP + VWAP
+        series += List(8) { 49.0 }                        // stabilize → DIP + VWAP + SPOT_DIVERGENCE
+        series += listOf(50.0)                            // first uptick → CAPITULATION_FADE (mid 50 passes the gate)
         series += List(50) { 56.0 }                       // quiet plateau (range setup)
         series += List(7) { 50.0 }                        // extension → RANGE_FADE
         series.forEach { h.tick(it) }
@@ -240,19 +245,21 @@ class ScalpWindowTest {
             h.events.none { it is ScalpEvent.GuardrailBlocked }
         )
         val entered = h.events.filterIsInstance<ScalpEvent.Entered>().map { it.position.strategy }.toSet()
+        // Every one of these trades at or below the 50¢ gate on this series.
         // RANGE_FADE needs a genuinely quiet, flat band — mathematically
         // impossible on this 6¢-range mixed series — so it stays out of the
         // expected set (it has its own engine test in
-        // windowCloseForceExitsOpenPositionBeforeSettle).
+        // windowCloseForceExitsOpenPositionBeforeSettle). FIFTY_FLIP enters
+        // on the t11 cross (49→50) — mid exactly 50 passes the gate.
         val expect = listOf(
             ScalpStrategy.BOOK_IMBALANCE,
             ScalpStrategy.SPOT_LEAD,
             ScalpStrategy.OPEN_DRIVE,
             ScalpStrategy.FIFTY_FLIP,
-            ScalpStrategy.MOMENTUM_SNIPER,
-            ScalpStrategy.EXTREME_REVERSAL,
             ScalpStrategy.DIP_HUNT,
-            ScalpStrategy.VWAP_REVERT
+            ScalpStrategy.VWAP_REVERT,
+            ScalpStrategy.SPOT_DIVERGENCE,
+            ScalpStrategy.CAPITULATION_FADE
         )
         expect.forEach { strategy ->
             assertTrue(
@@ -260,10 +267,23 @@ class ScalpWindowTest {
                 strategy in entered
             )
         }
-        assertTrue("concurrency cap respected", h.ledger.openPositions().size <= 12)
+        // Gate proof: these two fire mid > 50¢ on this exact series — their
+        // absence can only be the shared entry gate (MOMENTUM at 56¢+,
+        // EXTREME_REVERSAL at 94¢).
+        val gatedOut = listOf(
+            ScalpStrategy.MOMENTUM_SNIPER,
+            ScalpStrategy.EXTREME_REVERSAL
+        )
+        gatedOut.forEach { strategy ->
+            assertTrue(
+                "the 50c gate must keep $strategy out, entered=$entered",
+                strategy !in entered
+            )
+        }
+        assertTrue("concurrency cap respected", h.ledger.openPositions().size <= 20)
         assertEquals(
             "every strategy state reported",
-            11,
+            20,
             h.engine.currentState().strategyStates.size
         )
     }

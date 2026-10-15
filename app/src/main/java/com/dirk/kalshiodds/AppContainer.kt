@@ -175,17 +175,25 @@ class AppContainer(context: Context) {
         store = scalpLedger,
         scope = scalpScope,
         onEvent = { event -> runCatching { onScalpEvent(event) } },
-        // SPOT_LEAD / OPEN_DRIVE features: exact 15s spot return from the
-        // Coinbase WS ring, falling back to the REST snapshot's 1m return.
+        // SPOT_LEAD / OPEN_DRIVE / SPOT_DIVERGENCE / SPOT_REBOUND features:
+        // exact 15s spot return from the Coinbase WS ring, falling back to
+        // the REST snapshot's 1m return; SPOT_REBOUND additionally gets the
+        // rebound off the ring's session low (20-minute horizon).
         spotProvider = { series ->
             val snap = external.refreshIfStale().forSeries(series)
             if (snap == null) {
                 null
             } else {
                 val asset = snap.asset.uppercase()
+                val rebound = spotStream?.lowRebound(
+                    asset,
+                    com.dirk.kalshiodds.signal.external.SpotStream.WINDOW_MS
+                )
                 com.dirk.kalshiodds.signal.scalp.ScalpSpot(
                     return15s = spotStream?.returnOver(asset, 15_000L),
-                    return1m = spotStream?.overlay(snap)?.spotReturn1m ?: snap.spotReturn1m
+                    return1m = spotStream?.overlay(snap)?.spotReturn1m ?: snap.spotReturn1m,
+                    sessionLowAgeMs = rebound?.second,
+                    sessionLowRebound = rebound?.first
                 )
             }
         }

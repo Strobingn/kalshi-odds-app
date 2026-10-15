@@ -89,6 +89,21 @@ class SpotStream(
         return last.px / base - 1.0
     }
 
+    /**
+     * Rebound off the session low over [horizonMs] for the scalper's
+     * SPOT_REBOUND: (fraction above the low, age of the low in ms), or null
+     * when the ring is stale/unreachable. "Session" = the ring's 20-minute
+     * window — as close to a session as the feed gets.
+     */
+    fun lowRebound(asset: String, horizonMs: Long, nowMs: Long = clock()): Pair<Double, Long>? {
+        val ring = rings[asset.uppercase()] ?: return null
+        val last = ring.latest() ?: return null
+        if (nowMs - last.tMs > STALE_MS) return null
+        val low = ring.lowSince(horizonMs, nowMs) ?: return null
+        if (low.px <= 0.0) return null
+        return (last.px / low.px - 1.0) to (nowMs - low.tMs)
+    }
+
     /** Parse one WebSocket frame. Public for tests. */
     fun ingest(text: String, nowMs: Long = clock()) {
         val o = runCatching { JSONObject(text) }.getOrNull() ?: return
@@ -144,6 +159,11 @@ class SpotStream(
 
         @Synchronized
         fun latest(): Sample? = q.lastOrNull()
+
+        /** Lowest sample within the trailing [horizonMs]; null when empty. */
+        @Synchronized
+        fun lowSince(horizonMs: Long, nowMs: Long): Sample? =
+            q.filter { nowMs - it.tMs <= horizonMs }.minByOrNull { it.px }
 
         /** Last trade at or before [tMs]; null when the ring does not reach back that far. */
         @Synchronized

@@ -72,13 +72,21 @@ data class ScalpSettings(
      */
     val aggressive: Boolean = true,
     /** Max concurrent open scalp positions across all strategies. */
-    val maxOpenPositions: Int = 12,
+    val maxOpenPositions: Int = 20,
     /**
      * Per-strategy enable set for aggressive mode — strategy NAMES
      * ([ScalpStrategy.name]) that may trade. EMPTY = all strategies on (the
      * default). Strategies absent here are computed but never entered.
      */
-    val enabledStrategies: Set<String> = emptySet()
+    val enabledStrategies: Set<String> = emptySet(),
+    /**
+     * Universal entry gate: the engine refuses ANY entry whose current mid
+     * is above this (cents). The YES side is only cheap below the coin-flip
+     * line — everything the roster buys is a sub-50¢ YES. Enforced in
+     * [ScalpEngine] before the strategy decider runs, in aggressive AND
+     * single-strategy mode; exits are unaffected.
+     */
+    val maxEntryCents: Int = DEFAULT_MAX_ENTRY_CENTS
 ) {
     val paper: Boolean get() = !liveMode
 
@@ -146,18 +154,21 @@ data class ScalpSettings(
         const val DEFAULT_MAX_HOLD_MS = 480_000L
         const val DEFAULT_DIP_MIN_DROP_PP = 5.0
 
-        // Aggressive profile (bitcoin-swarm experiment branch): 11 concurrent
+        // Aggressive profile (bitcoin-swarm experiment branch): 20 concurrent
         // strategies trading the full window. One entry per strategy per
-        // window is the design intent behind the 60/h cap (4 windows/h × ~15)
-        // and the 12-open cap (one per strategy). The daily-loss breaker and
+        // window is the design intent behind the 120/h cap (4 windows/h × ~30)
+        // and the 20-open cap (one per strategy). The daily-loss breaker and
         // kill switch are identical in both profiles — never relaxed.
         const val AGGRESSIVE_MAX_STAKE_USD = 10.0
-        const val AGGRESSIVE_MAX_TRADES_PER_HOUR = 60
+        const val AGGRESSIVE_MAX_TRADES_PER_HOUR = 120
         const val AGGRESSIVE_WINDOW_SECONDS = 30
         const val AGGRESSIVE_TAKE_PROFIT_PP = 4.0
         const val AGGRESSIVE_STOP_LOSS_PP = 6.0
         const val AGGRESSIVE_MAX_HOLD_MS = 300_000L
         const val AGGRESSIVE_DIP_MIN_DROP_PP = 2.0
+
+        /** Universal entry gate default: only buy YES when mid ≤ 50¢. */
+        const val DEFAULT_MAX_ENTRY_CENTS = 50
 
         /** Fraction of the paper bankroll each entry may risk (aggressive). */
         const val BANKROLL_FRACTION_PER_TRADE = 0.25
@@ -207,7 +218,7 @@ class ScalpSettingsStore(context: Context) {
     }
 
     suspend fun updateMaxTradesPerHour(n: Int) {
-        app.scalpStore.edit { it[KEY_TPH] = n.coerceIn(1, 60) }
+        app.scalpStore.edit { it[KEY_TPH] = n.coerceIn(1, 240) }
     }
 
     suspend fun updateMaxDailyLossUsd(usd: Double) {
@@ -231,7 +242,12 @@ class ScalpSettingsStore(context: Context) {
     }
 
     suspend fun updateMaxOpenPositions(n: Int) {
-        app.scalpStore.edit { it[KEY_MAX_OPEN] = n.coerceIn(1, 12) }
+        app.scalpStore.edit { it[KEY_MAX_OPEN] = n.coerceIn(1, 20) }
+    }
+
+    /** Update the universal entry gate (cents). 50 = only sub-coin-flip YES. */
+    suspend fun updateMaxEntryCents(cents: Int) {
+        app.scalpStore.edit { it[KEY_MAX_ENTRY] = cents.coerceIn(1, 99) }
     }
 
     /** Replace the per-strategy enable set. Empty = all strategies on. */
@@ -252,8 +268,9 @@ class ScalpSettingsStore(context: Context) {
         dipMinDropPp = this[KEY_DIP] ?: ScalpSettings.DEFAULT_DIP_MIN_DROP_PP,
         killSwitch = this[KEY_KILL] ?: false,
         aggressive = this[KEY_AGGRESSIVE] ?: true,
-        maxOpenPositions = this[KEY_MAX_OPEN] ?: 12,
-        enabledStrategies = this[KEY_STRATEGIES] ?: emptySet()
+        maxOpenPositions = this[KEY_MAX_OPEN] ?: 20,
+        enabledStrategies = this[KEY_STRATEGIES] ?: emptySet(),
+        maxEntryCents = this[KEY_MAX_ENTRY] ?: ScalpSettings.DEFAULT_MAX_ENTRY_CENTS
     )
 
     companion object {
@@ -271,5 +288,6 @@ class ScalpSettingsStore(context: Context) {
         private val KEY_AGGRESSIVE = booleanPreferencesKey("scalp_aggressive")
         private val KEY_MAX_OPEN = intPreferencesKey("scalp_max_open_positions")
         private val KEY_STRATEGIES = stringSetPreferencesKey("scalp_enabled_strategies")
+        private val KEY_MAX_ENTRY = intPreferencesKey("scalp_max_entry_cents")
     }
 }

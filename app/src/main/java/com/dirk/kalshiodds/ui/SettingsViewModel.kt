@@ -156,6 +156,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setScalpMaxOpenPositions(n: Int) =
         viewModelScope.launch { container.scalpSettingsStore.updateMaxOpenPositions(n) }
 
+    fun setScalpMaxEntryCents(cents: Int) =
+        viewModelScope.launch { container.scalpSettingsStore.updateMaxEntryCents(cents) }
+
     /** Toggle one strategy in the aggressive-mode enable set (empty = all on). */
     fun setScalpStrategyEnabled(name: String, enabled: Boolean) {
         viewModelScope.launch {

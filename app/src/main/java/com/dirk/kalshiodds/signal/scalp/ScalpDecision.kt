@@ -6,15 +6,20 @@ import kotlin.math.abs
 enum class ExitReason { TARGET, STOP, TIMEOUT, MOMENTUM_FADE, WINDOW_CLOSE }
 
 /**
- * Spot impulse for SPOT_LEAD / OPEN_DRIVE. Fractions, not percent:
- * 0.0006 = a 6bp move. Nulls mean the feature is unavailable (stream
- * disconnected / series unsupported) — strategies must fail soft.
+ * Spot impulse for SPOT_LEAD / OPEN_DRIVE / SPOT_DIVERGENCE / SPOT_REBOUND.
+ * Fractions, not percent: 0.0006 = a 6bp move. Nulls mean the feature is
+ * unavailable (stream disconnected / series unsupported) — strategies must
+ * fail soft.
  */
 data class ScalpSpot(
     /** Spot return over the last ~15s. */
     val return15s: Double? = null,
     /** Spot return over the last 1m. */
-    val return1m: Double? = null
+    val return1m: Double? = null,
+    /** Age of the session low over the provider's horizon (ms). */
+    val sessionLowAgeMs: Long? = null,
+    /** Fraction the last spot print sits above that session low (2bp = 0.0002). */
+    val sessionLowRebound: Double? = null
 ) {
     /** Short-horizon impulse: prefer the 15s reading; fall back to 1m ÷ 4. */
     val impulse: Double? get() = return15s ?: return1m?.let { it / 4.0 }
@@ -55,12 +60,36 @@ data class ScalpSpot(
  *   the trend, never against). Never enters inside the window-close buffer.
  * - **OPEN_DRIVE** — first 60s only: opening velocity one-directional for
  *   ≥ 10s, non-negative accel, spot agreement when available.
+ * - **DOUBLE_DIP** — two lows in the window, second ≥1¢ higher, mid ≤45¢,
+ *   book no longer ask-heavy (accumulation). Skipped while the tape falls.
+ * - **CAPITULATION_FADE** — ≥3¢ off the window high with the low ≤30s old,
+ *   on the FIRST uptick with a stabilizing tape (seller exhaustion).
+ * - **WICK_BUY** — mid ran ≥4¢ below the fast EMA inside the window (stop
+ *   sweep) and reclaims the EMA this tick. Shortest hold in the roster.
+ * - **SPOT_DIVERGENCE** — Kalshi ≥2¢ off its window high while spot's 1m
+ *   return is flat-to-up (≥ −5bp): venue-local panic, not information. Exit
+ *   on spot-impulse decay (MOMENTUM_FADE).
+ * - **SPOT_REBOUND** — spot ≥2bp off a session low ≤60s old and heating up
+ *   (15s impulse above the 1m pace) while Kalshi lags (≥2¢ off its high,
+ *   velocity ≤0.2¢/s). Exit on spot-impulse decay (MOMENTUM_FADE).
+ * - **IMBALANCE_FLIP** — min imbalance ≤ −0.4 over the last 30s, now ≥ +0.2,
+ *   |velocity| ≤1.0 (depth rotated, tape not runaway). Exit below +0.05
+ *   (MOMENTUM_FADE).
+ * - **SLOW_BLEED_FADE** — velocity sustained in −0.05..−0.2¢/s for ≥90s,
+ *   bleed not accelerating, spot flat (|1m| ≤5bp): the grind is exhausted.
+ * - **VOLUME_DRYUP** — spread ≥3¢ (quotes pulled), depth not ask-heavy, mid
+ *   ≤1.5¢ above the window low, first uptick: thin books turn fast.
+ * - **RANGE_ANCHOR** — window min ≤45¢, whole range ≤6¢, ≥2min of samples,
+ *   mid just ticked up off the floor (the level is defended).
+ *
+ * The 50¢ max-entry gate is NOT here — it lives in the engine, one shared
+ * check before any decider runs. All of the above respect it by design.
  *
  * ## Exits (priority order), all filled at the bid
  * 1. TARGET — bid ≥ entry + TP (also: VWAP touch for VWAP_REVERT, range-mid
  *    touch for RANGE_FADE, mid back at 50¢ ± band for EXTREME_REVERSAL).
  * 2. MOMENTUM_FADE — the entry signal decayed (momentum reversed, imbalance
- *    flipped, pulse recovered, spot impulse decayed).
+ *    flipped/decayed, pulse recovered, spot impulse decayed).
  * 3. STOP — bid ≤ entry − SL.
  * 4. TIMEOUT — held ≥ maxHoldMs.
  * WINDOW_CLOSE is never emitted here — it is the engine's force-exit a few
@@ -132,6 +161,65 @@ class ScalpDecision(
     private val openDriveMinSpanMs: Long = 10_000L,
     /** OPEN_DRIVE: minimum whole-window velocity. */
     private val openDriveMinVelocity: Double = 0.2,
+    // ---- 20-strategy roster (bitcoin-swarm experiment) ----------------------
+    /** DOUBLE_DIP: minimum samples before two lows are meaningful. */
+    private val doubleDipMinSamples: Int = 30,
+    /** DOUBLE_DIP: the whole roster's 50c gate aside, this buyer only works
+     *  deep in the YES-cheap zone. */
+    private val doubleDipMaxMidPp: Double = 45.0,
+    /** DOUBLE_DIP: second low must be at least this far above the first. */
+    private val doubleDipHigherLowMinPp: Double = 1.0,
+    /** DOUBLE_DIP: book must be at least this bid-side (0.0 = not ask-heavy). */
+    private val doubleDipImbalanceMin: Double = 0.0,
+    /** CAPITULATION_FADE: minimum drop from the window high. */
+    private val capitulationDropPp: Double = 3.0,
+    /** CAPITULATION_FADE: the window low must be this fresh (ms). */
+    private val capitulationLowMaxAgeMs: Long = 30_000L,
+    /** WICK_BUY: minimum sweep below the fast EMA within the window. */
+    private val wickDipMinPp: Double = 4.0,
+    /** SPOT_DIVERGENCE: minimum Kalshi drop from the window high. */
+    private val spotDivergenceDropPp: Double = 2.0,
+    /** SPOT_DIVERGENCE: spot 1m must be at least this (≥ −5bp = flat-to-up). */
+    private val spotDivergenceFlatMin: Double = -0.0005,
+    /** SPOT_DIVERGENCE: minimum samples before the window means anything. */
+    private val spotDivergenceMinSamples: Int = 20,
+    /** SPOT_REBOUND: the session low must be this fresh (ms). */
+    private val spotReboundMaxLowAgeMs: Long = 60_000L,
+    /** SPOT_REBOUND: minimum bounce off the session low (fraction, 2bp). */
+    private val spotReboundMin: Double = 0.0002,
+    /** SPOT_REBOUND: Kalshi must still be this far off its window high. */
+    private val spotReboundKalshiLagPp: Double = 2.0,
+    /** SPOT_REBOUND: refuse when Kalshi already ran (¢/s). */
+    private val spotReboundKalshiMaxVelocity: Double = 0.2,
+    /** IMBALANCE_FLIP: the recent (30s) low imbalance must be at/under this. */
+    private val flipLowImbalance: Double = -0.4,
+    /** IMBALANCE_FLIP: current imbalance must reach at least this. */
+    private val flipEnterImbalance: Double = 0.2,
+    /** IMBALANCE_FLIP: exit (fade) when imbalance decays below this. */
+    private val flipExitImbalance: Double = 0.05,
+    /** SLOW_BLEED_FADE: minimum samples (≥90s of history at 1/s). */
+    private val slowBleedMinSamples: Int = 90,
+    /** SLOW_BLEED_FADE: |velocity| band edges (¢/s) — the bleed must be slow. */
+    private val slowBleedMinAbsVelocity: Double = 0.05,
+    private val slowBleedMaxAbsVelocity: Double = 0.2,
+    /** SLOW_BLEED_FADE: spot is "flat" when |1m return| stays under this. */
+    private val slowBleedSpotFlatMax: Double = 0.0005,
+    /** SLOW_BLEED_FADE: the bleed may not be accelerating (¢/s² floor). */
+    private val slowBleedMaxAccel: Double = 0.02,
+    /** VOLUME_DRYUP: spread this wide = quotes pulled (activity collapsed). */
+    private val dryupSpreadCents: Int = 3,
+    /** VOLUME_DRYUP: depth may not be ask-heavy while we buy the low. */
+    private val dryupImbalanceMin: Double = 0.0,
+    /** VOLUME_DRYUP: mid must sit within this of the window low. */
+    private val dryupNearLowPp: Double = 1.5,
+    /** RANGE_ANCHOR: minimum samples (≥2min at 1/s). */
+    private val rangeAnchorMinSamples: Int = 120,
+    /** RANGE_ANCHOR: the defended floor must be at/under this. */
+    private val rangeAnchorMaxFloorPp: Double = 45.0,
+    /** RANGE_ANCHOR: the whole-window range must stay at/under this. */
+    private val rangeAnchorMaxRangePp: Double = 6.0,
+    /** RANGE_ANCHOR: mid may be at most this far above the floor. */
+    private val rangeAnchorTickUpPp: Double = 1.0,
     /** No entries inside this buffer before close — the engine force-exits. */
     private val windowCloseBufferMs: Long = 5_000L
 ) {
@@ -161,10 +249,14 @@ class ScalpDecision(
         nowMs: Long,
         closeTimeEpochMs: Long? = null,
         pulse: LocalOrderBook.Pulse? = null,
-        spot: ScalpSpot? = null
+        spot: ScalpSpot? = null,
+        /** Best-guess top-of-book spread in cents (VOLUME_DRYUP). Null = soft-off. */
+        spreadCents: Int? = null,
+        /** Min near-mid imbalance over the last ~30s (IMBALANCE_FLIP). Null = soft-off. */
+        imbalanceLow: Double? = null
     ): ScalpDecision.ScalpDecision {
         if (position != null) return exitDecision(features, position, bestBidCents, imbalance, pulse, spot, nowMs)
-        return entryDecision(features, bestBidCents, bestAskCents, imbalance, nowMs, closeTimeEpochMs, pulse, spot)
+        return entryDecision(features, bestBidCents, bestAskCents, imbalance, nowMs, closeTimeEpochMs, pulse, spot, spreadCents, imbalanceLow)
     }
 
     private fun entryDecision(
@@ -175,7 +267,9 @@ class ScalpDecision(
         nowMs: Long,
         closeTimeEpochMs: Long?,
         pulse: LocalOrderBook.Pulse?,
-        spot: ScalpSpot?
+        spot: ScalpSpot?,
+        spreadCents: Int?,
+        imbalanceLow: Double?
     ): ScalpDecision.ScalpDecision {
         val ask = bestAskCents ?: return ScalpDecision.Hold
         val bid = bestBidCents ?: return ScalpDecision.Hold
@@ -194,6 +288,15 @@ class ScalpDecision(
             ScalpStrategy.RANGE_FADE -> rangeFadeEntry(features, ask)
             ScalpStrategy.LATE_DRIFT -> lateDriftEntry(features, ask, nowMs, closeTimeEpochMs)
             ScalpStrategy.OPEN_DRIVE -> openDriveEntry(features, ask, spot)
+            ScalpStrategy.DOUBLE_DIP -> doubleDipEntry(features, ask, imbalance)
+            ScalpStrategy.CAPITULATION_FADE -> capitulationEntry(features, ask)
+            ScalpStrategy.WICK_BUY -> wickBuyEntry(features, ask)
+            ScalpStrategy.SPOT_DIVERGENCE -> spotDivergenceEntry(features, ask, spot)
+            ScalpStrategy.SPOT_REBOUND -> spotReboundEntry(features, ask, spot)
+            ScalpStrategy.IMBALANCE_FLIP -> imbalanceFlipEntry(features, ask, imbalance, imbalanceLow)
+            ScalpStrategy.SLOW_BLEED_FADE -> slowBleedEntry(features, ask, spot)
+            ScalpStrategy.VOLUME_DRYUP -> volumeDryupEntry(features, ask, imbalance, spreadCents)
+            ScalpStrategy.RANGE_ANCHOR -> rangeAnchorEntry(features, ask)
         }
     }
 
@@ -365,6 +468,189 @@ class ScalpDecision(
         return ScalpDecision.Enter(entryPriceCents = ask)
     }
 
+    // ---- 20-strategy roster (bitcoin-swarm experiment) -----------------------
+
+    private fun doubleDipEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int,
+        imbalance: Double?
+    ): ScalpDecision.ScalpDecision {
+        if (features.sampleCount < doubleDipMinSamples) return ScalpDecision.Hold
+        val last = features.lastMidPp ?: return ScalpDecision.Hold
+        if (last > doubleDipMaxMidPp) return ScalpDecision.Hold
+        val firstLow = features.windowMinPp ?: return ScalpDecision.Hold
+        val secondLow = features.secondLowPp ?: return ScalpDecision.Hold
+        // A genuinely HIGHER second low — an exact retest means the level is
+        // untested support, not accumulation.
+        if (secondLow + 1e-9 < firstLow + doubleDipHigherLowMinPp) return ScalpDecision.Hold
+        if (!stabilizing(features)) return ScalpDecision.Hold
+        if ((features.velocityPpPerSec ?: return ScalpDecision.Hold) < -maxFallPpPerSec - 1e-9) {
+            return ScalpDecision.Hold
+        }
+        // The book must no longer be ask-heavy — sellers done, buyers absorbing.
+        if ((imbalance ?: return ScalpDecision.Hold) < doubleDipImbalanceMin) return ScalpDecision.Hold
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun capitulationEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int
+    ): ScalpDecision.ScalpDecision {
+        val drop = features.dropFromWindowMaxPp ?: return ScalpDecision.Hold
+        if (drop + 1e-9 < capitulationDropPp) return ScalpDecision.Hold
+        // The low that confirms the capitulation must be recent — a 3¢ drop
+        // off a high from ten minutes ago is a trend, not a flush.
+        val lowAge = features.windowMinAgeMs ?: return ScalpDecision.Hold
+        if (lowAge > capitulationLowMaxAgeMs) return ScalpDecision.Hold
+        // The FIRST uptick after the low: prev must still be at/below the
+        // current print.
+        val prev = features.prevMidPp ?: return ScalpDecision.Hold
+        val last = features.lastMidPp ?: return ScalpDecision.Hold
+        if (prev + 1e-9 >= last) return ScalpDecision.Hold
+        if (!stabilizing(features)) return ScalpDecision.Hold
+        if ((features.velocityPpPerSec ?: return ScalpDecision.Hold) < -maxFallPpPerSec - 1e-9) {
+            return ScalpDecision.Hold
+        }
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun wickBuyEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int
+    ): ScalpDecision.ScalpDecision {
+        // The sweep already happened (maxDropFromShortEma within the window)…
+        val swept = features.maxDropFromShortEmaPp ?: return ScalpDecision.Hold
+        if (swept + 1e-9 < wickDipMinPp) return ScalpDecision.Hold
+        // …and this tick reclaimed the fast EMA (mid back at/above it).
+        val ema = features.shortEmaPp ?: return ScalpDecision.Hold
+        val last = features.lastMidPp ?: return ScalpDecision.Hold
+        if (last + 1e-9 < ema) return ScalpDecision.Hold
+        if (!stabilizing(features)) return ScalpDecision.Hold
+        if ((features.velocityPpPerSec ?: return ScalpDecision.Hold) < -maxFallPpPerSec - 1e-9) {
+            return ScalpDecision.Hold
+        }
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun spotDivergenceEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int,
+        spot: ScalpSpot?
+    ): ScalpDecision.ScalpDecision {
+        // Spot is the information leg: flat-to-up over 1m means the Kalshi dip
+        // is venue-local panic, not news.
+        val flat = spot?.return1m ?: return ScalpDecision.Hold
+        if (flat < spotDivergenceFlatMin) return ScalpDecision.Hold
+        val drop = features.dropFromWindowMaxPp ?: return ScalpDecision.Hold
+        if (drop + 1e-9 < spotDivergenceDropPp) return ScalpDecision.Hold
+        if (features.sampleCount < spotDivergenceMinSamples) return ScalpDecision.Hold
+        if ((features.velocityPpPerSec ?: return ScalpDecision.Hold) < -maxFallPpPerSec - 1e-9) {
+            return ScalpDecision.Hold
+        }
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun spotReboundEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int,
+        spot: ScalpSpot?
+    ): ScalpDecision.ScalpDecision {
+        val s = spot ?: return ScalpDecision.Hold
+        val age = s.sessionLowAgeMs ?: return ScalpDecision.Hold
+        if (age > spotReboundMaxLowAgeMs) return ScalpDecision.Hold
+        val rebound = s.sessionLowRebound ?: return ScalpDecision.Hold
+        if (rebound + 1e-9 < spotReboundMin) return ScalpDecision.Hold
+        // Heating up: the short impulse must exceed the 1m average pace.
+        val impulse = s.impulse ?: return ScalpDecision.Hold
+        val heat = s.return1m?.let { impulse > it / 4.0 } ?: true
+        if (!heat) return ScalpDecision.Hold
+        // Kalshi hasn't followed yet: still off its high and not already run.
+        val drop = features.dropFromWindowMaxPp ?: return ScalpDecision.Hold
+        if (drop + 1e-9 < spotReboundKalshiLagPp) return ScalpDecision.Hold
+        val velocity = features.velocityPpPerSec ?: return ScalpDecision.Hold
+        if (velocity > spotReboundKalshiMaxVelocity) return ScalpDecision.Hold
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun imbalanceFlipEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int,
+        imbalance: Double?,
+        imbalanceLow: Double?
+    ): ScalpDecision.ScalpDecision {
+        // The rotation must have actually happened: ask-heavy depth within the
+        // last 30s, bid-heavy now.
+        val low = imbalanceLow ?: return ScalpDecision.Hold
+        if (low > flipLowImbalance) return ScalpDecision.Hold
+        if ((imbalance ?: return ScalpDecision.Hold) < flipEnterImbalance) return ScalpDecision.Hold
+        val velocity = features.velocityPpPerSec ?: return ScalpDecision.Hold
+        if (abs(velocity) > imbalanceMaxAbsVelocity) return ScalpDecision.Hold
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun slowBleedEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int,
+        spot: ScalpSpot?
+    ): ScalpDecision.ScalpDecision {
+        if (features.sampleCount < slowBleedMinSamples) return ScalpDecision.Hold
+        val velocity = features.velocityPpPerSec ?: return ScalpDecision.Hold
+        // Sustained SMALL negative drift — inside the band only. A fast fall is
+        // DIP_HUNT's falling knife, not an exhaustion bleed.
+        if (velocity > -slowBleedMinAbsVelocity + 1e-9) return ScalpDecision.Hold
+        if (velocity < -slowBleedMaxAbsVelocity - 1e-9) return ScalpDecision.Hold
+        // The bleed may not be accelerating into a collapse.
+        if ((features.accelerationPpPerSec2 ?: 0.0) < -slowBleedMaxAccel - 1e-9) {
+            return ScalpDecision.Hold
+        }
+        // Spot flat: a real spot move means the bleed is information, not noise.
+        val s1m = spot?.return1m
+        if (s1m != null && abs(s1m) > slowBleedSpotFlatMax) return ScalpDecision.Hold
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun volumeDryupEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int,
+        imbalance: Double?,
+        spreadCents: Int?
+    ): ScalpDecision.ScalpDecision {
+        // Quotes pulled = activity collapsed. The common spread gate already
+        // caps at maxSpreadCents, so a 3¢ print here means "as wide as allowed".
+        val spread = spreadCents ?: return ScalpDecision.Hold
+        if (spread < dryupSpreadCents) return ScalpDecision.Hold
+        // …but the remaining depth may not be ask-heavy.
+        if ((imbalance ?: return ScalpDecision.Hold) < dryupImbalanceMin) return ScalpDecision.Hold
+        val last = features.lastMidPp ?: return ScalpDecision.Hold
+        val min = features.windowMinPp ?: return ScalpDecision.Hold
+        if (last > min + dryupNearLowPp) return ScalpDecision.Hold
+        // First bid lift: an uptick off the floor on thinning quotes.
+        val prev = features.prevMidPp ?: return ScalpDecision.Hold
+        if (prev + 1e-9 >= last) return ScalpDecision.Hold
+        if (!stabilizing(features)) return ScalpDecision.Hold
+        if ((features.velocityPpPerSec ?: return ScalpDecision.Hold) < -maxFallPpPerSec - 1e-9) {
+            return ScalpDecision.Hold
+        }
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
+    private fun rangeAnchorEntry(
+        features: ScalpMath.ScalpFeatures,
+        ask: Int
+    ): ScalpDecision.ScalpDecision {
+        if (features.sampleCount < rangeAnchorMinSamples) return ScalpDecision.Hold
+        val min = features.windowMinPp ?: return ScalpDecision.Hold
+        if (min > rangeAnchorMaxFloorPp) return ScalpDecision.Hold
+        val max = features.windowMaxPp ?: return ScalpDecision.Hold
+        if (max - min > rangeAnchorMaxRangePp) return ScalpDecision.Hold
+        // Just ticked up off the defended floor.
+        val last = features.lastMidPp ?: return ScalpDecision.Hold
+        if (last > min + rangeAnchorTickUpPp) return ScalpDecision.Hold
+        val prev = features.prevMidPp ?: return ScalpDecision.Hold
+        if (prev + 1e-9 >= last) return ScalpDecision.Hold
+        return ScalpDecision.Enter(entryPriceCents = ask)
+    }
+
     private fun stabilizing(features: ScalpMath.ScalpFeatures): Boolean {
         val velocity = features.velocityPpPerSec ?: return false
         val acceleration = features.accelerationPpPerSec2 ?: return false
@@ -412,6 +698,20 @@ class ScalpDecision(
             ScalpStrategy.SPOT_LEAD -> {
                 // The spot impulse decayed — the lead is gone.
                 if ((spot?.impulse ?: 1.0) < spotEnter / 2.0) {
+                    return ScalpDecision.Exit(ExitReason.MOMENTUM_FADE, bid)
+                }
+            }
+            ScalpStrategy.SPOT_DIVERGENCE, ScalpStrategy.SPOT_REBOUND -> {
+                // The divergence/rebound thesis was the spot impulse — when it
+                // decays below half the SPOT_LEAD threshold there is no lead
+                // left to converge. Null spot mid-position = treat as decayed.
+                if ((spot?.impulse ?: 0.0) < spotEnter / 2.0) {
+                    return ScalpDecision.Exit(ExitReason.MOMENTUM_FADE, bid)
+                }
+            }
+            ScalpStrategy.IMBALANCE_FLIP -> {
+                // The rotation unwound — depth no longer bid-heavy.
+                if ((imbalance ?: 1.0) < flipExitImbalance) {
                     return ScalpDecision.Exit(ExitReason.MOMENTUM_FADE, bid)
                 }
             }

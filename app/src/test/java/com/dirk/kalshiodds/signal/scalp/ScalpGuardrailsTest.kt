@@ -72,9 +72,9 @@ class ScalpGuardrailsTest {
 
     @Test
     fun blocksWhenMaxOpenPositionsReached() {
-        // Default cap is 12 (one slot per strategy in the 11-strategy swarm).
-        assertNull(ScalpGuardrails.checkEnter(state(openPositionCount = 11), settings()))
-        val block = ScalpGuardrails.checkEnter(state(openPositionCount = 12), settings())
+        // Default cap is 20 (one slot per strategy in the 20-strategy swarm).
+        assertNull(ScalpGuardrails.checkEnter(state(openPositionCount = 19), settings()))
+        val block = ScalpGuardrails.checkEnter(state(openPositionCount = 20), settings())
         assertNotNull(block)
         assertTrue(block!!.contains("max open scalp positions"))
     }
@@ -113,9 +113,11 @@ class ScalpGuardrailsTest {
         assertEquals(5.0, s.dipMinDropPp, 1e-9)
         // Aggression switch + concurrent-position cap (swarm: one per strategy).
         assertTrue(s.aggressive)
-        assertEquals(12, s.maxOpenPositions)
-        assertTrue(s.enabledStrategies.isEmpty()) // empty = all 11 strategies on
-        assertEquals(11, ScalpStrategy.values().size)
+        assertEquals(20, s.maxOpenPositions)
+        // Universal entry gate: the YES side is only cheap below the coin-flip.
+        assertEquals(50, s.maxEntryCents)
+        assertTrue(s.enabledStrategies.isEmpty()) // empty = all 20 strategies on
+        assertEquals(20, ScalpStrategy.values().size)
         assertTrue(s.paper)
     }
 

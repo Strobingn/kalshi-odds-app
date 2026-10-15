@@ -56,6 +56,11 @@ class ScalpMath(
          * OPEN_DRIVE. Null with fewer than 2 samples.
          */
         val windowVelocityPpPerSec: Double? = null,
+        /** Age of the oldest [windowMinPp] print (ms) — how fresh the low is. */
+        val windowMinAgeMs: Long? = null,
+        /** Second-lowest mid in the window (one occurrence of the min removed)
+         * — the "higher low" of a DOUBLE_DIP bottom. Null with < 2 samples. */
+        val secondLowPp: Double? = null,
         /** shortEma − lastMid. Positive = price below the fast trend (a dip). */
         val dropFromShortEmaPp: Double?,
         /** Deepest (emaAtSample − mid) within the window — how far price ran
@@ -111,6 +116,20 @@ class ScalpMath(
         val span = if (pts.size >= 2) pts.last().nowMs - pts.first().nowMs else 0L
         val mean = mids.takeIf { it.isNotEmpty() }?.average()
         val midStd = mean?.let { m -> kotlin.math.sqrt(mids.sumOf { (it - m) * (it - m) } / mids.size) }
+        // Age of the most RECENT print at the window low (reversed scan), so a
+        // market sitting at the low reads age≈0 and only a stale, abandoned
+        // low reads old.
+        val windowMin = if (pts.size >= 2) {
+            pts.asReversed().minByOrNull { it.midPp }?.let { pts.last().nowMs - it.nowMs }
+        } else {
+            null
+        }
+        val secondLow = if (mids.size >= 2) {
+            val sorted = mids.sorted()
+            sorted[1]
+        } else {
+            null
+        }
         return ScalpFeatures(
             lastMidPp = last,
             prevMidPp = prevMid,
@@ -123,6 +142,8 @@ class ScalpMath(
             vwapPp = mean,
             midStdPp = midStd,
             windowVelocityPpPerSec = velocity(mids, times, WINDOW_VELOCITY_POINTS),
+            windowMinAgeMs = windowMin,
+            secondLowPp = secondLow,
             dropFromShortEmaPp = if (emaS != null && last != null) emaS - last else null,
             maxDropFromShortEmaPp = emaGaps.maxOrNull(),
             dropFromWindowMaxPp = if (last != null) (mids.maxOrNull() ?: last) - last else null,
