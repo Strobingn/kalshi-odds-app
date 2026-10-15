@@ -160,6 +160,7 @@ object ScalpCatalog {
                 val b = bid(t, pos.side)
                 when {
                     b + 1e-9 >= pos.entry + up -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - 0.05 -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }
@@ -181,6 +182,7 @@ object ScalpCatalog {
                 val armed = pos.peakBid + 1e-9 >= pos.entry + arm
                 when {
                     armed && pos.peakBid - b + 1e-9 >= trail -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - 0.05 -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }
