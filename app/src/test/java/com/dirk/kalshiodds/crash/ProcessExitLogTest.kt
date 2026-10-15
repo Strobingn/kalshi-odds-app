@@ -11,7 +11,7 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
 @RunWith(AndroidJUnit4::class)
-@Config(sdk = [34])
+@Config(sdk = [34], application = android.app.Application::class)
 class ProcessExitLogTest {
     @Test fun osExitReportIsBoundedDeduplicatedAndKeepsTheOriginalStack() {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
