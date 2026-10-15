@@ -70,7 +70,7 @@ object ProcessExitLog {
             append("Last sampled PSS ${entry.pssKb} KB · RSS ${entry.rssKb} KB\n")
             append("Collected on app ${CrashLog.versionName}; the exited version may differ.\n")
             append("${entry.description.orEmpty().take(4000)}\n\n")
-            append(trace().take(if (entry.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) 90_000 else MAX_TRACE_BYTES))
+            append(trace().take(if (entry.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) 90_000 else MAX_TRACE_BYTES + 128))
         })
         marker.writeText(entry.atMs.toString())
         dir.listFiles { f -> f.name.startsWith("crash-") && f.name.endsWith(".txt") }.orEmpty()
