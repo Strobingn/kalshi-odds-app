@@ -20,19 +20,28 @@ object ProcessExitLog {
             val entry = Entry(exit.timestamp, exit.pid, exit.processName, exit.reason, exit.status,
                 exit.importance, exit.pss, exit.rss, exit.description)
             record(context, entry) {
-                if (exit.reason != ApplicationExitInfo.REASON_ANR) ""
-                else runCatching { exit.traceInputStream?.use {
-                    val buffer = ByteArray(MAX_TRACE_BYTES)
-                    var total = 0
-                    while (total < buffer.size) {
-                        val n = it.read(buffer, total, buffer.size - total)
-                        if (n <= 0) break
-                        total += n
-                    }
-                    String(buffer, 0, total, Charsets.UTF_8)
-                }.orEmpty() }.getOrDefault("")
+                val native = Build.VERSION.SDK_INT >= 31 && exit.reason == ApplicationExitInfo.REASON_CRASH_NATIVE
+                if (exit.reason != ApplicationExitInfo.REASON_ANR && !native) ""
+                else runCatching { exit.traceInputStream?.use { readTrace(it, native) }
+                    ?: "Android did not retain a trace." }.getOrElse { "Trace unavailable: ${it.javaClass.simpleName}" }
             }
         }
+    }
+
+    /** Native streams contain protobuf bytes, not UTF-8. Preserve a bounded binary payload losslessly. */
+    internal fun readTrace(input: java.io.InputStream, native: Boolean): String {
+        val buffer = ByteArray(MAX_TRACE_BYTES)
+        var total = 0
+        while (total < buffer.size) {
+            val n = input.read(buffer, total, buffer.size - total)
+            if (n <= 0) break
+            total += n
+        }
+        val truncated = total == buffer.size && input.read() != -1
+        return if (native) {
+            "Native tombstone protobuf · base64 · $total bytes · truncated=$truncated\n" +
+                android.util.Base64.encodeToString(buffer.copyOf(total), android.util.Base64.NO_WRAP)
+        } else String(buffer, 0, total, Charsets.UTF_8) + if (truncated) "\n[ANR trace truncated at 64 KiB]" else ""
     }
 
     /** Does not replace a saved exception or announce routine user/update kills as an app crash. */
@@ -61,7 +70,7 @@ object ProcessExitLog {
             append("Last sampled PSS ${entry.pssKb} KB · RSS ${entry.rssKb} KB\n")
             append("Collected on app ${CrashLog.versionName}; the exited version may differ.\n")
             append("${entry.description.orEmpty().take(4000)}\n\n")
-            append(trace().take(MAX_TRACE_BYTES))
+            append(trace().take(if (entry.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) 90_000 else MAX_TRACE_BYTES))
         })
         marker.writeText(entry.atMs.toString())
         dir.listFiles { f -> f.name.startsWith("crash-") && f.name.endsWith(".txt") }.orEmpty()

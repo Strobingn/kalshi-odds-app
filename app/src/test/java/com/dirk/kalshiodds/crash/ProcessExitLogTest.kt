@@ -13,6 +13,17 @@ import org.robolectric.annotation.Config
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34], application = android.app.Application::class)
 class ProcessExitLogTest {
+    @Test fun nativeTraceBytesSurviveEncodingAndOversizeTracesAreMarked() {
+        val bytes = ByteArray(4096) { (it % 256).toByte() }
+        val trace = ProcessExitLog.readTrace(java.io.ByteArrayInputStream(bytes), native = true)
+        assertTrue(trace.contains("truncated=false"))
+        assertArrayEquals(bytes, android.util.Base64.decode(trace.substringAfter('\n'), android.util.Base64.NO_WRAP))
+        val large = ProcessExitLog.readTrace(java.io.ByteArrayInputStream(ByteArray(70_000) { 123 }), native = true)
+        assertTrue(large.contains("truncated=true"))
+        assertEquals(65_536, android.util.Base64.decode(large.substringAfter('\n'), android.util.Base64.NO_WRAP).size)
+        assertTrue(large.length < 90_000)
+    }
+
     @Test fun osExitReportIsBoundedDeduplicatedAndKeepsTheOriginalStack() {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         CrashLog.attach(ctx); CrashLog.clear()
