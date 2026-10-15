@@ -19,6 +19,20 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.9.6 (Claude branch): every call uses Kalshi data only
+
+- **Card call (BET / NO BET).** Only the clear-lead rule can say BET now. The AI model's chance comes from an
+  outside Bitcoin feed (Coinbase / CF Benchmarks), so it no longer makes calls, and its alerts are no longer sent.
+- **Clear lead, Kalshi prices only.** The side Kalshi prices at 80–90¢ between minute 3 and minute 10 (it used
+  to be "Bitcoin 0.10–0.20% from the start price" on Coinbase). History on 46 days of Kalshi 1-minute prices
+  (`tools/research/clear_lead_kalshi.py`): +0.66¢ per contract in the first half, +0.48¢ in the second, neither
+  clear of zero. The same size as the Coinbase version.
+- **No automatic tickets** (hunter, long-shot, configured): they were picked by the model. Buy on a card, limit
+  orders and the clear-lead ticket work as before.
+- **Late-favorite tracker stops recording**: it needs a Bitcoin price. Its card keeps its record.
+- Unchanged: the scalper and the strategy arena were already Kalshi-only. The AI % and the Bitcoin line on the
+  card and chart are still shown, for information only.
+
 ## 1.9.5 (claude/scalp-insights): Compare all 30, and a page for every strategy
 
 - **Compare** (a new section chip, second from the left): every strategy in one table: rank, net, trades,

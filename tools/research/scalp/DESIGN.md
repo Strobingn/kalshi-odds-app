@@ -214,3 +214,13 @@ in the app, nothing more. If no cell passes, the app is left alone.
 Context, no bar: k = 0 (joining the best bid) through the same code; how much the queue ahead shrinks while
 an order waits (size at the price when placed vs contracts still ahead when it fills or expires); the share
 of fills that came from a sale through the price.
+
+## Part K — clear lead from Kalshi prices only (fixed 2026-10-15 before scoring)
+
+Dirk asked that every call use Kalshi data only. The clear-lead rule used Coinbase (Bitcoin 0.10–0.20%
+from the start price). Kalshi-only version: between minute 3 and minute 10 of the window (Kalshi 1-minute
+candle closes, 4,264 settled windows 2026-08-24 → 10-08), the first minute the favourite's ask (the side
+whose mid is above 50¢) is inside a band, buy that side at the ask, once per window, taker fee paid, held
+to settlement. Bands: 60–70¢, 70–80¢, 80–90¢. The band with the best cents per contract on the first half
+of the days is scored once on the second half; it counts only if the second half's 95% day-resampled
+interval is above zero. All three bands are printed for both halves as context.

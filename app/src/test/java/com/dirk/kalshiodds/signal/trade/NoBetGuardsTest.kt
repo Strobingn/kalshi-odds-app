@@ -57,10 +57,7 @@ class NoBetGuardsTest {
             assertEquals("fair=$fair", BetCall.Headline.NO_BET, d.headline)
             assertFalse(d.isActionable)
             assertNull(d.ticket)
-            assertEquals(
-                "UP costs 0.2¢. That far out the model cannot tell 0.2% from a few percent, so its \"edge\" is not real. No bet.",
-                d.noBetReason
-            )
+            assertEquals("the model no longer makes calls (Kalshi data only)", BetCall.NO_RULE, d.noBetReason)
         }
     }
 

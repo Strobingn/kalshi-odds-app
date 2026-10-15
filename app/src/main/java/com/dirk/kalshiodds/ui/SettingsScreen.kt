@@ -780,12 +780,12 @@ fun SettingsContent(
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
                 Text("Reset paper book to $100")
             }
-            ToggleRow("Clear lead rule (bet the side Bitcoin is on)", s.clearLeadEnabled, { viewModel?.setClearLead(it) })
+            ToggleRow("Clear lead rule (bet the side Kalshi favours at 80–90¢)", s.clearLeadEnabled, { viewModel?.setClearLead(it) })
             Text(
-                "Your rule. When Bitcoin is 0.10–0.20% from the window's start price between minute 3 and minute 10, " +
-                    "the card says BET UP or BET DOWN on that side with a \$5 ticket (Approve still required), and " +
-                    "every window is logged to the Clear lead paper record on Home. These are 60–95¢ buys, so the " +
-                    "min-profit setting does not block them. History: a small edge in 46 days of data, not proven.",
+                "Your rule, Kalshi data only. When Kalshi prices UP or DOWN at 80–90¢ between minute 3 and minute 10, " +
+                    "the card says BET on that side with a \$5 ticket (Approve still required), and every window is " +
+                    "logged to the Clear lead paper record on Home. It is the only rule that can say BET. The " +
+                    "min-profit setting does not block it. History (46 days of Kalshi prices): about break-even, not proven.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )

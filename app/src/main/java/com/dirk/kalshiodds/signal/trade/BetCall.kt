@@ -8,6 +8,9 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 /**
  * Single source of truth for the card headline, the ticket side, and
  * the Approve target. Never a separate heuristic.
+ *
+ * Kalshi data only: BET UP / BET DOWN comes only from the clear-lead rule,
+ * which reads Kalshi's own prices. Everything else is NO BET.
  */
 object BetCall {
 
@@ -38,53 +41,13 @@ object BetCall {
         if (!ctx.settings.ticketsEnabled) {
             return none("Trade tickets are off in Settings")
         }
-        // Dirk's clear-lead rule calls the side on its own: it does not use the
-        // model, so the model's sit-out and edge gates do not apply to it.
+        // Kalshi data only (since 1.9.6): the only call is the clear-lead rule, read from Kalshi's prices.
+        // The AI model's chance comes from an outside Bitcoin feed, so it no longer makes calls.
         clearLeadCall(market, ctx)?.let { return it }
-        if (ctx.settings.isSittingOut()) {
-            return none(ctx.settings.autoTuneNote.ifBlank { "The model hasn't beaten Kalshi's prices in testing." })
-        }
         if (!MarketLifecycle.isTradable(market, ctx.nowMs)) {
             return none(TicketBuilder.MARKET_CLOSED)
         }
-        TicketBuilder.entryBlockReason(market, ctx.settings)?.let { return none(it) }
-        // EV at the ask picks the side (or no side) whenever the engine has a fair.
-        val ev = TicketBuilder.evDecision(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
-        if (ev != null && ev.side == null) return none(ev.reason)
-        // The "edge" on a side priced under 5¢ is the model's floor, not information: never a call.
-        if (ev?.side != null) {
-            val ask = if (ev.side == "YES") ev.yesAsk else ev.noAsk
-            if (ask != null && TicketBuilder.isLongShotPrice(ask)) return none(TicketBuilder.longShotReason(ev.side, ask))
-        }
-        val proposed = TicketBuilder.proposeAll(listOf(market), ctx).filter { !it.isSell }
-        val manuals = listOf("YES", "NO").mapNotNull { TicketBuilder.proposeManual(market, it, ctx) }
-        val all = (proposed + manuals).distinctBy { "${it.side.uppercase()}|${it.kind}" }
-        // Only the EV side can be the call — never the other side's ticket.
-        val tickets = if (ev != null) all.filter { it.side.equals(ev.side, true) } else all
-        val actionable = tickets.filter { qualifies(it, market, ctx) }
-        val preferred = ev?.side ?: TicketBuilder.resolveSide(market, ctx.settings.feeRate, ctx.settings.ticketStakeUsd)
-        val chosen = actionable.firstOrNull { preferred != null && it.side.equals(preferred, true) }
-            ?: actionable.maxByOrNull { it.profitIfWinUsd ?: 0.0 }
-        if (chosen != null) {
-            return Decision(
-                headline = if (chosen.side.equals("NO", true)) Headline.BET_DOWN else Headline.BET_UP,
-                side = chosen.side,
-                ticket = chosen,
-                ask = KalshiPrice.usable(chosen.limitPrice) ?: TicketBuilder.bestAsk(market, chosen.side, ctx),
-                profitIfWinUsd = chosen.profitIfWinUsd,
-                allInUsd = chosen.estimatedFillUsd,
-                contracts = chosen.contracts,
-                noBetReason = null
-            )
-        }
-        tickets.firstOrNull { TicketBuilder.isLongShotPrice(it.limitPrice) }?.let {
-            return none(TicketBuilder.longShotReason(it.side, it.limitPrice))
-        }
-        val blocked = tickets.firstOrNull { it.blockedReason != null }
-        val reason = blocked?.blockedReason
-            ?: tickets.firstOrNull()?.gateNote?.takeIf { ev == null }
-            ?: "No side clears edge after fees, the $5 all-in cap, and the min-profit setting"
-        return none(reason)
+        return none(NO_RULE)
     }
 
     /**
@@ -111,6 +74,9 @@ object BetCall {
 
     fun decide(market: MarketUiModel, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Decision =
         decide(market, TicketBuilder.Context(settings = settings, alertsPaused = false, nowMs = nowMs))
+
+    const val NO_RULE =
+        "No bet: the clear-lead rule (Kalshi prices UP or DOWN at 80–90¢, minutes 3–10) is not on right now."
 
     fun sortKey(decision: Decision): Int = if (decision.isActionable) 0 else 1
 

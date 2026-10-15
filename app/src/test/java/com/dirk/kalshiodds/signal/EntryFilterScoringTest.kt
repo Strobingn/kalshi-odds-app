@@ -105,22 +105,14 @@ class EntryFilterScoringTest {
     }
 
     @Test
-    fun betCallShowsTheEntryReasonInsteadOfABet() {
+    fun theModelNoLongerMakesTheCallOrAutomaticTickets() {
+        // Kalshi data only (1.9.6): this model-backed market is NO BET, entry filter or not.
         val open = betMarket()
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
-        assertEquals("control: this market is a BET UP", BetCall.Headline.BET_UP, BetCall.decide(open, ctx).headline)
-
-        val reason = "too early: 13:40 left (wait until 12:00)"
-        val blocked = open.copy(entryBlockReason = reason)
-        val decision = BetCall.decide(blocked, ctx)
-        assertEquals(BetCall.Headline.NO_BET, decision.headline)
-        assertFalse(decision.isActionable)
-        assertEquals(reason, decision.noBetReason)
-        val line = HomeCopy.thisWindowHeadline(decision, blocked, System.currentTimeMillis())
-        assertTrue(line, line.contains(reason))
-
-        val off = TicketBuilder.Context(settings = SignalSettings(entryFilterEnabled = false), alertsPaused = false)
-        assertEquals(BetCall.Headline.BET_UP, BetCall.decide(blocked, off).headline)
+        val ctx = TicketBuilder.Context(settings = SignalSettings(ticketRespectGates = false), alertsPaused = false)
+        val d = BetCall.decide(open, ctx)
+        assertEquals(BetCall.Headline.NO_BET, d.headline)
+        assertEquals(BetCall.NO_RULE, d.noBetReason)
+        assertTrue(TicketBuilder.proposeAll(listOf(open), ctx).isEmpty())
     }
 
     @Test
@@ -130,8 +122,6 @@ class EntryFilterScoringTest {
             settings = SignalSettings(ticketRespectGates = false),
             alertsPaused = false
         )
-        assertTrue("control: long-shot ticket without the block", TicketBuilder.proposeAll(listOf(open), ctx).isNotEmpty())
-
         val blocked = open.copy(entryBlockReason = "near strike: 2.1bp < 5bp")
         assertTrue(TicketBuilder.proposeAll(listOf(blocked), ctx).isEmpty())
         assertNull(TicketBuilder.propose(blocked, ctx))
@@ -146,7 +136,8 @@ class EntryFilterScoringTest {
 
         val off = ctx.copy(settings = ctx.settings.copy(entryFilterEnabled = false))
         assertNull(TicketBuilder.entryBlockReason(blocked, off.settings))
-        assertTrue(TicketBuilder.proposeAll(listOf(blocked), off).isNotEmpty())
+        // Kalshi data only (1.9.6): no automatic tickets at all, filter or not.
+        assertTrue(TicketBuilder.proposeAll(listOf(blocked), off).isEmpty())
     }
 
     @Test

@@ -32,8 +32,7 @@ class NoBetMinProfitCopyTest {
         assertEquals(BetCall.Headline.NO_BET, decision.headline)
         val line = HomeCopy.thisWindowHeadline(decision, market, HomeFixtures.NOW_MS)
         assertTrue(line, line.startsWith("NO BET this window"))
-        val reason = decision.noBetReason.orEmpty()
-        assertTrue(reason, reason.contains("$20") || line.contains("$20"))
-        assertFalse(reason, reason.contains("$10 minimum"))
+        // Kalshi data only (1.9.6): no rule is on, so that is the reason shown.
+        assertEquals(BetCall.NO_RULE, decision.noBetReason)
     }
 }

@@ -50,7 +50,7 @@ data class SignalSettings(
     val lateFavoriteEnabled: Boolean = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
     /**
      * Settings → "Clear lead rule". Dirk's rule: bet the side Bitcoin is
-     * clearly ahead on (minutes 3–10, 0.10–0.20% from the start price).
+     * clearly ahead on, read from Kalshi's prices (80–90¢, minutes 3–10).
      * Drives the BET headline and its $5 ticket, and logs every window to
      * its own paper record. Approve is still required.
      */
