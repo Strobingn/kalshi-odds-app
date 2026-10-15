@@ -715,7 +715,7 @@ fun SettingsContent(
             )
             ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper book to $100")
+                Text("Reset paper book to $1000")
             }
 
             Section("Live Approve tickets (Kalshi V2)")

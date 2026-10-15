@@ -91,7 +91,7 @@ class PaperBook(
             )
             publish(
                 PaperBookState(
-                    lastMessage = "Paper book reset to $100 — prior run archived",
+                    lastMessage = "Paper book reset to $1000 — prior run archived",
                     archived = cur.archived + archive
                 )
             )
@@ -177,7 +177,7 @@ class PaperBook(
         val stake = qty * px
         synchronized(lock) {
             val cur = _state.value
-            if (cur.cashUsd + 1e-9 < stake) {
+            if (cur.cashUsd + 1e-9 < stake && !SignalConstants.PAPER_ALLOW_NEGATIVE) {
                 rememberMessage("Paper skip $ticker — need ${fmt(stake)} (cash ${fmt(cur.cashUsd)})")
                 return null
             }
@@ -319,7 +319,7 @@ class PaperBook(
             )
             publish(
                 cur.copy(
-                    cashUsd = cur.cashUsd - debit,
+                    cashUsd = if (SignalConstants.PAPER_ALLOW_NEGATIVE) cur.cashUsd - debit else (cur.cashUsd - debit).coerceAtLeast(0.0),
                     fills = fills,
                     lastMessage = msg
                 )

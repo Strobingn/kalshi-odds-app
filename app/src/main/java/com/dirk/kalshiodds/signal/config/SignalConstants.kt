@@ -36,10 +36,12 @@ object SignalConstants {
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
     /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
-    const val PAPER_START_USD = 100.0
+    const val PAPER_START_USD = 1000.0
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
-    const val PAPER_LEDGER_MAX = 40
+    const val PAPER_LEDGER_MAX = 1000
+    /** Allow paper book to go negative - this is just an experiment with fake money */
+    const val PAPER_ALLOW_NEGATIVE = true
 
     /**
      * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,
