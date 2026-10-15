@@ -241,7 +241,8 @@ class LiveSignalsService : Service() {
                             yesLevels = snap.yesLevels,
                             noLevels = snap.noLevels,
                             seq = snap.seq,
-                            receiveElapsedNanos = snap.receiveElapsedNanos
+                            receiveElapsedNanos = snap.receiveElapsedNanos,
+                            demo = demo
                         )
                     }
                 },
@@ -253,7 +254,8 @@ class LiveSignalsService : Service() {
                             delta = delta.delta,
                             side = delta.side,
                             seq = delta.seq,
-                            receiveElapsedNanos = delta.receiveElapsedNanos
+                            receiveElapsedNanos = delta.receiveElapsedNanos,
+                            demo = demo
                         )
                     }
                 },

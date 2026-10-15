@@ -68,6 +68,8 @@ class SignalHub(
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
     private val lastBookScoredMs = ConcurrentHashMap<String, Long>()
     private val bookRevisions = ConcurrentHashMap<String, Long>()
+    private val bookEnvironments = ConcurrentHashMap<String, Boolean>()
+    fun bookEnvironment(ticker: String): Boolean? = bookEnvironments[ticker]
     fun bookRevision(ticker: String): Long? = bookRevisions[ticker]
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
     private val lastSnapshotPersistMs = ConcurrentHashMap<String, Long>()
@@ -185,10 +187,12 @@ class SignalHub(
         yesLevels: List<Pair<Double, Double>>,
         noLevels: List<Pair<Double, Double>>,
         seq: Int?,
-        receiveElapsedNanos: Long
+        receiveElapsedNanos: Long,
+        demo: Boolean = settings.kalshiDemoEnabled
     ) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         if (!settings.isWatchedTicker(ticker)) return
+        bookEnvironments[ticker] = demo
         runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
         bookRevisions[ticker] = receiveElapsedNanos
         requestBookScore(ticker, receiveElapsedNanos)
@@ -200,10 +204,13 @@ class SignalHub(
         delta: Double,
         side: String,
         seq: Int?,
-        receiveElapsedNanos: Long
+        receiveElapsedNanos: Long,
+        demo: Boolean = settings.kalshiDemoEnabled
     ) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         if (!settings.isWatchedTicker(ticker)) return
+        // A new environment must provide a full snapshot before its deltas can be used.
+        if (bookEnvironments[ticker] != demo) return
         // Apply on the WS thread under TickBook's lock — cheap. Scoring is
         // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
         runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }

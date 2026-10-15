@@ -73,7 +73,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
             lab.expirePending(now)
             if (now < retryAfter) { _state.value = lab.snapshot().copy(status = "Market-data backoff; no simulated fills from stale quotes"); return }
             if (marketTicker == null || marketClose <= now) {
-                val candidate = hub.watchTickers.value.firstOrNull { it.startsWith("KXBTC15M-") && (hub.scoring.book.closeTime(it) ?: 0) > now }
+                val candidate = hub.watchTickers.value.firstOrNull { it.startsWith("KXBTC15M-") && hub.bookEnvironment(it) == (key == "demo") && (hub.scoring.book.closeTime(it) ?: 0) > now }
                 if (candidate != null) { marketTicker = candidate; marketClose = hub.scoring.book.closeTime(candidate)!! }
                 else if (now >= listAfter) {
                     listAfter = now + 3000
@@ -83,7 +83,7 @@ class PaperScalpRuntime(context: Context, private val hub: SignalHub) {
             val ticker = marketTicker
             if (ticker == null || marketClose <= now) { _state.value = lab.snapshot().copy(status = "Waiting for an open BTC 15-minute market"); return }
             var depth: PaperDepth? = null
-            if (hub.hasFreshBook(ticker, now)) {
+            if (hub.bookEnvironment(ticker) == (key == "demo") && hub.hasFreshBook(ticker, now)) {
                 val book = hub.scoring.book.snapshotBook(ticker)
                 val revision = hub.bookRevision(ticker)
                 if (book != null && revision != null && revision != lastWsRevision) {
