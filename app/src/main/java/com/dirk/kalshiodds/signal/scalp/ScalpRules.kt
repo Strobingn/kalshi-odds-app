@@ -172,13 +172,11 @@ object ScalpCatalog {
         algo(id, name, rule) { a, t ->
             val pos = a.position
             if (pos == null) {
-                val side = rising(t)
-                if (side != null) {
-                    val aPx = ask(t, side)
-                    if (aPx in 0.45..0.55) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
-                } else {
-                    ScalpIntent.Hold
-                }
+                val side = rising(t) ?: cheaper(t)
+                val aPx = ask(t, side)
+                val deep = aPx <= 0.20
+                val open = aPx in 0.45..0.55 && rising(t) != null
+                if (deep || open) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {
