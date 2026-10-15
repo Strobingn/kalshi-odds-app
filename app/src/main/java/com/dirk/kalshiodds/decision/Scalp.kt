@@ -1520,7 +1520,7 @@ class ScalpBook(
                     val timeExit = if (holdExpired) "V2 user max hold reached" else null
                     val priceExit = bid?.let {
                         ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it))
-                            ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target) "V2 user net take-profit" else null
+                            ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }
                     val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
                     if (reason == null) { if (marked != t) out += marked; continue }
