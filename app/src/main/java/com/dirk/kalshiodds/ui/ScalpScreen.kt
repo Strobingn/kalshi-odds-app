@@ -182,8 +182,8 @@ private fun ScalpSettingsCard() {
         SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it; save() }
         SettingSlider("Max ask", maxAsk.value, 0.30, 0.70) { maxAsk.value = it; ScalpSettings.maxAsk = it; save() }
         SettingSlider("Size", frac.value, 0.05, 0.50) { frac.value = it; ScalpSettings.fraction = it; save() }
-        SettingSlider("Range minutes", rangeMin.value, 5.0, 14.0) { rangeMin.value = it; ScalpSettings.rangeMinutes = it.toInt(); save() }
-        SettingSlider("Shift minutes", shiftMin.value, 1.0, 10.0) { shiftMin.value = it; ScalpSettings.shiftMinutes = it.toInt(); save() }
+        SettingSlider("Range minutes", rangeMin.value, 1.0, 15.0) { rangeMin.value = it; ScalpSettings.rangeMinutes = it.toInt(); save() }
+        SettingSlider("Shift minutes", shiftMin.value, 1.0, 15.0) { shiftMin.value = it; ScalpSettings.shiftMinutes = it.toInt(); save() }
         SettingSlider("Range low", rangeLow.value, 0.10, 0.50) { rangeLow.value = it; ScalpSettings.rangeLow = it; save() }
         SettingSlider("Range high", rangeHigh.value, 0.50, 0.90) { rangeHigh.value = it; ScalpSettings.rangeHigh = it; save() }
     }
@@ -194,8 +194,11 @@ private fun SettingSlider(label: String, value: Double, min: Double, max: Double
     val colors = DipTheme.colors
     Column {
         Text(
-            if (label == "Size") String.format(Locale.US, "%s  %.0f%%", label, value * 100)
-            else String.format(Locale.US, "%s  %.0f¢", label, value * 100),
+            when (label) {
+                "Size" -> String.format(Locale.US, "%s  %.0f%%", label, value * 100)
+                "Range minutes", "Shift minutes" -> String.format(Locale.US, "%s  %.0f", label, value)
+                else -> String.format(Locale.US, "%s  %.0f¢", label, value * 100)
+            },
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
