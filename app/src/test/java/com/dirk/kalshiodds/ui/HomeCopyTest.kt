@@ -4,10 +4,15 @@ import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.BetCall
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeCopyTest {
+
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
 
     private val nowMs = 1_700_000_000_000L
 
@@ -47,7 +52,7 @@ class HomeCopyTest {
 
     @Test
     fun actionableDownFixtureIsBetDown() {
-        val down = HomeFixtures.actionableDownBtc()
+        val down = HomeFixtures.withLastMinuteFire(HomeFixtures.actionableDownBtc(), "NO")
         val call = BetCall.decide(down, SignalSettings(), nowMs)
         assertEquals(BetCall.Headline.BET_DOWN, call.headline)
         assertTrue(call.isActionable)
@@ -63,11 +68,12 @@ class HomeCopyTest {
             predicted = "YES",
             closeMs = nowMs + 372_000L
         )
-        val upCall = BetCall.decide(up, SignalSettings(), nowMs)
+        val fired = HomeFixtures.withLastMinuteFire(up, "YES")
+        val upCall = BetCall.decide(fired, SignalSettings(), nowMs)
         assertTrue(upCall.isActionable)
-        val line = HomeCopy.thisWindowHeadline(upCall, up, nowMs)
+        val line = HomeCopy.thisWindowHeadline(upCall, fired, nowMs)
         assertTrue(line.startsWith("BET UP  BTC"))
-        assertTrue(line.contains("\$5 wins"))
+        assertTrue(line.contains("BUY UP") || line.contains("\$10 wins"))
         assertTrue(line.contains("closes in 6:12"))
 
         val dead = HomeFixtures.market(
@@ -83,6 +89,19 @@ class HomeCopyTest {
         val noLine = HomeCopy.thisWindowHeadline(no, dead, nowMs)
         assertTrue(noLine.startsWith("NO BET this window"))
         assertTrue(noLine.contains(no.noBetReason!!.take(12)))
+    }
+
+    @Test
+    fun deadWindowHeadlineIsFlipChanceNoBet() {
+        val dead = HomeFixtures.deadWindowLotteryBtc()
+        val call = BetCall.decide(dead, SignalSettings(), nowMs)
+        assertEquals(BetCall.Headline.NO_BET, call.headline)
+        assertFalse(call.isActionable)
+        val line = HomeCopy.thisWindowHeadline(call, dead, nowMs)
+        assertTrue(line.startsWith("NO BET this window"))
+        assertTrue(line.contains("Flip chance"))
+        assertNull(HomeCopy.allInProfit(call))
+        assertEquals("PAPER  NO BET", HomeCopy.primaryButtonLabel("PAPER", call))
     }
 
     @Test
@@ -131,9 +150,14 @@ class HomeCopyTest {
 
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(null).line)
         assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.0).line)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.001).line)
+        assertEquals(0, HomeCopy.tenDollarWins(0.001).contracts)
+        assertEquals(HomeCopy.TEN_WINS_DASH, HomeCopy.tenDollarWins(0.99).line)
+        assertTrue(HomeCopy.tenDollarWins(0.02).line.startsWith("\$10 wins"))
+        assertTrue(HomeCopy.tenDollarWins(0.98).line.startsWith("\$10 wins"))
         assertEquals(10.0, HomeCopy.TILE_STAKE_USD, 1e-9)
-        assertEquals(5.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
-        assertEquals(5.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.config.SignalConstants.LIVE_ALL_IN_CAP_USD, 1e-9)
+        assertEquals(10.0, com.dirk.kalshiodds.signal.trade.LiveOrderSizer.LIVE_ALL_IN_CAP_USD, 1e-9)
 
         val market = HomeFixtures.actionableBtc()
         val quotes = com.dirk.kalshiodds.domain.MarketQuoteView.of(market)
@@ -239,7 +263,7 @@ class HomeCopyTest {
     @Test
     fun scorecardSummaryLineUsesRecordWinRateAndPaperPnl() {
         assertEquals(
-            "12-6 · 67% · paper +$12.40",
+            "12-6 · 67% · lifetime paper +$12.40",
             HomeCopy.scorecardSummaryLine(HomeFixtures.SAMPLE_SCORECARD)
         )
         assertEquals(
@@ -248,13 +272,13 @@ class HomeCopyTest {
         )
         assertEquals("No settled picks yet", HomeCopy.NO_SETTLED_PICKS)
         assertEquals(
-            "0-3 · 0% · paper −$3.10",
+            "0-3 · 0% · lifetime paper −$3.10",
             HomeCopy.scorecardSummaryLine(
                 HomeScorecardSummary(wins = 0, losses = 3, hitRate = 0.0, paperPnlUsd = -3.10, settledCount = 3)
             )
         )
         assertEquals(
-            "2-0 · 100% · paper $0.00",
+            "2-0 · 100% · lifetime paper $0.00",
             HomeCopy.scorecardSummaryLine(
                 HomeScorecardSummary(wins = 2, losses = 0, hitRate = 1.0, paperPnlUsd = 0.0, settledCount = 2)
             )

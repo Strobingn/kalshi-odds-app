@@ -21,6 +21,8 @@ class SideColorTest {
             assertEquals(p.textSecondary, SideColor.of(BetCall.Headline.NO_BET, p))
             assertEquals(p.onUp, SideColor.on(BetCall.Headline.BET_UP, p))
             assertEquals(p.onDown, SideColor.on(BetCall.Headline.BET_DOWN, p))
+            assertEquals(p.downButton, SideColor.fill(BetCall.Headline.BET_DOWN, p))
+            assertEquals(p.upButton, SideColor.fill(BetCall.Headline.BET_UP, p))
             assertEquals(p.upContainer, SideColor.container(BetCall.Headline.BET_UP, p))
             assertEquals(p.downContainer, SideColor.container(BetCall.Headline.BET_DOWN, p))
         }

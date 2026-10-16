@@ -1,92 +1,69 @@
 name: Train edge model
 
 on:
-  # Schedules only fire from the default branch; workflow_dispatch works on any
-  # branch when you run the workflow from that branch in the Actions UI.
   schedule:
+    # Daily 08:17 UTC — retrain on fresh settled Kalshi BTC/ETH/SOL 15m data.
+    # GitHub Actions schedules fire only from the repository default branch.
+    # This file is on kashi, so the cron does not run while the default
+    # branch is main. workflow_dispatch on this branch still works.
+    # Until then, run `python3 ml/publish_daily.py --github` locally.
     - cron: "17 8 * * *"
   workflow_dispatch:
     inputs:
       days:
-        description: Lookback days for settled Kalshi 15m markets
+        description: Lookback days for settled Kalshi 15m markets (0 = full history)
         required: false
-        default: "30"
+        default: "3650"
 
+# A failed step skips later steps (GitHub Actions default). Publish only runs
+# after the trainer exits 0, which requires the publish gates to pass.
+# https://docs.github.com/en/actions/using-jobs/using-jobs-in-a-workflow
 permissions:
   contents: write
 
 jobs:
   train:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Sanitize branch name
-        id: meta
-        run: |
-          branch=$(echo "${GITHUB_REF_NAME}" | tr '/' '-')
-          echo "branch=$branch" >> "$GITHUB_OUTPUT"
-      - name: Trainer tests (no look-ahead)
-        run: |
-          if [ -f ml/test_train_edge.py ]; then python3 ml/test_train_edge.py; fi
-          if [ -f ml/test_publish_model.py ]; then python3 ml/test_publish_model.py; fi
+      - name: Trainer tests (no look-ahead + publish safety)
+        run: python3 ml/test_train_edge.py && python3 ml/test_publish_model.py
       - name: Train
+        id: train
+        run: python3 ml/train_edge.py --days ${{ github.event.inputs.days || '3650' }} --series KXBTC15M,KXETH15M,KXSOL15M --out ml/edge_model.json --manifest ml/edge_model_manifest.json
+      - name: Refuse publish unless gates pass
         run: |
-          # Prefer BTC/ETH/SOL when the trainer supports --series; else plain train.
-          if python3 ml/train_edge.py --help 2>&1 | grep -q -- '--series'; then
-            python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} \
-              --series KXBTC15M,KXETH15M,KXSOL15M \
-              --out ml/edge_model.json --manifest ml/edge_model_manifest.json
-          else
-            python3 ml/train_edge.py --days ${{ github.event.inputs.days || '30' }} \
-              --out ml/edge_model.json --manifest ml/edge_model_manifest.json
-          fi
+          python3 - <<'PY'
+          import json, sys
+          from pathlib import Path
+          sys.path.insert(0, "ml")
+          import publish_gates as gates
+          p = Path("ml/edge_model_manifest.json")
+          if not p.is_file():
+              print("no manifest — refusing publish")
+              sys.exit(1)
+          m = json.loads(p.read_text())
+          d = gates.publish_decision(m)
+          print(json.dumps(d, indent=2))
+          if not d["publishable"]:
+              print("gates failed — not publishing")
+              sys.exit(1)
+          PY
       - name: Upload model
         uses: actions/upload-artifact@v4
         with:
-          name: edge-model-json-${{ steps.meta.outputs.branch }}
+          name: edge-model-json
           path: |
             ml/edge_model.json
             ml/edge_model_manifest.json
             ml/fixtures/parity_sample.json
-          if-no-files-found: warn
-      - name: Publish rolling release for this branch
+          if-no-files-found: error
+      - name: Publish model-YYYYMMDD only if beat_market
+        if: success()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          tag="edge-model-${{ steps.meta.outputs.branch }}"
-          # Prefer dedicated publisher when present (beat-market gate).
-          if [ -f ml/publish_model.py ]; then
-            python3 ml/publish_model.py --github \
-              --model ml/edge_model.json \
-              --manifest ml/edge_model_manifest.json || {
-                echo "publish_model refused (likely failed beat-market gate) — skipping release"
-                exit 0
-              }
-            exit 0
-          fi
-          gh release delete "$tag" --yes --cleanup-tag || true
-          NOTES=$(python3 - <<'PY'
-          import json, pathlib
-          p = pathlib.Path("ml/edge_model_manifest.json")
-          m = json.loads(p.read_text()) if p.is_file() else {}
-          print(
-              "Edge model\n\n"
-              f"- version: {m.get('version')}\n"
-              f"- trained_at: {m.get('trained_at')}\n"
-              f"- n_samples: {m.get('n_samples') or m.get('n_rows')}\n"
-              f"- model_brier: {m.get('model_brier')} vs market {m.get('market_brier')}\n"
-              f"- model_logloss: {m.get('model_logloss')} vs market {m.get('market_logloss')}\n"
-              f"- beats_market: {m.get('beats_market') or m.get('beat_market')}"
-          )
-          PY
-          )
-          gh release create "$tag" \
-            ml/edge_model.json \
-            ml/edge_model_manifest.json \
-            --title "Edge model (${{ github.ref_name }})" \
-            --notes "$NOTES"
+        run: python3 ml/publish_model.py --github --model ml/edge_model.json --manifest ml/edge_model_manifest.json

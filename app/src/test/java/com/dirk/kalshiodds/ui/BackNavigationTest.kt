@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.dirk.kalshiodds.signal.config.SignalSettings
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
@@ -101,6 +102,42 @@ class BackNavigationTest {
     @Test
     fun pressBackOnSellDialogSendsNoOrder() {
         assertTicketSectionBackCancels(sell = true)
+    }
+
+    @Test
+    fun fiveTabsSwitchWithoutABackStack() {
+        val nav = AppNavigator()
+        rule.setContent {
+            DipApp(
+                navigator = nav,
+                sheetOpen = false,
+                onCancelSheet = {},
+                home = { Text("HOME_SCREEN") },
+                settings = { Text("SETTINGS_SCREEN") },
+                scorecard = { Text("SCORECARD_SCREEN") },
+                data = { Text("DATA_SCREEN") },
+                history = { Text("HISTORY_SCREEN") },
+                signalHistory = { Text("SIGNAL_HISTORY_SCREEN") },
+                chart = { Text("CHART_SCREEN") },
+                live = { Text("LIVE_SCREEN") },
+                more = { Text("MORE_SCREEN") }
+            )
+        }
+        rule.onNodeWithText("Home").assertExists()
+        rule.onNodeWithText("Scorecard").assertExists()
+        rule.onNodeWithText("Live").assertExists()
+        rule.onNodeWithText("Data").assertExists()
+        rule.onNodeWithText("More").assertExists()
+        rule.onNodeWithText("Live").performClick()
+        rule.onNodeWithText("LIVE_SCREEN").assertExists()
+        assertEquals(AppRoutes.LIVE, nav.current)
+        assertTrue(nav.isHome().not())
+        assertFalse(nav.canPop)
+        rule.onNodeWithText("More").performClick()
+        rule.onNodeWithText("MORE_SCREEN").assertExists()
+        rule.activity.onBackPressedDispatcher.onBackPressed()
+        rule.waitForIdle()
+        assertTrue(rule.activity.isFinishing)
     }
 
     @Test

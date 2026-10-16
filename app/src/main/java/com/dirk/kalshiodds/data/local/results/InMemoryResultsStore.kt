@@ -13,23 +13,23 @@ class InMemoryResultsStore(
     private val maxTickets: Int = 200,
     private val maxOdds: Int = 1_200,
     private val maxChartTicks: Int = 2_880
-) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
+) : ResultsDatabase {
     private val nextId = AtomicLong(1L)
     private val snapshots = ArrayDeque<ScoredSnapshotRow>()
     private val alerts = ArrayDeque<AlertRow>()
     private val scorecards = ArrayDeque<ScorecardRow>()
     private val tickets = ArrayDeque<TicketAttemptRow>()
     private val odds = ArrayDeque<OddsMidRow>()
-    private val forward = LinkedHashMap<String, ForwardTestRow>()
-    private val ticketForwardRows = LinkedHashMap<String, TicketForwardRow>()
     private val settled = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.SettledWindowRow>()
     private val path = ArrayDeque<com.dirk.kalshiodds.data.local.archive.PricePathRow>()
     private val spot = ArrayDeque<com.dirk.kalshiodds.data.local.archive.SpotCandleRow>()
     private val fills = LinkedHashMap<String, com.dirk.kalshiodds.data.importing.ImportedFill>()
+    private val paperFills = LinkedHashMap<String, com.dirk.kalshiodds.signal.paper.PaperFill>()
     private val cursors = LinkedHashMap<String, com.dirk.kalshiodds.data.local.archive.BackfillCursorRow>()
     private val settingsChanges = ArrayDeque<com.dirk.kalshiodds.data.local.history.SettingsChange>()
     private val sessions = LinkedHashMap<String, com.dirk.kalshiodds.data.local.history.HistorySession>()
     private val chartTickRows = ArrayDeque<com.dirk.kalshiodds.data.local.archive.ChartTickRow>()
+    private val pendingOrders = LinkedHashMap<String, PendingClientOrder>()
 
     @Synchronized
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -68,30 +68,6 @@ class InMemoryResultsStore(
     @Synchronized
     override fun recentOddsMids(limit: Int): List<OddsMidRow> =
         odds.toList().takeLast(limit).asReversed()
-
-    @Synchronized
-    override fun insertForwardTests(rows: List<ForwardTestRow>) {
-        for (row in rows) forward.putIfAbsent(row.ticker, row)
-        while (forward.size > 5_000) forward.remove(forward.keys.first())
-    }
-
-    @Synchronized
-    override fun forwardTests(limit: Int): List<ForwardTestRow> = forward.values.toList()
-        .takeLast(limit.coerceIn(1, 5_000)).asReversed().map { row ->
-            row.copy(outcome = settled[row.ticker]?.result)
-        }
-
-    @Synchronized
-    override fun insertTicketForward(rows: List<TicketForwardRow>) {
-        for (row in rows) ticketForwardRows.putIfAbsent(row.ticker, row)
-        while (ticketForwardRows.size > 5_000) ticketForwardRows.remove(ticketForwardRows.keys.first())
-    }
-
-    @Synchronized
-    override fun ticketForward(limit: Int): List<TicketForwardRow> = ticketForwardRows.values.toList()
-        .takeLast(limit.coerceIn(1, 5_000)).asReversed().map { row ->
-            row.copy(outcome = settled[row.ticker]?.result)
-        }
 
     @Synchronized
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
@@ -138,6 +114,13 @@ class InMemoryResultsStore(
     override fun insertFills(rows: List<com.dirk.kalshiodds.data.importing.ImportedFill>) {
         for (r in rows) if (r.id !in fills) fills[r.id] = r
     }
+
+    @Synchronized
+    override fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>) {
+        for (r in rows) paperFills[r.id] = r
+    }
+
+    fun paperFill(id: String): com.dirk.kalshiodds.signal.paper.PaperFill? = paperFills[id]
 
     @Synchronized
     override fun insertBidSnapshots(rows: List<OddsMidRow>) = insertOddsMids(rows)
@@ -240,7 +223,7 @@ class InMemoryResultsStore(
 
     @Synchronized
     override fun existingSnapshotKeys(): Set<String> =
-        snapshots.map { "${it.ticker}|${it.createdAtMs}" }.toSet()
+        snapshots.map { "${it.ticker}|${it.createdAtMs}|${it.side}" }.toSet()
 
     @Synchronized
     override fun existingAlertIds(): Set<String> = alerts.map { it.alertId }.toSet()
@@ -299,4 +282,17 @@ class InMemoryResultsStore(
     @Synchronized
     override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> =
         sessions.values.sortedByDescending { it.startedAtMs }.take(limit.coerceAtLeast(0))
+
+    @Synchronized
+    override fun save(order: PendingClientOrder) {
+        pendingOrders[order.key] = order
+    }
+
+    @Synchronized
+    override fun find(key: String): PendingClientOrder? = pendingOrders[key]
+
+    @Synchronized
+    override fun clear(key: String) {
+        pendingOrders.remove(key)
+    }
 }

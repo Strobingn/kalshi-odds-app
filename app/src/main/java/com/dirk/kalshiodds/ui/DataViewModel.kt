@@ -25,6 +25,12 @@ import kotlinx.coroutines.withContext
 import java.io.InputStreamReader
 
 data class DataUiState(
+    /** 0.3.43: Price debug log (WS/REST price inputs and what was applied / dropped). */
+    val priceLogLines: List<String> = emptyList(),
+    val priceLogSummary: String? = null,
+    /** 0.3.44 Kalshi REST request counters (per endpoint, 429s, loop owners). */
+    val requestLines: List<String> = emptyList(),
+    val priceLogNote: String? = null,
     val stats: DataStats = DataStats(),
     val settings: DataHubSettings = DataHubSettings(),
     val importSummary: ImportSummary? = null,
@@ -39,7 +45,13 @@ data class DataUiState(
     val credPassphrase: String = "",
     val githubTokenDraft: String = "",
     val syncLine: String? = null,
-    val modelBusy: Boolean = false
+    val modelBusy: Boolean = false,
+    val ledgerNote: String? = null,
+    val championReport: String? = null,
+    val cfFeedLine: String? = null,
+    /** 0.3.65 Supabase size vs free cap + unsynced scalp count. */
+    val storageLine: String? = null,
+    val storageWarn: Boolean = false
 )
 
 class DataViewModel(application: Application) : AndroidViewModel(application) {
@@ -62,6 +74,8 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                         supabaseUrlDraft = s.supabaseUrl,
                         supabaseKeyDraft = s.supabaseAnonKey,
                         modelNote = modelLabel(),
+                        championReport = championLine(),
+                        cfFeedLine = cfLine(),
                         syncLine = syncLine(s)
                     )
                 }
@@ -89,7 +103,22 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun refreshStorage() {
+        viewModelScope.launch {
+            val (line, warn) = withContext(Dispatchers.IO) {
+                runCatching {
+                    val hub = _state.value.settings
+                    com.dirk.kalshiodds.data.supabase.SupabaseSync().storageLine(
+                        com.dirk.kalshiodds.data.supabase.SupabaseSync().dbSizeBytes(hub),
+                        com.dirk.kalshiodds.worker.SyncWorker.unsyncedScalps(getApplication()))
+                }.getOrElse { "Supabase size: unavailable" to false }
+            }
+            _state.update { it.copy(storageLine = line, storageWarn = warn) }
+        }
+    }
+
     fun refreshStats() {
+        refreshStorage()
         viewModelScope.launch {
             val stats = withContext(Dispatchers.IO) { runCatching { archive.stats() }.getOrElse { DataStats() } }
             _state.update { it.copy(stats = stats, modelNote = modelLabel()) }
@@ -205,14 +234,13 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     when (val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)) {
                         is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready -> {
-                            val d = out.fetch.decision
-                            if (d.activate) {
-                                modelStore.activate(out.fetch.model, out.fetch.manifest)
-                                container.scoring.edgeModel = out.fetch.model
-                            }
+                            val reason = com.dirk.kalshiodds.prediction.PublishedModelInstaller.apply(
+                                modelStore,
+                                out
+                            ) { model -> container.scoring.edgeModel = model }
                             val m = out.fetch.manifest
                             buildString {
-                                append(d.reason)
+                                append(reason)
                                 append(" · n=")
                                 append(m.nSamples)
                                 append(" · Brier ")
@@ -277,7 +305,10 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     val bundle = com.dirk.kalshiodds.signal.config.CredentialBackup.decryptAll(
                         bytes, pass.toCharArray()
                     )
-                    container.preferences.saveCredentials(bundle.keyId, bundle.pem)
+                    val saved = container.preferences.saveCredentials(bundle.keyId, bundle.pem)
+                    if (saved is com.dirk.kalshiodds.signal.config.CredentialSave.Refused) {
+                        error(saved.reason)
+                    }
                     if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
                         container.preferences.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
                     }
@@ -301,8 +332,12 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
     fun restoreSupabase() {
         viewModelScope.launch {
             val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val seen = SeenKeys()
+                try {
+                    val seen = SeenKeys().apply {
+                        archive.existingSnapshotKeys().forEach { snapshots.add(it) }
+                        archive.existingAlertIds().forEach { alerts.add(it) }
+                        archive.existingTicketKeys().forEach { tickets.add(it) }
+                    }
                     val restore = SupabaseMirror().restore(_state.value.settings, seen)
                     val store = container.resultsStore
                     if (restore.batch.snapshots.isNotEmpty()) store.insertSnapshots(restore.batch.snapshots)
@@ -312,12 +347,88 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
                     restore.batch.settingsChanges.forEach { archive.insertSettingsChange(it) }
                     restore.batch.sessions.forEach { archive.insertSession(it) }
                     archive.upsertSettled(restore.settled)
+                    restore.paper.forEach { container.paper.book.upsertFromSync(it) }
+                    runCatching { container.scalp.importRestored(restore.scalps) }
+                    runCatching { container.shadow.book.importRestored(restore.shadow) }
+                    restore.settingsSnapshot?.let { container.preferences.restoreSnapshot(it) }
                     restore.message
-                }.getOrElse { it.message ?: "Supabase restore failed" }
+                } catch (t: Throwable) {
+                    t.message ?: "Supabase restore failed"
+                }
             }
             _state.update { it.copy(message = result) }
             refreshStats()
         }
+    }
+
+    private fun requestLines(): List<String> {
+        val c = KalshiOddsApp.from(getApplication()).container
+        val lim = c.kalshiTraffic.limiter
+        return com.dirk.kalshiodds.data.api.KalshiRest.gate.stats().lines() +
+            "Backoff holds: ${lim.realFailures} real failures · ${lim.localThrottles} local throttles (no escalation) · hold ${lim.remainingHoldMs() / 1000}s" +
+            com.dirk.kalshiodds.data.api.KalshiPollLoops.lines()
+    }
+
+    fun refreshPriceLog() {
+        val log = com.dirk.kalshiodds.signal.debug.PriceDebugLog
+        val counts = log.countByVerdict().entries.sortedByDescending { it.value }
+            .joinToString(" · ") { "${it.key} ${it.value}" }
+        _state.update {
+            it.copy(
+                priceLogLines = log.recent(40).asReversed().map(log::line),
+                priceLogSummary = "${log.size()} entries (last ${log.CAPACITY} kept)" + if (counts.isNotEmpty()) " — $counts" else "",
+                requestLines = requestLines()
+            )
+        }
+    }
+
+    fun exportPriceLog() {
+        viewModelScope.launch {
+            val csv = com.dirk.kalshiodds.signal.debug.PriceDebugLog.csv()
+            val result = withContext(Dispatchers.IO) {
+                com.dirk.kalshiodds.data.local.results.ResultsFileExport.write(getApplication(), csv, namePrefix = "price-debug-log")
+            }
+            _state.update { it.copy(priceLogNote = result.message) }
+        }
+    }
+
+    fun clearPriceLog() {
+        com.dirk.kalshiodds.signal.debug.PriceDebugLog.clear()
+        refreshPriceLog()
+    }
+
+    fun exportLedger() {
+        viewModelScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                val store = container.predictionLedger
+                if (store == null) {
+                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, "Ledger database is unavailable")
+                } else {
+                    com.dirk.kalshiodds.data.local.results.ResultsFileExport.write(
+                        getApplication(),
+                        store.ledgerCsv(),
+                        namePrefix = "prediction-ledger"
+                    )
+                }
+            }
+            _state.update { it.copy(ledgerNote = result.message) }
+        }
+    }
+
+    private fun championLine(): String? {
+        val man = modelStore.currentManifest() ?: return "No champion report installed."
+        return "Champion ${man.tag.ifBlank { "untagged" }} · rows ${man.nRows} · Brier ${"%.4f".format(man.modelBrier)} vs market ${"%.4f".format(man.marketBrier)} · beat=${man.beatsMarket}"
+    }
+
+    private fun cfLine(): String {
+        val now = System.currentTimeMillis()
+        val ext = container.external.latest()
+        val feeds = com.dirk.kalshiodds.signal.ws.CfBenchmarks.INDEX_IDS.joinToString("\n") { id ->
+            val coin = com.dirk.kalshiodds.signal.ws.CfBenchmarks.coinOf(id)
+            "$coin: " + container.cfFeed.status(id, now, coinbaseAvailable = ext.forSeries(coin)?.lastPrice != null).detail
+        }
+        val ledger = runCatching { container.predictionLedger?.ledgerCount() }.getOrNull()
+        return feeds + (ledger?.let { "\nPrediction ledger: $it rows · settlement source recorded per row" } ?: "")
     }
 
     private fun modelLabel(): String? {
@@ -329,9 +440,5 @@ class DataViewModel(application: Application) : AndroidViewModel(application) {
         return "Model ${m.kind} v${m.version} · blend ${"%.2f".format(m.blendWeight)}$extra"
     }
 
-    private fun syncLine(s: DataHubSettings): String? {
-        if (!s.supabaseConfigured) return "Supabase not configured — History stays on this phone."
-        if (!s.syncEnabled) return "Cloud sync off"
-        return s.lastSyncMessage.ifBlank { "Cloud sync ready — never uploads the Kalshi key." }
-    }
+    private fun syncLine(s: DataHubSettings): String? = CloudSyncStatus.line(s)
 }

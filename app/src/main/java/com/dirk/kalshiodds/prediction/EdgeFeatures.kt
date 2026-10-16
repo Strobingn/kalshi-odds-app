@@ -4,13 +4,19 @@ import com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue
 import java.util.Calendar
 import java.util.TimeZone
 import kotlin.math.ln
+import kotlin.math.sqrt
 
 /**
  * Compact tabular features for the imported offline edge model.
  * Order **must** match `ml/train_edge.py` / the JSON `feature_names`.
+ *
+ * Momentum and realized_vol come from 8 one-minute Coinbase closes
+ * (`candleWindow`), not from a few seconds of live ticks.
+ * time_of_day is the UTC hour / 24.
  */
 object EdgeFeatures {
     const val SIZE = 10
+    const val CANDLE_BARS = 8
     val NAMES = listOf(
         "dist_to_strike_vol",
         "tte_frac",
@@ -36,7 +42,8 @@ object EdgeFeatures {
         val realizedVol01: Double? = null,
         val crossAssetRet: Double? = null,
         val nowMs: Long = System.currentTimeMillis(),
-        val digitalFair: Double? = null
+        val digitalFair: Double? = null,
+        val coinbaseCloses: List<Double> = emptyList()
     )
 
     fun build(raw: Raw): FloatArray {
@@ -53,6 +60,9 @@ object EdgeFeatures {
             } else {
                 null
             }
+        val window = candleWindow(raw.coinbaseCloses)
+        val momentum = window?.momentum ?: raw.momentum ?: 0.0
+        val rvol = window?.realizedVol ?: raw.realizedVol01 ?: 0.0
         val tod = timeOfDayFrac(raw.nowMs)
         return floatArrayOf(
             (dist ?: 0.0).toFloat().coerceIn(-8f, 8f),
@@ -60,19 +70,46 @@ object EdgeFeatures {
             raw.marketMid.toFloat().coerceIn(0f, 1f),
             (raw.imbalance ?: 0.0).toFloat().coerceIn(-1f, 1f),
             (raw.spread ?: 0.0).toFloat().coerceIn(0f, 1f),
-            (raw.momentum ?: 0.0).toFloat().coerceIn(-1f, 1f),
-            (raw.realizedVol01 ?: 0.0).toFloat().coerceIn(0f, 1f),
+            momentum.toFloat().coerceIn(-1f, 1f),
+            rvol.toFloat().coerceIn(0f, 1f),
             (raw.crossAssetRet ?: 0.0).toFloat().coerceIn(-0.2f, 0.2f),
             tod,
             (digital ?: raw.marketMid).toFloat().coerceIn(0f, 1f)
         )
     }
 
-    fun timeOfDayFrac(nowMs: Long, tz: TimeZone = TimeZone.getTimeZone("America/New_York")): Float {
+    /**
+     * Same formula as `train_edge.coinbase_window_features`:
+     * momentum = (last − first) / first; realized_vol = pop-std / mean.
+     */
+    data class CandleWindow(val momentum: Double, val realizedVol: Double)
+
+    fun candleWindow(closes: List<Double>): CandleWindow? {
+        val xs = closes.filter { it.isFinite() && it > 0.0 }.takeLast(CANDLE_BARS)
+        if (xs.size < 2) return null
+        val mom = (xs.last() - xs.first()) / xs.first()
+        val rvol = if (xs.size >= 3) {
+            val mu = xs.average()
+            if (mu > 0.0) {
+                val var_ = xs.map { val d = it - mu; d * d }.average()
+                sqrt(var_.coerceAtLeast(0.0)) / mu
+            } else {
+                0.0
+            }
+        } else {
+            0.0
+        }
+        return CandleWindow(
+            momentum = mom.coerceIn(-1.0, 1.0),
+            realizedVol = rvol.coerceIn(0.0, 1.0)
+        )
+    }
+
+    fun timeOfDayFrac(nowMs: Long, tz: TimeZone = TimeZone.getTimeZone("UTC")): Float {
         val cal = Calendar.getInstance(tz)
         cal.timeInMillis = nowMs
-        val minutes = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE)
-        return (minutes / (24.0 * 60.0)).toFloat().coerceIn(0f, 1f)
+        val hour = cal.get(Calendar.HOUR_OF_DAY)
+        return (hour / 24.0).toFloat().coerceIn(0f, 1f)
     }
 
     fun seriesId(ticker: String): Int {

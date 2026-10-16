@@ -1,8 +1,8 @@
 package com.dirk.kalshiodds.signal.engine
 
+import com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue
 import kotlin.math.abs
 import kotlin.math.max
-import kotlin.math.tanh
 
 /**
  * Price-vs-target sanity for Kalshi crypto 15m “price up?” markets.
@@ -11,9 +11,9 @@ import kotlin.math.tanh
  * already expensive because spot is far above the strike, that fade recommends
  * NO / DOWN — the opposite of the contract semantics (YES = UP, NO = DOWN).
  *
- * This lock forces the displayed UP/DOWN percentages and the recommended
- * bet side to agree with `sign(spot − strike)`. An edge threshold cannot
- * override that direction.
+ * The lock forces the recommended side to agree with `sign(spot − strike)`.
+ * The displayed probability is the time- and volatility-aware digital
+ * P(finish above), which can raise **or** lower the incoming fair.
  */
 object DirectionSanity {
 
@@ -39,6 +39,8 @@ object DirectionSanity {
     /**
      * @param yesMeansUp false only when the market’s YES is explicitly a
      *        down/below contract. Default crypto 15m is YES=UP.
+     * @param digitalFairPp time/vol-aware P(YES)×100 computed **before**
+     *        the lock. When present it is used symmetrically.
      */
     fun apply(
         spotUsd: Double?,
@@ -46,7 +48,10 @@ object DirectionSanity {
         spotReturn: Double?,
         fairPp: Double,
         predictedSide: String,
-        yesMeansUp: Boolean = true
+        yesMeansUp: Boolean = true,
+        digitalFairPp: Double? = null,
+        tteSeconds: Double? = null,
+        sigmaAnnual: Double? = null
     ): Result {
         val spot = spotUsd?.takeIf { it.isFinite() && it > 0.0 }
         val strike = strikeUsd?.takeIf { it.isFinite() && it > 0.0 }
@@ -73,12 +78,22 @@ object DirectionSanity {
         }
 
         val side = if (wantYes) SIDE_YES else SIDE_NO
-        val dirPp = directionalFairPp(signed, strike)
-        var fair = fairPp.coerceIn(2.0, 98.0)
-        // Hero UP/DOWN is `fair` / `100−fair`. Keep it on the same side as the bet.
-        fair = if (wantYes) max(fair, max(dirPp, 52.0)) else minOf(fair, minOf(dirPp, 48.0))
-        if (wantYes && fair < 50.5) fair = 52.0
-        if (!wantYes && fair > 49.5) fair = 48.0
+        val dirPp = resolveDirectionalPp(
+            signedUsd = signed,
+            strike = strike,
+            spot = spot,
+            digitalFairPp = digitalFairPp,
+            tteSeconds = tteSeconds,
+            sigmaAnnual = sigmaAnnual
+        )
+        val fair = if (dirPp != null) {
+            // Symmetric: digital fair can lower an over-confident favorite
+            // as well as raise a faded one.
+            dirPp
+        } else {
+            // No vol/tte — lock the side across 50 without inventing 87%.
+            if (wantYes) max(fairPp, 52.0) else minOf(fairPp, 48.0)
+        }.coerceIn(2.0, 98.0)
 
         val vs = if (rawDelta >= 0) "above" else "below"
         val mom = when {
@@ -96,7 +111,7 @@ object DirectionSanity {
         )
         return Result(
             side = side,
-            fairPp = fair.coerceIn(2.0, 98.0),
+            fairPp = fair,
             applied = true,
             spotVsTargetUsd = rawDelta,
             note = note
@@ -133,11 +148,34 @@ object DirectionSanity {
         max(MIN_ABS_GAP_USD, abs(strike) * MIN_RELATIVE_GAP)
 
     /**
-     * Smooth 15m P(YES) from signed USD distance. A ~0.2% gap maps near 90%.
+     * Time- and volatility-aware P(YES)×100. Replaces the old tanh that
+     * mapped a 0.2% gap to 87% regardless of minutes left.
      */
-    fun directionalFairPp(signedUsd: Double, strike: Double): Double {
-        val scale = max(abs(strike) * 0.002, 1.0)
-        val p = 0.50 + 0.48 * tanh(signedUsd / scale)
+    fun directionalFairPp(
+        signedUsd: Double,
+        strike: Double,
+        tteSeconds: Double,
+        sigmaAnnual: Double
+    ): Double {
+        val spot = strike + signedUsd
+        val p = DigitalOptionFairValue.pFinishAbove(spot, strike, tteSeconds, sigmaAnnual)
+            ?: return if (signedUsd > 0) 52.0 else 48.0
         return (p * 100.0).coerceIn(2.0, 98.0)
+    }
+
+    private fun resolveDirectionalPp(
+        signedUsd: Double,
+        strike: Double,
+        spot: Double,
+        digitalFairPp: Double?,
+        tteSeconds: Double?,
+        sigmaAnnual: Double?
+    ): Double? {
+        digitalFairPp?.takeIf { it.isFinite() }?.let { return it.coerceIn(2.0, 98.0) }
+        val tte = tteSeconds?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val sig = sigmaAnnual?.takeIf { it.isFinite() && it > 1e-8 } ?: return null
+        return DigitalOptionFairValue.pFinishAbove(spot, strike, tte, sig)
+            ?.times(100.0)
+            ?.coerceIn(2.0, 98.0)
     }
 }

@@ -26,4 +26,7 @@ object CredentialWriteGuard {
     /** Banner, not a silent empty field, when Keystore died and nothing loaded. */
     fun needsReenterBanner(hasCredentials: Boolean, keystoreInvalidated: Boolean): Boolean =
         !hasCredentials && keystoreInvalidated
+
+    fun keystoreBanner(hasCredentials: Boolean, keystoreInvalidated: Boolean): String? =
+        if (needsReenterBanner(hasCredentials, keystoreInvalidated)) LiveCredentialVault.UNREADABLE else null
 }

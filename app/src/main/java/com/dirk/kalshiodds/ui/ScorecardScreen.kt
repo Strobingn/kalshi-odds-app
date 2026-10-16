@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -27,6 +28,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -40,21 +44,25 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.feedback.ScorecardLedger
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
+import com.dirk.kalshiodds.signal.feedback.ScorecardTargets
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import java.util.Locale
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ScorecardScreen(viewModel: ScorecardViewModel, onBack: () -> Unit) {
+fun ScorecardScreen(
+    viewModel: ScorecardViewModel,
+    onBack: () -> Unit,
+    showBack: Boolean = true
+) {
     val ui by viewModel.snapshot.collectAsStateWithLifecycle()
     ScorecardScreen(
         ui = ui,
         onBack = onBack,
         onExport = viewModel::exportResults,
-        onExportForward = viewModel::exportForwardTest,
-        onExportTicketForward = viewModel::exportTicketForward,
-        onGetLatestModel = viewModel::getLatestModel
+        onGetLatestModel = viewModel::getLatestModel,
+        showBack = showBack
     )
 }
 
@@ -64,9 +72,8 @@ fun ScorecardScreen(
     ui: ScorecardUi,
     onBack: () -> Unit,
     onExport: () -> Unit = {},
-    onExportForward: () -> Unit = {},
-    onExportTicketForward: () -> Unit = {},
-    onGetLatestModel: () -> Unit = {}
+    onGetLatestModel: () -> Unit = {},
+    showBack: Boolean = true
 ) {
     val colors = DipTheme.colors
     val view = ui.view
@@ -75,18 +82,21 @@ fun ScorecardScreen(
 
     Scaffold(
         containerColor = colors.bg,
+        contentWindowInsets = dipContentInsets(),
         topBar = {
             TopAppBar(
                 title = { Text(ScorecardCopy.TITLE) },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary
                 )
             )
         }
@@ -121,8 +131,6 @@ fun ScorecardScreen(
             ui.modelNote?.let {
                 item { Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium) }
             }
-            item { ForwardTestCard(ui.forwardTest, onExportForward) }
-            item { TicketForwardCard(ui.ticketForward, onExportTicketForward) }
             if (ui.sitOut) {
                 item {
                     Text(
@@ -137,12 +145,24 @@ fun ScorecardScreen(
                     )
                 }
             }
+            item { LastMinuteScorecardCard(view.lastMinute) }
+            item { D3ScorecardCard(view.d3) }
+            item { AutopilotScorecardCard(view.autopilot) }
+            item {
+                Column(Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Text("Scored paper P&L", fontWeight = FontWeight.Bold, color = colors.textPrimary)
+                    ui.honestLines.forEach { line ->
+                        Text(line, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+                    }
+                    Text(ui.ladderLine, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+                }
+            }
             snap?.let { metrics ->
                 item { CalibrationBanner(metrics) }
                 ui.adapter?.let { item { AdapterBanner(it) } }
                 ui.guardrails?.let { item { GuardBanner(it) } }
                 ui.allowlist?.let { item { MuteBanner(it) } }
-                item { HonestCard(metrics) }
+                item { HonestCard(metrics.honest) }
                 item { WindowCard("Today", metrics.daily) }
                 item { WindowCard("Rolling 7 days", metrics.rolling) }
                 item { WindowCard("All time", metrics.allTime) }
@@ -158,16 +178,20 @@ fun ScorecardScreen(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
-                items(snap.perSeries, key = { "series-${it.series}" }) { SeriesRow(it) }
+                val seriesKeyed = LazyListKeys.keyed(snap.perSeries) { "series-${it.series}" }
+                items(seriesKeyed, key = { it.key }) { row -> SeriesRow(row.value) }
             }
             if (snap != null) {
                 item {
                     Text(
-                        "Open ${snap.openCount} · void ${snap.voidCount} · settled ${snap.sampleCount}",
+                        ScorecardCopy.logCountLine(snap.openCount, snap.voidCount, snap.sampleCount),
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
                 }
+            }
+            if (view.archive.fillCount > 0) {
+                item { PreResetArchiveCard(view.archive) }
             }
             if (view.showsEmptyState) {
                 item {
@@ -180,6 +204,40 @@ fun ScorecardScreen(
                 }
             } else {
                 item { RecordCard(ScorecardCopy.COMBINED_TITLE, ledger.combined) }
+                view.hypotheticalLine?.let { line ->
+                    item {
+                        Text(
+                            line,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.textSecondary
+                        )
+                    }
+                }
+                view.resetMarker?.let { marker ->
+                    item {
+                        Text(marker, style = MaterialTheme.typography.labelMedium, color = colors.accentOrange)
+                    }
+                }
+                view.paperBankrollUsd?.let { roll ->
+                    item {
+                        Text(
+                            ScorecardCopy.paperBankrollLine(roll) ?: "",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = colors.textPrimary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+                view.reconcileWarning?.let { warn ->
+                    item {
+                        Text(
+                            warn,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = colors.accentOrange,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 item { RecordCard(ScorecardCopy.AI_TITLE, ledger.ai) }
                 item { RecordCard(ScorecardCopy.MANUAL_TITLE, ledger.manual) }
                 if (ledger.noBetWouldHave.settledCount > 0) {
@@ -192,6 +250,7 @@ fun ScorecardScreen(
                 item { SectionCard(ScorecardCopy.PRICE_TITLE) { view.byPrice.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.TIME_TITLE) { view.timeOfDay.forEach { BucketRow(it) } } }
                 item { SectionCard(ScorecardCopy.CONF_TITLE) { view.byConfidence.forEach { BucketRow(it) } } }
+                item { SectionCard(ScorecardCopy.SOURCE_TITLE) { view.bySource.forEach { BucketRow(it) } } }
                 item {
                     Text(
                         ScorecardCopy.PICKS_TITLE,
@@ -199,8 +258,9 @@ fun ScorecardScreen(
                         color = colors.textPrimary
                     )
                 }
-                items(view.recent, key = { "${it.ticker}-${it.settledAtMs}-${it.line}" }) { pick ->
-                    SettledPickRow(pick)
+                val recentKeyed = LazyListKeys.keyed(view.recent) { "${it.ticker}:${it.settledAtMs}" }
+                items(recentKeyed, key = { it.key }) { row ->
+                    SettledPickRow(row.value)
                 }
             }
             item { Spacer(Modifier.height(8.dp)) }
@@ -209,58 +269,222 @@ fun ScorecardScreen(
 }
 
 @Composable
-private fun ForwardTestCard(summary: com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary, onExport: () -> Unit) {
+internal fun LastMinuteScorecardCard(section: ScorecardCopy.LastMinuteSection) {
     val colors = DipTheme.colors
-    val score = if (summary.settled == 0) "Waiting for settled live signals" else String.format(
-        Locale.US, "Brier %.3f vs market %.3f (lower wins)",
-        summary.modelBrier, summary.marketBrier
-    )
-    val proxy = summary.quotedProxyPnlUsd?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
-    Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(16.dp)) {
-        Text("Forward Test · current app forecast", style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary)
-        Spacer(Modifier.height(6.dp))
-        Text("${summary.captured} frozen signals · ${summary.settled} settled · ${summary.quoted} with visible $5 depth",
-            color = colors.textSecondary)
-        Text(score, color = colors.textPrimary)
-        Text("Quoted-price paper P&L: $proxy USD", color = colors.textPrimary)
-        Text("Live signals must be on. One first qualifying book signal per market. " +
-            "Visible size and fees are recorded; no order is placed and a quote is not a guaranteed fill. " +
-            "The research 128-tree model remains inactive.",
-            style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.LAST_MINUTE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.LAST_MINUTE_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.accentOrange
+        )
+        Text(
+            if (section.settledCount <= 0) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export forward test CSV") }
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.wonUsdLine(section.wonUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.lostUsdLine(section.lostUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.netPnlLine(section.pnlUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        if (section.picks.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.picks.forEach { pick ->
+                Text(
+                    com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.pickLine(pick),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pick.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        }
     }
 }
 
 @Composable
-private fun TicketForwardCard(
-    summary: com.dirk.kalshiodds.signal.feedback.TicketForwardTest.Summary,
-    onExport: () -> Unit
-) {
+internal fun D3ScorecardCard(section: ScorecardCopy.D3Section) {
     val colors = DipTheme.colors
-    val brier = if (summary.settled == 0) "Waiting for settled ticket suggestions" else String.format(
-        Locale.US, "Ticket model Brier %.3f vs book midpoint %.3f (lower wins)",
-        summary.modelBrier, summary.marketBrier
-    )
-    val proxy = summary.quotedProxyPnlUsd?.let { String.format(Locale.US, "%+.2f", it) } ?: "—"
-    val drawdown = summary.worstDrawdownUsd?.let { String.format(Locale.US, "%.2f", it) } ?: "—"
-    Column(Modifier.fillMaxWidth().background(colors.surface, RoundedCornerShape(16.dp)).padding(16.dp)) {
-        Text("Ticket suggestion forward test", style = MaterialTheme.typography.titleMedium,
-            color = colors.textPrimary)
-        Spacer(Modifier.height(6.dp))
-        Text("${summary.captured} frozen tickets · ${summary.settled} settled · ${summary.wins} wins",
-            color = colors.textSecondary)
-        Text(brier, color = colors.textPrimary)
-        Text("Quoted-price proxy P&L: $proxy USD · worst drawdown: $drawdown",
-            color = colors.textPrimary)
-        Text("First fresh book-backed automatic ticket per BTC market, using the ticket's actual model " +
-            "probability, side, size and fee. Keep the app and Live signals running. No order is placed; " +
-            "visible depth does not prove a fill. Results across app builds or settings may differ. " +
-            "Small samples are provisional; inspect the CSV before drawing conclusions.",
-            style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.D3_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.D3_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Text(
+            if (section.picks.isEmpty()) ScorecardCopy.EM_DASH else "${section.wins}-${section.losses}",
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
         Spacer(Modifier.height(8.dp))
-        Button(onClick = onExport, modifier = Modifier.fillMaxWidth()) { Text("Export ticket test CSV") }
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.wonUsdLine(section.wonUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.lostUsdLine(section.lostUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.netPnlLine(section.pnlUsd),
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        Text(
+            com.dirk.kalshiodds.signal.d3.D3Copy.fillRateLine(section.fillRate),
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        if (section.picks.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.picks.take(80).forEach { pick ->
+                Text(
+                    com.dirk.kalshiodds.signal.d3.D3Copy.pickLine(pick),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (pick.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AutopilotScorecardCard(section: ScorecardCopy.AutopilotSection) {
+    val colors = DipTheme.colors
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.AUTOPILOT_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.AUTOPILOT_SUBTITLE,
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        Text(
+            section.bankrollLabel,
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Text(
+            section.pnlLabel,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary
+        )
+        if (section.credibility.isNotBlank()) {
+            Text(section.credibility, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        }
+        if (section.favoriteLogLine.isNotBlank()) {
+            Text(section.favoriteLogLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        }
+        if (section.edgeFillLine.isNotBlank()) {
+            Text(section.edgeFillLine, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+        }
+        if (section.laterSliceLine.isNotBlank()) {
+            Text(section.laterSliceLine, style = MaterialTheme.typography.bodyMedium, color = colors.textSecondary)
+        }
+        section.regimeLines.forEach { line ->
+            Text(line, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        }
+        if (section.shadowLine.isNotBlank()) {
+            Text(section.shadowLine, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            section.record,
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.textSecondary
+        )
+        if (section.bets.isNotEmpty()) {
+            Spacer(Modifier.height(8.dp))
+            section.bets.forEach { bet ->
+                Text(
+                    bet.line,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (bet.side.equals("NO", true)) colors.down else colors.up,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PreResetArchiveCard(section: ScorecardCopy.ArchiveSection) {
+    val colors = DipTheme.colors
+    var open by rememberSaveable { mutableStateOf(false) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .clickable { open = !open }
+            .padding(16.dp)
+    ) {
+        Text(ScorecardCopy.ARCHIVE_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            section.line,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            color = colors.textPrimary
+        )
+        Text(
+            if (open) "Hide fills" else "Show fills",
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
+        if (open) {
+            Spacer(Modifier.height(8.dp))
+            Text(
+                "Won ${section.wins} · lost ${section.losses} · ${section.settledCount} settled · P&L ${ScorecardLedger.signedUsd(section.pnlUsd)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary
+            )
+        }
     }
 }
 
@@ -270,7 +494,7 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -304,6 +528,16 @@ private fun RecordCard(title: String, record: ScorecardLedger.Record, money: Boo
                 WinStat("Biggest win", m.biggestWinUsd?.let { ScorecardLedger.signedUsd(it) } ?: ScorecardCopy.EM_DASH)
                 LossStat("Biggest loss", m.biggestLossUsd?.let { ScorecardLedger.signedUsd(it) } ?: ScorecardCopy.EM_DASH)
             }
+            if (title == ScorecardCopy.AI_TITLE) {
+                ScorecardCopy.breakEvenWinRateLine(m)?.let { line ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = colors.textPrimary
+                    )
+                }
+            }
         }
     }
 }
@@ -314,7 +548,7 @@ private fun SectionCard(title: String, content: @Composable () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -333,18 +567,27 @@ private fun BucketRow(bucket: ScorecardCopy.Bucket) {
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Text(
-            bucket.label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
-                colors.up
-            } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
-                colors.down
-            } else {
-                colors.textPrimary
-            },
-            fontWeight = FontWeight.SemiBold
-        )
+        Column(Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(
+                bucket.label,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (bucket.label.startsWith("UP") || bucket.label.contains("UP picks")) {
+                    colors.up
+                } else if (bucket.label.startsWith("DOWN") || bucket.label.contains("DOWN picks")) {
+                    colors.down
+                } else {
+                    colors.textPrimary
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+            bucket.note?.let { note ->
+                Text(
+                    note,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
+        }
         Text(
             if (bucket.settledCount <= 0) {
                 ScorecardCopy.EM_DASH
@@ -433,11 +676,14 @@ private fun SettledPickRow(pick: ScorecardCopy.RecentPick) {
                         append(" · ")
                         append(row.feeUsd?.let { String.format(Locale.US, "fee $%.2f", it) } ?: "fee —")
                     }
+                    row.kellyF?.let { append(String.format(Locale.US, " · Kelly f=%.3f", it)) }
+                    row.kellyFraction?.let { append(String.format(Locale.US, " ×%.2f", it)) }
+                    row.bankrollAfterUsd?.let { append(String.format(Locale.US, " · bankroll $%.2f", it)) }
                     append(" · ")
                     append(ScorecardLedger.signedUsd(row.pnlUsd))
                     row.strikeUsd?.let { append(String.format(Locale.US, " · strike $%,.0f", it)) }
                     row.finalUsd?.let { append(String.format(Locale.US, " · final $%,.0f", it)) }
-                    append(" · ${row.source}")
+                    append(" · ${row.pickSource ?: row.source}")
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = if (won) colors.up else colors.down
@@ -458,7 +704,7 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(ScorecardCopy.PNL_TITLE, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -480,7 +726,7 @@ private fun CumulativePnlCard(points: List<Pair<Long, Double>>) {
             }
             drawPath(
                 path,
-                if (last >= 0) colors.up else colors.down,
+                if (last >= 0) colors.upButton else colors.downButton,
                 style = Stroke(width = 3f, cap = StrokeCap.Round)
             )
             val zero = size.height * (1f - ((0.0 - minY) / spanY).toFloat()).coerceIn(0f, 1f)
@@ -591,19 +837,18 @@ private fun MuteBanner(a: com.dirk.kalshiodds.signal.feedback.Allowlist.State) {
 }
 
 @Composable
-private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
+private fun HonestCard(h: ScorecardMetrics.Honest) {
     val colors = DipTheme.colors
-    val h = snapshot.honest
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text("Honest scorecard · model vs market", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         if (!h.enoughData) {
             Text(
-                "${h.n}/${ScorecardMetrics.MIN_HONEST_SAMPLES} settled directional picks. ${snapshot.noBetCount} settled NO BET windows are excluded. Numbers below are provisional.",
+                "Not enough data yet — ${h.n}/${ScorecardTargets.MIN_SETTLED_BTC_SIGNALS} settled BTC signals. Numbers below are provisional.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
                 fontWeight = FontWeight.SemiBold,
@@ -617,12 +862,6 @@ private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
                 color = colors.textPrimary
             )
         }
-        Text(
-            "One result per BTC 15-minute window, up to four per hour. The 100-pick check takes at least 25 hours if every window has a pick; abstentions take longer. Each 4-hour time bucket needs results across multiple days. ${snapshot.openCount} logged windows still await settlement.",
-            style = MaterialTheme.typography.labelMedium,
-            color = colors.textSecondary,
-            modifier = Modifier.padding(top = 6.dp)
-        )
         Spacer(Modifier.height(8.dp))
         Text(
             HomeCopy.pickedSideLine(h.hits, h.n.takeIf { it > 0 }),
@@ -660,9 +899,7 @@ private fun HonestCard(snapshot: ScorecardMetrics.Snapshot) {
         if (h.perCoin.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             Text("Per coin", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)
-            h.perCoin.forEach { b ->
-                if (b.key == "BTC" || b.n > 0) BreakdownRow(b)
-            }
+            h.perCoin.forEach { b -> BreakdownRow(b) }
         }
         if (h.perTimeOfDay.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
@@ -703,7 +940,7 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
@@ -714,6 +951,24 @@ private fun WindowCard(title: String, stats: ScorecardMetrics.WindowStats) {
             color = colors.textPrimary,
             lineHeight = 28.sp
         )
+        if (stats.total > 0) {
+            Spacer(Modifier.height(6.dp))
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.Top
+            ) {
+                Text(
+                    ScorecardCopy.PICKED_SIDE_DIRECTION_NOTE,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary,
+                    modifier = Modifier.weight(1f).padding(end = 8.dp)
+                )
+                if (stats.pnlUsd != null) {
+                    SignedStat("Real paper P&L", ScorecardLedger.signedUsd(stats.pnlUsd), stats.pnlUsd)
+                }
+            }
+        }
         Text(
             "${stats.label} settled",
             style = MaterialTheme.typography.bodyMedium,
@@ -738,10 +993,14 @@ private fun PolicyCard(policy: com.dirk.kalshiodds.signal.ml.PolicyEval.Scorecar
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
-        Text("Counterfactual policy", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            ScorecardCopy.hypotheticalPolicyTitle(policy.stakeUsd),
+            style = MaterialTheme.typography.labelMedium,
+            color = colors.textSecondary
+        )
         Text(
             String.format(Locale.US, "If every alert @ $%.0f", policy.stakeUsd),
             fontSize = 20.sp,
@@ -762,7 +1021,7 @@ private fun ExtendedAiCard(line: String) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text("Extended AI (advisory)", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)

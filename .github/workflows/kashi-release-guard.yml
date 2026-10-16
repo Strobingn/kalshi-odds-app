@@ -1,0 +1,26 @@
+# Every Kashi vX.Y.Z-debug release body must start with the app-id line, or the in-app updater skips it.
+# On publish/edit: if missing, prepend it (so the release still works) and FAIL the job so it's noticed.
+name: kashi-release-guard
+on:
+  release:
+    types: [published, edited, created]
+permissions:
+  contents: write
+jobs:
+  guard:
+    if: ${{ startsWith(github.event.release.tag_name, 'v') && endsWith(github.event.release.tag_name, '-debug') }}
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ github.event.release.tag_name }}
+      MARKER: "app-id: com.dirk.kalshiodds.kashi"
+    steps:
+      - name: Require app-id first line
+        run: |
+          body="$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json body -q .body)"
+          first="$(printf '%s\n' "$body" | head -n1 | tr -d '\r')"
+          if [ "$first" = "$MARKER" ]; then echo "ok"; exit 0; fi
+          rest="$(printf '%s\n' "$body" | grep -vxF "$MARKER" || true)"
+          gh release edit "$TAG" -R "$GITHUB_REPOSITORY" --notes "$(printf '%s\n\n%s\n' "$MARKER" "$rest")"
+          echo "::error::Release $TAG body did not start with '$MARKER' (prepended now). Use scripts/kashi-release.sh."
+          exit 1

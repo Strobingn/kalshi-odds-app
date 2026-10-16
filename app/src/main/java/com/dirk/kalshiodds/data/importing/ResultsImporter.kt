@@ -217,7 +217,7 @@ object ResultsImporter {
             val o = runCatching { JSONObject(t) }.getOrNull() ?: return@forEach
             if (o.has("format")) return@forEach
             when (o.optString("kind").lowercase()) {
-                "snapshot" -> jsonSnapshot(o)?.takeIf { seen.snapshots.add(seen.snapshotKey(it.ticker, it.createdAtMs)) }?.also {
+                "snapshot" -> jsonSnapshot(o)?.takeIf { seen.snapshots.add(seen.snapshotKey(it.ticker, it.createdAtMs, it.side)) }?.also {
                     snapshots.add(it); imported += 1; minTs = minOfTs(minTs, it.createdAtMs); maxTs = maxOfTs(maxTs, it.createdAtMs)
                 } ?: run { skipped += 1 }
                 "alert" -> jsonAlert(o)?.takeIf { seen.alerts.add(seen.alertKey(it.alertId, it.ticker, it.createdAtMs)) }?.also {
@@ -270,7 +270,7 @@ object ResultsImporter {
         var maxTs: Long? = null
         fun addSnap(o: JSONObject) {
             val row = jsonSnapshot(o) ?: run { skipped += 1; return }
-            if (!seen.snapshots.add(seen.snapshotKey(row.ticker, row.createdAtMs))) { skipped += 1; return }
+            if (!seen.snapshots.add(seen.snapshotKey(row.ticker, row.createdAtMs, row.side))) { skipped += 1; return }
             snapshots.add(row); imported += 1
             minTs = minOfTs(minTs, row.createdAtMs); maxTs = maxOfTs(maxTs, row.createdAtMs)
         }
@@ -395,11 +395,12 @@ object ResultsImporter {
         val ticker = StreamCsvParser.field(fields, idx, "ticker") ?: return null
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val ts = parseTs(StreamCsvParser.field(fields, idx, "created_at_ms", "created_time", "timestamp")) ?: return null
-        if (!seen.snapshots.add(seen.snapshotKey(ticker, ts))) return null
+        val side = StreamCsvParser.field(fields, idx, "side") ?: "YES"
+        if (!seen.snapshots.add(seen.snapshotKey(ticker, ts, side))) return null
         val row = ScoredSnapshotRow(
             ticker = ticker,
             series = StreamCsvParser.field(fields, idx, "series") ?: CryptoMarkets.inferSeries(ticker),
-            side = StreamCsvParser.field(fields, idx, "side") ?: "YES",
+            side = side,
             edgePp = num(StreamCsvParser.field(fields, idx, "edge_pp")) ?: 0.0,
             fairPp = num(StreamCsvParser.field(fields, idx, "fair_pp")) ?: 0.0,
             marketPp = num(StreamCsvParser.field(fields, idx, "market_pp")) ?: 0.0,

@@ -35,6 +35,8 @@ import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -44,6 +46,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TradeModeLabel
+import com.dirk.kalshiodds.ui.components.D3Card
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.NextWindowLoadingCard
 import com.dirk.kalshiodds.ui.components.ThisWindowCard
@@ -76,15 +79,26 @@ fun HomeScreen(
     onPaperSellTicket: (String, Int, Double) -> Unit,
     onCancelApprove: () -> Unit,
     onCancelOrder: (String) -> Unit,
+    onLimitCents: (String, String) -> Unit = { _, _ -> },
     onResumeAlerts: () -> Unit = {},
+    onCancelResting: (String, String, String) -> Unit = { _, _, _ -> },
+    scalpLines: List<String> = emptyList(),
+    onOpenScalp: () -> Unit = {},
+    onBuyDaily: (com.dirk.kalshiodds.signal.d3.D3Quote, String) -> Unit = { _, _ -> },
     nowMs: Long = System.currentTimeMillis(),
-    versionLabel: String = AppVersion.label
+    versionLabel: String = AppVersion.label,
+    /** 0.3.43 paper limit orders. */
+    paperOrders: List<com.dirk.kalshiodds.signal.paper.PaperOrder> = emptyList(),
+    onSubmitPaperOrder: (String, String, String, Double?, Int, Boolean) -> Unit = { _, _, _, _, _, _ -> },
+    onEditPaperOrder: (String, Double?, Int?) -> Unit = { _, _, _ -> },
+    onCancelPaperOrder: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val mode = TradeModeLabel.forApprove(state.settings)
     val hasKey = state.settings.tradingCredentialsConfigured()
     val ctx = TicketBuilder.Context(settings = state.settings, alertsPaused = state.alertsPaused, nowMs = nowMs)
-    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs)
+    var coin by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(HomeMarkets.Coin.ALL) }
+    val coinCards = HomeMarkets.coinCards(state.snapshot?.allMarkets.orEmpty(), nowMs, coin)
     val windowMarkets = coinCards.mapNotNull { it.market }
     val decisions = HomeMarkets.decisions(windowMarkets, ctx)
     val ranked = HomeMarkets.ranked(windowMarkets, decisions, state.settings)
@@ -92,11 +106,12 @@ fun HomeScreen(
     val snackbar = remember { SnackbarHostState() }
     LaunchedEffect(state.userMessage) {
         val msg = state.userMessage ?: return@LaunchedEffect
+        if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.isQuietStatus(msg)) return@LaunchedEffect
         snackbar.showSnackbar(msg)
     }
     Scaffold(
         containerColor = colors.bg,
-        contentWindowInsets = WindowInsets.safeDrawing,
+        contentWindowInsets = dipContentInsets(),
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
             TopAppBar(
@@ -123,7 +138,7 @@ fun HomeScreen(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    actionIconContentColor = colors.accentBlue
+                    actionIconContentColor = colors.textSecondary
                 )
             )
         }
@@ -163,8 +178,17 @@ fun HomeScreen(
                             .fillMaxSize()
                             .background(colors.bg),
                         contentPadding = PaddingValues(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                        verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
+                        if (state.feedStatus.isNotBlank()) {
+                            item(key = "feed-status") {
+                                androidx.compose.material3.Text(
+                                    state.feedStatus,
+                                    style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
                         state.pauseBanner?.let { banner ->
                             item {
                                 Column(
@@ -180,10 +204,66 @@ fun HomeScreen(
                                 }
                             }
                         }
+                        state.updateBanner?.let { banner ->
+                            item {
+                                Text(
+                                    banner,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary,
+                                    modifier = Modifier.clickable { onOpenSettings() }
+                                )
+                            }
+                        }
+                        state.pollLabel.takeIf { it.startsWith("Backing off") }?.let { label ->
+                            item {
+                                Text(
+                                    label,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
+                        state.cfFeedLine?.let { line ->
+                            item {
+                                Text(
+                                    "CF Benchmarks · $line",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = colors.textSecondary
+                                )
+                            }
+                        }
                         state.userMessage?.takeIf { !it.startsWith("Paper ", true) && !it.startsWith("PAPER ", true) }?.let { msg ->
                             item {
-                                Text(msg, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+                                val quiet = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isQuietStatus(msg)
+                                Text(
+                                    msg,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (quiet) colors.textSecondary else MaterialTheme.colorScheme.error
+                                )
                             }
+                        }
+                        if (scalpLines.isNotEmpty()) {
+                            item {
+                                HomeScalpCard(lines = scalpLines, onOpen = onOpenScalp)
+                            }
+                        }
+                        if (state.settings.paperTradingEnabled) {
+                            item(key = "paper-orders") {
+                                com.dirk.kalshiodds.ui.components.PaperOrdersPanel(
+                                    tickers = com.dirk.kalshiodds.domain.MarketLifecycle
+                                        .tradable(state.snapshot?.allMarkets.orEmpty(), nowMs)
+                                        .filter { com.dirk.kalshiodds.domain.CryptoMarkets.isCryptoTicker(it.ticker) }
+                                        .sortedBy { it.closeTimeEpochMs ?: Long.MAX_VALUE }
+                                        .map { it.ticker },
+                                    orders = paperOrders,
+                                    onSubmit = onSubmitPaperOrder,
+                                    onEdit = onEditPaperOrder,
+                                    onCancel = onCancelPaperOrder
+                                )
+                            }
+                        }
+                        item {
+                            HomeCoinSelector(selected = coin, onSelect = { coin = it })
                         }
                         item {
                             ThisWindowCard(
@@ -194,7 +274,9 @@ fun HomeScreen(
                                 onOpenScorecard = onOpenScorecard
                             )
                         }
-                        items(coinCards, key = { it.series }) { card ->
+                        val keyedCoins = LazyListKeys.keyed(coinCards) { it.series }
+                        items(keyedCoins, key = { it.key }) { row ->
+                            val card = row.value
                             val market = card.market
                             if (market == null) {
                                 NextWindowLoadingCard(card.series)
@@ -218,6 +300,31 @@ fun HomeScreen(
                                 )
                             }
                         }
+                        HomeMarkets.dailySeries(coin).forEach { series ->
+                            item(key = "daily-$series") {
+                                HomeDailyCard(
+                                    series = series,
+                                    rows = HomeMarkets.dailyRows(state.dailyQuotes, series),
+                                    onBuy = onBuyDaily
+                                )
+                            }
+                        }
+                        if (state.d3.closeTimeEpochMs != null ||
+                            state.d3.qualifying.isNotEmpty() ||
+                            state.d3.todayPicks.isNotEmpty() ||
+                            state.d3.phase != com.dirk.kalshiodds.signal.d3.D3Phase.WAITING
+                        ) {
+                            item {
+                                D3Card(snapshot = state.d3)
+                            }
+                        }
+                        item {
+                            HomeOpenBetsSection(
+                                rows = HomeOpenBets.rows(state.positions, state.restingOrders, state.paper.fills),
+                                onClose = onSellPosition,
+                                onCancel = onCancelResting
+                            )
+                        }
                         item {
                             Text(
                                 HomeCopy.SIGNAL_HISTORY,
@@ -233,6 +340,7 @@ fun HomeScreen(
                         tickets = state.tickets,
                         credentialsConfigured = hasKey,
                         paperTradingEnabled = state.settings.paperTradingEnabled,
+                        feeRate = state.settings.feeRate,
                         homeMode = true,
                         listVisible = false,
                         onReview = onReviewTicket,
@@ -242,7 +350,8 @@ fun HomeScreen(
                         onPaper = onPaperTicket,
                         onPaperSell = onPaperSellTicket,
                         onCancelApprove = onCancelApprove,
-                        onCancelOrder = onCancelOrder
+                        onCancelOrder = onCancelOrder,
+                        onLimitCents = onLimitCents
                     )
                     }
                 }

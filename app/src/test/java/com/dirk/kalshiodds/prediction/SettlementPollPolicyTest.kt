@@ -1,0 +1,139 @@
+package com.dirk.kalshiodds.prediction
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SettlementPollPolicyTest {
+
+    private val close = 1_700_000_900_000L
+
+    @Test
+    fun filtersToTrackedKxbtc15mAfterClose() {
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXBTC15M-27SEP161500-00"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXBTCD-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXETHD-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXSOLD-27SEP16"))
+        assertFalse(SettlementPollPolicy.isPollableTicker("KXBTCY-27SEP16"))
+        assertFalse(SettlementPollPolicy.isPollableTicker("KXGRAMMY-BESTSONG"))
+        assertFalse(SettlementPollPolicy.isPollableTicker("KXCRYPTOLEAD15M-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXETH15M-27SEP16"))
+        assertTrue(SettlementPollPolicy.isPollableTicker("KXSOL15M-27SEP16"))
+        assertFalse(SettlementPollPolicy.isPollableTicker("KXXRP15M-27SEP16"))
+        assertFalse(SettlementPollPolicy.afterClose(close, close - 1))
+        assertTrue(SettlementPollPolicy.afterClose(close, close))
+        assertFalse(
+            SettlementPollPolicy.shouldPoll(
+                ticker = "KXBTC15M-OPEN",
+                closeTimeMs = close + 60_000L,
+                nowMs = close,
+                nextAttemptMs = 0L,
+                inFlight = false
+            )
+        )
+        assertTrue(
+            SettlementPollPolicy.shouldPoll(
+                ticker = "KXBTC15M-CLOSED",
+                closeTimeMs = close,
+                nowMs = close + 1,
+                nextAttemptMs = 0L,
+                inFlight = false
+            )
+        )
+        assertFalse(
+            SettlementPollPolicy.shouldPoll(
+                ticker = "KXBTC15M-CLOSED",
+                closeTimeMs = close,
+                nowMs = close + 1,
+                nextAttemptMs = 0L,
+                inFlight = true
+            )
+        )
+    }
+
+    @Test
+    fun backoffStepsThenCaps() {
+        // 0.3.49: 5/10/15 s, capped at 15 s (no 60 s waits).
+        assertEquals(5_000L, SettlementPollPolicy.delayMs(0))
+        assertEquals(10_000L, SettlementPollPolicy.delayMs(1))
+        assertEquals(15_000L, SettlementPollPolicy.delayMs(2))
+        assertEquals(15_000L, SettlementPollPolicy.delayMs(8))
+        val first = SettlementPollPolicy.afterMiss(SettlementPollPolicy.Schedule(), close)
+        assertEquals(close + 5_000L, first.nextAttemptMs)
+        val second = SettlementPollPolicy.afterMiss(first, first.nextAttemptMs)
+        assertEquals(first.nextAttemptMs + 10_000L, second.nextAttemptMs)
+    }
+
+    @Test
+    fun honors429RetryAfterAndDedupe() {
+        assertEquals(12_000L, SettlementPollPolicy.retryAfterHeader("12"))
+        assertEquals(null, SettlementPollPolicy.retryAfterHeader("  "))
+        val sched = SettlementPollPolicy.after429(
+            SettlementPollPolicy.Schedule(),
+            nowMs = close,
+            retryAfterMs = 20_000L
+        )
+        assertEquals(close + 20_000L, sched.nextAttemptMs)
+        val tracked = listOf(
+            SettlementPollPolicy.Tracked("KXBTC15M-A", close),
+            SettlementPollPolicy.Tracked("KXGRAMMY-X", close),
+            SettlementPollPolicy.Tracked("KXBTC15M-B", close + 60_000L),
+            SettlementPollPolicy.Tracked("KXBTC15M-A", close)
+        )
+        val due = SettlementPollPolicy.candidates(
+            tracked = tracked,
+            nowMs = close + 1,
+            schedules = emptyMap(),
+            inFlight = setOf("KXBTC15M-A")
+        )
+        assertEquals(emptyList<String>(), due)
+        val due2 = SettlementPollPolicy.candidates(
+            tracked = tracked,
+            nowMs = close + 1,
+            schedules = emptyMap(),
+            inFlight = emptySet()
+        )
+        assertEquals(listOf("KXBTC15M-A"), due2)
+    }
+
+    @Test
+    fun mergeDropsForeignSeriesAndKeepsCloseTimes() {
+        val open = listOf(
+            PredictionLogEntry(
+                ticker = "KXBTC15M-KEEP",
+                series = "KXBTC15M",
+                predictedYes = 0.6,
+                predictedNo = 0.4,
+                marketMid = 0.5,
+                timestampMs = close - 10,
+                closeTimeMs = close
+            ),
+            PredictionLogEntry(
+                ticker = "KXGRAMMY-DROP",
+                series = "KXGRAMMY",
+                predictedYes = 0.6,
+                predictedNo = 0.4,
+                marketMid = 0.5,
+                timestampMs = close - 10,
+                closeTimeMs = close
+            )
+        )
+        val merged = SettlementPollPolicy.mergeTracked(
+            open,
+            listOf("KXGRAMMY-NO", "KXBTC15M-PAPER"),
+            closeTimeOf = { if (it == "KXBTC15M-PAPER") close else null }
+        )
+        assertEquals(setOf("KXBTC15M-KEEP", "KXBTC15M-PAPER"), merged.map { it.ticker }.toSet())
+        assertEquals(close, merged.first { it.ticker == "KXBTC15M-KEEP" }.closeTimeMs)
+        val withHeld = SettlementPollPolicy.mergeTracked(
+            open,
+            listOf("KXBTCD-HELD", "KXGRAMMY-NO"),
+            closeTimeOf = { if (it == "KXBTCD-HELD") close else null }
+        )
+        assertTrue(withHeld.any { it.ticker == "KXBTCD-HELD" })
+        assertTrue(withHeld.none { it.ticker.startsWith("KXGRAMMY") })
+        assertEquals(close, withHeld.first { it.ticker == "KXBTCD-HELD" }.closeTimeMs)
+        assertEquals("KXBTCD", SettlementPollPolicy.seriesOf("KXBTCD-HELD"))
+    }
+}

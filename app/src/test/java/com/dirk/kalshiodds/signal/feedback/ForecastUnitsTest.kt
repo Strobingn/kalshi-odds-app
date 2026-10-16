@@ -8,9 +8,9 @@ import org.junit.Test
 import kotlin.math.abs
 
 /**
- * Hit rate evaluates the pick; Brier evaluates the probability forecast.
- * A correctly transformed NO forecast and NO outcome have the same Brier
- * as their complementary YES forecast and YES outcome.
+ * Scorecard display: hit = picked side vs settlement; side-Brier is not
+ * the P(YES) Brier. The 0.3.11 mix scored P(YES)>0.5 as a hit and printed
+ * (0.945−1)² ≈ 0.003 next to a fade that actually went 0/5.
  */
 class ForecastUnitsTest {
 
@@ -22,7 +22,7 @@ class ForecastUnitsTest {
     }
 
     @Test
-    fun fadeOfHighYesCanLoseDespiteGoodProbabilityForecast() {
+    fun fadeOfHighYesThatLosesIsZeroHitsAndComplementedBrier() {
         val rows = (0 until 5).map { i ->
             row(
                 ticker = "KXETH15M-$i",
@@ -37,11 +37,13 @@ class ForecastUnitsTest {
         val sideBrier = rows.map { ForecastUnits.sideBrier(it) }.average()
         val yesBrier = rows.map { ForecastUnits.brier(it) }.average()
         assertEquals(0, hits)
-        val pSide = 1.0 - 0.945
-        val expectedSide = pSide * pSide
+        // P(NO)=0.055 vs NO not settling → (0.055−0)² = P(YES) Brier.
+        val pNo = 1.0 - 0.945
+        val expectedSide = (pNo - 0.0) * (pNo - 0.0)
         assertEquals(expectedSide, sideBrier, 1e-9)
         assertEquals(yesBrier, sideBrier, 1e-9)
-        assertEquals((0.945 - 1.0) * (0.945 - 1.0), yesBrier, 1e-9)
+        assertTrue(abs(sideBrier - 0.003) < 0.001)
+        assertFalse("old bug compared P(NO) with YES settling (~0.893)", abs(sideBrier - 0.893) < 0.002)
 
         val card = ScorecardMetrics.window(rows)
         assertEquals(0, card.hits)
@@ -49,6 +51,22 @@ class ForecastUnitsTest {
         assertEquals(sideBrier, card.brier!!, 1e-9)
         assertEquals(yesBrier, card.pUpBrier!!, 1e-9)
         assertFalse(card.showBrier)
+    }
+
+    @Test
+    fun winningNoPickComparesPNoWithNoSettling() {
+        val row = row(
+            ticker = "KXBTC15M-WINNO",
+            predictedYes = 0.20,
+            outcome = "no",
+            predictedSide = "NO"
+        )
+        assertTrue(ForecastUnits.hit(row))
+        val side = ForecastUnits.sideBrier(row)
+        val yes = ForecastUnits.brier(row)
+        assertEquals((0.80 - 1.0) * (0.80 - 1.0), side, 1e-9)
+        assertEquals(yes, side, 1e-9)
+        assertFalse("old bug scored winning NO as (0.80−0)² = 0.64", abs(side - 0.64) < 0.01)
     }
 
     @Test
@@ -70,14 +88,6 @@ class ForecastUnitsTest {
         assertEquals(5, card.hits)
         assertEquals(5, card.total)
         assertEquals(side, card.brier!!, 1e-9)
-    }
-
-    @Test
-    fun winningNoSideHasLowBrier() {
-        val no = row("KXBTC15M-NO", 0.10, "no", "NO")
-        assertTrue(ForecastUnits.hit(no))
-        assertEquals(0.01, ForecastUnits.sideBrier(no), 1e-9)
-        assertEquals(ForecastUnits.brier(no), ForecastUnits.sideBrier(no), 1e-9)
     }
 
     @Test

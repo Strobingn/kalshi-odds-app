@@ -56,7 +56,7 @@ class LiveWindowBackfill(
                 throw HistoryTransport.Cancelled()
             } catch (e: HistoryTransport.RateLimited) {
                 last = e
-                sleep(e.retryAfterMs * (1L shl attempt.coerceAtMost(3)))
+                sleep((e.retryAfterMs * (1L shl attempt.coerceAtMost(3))).coerceAtMost(10_000L))
             } catch (e: HistoryTransport.HttpFail) {
                 last = e
                 if (e.code == 404) return null

@@ -4,14 +4,15 @@ import com.dirk.kalshiodds.prediction.PredictionLogEntry
 import com.dirk.kalshiodds.signal.feedback.ForecastUnits
 import com.dirk.kalshiodds.signal.feedback.ScorecardMetrics
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import kotlin.math.abs
 
 /**
  * The pre-0.3.12 mix printed 0/5 hits next to P(YES) Brier 0.003.
- * Hit rate and a calibrated probability answer different questions. A
- * correctly scored NO Brier equals the complementary P(YES) Brier.
+ * Production now scores hit + [ScorecardMetrics.WindowStats.brier] on the
+ * picked side; P(YES) Brier is [ScorecardMetrics.WindowStats.pUpBrier].
  */
 class ScorecardBrierDiagnosisTest {
 
@@ -40,6 +41,8 @@ class ScorecardBrierDiagnosisTest {
         val side = rows.map { ForecastUnits.sideBrier(it) }.average()
         val yes = rows.map { ForecastUnits.brier(it) }.average()
         assertEquals(yes, side, 1e-9)
+        assertTrue("complemented NO Brier equals P(YES) Brier (~0.003)", abs(side - 0.003) < 0.002)
+        assertFalse("old bug compared P(NO) with YES settling (~0.893)", abs(side - 0.893) < 0.002)
         assertEquals((0.945 - 1.0) * (0.945 - 1.0), yes, 1e-9)
         assertEquals(side, w.brier!!, 1e-9)
         assertEquals(yes, w.pUpBrier!!, 1e-9)

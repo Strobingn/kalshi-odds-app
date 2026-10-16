@@ -21,6 +21,20 @@ object DigitalOptionFairValue {
     const val SECONDS_PER_YEAR = 365.25 * 24.0 * 3600.0
     const val WINDOW_SECONDS = 900.0
 
+    /** Typical annualized log-vol used when the live 1m window is missing. */
+    const val TYPICAL_BTC_SIGMA = 0.40
+    const val TYPICAL_ETH_SIGMA = 0.55
+    const val TYPICAL_SOL_SIGMA = 0.74
+
+    fun typicalSigma(seriesOrAsset: String?): Double {
+        val u = seriesOrAsset.orEmpty().uppercase()
+        return when {
+            u.contains("SOL") -> TYPICAL_SOL_SIGMA
+            u.contains("ETH") && !u.contains("BTC") -> TYPICAL_ETH_SIGMA
+            else -> TYPICAL_BTC_SIGMA
+        }
+    }
+
     fun pFinishAbove(
         spot: Double,
         strike: Double,

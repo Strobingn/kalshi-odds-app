@@ -29,6 +29,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.dirk.kalshiodds.signal.trade.ApproveControls
+import com.dirk.kalshiodds.signal.trade.TicketBuilder
+import com.dirk.kalshiodds.signal.trade.LimitPriceInput
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketPhase
@@ -46,6 +49,7 @@ fun TradeTicketsSection(
     tickets: TicketUiState,
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
+    feeRate: Double = com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE,
     homeMode: Boolean = false,
     listVisible: Boolean = true,
     onReview: (String) -> Unit,
@@ -55,9 +59,11 @@ fun TradeTicketsSection(
     onPaper: (String) -> Unit,
     onPaperSell: (String, Int, Double) -> Unit = { id, _, _ -> onPaper(id) },
     onCancelApprove: () -> Unit,
-    onCancelOrder: (String) -> Unit
+    onCancelOrder: (String) -> Unit,
+    onLimitCents: (String, String) -> Unit = { _, _ -> }
 ) {
     val colors = DipTheme.colors
+    val submittingId = (tickets.phase as? TicketPhase.Submitting)?.ticket?.id
     val proposals = tickets.proposals.sortedByDescending {
         if (it.kind == TicketKind.HUNTER || it.kind == TicketKind.HUNTER_VALUE) 1_000.0 + it.maxPayoutUsd else it.maxPayoutUsd
     }
@@ -123,7 +129,7 @@ fun TradeTicketsSection(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(10.dp))
-                        .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
+                        .border(1.dp, colors.downButton, RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 )
             }
@@ -150,7 +156,9 @@ fun TradeTicketsSection(
                 paperTradingEnabled,
                 onReview,
                 onDismiss,
-                onPaper
+                onPaper,
+                submitting = ticket.id == submittingId,
+                onLimitCents = { text -> onLimitCents(ticket.id, text) }
             )
         }
     }
@@ -162,11 +170,13 @@ fun TradeTicketsSection(
             ticket = awaiting.ticket,
             credentialsConfigured = credentialsConfigured,
             paperTradingEnabled = paperTradingEnabled,
+            feeRate = feeRate,
             onApprove = { onApprove(awaiting.ticket.id) },
             onApproveSell = { count, price -> onApproveSell(awaiting.ticket.id, count, price) },
             onPaper = { onPaper(awaiting.ticket.id) },
             onPaperSell = { count, price -> onPaperSell(awaiting.ticket.id, count, price) },
-            onDismiss = onCancelApprove
+            onDismiss = onCancelApprove,
+            onLimitCents = { text -> onLimitCents(awaiting.ticket.id, text) }
         )
     }
 }
@@ -178,7 +188,9 @@ private fun ProposedTicketCard(
     paperTradingEnabled: Boolean = false,
     onReview: (String) -> Unit,
     onDismiss: (String) -> Unit,
-    onPaper: (String) -> Unit
+    onPaper: (String) -> Unit,
+    submitting: Boolean = false,
+    onLimitCents: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val hunter = ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE
@@ -192,9 +204,9 @@ private fun ProposedTicketCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, RoundedCornerShape(16.dp)),
+            .border(if (highlightEdge || ticket.kind == TicketKind.HUNTER) 2.dp else 1.dp, border, com.dirk.kalshiodds.ui.theme.FieldShapes.card),
         colors = CardDefaults.cardColors(containerColor = colors.surface),
-        shape = RoundedCornerShape(16.dp)
+        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.card
     ) {
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -203,8 +215,9 @@ private fun ProposedTicketCard(
                         TicketKind.HUNTER -> "PENDING APPROVAL · Hunter"
                         TicketKind.HUNTER_VALUE -> "PENDING APPROVAL · Long-shot"
                         TicketKind.MANUAL -> "MANUAL BUY"
+                        TicketKind.LAST_MINUTE -> "LAST-MINUTE PLAY"
+                        TicketKind.D3 -> "D3 DAILY FAVOURITE"
                         TicketKind.CONFIGURED -> "TICKET"
-                        TicketKind.WINNING_STRATEGY -> "PENDING APPROVAL · Strategy"
                         TicketKind.SELL -> if (ticket.paperOnly) "PAPER SELL" else "SELL"
                     } + " · " + TradeModeLabel.forApprove(
                         paperTradingEnabled = paperTradingEnabled,
@@ -245,7 +258,7 @@ private fun ProposedTicketCard(
                         .padding(top = 8.dp)
                         .fillMaxWidth()
                         .background(MaterialTheme.colorScheme.errorContainer, RoundedCornerShape(10.dp))
-                        .border(1.dp, colors.accentRed, RoundedCornerShape(10.dp))
+                        .border(1.dp, colors.downButton, RoundedCornerShape(10.dp))
                         .padding(10.dp)
                 )
             } else if (ticket.isSell) {
@@ -259,6 +272,7 @@ private fun ProposedTicketCard(
             ticket.feeUsd?.let {
                 TicketMetricRow("Fee", String.format(Locale.US, "$%.2f", it))
             }
+            FeeExplainer(ticket.contracts, ticket.limitPrice, com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE)
             Text(
                 ticket.sizingNote,
                 style = MaterialTheme.typography.labelMedium,
@@ -338,6 +352,9 @@ private fun ProposedTicketCard(
                 color = colors.textSecondary,
                 modifier = Modifier.padding(top = 6.dp)
             )
+            if (!ticket.isSell) {
+                LimitCentsField(ticket, onLimitCents)
+            }
             ticket.gateNote?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = colors.accentBlue)
             }
@@ -370,7 +387,7 @@ private fun ProposedTicketCard(
                 }
                 Button(
                     onClick = { onReview(ticket.id) },
-                    enabled = credentialsConfigured && ticket.canApprove,
+                    enabled = ApproveControls.enabled(credentialsConfigured, ticket.canApprove, submitting),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = SideColor.ofTicketSide(ticket.side, colors),
                         contentColor = SideColor.onTicketSide(ticket.side, colors)
@@ -405,6 +422,20 @@ private fun ProposedTicketCard(
     }
 }
 
+/** Full Kalshi order id — the header and this card must show the same string. */
+internal fun workingOrderDetail(order: PlacedOrder): String {
+    val id = order.orderId ?: "pending id"
+    return String.format(
+        Locale.US,
+        "%d ct @ %s · filled %.0f · rest %.0f · id %s",
+        order.ticket.contracts,
+        KalshiQuoteDisplay.formatPriceCents(order.ticket.limitPrice),
+        order.fillCount,
+        order.remainingCount,
+        id
+    )
+}
+
 @Composable
 private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
     val colors = DipTheme.colors
@@ -422,15 +453,7 @@ private fun WorkingOrderCard(order: PlacedOrder, onCancel: (String) -> Unit) {
             color = colors.accentBlue
         )
         Text(
-            String.format(
-                Locale.US,
-                "%d ct @ %s · filled %.0f · rest %.0f · id %s",
-                order.ticket.contracts,
-                KalshiQuoteDisplay.formatPriceCents(order.ticket.limitPrice),
-                order.fillCount,
-                order.remainingCount,
-                id.take(8)
-            ),
+            workingOrderDetail(order),
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
@@ -462,11 +485,13 @@ internal fun ApproveTicketDialog(
     ticket: TradeTicket,
     credentialsConfigured: Boolean,
     paperTradingEnabled: Boolean = false,
+    feeRate: Double = com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE,
     onApprove: () -> Unit,
     onApproveSell: (Int, Double) -> Unit = { _, _ -> onApprove() },
     onPaper: () -> Unit,
     onPaperSell: (Int, Double) -> Unit = { _, _ -> onPaper() },
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onLimitCents: (String) -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val held = (ticket.heldContracts ?: ticket.contracts).coerceAtLeast(1)
@@ -476,8 +501,25 @@ internal fun ApproveTicketDialog(
     var centsText by remember(ticket.id) {
         mutableStateOf(String.format(Locale.US, "%.1f", ticket.limitPrice * 100.0))
     }
+    var limitCents by remember(ticket.id) { mutableStateOf(LimitPriceInput.suggestedCents(ticket.limitPrice)) }
+    var confirmBusy by remember(ticket.id) { mutableStateOf(false) }
+    val limitError = if (ticket.isSell) null else LimitPriceInput.validationError(limitCents)
+    val buyQuote = if (ticket.isSell) {
+        null
+    } else {
+        LimitPriceInput.parse(limitCents)?.let { LimitPriceInput.apply(ticket, it, feeRate) }
+    }
+    val sellQty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
+    val sellQuote = if (ticket.isSell && ticket.blockedReason == null) {
+        TicketBuilder.applySellQuote(ticket, sellQty, ticket.limitPrice, feeRate)
+    } else {
+        null
+    }
+    val shown = buyQuote ?: sellQuote ?: ticket
     AlertDialog(
         onDismissRequest = onDismiss,
+        containerColor = colors.surface,
+        shape = com.dirk.kalshiodds.ui.theme.FieldShapes.card,
                 title = {
             Text(
                 when {
@@ -512,32 +554,52 @@ internal fun ApproveTicketDialog(
                         colors.accentOrange
                     }
                 )
+                if (ticket.kind == TicketKind.LAST_MINUTE && !ticket.isSell) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        com.dirk.kalshiodds.signal.lastminute.LastMinuteCopy.CONFIRM_UNPROVEN,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentOrange
+                    )
+                }
+                if (ticket.kind == TicketKind.D3 && !ticket.isSell) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        com.dirk.kalshiodds.signal.d3.D3Copy.CONFIRM_POST_ONLY,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = colors.accentOrange
+                    )
+                }
                 Spacer(Modifier.height(8.dp))
                 if (ticket.isSell && !paperSell && ticket.blockedReason == null) {
-                    TicketMetricRow("Contracts", ticket.contracts.toString())
-                    TicketMetricRow("Bid", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+                    TicketMetricRow("Contracts", shown.contracts.toString())
+                    TicketMetricRow("Bid", KalshiQuoteDisplay.formatPriceCents(shown.limitPrice))
                     TicketMetricRow(
                         "Fee",
-                        String.format(Locale.US, "$%.2f", ticket.feeUsd ?: 0.0)
+                        String.format(Locale.US, "$%.2f", shown.feeUsd ?: 0.0)
                     )
+                    FeeExplainer(shown.contracts, shown.limitPrice, feeRate)
                     TicketMetricRow(
                         "Expected proceeds",
-                        String.format(Locale.US, "$%.2f", ticket.stakeUsd)
+                        String.format(Locale.US, "$%.2f", shown.stakeUsd)
                     )
                 } else if (!paperSell && !paperBuy && ticket.blockedReason == null) {
-                    TicketMetricRow("Contracts", ticket.contracts.toString())
-                    TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(ticket.limitPrice))
+                    TicketMetricRow("Contracts", shown.contracts.toString())
+                    TicketMetricRow("Price", KalshiQuoteDisplay.formatPriceCents(shown.limitPrice))
                     TicketMetricRow(
                         "Fee",
-                        String.format(Locale.US, "$%.2f", ticket.feeUsd ?: 0.0)
+                        String.format(Locale.US, "$%.2f", shown.feeUsd ?: 0.0)
                     )
+                    FeeExplainer(shown.contracts, shown.limitPrice, feeRate)
                     TicketMetricRow(
                         "Total cost",
-                        String.format(Locale.US, "$%.2f", ticket.allInUsd ?: ticket.stakeUsd)
+                        String.format(Locale.US, "$%.2f", shown.allInUsd ?: shown.stakeUsd)
                     )
                     TicketMetricRow(
                         "Profit if win",
-                        String.format(Locale.US, "$%.2f", ticket.profitIfWinUsd ?: ticket.potentialGainUsd)
+                        String.format(Locale.US, "$%.2f", shown.profitIfWinUsd ?: shown.potentialGainUsd)
                     )
                 } else if (paperSell || paperBuy) {
                     Text(
@@ -582,6 +644,9 @@ internal fun ApproveTicketDialog(
                         )
                     }
                 }
+                if (!ticket.isSell) {
+                    LimitCentsField(ticket, onLimitCents, text = limitCents, onText = { limitCents = it })
+                }
                 if (ticket.kind == TicketKind.HUNTER || ticket.kind == TicketKind.HUNTER_VALUE) {
                     Text(
                         ticket.gateNote ?: "Hunter path · Approve still required — never auto-placed.",
@@ -595,29 +660,33 @@ internal fun ApproveTicketDialog(
         confirmButton = {
             Button(
                 onClick = {
+                    if (confirmBusy) return@Button
+                    confirmBusy = true
                     if (ticket.isSell) {
-                        val qty = countText.toIntOrNull()?.coerceIn(1, held) ?: ticket.contracts
+                        val qty = shown.contracts
                         val px = if (paperSell) {
-                            (centsText.toDoubleOrNull()?.div(100.0)) ?: ticket.limitPrice
+                            (centsText.toDoubleOrNull()?.div(100.0)) ?: shown.limitPrice
                         } else {
-                            ticket.limitPrice
+                            shown.limitPrice
                         }
                         if (paperSell) onPaperSell(qty, px) else onApproveSell(qty, px)
                     } else if (paperBuy) {
                         onPaper()
                     } else {
+                        onLimitCents(limitCents)
                         onApprove()
                     }
                 },
-                enabled = when {
+                enabled = !confirmBusy && limitError == null && when {
                     paperSell || paperBuy -> ticket.canPaper || ticket.contracts > 0 || ticket.blockedReason != null
-                    else -> credentialsConfigured && ticket.canApprove
+                    else -> ApproveControls.enabled(credentialsConfigured, ticket.canApprove, submitting = false)
                 },
                 colors = ButtonDefaults.buttonColors(
                     containerColor = SideColor.ofTicketSide(ticket.side, colors),
                     contentColor = SideColor.onTicketSide(ticket.side, colors)
                 ),
-                modifier = Modifier.height(48.dp)
+                modifier = Modifier.height(com.dirk.kalshiodds.ui.theme.FieldMetrics.primaryTouch),
+                shape = com.dirk.kalshiodds.ui.theme.FieldShapes.button
             ) {
                 val mode = TradeModeLabel.forApprove(
                     paperTradingEnabled = paperTradingEnabled,
@@ -627,7 +696,7 @@ internal fun ApproveTicketDialog(
                     canApprove = ticket.canApprove,
                     blockedReason = ticket.blockedReason
                 )
-                Text(HomeCopy.confirmApproveLabel(mode, ticket.stakeUsd, ticket.isSell))
+                Text(HomeCopy.confirmApproveLabel(mode, shown.stakeUsd, ticket.isSell))
             }
         },
         dismissButton = {
@@ -645,10 +714,53 @@ internal fun ApproveTicketDialog(
 }
 
 @Composable
+private fun LimitCentsField(
+    ticket: TradeTicket,
+    onLimitCents: (String) -> Unit,
+    text: String? = null,
+    onText: ((String) -> Unit)? = null
+) {
+    val colors = DipTheme.colors
+    var local by remember(ticket.id) { mutableStateOf(text ?: LimitPriceInput.suggestedCents(ticket.limitPrice)) }
+    val shown = text ?: local
+    val error = LimitPriceInput.validationError(shown)
+    OutlinedTextField(
+        value = shown,
+        onValueChange = { raw ->
+            val next = raw.filter { it.isDigit() }.take(2)
+            if (onText != null) onText(next) else local = next
+            onLimitCents(next)
+        },
+        label = { Text("Limit price (¢)") },
+        isError = error != null,
+        singleLine = true,
+        modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+    )
+    Text(
+        error ?: "1–99¢. Stake, contracts, fee, and the $10 cap update at this price.",
+        style = MaterialTheme.typography.labelMedium,
+        color = if (error != null) colors.accentRed else colors.textSecondary,
+        modifier = Modifier.padding(top = 4.dp)
+    )
+}
+
+@Composable
 private fun TicketMetricRow(label: String, value: String) {
     val colors = DipTheme.colors
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
         Text(label, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
         Text(value, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
     }
+}
+
+
+/** 0.3.43: every ticket shows the expected fee as 7% × (1 − P) of stake. */
+@androidx.compose.runtime.Composable
+internal fun FeeExplainer(contracts: Int, price: Double, feeRate: Double) {
+    if (contracts <= 0) return
+    androidx.compose.material3.Text(
+        com.dirk.kalshiodds.signal.trade.KalshiFee.expectedFeeLine(contracts, price, feeRate),
+        style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+        color = com.dirk.kalshiodds.ui.theme.DipTheme.colors.textSecondary
+    )
 }

@@ -33,7 +33,7 @@ import kotlin.math.tanh
  *
  * | Feature                         | Early | Late | Notes |
  * |---------------------------------|------:|-----:|-------|
- * | AI (TFLite / fallback MLP)      |  0.30 | 0.20 | Then temperature + reliability-bin calibration |
+ * | AI (TFLite / fallback MLP)      |  0.00 | 0.00 | Weight 0 until a time-ordered grouped split beats market-only |
  * | Volume-flow + aggressor         |  0.12 | 0.14 | Taker side when the trade feed provides it |
  * | Related crypto mid              |  0.08 | 0.04 | BTC ↔ ETH ↔ SOL last mid |
  * | Tick velocity `Δmid/Δt` + accel |  0.10 | 0.14 | Last N ticker/trade/REST ticks |
@@ -176,6 +176,12 @@ class ScoringEngine(
     private val tapeStreak = java.util.concurrent.ConcurrentHashMap<String, Int>()
     private val lastPrimarySide = java.util.concurrent.ConcurrentHashMap<String, String>()
 
+    /** 0.3.52: drop per-ticker state for markets no longer watched (closed windows). */
+    fun pruneTo(keep: Set<String>) {
+        if (keep.isEmpty()) return
+        listOf(lastAlertMs, lastBookScoreMs, tapeStreak, lastPrimarySide).forEach { m -> m.keys.retainAll(keep) }
+    }
+
     fun rememberMeta(
         ticker: String,
         closeTimeEpochMs: Long?,
@@ -202,6 +208,19 @@ class ScoringEngine(
         seq: Int? = null
     ): LocalOrderBook? = book.applyDelta(ticker, price, delta, side, seq)
 
+    /** 0.3.43: quote fields from the merged per-ticker tick; event fields from the incoming tick. */
+    internal fun mergedForScoring(incoming: MarketTick, merged: MarketTick?): MarketTick {
+        if (merged == null || !merged.ticker.equals(incoming.ticker, ignoreCase = true)) return incoming
+        return merged.copy(
+            source = incoming.source,
+            receiveElapsedNanos = incoming.receiveElapsedNanos,
+            tradeSize = incoming.tradeSize,
+            takerSide = incoming.takerSide,
+            closeTimeEpochMs = incoming.closeTimeEpochMs ?: merged.closeTimeEpochMs,
+            floorStrike = incoming.floorStrike ?: merged.floorStrike
+        )
+    }
+
     fun score(tick: MarketTick, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Score? {
         return try {
             scoreUnchecked(tick, settings, nowMs)
@@ -217,7 +236,8 @@ class ScoringEngine(
         }
     }
 
-    private fun scoreUnchecked(tick: MarketTick, rawSettings: SignalSettings, nowMs: Long): Score? {
+    private fun scoreUnchecked(rawTick: MarketTick, rawSettings: SignalSettings, nowMs: Long): Score? {
+        var tick = rawTick
         if (!CryptoMarkets.isCryptoTicker(tick.ticker)) return null
         if (!rawSettings.isWatchedTicker(tick.ticker)) return null
         var settings = com.dirk.kalshiodds.signal.ml.HeavyMlGuard.apply(rawSettings)
@@ -233,8 +253,12 @@ class ScoringEngine(
             }
         }
         val spotFeat = external.forSeries(tick.series)
-        spotFeat?.lastPrice?.let { book.noteSpot(tick.ticker, it, nowMs) }
+        val modelSpot = spotFeat?.takeIf { it.modelUsable }?.lastPrice
+        modelSpot?.let { book.noteSpot(tick.ticker, it, nowMs) }
         book.push(tick, nowMs)
+        // 0.3.43: score / display the merged per-ticker quote, never a raw trade print (bid = ask = trade)
+        // or a stale/suppressed update. Trade size / taker side / latency come from the incoming tick.
+        tick = mergedForScoring(rawTick, book.lastTick(rawTick.ticker))
         if (tick.floorStrike != null) book.rememberStrike(tick.ticker, tick.floorStrike)
         val view = book.bookView(tick.ticker)
         val mid01 = tick.mid01 ?: return null
@@ -351,10 +375,8 @@ class ScoringEngine(
         val flow = (0.65 * rawFlow + 0.35 * aggressor).coerceIn(-1.0, 1.0)
         val momentumPp = book.momentumPp(tick.ticker)
         val flowAdjPp = (midPp + 8.0 * tanh(flow) + 0.35 * momentumPp).coerceIn(2.0, 98.0)
-        // Another coin's YES midpoint is a different event probability.
-        // Keep this channel out of the fair-value blend until its predictive
-        // contribution is fitted against same-market settlement outcomes.
-        val relatedPp: Double? = null
+        val related01 = book.relatedCryptoMid(tick.series, settings.watchedSeries)
+        val relatedPp = related01?.times(100.0)
 
         val velAdjPp = vel?.let {
             val velPpPerSec = it * 100.0
@@ -417,8 +439,9 @@ class ScoringEngine(
             ).coerceIn(2.0, 98.0)
 
         val calState = calibration
-        val afterTemp = Calibrator.applyPp(rawFair, calState)
-        var fair = OnlineAdapter.applyPp(afterTemp, adapterState).coerceIn(2.0, 98.0)
+        val afterTemp = Calibrator.applyPp(rawFair, calState, tteSec)
+        // OnlineAdapter Platt is disabled — one calibrator only (raw vs outcome).
+        var fair = afterTemp.coerceIn(2.0, 98.0)
         var delta = fair - midPp
         var predictedSide = if (delta >= 0) "YES" else "NO"
 
@@ -536,12 +559,32 @@ class ScoringEngine(
         }
         val strikeUsd = tick.floorStrike ?: book.strike(tick.ticker)
             ?: DirectionSanity.parseStrike(tick.ticker)
+        val sigmaAnnual = modelSpot?.let {
+            spotFeat?.realizedVol15m?.let { barStd ->
+                if (!barStd.isFinite() || barStd <= 0.0) null
+                else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
+                    .coerceIn(0.01, 5.0)
+            } ?: com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.typicalSigma(tick.series)
+        }
+        val digitalFairPp = if (modelSpot != null && strikeUsd != null && sigmaAnnual != null) {
+            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
+                spot = modelSpot,
+                strike = strikeUsd,
+                tteSeconds = (tteSec ?: 900L).toDouble(),
+                sigmaAnnual = sigmaAnnual
+            )?.times(100.0)
+        } else {
+            null
+        }
         val dir = DirectionSanity.apply(
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = modelSpot,
             strikeUsd = strikeUsd,
-            spotReturn = spotRet,
+            spotReturn = if (spotFeat?.modelUsable == true) spotRet else null,
             fairPp = fair,
-            predictedSide = predictedSide
+            predictedSide = predictedSide,
+            digitalFairPp = digitalFairPp,
+            tteSeconds = (tteSec ?: 900L).toDouble(),
+            sigmaAnnual = sigmaAnnual
         )
         if (dir.applied) {
             fair = dir.fairPp
@@ -598,21 +641,6 @@ class ScoringEngine(
             extBlocked != null -> extBlocked
             else -> filter.reason
         }
-        val sigmaAnnual = spotFeat?.realizedVol15m?.let { barStd ->
-            if (!barStd.isFinite() || barStd <= 0.0) null
-            else (barStd * kotlin.math.sqrt(com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.SECONDS_PER_YEAR / 60.0))
-                .coerceIn(0.01, 5.0)
-        }
-        val digitalFairPp = if (spotFeat?.lastPrice != null && strikeUsd != null && sigmaAnnual != null) {
-            com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pFinishAbove(
-                spot = spotFeat.lastPrice!!,
-                strike = strikeUsd,
-                tteSeconds = (tteSec ?: 900L).toDouble(),
-                sigmaAnnual = sigmaAnnual
-            )?.times(100.0)
-        } else {
-            null
-        }
         var importedModelPp: Double? = null
         var modelEdgeQualified = true
         var importedBlendW: Double? = null
@@ -620,7 +648,7 @@ class ScoringEngine(
         if (loaded != null) {
             val feats = com.dirk.kalshiodds.prediction.EdgeFeatures.build(
                 com.dirk.kalshiodds.prediction.EdgeFeatures.Raw(
-                    spot = spotFeat?.lastPrice,
+                    spot = modelSpot,
                     strike = strikeUsd,
                     tteSeconds = (tteSec ?: 900L).toDouble(),
                     sigmaAnnual = sigmaAnnual,
@@ -629,9 +657,10 @@ class ScoringEngine(
                     spread = spread,
                     momentum = momForMl,
                     realizedVol01 = volForMl,
-                    crossAssetRet = spotFeat?.spotReturn5m,
+                    crossAssetRet = if (spotFeat?.modelUsable == true) spotFeat.spotReturn5m else null,
                     nowMs = nowMs,
-                    digitalFair = digitalFairPp?.div(100.0)
+                    digitalFair = digitalFairPp?.div(100.0),
+                    coinbaseCloses = if (spotFeat?.modelUsable == true) spotFeat.minuteCloses else emptyList()
                 )
             )
             val pYes = loaded.predictYes(feats)
@@ -644,12 +673,12 @@ class ScoringEngine(
             predictedSide = if (delta >= 0) "YES" else "NO"
         }
         val tape = TapeConflict.evaluate(
-            spotReturn1m = spotFeat?.spotReturn1m,
-            spotReturn5m = spotFeat?.spotReturn5m,
+            spotReturn1m = if (spotFeat?.modelUsable == true) spotFeat.spotReturn1m else null,
+            spotReturn5m = if (spotFeat?.modelUsable == true) spotFeat.spotReturn5m else null,
             modelSide = predictedSide,
             yesAsk = tick.yesAsk,
             noAsk = tick.noAsk ?: tick.yesBid?.let { 1.0 - it },
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = modelSpot,
             strikeUsd = strikeUsd,
             fairYes = fair / 100.0,
             previousPrimary = lastPrimarySide[tick.ticker],
@@ -762,7 +791,7 @@ class ScoringEngine(
             extendedNote = extOut?.note,
             directionalLock = dir.applied,
             spotVsTargetUsd = dir.spotVsTargetUsd,
-            spotUsd = spotFeat?.lastPrice,
+            spotUsd = modelSpot,
             tapeTrend = tape.trend.name,
             tapeConflict = tape.conflict,
             tapeConflictNote = tape.banner,
@@ -980,13 +1009,13 @@ class ScoringEngine(
     }
 
     companion object {
-        // The shipped MLP trails the market midpoint in the recorded backtest.
-        // It remains visible for diagnostics but cannot tilt trade fair value.
-        // Backtest showed: W_AI = 0.0 means model doesn't help. Winning strategy
-        // uses simplified approach: cheap sides + time window only.
         const val W_AI = 0.0
         const val W_FLOW = 0.12
-        const val W_RELATED = 0.08
+        /**
+         * Related-crypto YES mids are other coins / other strikes — not
+         * this market's P(YES). Weight stays 0 (Bitcoin-only).
+         */
+        const val W_RELATED = 0.0
         const val W_VELOCITY = 0.10
         const val W_IMBALANCE = 0.10
         const val W_LEADLAG = 0.10
@@ -995,7 +1024,7 @@ class ScoringEngine(
 
         const val W_AI_LATE = 0.0
         const val W_FLOW_LATE = 0.14
-        const val W_RELATED_LATE = 0.04
+        const val W_RELATED_LATE = 0.0
         const val W_VELOCITY_LATE = 0.14
         const val W_IMBALANCE_LATE = 0.14
         const val W_LEADLAG_LATE = 0.06
@@ -1006,14 +1035,5 @@ class ScoringEngine(
 
         /** Book deltas update depth immediately; re-score at most this often. */
         const val BOOK_SCORE_MIN_INTERVAL_MS = 250L
-
-        /**
-         * Winning strategy constants based on OOS backtest results.
-         * App pick, ask 32-50c: 92 trades, +$89.46, +$0.97/bet, 60.9% win
-         * App pick, time-left 11-9min: 593 trades, +$134.18, +$0.23/bet, 73.2% win
-         */
-        const val WINNING_STRATEGY_MAX_ASK = 0.40
-        const val WINNING_STRATEGY_TIME_WINDOW_MS = 360_000L
-        const val WINNING_STRATEGY_MIN_TIME_MS = 300_000L
     }
 }

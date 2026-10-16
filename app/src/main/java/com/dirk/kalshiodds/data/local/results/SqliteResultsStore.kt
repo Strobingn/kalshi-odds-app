@@ -11,7 +11,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * a process kill. Writes are serialized by SQLite; callers should use
  * [AsyncResultsWriter] so scoring never blocks.
  */
-class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.data.local.archive.DataArchive {
+class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodds.decision.LedgerSink, com.dirk.kalshiodds.decision.ScalpPersistence, com.dirk.kalshiodds.signal.paper.PaperOrderPersistence {
     private val db = Helper(context.applicationContext)
 
     override fun insertSnapshots(rows: List<ScoredSnapshotRow>) {
@@ -62,92 +62,6 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         }
     }
 
-    override fun insertForwardTests(rows: List<ForwardTestRow>) {
-        if (rows.isEmpty()) return
-        val w = db.writableDatabase
-        w.beginTransaction()
-        try {
-            for (r in rows) {
-                val v = ContentValues().apply {
-                    put("ticker", r.ticker); put("series", r.series); put("captured_at_ms", r.capturedAtMs)
-                    put("model_yes", r.modelYes); put("market_yes", r.marketYes); put("side", r.side)
-                    put("book_ask", r.bookAsk); put("size_at_ask", r.sizeAtAsk)
-                    put("contracts", r.contracts); put("all_in_usd", r.allInUsd); put("fee_usd", r.feeUsd)
-                    put("quote_qualified", if (r.quoteQualified) 1 else 0)
-                }
-                w.insertWithOnConflict(TABLE_FORWARD, null, v, SQLiteDatabase.CONFLICT_IGNORE)
-            }
-            w.execSQL("DELETE FROM $TABLE_FORWARD WHERE ticker NOT IN " +
-                "(SELECT ticker FROM $TABLE_FORWARD ORDER BY captured_at_ms DESC LIMIT $MAX_FORWARD)")
-            w.setTransactionSuccessful()
-        } finally { w.endTransaction() }
-    }
-
-    override fun forwardTests(limit: Int): List<ForwardTestRow> {
-        val out = ArrayList<ForwardTestRow>()
-        db.readableDatabase.rawQuery(
-            "SELECT f.*, s.result AS outcome FROM $TABLE_FORWARD f " +
-                "LEFT JOIN $TABLE_SETTLED s ON s.ticker = f.ticker " +
-                "ORDER BY f.captured_at_ms DESC LIMIT ?",
-            arrayOf(limit.coerceIn(1, MAX_FORWARD).toString())
-        ).use { c ->
-            while (c.moveToNext()) out.add(ForwardTestRow(
-                ticker = c.str("ticker"), series = c.str("series"),
-                capturedAtMs = c.long("captured_at_ms"), modelYes = c.dbl("model_yes"),
-                marketYes = c.dbl("market_yes"), side = c.str("side"),
-                bookAsk = c.dblOrNull("book_ask"), sizeAtAsk = c.dblOrNull("size_at_ask"),
-                contracts = c.intOrNull("contracts"), allInUsd = c.dblOrNull("all_in_usd"),
-                feeUsd = c.dblOrNull("fee_usd"), quoteQualified = c.long("quote_qualified") == 1L,
-                outcome = c.strOrNull("outcome")
-            ))
-        }
-        return out
-    }
-
-    override fun insertTicketForward(rows: List<TicketForwardRow>) {
-        if (rows.isEmpty()) return
-        val w = db.writableDatabase
-        w.beginTransaction()
-        try {
-            for (r in rows) {
-                val v = ContentValues().apply {
-                    put("ticker", r.ticker); put("series", r.series); put("captured_at_ms", r.capturedAtMs)
-                    put("build_code", r.buildCode); put("kind", r.kind); put("model_source", r.modelSource)
-                    put("side", r.side); put("model_yes", r.modelYes); put("market_yes", r.marketYes)
-                    put("ask", r.ask); put("visible_contracts", r.visibleContracts)
-                    put("contracts", r.contracts); put("all_in_usd", r.allInUsd)
-                    put("fee_usd", r.feeUsd); put("fee_rate", r.feeRate)
-                    put("modeled_net_usd", r.modeledNetUsd)
-                }
-                w.insertWithOnConflict(TABLE_TICKET_FORWARD, null, v, SQLiteDatabase.CONFLICT_IGNORE)
-            }
-            w.execSQL("DELETE FROM $TABLE_TICKET_FORWARD WHERE ticker NOT IN " +
-                "(SELECT ticker FROM $TABLE_TICKET_FORWARD ORDER BY captured_at_ms DESC LIMIT $MAX_FORWARD)")
-            w.setTransactionSuccessful()
-        } finally { w.endTransaction() }
-    }
-
-    override fun ticketForward(limit: Int): List<TicketForwardRow> {
-        val out = ArrayList<TicketForwardRow>()
-        db.readableDatabase.rawQuery(
-            "SELECT f.*, s.result AS outcome FROM $TABLE_TICKET_FORWARD f " +
-                "LEFT JOIN $TABLE_SETTLED s ON s.ticker = f.ticker " +
-                "ORDER BY f.captured_at_ms DESC LIMIT ?",
-            arrayOf(limit.coerceIn(1, MAX_FORWARD).toString())
-        ).use { c ->
-            while (c.moveToNext()) out.add(TicketForwardRow(
-                ticker = c.str("ticker"), series = c.str("series"),
-                capturedAtMs = c.long("captured_at_ms"), buildCode = c.intOrNull("build_code") ?: 0,
-                kind = c.str("kind"), modelSource = c.str("model_source"), side = c.str("side"),
-                modelYes = c.dbl("model_yes"), marketYes = c.dbl("market_yes"), ask = c.dbl("ask"),
-                visibleContracts = c.dbl("visible_contracts"), contracts = c.intOrNull("contracts") ?: 0,
-                allInUsd = c.dbl("all_in_usd"), feeUsd = c.dbl("fee_usd"), feeRate = c.dbl("fee_rate"),
-                modeledNetUsd = c.dbl("modeled_net_usd"), outcome = c.strOrNull("outcome")
-            ))
-        }
-        return out
-    }
-
     override fun recentSnapshots(limit: Int): List<ScoredSnapshotRow> =
         query(TABLE_SNAP, limit) { cursorToSnap(it) }
 
@@ -159,6 +73,52 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     override fun recentTickets(limit: Int): List<TicketAttemptRow> =
         query(TABLE_TICKET, limit) { cursorToTicket(it) }
+
+    override fun save(order: PendingClientOrder) {
+        val values = ContentValues().apply {
+            put("order_key", order.key)
+            put("client_order_id", order.clientOrderId)
+            put("attempted", if (order.attempted) 1 else 0)
+            put("ticker", order.ticker)
+            put("side", order.side)
+            put("kind", order.kind)
+            put("updated_at_ms", order.updatedAtMs)
+        }
+        db.writableDatabase.insertWithOnConflict(
+            TABLE_PENDING,
+            null,
+            values,
+            SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun find(key: String): PendingClientOrder? {
+        db.readableDatabase.query(
+            TABLE_PENDING,
+            null,
+            "order_key = ?",
+            arrayOf(key),
+            null,
+            null,
+            null,
+            "1"
+        ).use { c ->
+            if (!c.moveToFirst()) return null
+            return PendingClientOrder(
+                key = c.str("order_key"),
+                clientOrderId = c.str("client_order_id"),
+                attempted = c.long("attempted") != 0L,
+                ticker = c.strOrNull("ticker").orEmpty(),
+                side = c.strOrNull("side").orEmpty(),
+                kind = c.strOrNull("kind").orEmpty(),
+                updatedAtMs = c.long("updated_at_ms")
+            )
+        }
+    }
+
+    override fun clear(key: String) {
+        db.writableDatabase.delete(TABLE_PENDING, "order_key = ?", arrayOf(key))
+    }
 
     override fun recentOddsMids(limit: Int): List<OddsMidRow> =
         query(TABLE_ODDS, limit) { cursorToOdds(it) }
@@ -412,6 +372,83 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
                         put("source", r.source)
                     },
                     SQLiteDatabase.CONFLICT_IGNORE
+                )
+            }
+            w.setTransactionSuccessful()
+        } finally {
+            w.endTransaction()
+        }
+    }
+
+    /**
+     * Every settled paper fill ever written (no 80-row truncation): id to scorecard row.
+     * Paged by rowid so a large history never loads one giant cursor window.
+     */
+    fun settledPaperRows(): List<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>> {
+        val out = ArrayList<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>>()
+        val table = com.dirk.kalshiodds.data.local.paper.PaperFillSchema.TABLE
+        var last = -1L
+        while (true) {
+            var n = 0
+            db.readableDatabase.rawQuery(
+                "SELECT rowid, fill_id, ticker, limit_price, stake_usd, pnl_usd, outcome FROM $table " +
+                    "WHERE settled = 1 AND pnl_usd IS NOT NULL AND rowid > ? ORDER BY rowid LIMIT 2000",
+                arrayOf(last.toString())
+            ).use { c ->
+                while (c.moveToNext()) {
+                    n += 1
+                    last = c.getLong(0)
+                    val outcome = if (c.isNull(6)) null else c.getString(6)
+                    if (outcome.equals("void", true)) continue
+                    val price = c.getDouble(3)
+                    if (price <= 0.0) continue
+                    out += c.getString(1) to com.dirk.kalshiodds.decision.HonestScorecard.Row(
+                        ask = price,
+                        pnlUsd = c.getDouble(5),
+                        stakeUsd = c.getDouble(4),
+                        market = c.getString(2).uppercase()
+                    )
+                }
+            }
+            if (n < 2000) break
+        }
+        return out
+    }
+
+    override fun upsertPaperFills(rows: List<com.dirk.kalshiodds.signal.paper.PaperFill>) {
+        if (rows.isEmpty()) return
+        val table = com.dirk.kalshiodds.data.local.paper.PaperFillSchema.TABLE
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            for (r in rows) {
+                w.insertWithOnConflict(
+                    table,
+                    null,
+                    ContentValues().apply {
+                        put("fill_id", r.id)
+                        put("ticker", r.ticker)
+                        put("side", r.side)
+                        put("stake_usd", r.stakeUsd)
+                        put("contracts", r.contracts)
+                        put("limit_price", r.limitPrice)
+                        put("source", r.source)
+                        put("created_at_ms", r.createdAtMs)
+                        put("settled", if (r.settled) 1 else 0)
+                        put("outcome", r.outcome)
+                        put("won", r.won?.let { if (it) 1 else 0 })
+                        put("pnl_usd", r.pnlUsd)
+                        put("note", r.note)
+                        put("win_target_usd", r.winTargetUsd)
+                        put("ai_pct", r.aiPct)
+                        put("ai_confidence", r.aiConfidence)
+                        put("market_pct", r.marketPct)
+                        put("pick_source", r.pickSource)
+                        put("kelly_f", r.kellyF)
+                        put("kelly_fraction", r.kellyFraction)
+                        put("bankroll_after_usd", r.bankrollAfterUsd)
+                    },
+                    SQLiteDatabase.CONFLICT_REPLACE
                 )
             }
             w.setTransactionSuccessful()
@@ -713,8 +750,14 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     override fun existingSnapshotKeys(): Set<String> {
         val out = HashSet<String>()
-        db.readableDatabase.rawQuery("SELECT ticker, created_at_ms FROM $TABLE_SNAP", null).use { c ->
-            while (c.moveToNext()) out.add("${c.getString(0)}|${c.getLong(1)}")
+        db.readableDatabase.rawQuery(
+            "SELECT ticker, created_at_ms, side FROM $TABLE_SNAP",
+            null
+        ).use { c ->
+            while (c.moveToNext()) {
+                val side = if (c.isNull(2)) "" else c.getString(2).orEmpty()
+                out.add("${c.getString(0)}|${c.getLong(1)}|$side")
+            }
         }
         return out
     }
@@ -852,6 +895,15 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         )
     }
 
+    override fun repairInterruptedSessions(currentSessionId: String, recoveredAtMs: Long): Int =
+        db.writableDatabase.compileStatement(
+            "UPDATE $TABLE_SESSION SET ended_at_ms = MAX(started_at_ms, ?) WHERE id != ? AND ended_at_ms IS NULL"
+        ).use { statement ->
+            statement.bindLong(1, recoveredAtMs)
+            statement.bindString(2, currentSessionId)
+            statement.executeUpdateDelete()
+        }
+
     override fun recentSessions(limit: Int): List<com.dirk.kalshiodds.data.local.history.HistorySession> {
         val out = ArrayList<com.dirk.kalshiodds.data.local.history.HistorySession>()
         db.readableDatabase.rawQuery(
@@ -886,6 +938,413 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         clientOrderId = c.strOrNull("client_order_id"),
         note = c.strOrNull("note")
     )
+
+    override fun insertLedger(row: com.dirk.kalshiodds.data.local.ledger.LedgerRow): Long {
+        val values = ContentValues()
+        for ((k, v) in com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.values(row)) {
+            when (v) {
+                null -> values.putNull(k)
+                is Long -> values.put(k, v)
+                is Int -> values.put(k, v)
+                is Double -> if (v.isFinite()) values.put(k, v) else values.putNull(k)
+                is String -> values.put(k, v)
+                else -> values.put(k, v.toString())
+            }
+        }
+        return db.writableDatabase.insert(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            null,
+            values
+        )
+    }
+
+    /** 0.3.38 paper scalps: insert or replace one row by id. Never deletes. */
+    override fun upsertScalp(trade: com.dirk.kalshiodds.decision.ScalpTrade) {
+        val v = ContentValues().apply {
+            put("id", trade.id)
+            put("ticker", trade.ticker)
+            put("side", trade.side)
+            put("state", trade.state.name)
+            put("signal_at_ms", trade.signalAtMs)
+            put("signal_ask", trade.signalAsk)
+            put("fair_at_signal", trade.fairAtSignal)
+            put("contracts", trade.contracts)
+            trade.entryPrice?.let { put("entry_price", it) } ?: putNull("entry_price")
+            put("entry_fee_usd", trade.entryFeeUsd)
+            trade.entryAtMs?.let { put("entry_at_ms", it) } ?: putNull("entry_at_ms")
+            trade.exitDecidedAtMs?.let { put("exit_decided_at_ms", it) } ?: putNull("exit_decided_at_ms")
+            put("exit_reason", trade.exitReason)
+            put("sold_contracts", trade.soldContracts)
+            put("proceeds_usd", trade.proceedsUsd)
+            put("exit_fee_usd", trade.exitFeeUsd)
+            trade.closedAtMs?.let { put("closed_at_ms", it) } ?: putNull("closed_at_ms")
+            trade.netUsd?.let { put("net_usd", it) } ?: putNull("net_usd")
+            put("note", trade.note)
+            put("rule_version", trade.ruleVersion)
+            put("scalper_id", com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(trade) ?: "")
+            put("synced", 0)
+        }
+        db.writableDatabase.insertWithOnConflict(
+            com.dirk.kalshiodds.data.local.paper.ScalpSchema.TABLE, null, v, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    // ---------------- 0.3.67 scalp ledger: indexed SQLite + incremental stats ----------------
+    private val ST = com.dirk.kalshiodds.data.local.paper.ScalpSchema
+
+    /** Upsert + (on the close transition) every aggregate table, in ONE transaction. */
+    override fun upsertScalpAndStats(trade: com.dirk.kalshiodds.decision.ScalpTrade, prev: com.dirk.kalshiodds.decision.ScalpTrade?) {
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            var prevState: String? = null
+            var prevAgg = 0
+            var exists = false
+            w.rawQuery("SELECT state, agg_v FROM ${ST.TABLE} WHERE id = ?", arrayOf(trade.id)).use { c ->
+                if (c.moveToFirst()) { exists = true; prevState = c.getString(0); prevAgg = c.getInt(1) }
+            }
+            upsertScalp(trade)
+            // A row not yet indexed by this generation is left for the background indexer (it counts it once, whole).
+            if (!exists || prevAgg >= ST.AGG_V) {
+                applyAgg(w, trade, wasOpen = exists && prevState != "CLOSED" && prevState != "NO_FILL",
+                    wasClosed = exists && prevState == "CLOSED", wasNoFill = exists && prevState == "NO_FILL")
+                w.execSQL("UPDATE ${ST.TABLE} SET agg_v = ? WHERE id = ?", arrayOf<Any>(ST.AGG_V, trade.id))
+            }
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+    }
+
+    /** Apply one row's contribution (transitions only) to scalp_stats / scalp_daily / scalp_exits / scalp_windows. */
+    private fun applyAgg(w: SQLiteDatabase, t: com.dirk.kalshiodds.decision.ScalpTrade, wasOpen: Boolean, wasClosed: Boolean, wasNoFill: Boolean) {
+        val sid = com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(t) ?: return
+        val nowOpen = t.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && t.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL
+        w.execSQL("INSERT OR IGNORE INTO ${ST.STATS}(scalper_id) VALUES (?)", arrayOf(sid))
+        if (nowOpen && !wasOpen) w.execSQL("UPDATE ${ST.STATS} SET open_n = open_n + 1 WHERE scalper_id = ?", arrayOf(sid))
+        if (!nowOpen && wasOpen) w.execSQL("UPDATE ${ST.STATS} SET open_n = MAX(open_n - 1, 0) WHERE scalper_id = ?", arrayOf(sid))
+        if (t.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL && !wasNoFill) w.execSQL("UPDATE ${ST.STATS} SET no_fills = no_fills + 1 WHERE scalper_id = ?", arrayOf(sid))
+        if (wasClosed) return
+        val d = com.dirk.kalshiodds.decision.ScalpCloseDelta.of(t) ?: return
+        val win = if (d.win) 1 else 0
+        val lose = 1 - win
+        val neg = if (d.net < 0) 1 else 0
+        val ss = d.stopSaved
+        w.execSQL(
+            "UPDATE ${ST.STATS} SET n = n + 1, wins = wins + ?, net_usd = net_usd + ?, fees_usd = fees_usd + ?, " +
+                "best_usd = CASE WHEN best_usd IS NULL OR ? > best_usd THEN ? ELSE best_usd END, " +
+                "worst_usd = CASE WHEN worst_usd IS NULL OR ? < worst_usd THEN ? ELSE worst_usd END, " +
+                "sum_sq = sum_sq + ?, last_closed_at_ms = MAX(COALESCE(last_closed_at_ms, 0), ?), " +
+                "sum_win = sum_win + ?, sum_loss = sum_loss + ?, n_loss = n_loss + ?, neg_sum = neg_sum + ?, neg_n = neg_n + ?, " +
+                "cost_sum = cost_sum + ?, stop_saved_sum = stop_saved_sum + ?, stop_saved_n = stop_saved_n + ? WHERE scalper_id = ?",
+            arrayOf<Any>(win, d.net, d.fees, d.net, d.net, d.net, d.net, d.net * d.net, d.closedAtMs,
+                win * d.net, lose * d.net, lose, neg * d.net, neg, d.cost, ss ?: 0.0, if (ss != null) 1 else 0, sid)
+        )
+        w.execSQL("INSERT OR IGNORE INTO ${ST.DAILY}(scalper_id, day_et) VALUES (?, ?)", arrayOf(sid, d.day))
+        w.execSQL(
+            "UPDATE ${ST.DAILY} SET n = n + 1, wins = wins + ?, net_usd = net_usd + ?, fees_usd = fees_usd + ?, sum_sq = sum_sq + ?, " +
+                "sum_win = sum_win + ?, sum_loss = sum_loss + ?, n_loss = n_loss + ?, neg_sum = neg_sum + ?, neg_n = neg_n + ?, cost_sum = cost_sum + ?, " +
+                "best_usd = CASE WHEN best_usd IS NULL OR ? > best_usd THEN ? ELSE best_usd END, " +
+                "worst_usd = CASE WHEN worst_usd IS NULL OR ? < worst_usd THEN ? ELSE worst_usd END WHERE scalper_id = ? AND day_et = ?",
+            arrayOf<Any>(win, d.net, d.fees, d.net * d.net, win * d.net, lose * d.net, lose, neg * d.net, neg, d.cost, d.net, d.net, d.net, d.net, sid, d.day)
+        )
+        w.execSQL("INSERT OR IGNORE INTO ${ST.EXITS}(scalper_id, reason) VALUES (?, ?)", arrayOf(sid, d.reason))
+        w.execSQL("UPDATE ${ST.EXITS} SET n = n + 1 WHERE scalper_id = ? AND reason = ?", arrayOf(sid, d.reason))
+        w.execSQL("INSERT OR IGNORE INTO ${ST.WINDOWS}(window_key, scalper_id, close_ms) VALUES (?, ?, ?)", arrayOf<Any?>(d.windowKey, sid, d.windowCloseMs))
+        w.execSQL("UPDATE ${ST.WINDOWS} SET n = n + 1, net_usd = net_usd + ? WHERE window_key = ? AND scalper_id = ?", arrayOf<Any>(d.net, d.windowKey, sid))
+    }
+
+    override fun loadStats(): List<com.dirk.kalshiodds.decision.ScalpStat> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpStat>()
+        runCatching {
+            db.readableDatabase.rawQuery("SELECT scalper_id, n, wins, net_usd, fees_usd, best_usd, worst_usd, sum_sq, last_closed_at_ms, open_n, " +
+                "sum_win, sum_loss, n_loss, neg_sum, neg_n, cost_sum, stop_saved_sum, stop_saved_n, no_fills FROM ${ST.STATS}", null).use { c ->
+                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpStat(
+                    c.getString(0), c.getInt(1), c.getInt(2), c.getDouble(3), c.getDouble(4),
+                    if (c.isNull(5)) null else c.getDouble(5), if (c.isNull(6)) null else c.getDouble(6),
+                    c.getDouble(7), if (c.isNull(8)) null else c.getLong(8), c.getInt(9),
+                    c.getDouble(10), c.getDouble(11), c.getInt(12), c.getDouble(13), c.getInt(14), c.getDouble(15), c.getDouble(16), c.getInt(17), c.getInt(18))
+            }
+        }
+        return out
+    }
+
+    override fun loadDaily(dayEt: String): List<com.dirk.kalshiodds.decision.ScalpDaily> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpDaily>()
+        runCatching {
+            db.readableDatabase.rawQuery("SELECT scalper_id, day_et, n, wins, net_usd, fees_usd, sum_sq, sum_win, sum_loss, n_loss, neg_sum, neg_n, cost_sum, best_usd, worst_usd " +
+                "FROM ${ST.DAILY} WHERE day_et = ?", arrayOf(dayEt)).use { c ->
+                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpDaily(c.getString(0), c.getString(1), c.getInt(2), c.getInt(3), c.getDouble(4), c.getDouble(5),
+                    c.getDouble(6), c.getDouble(7), c.getDouble(8), c.getInt(9), c.getDouble(10), c.getInt(11), c.getDouble(12),
+                    if (c.isNull(13)) null else c.getDouble(13), if (c.isNull(14)) null else c.getDouble(14))
+            }
+        }
+        return out
+    }
+
+    override fun loadExits(): List<com.dirk.kalshiodds.decision.ScalpExitAgg> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpExitAgg>()
+        runCatching {
+            db.readableDatabase.rawQuery("SELECT scalper_id, reason, n FROM ${ST.EXITS}", null).use { c ->
+                while (c.moveToNext()) out += com.dirk.kalshiodds.decision.ScalpExitAgg(c.getString(0), c.getString(1), c.getInt(2))
+            }
+        }
+        return out
+    }
+
+    override fun loadWindows(limitWindows: Int): List<com.dirk.kalshiodds.decision.ScalpWindowAgg> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpWindowAgg>()
+        runCatching {
+            // 0.3.68: one pass down the close_ms index; stop at the first row of window limit+1 (no GROUP BY over every window).
+            val keys = HashSet<String>()
+            db.readableDatabase.rawQuery("SELECT window_key, scalper_id, n, net_usd, close_ms FROM ${ST.WINDOWS} ORDER BY close_ms DESC LIMIT ${(limitWindows + 1) * (com.dirk.kalshiodds.decision.ScalpModels.COUNT + 4)}", null).use { c ->
+                while (c.moveToNext()) {
+                    val k = c.getString(0)
+                    if (keys.add(k) && keys.size > limitWindows) break
+                    out += com.dirk.kalshiodds.decision.ScalpWindowAgg(k, c.getString(1), c.getInt(2), c.getDouble(3), if (c.isNull(4)) null else c.getLong(4))
+                }
+            }
+        }
+        return out
+    }
+
+    private fun scalpRows(sql: String, args: Array<String>?): List<com.dirk.kalshiodds.decision.ScalpTrade> {
+        val out = ArrayList<com.dirk.kalshiodds.decision.ScalpTrade>()
+        db.readableDatabase.rawQuery(sql, args).use { c -> while (c.moveToNext()) out += scalpFromCursor(c) }
+        return out
+    }
+
+    override fun loadActiveScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        // Open rows + rows closed in the last 20 min (per-window entry rules need them); index on state.
+        val since = System.currentTimeMillis() - 20 * 60_000L
+        scalpRows("SELECT * FROM ${ST.TABLE} WHERE state NOT IN ('CLOSED','NO_FILL') OR closed_at_ms >= ? ORDER BY signal_at_ms DESC LIMIT 5000", arrayOf(since.toString()))
+    }.getOrDefault(emptyList())
+
+    /** Keyset paging, newest first, index (scalper_id, closed_at_ms DESC). */
+    override fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        if (afterClosedAtMs == null) scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id = ? AND state = 'CLOSED' ORDER BY closed_at_ms DESC, id DESC LIMIT $limit", arrayOf(scalperId))
+        else scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id = ? AND state = 'CLOSED' AND (closed_at_ms < ? OR (closed_at_ms = ? AND id < ?)) ORDER BY closed_at_ms DESC, id DESC LIMIT $limit",
+            arrayOf(scalperId, afterClosedAtMs.toString(), afterClosedAtMs.toString(), afterId ?: ""))
+    }.getOrDefault(emptyList())
+
+    override fun windowPrimaryTrades(ticker: String, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> =
+        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY signal_at_ms DESC LIMIT ${limit.coerceIn(1, 600)}", arrayOf(ticker.uppercase()))
+            .filter { it.isPrimary }.sortedBy { it.signalAtMs }
+
+    override fun windowTrades(scalperId: String, ticker: String): List<com.dirk.kalshiodds.decision.ScalpTrade> =
+        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id = ? ORDER BY signal_at_ms", arrayOf(ticker.uppercase(), scalperId))
+
+    /** Uploader: unsynced closed primaries by index (synced, closed_at_ms), oldest first. */
+    override fun unsyncedClosed(limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        scalpRows("SELECT * FROM ${ST.TABLE} WHERE synced = 0 AND state = 'CLOSED' AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY closed_at_ms ASC LIMIT $limit", null)
+    }.getOrDefault(emptyList())
+
+    override fun markSynced(ids: List<String>) {
+        if (ids.isEmpty()) return
+        val w = db.writableDatabase
+        w.beginTransaction()
+        try {
+            ids.chunked(500).forEach { ch ->
+                w.execSQL("UPDATE ${ST.TABLE} SET synced = 1 WHERE id IN (${ch.joinToString(",") { "?" }})", ch.toTypedArray())
+            }
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+    }
+
+    /** One-time: everything closed at or before the 0.3.65/0.3.66 ack watermark is already in Supabase. */
+    fun markSyncedUpTo(closedAtMs: Long) {
+        runCatching { db.writableDatabase.execSQL("UPDATE ${ST.TABLE} SET synced = 1 WHERE synced = 0 AND state = 'CLOSED' AND closed_at_ms <= ?", arrayOf<Any>(closedAtMs)) }
+    }
+
+    /** 0.3.67/0.3.68 background indexer: rows with agg_v < AGG_V → tagged + counted whole, [limit] per transaction. */
+    override fun migrateStatsChunk(limit: Int): Int {
+        val w = db.writableDatabase
+        val rows = runCatching { scalpRows("SELECT * FROM ${ST.TABLE} WHERE agg_v < ${ST.AGG_V} LIMIT $limit", null) }.getOrDefault(emptyList())
+        if (rows.isEmpty()) return 0
+        w.beginTransaction()
+        try {
+            val mark = w.compileStatement("UPDATE ${ST.TABLE} SET scalper_id = ?, agg_v = ${ST.AGG_V} WHERE id = ? AND agg_v < ${ST.AGG_V}")
+            for (t in rows) {
+                val sid = com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(t)
+                mark.clearBindings(); mark.bindString(1, sid ?: ""); mark.bindString(2, t.id)
+                if (mark.executeUpdateDelete() != 1) continue // counted meanwhile by the live path
+                if (sid != null) applyAgg(w, t, wasOpen = false, wasClosed = false, wasNoFill = false)
+            }
+            w.setTransactionSuccessful()
+        } finally { w.endTransaction() }
+        return rows.size
+    }
+
+    override fun tradeCount(): Int = runCatching {
+        db.readableDatabase.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE}", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+    }.getOrDefault(0)
+
+    fun unmigratedCount(): Int = runCatching {
+        db.readableDatabase.rawQuery("SELECT COUNT(*) FROM ${ST.TABLE} WHERE agg_v < ${ST.AGG_V}", null).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
+    }.getOrDefault(0)
+
+    override fun statsMigrated(): Boolean = unmigratedCount() == 0
+    @androidx.annotation.VisibleForTesting internal fun writableForTest(): SQLiteDatabase = db.writableDatabase
+
+    private val paperOrderJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; encodeDefaults = true }
+
+    override fun upsertPaperOrder(order: com.dirk.kalshiodds.signal.paper.PaperOrder) {
+        val v = android.content.ContentValues().apply {
+            put("id", order.id)
+            put("ticker", order.ticker)
+            put("status", order.status)
+            put("source", order.source)
+            put("created_at_ms", order.createdAtMs)
+            put("updated_at_ms", order.updatedAtMs)
+            put("json", paperOrderJson.encodeToString(com.dirk.kalshiodds.signal.paper.PaperOrder.serializer(), order))
+        }
+        db.writableDatabase.insertWithOnConflict(
+            com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.TABLE, null, v, SQLiteDatabase.CONFLICT_REPLACE
+        )
+    }
+
+    override fun loadPaperOrders(): List<com.dirk.kalshiodds.signal.paper.PaperOrder> {
+        val out = ArrayList<com.dirk.kalshiodds.signal.paper.PaperOrder>()
+        runCatching {
+            db.readableDatabase.query(
+                com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.TABLE, arrayOf("json"), null, null, null, null, "created_at_ms DESC", "2000"
+            ).use { c ->
+                while (c.moveToNext()) {
+                    runCatching { paperOrderJson.decodeFromString(com.dirk.kalshiodds.signal.paper.PaperOrder.serializer(), c.getString(0)) }
+                        .getOrNull()?.let { out += it }
+                }
+            }
+        }
+        return out
+    }
+
+    override fun loadScalps(): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
+        // 0.3.67: bounded (tuner input only); the UI never loads the whole table.
+        scalpRows("SELECT * FROM ${ST.TABLE} WHERE state = 'CLOSED' ORDER BY closed_at_ms DESC LIMIT 6000", null)
+    }.getOrDefault(emptyList())
+
+    private fun scalpFromCursor(c: android.database.Cursor): com.dirk.kalshiodds.decision.ScalpTrade {
+        val state = runCatching { com.dirk.kalshiodds.decision.ScalpState.valueOf(c.str("state")) }
+            .getOrDefault(com.dirk.kalshiodds.decision.ScalpState.NO_FILL)
+        return com.dirk.kalshiodds.decision.ScalpTrade(
+            id = c.str("id"),
+            ticker = c.str("ticker"),
+            side = c.str("side"),
+            state = state,
+            signalAtMs = c.long("signal_at_ms"),
+            signalAsk = c.dbl("signal_ask"),
+            fairAtSignal = c.dbl("fair_at_signal"),
+            contracts = c.intOrNull("contracts") ?: 0,
+            entryPrice = c.dblOrNull("entry_price"),
+            entryFeeUsd = c.dbl("entry_fee_usd"),
+            entryAtMs = c.dblOrNull("entry_at_ms")?.toLong(),
+            exitDecidedAtMs = c.dblOrNull("exit_decided_at_ms")?.toLong(),
+            exitReason = c.strOrNull("exit_reason"),
+            soldContracts = c.intOrNull("sold_contracts") ?: 0,
+            proceedsUsd = c.dbl("proceeds_usd"),
+            exitFeeUsd = c.dbl("exit_fee_usd"),
+            closedAtMs = c.dblOrNull("closed_at_ms")?.toLong(),
+            netUsd = c.dblOrNull("net_usd"),
+            note = c.strOrNull("note").orEmpty(),
+            ruleVersion = c.strOrNull("rule_version") ?: com.dirk.kalshiodds.decision.ScalpRule.VERSION
+        )
+    }
+
+    /** Fill in the outcome on every unsettled prediction for [ticker]. Never deletes rows. */
+    fun settleLedger(ticker: String, result: String, atMs: Long): Int {
+        val values = ContentValues().apply {
+            put("settlement_result", result.lowercase())
+            put("settled_at_ms", atMs)
+        }
+        return db.writableDatabase.update(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            values,
+            "ticker = ? AND settlement_result IS NULL",
+            arrayOf(ticker.uppercase())
+        )
+    }
+
+    private fun queryLedger(
+        selection: String?,
+        args: Array<String>?,
+        order: String,
+        limit: Int
+    ): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> {
+        val out = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+        db.readableDatabase.query(
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE,
+            null,
+            selection,
+            args,
+            null,
+            null,
+            order,
+            limit.coerceAtLeast(1).toString()
+        ).use { c ->
+            while (c.moveToNext()) out.add(cursorToLedger(c))
+        }
+        return out
+    }
+
+    fun recentLedger(limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
+        queryLedger(null, null, "timestamp_ms DESC", limit)
+
+    /** Settled predictions newest first, for calibration. */
+    override fun settledLedger(sinceMs: Long, limit: Int): List<com.dirk.kalshiodds.data.local.ledger.LedgerRow> =
+        queryLedger(
+            "settlement_result IN ('yes','no') AND timestamp_ms >= ?",
+            arrayOf(sinceMs.toString()),
+            "timestamp_ms DESC",
+            limit
+        )
+
+    /** Tickers with an unsettled prediction whose window has closed — fed to the settlement poller. */
+    override fun unsettledLedgerTickers(nowMs: Long, sinceMs: Long, limit: Int): List<String> {
+        val out = ArrayList<String>()
+        db.readableDatabase.rawQuery(
+            "SELECT ticker, MAX(close_time_ms) AS c FROM ${com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE} " +
+                "WHERE settlement_result IS NULL AND close_time_ms IS NOT NULL AND close_time_ms <= ? AND close_time_ms >= ? " +
+                "GROUP BY ticker ORDER BY c DESC LIMIT ?",
+            arrayOf(nowMs.toString(), sinceMs.toString(), limit.coerceAtLeast(1).toString())
+        ).use { c ->
+            while (c.moveToNext()) out.add(c.getString(0))
+        }
+        return out
+    }
+
+    fun ledgerCount(): Long =
+        android.database.DatabaseUtils.queryNumEntries(
+            db.readableDatabase,
+            com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.TABLE
+        )
+
+    /** Full export — no truncation (paged internally). */
+    fun ledgerCsv(): String {
+        val rows = ArrayList<com.dirk.kalshiodds.data.local.ledger.LedgerRow>()
+        var lastId = 0L
+        while (true) {
+            val page = queryLedger("id > ?", arrayOf(lastId.toString()), "id ASC", 20_000)
+            if (page.isEmpty()) break
+            rows += page
+            lastId = page.last().id
+            if (page.size < 20_000) break
+        }
+        return com.dirk.kalshiodds.data.local.ledger.LedgerCsv.render(rows)
+    }
+
+    private fun cursorToLedger(c: Cursor): com.dirk.kalshiodds.data.local.ledger.LedgerRow {
+        val types = com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.COLUMNS.associate { it.name to it.type }
+        return com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.fromReader(c.long("id")) { name ->
+            val i = c.getColumnIndex(name)
+            if (i < 0 || c.isNull(i)) {
+                null
+            } else {
+                when (types[name]) {
+                    com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.Type.INT -> c.getLong(i)
+                    com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.Type.REAL -> c.getDouble(i)
+                    else -> c.getString(i)
+                }
+            }
+        }
+    }
 
     private class Helper(context: Context) : SQLiteOpenHelper(context, DB_NAME, null, DB_VERSION) {
         override fun onCreate(db: SQLiteDatabase) {
@@ -963,8 +1422,11 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             createArchiveTables(db)
             createHistoryTables(db)
             createChartTickTable(db)
-            createForwardTable(db)
-            createTicketForwardTable(db)
+            createPaperFillTable(db)
+            createPendingOrdersTable(db)
+            createLedgerTable(db)
+            createScalpTable(db)
+            createPaperOrderTable(db)
         }
 
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
@@ -975,34 +1437,77 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
             }
             if (oldVersion < 4) createHistoryTables(db)
             if (oldVersion < 5) createChartTickTable(db)
-            if (oldVersion < 6) createForwardTable(db)
-            if (oldVersion < 7) createTicketForwardTable(db)
+            if (oldVersion < 6) createPaperFillTable(db)
+            if (oldVersion < 7) createLedgerTable(db)
+            if (oldVersion < 8) createScalpTable(db)
+            if (oldVersion < 9) createPaperOrderTable(db)
+            if (oldVersion < 10) createScalpTable(db)
+            // 0.3.68: move (rename) the 0.3.67 aggregates aside; fresh tables rebuilt by the background indexer.
+            if (oldVersion == 10) com.dirk.kalshiodds.data.local.paper.ScalpSchema.moveV10Sql().forEach { runCatching { db.execSQL(it) } }
+            if (oldVersion < 11) createScalpTable(db)
+            applyPaperFillColumns(db)
         }
 
-        private fun createForwardTable(db: SQLiteDatabase) {
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS $TABLE_FORWARD (
-                    ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
-                    model_yes REAL NOT NULL, market_yes REAL NOT NULL, side TEXT NOT NULL,
-                    book_ask REAL, size_at_ask REAL, contracts INTEGER, all_in_usd REAL,
-                    fee_usd REAL, quote_qualified INTEGER NOT NULL
-                )
-            """.trimIndent())
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_forward_time ON $TABLE_FORWARD(captured_at_ms)")
+        override fun onOpen(db: SQLiteDatabase) {
+            super.onOpen(db)
+            applyPaperFillColumns(db)
+            createPendingOrdersTable(db)
+            createScalpTable(db)
+            createPaperOrderTable(db)
         }
 
-        private fun createTicketForwardTable(db: SQLiteDatabase) {
-            db.execSQL("""
-                CREATE TABLE IF NOT EXISTS $TABLE_TICKET_FORWARD (
-                    ticker TEXT PRIMARY KEY, series TEXT NOT NULL, captured_at_ms INTEGER NOT NULL,
-                    build_code INTEGER NOT NULL, kind TEXT NOT NULL, model_source TEXT NOT NULL,
-                    side TEXT NOT NULL, model_yes REAL NOT NULL, market_yes REAL NOT NULL,
-                    ask REAL NOT NULL, visible_contracts REAL NOT NULL, contracts INTEGER NOT NULL,
-                    all_in_usd REAL NOT NULL, fee_usd REAL NOT NULL, fee_rate REAL NOT NULL,
-                    modeled_net_usd REAL NOT NULL
+        private fun createPaperOrderTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.upgradeSql(
+                com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.FROM_VERSION
+            )) {
+                db.execSQL(sql)
+            }
+        }
+
+        private fun createScalpTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.ScalpSchema.upgradeSql(
+                com.dirk.kalshiodds.data.local.paper.ScalpSchema.FROM_VERSION
+            )) {
+                // 0.3.67: ALTER ADD COLUMN throws when it already exists — ignore that one statement.
+                runCatching { db.execSQL(sql) }
+            }
+        }
+
+        private fun createPendingOrdersTable(db: SQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS $TABLE_PENDING (
+                  order_key TEXT PRIMARY KEY,
+                  client_order_id TEXT NOT NULL,
+                  attempted INTEGER NOT NULL,
+                  ticker TEXT,
+                  side TEXT,
+                  kind TEXT,
+                  updated_at_ms INTEGER NOT NULL
                 )
-            """.trimIndent())
-            db.execSQL("CREATE INDEX IF NOT EXISTS idx_ticket_forward_time ON $TABLE_TICKET_FORWARD(captured_at_ms)")
+                """.trimIndent()
+            )
+        }
+
+        private fun createLedgerTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.upgradeSql(
+                com.dirk.kalshiodds.data.local.ledger.PredictionLedgerSchema.FROM_VERSION
+            )) {
+                db.execSQL(sql)
+            }
+        }
+
+        private fun createPaperFillTable(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.upgradeSql(5)) {
+                db.execSQL(sql)
+            }
+            applyPaperFillColumns(db)
+        }
+
+        private fun applyPaperFillColumns(db: SQLiteDatabase) {
+            for (sql in com.dirk.kalshiodds.data.local.paper.PaperFillSchema.nullableColumnSql()) {
+                runCatching { db.execSQL(sql) }
+            }
         }
 
         private fun createChartTickTable(db: SQLiteDatabase) {
@@ -1113,7 +1618,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
 
     companion object {
         const val DB_NAME = "diphunter_results.db"
-        const val DB_VERSION = 7
+        const val DB_VERSION = 11
         const val TABLE_SETTINGS = "settings_history"
         const val TABLE_SESSION = "sessions"
         const val MAX_SETTINGS = 400
@@ -1121,6 +1626,7 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val TABLE_ALERT = "alerts_fired"
         const val TABLE_CARD = "scorecard_rows"
         const val TABLE_TICKET = "ticket_attempts"
+        const val TABLE_PENDING = "pending_client_orders"
         const val TABLE_ODDS = "odds_mids"
         const val TABLE_SETTLED = "settled_windows"
         const val TABLE_PATH = "price_path"
@@ -1128,9 +1634,6 @@ class SqliteResultsStore(context: Context) : ResultsStore, com.dirk.kalshiodds.d
         const val TABLE_FILL = "imported_fills"
         const val TABLE_CURSOR = "backfill_cursor"
         const val TABLE_CHART = com.dirk.kalshiodds.data.local.chart.ChartTickSchema.TABLE
-        const val TABLE_FORWARD = "forward_test"
-        const val TABLE_TICKET_FORWARD = "ticket_forward_test"
-        const val MAX_FORWARD = 5_000
         const val MAX_SNAP = 1_200
         const val MAX_ALERT = 400
         const val MAX_CARD = 600

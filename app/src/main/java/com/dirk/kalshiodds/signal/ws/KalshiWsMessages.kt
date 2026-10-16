@@ -46,7 +46,8 @@ object KalshiWsMessages {
             val yesLevels: List<Pair<Double, Double>>,
             val noLevels: List<Pair<Double, Double>>,
             val seq: Int?,
-            val receiveElapsedNanos: Long
+            val receiveElapsedNanos: Long,
+            val sid: Int? = null
         ) : Parsed()
         data class OrderbookDelta(
             val ticker: String,
@@ -54,9 +55,12 @@ object KalshiWsMessages {
             val delta: Double,
             val side: String,
             val seq: Int?,
-            val receiveElapsedNanos: Long
+            val receiveElapsedNanos: Long,
+            val sid: Int? = null,
+            val exchangeTsMs: Long? = null
         ) : Parsed()
-        data class Subscribed(val sid: Int?, val raw: String) : Parsed()
+        data class Subscribed(val sid: Int?, val raw: String, val commandId: Int? = null, val channel: String? = null) : Parsed()
+        data class CfValue(val tick: CfBenchmarks.Tick) : Parsed()
         data class Unsubscribed(val sids: List<Int>, val raw: String) : Parsed()
         data class Lifecycle(
             val ticker: String,
@@ -120,12 +124,21 @@ object KalshiWsMessages {
                 Parsed.Trade(tick)
             }
             "orderbook_snapshot" -> {
-                parseSnapshot(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
+                (parseSnapshot(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)).copy(sid = env.sid)
             }
             "orderbook_delta" -> {
-                parseDelta(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)
+                (parseDelta(env.msg, env.seq, receiveElapsedNanos) ?: return Parsed.Other(env.type, raw)).copy(sid = env.sid)
             }
-            "subscribed" -> Parsed.Subscribed(env.sid ?: env.msg?.intField("sid"), raw)
+            "subscribed" -> Parsed.Subscribed(
+                sid = env.sid ?: env.msg?.intField("sid"),
+                raw = raw,
+                commandId = env.id,
+                channel = env.msg?.stringField("channel")
+            )
+            CfBenchmarks.CHANNEL -> {
+                val tick = CfBenchmarks.parse(raw, System.currentTimeMillis()) ?: return Parsed.Other(env.type, raw)
+                Parsed.CfValue(tick)
+            }
             "unsubscribed" -> Parsed.Unsubscribed(
                 sids = env.msg?.intList("sids").orEmpty().ifEmpty {
                     listOfNotNull(env.sid)
@@ -223,7 +236,8 @@ object KalshiWsMessages {
             delta = delta,
             side = side,
             seq = seq,
-            receiveElapsedNanos = receiveElapsedNanos
+            receiveElapsedNanos = receiveElapsedNanos,
+            exchangeTsMs = msg.longField("ts_ms")
         )
     }
 

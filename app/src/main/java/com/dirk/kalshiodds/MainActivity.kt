@@ -44,11 +44,12 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
-    private val oddsViewModel: OddsViewModel by viewModels()
+    private val oddsViewModel: OddsViewModel by lazy { KalshiOddsApp.from(application).oddsViewModel }
     private val settingsViewModel: SettingsViewModel by viewModels()
     private val scorecardViewModel: ScorecardViewModel by viewModels()
     private val dataViewModel: DataViewModel by viewModels()
     private val historyViewModel: com.dirk.kalshiodds.ui.HistoryViewModel by viewModels()
+    private val decisionViewModel: com.dirk.kalshiodds.ui.DecisionViewModel by viewModels()
 
     private val notificationPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -59,6 +60,8 @@ class MainActivity : ComponentActivity() {
         SignalNotifier.ensureChannels(this)
         com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this)
         handleOpportunityIntent(intent)
+        // 0.3.41: the Live signals FGS starts only after the first frame is drawn (off app startup).
+        LiveSignalsKeepAlive.startAfterFirstFrame(this)
         lifecycleScope.launch {
             KalshiOddsApp.from(this@MainActivity).container.preferences.settings
                 .map { it.notificationsEnabled || it.liveSignalsEnabled }
@@ -77,11 +80,31 @@ class MainActivity : ComponentActivity() {
         }
         enableEdgeToEdge()
         setContent {
-            KalshiOddsTheme {
+            val colorStyle by androidx.compose.runtime.remember {
+                KalshiOddsApp.from(this@MainActivity).container.preferences.settings.map { it.colorStyle }
+            }.collectAsStateWithLifecycle(initialValue = com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC)
+            KalshiOddsTheme(colorStyle = colorStyle) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     val navigator = rememberSaveable(saver = AppNavigator.Saver) { AppNavigator() }
                     var settingsFocusApiKey by rememberSaveable { mutableStateOf(false) }
                     var chartTicker by rememberSaveable { mutableStateOf<String?>(null) }
+                    // 0.3.47: announce the previous crash once (marker consumed on read).
+                    var crashNote by rememberSaveable {
+                        mutableStateOf(runCatching { com.dirk.kalshiodds.crash.CrashLog.consumePending()?.let { com.dirk.kalshiodds.crash.CrashLog.headline(it) } }.getOrNull())
+                    }
+                    crashNote?.let { note ->
+                        androidx.compose.material3.AlertDialog(
+                            onDismissRequest = { crashNote = null },
+                            title = { androidx.compose.material3.Text("Crash log") },
+                            text = { androidx.compose.material3.Text(com.dirk.kalshiodds.ui.CrashLogCopy.announce(note)) },
+                            confirmButton = {
+                                androidx.compose.material3.TextButton(onClick = { crashNote = null; navigator.open(AppRoutes.CRASH_LOG) }) { androidx.compose.material3.Text("View") }
+                            },
+                            dismissButton = {
+                                androidx.compose.material3.TextButton(onClick = { crashNote = null }) { androidx.compose.material3.Text("Dismiss") }
+                            }
+                        )
+                    }
                     val oddsState by oddsViewModel.state.collectAsStateWithLifecycle()
                     val sheetOpen = oddsState.tickets.phase is TicketPhase.AwaitingApprove
                     val chartMarket: MarketUiModel? = chartTicker?.let { t ->
@@ -104,6 +127,7 @@ class MainActivity : ComponentActivity() {
                                     navigator.open(AppRoutes.SETTINGS)
                                 },
                                 onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                onOpenScalp = { navigator.open(AppRoutes.SCALP_DATA) },
                                 onOpenData = { navigator.open(AppRoutes.DATA) },
                                 onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                 onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
@@ -127,14 +151,86 @@ class MainActivity : ComponentActivity() {
                         scorecard = {
                             ScorecardScreen(
                                 viewModel = scorecardViewModel,
-                                onBack = { navigator.back() }
+                                onBack = { navigator.back() },
+                                showBack = navigator.canPop
                             )
                         },
                         data = {
                             DataScreen(
                                 viewModel = dataViewModel,
                                 onBack = { navigator.back() },
-                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) }
+                                onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
+                                showBack = navigator.canPop
+                            )
+                        },
+                        live = {
+                            com.dirk.kalshiodds.ui.LiveApproveScreen(oddsViewModel)
+                        },
+                        extra = mapOf<String, @androidx.compose.runtime.Composable () -> Unit>(
+                            AppRoutes.CALIBRATION to {
+                                com.dirk.kalshiodds.ui.CalibrationReportScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.LADDER to {
+                                com.dirk.kalshiodds.ui.StrategyLadderScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.SCALP to {
+                                com.dirk.kalshiodds.ui.ScalpScreen(decisionViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.SCALP_TAB to {
+                                com.dirk.kalshiodds.ui.ScalpTabScreen(
+                                    viewModel = oddsViewModel,
+                                    onOpenScalpData = { navigator.open(AppRoutes.SCALP_DATA) },
+                                    onOpenScalpRules = { navigator.open(AppRoutes.SCALP) },
+                                    onOpenAlgo = { m -> oddsViewModel.openScalpAlgo(m); navigator.open(AppRoutes.SCALP_ALGO) }
+                                )
+                            },
+                            AppRoutes.SCALP_ALGO to {
+                                com.dirk.kalshiodds.ui.ScalpAlgoScreen(oddsViewModel, onBack = { navigator.back() })
+                            },
+                            AppRoutes.CRASH_LOG to {
+                                com.dirk.kalshiodds.ui.CrashLogScreen(onBack = { navigator.back() })
+                            },
+                            AppRoutes.SCALP_DATA to {
+                                com.dirk.kalshiodds.ui.ScalpDataScreen(
+                                    decisionViewModel,
+                                    onBack = { navigator.back() },
+                                    onOpenScalp = { navigator.open(AppRoutes.SCALP) }
+                                )
+                            }
+                        ),
+                        realMoney = {
+                            com.dirk.kalshiodds.ui.RealMoneyScreen(
+                                odds = oddsViewModel,
+                                settings = settingsViewModel,
+                                onOpenApiKey = {
+                                    settingsFocusApiKey = true
+                                    navigator.open(AppRoutes.SETTINGS)
+                                }
+                            )
+                        },
+                        more = {
+                            val message = oddsState.userMessage.orEmpty()
+                            val failed = message.contains("offline", ignoreCase = true) ||
+                                message.contains("fail", ignoreCase = true)
+                            val pending = oddsState.snapshot?.fromCache == true
+                            val syncText = when {
+                                oddsState.isLoading -> "Syncing…"
+                                failed -> "Sync failed"
+                                pending -> "Pending sync"
+                                else -> "Synced"
+                            }
+                            com.dirk.kalshiodds.ui.MoreScreen(
+                                onOpen = { dest ->
+                                    if (dest.tab) navigator.selectTab(dest.route)
+                                    else navigator.open(dest.route)
+                                },
+                                syncText = syncText,
+                                syncFailed = failed && !oddsState.isLoading,
+                                syncPending = pending && !failed && !oddsState.isLoading,
+                                onCheckUpdate = {
+                                    navigator.open(AppRoutes.SETTINGS)
+                                    settingsViewModel.checkForKashiUpdate()
+                                }
                             )
                         },
                         history = {
@@ -166,6 +262,7 @@ class MainActivity : ComponentActivity() {
                                     viewModel = oddsViewModel,
                                     onOpenSettings = { navigator.open(AppRoutes.SETTINGS) },
                                     onOpenScorecard = { navigator.open(AppRoutes.SCORECARD) },
+                                    onOpenScalp = { navigator.open(AppRoutes.SCALP_DATA) },
                                     onOpenData = { navigator.open(AppRoutes.DATA) },
                                     onOpenHistory = { navigator.open(AppRoutes.HISTORY) },
                                     onOpenSignalHistory = { navigator.open(AppRoutes.SIGNAL_HISTORY) },
@@ -177,6 +274,7 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ChartDetailScreen(
                                     market = market,
+                                    book = oddsViewModel.orderBook(market.ticker),
                                     points = market.bidHistory.ifEmpty {
                                         market.oddsHistory.mapIndexed { i, mid ->
                                             com.dirk.kalshiodds.chart.BidPoint(

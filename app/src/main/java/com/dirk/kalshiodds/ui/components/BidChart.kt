@@ -176,16 +176,16 @@ fun BidChart(
                     drawPath(path, color, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
                 }
             }
-            line({ it.upBidCents }, colors.up)
-            line({ it.downBidCents }, colors.down)
+            line({ it.upBidCents }, colors.upButton)
+            line({ it.downBidCents }, colors.downButton)
             if (scrub && scrubIdx != null) {
                 val x = xOf(pick.tMs)
                 drawLine(axisColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 2f)
-                pick.upBidCents?.let { drawCircle(colors.up, 4.dp.toPx(), Offset(x, yOf(it))) }
-                pick.downBidCents?.let { drawCircle(colors.down, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.upBidCents?.let { drawCircle(colors.upButton, 4.dp.toPx(), Offset(x, yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.downButton, 4.dp.toPx(), Offset(x, yOf(it))) }
             } else {
-                pick.upBidCents?.let { drawCircle(colors.up, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
-                pick.downBidCents?.let { drawCircle(colors.down, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.upBidCents?.let { drawCircle(colors.upButton, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
+                pick.downBidCents?.let { drawCircle(colors.downButton, 3.dp.toPx(), Offset(xOf(pick.tMs), yOf(it))) }
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -222,7 +222,8 @@ private fun SpotPathCanvas(
     lastSpot: Double?,
     axisColor: androidx.compose.ui.graphics.Color
 ) {
-    val colors = DipTheme.colors
+    // Spot has a fixed orange meaning in the chart legend, independent of the app accent.
+    val spotColor = DipTheme.colors.spot
     val (minY, maxY) = range
     val t0 = windowStartMs
     val t1 = windowEndMs
@@ -257,19 +258,19 @@ private fun SpotPathCanvas(
                 val y = yOf(px)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, colors.accentOrange, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, spotColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
         }
         val endPx = lastSpot ?: series.lastOrNull()?.second
         val endT = series.lastOrNull()?.first ?: t1
         if (endPx != null) {
-            drawCircle(colors.accentOrange, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
+            drawCircle(spotColor, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
         }
     }
     Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         val now = lastSpot ?: series.lastOrNull()?.second
         Text(
             now?.let { String.format(Locale.US, "Now $%,.2f", it) } ?: "Spot",
-            color = colors.accentOrange,
+            color = spotColor,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold
         )

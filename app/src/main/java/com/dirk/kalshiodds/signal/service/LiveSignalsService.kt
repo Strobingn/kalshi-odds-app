@@ -60,10 +60,14 @@ class LiveSignalsService : Service() {
     override fun onCreate() {
         super.onCreate()
         // Must be first: startForegroundService timeout is ~5–10s and a throw
-        // here is a process-killing RemoteServiceException.
+        // here is a process-killing RemoteServiceException. 0.3.41: nothing else runs on the
+        // main thread before it; the rest of the setup moves to a background dispatcher.
         promoteToForeground()
-        runCatching { acquireWakeLock() }
-        runCatching { bindRollover() }
+        isRunning = true
+        scope.launch {
+            runCatching { acquireWakeLock() }
+            runCatching { bindRollover() }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -75,13 +79,24 @@ class LiveSignalsService : Service() {
         if (intent?.action == LiveSignalsPolicy.ACTION_STOP) {
             return handleExplicitStop()
         }
+        if (intent?.action == LiveSignalsPolicy.ACTION_RESUME) {
+            LiveSignalsKeepAlive.setTimeoutPaused(this, false)
+        }
         explicitStop = false
+        LiveSignalsKeepAlive.setTimeoutPaused(this, false)
+        runCatching {
+            androidx.core.app.NotificationManagerCompat.from(this)
+                .cancel(SignalNotifier.PAUSED_NOTIFICATION_ID)
+        }
         if (pipelineJob == null || pipelineJob?.isActive != true) {
             pipelineJob = scope.launch { runPipeline() }
         }
         if (metadataJob == null || metadataJob?.isActive != true) {
             metadataJob = scope.launch { runMetadataLoop() }
         }
+        // 0.3.39: host the process-scoped Autopilot (OddsViewModel) even with no Activity.
+        // 0.3.41: posted after this call returns, so it never delays startForeground.
+        android.os.Handler(mainLooper).post { runCatching { KalshiOddsApp.from(this).ensureAutopilotHost() } }
         if (rolloverJob == null || rolloverJob?.isActive != true) {
             rolloverJob = scope.launch {
                 runCatching {
@@ -123,9 +138,12 @@ class LiveSignalsService : Service() {
         return START_NOT_STICKY
     }
 
+    @Volatile private var promoted = false
+
     private fun promoteToForeground() {
-        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
-            .getOrElse { SignalNotifier(this) }
+        // 0.3.41: minimal work — no container access (AppContainer/OddsViewModel stay out of this path).
+        // Re-run on every start command: each startForegroundService() must be answered by startForeground().
+        val notifier = SignalNotifier(applicationContext)
         val notification = runCatching { notifier.foregroundNotification() }.getOrNull() ?: return
         val types = LiveSignalsPolicy.foregroundServiceTypesToTry(Build.VERSION.SDK_INT)
         if (types.isEmpty()) {
@@ -133,6 +151,7 @@ class LiveSignalsService : Service() {
             try {
                 @Suppress("DEPRECATION")
                 startForeground(SignalNotifier.FG_NOTIFICATION_ID, notification)
+                promoted = true
                 foregroundFailed = false
             } catch (t: Throwable) {
                 Log.e(TAG, "startForeground failed: ${t.message}")
@@ -151,6 +170,7 @@ class LiveSignalsService : Service() {
                 )
                 foregroundTypeInUse = type
                 started = true
+                promoted = true
                 foregroundFailed = false
                 break
             } catch (t: Throwable) {
@@ -185,9 +205,15 @@ class LiveSignalsService : Service() {
         val container = KalshiOddsApp.from(this).container
         val hub = container.hub
         hub.settings = settings
-        LiveSignalsKeepAlive.setEnabled(this, settings.liveSignalsEnabled)
+        // 0.3.39: stay up for Live signals OR always-on Autopilot (paper/scalp only).
+        val wanted = com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.serviceWanted(
+            liveSignalsEnabled = settings.liveSignalsEnabled,
+            paperTradingEnabled = settings.paperTradingEnabled,
+            aiPaperAutopilotEnabled = settings.aiPaperAutopilotEnabled
+        )
+        LiveSignalsKeepAlive.setEnabled(this, wanted)
         lastTickerCount = tickers.size
-        if (!settings.liveSignalsEnabled) {
+        if (!wanted) {
             explicitStop = true
             client?.stop()
             client = null
@@ -267,6 +293,8 @@ class LiveSignalsService : Service() {
                         )
                     }
                 },
+                onCf = { tick -> runCatching { container.cfFeed.acceptAndNotify(tick) } },
+                onBookGap = { tickers -> runCatching { hub.scoring.book.invalidateBooks(tickers) } },
                 onLog = { msg -> Log.d(TAG, msg) },
                 urls = com.dirk.kalshiodds.signal.ws.KalshiWsAuth.wsUrls(demo)
             )
@@ -293,7 +321,11 @@ class LiveSignalsService : Service() {
         while (scope.isActive) {
             refreshWakeLock()
             val uiUp = LiveSignalsKeepAlive.isUiInForeground()
-            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp) {
+            val headless = com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.headlessDriving.get()
+            // 0.3.44: hand the markets loop straight back to the UI loop.
+            if (uiUp || headless) com.dirk.kalshiodds.data.api.KalshiPollLoops.release(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.MARKETS, "service")
+            if (LiveSignalsKeepAlive.isEnabled(this) && !uiUp && !headless &&
+                com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.MARKETS, "service", leaseMs = 2 * LiveSignalsPolicy.METADATA_INTERVAL_MS)) {
                 runCatching {
                     val settings = container.hub.settings
                     runCatching { container.external.refreshIfStale() }.getOrNull()?.let {
@@ -301,8 +333,8 @@ class LiveSignalsService : Service() {
                     }
                     val snap = container.repository.refresh(
                         watchBtc = true,
-                        watchEth = false,
-                        watchSol = false,
+                        watchEth = true,
+                        watchSol = true,
                         extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(settings.extraTickerList()),
                         edgeThresholdPp = settings.effectiveEdgeThresholdPp()
                     )
@@ -347,51 +379,72 @@ class LiveSignalsService : Service() {
         if (LiveSignalsPolicy.shouldRestartAfterKill(
                 LiveSignalsKeepAlive.isEnabled(this),
                 explicitStop,
-                foregroundFailed
+                foregroundFailed,
+                LiveSignalsKeepAlive.isTimeoutPaused(this)
             )
         ) {
-            LiveSignalsKeepAlive.startService(this)
+            // 0.3.42: the service keeps running (stopWithTask=false); only arm the WorkManager watchdog.
             LiveSignalsKeepAlive.enqueueSoon(this)
         }
     }
 
+    /**
+     * API 34 `shortService` timeout. We do not use shortService, but must
+     * still [stopSelf] if the system delivers this callback.
+     */
     @Suppress("UNUSED_PARAMETER")
     override fun onTimeout(startId: Int) {
-        handleDataSyncTimeout()
+        handleForegroundTimeout()
     }
 
+    /**
+     * Android 15 `dataSync` / `mediaProcessing` 6h-per-24h timeout.
+     * Official contract: [stopSelf] within a few seconds. Never re-promote.
+     */
     @Suppress("UNUSED_PARAMETER")
     override fun onTimeout(startId: Int, fgsType: Int) {
-        handleDataSyncTimeout()
+        handleForegroundTimeout()
     }
 
-    private fun handleDataSyncTimeout() {
-        // API 35 dataSync time-box. Re-promote as dataSync; never specialUse.
-        if (LiveSignalsPolicy.shouldRestartAfterKill(
-                LiveSignalsKeepAlive.isEnabled(this),
-                explicitStop,
-                foregroundFailed
-            )
-        ) {
-            promoteToForeground()
-        } else {
+    private fun handleForegroundTimeout() {
+        if (!LiveSignalsPolicy.timeoutRequiresStopSelf()) {
             stopSelf()
+            return
         }
+        explicitStop = true
+        runCatching { LiveSignalsKeepAlive.setTimeoutPaused(this, true) }
+        tearDownPipeline()
+        releaseWakeLock()
+        val notifier = runCatching { KalshiOddsApp.from(this).container.notifier }
+            .getOrElse { SignalNotifier(this) }
+        val paused = runCatching { notifier.pausedNotification() }.getOrNull()
+        runCatching { ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE) }
+        if (paused != null) {
+            runCatching {
+                androidx.core.app.NotificationManagerCompat.from(this)
+                    .notify(SignalNotifier.PAUSED_NOTIFICATION_ID, paused)
+            }
+        }
+        stopSelf()
     }
 
     override fun onDestroy() {
         val restart = LiveSignalsPolicy.shouldRestartAfterKill(
             LiveSignalsKeepAlive.isEnabled(this),
             explicitStop,
-            foregroundFailed
+            foregroundFailed,
+            LiveSignalsKeepAlive.isTimeoutPaused(this)
         )
         tearDownPipeline()
         releaseWakeLock()
         runCatching { KalshiOddsApp.from(this).container.hub.wsLive = false }
         scope.cancel()
         super.onDestroy()
+        isRunning = false
         if (restart) {
-            LiveSignalsKeepAlive.startService(applicationContext)
+            // 0.3.42: never startForegroundService() from inside onDestroy — when the system tears the
+            // service down (e.g. after a missed start window) an immediate re-start re-arms the same
+            // deadline on a stalled main thread. Restart via WorkManager (delay + exponential backoff).
             LiveSignalsKeepAlive.enqueueSoon(applicationContext)
         }
     }
@@ -438,7 +491,11 @@ class LiveSignalsService : Service() {
     companion object {
         private const val TAG = "DipHunterWS"
 
-        fun start(context: Context) = LiveSignalsKeepAlive.startService(context)
+        /** 0.3.42: true between onCreate and onDestroy of this process's service instance. */
+        @Volatile var isRunning: Boolean = false
+            private set
+
+        fun start(context: Context) = LiveSignalsKeepAlive.requestStart(context)
 
         fun stop(context: Context) = LiveSignalsKeepAlive.stopService(context)
     }

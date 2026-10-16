@@ -36,30 +36,31 @@ object SignalConstants {
     const val DEFAULT_BANKROLL_USD = 1_000.0
 
     /** Isolated paper book — never hits Kalshi. Visible on the home screen. */
-    const val PAPER_START_USD = 1000.0
+    const val PAPER_START_USD = 20_000.0 // 0.3.46
+    /** Legacy $5 clip — unused for AI paper (Kelly). Kept so History restore still reads. */
     const val PAPER_STAKE_USD = 5.0
     const val DEFAULT_PAPER_TRADING = true
-    const val PAPER_LEDGER_MAX = 1000
-    /** Allow paper book to go negative - this is just an experiment with fake money */
-    const val PAPER_ALLOW_NEGATIVE = true
-
-    /** Paper risk controls. Trail distance is a percentage of filled entry price. */
-    const val DEFAULT_TRAILING_STOP_PCT = 2.0
-    const val MIN_TRAILING_STOP_PCT = 1.0
-    const val MAX_TRAILING_STOP_PCT = 4.0
-    const val DEFAULT_STOP_LOSS_PCT = 3.0
-    const val DEFAULT_TRAIL_ACTIVATION_PCT = 0.5
-    const val DEFAULT_STOP_LOSS_DELAY_MS = 30_000L
-    const val DEFAULT_MAX_PAPER_HOLD_MS = 12 * 60_000L
-    const val DEFAULT_SETTLEMENT_FALLBACK_MS = 30_000L
-    const val DEFAULT_MAX_EXIT_QUOTE_AGE_MS = 5_000L
-    const val MAX_PAPER_ENTRY_ASK = 0.50
+    /** AI paper autopilot — default on. Manual Paper UP/DOWN is separate. */
+    const val DEFAULT_AI_PAPER_AUTOPILOT = true
+    const val PAPER_LEDGER_MAX = 80
 
     /**
-     * Fraction of full Kelly actually risked. 0.25 = quarter-Kelly,
-     * a common conservative default for noisy edges.
+     * Live-card advisory Kelly fraction for [com.dirk.kalshiodds.signal.sizing.PositionSizer]
+     * / ScoringEngine. Default 0.25 (quarter-Kelly). Paper AI uses
+     * [DEFAULT_PAPER_KELLY_FRACTION] on a separate preference key.
      */
     const val DEFAULT_KELLY_FRACTION = 0.25
+
+    /**
+     * Fraction of full Kelly actually risked on **paper**. Default 0.5
+     * (half-Kelly). Settings slider is [PAPER_KELLY_FRACTION_MIN]–[PAPER_KELLY_FRACTION_MAX].
+     * Live orders ignore this and stay on the $10 all-in cap.
+     */
+    const val DEFAULT_PAPER_KELLY_FRACTION = 0.5
+    const val PAPER_KELLY_FRACTION_MIN = 0.1
+    const val PAPER_KELLY_FRACTION_MAX = 1.0
+    const val LIVE_KELLY_FRACTION_MIN = 0.05
+    const val LIVE_KELLY_FRACTION_MAX = 1.0
 
     /** Hard cap on bankroll committed to one suggested clip. */
     const val DEFAULT_MAX_BANKROLL_FRACTION = 0.05
@@ -85,11 +86,12 @@ object SignalConstants {
 
     const val DEFAULT_CLOUD_SYNC = true
 
-    const val SCORECARD_BUCKET_MIN_SAMPLES = 20
+    /** @see com.dirk.kalshiodds.signal.feedback.ScorecardTargets.MIN_PER_SLOT_SAMPLES */
+    const val SCORECARD_BUCKET_MIN_SAMPLES = 5
 
     const val GITHUB_OWNER = "Strobingn"
     const val GITHUB_REPO = "kalshi-odds-app"
-    const val EDGE_MODEL_RELEASE_TAG = "edge-model-chat-GTP"
+    const val EDGE_MODEL_RELEASE_TAG = "edge-model-latest"
 
     const val DEFAULT_RANK_BY_NET_EV = true
     const val DEFAULT_AUTO_MUTE = true
@@ -104,9 +106,12 @@ object SignalConstants {
     const val DEFAULT_DRAWDOWN_USD = 50.0
     const val DEFAULT_RESUME_ON_NEW_SESSION = true
 
-    const val MIN_ADAPTER_SAMPLES = 8
+    /** Reweight blend channels only after this many settlements. Was 8. */
+    const val MIN_ADAPTER_SAMPLES = 100
     const val ADAPTER_LEARNING_RATE = 0.08
     const val ADAPTER_WEIGHT_EMA = 0.15
+    /** L2-style pull of each channel weight toward the prior (1.0). */
+    const val ADAPTER_PRIOR_SHRINK = 0.05
 
     const val EXTERNAL_CACHE_MS = 25_000L
     const val EXTERNAL_CONNECT_TIMEOUT_MS = 3_000L
@@ -117,23 +122,32 @@ object SignalConstants {
     /**
      * Hard all-in cap on a live Approve, including Kalshi fees.
      * `count` is the largest integer with count×P + fee ≤ this.
+     * 0.3.16: $10 default and hard cap (user may pick less).
      */
-    const val LIVE_ALL_IN_CAP_USD = 5.0
+    const val LIVE_ALL_IN_CAP_USD = 10.0
 
-    /** Hide / disable a ticket when profit-if-win is below this. */
-    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 10.0
-
-    /** Default USD risked on one approved ticket. */
-    const val DEFAULT_TICKET_STAKE_USD = 5.0
+    /** Limited live Autopilot daily spend. Editable in Settings. Default $50. */
+    const val DEFAULT_LIVE_AUTOPILOT_DAILY_CAP_USD = 50.0
+    const val LIVE_AUTOPILOT_DAILY_CAP_MIN_USD = 10.0
+    const val LIVE_AUTOPILOT_DAILY_CAP_MAX_USD = 200.0
 
     /**
-     * Soft cap: Settings may lower freely. Raising above this requires an
-     * explicit typed confirmation in Settings.
+     * Min-profit-if-win is gone in 0.3.16. Kept at 0 so leftover prefs
+     * and History restore cannot block a ticket.
      */
-    const val TICKET_STAKE_SOFT_CAP_USD = 5.0
+    const val DEFAULT_MIN_PROFIT_IF_WIN_USD = 0.0
 
-    /** Hard ceiling so this never becomes a large auto-bot. */
-    const val TICKET_STAKE_HARD_CAP_USD = 25.0
+    /** Default USD risked on one approved ticket. */
+    const val DEFAULT_TICKET_STAKE_USD = 10.0
+
+    /**
+     * Soft cap equals the hard cap — Settings may lower freely; no RAISE
+     * phrase is needed because nothing above $10 is allowed.
+     */
+    const val TICKET_STAKE_SOFT_CAP_USD = 10.0
+
+    /** Hard ceiling: $10 max bet. */
+    const val TICKET_STAKE_HARD_CAP_USD = 10.0
 
     /** Minimum stake the slider / prefs will accept. */
     const val TICKET_STAKE_MIN_USD = 1.0
@@ -159,32 +173,6 @@ object SignalConstants {
      */
     const val DEFAULT_LONG_SHOT_MAX_ASK = 0.20
 
-
-    // --- Winning Strategy Settings ---
-
-    /**
-     * Enable simplified winning strategy (cheap sides + time window)
-     * Default off - user must explicitly enable
-     */
-    const val DEFAULT_WINNING_STRATEGY_ENABLED = false
-
-    /**
-     * Max ask filter for winning strategy (default 40c)
-     * Based on backtest: app pick, ask 32-50c showed +$0.97/bet
-     */
-    const val DEFAULT_WINNING_STRATEGY_MAX_ASK = 0.40
-
-    /**
-     * Time window before close for winning strategy (default: 6 minutes = 360,000ms)
-     * Based on backtest: app pick, time-left 11-9min showed +$0.23/bet
-     */
-    const val DEFAULT_WINNING_STRATEGY_TIME_WINDOW_MS = 360_000L
-
-    /**
-     * Minimum time before close (default: 5 minutes = 300,000ms)
-     * Avoids the very end where fills get expensive
-     */
-    const val DEFAULT_WINNING_STRATEGY_MIN_TIME_MS = 300_000L
     /** Legacy $1 → $5 keys — kept so History restore can derive max ask. */
     const val HUNTER_VALUE_STAKE_USD = 1.0
     const val HUNTER_VALUE_PAYOUT_USD = 5.0

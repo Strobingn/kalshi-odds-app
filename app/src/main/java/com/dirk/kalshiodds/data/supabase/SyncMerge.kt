@@ -86,6 +86,9 @@ object SyncMerge {
         )
     }
 
+    /** Kinds re-sent every sync while recent (idempotent upsert) because they change without a new timestamp. */
+    val ALWAYS_PUSH = setOf("shadow", "scalp") // 0.3.65: scalp rows ride their own ack watermark (backlog retry), not lastPushMs
+
     fun outgoing(local: List<Record>, lastPushMs: Long): List<Record> =
-        local.filter { it.updatedAtMs >= lastPushMs && !isForbiddenPayload(it.payload) }
+        local.filter { (it.updatedAtMs >= lastPushMs || it.kind in ALWAYS_PUSH) && !isForbiddenPayload(it.payload) }
 }

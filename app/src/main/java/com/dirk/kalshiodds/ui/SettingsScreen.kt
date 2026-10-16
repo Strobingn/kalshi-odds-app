@@ -36,11 +36,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -54,9 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.service.BatteryExemption
-import kotlinx.coroutines.launch
 import java.util.Locale
 import com.dirk.kalshiodds.ui.theme.DipTheme
 
@@ -69,6 +68,8 @@ fun SettingsScreen(
     scrollToApiKey: Boolean = false
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    var scalpSettings by remember { mutableStateOf(false) }
+    if (scalpSettings) SwarmScalpSettingsDialog { scalpSettings = false }
     val exportKeys = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream")
     ) { uri: Uri? -> uri?.let { viewModel.backupCredentials(it) } }
@@ -86,7 +87,9 @@ fun SettingsScreen(
         onOpenData = onOpenData,
         scrollToApiKey = scrollToApiKey,
         onExportKeys = { exportKeys.launch("diphunter-kalshi-key.dhcred") },
-        onImportKeys = { importKeys.launch(arrayOf("*/*")) }
+        onImportKeys = { importKeys.launch(arrayOf("*/*")) },
+        onOpenScalpSettings = { scalpSettings = true },
+        onCheckUpdate = { viewModel.checkForKashiUpdate() }
     )
 }
 
@@ -99,14 +102,13 @@ fun SettingsContent(
     scrollToApiKey: Boolean = false,
     viewModel: SettingsViewModel? = null,
     onExportKeys: () -> Unit = {},
-    onImportKeys: () -> Unit = {}
+    onImportKeys: () -> Unit = {},
+    onCheckUpdate: () -> Unit = {},
+    onOpenScalpSettings: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val s = state.settings
     val context = LocalContext.current
-    val updateScope = rememberCoroutineScope()
-    var updateBusy by remember { mutableStateOf(false) }
-    var updateMessage by remember { mutableStateOf<String?>(null) }
     val scroll = rememberScrollState()
     val apiKeyY = remember { mutableIntStateOf(0) }
     val clipboard = LocalClipboardManager.current
@@ -129,7 +131,7 @@ fun SettingsContent(
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary
                 )
             )
         }
@@ -147,25 +149,67 @@ fun SettingsContent(
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            OutlinedButton(
-                enabled = !updateBusy,
-                onClick = {
-                    updateScope.launch {
-                        updateBusy = true
-                        updateMessage = "Checking branch release…"
-                        updateMessage = when (val result = AppUpdater.checkAndDownload(context)) {
-                            AppUpdater.Result.Current -> "This app is up to date."
-                            is AppUpdater.Result.Failed -> result.reason
-                            is AppUpdater.Result.Ready -> runCatching {
-                                AppUpdater.showInstaller(context, result.apk)
-                            }.getOrElse { it.message ?: "Could not open Android installer" }
-                        }
-                        updateBusy = false
+            Section("Scalping")
+            OutlinedButton(onClick = onOpenScalpSettings, modifier = Modifier.fillMaxWidth().height(52.dp)) { Text("Scalping settings · V2 paper strategies") }
+            Section("App update")
+            Text(
+                "Checks GitHub for the newest v0.3.*-debug release and downloads DipHunter-debug.apk. Tags like gtp-*, grokbot, and v1.x are ignored. The package id and debug cert are checked before the installer opens.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                state.updateMessage,
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary
+            )
+            state.updateProgress?.let { pct ->
+                Text(
+                    "Download $pct%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.textSecondary
+                )
+            }
+            Button(
+                onClick = onCheckUpdate,
+                enabled = !state.updateBusy,
+                modifier = Modifier.height(48.dp)
+            ) {
+                Text(
+                    when {
+                        state.updateBusy && state.updateProgress != null -> "Downloading ${state.updateProgress}%"
+                        state.updateBusy -> "Checking…"
+                        else -> "Check for updates"
+                    }
+                )
+            }
+            if (state.updateNeedsUnknownApps) {
+                OutlinedButton(onClick = { viewModel?.openUnknownAppsSettings() }) {
+                    Text("Allow install unknown apps")
+                }
+            }
+            Section("Color style: Classic / FieldOps")
+            Text(
+                "Classic is the 0.3.23 palette. FieldOps is the gray 0.3.24 look. Green is UP, red is DOWN.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textSecondary
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                val classic = !com.dirk.kalshiodds.ui.theme.ColorStyles.isFieldOps(s.colorStyle)
+                if (classic) {
+                    Button(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC) }) {
+                        Text("Classic")
+                    }
+                    OutlinedButton(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.FIELDOPS) }) {
+                        Text("FieldOps")
+                    }
+                } else {
+                    OutlinedButton(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.CLASSIC) }) {
+                        Text("Classic")
+                    }
+                    Button(onClick = { viewModel?.setColorStyle(com.dirk.kalshiodds.ui.theme.ColorStyles.FIELDOPS) }) {
+                        Text("FieldOps")
                     }
                 }
-            ) { Text(if (updateBusy) "Checking for update…" else "Check for app update") }
-            updateMessage?.let {
-                Text(it, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
             }
             Column(
                 modifier = Modifier.onGloballyPositioned { apiKeyY.intValue = it.positionInParent().y.toInt() },
@@ -192,7 +236,8 @@ fun SettingsContent(
             }
             Text(
                 "Create a key at kalshi.com → Account → API Keys. Paste Key ID + private key PEM. " +
-                    "RSA-PSS/SHA-256 or Ed25519. Stored in EncryptedSharedPreferences. Never logged. " +
+                    "RSA-PSS/SHA-256 or Ed25519. Stored only in EncryptedSharedPreferences. " +
+                    "If the Android Keystore fails, the key is not saved and live trading stays off. Never logged. " +
                     "Used for the public ticker / trade / orderbook_delta WebSocket and, after Live Approve, " +
                     "POST /trade-api/v2/portfolio/events/orders (V2 limit only — never /portfolio/orders).",
                 style = MaterialTheme.typography.labelMedium,
@@ -277,7 +322,7 @@ fun SettingsContent(
                     )
                     .then(
                         if (lastErr == null) Modifier
-                        else Modifier.border(1.dp, colors.accentRed, RoundedCornerShape(12.dp))
+                        else Modifier.border(1.dp, colors.downButton, RoundedCornerShape(12.dp))
                     )
                     .padding(12.dp)
             )
@@ -349,7 +394,7 @@ fun SettingsContent(
 
             Section("Live signals")
             Text(
-                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “DipHunter live signals” notification — allow it. Nothing is ordered without an in-app Approve tap.",
+                "Leave Live signals on to keep the Kalshi WebSocket and scoring loop running after you switch apps or turn the screen off. Android shows an ongoing “${AppIdentity.LABEL}” notification — allow it. Nothing is ordered without an in-app Approve tap.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -365,7 +410,7 @@ fun SettingsContent(
                 fontWeight = FontWeight.SemiBold
             )
             Text(
-                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Dip Hunter battery usage to Unrestricted. This never auto-trades.",
+                "Some phones (Samsung, Xiaomi, Oppo, …) still kill background apps. Optional: set Kalshi Trader battery usage to Unrestricted. This never auto-trades.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -384,7 +429,7 @@ fun SettingsContent(
 
             Section("Watch series")
             Text(
-                "Bitcoin-only. DipHunter watches KXBTC15M. Ethereum, Solana, and extra tickers are not subscribed, scored, or paper-traded.",
+                "Home shows BTC, ETH and SOL 15-minute and daily 5 PM markets (coin selector). XRP, HYPE, sports, and other series stay off.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textSecondary
             )
@@ -482,7 +527,7 @@ fun SettingsContent(
 
             Section("Bankroll & size (advisory)")
             Text(
-                "Suggested contracts only. The app never places orders. Default is quarter-Kelly, capped at 5% of bankroll and by liquidity / spread.",
+                "Suggested contracts for live cards only. Live Approve stays \$10 all-in. Paper AI fills use half-Kelly on the paper bankroll (no dollar max).",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -497,7 +542,7 @@ fun SettingsContent(
             ToggleRow("Kelly sizing (off = fixed fraction)", s.useKelly, { viewModel?.setUseKelly(it) })
             if (s.useKelly) {
                 Text(
-                    String.format(Locale.US, "Kelly fraction  %.2f  (0.25 = quarter-Kelly)", s.kellyFraction),
+                    String.format(Locale.US, "Kelly fraction  %.2f  (0.25 = quarter-Kelly · live cards only)", s.kellyFraction),
                     style = MaterialTheme.typography.bodyMedium,
                     color = colors.textPrimary,
                     fontWeight = FontWeight.SemiBold
@@ -505,8 +550,8 @@ fun SettingsContent(
                 Slider(
                     value = s.kellyFraction.toFloat(),
                     onValueChange = { viewModel?.setKellyFraction(it.toDouble()) },
-                    valueRange = 0.10f..1.0f,
-                    steps = 8
+                    valueRange = SignalConstants.LIVE_KELLY_FRACTION_MIN.toFloat()..SignalConstants.LIVE_KELLY_FRACTION_MAX.toFloat(),
+                    steps = 18
                 )
             } else {
                 Text(
@@ -687,7 +732,7 @@ fun SettingsContent(
             Text(
                 "On-device regime / anomaly / survival / conformal / meta / path-sim plus advisory RL sizing. " +
                     "These can raise CPU and battery — turn the master switch off to drop back to Heavy ML + 0.2.x. " +
-                    "RL suggested stake is display-only. Tickets always use the configured \$5 default / caps and still need Approve. " +
+                    "RL suggested stake is display-only. Tickets always use the configured \$10 max / caps and still need Approve. " +
                     "News embeddings fail-soft and cache if the network is down.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -706,54 +751,102 @@ fun SettingsContent(
 
             Section("Paper book (visible on home)")
             Text(
-                "Isolated from live money. Starts at \$100, auto-logs a win-target-sized simulated fill when an AI hunter / LiveCall " +
-                    "signal would trade. Never calls Kalshi. Reset returns cash to \$100. The home-screen PAPER BOOK " +
-                    "card is the ledger — you do not need to dig here to see it. Paper trading ON does not swallow " +
-                    "Live Approve after a Kalshi key is saved — use the Paper button for simulated fills.",
+                "Isolated from live money. Starts at \$1,000 (editable below). AI paper fills use fractional Kelly " +
+                    "on that bankroll — no dollar max. Flip-chance and “no asks under 3¢” guards still apply. " +
+                    "Never calls Kalshi. Reset archives the ledger and returns cash to the start amount. " +
+                    "Paper trading ON does not swallow Live Approve after a Kalshi key is saved — " +
+                    "use the Paper button for simulated fills. Live orders stay \$10 all-in + REAL MONEY confirm.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            ToggleRow("Paper trading (AI auto-log win-target fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("Paper trading (AI Kelly auto-fills)", s.paperTradingEnabled, { viewModel?.setPaperTrading(it) })
+            ToggleRow("AI paper autopilot", s.aiPaperAutopilotEnabled, { viewModel?.setAiPaperAutopilot(it) })
+            Text(
+                "When on (default), Autopilot looks for +EV after fees on either side, sized by half-Kelly " +
+                    "on the paper bankroll (no dollar cap; book-depth cap still applies). Flip-chance still blocks " +
+                    "lottery prints. Off = no AI paper or shadow bets. Manual Paper UP/DOWN still works.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Text(
+                "Autopilot covers BTC, ETH, and SOL 15-minute markets. Paper books simulated fills. " +
+                    "Shadow builds the same Kelly order and never submits it. " +
+                    "Autopilot and Scalp are paper-only: they cannot place real orders and there is nothing to arm. " +
+                    "The AI sizes half-Kelly on the free paper bankroll with no cap beyond that bankroll, " +
+                    "filled at displayed book depth with fees on both legs. " +
+                    "Kelly clips under \$5 are skipped, not rounded up. Real orders are manual only: Approve + typed REAL MONEY.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            AutopilotModeSelector(
+                mode = com.dirk.kalshiodds.signal.paper.AutopilotMode.parse(s.autopilotMode),
+                onSelect = { picked -> viewModel?.setAutopilotMode(picked) }
+            )
+            Text(
+                String.format(
+                    Locale.US,
+                    "Paper Kelly fraction  %.2f  (manual paper fills · AI Autopilot always uses half-Kelly · manual Approve stays \$10)",
+                    s.paperKellyFraction
+                ),
+                style = MaterialTheme.typography.bodyMedium,
+                color = colors.textPrimary,
+                fontWeight = FontWeight.SemiBold
+            )
+            Slider(
+                value = s.paperKellyFraction.toFloat(),
+                onValueChange = { viewModel?.setPaperKellyFraction(it.toDouble()) },
+                valueRange = SignalConstants.PAPER_KELLY_FRACTION_MIN.toFloat()..SignalConstants.PAPER_KELLY_FRACTION_MAX.toFloat(),
+                steps = 8
+            )
+            OutlinedTextField(
+                value = state.paperBankrollDraft,
+                onValueChange = { viewModel?.setPaperBankrollDraft(it) },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("Paper bankroll start (USD)") },
+                supportingText = { Text("Default $20,000. Used on Reset. Settled paper P&L updates the bankroll. Reset archives paper history; nothing is deleted.") },
+                singleLine = true
+            )
             OutlinedButton(onClick = { viewModel?.resetPaperBook() }, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper book to $1000")
+                Text(String.format(Locale.US, "Reset paper book to $%,.0f", s.paperBankrollStartUsd))
             }
+            OutlinedButton(
+                onClick = { viewModel?.resetPaperBankrollTo20k() },
+                modifier = Modifier.height(44.dp)
+            ) {
+                Text(PaperResetCopy.BUTTON)
+            }
+
+            Section("D3 daily favourite (KXBTCD 5 PM ET)")
+            Text(
+                com.dirk.kalshiodds.signal.d3.D3Copy.SETTINGS_BODY,
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
 
             Section("Live Approve tickets (Kalshi V2)")
             Text(
-                "Live Approve is \$5 all-in including Kalshi fees. Count is the largest integer with " +
-                    "count×price + fee ≤ \$5 (fee = ceil_cent(0.07×count×P×(1−P))). " +
-                    "Tickets below the min-profit-if-win setting (default \$10) stay disabled. " +
-                    "The \$100-payout long-shot (ask ≤5¢ / configured stake) is still its own option. " +
+                "The last-minute play is retired (0.3.39); Autopilot runs Scalp (paper). " +
+                    "Live Approve is \$10 all-in including Kalshi fees. Count is the largest integer with " +
+                    "count×price + fee ≤ your stake (default and cap \$10; you can pick less). " +
+                    "There is no min-profit-if-win gate — a cheap ticket is not blocked for low profit. " +
                     "Hunter still surfaces when \$1 can settle ≥\$25. Long-shot hunter still needs ask ≤20¢ " +
                     "and AI beating implied after fees. Paper fills never block Live. " +
-                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. No auto-fire.",
+                    "Limit orders only — POST /trade-api/v2/portfolio/events/orders. Approve + REAL MONEY still required. No auto-fire.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            Text(
-                String.format(Locale.US, "Min profit if win  $%.0f", s.minProfitIfWinUsd),
-                style = MaterialTheme.typography.bodyMedium,
-                color = colors.textPrimary,
-                fontWeight = FontWeight.SemiBold
-            )
-            Slider(
-                value = s.minProfitIfWinUsd.toFloat().coerceIn(0f, 50f),
-                onValueChange = { viewModel?.setMinProfitIfWinUsd(it.toDouble()) },
-                valueRange = 0f..50f,
-                steps = 49
-            )
             ToggleRow("Show live trade tickets", s.ticketsEnabled, { viewModel?.setTicketsEnabled(it) })
             Text(
-                String.format(Locale.US, "Ticket stake  $%.0f  (soft cap $5 · hard cap $25)", s.ticketStakeUsd),
+                String.format(Locale.US, "Max bet  $%.0f  (default $10 · cap $10)", s.ticketStakeUsd),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.textPrimary,
                 fontWeight = FontWeight.SemiBold
             )
             Slider(
-                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 25f),
+                value = s.ticketStakeUsd.toFloat().coerceIn(1f, 10f),
                 onValueChange = { viewModel?.requestTicketStake(it.toDouble()) },
-                valueRange = 1f..25f,
-                steps = 23
+                valueRange = 1f..10f,
+                steps = 8
             )
             ToggleRow(
                 "Require skip filter / mute / streak-pause for tickets",
@@ -763,9 +856,8 @@ fun SettingsContent(
             Text(
                 String.format(
                     Locale.US,
-                    "Long-shot hunter  max ask ≤ %.0f¢  · $5 all-in · disabled if profit < $%.0f",
-                    s.longShotMaxAsk * 100.0,
-                    s.minProfitIfWinUsd
+                    "Long-shot hunter  max ask ≤ %.0f¢  · $10 all-in · no min-profit gate",
+                    s.longShotMaxAsk * 100.0
                 ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = colors.accentOrange,
@@ -785,9 +877,9 @@ fun SettingsContent(
 
             Section("Legacy win-target (History / paper only)")
             Text(
-                "Off for live. Live Approve always uses the \$5 all-in cap and the min-profit setting above. " +
+                "Off for live. Live Approve always uses the \$10 all-in cap. Min-profit-if-win is removed. " +
                     "This leftover \$50 sizer is kept so History restore still reads old snapshots — " +
-                    "it can never resize a LIVE order above \$5 (the final order-build step clips again). " +
+                    "it can never resize a LIVE order above \$10 (the final order-build step clips again). " +
                     "Paper / History may still walk the ask book for a \$50 win target.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -838,7 +930,7 @@ fun SettingsContent(
 
             Section("Kalshi demo (play money)")
             Text(
-                "Separate from the local \$100 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
+                "Separate from the local \$1,000 paper book. Demo uses https://external-api.demo.kalshi.co/trade-api/v2 " +
                     "and a demo-only key stored next to the GitHub token — not the live Kalshi EncryptedSharedPreferences. " +
                     "Paper Buy still works with no key and never hits this host.",
                 style = MaterialTheme.typography.labelMedium,

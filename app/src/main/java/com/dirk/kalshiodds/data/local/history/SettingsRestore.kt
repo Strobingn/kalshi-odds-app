@@ -21,6 +21,12 @@ object SettingsRestore {
         o.put("bankrollUsd", s.bankrollUsd)
         o.put("edgeThresholdPp", s.edgeThresholdPp)
         o.put("paperTradingEnabled", s.paperTradingEnabled)
+        o.put("aiPaperAutopilotEnabled", s.aiPaperAutopilotEnabled)
+        o.put("autopilotMode", s.autopilotMode)
+        o.put("liveAutopilotDailyCapUsd", s.liveAutopilotDailyCapUsd)
+        o.put("paperBankrollStartUsd", s.paperBankrollStartUsd)
+        o.put("kellyFraction", s.kellyFraction)
+        o.put("paperKellyFraction", s.paperKellyFraction)
         o.put("minConfidence", s.minConfidence)
         o.put("maxSpreadCents", s.maxSpreadCents)
         o.put("minProfitIfWinUsd", s.minProfitIfWinUsd)
@@ -46,6 +52,12 @@ object SettingsRestore {
             bankrollUsd = o.optDoubleOrNull("bankrollUsd"),
             edgeThresholdPp = o.optDoubleOrNull("edgeThresholdPp"),
             paperTradingEnabled = if (o.has("paperTradingEnabled")) o.optBoolean("paperTradingEnabled") else null,
+            aiPaperAutopilotEnabled = if (o.has("aiPaperAutopilotEnabled")) o.optBoolean("aiPaperAutopilotEnabled") else null,
+            autopilotMode = o.optString("autopilotMode").takeIf { o.has("autopilotMode") && it.isNotBlank() },
+            liveAutopilotDailyCapUsd = o.optDoubleOrNull("liveAutopilotDailyCapUsd"),
+            paperBankrollStartUsd = o.optDoubleOrNull("paperBankrollStartUsd"),
+            kellyFraction = o.optDoubleOrNull("kellyFraction"),
+            paperKellyFraction = o.optDoubleOrNull("paperKellyFraction"),
             minConfidence = o.optDoubleOrNull("minConfidence"),
             maxSpreadCents = o.optDoubleOrNull("maxSpreadCents"),
             minProfitIfWinUsd = o.optDoubleOrNull("minProfitIfWinUsd")
@@ -54,7 +66,7 @@ object SettingsRestore {
 
     fun label(s: SignalSettings): String =
         "stake $${s.ticketStakeUsd.toInt()} · long-shot ≤${(s.longShotMaxAsk * 100.0).toInt()}¢ · " +
-            "$5 all-in · min profit $${s.minProfitIfWinUsd.toInt()}"
+            "$10 all-in · no min-profit gate"
 
     private fun JSONObject.optDoubleOrNull(key: String): Double? {
         if (!has(key) || isNull(key)) return null
@@ -75,6 +87,12 @@ data class RestoredSettings(
     val bankrollUsd: Double? = null,
     val edgeThresholdPp: Double? = null,
     val paperTradingEnabled: Boolean? = null,
+    val aiPaperAutopilotEnabled: Boolean? = null,
+    val autopilotMode: String? = null,
+    val liveAutopilotDailyCapUsd: Double? = null,
+    val paperBankrollStartUsd: Double? = null,
+    val kellyFraction: Double? = null,
+    val paperKellyFraction: Double? = null,
     val minConfidence: Double? = null,
     val maxSpreadCents: Double? = null,
     val minProfitIfWinUsd: Double? = null

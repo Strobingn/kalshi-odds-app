@@ -11,19 +11,17 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.engine.OverlayThrottle
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
-import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
+import com.dirk.kalshiodds.signal.paper.PaperAskDepth
+import com.dirk.kalshiodds.signal.paper.PaperAutopilot
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
-import com.dirk.kalshiodds.signal.trade.AdaptiveStrategy
-import com.dirk.kalshiodds.signal.trade.PaperExitQuote
-import com.dirk.kalshiodds.signal.trade.getStopOrderManager
 import com.dirk.kalshiodds.chart.ChartWindowService
 import com.dirk.kalshiodds.chart.hasQuote
 import com.dirk.kalshiodds.chart.hasSpot
@@ -37,7 +35,6 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.withLiveQuote
 import kotlin.math.max
 import kotlin.math.min
-import kotlin.math.floor
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -50,14 +47,22 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
+import com.dirk.kalshiodds.data.api.KalshiPollBudget
+import com.dirk.kalshiodds.data.api.KalshiRequestStatus
+import com.dirk.kalshiodds.data.api.RefreshGate
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class OddsUiState(
+    /** 0.3.49 Home status line: WS state, last tick age, AI eval latency, REST delay, real 429s last hour. */
+    val feedStatus: String = "",
     val isLoading: Boolean = false,
     val snapshot: MarketsSnapshot? = null,
     val userMessage: String? = null,
-    val pollLabel: String = "Polling ~750ms",
+    val pollLabel: String = "Polling ~2s",
+    /** Quiet line when a newer v0.3.*-debug build is on GitHub. */
+    val updateBanner: String? = null,
     val modelScoreLabel: String? = null,
     val signalStatus: SignalStatus = SignalStatus(),
     val recentAlerts: List<SignalAlert> = emptyList(),
@@ -69,13 +74,26 @@ data class OddsUiState(
     val mutedSummary: String? = null,
     val tickets: TicketUiState = TicketUiState(),
     val paper: PaperBookState = PaperBookState(),
+    val shadow: com.dirk.kalshiodds.signal.paper.ShadowBookState =
+        com.dirk.kalshiodds.signal.paper.ShadowBookState(),
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
     val liveCashUsd: Double? = null,
+    val liveCashAtMs: Long? = null,
+    val cfFeedLine: String? = null,
+    /** CF Benchmarks feed status for BTC / ETH / SOL (primary settlement source). */
+    val cfFeedLines: List<String> = emptyList(),
+    /** Latest deterministic gate verdict per market ("BET …" or "NO BET — …"). */
+    val decisionLines: List<String> = emptyList(),
+    val restingOrders: List<com.dirk.kalshiodds.signal.trade.RestingOrder> = emptyList(),
+    /** True after the Home Stop tap until Autopilot is turned on again. */
     val persistedHistory: List<ScoredSnapshotRow> = emptyList(),
     val mlGuardNote: String? = null,
-    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY
+    val scorecardSummary: HomeScorecardSummary = HomeScorecardSummary.EMPTY,
+    val d3: com.dirk.kalshiodds.signal.d3.D3Snapshot = com.dirk.kalshiodds.signal.d3.D3Snapshot.EMPTY,
+    /** 0.3.39: daily 5 PM ET quotes keyed by series (KXBTCD / KXETHD / KXSOLD) for the Home daily views. */
+    val dailyQuotes: Map<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>> = emptyMap()
 )
 
 /**
@@ -83,6 +101,8 @@ data class OddsUiState(
  * Crypto series only (BTC / ETH / SOL + extra crypto tickers).
  */
 class OddsViewModel(application: Application) : AndroidViewModel(application) {
+    /** 0.3.64: all VM loops (scalp lane, rollover, conflator) under SupervisorJob + exception handler. */
+    private val vmScope = com.dirk.kalshiodds.crash.SafeScopes.child(viewModelScope.coroutineContext, "odds-vm")
 
     private val container = KalshiOddsApp.from(application).container
     private val repository = container.repository
@@ -90,12 +110,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = container.preferences
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
-    private val paperStopManager = paperBook.getStopOrderManager()
+    private val shadowBook = container.shadow.book
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
+    /** 0.3.39: Scalp is the primary paper Autopilot strategy (Home card). */
+    val scalpTrades = container.scalp.trades
 
     private var pollJob: Job? = null
+    /** 0.3.44 poll-loop lease owner id (unique per ViewModel instance). */
+    private val loopOwner = "vm@" + Integer.toHexString(System.identityHashCode(this))
     private var ticketRebuildJob: Job? = null
     private var scoreOverlayJob: Job? = null
     private val overlayThrottle = OverlayThrottle<Map<String, ScoringEngine.Score>>(
@@ -117,12 +141,342 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private var lastWsState: WsConnectionState? = null
     private var rolloverBound = false
     private var lastRecordedTicketError: String? = null
-    private val ticketForwardLogged = ConcurrentHashMap.newKeySet<String>()
+
+    /** 0.3.49: event-driven eval (WS ticker / book delta / CF tick → debounced per market → AI + scalpers + Home). */
+    /**
+     * 0.3.50 crash fix: ONE background lane for every paper/AI/scalper evaluation (never Main). 0.3.49 ran the whole
+     * pipeline + its SQLite writes on Main every 150 ms of WS traffic → ANR / OOM kills after a few minutes.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private val paperLane: kotlinx.coroutines.CoroutineDispatcher = Dispatchers.Default.limitedParallelism(1)
+
+    /** 0.3.50: per-coin conflation (newest wins, one job per coin, bounded) instead of the 0.3.49 Main debouncer. */
+    private val marketEvents = com.dirk.kalshiodds.signal.engine.CoinEvalConflator(vmScope, paperLane) { _, tickers -> onMarketEvents(tickers) }
+    @Volatile private var lastHomeLiveMs = 0L
+    private val restPaperPending = java.util.concurrent.atomic.AtomicReference<List<MarketUiModel>?>(null)
+
+    private fun onMarketEvents(tickers: Set<String>) {
+        val snap = _state.value.snapshot ?: return
+        fun List<MarketUiModel>.live() = map { m -> if (m.ticker in tickers) m.withLiveQuote(hub.scoring.book.lastTick(m.ticker)) else m }
+        val next = snap.copy(btc = snap.btc.live(), eth = snap.eth.live(), sol = snap.sol.live(), extra = snap.extra.live())
+        val nowMs = System.currentTimeMillis()
+        if (nowMs - lastHomeLiveMs >= HOME_LIVE_THROTTLE_MS) { // Home cards from the WS flow, ≤ 4 Hz recomposition
+            lastHomeLiveMs = nowMs
+            _state.update { it.copy(snapshot = next) }
+        }
+        val s = _state.value.settings
+        if (!s.paperTradingEnabled) return
+        val changed = next.allMarkets.filter { it.ticker in tickers }
+        if (changed.isNotEmpty()) runPaperAutopilotNow(changed)
+    }
+
+    private fun startEventDriven() {
+        ensureScalpMigration() // 0.3.67: background, chunked; UI never waits on it
+        hub.onMarketEvent = { t -> marketEvents.fire(t) }
+        container.cfFeed.onTick = { indexId ->
+            _state.value.snapshot?.allMarkets?.forEach { m ->
+                val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(m.ticker)
+                if (com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series) == indexId) marketEvents.fire(m.ticker)
+            }
+        }
+        vmScope.launch(paperLane) {
+            while (isActive) {
+                delay(com.dirk.kalshiodds.signal.engine.MarketEventDebouncer.EXIT_TIMER_MS)
+                // 1 s timer only for exits / time stops on open scalps + the status line.
+                runCatching {
+                    val s = _state.value.settings
+                    val live = _state.value.snapshot?.allMarkets.orEmpty()
+                    if (s.paperTradingEnabled && live.isNotEmpty()) {
+                        // 0.3.58: 1 Hz spot into the sf ring for every coin (shock/σ/basis need every second, not only book ticks).
+                        val now1 = container.clock.nowMs()
+                        live.filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
+                            .groupBy { com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) }
+                            .forEach { (coin, ms) -> runCatching { container.scalp.tickSpot(coin, settlementFor(ms.first().ticker, now1).spot, now1) } }
+                        val open = container.scalp.openTickers()
+                        val withOpen = live.filter { it.ticker in open }
+                        if (withOpen.isNotEmpty()) runScalp(withOpen, s)
+                    }
+                }
+                _state.update { it.copy(feedStatus = feedStatusLine()) }
+            }
+        }
+    }
+
+    // ---------------- 0.3.50 Scalp tab (paper only; computed on the paper lane, never Main) ----------------
+    private val _scalpTab = MutableStateFlow(ScalpTabState())
+    val scalpTab: StateFlow<ScalpTabState> = _scalpTab.asStateFlow()
+    @Volatile private var scalpTabVisible = false
+    @Volatile private var scalpTabBoardsAtMs = 0L
+    @Volatile private var scalpTabCiAtMs = 0L
+    @Volatile private var scalpTabBoardsStats: List<com.dirk.kalshiodds.decision.ScalpStat>? = null
+    @Volatile private var scalpTabBoardsCoin: String? = null
+    @Volatile private var scalpTabBoardsWkey: String? = null
+    private var scalpTabJob: kotlinx.coroutines.Job? = null
+
+    fun setScalpTabVisible(visible: Boolean) {
+        scalpTabVisible = visible
+        if (!visible) { scalpTabJob?.cancel(); scalpTabJob = null; return }
+        if (visible) ensureScalpMigration()
+        if (visible && scalpTabJob?.isActive != true) {
+            scalpTabJob = vmScope.launch(Dispatchers.Default) {
+                while (isActive && scalpTabVisible) {
+                    runCatching { container.scalp.flushWrites(); refreshScalpTab() }
+                    delay(SCALP_TAB_REFRESH_MS)
+                }
+            }
+        }
+    }
+
+    @Volatile private var scalpMigJob: kotlinx.coroutines.Job? = null
+    private fun ensureScalpMigration() {
+        if (scalpMigJob?.isActive == true || container.scalp.statsMigrated()) return
+        scalpMigJob = vmScope.launch(Dispatchers.IO) {
+            var n = 1
+            while (isActive && n > 0) {
+                n = runCatching { container.scalp.migrateStatsChunk(400) }.getOrDefault(0)
+                val left = runCatching { container.scalp.tradeCount() }.getOrDefault(0)
+                _scalpTab.update { it.copy(migrateNote = if (n > 0) "Indexing history… ($left rows)" else null) }
+                if (n > 0) delay(50)
+            }
+            _scalpTab.update { it.copy(migrateNote = null) }
+            container.scalp.reloadStats()
+            scalpTabBoardsAtMs = 0L
+        }
+    }
+
+    fun selectScalpCoin(coin: String?) { _scalpTab.update { it.copy(coin = coin) }; scalpTabBoardsAtMs = 0L }
+    fun selectScalpMarket(ticker: String) { _scalpTab.update { it.copy(selectedTicker = ticker) } }
+    fun selectScalpSide(side: String) { _scalpTab.update { it.copy(side = if (side.equals("NO", true)) "NO" else "YES") } }
+
+    private var arenaChartReadAtMs = 0L
+
+    private fun refreshScalpTab(now: Long = container.clock.nowMs()) {
+        val cur = _scalpTab.value
+        val markets = _state.value.snapshot?.allMarkets.orEmpty()
+            .filter { com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES }
+            .filter { (it.closeTimeEpochMs ?: Long.MAX_VALUE) > now }
+            // 0.3.59: Scalp tab is Bitcoin only.
+            .filter { com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN }
+            .sortedWith(compareBy({ it.closeTimeEpochMs ?: Long.MAX_VALUE }, { it.ticker }))
+            .map { ScalpTabMarket(it.ticker, com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker), it.closeTimeEpochMs, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(it.ticker, it.closeTimeEpochMs)) }
+            .distinctBy { it.ticker }
+        val sel = cur.selectedTicker?.takeIf { t -> markets.any { it.ticker == t } } ?: markets.firstOrNull { cur.coin == null || it.coin == cur.coin }?.ticker
+        val wkey = sel?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) } ?: markets.firstOrNull()?.ticker?.let { com.dirk.kalshiodds.decision.ScalpModels.windowKeyOf(it) }
+        val trades = container.scalp.snapshot() // open/pending only (0.3.67)
+        val marks = container.scalp.marks.value
+        val statsSnap = container.scalp.stats.value
+        val bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double? = { t -> marks[t.ticker.uppercase()]?.bid(t.side) }
+        var next = cur.copy(controls = container.scalpControls.state.value, feedback = com.dirk.kalshiodds.decision.ScalpModels.V2_MODELS.associate { it.code to container.scalpControls.feedback(it.code) }, activeScalps = trades.filter { it.state != com.dirk.kalshiodds.decision.ScalpState.CLOSED && it.state != com.dirk.kalshiodds.decision.ScalpState.NO_FILL },
+            scalpBids = trades.mapNotNull { t -> bidFor(t)?.let { t.id to it } }.toMap(), markets = markets, selectedTicker = sel, currentWindowKey = wkey, updatedAtMs = now)
+        // 0.3.67/0.3.68: everything from aggregate tables (stats, daily, exits, windows) — never a trade scan.
+        val tBoard0 = android.os.SystemClock.elapsedRealtime()
+        if (now - scalpTabBoardsAtMs >= SCALP_TAB_BOARDS_MS && (statsSnap !== scalpTabBoardsStats || cur.coin != scalpTabBoardsCoin || wkey != scalpTabBoardsWkey)) {
+            scalpTabBoardsAtMs = now
+            scalpTabBoardsStats = statsSnap
+            scalpTabBoardsCoin = cur.coin
+            scalpTabBoardsWkey = wkey
+            val bankroll = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+            val M = com.dirk.kalshiodds.decision.ScalpModels
+            val openBy = trades.groupingBy { M.scalperIdOf(it) ?: "" }.eachCount()
+            val unrealBy = trades.groupBy { M.scalperIdOf(it) ?: "" }.mapValues { (_, ts) -> ts.sumOf { t -> t.unrealizedUsd(bidFor(t))?.takeIf { it.isFinite() } ?: 0.0 } }
+            val exits = container.scalp.loadExits()
+            val windowsAgg = container.scalp.loadWindows(48)
+            val today = container.scalp.loadDaily(M.dayEt(now)).associateBy { it.scalperId }
+            val allTime = M.leaderboardFromStats(statsSnap, openBy, exits, unrealBy)
+            val allByModel = allTime.associateBy { it.model }
+            val todayRows = M.ALL.associateWith { m ->
+                M.rowFromStat((today[m.code]?.asStat() ?: com.dirk.kalshiodds.decision.ScalpStat(m.code)), openN = openBy[m.code] ?: 0, unrealizedUsd = unrealBy[m.code] ?: 0.0)
+            }
+            next = next.copy(
+                leaderAllTime = allTime,
+                leaderWindow = wkey?.let { M.windowBoardFromAgg(windowsAgg, it) }.orEmpty(),
+                leaderByCoin = emptyMap(),
+                algoAllTime = allByModel,
+                algoToday = todayRows,
+                algoByCoin = emptyMap(),
+                algoTodayByCoin = emptyMap(),
+                leaderTodayByCoin = emptyMap(),
+                windows = M.windowsFromAgg(windowsAgg),
+                sliceUsd = M.sliceUsd(runCatching { paperBook.snapshot().cashUsd }.getOrDefault(bankroll))
+            )
+        }
+        val boardMs = android.os.SystemClock.elapsedRealtime() - tBoard0
+        next = next.copy(debugTiming = "stats ${boardMs}ms · open ${trades.size} · hist ${container.scalp.tradeCount()}")
+        if (sel != null) {
+            val side = cur.side
+            val book = hub.scoring.book.snapshotBook(sel)
+            val orders = container.paperOrders.open().filter { it.ticker.equals(sel, true) && it.side.equals(side, true) }
+                .map { com.dirk.kalshiodds.decision.PriceLadder.Order(it.id, it.isBuy, it.limitPrice, it.remaining) }
+            val fill = runCatching { paperBook.snapshot().fills.firstOrNull { !it.settled && it.ticker.equals(sel, true) && it.side.equals(side, true) } }.getOrNull()
+            val close = markets.firstOrNull { it.ticker == sel }?.closeMs
+            next = next.copy(
+                ladder = com.dirk.kalshiodds.decision.PriceLadder.rows(side, book?.yes.orEmpty(), book?.no.orEmpty(), orders),
+                openOrders = orders,
+                heldContracts = runCatching { paperBook.openContracts(sel, side) }.getOrDefault(0),
+                heldEntry = fill?.limitPrice,
+                bookAgeMs = hub.scoring.book.bookAgeMs(sel, now),
+                secondsLeft = close?.let { ((it - now) / 1000L).coerceAtLeast(0L) }
+            )
+        }
+        // One indexed ticker read, only while the foreground arena is visible. No history scan.
+        val live = markets.firstOrNull { (it.closeMs ?: 0) in (now + 1)..(now + 900_000) }
+        val liveTicker = live?.ticker.orEmpty()
+        if (next.arenaChart.ticker != liveTicker || now - arenaChartReadAtMs >= 3_000) {
+            arenaChartReadAtMs = now
+            val end = live?.closeMs ?: 0L
+            val mine = if (liveTicker.isEmpty()) emptyList() else
+                (container.scalp.windowPrimaryTrades(liveTicker) + trades.filter { it.ticker == liveTicker && it.isPrimary })
+                    .associateBy { it.id }.values.sortedBy { it.signalAtMs }
+            val points = if (liveTicker.isEmpty()) emptyList() else
+                com.dirk.kalshiodds.chart.ChartDownsampler.downsample(com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(
+                    container.archive.chartTicks(liveTicker, end - 900_000, end, 2000).map { it.toBidPoint() },
+                    hub.scoring.book.bidHistory(liveTicker)).filter { it.tMs in (end - 900_000)..now }, 360)
+            next = next.copy(arenaChart = ScalpWindowChartData(liveTicker, end, now, marks[liveTicker]?.bookAtMs, points, mine))
+        } else next = next.copy(arenaChart = next.arenaChart.copy(nowMs = now, bookAtMs = marks[liveTicker]?.bookAtMs))
+        _scalpTab.value = next
+    }
+
+    private fun byCoinPerModel(
+        trades: List<com.dirk.kalshiodds.decision.ScalpTrade>, bidFor: (com.dirk.kalshiodds.decision.ScalpTrade) -> Double?, since: Long?
+    ): Map<com.dirk.kalshiodds.decision.ScalpModels.Model, Map<String, com.dirk.kalshiodds.decision.ScalpModels.Row>> {
+        val perCoin = com.dirk.kalshiodds.decision.ScalpParams.COINS.associateWith { c ->
+            com.dirk.kalshiodds.decision.ScalpModels.leaderboard(trades, c, null, bidFor, sinceMs = since, withCi = false).associateBy { it.model }
+        }
+        return com.dirk.kalshiodds.decision.ScalpModels.ALL.associateWith { m -> perCoin.mapValues { it.value.getValue(m) } }
+    }
+
+    // 0.3.52: one algorithm's own page (computed off Main).
+    private val _scalpAlgo = MutableStateFlow(ScalpAlgoDetail())
+    val scalpAlgo: StateFlow<ScalpAlgoDetail> = _scalpAlgo.asStateFlow()
+
+    /** 0.3.67: Paging 3 trade list for one scalper (opened on tap). */
+    fun scalpTradePager(model: com.dirk.kalshiodds.decision.ScalpModels.Model): kotlinx.coroutines.flow.Flow<androidx.paging.PagingData<com.dirk.kalshiodds.decision.ScalpTrade>> =
+        androidx.paging.Pager(androidx.paging.PagingConfig(pageSize = 50, initialLoadSize = 50, enablePlaceholders = false)) {
+            ScalpTradePagingSource(container.scalp, model.code)
+        }.flow
+
+    val scalpStrategyControls = container.scalpControls.state
+    fun saveScalpStrategySettings(code: String, settings: com.dirk.kalshiodds.decision.ScalpStrategySettings) {
+        if (!code.startsWith("v2-")) return
+        val current = container.scalpControls.state.value
+        container.scalpControls.save(current.copy(strategySettings = current.strategySettings + (code to settings.normalized())))
+    }
+    fun enableScalpStrategy(code: String, enabled: Boolean) {
+        val current = container.scalpControls.state.value
+        container.scalpControls.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - code else current.disabledStrategies + code))
+    }
+
+    private var scalpAlgoJob: Job? = null
+    fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
+        scalpAlgoJob?.cancel()
+        _scalpAlgo.value = ScalpAlgoDetail(model = model)
+    }
+    fun setScalpAlgoVisible(visible: Boolean) {
+        if (!visible) { scalpAlgoJob?.cancel(); scalpAlgoJob = null; return }
+        if (scalpAlgoJob?.isActive == true) return
+        scalpAlgoJob = vmScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try { refreshScalpAlgo() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { _scalpAlgo.update { it.copy(chart = it.chart.copy(error = "Unable to refresh. Retrying…")) } }
+                delay(1_000)
+            }
+        }
+    }
+    fun selectScalpChartWindow(ticker: String) {
+        _scalpAlgo.update { it.copy(followLive = false, chart = ScalpWindowChartData(ticker = ticker)) }
+    }
+    fun followScalpChartLive() { _scalpAlgo.update { it.copy(followLive = true) } }
+
+    private fun refreshScalpAlgo() {
+        val selected = _scalpAlgo.value
+        val model = selected.model ?: return
+        val now = container.clock.nowMs()
+        container.scalp.flushWrites()
+        val active = container.scalp.all.value.filter { com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(it) == model.code }
+        val page = container.scalp.pageTrades(model.code, limit = 80)
+        val liveMarkets = _state.value.snapshot?.allMarkets.orEmpty().filter {
+            com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES &&
+                com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == "BTC" && (it.closeTimeEpochMs ?: 0) in (now + 1)..(now + 900_000)
+        }.map { ScalpTabMarket(it.ticker, "BTC", it.closeTimeEpochMs, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(it.ticker, it.closeTimeEpochMs)) }
+        val recent = (active + page).mapNotNull { t -> com.dirk.kalshiodds.decision.ScalpTicker.closeMs(t.ticker)?.let { end ->
+            ScalpTabMarket(t.ticker, t.coin, end, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(t.ticker, end)) } }
+        val markets = ScalpWindowChartData.availableMarkets(liveMarkets, recent) { m ->
+            val endMs = m.closeMs ?: return@availableMarkets false
+            container.archive.chartTicks(m.ticker, endMs - 900_000, endMs, 240).any { it.yesBid != null || it.noBid != null } ||
+                hub.scoring.book.bidHistory(m.ticker).any { it.tMs in (endMs - 900_000)..endMs && (it.upBidCents != null || it.downBidCents != null) }
+        }
+        val ticker = if (!selected.followLive && selected.chart.ticker.isNotEmpty()) selected.chart.ticker
+            else liveMarkets.minByOrNull { it.closeMs ?: Long.MAX_VALUE }?.ticker
+                ?: markets.filter { (it.closeMs ?: 0) > now }.maxByOrNull { it.closeMs ?: 0 }?.ticker
+                ?: markets.maxByOrNull { it.closeMs ?: 0 }?.ticker.orEmpty()
+        val end = markets.firstOrNull { it.ticker == ticker }?.closeMs ?: com.dirk.kalshiodds.decision.ScalpTicker.closeMs(ticker) ?: 0L
+        val chartTrades = if (ticker.isEmpty()) emptyList() else
+            (container.scalp.windowTrades(model.code, ticker) + active.filter { it.ticker == ticker }).associateBy { it.id }.values.sortedBy { it.signalAtMs }
+        val points = if (ticker.isEmpty() || end == 0L) emptyList() else
+            com.dirk.kalshiodds.chart.ChartDownsampler.downsample(com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(
+                container.archive.chartTicks(ticker, end - 900_000, end, 2000).map { it.toBidPoint() },
+                hub.scoring.book.bidHistory(ticker)).filter { it.tMs in (end - 900_000)..minOf(end, now) }, 360)
+        val marks = container.scalp.marks.value
+        val st = container.scalp.stats.value.firstOrNull { it.scalperId == model.code } ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)
+        val td = container.scalp.loadDaily(com.dirk.kalshiodds.decision.ScalpModels.dayEt(now)).firstOrNull { it.scalperId == model.code }
+        val open = active.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.OPEN || it.state == com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT }
+        val allRow = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st, exits = container.scalp.loadExits().filter { it.scalperId == model.code })
+            .copy(open = active.count { it.state in listOf(com.dirk.kalshiodds.decision.ScalpState.PENDING_ENTRY, com.dirk.kalshiodds.decision.ScalpState.OPEN, com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT) }, unrealizedUsd = open.sumOf { it.unrealizedUsd(marks[it.ticker]?.bid(it.side)) ?: 0.0 })
+        val chart = ScalpWindowChartData(ticker, end, now, marks[ticker]?.bookAtMs, points, chartTrades)
+        _scalpAlgo.update { current ->
+            if (current.model != model || current.followLive != selected.followLive || current.chart.ticker != selected.chart.ticker) current
+            else current.copy(allTime = allRow,
+                today = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(td?.asStat() ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)),
+                trades = (active + page).distinctBy { it.id }.sortedByDescending { it.entryAtMs ?: it.signalAtMs },
+                equity = page.asReversed().runningFold(0.0) { a, t -> a + (t.netUsd ?: 0.0) }.drop(1),
+                chart = chart, chartMarkets = markets)
+        }
+    }
+
+    /** Tap a ladder row: paper limit at exactly that price (fills on touch, depth-capped, auto-cancels at close). */
+    fun ladderPlace(cents: Int, buy: Boolean, qty: Int) {
+        val st = _scalpTab.value
+        val t = st.selectedTicker ?: return
+        submitPaperOrder(t, st.side, if (buy) "BUY" else "SELL", cents.toDouble(), qty, market = false)
+        vmScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+    }
+
+    fun ladderCancel(id: String) { cancelPaperOrder(id); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+
+    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+
+    /** One tap: sell everything held on the selected side at entry + [plusCents]. */
+    fun sellOwnedAt(plusCents: Int) {
+        val st = _scalpTab.value
+        val t = st.selectedTicker ?: return
+        val px = com.dirk.kalshiodds.decision.PriceLadder.exitPrice(st.heldEntry, plusCents)
+        if (st.heldContracts <= 0 || px == null) {
+            _state.update { it.copy(userMessage = "Paper: nothing held on ${if (st.side == "NO") "DOWN" else "UP"} $t") }
+            return
+        }
+        submitPaperOrder(t, st.side, "SELL", px * 100.0, st.heldContracts, market = false)
+        vmScope.launch(paperLane) { runCatching { refreshScalpTab() } }
+    }
+
+    private fun feedStatusLine(now: Long = System.currentTimeMillis()): String {
+        val ws = _state.value.signalStatus.state == WsConnectionState.CONNECTED
+        val last = hub.lastWsEventAtMs
+        val age = if (last <= 0L) "—" else String.format(java.util.Locale.US, "%.1fs", (now - last) / 1000.0)
+        val bucket = com.dirk.kalshiodds.data.api.KalshiRest.bucket
+        val restMs = if (ws) WS_METADATA_POLL_MS else currentIntervalMs
+        val hold = bucket.readHoldRemainingMs()
+        return com.dirk.kalshiodds.signal.engine.FeedStatus.line(
+            wsConnected = ws, lastTickAge = age, evalMs = marketEvents.avgLatencyMs.takeIf { marketEvents.evals > 0 },
+            restDelayMs = restMs + hold, real429LastHour = bucket.real429sLastHour()
+        )
+    }
 
     init {
+        startEventDriven()
         ticketSession.onStart()
         _state.update { it.copy(paper = paperBook.snapshot()) }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
                     val lastError = tickets.lastError
@@ -153,34 +507,46 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
+            runCatching {
+                shadowBook.state.collect { shadow ->
+                    _state.update { it.copy(shadow = shadow) }
+                }
+            }
+        }
+        vmScope.launch {
             runCatching {
                 combine(container.logStore.entriesFlow, paperBook.state) { entries, paper ->
-                    HomeScorecardSummary.of(entries, paper.liveRealizedPnlUsd)
+                    HomeScorecardSummary.of(
+                        entries,
+                        paper.lifetimeRealizedPnlUsd ?: paper.liveRealizedPnlUsd
+                    )
                 }.collect { summary ->
                     _state.update { it.copy(scorecardSummary = summary) }
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.applyCalibration(Calibrator.fitEntries(container.logStore.readAll()))
                 container.support.bootstrap(_state.value.settings)
                 publishSupportState()
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching { restorePersistedState() }
             startPolling()
+            startLastMinuteLoop()
+            startD3Loop()
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 repository.cachedSnapshot.collect { cached ->
                     if (cached == null) return@collect
@@ -203,15 +569,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 prefs.settings.collectLatest { settings ->
                     hub.settings = settings
-                    _state.update { it.copy(settings = settings) }
+                    _state.update {
+                        it.copy(settings = settings)
+                    }
                     publishSupportState()
                     scheduleRebuildTickets(immediate = true)
-                    if (settings.liveSignalsEnabled) {
-                        runCatching { LiveSignalsService.start(getApplication()) }
+                    if (serviceWanted(settings)) {
+                        runCatching { LiveSignalsService.start(getApplication()) } // 0.3.42: gated requestStart
                         if (!settings.credentialsConfigured) {
                             hub.setConnection(WsConnectionState.NEEDS_API_KEY)
                         }
@@ -224,7 +592,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         bindRollover()
-        viewModelScope.launch {
+        startPositionLoop()
+        vmScope.launch {
+            runCatching {
+                com.dirk.kalshiodds.update.UpdateAvailability.offer.collect { offer ->
+                    _state.update {
+                        it.copy(updateBanner = offer?.let { rel -> "Update ${rel.tag} available" })
+                    }
+                }
+            }
+        }
+        vmScope.launch {
             runCatching {
                 hub.status.collect { status ->
                     val prev = lastWsState
@@ -234,7 +612,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         prev != null &&
                         prev != WsConnectionState.CONNECTED
                     ) {
-                        viewModelScope.launch {
+                        vmScope.launch {
                             runCatching { container.rollover.refreshFromRest() }
                             container.rollover.onReconnect()
                         }
@@ -242,7 +620,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.alerts.collect { alerts ->
                     _state.update { it.copy(recentAlerts = alerts) }
@@ -250,7 +628,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching {
                 hub.scores.collect { scores ->
                     when (overlayThrottle.onEvent(scores)) {
@@ -262,7 +640,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                         OverlayThrottle.Decision.SCHEDULE_TRAILING -> {
                             val waitMs = overlayThrottle.remainingMs()
                             scoreOverlayJob?.cancel()
-                            scoreOverlayJob = viewModelScope.launch {
+                            scoreOverlayJob = vmScope.launch {
                                 delay(waitMs)
                                 overlayThrottle.takeTrailing()?.let { applyScoreOverlay(it) }
                             }
@@ -314,7 +692,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 hub.scoring.book.seedSeries(ticker, rows.map { it.createdAtMs to it.mid01 }.asReversed())
             }
             if (grouped.isEmpty()) {
-                val snaps = container.resultsStore.recentSnapshots(200)
+                val snaps = container.resultsStore.recentSnapshots(80)
                 snaps.groupBy { it.ticker }.forEach { (ticker, rows) ->
                     hub.scoring.book.seedSeries(
                         ticker,
@@ -347,18 +725,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun setLiveSignals(enabled: Boolean) {
-        viewModelScope.launch { prefs.updateLiveSignals(enabled) }
+        vmScope.launch { prefs.updateLiveSignals(enabled) }
     }
 
     private fun bindRollover() {
         if (rolloverBound) return
         rolloverBound = true
         container.rollover.addListener { event -> applyRolloverEvent(event) }
-        container.rollover.start(viewModelScope)
+        container.rollover.start(vmScope)
     }
 
     fun onForeground() {
-        viewModelScope.launch {
+        vmScope.launch {
             runCatching { container.rollover.refreshFromRest() }
         }
     }
@@ -374,7 +752,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
         if (event.droppedTickers.isNotEmpty()) {
             ticketSession.voidTickers(event.droppedTickers)
-            viewModelScope.launch {
+            vmScope.launch {
                 runCatching { repository.scoreSettlementsNow(now) }
             }
         }
@@ -385,11 +763,54 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         scheduleRebuildTickets()
     }
 
+    private val refreshGate = RefreshGate(debounceMs = 750L, nowMs = { container.clock.nowMs() })
+
     fun refresh() {
-        viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, userMessage = null) }
-            applyResult(doRefresh())
+        if (!refreshGate.tryAcquire()) return
+        vmScope.launch {
+            try {
+                _state.update { it.copy(isLoading = true, userMessage = null) }
+                val result = try {
+                    doRefresh()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    offlineSnapshot(t)
+                }
+                applyResult(result)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (t: Throwable) {
+                _state.update {
+                    it.copy(
+                        isLoading = false,
+                        userMessage = KalshiRequestStatus.message(
+                            t,
+                            container.kalshiTraffic.limiter.remainingHoldMs()
+                        )
+                    )
+                }
+            } finally {
+                refreshGate.release()
+            }
         }
+    }
+
+    private fun offlineSnapshot(error: Throwable): MarketsSnapshot {
+        val retry = container.kalshiTraffic.limiter.remainingHoldMs().takeIf { it > 0L } ?: 1_000L
+        val message = KalshiRequestStatus.message(error, retry)
+        container.kalshiTraffic.health.note(error, retry)
+        val cached = _state.value.snapshot
+        return (cached ?: MarketsSnapshot(
+            btc = emptyList(),
+            fetchedAtEpochMs = 0L,
+            fromCache = false
+        )).copy(
+            fromCache = cached != null,
+            errorMessage = message,
+            rateLimited = KalshiRequestStatus.isRateLimited(error) || KalshiRequestStatus.isServerError(error),
+            retryInMs = retry
+        )
     }
 
     private fun restartPolling() {
@@ -398,37 +819,77 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun startPolling() {
         pollJob?.cancel()
-        pollJob = viewModelScope.launch {
+        pollJob = vmScope.launch {
             while (isActive) {
-                runCatching {
+                val headless = !com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
+                if (headless) {
+                    // 0.3.39 always-on: with no UI, this process-scoped ViewModel keeps Autopilot running.
+                    val wanted = autopilotWanted(_state.value.settings)
+                    com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.headlessDriving.set(wanted)
+                    if (!wanted) {
+                        delay(1_000L)
+                        continue
+                    }
+                } else {
+                    com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.headlessDriving.set(false)
+                }
+                // 0.3.44: one markets loop per process (this VM, another VM instance, or the service).
+                if (!com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.MARKETS, loopOwner)) {
+                    delay(nextDelayMs())
+                    continue
+                }
+                try {
                     if (_state.value.snapshot == null) {
                         _state.update { it.copy(isLoading = true) }
                     }
                     applyResult(doRefresh())
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    val retry = container.kalshiTraffic.limiter.remainingHoldMs()
+                    _state.update {
+                        it.copy(
+                            isLoading = false,
+                            userMessage = KalshiRequestStatus.message(t, retry)
+                        )
+                    }
                 }
+                // 0.3.49: no 5 s headless floor — AI/scalpers are event-driven off the WS; REST is backup only.
                 delay(nextDelayMs())
             }
         }
     }
+
+    private fun autopilotWanted(s: com.dirk.kalshiodds.signal.config.SignalSettings): Boolean =
+        com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.autopilotWanted(
+            s.paperTradingEnabled, s.aiPaperAutopilotEnabled
+        )
+
+    private fun serviceWanted(s: com.dirk.kalshiodds.signal.config.SignalSettings): Boolean =
+        s.liveSignalsEnabled || autopilotWanted(s)
 
     private suspend fun doRefresh(): MarketsSnapshot {
         val s = _state.value.settings
         refreshExternal()
         return repository.refresh(
             watchBtc = true,
-            watchEth = false,
-            watchSol = false,
+            watchEth = true,
+            watchSol = true,
             extraTickers = com.dirk.kalshiodds.domain.CryptoMarkets.liveTickers(s.extraTickerList()),
             edgeThresholdPp = s.edgeThresholdPp
         )
     }
 
     private fun applyResult(result: MarketsSnapshot) {
+        // 0.3.49 root cause: this used to double the REST interval to 60 s on every rate-limited result (local
+        // throttles included) and only recover by ×0.8 per success — minutes of slow refresh after a WS drop.
+        // Now: wait exactly the shared bucket's hold (short, 0.3.45 design), capped at 8 s; success snaps back.
         if (result.rateLimited) {
-            currentIntervalMs = min(max(currentIntervalMs * 2, INITIAL_BACKOFF_MS), MAX_BACKOFF_MS)
+            val hold = com.dirk.kalshiodds.data.api.KalshiRest.bucket.readHoldRemainingMs()
+            currentIntervalMs = max(BASE_POLL_MS, hold).coerceAtMost(MAX_BACKOFF_MS)
         } else if (result.errorMessage == null) {
             val wsLive = _state.value.signalStatus.state == WsConnectionState.CONNECTED
-            currentIntervalMs = if (wsLive) WS_METADATA_POLL_MS else max((currentIntervalMs * 4) / 5, BASE_POLL_MS)
+            currentIntervalMs = if (wsLive) WS_METADATA_POLL_MS else BASE_POLL_MS
         }
         val wsConnected = _state.value.signalStatus.state == WsConnectionState.CONNECTED
         val pollLabel = when {
@@ -446,29 +907,33 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             event,
             container.clock.nowMs()
         )
-        val overlaid = attachHistory(
-            pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
+        val overlaid = attachLastMinute(
+            attachHistory(
+                pruned.overlayScores(hub.latestScores(), _state.value.settings.effectiveEdgeThresholdPp())
+            )
         )
         _state.update {
             it.copy(
                 isLoading = false,
                 snapshot = overlaid,
                 userMessage = when {
+                    !result.errorMessage.isNullOrBlank() -> result.errorMessage
                     event.retrying.isNotEmpty() -> null
-                    result.errorMessage != null && result.fromCache ->
-                        "Offline — showing cache (${result.errorMessage})"
-                    result.errorMessage != null -> result.errorMessage
                     else -> null
                 },
                 pollLabel = pollLabel,
                 modelScoreLabel = scoreLabel(overlaid),
+                cfFeedLine = container.cfFeed.status(
+                    com.dirk.kalshiodds.signal.ws.CfBenchmarks.BTC,
+                    container.clock.nowMs(),
+                    coinbaseAvailable = true
+                ).detail,
                 avgEdgeWhenRight = overlaid.avgEdgeWhenRight,
                 avgEdgeWhenWrong = overlaid.avgEdgeWhenWrong
             )
         }
         publishSupportState()
         scheduleRebuildTickets()
-        refreshPositions()
         scheduleChartBackfill(overlaid)
     }
 
@@ -477,6 +942,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val snap = withContext(Dispatchers.IO) { container.external.refreshIfStale() }
             hub.applyExternal(snap)
         }
+        runCatching { refreshBrtiSpot() }
         runCatching {
             val s = _state.value.settings
             if (s.extendedAiEnabled && s.newsPulseEnabled) {
@@ -504,7 +970,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun resumeAlerts() {
-        viewModelScope.launch {
+        vmScope.launch {
             container.support.resumeAlerts()
             publishSupportState()
             scheduleRebuildTickets(immediate = true)
@@ -534,8 +1000,21 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * Explicit Approve for [ticketId] only. Nothing else in this ViewModel
      * (init, poll, score overlay) ever calls the trade client.
      */
+    fun reviseTicketLimit(ticketId: String, centsText: String) {
+        val cents = com.dirk.kalshiodds.signal.trade.LimitPriceInput.parse(centsText) ?: return
+        val fee = _state.value.settings.feeRate
+        ticketSession.revise(ticketId) {
+            com.dirk.kalshiodds.signal.trade.LimitPriceInput.apply(it, cents, fee)
+        }
+    }
+
+    private fun publishFeedBanner() {
+        val banner = container.kalshiTraffic.health.banner ?: return
+        _state.update { it.copy(userMessage = banner, isLoading = false) }
+    }
+
     fun approveTicket(ticketId: String) {
-        viewModelScope.launch {
+        vmScope.launch {
             val settings = _state.value.settings
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             when (
@@ -559,17 +1038,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun approveSellTicket(ticketId: String, count: Int, price: Double) {
-        viewModelScope.launch {
+        vmScope.launch {
             val settings = _state.value.settings
             if (!settings.tradingCredentialsConfigured()) {
                 ticketSession.failSoft("Add Kalshi API Key ID + PEM in Settings before Approving")
                 return@launch
             }
-            val now = System.currentTimeMillis()
             val snap = _state.value
-            val ctx = ticketContext(snap, now)
             ticketSession.revise(ticketId) { t ->
-                refreshSellAtConfirm(t, count, price, snap, ctx)
+                refreshSellAtConfirm(t, count, price, snap)
             }
             val ticket = ticketSession.snapshot().proposals.firstOrNull { it.id == ticketId }
             if (ticket != null && !ticket.canApprove) {
@@ -581,25 +1058,26 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelWorkingOrder(orderId: String) {
-        viewModelScope.launch { ticketSession.cancelWorking(orderId) }
+        vmScope.launch { ticketSession.cancelWorking(orderId) }
     }
 
     fun setPaperTrading(enabled: Boolean) {
-        viewModelScope.launch { prefs.updatePaperTrading(enabled) }
+        vmScope.launch { prefs.updatePaperTrading(enabled) }
     }
 
     fun resetPaperBook() {
         val before = paperBook.snapshot().cashUsd
         val snap = _state.value.settings
-        paperBook.reset()
-        viewModelScope.launch(Dispatchers.IO) {
+        val start = snap.paperBankrollStartUsd
+        paperBook.reset(start)
+        vmScope.launch(Dispatchers.IO) {
             runCatching {
                 container.archive.insertSettingsChange(
                     com.dirk.kalshiodds.data.local.history.SettingsChange(
                         createdAtMs = System.currentTimeMillis(),
                         key = "paper_reset",
                         oldValue = before.toString(),
-                        newValue = "100.0",
+                        newValue = start.toString(),
                         snapshotJson = com.dirk.kalshiodds.data.local.history.SettingsRestore.snapshot(snap)
                     )
                 )
@@ -741,6 +1219,30 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
      * Window/Market closed. Missing asks become a disabled ticket card — never
      * a page-level "No ask to size" error. Never remaps a previous ticket.
      */
+    /**
+     * 0.3.39: manual Buy on a daily 5 PM ET strike (BTC/ETH/SOL). Same approve-gated ticket path as
+     * the 15m cards (Approve + typed REAL MONEY for live). Uses only that quote's own prices.
+     */
+    fun buyDaily(quote: com.dirk.kalshiodds.signal.d3.D3Quote, side: String) {
+        val s = _state.value
+        if (!s.settings.ticketsEnabled) {
+            ticketSession.failSoft("Turn on trade tickets in Settings to buy")
+            return
+        }
+        val now = container.clock.nowMs()
+        val market = com.dirk.kalshiodds.ui.HomeMarkets.dailyMarket(quote)
+        val ticket = TicketBuilder.proposeManual(market, side, ticketContext(s, now))
+        if (ticket == null) {
+            ticketSession.failSoft("Could not build a buy ticket — turn on trade tickets in Settings")
+            return
+        }
+        ticketSession.addManual(ticket)
+    }
+
+    /** 0.3.39: live order book for one ticker (WS book), for the chart screen. */
+    fun orderBook(ticker: String): com.dirk.kalshiodds.signal.engine.BookLevelSnapshot? =
+        runCatching { hub.scoring.book.snapshotBook(ticker) }.getOrNull()
+
     fun buyMarket(market: MarketUiModel, side: String) {
         val s = _state.value
         if (!s.settings.ticketsEnabled) {
@@ -756,6 +1258,16 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             return
         }
         val ticketCtx = ticketContext(s, now)
+        val lastMinute = TicketBuilder.proposeLastMinute(target.copy(lastMinute = target.lastMinute), ticketCtx)
+            ?: s.tickets.proposals.firstOrNull {
+                it.kind == com.dirk.kalshiodds.signal.trade.TicketKind.LAST_MINUTE &&
+                    it.ticker.equals(target.ticker, true) &&
+                    it.canApprove
+            }
+        if (lastMinute != null && lastMinute.side.equals(side, true)) {
+            ticketSession.addManual(lastMinute)
+            return
+        }
         val ticket = TicketBuilder.proposeManual(target, side, ticketCtx)
         if (ticket == null) {
             ticketSession.failSoft("Could not build a buy ticket — turn on trade tickets in Settings")
@@ -768,7 +1280,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         runCatching {
             _state.update { s ->
                 val snap = s.snapshot ?: return@update s
-                s.copy(snapshot = attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp())))
+                s.copy(
+                    snapshot = attachLastMinute(
+                        attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp()))
+                    )
+                )
             }
             scheduleRebuildTickets()
             refreshPositionMarks()
@@ -777,7 +1293,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun scheduleRebuildTickets(immediate: Boolean = false) {
         ticketRebuildJob?.cancel()
-        ticketRebuildJob = viewModelScope.launch {
+        ticketRebuildJob = vmScope.launch {
             if (!immediate) delay(com.dirk.kalshiodds.signal.service.LiveSignalsPolicy.TICKET_REBUILD_DEBOUNCE_MS)
             runCatching { rebuildTickets() }
         }
@@ -798,15 +1314,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val now = container.clock.nowMs()
         val markets = s.snapshot?.allMarkets.orEmpty()
         val live = MarketLifecycle.tradable(markets, now)
-        val liveTickers = live.map { it.ticker }.toSet()
+        val d3Tickers = s.d3.liveTickers
+        val liveTickers = live.map { it.ticker }.toSet() + d3Tickers
         val ctx = ticketContext(s, now)
-        val adaptive = AdaptiveStrategy(paperBook.snapshot())
-        val adaptiveConfig = adaptive.getAdaptiveConfig()
-        val adaptiveAllowed = live.isEmpty() || live.any { adaptive.shouldTrade(it) }
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
-        val tickets = TicketBuilder.proposeAll(live, ctx)
-        captureTicketForward(tickets, live, ctx, now)
+        val d3Tickets = s.d3.qualifying.mapNotNull {
+            TicketBuilder.proposeD3(it, ctx, container.d3Engine.schedule)
+        }
+        val tickets = TicketBuilder.proposeAll(live, ctx) + d3Tickets
         ticketSession.replaceProposals(tickets, liveTickers = liveTickers)
         runCatching {
             container.opportunities.consider(
@@ -815,89 +1331,217 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 quiet = s.settings.opportunityQuiet
             )
         }
-        if (s.settings.paperTradingEnabled) {
-            val paperCtx = ctx.copy(
-                bankrollUsd = paperBook.snapshot().equityUsd,
-                bankrollSource = "paper",
-                adaptiveConfig = adaptiveConfig,
-                adaptiveTradingAllowed = adaptiveAllowed
-            )
-            val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
-            paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
-            evaluatePaperStops(paperCtx, now)
-        }
+        runPaperAutopilot(live)
         refreshPositionMarks()
     }
 
-    /** Evaluate paper exits only against the current held-side bid and touch depth. */
-    private fun evaluatePaperStops(ctx: TicketBuilder.Context, nowMs: Long) {
-        if (paperBook.snapshot().openCount <= 0) return
-        val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
-        val quotes = paperBook.snapshot().fills
-            .filter { !it.settled }
-            .mapNotNull { fill ->
-                val market = markets[fill.ticker] ?: return@mapNotNull null
-                val bid = TicketBuilder.freshBestBid(market, fill.side, ctx) ?: return@mapNotNull null
-                val book: BookLevelSnapshot? = ctx.books[fill.ticker]
-                val levels = if (fill.side.equals("NO", true)) book?.no else book?.yes
-                val touchDepth = levels
-                    ?.filter { kotlin.math.abs(it.first - bid) <= 1e-9 }
-                    ?.sumOf { it.second }
-                    ?.takeIf { it > 0.0 }
-                    ?.let { floor(it).toInt().coerceAtLeast(0) }
-                fill.ticker to PaperExitQuote(
-                    price = bid,
-                    availableContracts = touchDepth,
-                    observedAtMs = nowMs,
-                    source = if (touchDepth != null) "book" else "quote"
+    private var lastMinuteJob: Job? = null
+    private var d3Job: Job? = null
+    private var positionJob: Job? = null
+    private val lastD3TradeFetch = ConcurrentHashMap<String, Long>()
+    @Volatile private var d3Quotes: List<com.dirk.kalshiodds.signal.d3.D3Quote> = emptyList()
+    @Volatile private var lastOtherDailyFetchMs = 0L
+
+    private fun startD3Loop() {
+        d3Job?.cancel()
+        _state.update {
+            it.copy(
+                d3 = container.d3Engine.snapshot(
+                    emptyList(),
+                    container.d3Store,
+                    now = container.clock.nowMs()
                 )
+            )
+        }
+        d3Job = vmScope.launch {
+            runCatching {
+                val schedule = withContext(Dispatchers.IO) { container.d3Markets.loadSchedule() }
+                container.d3Engine.applySchedule(schedule)
             }
-            .toMap()
-        val executions = paperStopManager.checkAndExecute(quotes, nowMs)
-        if (executions.isNotEmpty()) {
-            _state.update {
-                it.copy(userMessage = "Paper stop: ${executions.sumOf { e -> e.contracts }} contracts exited at executable bid")
+            var lastMarketFetch = 0L
+            while (isActive) {
+                if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) {
+                    delay(5_000)
+                    continue
+                }
+                if (!com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.D3, loopOwner)) {
+                    delay(5_000); continue
+                }
+                runCatching { tickD3(lastMarketFetch).also { lastMarketFetch = it } }
+                .onFailure { t ->
+                    if (t is CancellationException) throw t
+                    container.kalshiTraffic.health.note(
+                        t,
+                        container.kalshiTraffic.limiter.remainingHoldMs().takeIf { it > 0L } ?: 1_000L
+                    )
+                }
+            publishFeedBanner()
+                delay(5_000)
             }
         }
     }
 
-    private fun captureTicketForward(
-        tickets: List<com.dirk.kalshiodds.signal.trade.TradeTicket>,
-        live: List<MarketUiModel>,
-        ctx: TicketBuilder.Context,
-        nowMs: Long
-    ) {
-        ticketForwardLogged.retainAll(live.map { it.ticker }.toSet())
-        for (ticket in tickets.filter { it.canApprove }.sortedByDescending { it.netEvUsd ?: Double.NEGATIVE_INFINITY }) {
-            if (ticket.ticker in ticketForwardLogged ||
-                !com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(ticket.ticker) ||
-                !hub.hasFreshBook(ticket.ticker, nowMs)) continue
-            val market = live.firstOrNull { it.ticker == ticket.ticker } ?: continue
-            val source = when {
-                market.importedModelPp?.isFinite() == true -> "imported"
-                market.aiYesPercent?.isFinite() == true -> "on-device AI"
-                market.digitalFairPp?.isFinite() == true -> "digital fair"
-                else -> continue
+    private suspend fun tickD3(lastMarketFetchMs: Long): Long {
+        val now = container.clock.nowMs()
+        val impliedClose = com.dirk.kalshiodds.signal.d3.D3Window.impliedCloseMs(now)
+        val phase = com.dirk.kalshiodds.signal.d3.D3Window.phase(now, impliedClose)
+        val interval = when (phase) {
+            com.dirk.kalshiodds.signal.d3.D3Phase.ACTIVE -> 5_000L // 0.3.45
+            com.dirk.kalshiodds.signal.d3.D3Phase.WAITING -> 60_000L
+            com.dirk.kalshiodds.signal.d3.D3Phase.CLOSED -> 120_000L
+        }
+        var fetchedAt = lastMarketFetchMs
+        if (now - lastMarketFetchMs >= interval) {
+            val quotes = withContext(Dispatchers.IO) { container.d3Markets.loadFivePmQuotes() }
+            if (quotes.isNotEmpty()) d3Quotes = quotes
+            fetchedAt = now
+            val daily = HashMap<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>>()
+            daily[com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTCD] = quotes
+            if (now - lastOtherDailyFetchMs >= OTHER_DAILY_MS) {
+                for (series in listOf(com.dirk.kalshiodds.data.api.KalshiApi.SERIES_ETHD, com.dirk.kalshiodds.data.api.KalshiApi.SERIES_SOLD)) {
+                    daily[series] = withContext(Dispatchers.IO) {
+                        runCatching { container.d3Markets.loadFivePmQuotes(series) }.getOrDefault(emptyList())
+                    }
+                }
+                lastOtherDailyFetchMs = now
             }
-            val row = com.dirk.kalshiodds.signal.feedback.TicketForwardTest.capture(
-                ticket = ticket,
-                book = ctx.books[ticket.ticker],
-                modelSource = source,
-                feeRate = ctx.settings.feeRate,
-                atMs = nowMs,
-                buildCode = com.dirk.kalshiodds.BuildConfig.VERSION_CODE
-            ) ?: continue
-            container.resultsWriter.enqueueTicketForward(row)
-            ticketForwardLogged.add(ticket.ticker)
+            runCatching { runDailyDecisions(daily, now) }
+            val shown = daily.filterValues { it.isNotEmpty() }
+            if (shown.isNotEmpty()) _state.update { it.copy(dailyQuotes = it.dailyQuotes + shown) }
+        }
+        val quotes = d3Quotes
+        val settings = _state.value.settings
+        val paperOn = settings.paperTradingEnabled && settings.aiPaperAutopilotEnabled
+        val trades = HashMap<String, List<com.dirk.kalshiodds.signal.d3.D3TradePrint>>()
+        if (paperOn) {
+            val resting = container.d3Engine.restingBids()
+            for (bid in resting) {
+                val key = bid.ticker.uppercase()
+                val last = lastD3TradeFetch[key] ?: 0L
+                if (now - last < com.dirk.kalshiodds.data.api.KalshiPollBudget.D3_TRADES_MS) continue
+                val prints = withContext(Dispatchers.IO) {
+                    runCatching { container.d3Markets.loadTrades(bid.ticker, bid.placedAtMs) }
+                        .getOrDefault(emptyList())
+                }
+                lastD3TradeFetch[key] = now
+                trades[key] = prints
+            }
+        }
+        val bankroll = paperBook.snapshot().paperBankrollUsd
+        val fired = container.d3Engine.tickPaper(
+            quotes = quotes,
+            store = container.d3Store,
+            tradesByTicker = trades,
+            paperAutopilot = paperOn,
+            bankrollUsd = bankroll,
+            now = now
+        )
+        val snap = container.d3Engine.snapshot(quotes, container.d3Store, bankrollUsd = bankroll, now = now)
+        _state.update { it.copy(d3 = snap) }
+        fired.forEach { signal ->
+            runCatching { container.d3Notifier.notifyFired(signal) }
+        }
+        if (fired.isNotEmpty() || snap.qualifying.isNotEmpty()) {
+            scheduleRebuildTickets(immediate = true)
+        }
+        quotes.forEach { q ->
+            q.closeTimeEpochMs?.let { container.repository.noteCloseTime(q.ticker, it) }
+        }
+        return fetchedAt
+    }
+
+    private fun startLastMinuteLoop() {
+        lastMinuteJob?.cancel()
+        lastMinuteJob = vmScope.launch {
+            runCatching { refreshMinuteVol() }
+            var lastMinuteBucket = 0L
+            while (isActive) {
+                runCatching { refreshBrtiSpot() }
+                runCatching { tickLastMinute() }
+                val bucket = container.clock.nowMs() / 60_000L
+                if (bucket != lastMinuteBucket) {
+                    lastMinuteBucket = bucket
+                    runCatching { refreshMinuteVol() }
+                }
+                delay(1_000)
+            }
         }
     }
 
-    private fun ticketContext(
-        s: OddsUiState,
-        nowMs: Long,
-        adaptiveConfig: AdaptiveStrategy.AdaptiveConfig? = null,
-        adaptiveTradingAllowed: Boolean = true
-    ): TicketBuilder.Context {
+    private suspend fun refreshBrtiSpot() {
+        // CF Benchmarks BRTI over the signed Kalshi WS is primary; the public composite is the fallback.
+        val now = container.clock.nowMs()
+        val cf = container.cfFeed.latest(com.dirk.kalshiodds.signal.ws.CfBenchmarks.BTC)?.takeIf { it.fresh(now) }
+        if (cf != null) {
+            container.lastMinuteEngine.noteSpot(
+                com.dirk.kalshiodds.signal.lastminute.BrtiQuote(
+                    price = cf.value,
+                    source = "CF BRTI",
+                    fallback = false,
+                    fetchedAtMs = cf.localReceivedAtMs.takeIf { it > 0L } ?: now
+                )
+            )
+            return
+        }
+        val fallback = container.external.latest().btc
+        val quote = withContext(Dispatchers.IO) {
+            container.brti.fetchSpot(fallback?.lastPrice, fallback?.source)
+        }
+        if (quote != null) container.lastMinuteEngine.noteSpot(quote)
+    }
+
+    private suspend fun refreshMinuteVol() {
+        val candles = withContext(Dispatchers.IO) { container.brti.fetchMinuteCloses() }
+        if (candles.isNotEmpty()) {
+            container.lastMinuteEngine.replaceMinuteCloses(container.brti.logCloses(candles))
+        }
+    }
+
+    private fun tickLastMinute() {
+        if (com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired) return
+        val snap = _state.value.snapshot ?: return
+        val next = attachLastMinute(snap)
+        _state.update { it.copy(snapshot = next) }
+        scheduleRebuildTickets(immediate = true)
+    }
+
+    private fun attachLastMinute(snap: MarketsSnapshot): MarketsSnapshot {
+        val stake = _state.value.settings.ticketStakeUsd
+        container.lastMinuteEngine.forgetStale(snap.allMarkets.map { it.ticker }.toSet())
+        // 0.3.39: last-minute play retired — never attach, record, notify or paper it.
+        if (com.dirk.kalshiodds.signal.lastminute.LastMinuteRetired.retired) return snap.mapMarkets { it.copy(lastMinute = null) }
+        return snap.mapMarkets { market ->
+            val book = hub.scoring.book.snapshotBook(market.ticker)
+            val eval = container.lastMinuteEngine.tick(
+                market = market,
+                book = book,
+                stakeUsd = stake,
+                fallbackSpot = market.spotUsd,
+                fallbackSource = market.spotLabel
+            )
+            eval.fired?.let { fired ->
+                val liveAsk = com.dirk.kalshiodds.signal.trade.TicketBuilder.liveAsk(market, fired.side)
+                if (!com.dirk.kalshiodds.signal.flip.FlipCheck.allowsFired(
+                        fired,
+                        eval.spotUsd ?: market.spotUsd,
+                        eval.strikeUsd ?: market.floorStrike,
+                        liveAsk
+                    )
+                ) {
+                    return@mapMarkets market.copy(lastMinute = eval)
+                }
+                val logged = container.lastMinuteStore.record(fired)
+                if (logged != null) {
+                    // Heads-up even when this Activity is in the foreground.
+                    runCatching { container.lastMinuteNotifier.notifyFired(fired) }
+                    runPaperAutopilot(listOf(market.copy(lastMinute = eval)))
+                }
+            }
+            market.copy(lastMinute = eval)
+        }
+    }
+
+    private fun ticketContext(s: OddsUiState, nowMs: Long): TicketBuilder.Context {
         val markets = s.snapshot?.allMarkets.orEmpty()
         val books = markets.mapNotNull { m ->
             hub.scoring.book.snapshotBook(m.ticker)?.let { m.ticker to it }
@@ -905,6 +1549,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val ticks = markets.mapNotNull { m ->
             hub.scoring.book.lastTick(m.ticker)?.let { m.ticker to it }
         }.toMap()
+        val liveFresh = com.dirk.kalshiodds.decision.LiveBalancePolicy.fresh(s.liveCashUsd, s.liveCashAtMs, nowMs)
         return TicketBuilder.Context(
             settings = s.settings,
             alertsPaused = s.alertsPaused,
@@ -912,10 +1557,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ticks = ticks,
             positions = s.positions,
             nowMs = nowMs,
-            bankrollUsd = s.liveCashUsd ?: s.settings.bankrollUsd,
-            bankrollSource = if (s.liveCashUsd != null) "live" else "settings",
-            adaptiveConfig = adaptiveConfig,
-            adaptiveTradingAllowed = adaptiveTradingAllowed
+            // 0.3.40: a stale (>15 min) real balance is never presented as "live".
+            bankrollUsd = if (liveFresh) s.liveCashUsd else s.settings.bankrollUsd,
+            bankrollSource = if (liveFresh) "live" else "settings"
         )
     }
 
@@ -924,13 +1568,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value
         val market = s.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticket.ticker, true) }
             ?: return ticket
-        val adaptive = AdaptiveStrategy(paperBook.snapshot())
-        val ctx = ticketContext(
-            s,
-            System.currentTimeMillis(),
-            adaptiveConfig = adaptive.getAdaptiveConfig(),
-            adaptiveTradingAllowed = adaptive.shouldTrade(market)
-        ).copy(
+        val ctx = ticketContext(s, System.currentTimeMillis()).copy(
             bankrollUsd = paperBook.snapshot().equityUsd,
             bankrollSource = "paper"
         )
@@ -944,20 +1582,50 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         decoratePositions(raw)
     }
 
+    private fun startPositionLoop() {
+        positionJob?.cancel()
+        positionJob = vmScope.launch {
+            var lastFetch = 0L
+            var lastLimits = 0L
+            while (isActive) {
+                val visible = com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()
+                val now = System.currentTimeMillis()
+                // 0.3.45: size the global limiter to 90 % of the account's real tier (GET /account/limits), every 30 min.
+                if (now - lastLimits >= 30 * 60_000L && _state.value.settings.tradingCredentialsConfigured()) {
+                    lastLimits = now
+                    launch(Dispatchers.IO) { runCatching { container.tradeClient.refreshRateLimits() } }
+                }
+                if (visible && now - lastFetch >= KalshiPollBudget.POSITIONS_MS &&
+                    com.dirk.kalshiodds.data.api.KalshiPollLoops.tryRun(com.dirk.kalshiodds.data.api.KalshiPollLoops.Type.POSITIONS, loopOwner, now, 2 * KalshiPollBudget.POSITIONS_MS)) {
+                    lastFetch = now
+                    refreshPositions()
+                }
+                delay(1_000L)
+            }
+        }
+    }
+
     private fun refreshPositions() {
-        viewModelScope.launch {
+        vmScope.launch {
             val settings = _state.value.settings
+            if (!com.dirk.kalshiodds.signal.service.LiveSignalsKeepAlive.isUiInForeground()) return@launch
             if (!settings.tradingCredentialsConfigured()) {
                 decoratePositions(_state.value.positions)
                 return@launch
             }
-            val (rows, cash) = withContext(Dispatchers.IO) {
+            val fetched = withContext(Dispatchers.IO) {
                 val positions = runCatching { container.tradeClient.listMarketPositions() }.getOrElse { emptyList() }
                 val cashUsd = runCatching { container.tradeClient.getCashUsd() }.getOrNull()
-                positions to cashUsd
+                val resting = runCatching { container.tradeClient.listRestingOrders() }
+                Triple(positions, cashUsd, resting)
             }
-            if (cash != null) {
-                _state.update { it.copy(liveCashUsd = cash) }
+            val (rows, cash, orders) = fetched
+            _state.update { cur ->
+                cur.copy(
+                    liveCashUsd = cash ?: cur.liveCashUsd,
+                    liveCashAtMs = if (cash != null) System.currentTimeMillis() else cur.liveCashAtMs,
+                    restingOrders = orders.getOrElse { cur.restingOrders }
+                )
             }
             val parsed = PositionParser.parseAll(rows)
             decoratePositions(parsed)
@@ -994,52 +1662,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
         count: Int,
         price: Double,
-        snap: OddsUiState,
-        ctx: TicketBuilder.Context
+        snap: OddsUiState
     ): com.dirk.kalshiodds.signal.trade.TradeTicket {
         if (!ticket.isSell) return ticket
-        if (ticket.paperOnly) {
-            return TicketBuilder.applySellQuote(ticket, count, KalshiPrice.usable(price) ?: ticket.limitPrice)
-        }
-        val market = snap.snapshot?.allMarkets.orEmpty()
-            .firstOrNull { it.ticker.equals(ticket.ticker, true) }
-            ?: sellMarketFallback(ticket, snap)
-        val fresh = market?.let { TicketBuilder.freshBestBid(it, ticket.side, ctx) }
-        if (fresh == null) {
-            return TicketBuilder.applySellQuote(ticket, count, bid = null)
-        }
-        // Live sell always uses the fresh book bid. Never a stale or higher limit.
-        return TicketBuilder.applySellQuote(ticket, count, fresh, snap.settings.feeRate)
-    }
-
-    private fun sellMarketFallback(
-        ticket: com.dirk.kalshiodds.signal.trade.TradeTicket,
-        snap: OddsUiState
-    ): MarketUiModel? {
-        val pos = snap.positions.firstOrNull {
-            it.ticker.equals(ticket.ticker, true) && it.side.equals(ticket.side, true)
-        } ?: return null
-        return MarketUiModel(
-            ticker = ticket.ticker,
-            title = pos.title ?: ticket.title ?: ticket.ticker,
-            subtitle = null,
-            floorStrike = null,
-            yesBid = if (ticket.side == "YES") pos.bestBid else null,
-            yesAsk = null,
-            noBid = if (ticket.side == "NO") pos.bestBid else null,
-            noAsk = null,
-            lastPrice = pos.bestBid,
-            yesProbabilityPercent = null,
-            noProbabilityPercent = null,
-            volume = null,
-            volume24h = null,
-            openInterest = null,
-            liquidityDollars = null,
-            closeTimeLocal = null,
-            closeTimeEpochMs = pos.closeTimeEpochMs,
-            status = "active",
-            seriesLabel = com.dirk.kalshiodds.domain.CryptoMarkets.kindFor(ticket.ticker).label
-        )
+        val bid = KalshiPrice.usable(price) ?: ticket.limitPrice
+        // Send the contracts and price the confirm sheet showed. Do not re-price after confirm.
+        return TicketBuilder.applySellQuote(ticket, count, bid, snap.settings.feeRate)
     }
 
     private fun resizeSell(ticket: com.dirk.kalshiodds.signal.trade.TradeTicket, count: Int, price: Double): com.dirk.kalshiodds.signal.trade.TradeTicket {
@@ -1047,19 +1675,429 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         return TicketBuilder.applySellQuote(ticket, count, KalshiPrice.usable(price) ?: ticket.limitPrice)
     }
 
-    private fun paperFromAlerts(alerts: List<SignalAlert>) {
-        if (!_state.value.settings.paperTradingEnabled) return
-        val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
-        val now = System.currentTimeMillis()
-        alerts.forEach { alert ->
-            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
-            val market = markets[alert.ticker]
-            if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
-            val ask = market?.let {
-                TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
+    /**
+     * Alerts no longer auto-paper. AI paper fills go through
+     * [runPaperAutopilot] (EV at the ask, any time in the window).
+     */
+    private fun paperFromAlerts(@Suppress("UNUSED_PARAMETER") alerts: List<SignalAlert>) {
+        val live = MarketLifecycle.tradable(
+            _state.value.snapshot?.allMarkets.orEmpty(),
+            container.clock.nowMs()
+        )
+        runPaperAutopilot(live)
+    }
+
+    /**
+     * 0.3.38 paper scalp tick: one quote per BTC/ETH/SOL 15m market from the live WS book (no book, no
+     * quote), spot from the settlement feed (CF first, Coinbase fallback), σ from the in-app trailing
+     * estimator. Never calls Kalshi.
+     */
+    private fun runScalp(live: List<MarketUiModel>, s: com.dirk.kalshiodds.signal.config.SignalSettings) {
+        val now = container.clock.nowMs()
+        val openScalps = container.scalp.openTickers()
+        live.forEach { market ->
+            val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
+            if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
+            // 0.3.59: scalpers trade Bitcoin only (ETH/SOL markets only to wind down positions opened before 0.3.59).
+            if (com.dirk.kalshiodds.decision.ScalpParams.coinOf(market.ticker) != com.dirk.kalshiodds.decision.ShockFav.TRADE_COIN &&
+                market.ticker.uppercase() !in openScalps) return@forEach
+            val book = hub.scoring.book.snapshotBook(market.ticker) ?: return@forEach
+            val spot = settlementFor(market.ticker, now).spot
+            val coin = when {
+                series.contains("SOL") -> "SOL"
+                series.contains("ETH") -> "ETH"
+                else -> "BTC"
             }
-            paperBook.considerAlert(alert, ask, enabled = true)
+            val sigma = container.scalp.observeSpot(coin, spot, now)
+                ?: com.dirk.kalshiodds.decision.ScalpRule.defaultSigmaPerSec(market.ticker)
+            val q = com.dirk.kalshiodds.decision.ScalpRule.quoteFromBook(
+                ticker = market.ticker,
+                nowMs = now,
+                closeMs = market.closeTimeEpochMs,
+                bookAgeMs = hub.scoring.book.bookAgeMs(market.ticker, now),
+                yesBids = book.yes,
+                noBids = book.no,
+                spot = spot,
+                strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker),
+                sigmaPerSec = sigma
+            ) ?: return@forEach
+            // 0.3.43 CF-reprice inputs: CF Benchmarks settlement-aware price + tick age (no Coinbase fallback),
+            // and whether the book is waiting on a re-snapshot after a seq gap.
+            val cfId = com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series)
+            val cfTick = cfId?.let { container.cfFeed.latest(it) }
+            val qq = q.copy(
+                cfSpot = cfId?.let { container.cfFeed.settlementPrice(it, now, q.tauS) },
+                cfAgeMs = cfTick?.ageMs(now),
+                bookGap = !hub.scoring.book.hasSnapshot(market.ticker)
+            )
+            // 0.3.62: a paper-scalp exception must never take down the quote lane / app.
+            runCatching { container.scalp.onQuote(qq, enabled = s.paperTradingEnabled) }
+            // 0.3.53 Forecast ride / fade: same quote + top-3 book sizes (recorder-identical features).
+            runCatching {
+                container.scalp.onForecastQuote(
+                    qq,
+                    top3Yes = book.yes.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                    top3No = book.no.filter { it.second > 0 }.sortedBy { it.first }.takeLast(3).sumOf { it.second },
+                    enabled = s.paperTradingEnabled
+                )
+            }
+            // 0.3.57 sf57: twenty shock / late-favourite paper scalpers on the same conflated quote (paper lane).
+            runCatching { container.scalp.onShockFavQuote(qq, enabled = s.paperTradingEnabled) }
         }
+        // 0.3.67: batch SQLite+stats writes off the quote path (same paperLane worker, not Main).
+        runCatching { container.scalp.flushWrites() }
+    }
+
+    /**
+     * 0.3.43 paper limit orders: depth from the live WS book (every level at or better than the limit), else the
+     * displayed top of book from the REST/WS quote. Never Kalshi.
+     */
+    private fun paperSideQuote(ticker: String, side: String): com.dirk.kalshiodds.signal.paper.PaperSideQuote? {
+        val book = hub.scoring.book.snapshotBook(ticker)?.takeIf { hub.scoring.book.hasSnapshot(ticker) }
+        if (book != null) return com.dirk.kalshiodds.signal.paper.PaperSideQuote.fromBook(side, book.yes, book.no)
+        val m = _state.value.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticker, true) } ?: return null
+        val q = m.withLiveQuote(hub.scoring.book.lastTick(m.ticker))
+        return if (side.equals("NO", true)) {
+            com.dirk.kalshiodds.signal.paper.PaperSideQuote.top(q.noAsk, null, q.noBid, null)
+        } else {
+            com.dirk.kalshiodds.signal.paper.PaperSideQuote.top(q.yesAsk, q.yesAskSize, q.yesBid, null)
+        }
+    }
+
+    private fun runPaperOrders(live: List<MarketUiModel>) {
+        val book = container.paperOrders
+        val now = container.clock.nowMs()
+        book.expire(now)
+        val tickers = book.open().map { it.ticker }.toSet()
+        tickers.forEach { t -> book.onQuote(t, { side -> paperSideQuote(t, side) }, now) }
+    }
+
+    /** Manual paper ticket: MARKET (taker at the ask/bid, depth-capped) or LIMIT (rests until the market reaches it). */
+    fun submitPaperOrder(ticker: String, side: String, action: String, limitCents: Double?, quantity: Int, market: Boolean) {
+        val m = _state.value.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticker, true) }
+        val want = if (side.equals("NO", true) || side.equals("DOWN", true)) "NO" else "YES"
+        val q = paperSideQuote(ticker, want)
+        val buy = !action.equals("SELL", true)
+        val px = if (market) (if (buy) q?.bestAsk else q?.bestBid) else limitCents?.div(100.0)
+        if (px == null) {
+            _state.update { it.copy(userMessage = "Paper ${if (market) "market" else "limit"} order: no ${if (buy) "ask" else "bid"} on $ticker") }
+            return
+        }
+        val r = container.paperOrders.submit(ticker, want, if (buy) "BUY" else "SELL", px, quantity, m?.closeTimeEpochMs, q)
+        // A market order never rests: cancel any unfilled remainder right away.
+        if (market) r.order?.takeIf { it.isOpen }?.let { container.paperOrders.cancel(it.id) }
+        _state.update { it.copy(userMessage = r.message) }
+    }
+
+    fun editPaperOrder(id: String, limitCents: Double?, quantity: Int?) {
+        val o = container.paperOrders.orders.value.firstOrNull { it.id == id } ?: return
+        val r = container.paperOrders.edit(id, limitCents?.div(100.0), quantity, paperSideQuote(o.ticker, o.side))
+        _state.update { it.copy(userMessage = r.message) }
+    }
+
+    fun cancelPaperOrder(id: String) {
+        val r = container.paperOrders.cancel(id)
+        _state.update { it.copy(userMessage = r.message) }
+    }
+
+    val paperOrders get() = container.paperOrders.orders
+
+    /** Cancel one resting real-money order from the Home open-bets list. Needs typed REAL MONEY. */
+    fun cancelRestingOrder(orderId: String, ticker: String?, typed: String) {
+        if (!com.dirk.kalshiodds.signal.trade.RealMoneyPhrase.matches(typed)) {
+            _state.update { it.copy(userMessage = "Type REAL MONEY to cancel a real order") }
+            return
+        }
+        vmScope.launch {
+            val r = withContext(Dispatchers.IO) {
+                runCatching { container.tradeClient.cancelById(orderId, ticker) }
+            }
+            _state.update {
+                it.copy(userMessage = if (r.isSuccess) "Cancelled resting order on ${ticker ?: orderId}" else "Cancel failed: ${r.exceptionOrNull()?.message ?: "error"}")
+            }
+            refreshPositions()
+        }
+    }
+
+    fun clearLiveAutopilotError() {
+        shadowBook.clearLiveError()
+    }
+
+    /**
+     * Paper or shadow only (0.3.40 owner decision). There is no path from here to an order:
+     * no trade client, no ticket session, no armed state.
+     */
+    /** REST/alert paths: hand off to the paper lane, latest list wins (never queues behind itself). */
+    private fun runPaperAutopilot(live: List<MarketUiModel>) {
+        if (restPaperPending.getAndSet(live) != null) return
+        vmScope.launch(paperLane) {
+            val batch = restPaperPending.getAndSet(null) ?: return@launch
+            runPaperAutopilotNow(batch)
+        }
+    }
+
+    private fun runPaperAutopilotNow(live: List<MarketUiModel>) {
+        val now0 = container.clock.nowMs()
+        val backoff = container.paperBackoff
+        if (backoff.blocked(now0)) return
+        try {
+            runPaperAutopilotOnce(live)
+            backoff.onSuccess()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            // 0.3.39: an error never turns Autopilot off. Back off 30 s doubling to 10 min, then resume.
+            val msg = "Autopilot error (${t.javaClass.simpleName})"
+            val wait = backoff.onError(now0, msg)
+            android.util.Log.w("KashiAutopilot", "$msg — backing off ${wait / 1000}s")
+            container.tradeEvents.autopilotBackoff("paper:${backoff.episodeStartMs}", msg, wait)
+            runCatching { paperBook.rememberMessage("$msg — resumes in ${wait / 1000}s") }
+        }
+    }
+
+    private fun runPaperAutopilotOnce(live: List<MarketUiModel>) {
+        val s = _state.value.settings
+        val assessments = assessForLedger(live, s)
+        if (s.paperTradingEnabled) runFav15Ladder(live)
+        runScalp(live, s)
+        runCatching { runPaperOrders(live) }
+        if (!s.paperTradingEnabled || !s.aiPaperAutopilotEnabled) return
+        val mode = s.autopilotModeEnum()
+        paperBook.configure(
+            kellyFraction = s.paperKellyFraction,
+            feeRate = s.feeRate,
+            startUsd = s.paperBankrollStartUsd
+        )
+        val now = container.clock.nowMs()
+        val ctx = ticketContext(_state.value, now)
+        live.forEach { market ->
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(market.ticker)) return@forEach
+            val book = hub.scoring.book.snapshotBook(market.ticker)
+            val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
+            val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
+            // 0.3.40: the whole paper/shadow step lives in AutopilotStep (paper-only, tested end to end).
+            com.dirk.kalshiodds.signal.paper.AutopilotStep.run(
+                paperBook = paperBook,
+                shadowBook = shadowBook,
+                market = market,
+                settings = s,
+                mode = mode,
+                nowMs = now,
+                yesAsk = yesAsk,
+                noAsk = noAsk,
+                yesDepth = paperAskDepth("YES", yesAsk, market.ticker, market),
+                noDepth = paperAskDepth("NO", noAsk, market.ticker, market),
+                book = book,
+                assessment = assessments[market.ticker.uppercase()],
+                clientOrderId = java.util.UUID.randomUUID().toString()
+            )
+        }
+    }
+
+    /**
+     * 0.3.37: run the deterministic decision pipeline for every BTC/ETH/SOL
+     * 15m market and write the prediction ledger, whether or not Autopilot is
+     * on. Returns assessments keyed by upper-case ticker.
+     */
+    private fun assessForLedger(
+        live: List<MarketUiModel>,
+        s: com.dirk.kalshiodds.signal.config.SignalSettings
+    ): Map<String, com.dirk.kalshiodds.decision.DecisionPipeline.Assessment> {
+        val now = container.clock.nowMs()
+        val ctx = ticketContext(_state.value, now)
+        val out = HashMap<String, com.dirk.kalshiodds.decision.DecisionPipeline.Assessment>()
+        live.forEach { market ->
+            if (!com.dirk.kalshiodds.domain.CryptoMarkets.isAutopilotTicker(market.ticker)) return@forEach
+            runCatching {
+                val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
+                val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
+                val input = com.dirk.kalshiodds.decision.DecisionInputs.build(
+                    ticker = market.ticker,
+                    nowMs = now,
+                    closeTimeMs = market.closeTimeEpochMs,
+                    rawModelYes = PaperAutopilot.modelYes(market),
+                    marketYes = PaperAutopilot.marketYes(market, yesAsk, noAsk),
+                    yesAsk = yesAsk,
+                    noAsk = noAsk,
+                    yesBid = market.yesBid,
+                    noBid = market.noBid,
+                    yesDepth = paperAskDepth("YES", yesAsk, market.ticker, market),
+                    noDepth = paperAskDepth("NO", noAsk, market.ticker, market),
+                    bookAgeMs = bookAgeMs(market.ticker, now),
+                    strike = market.floorStrike ?: hub.scoring.book.strike(market.ticker),
+                    volPerSec = volPerSecFor(market.ticker),
+                    settlement = settlementFor(market.ticker, now),
+                    feeRate = s.feeRate,
+                    modelVersion = "app-${com.dirk.kalshiodds.BuildConfig.VERSION_NAME}",
+                    // 0.3.41: size on the free paper bankroll so TradeEligibility enforces the $5 minimum.
+                    stakeBankrollUsd = PaperAutopilot.freeBankroll(paperBook.snapshot())
+                )
+                out[market.ticker.uppercase()] = container.decisions.assess(input)
+            }
+        }
+        publishDecisionLines(now)
+        return out
+    }
+
+    /** Freshest of the WS book and the last REST snapshot; null if neither. */
+    private fun bookAgeMs(ticker: String, now: Long): Long? {
+        val ws = hub.scoring.book.bookAgeMs(ticker, now)
+        val rest = _state.value.snapshot?.takeIf { !it.fromCache && it.fetchedAtEpochMs > 0L }
+            ?.let { (now - it.fetchedAtEpochMs).coerceAtLeast(0L) }
+        return listOfNotNull(ws, rest).minOrNull()
+    }
+
+    private fun volPerSecFor(ticker: String): Double? {
+        val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
+        return if (series.contains("BTC")) container.lastMinuteEngine.sigS()?.takeIf { it.isFinite() && it > 0.0 } else null
+    }
+
+    private fun settlementFor(ticker: String, now: Long): com.dirk.kalshiodds.decision.DecisionInputs.Settlement {
+        val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(ticker)
+        val index = com.dirk.kalshiodds.signal.ws.CfBenchmarks.indexForSeries(series)
+        val cf = index?.let { container.cfFeed.latest(it) }
+        val cb = container.external.latest().forSeries(series)
+        return com.dirk.kalshiodds.decision.DecisionInputs.settlement(
+            series = series,
+            nowMs = now,
+            cfTick = cf,
+            coinbaseSpot = cb?.lastPrice ?: hub.scoring.book.lastSpot(ticker),
+            coinbaseAtMs = cb?.fetchedAtMs?.takeIf { it > 0L }
+        )
+    }
+
+    private fun cfLines(now: Long): List<String> {
+        val ext = container.external.latest()
+        return com.dirk.kalshiodds.signal.ws.CfBenchmarks.INDEX_IDS.map { id ->
+            val coin = com.dirk.kalshiodds.signal.ws.CfBenchmarks.coinOf(id)
+            val cb = ext.forSeries(coin)?.lastPrice != null
+            val st = container.cfFeed.status(id, now, coinbaseAvailable = cb)
+            "$coin: ${st.detail}" + (container.cfFeed.latest(id)?.let { com.dirk.kalshiodds.signal.ws.CfBenchmarks.settlementExplainer(it) }?.let { "\n   $it" } ?: "")
+        }
+    }
+
+    private fun publishDecisionLines(now: Long) {
+        val latest = container.decisions.latestAll()
+        val lines = latest.entries.sortedBy { it.key }.take(12).map { (t, a) -> "$t — ${a.verdict.headline}" }
+        val cf = cfLines(now)
+        val cur = _state.value
+        if (cur.decisionLines != lines || cur.cfFeedLines != cf) {
+            _state.update { it.copy(decisionLines = lines, cfFeedLines = cf) }
+        }
+    }
+
+    /** fav15 ladder (paper only): preregistered favourite rule on the 15m markets. */
+    private fun runFav15Ladder(live: List<MarketUiModel>) {
+        val now = container.clock.nowMs()
+        val ctx = ticketContext(_state.value, now)
+        live.forEach { market ->
+            val series = com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(market.ticker)
+            if (series !in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES) return@forEach
+            if (container.ladder.hasEntry(com.dirk.kalshiodds.decision.Fav15Rule.ID, market.ticker)) return@forEach
+            val yesAsk = TicketBuilder.liveAsk(market, "YES", ctx)
+            val noAsk = TicketBuilder.liveAsk(market, "NO", ctx)
+            val age = bookAgeMs(market.ticker, now)
+            val r = com.dirk.kalshiodds.decision.Fav15Rule.evaluate(
+                yesAsk = yesAsk,
+                noAsk = noAsk,
+                yesAskSize = paperAskDepth("YES", yesAsk, market.ticker, market)?.toDouble(),
+                noAskSize = paperAskDepth("NO", noAsk, market.ticker, market)?.toDouble(),
+                secondsRemaining = market.closeTimeEpochMs?.let { (it - now) / 1000.0 },
+                bookFresh = age != null && age <= com.dirk.kalshiodds.decision.FillModel.FRESH_BOOK_MS
+            )
+            if (r is com.dirk.kalshiodds.decision.Fav15Rule.Result.Enter) {
+                container.ladder.record(
+                    strategy = com.dirk.kalshiodds.decision.Fav15Rule.ID,
+                    ticker = market.ticker,
+                    event = market.ticker,
+                    side = r.signal.side,
+                    clip = r.signal.clip,
+                    price = r.signal.price,
+                    note = "fav15 ${r.signal.side} @ ${(r.signal.price * 100).toInt()}¢"
+                )
+            }
+        }
+    }
+
+    /** v060 ladder (paper only) + daily ledger rows for KXBTCD / KXETHD / KXSOLD 5 PM ET. */
+    private fun runDailyDecisions(quotesBySeries: Map<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>>, fetchedAtMs: Long) {
+        val s = _state.value.settings
+        val now = container.clock.nowMs()
+        val age = (now - fetchedAtMs).coerceAtLeast(0L)
+        quotesBySeries.forEach { (series, quotes) ->
+            quotes.forEach { q ->
+                val raw = com.dirk.kalshiodds.decision.DecisionInputs.dailyRaw(q.yesBid, q.yesAsk, q.closeTimeEpochMs, now)
+                    ?: return@forEach
+                if (raw.second < 0.03 || raw.second > 0.97) return@forEach
+                runCatching {
+                    container.decisions.assess(
+                        com.dirk.kalshiodds.decision.DecisionInputs.build(
+                            ticker = q.ticker,
+                            nowMs = now,
+                            closeTimeMs = q.closeTimeEpochMs,
+                            rawModelYes = raw.first,
+                            marketYes = raw.second,
+                            yesAsk = q.yesAsk,
+                            noAsk = q.noAsk,
+                            yesBid = q.yesBid,
+                            noBid = q.noBid,
+                            yesDepth = q.yesAskSize?.toInt(),
+                            noDepth = q.noAskSize?.toInt(),
+                            bookAgeMs = age,
+                            strike = q.strikeUsd,
+                            volPerSec = if (series.contains("BTC")) container.lastMinuteEngine.sigS() else null,
+                            settlement = settlementFor(q.ticker, now),
+                            feeRate = s.feeRate,
+                            modelVersion = com.dirk.kalshiodds.decision.V060Rule.VERSION
+                        )
+                    )
+                }
+            }
+        }
+        if (!s.paperTradingEnabled) return
+        val btc = quotesBySeries[com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTCD].orEmpty()
+        if (age > com.dirk.kalshiodds.decision.FillModel.FRESH_BOOK_MS) return
+        btc.groupBy { it.eventTicker ?: com.dirk.kalshiodds.decision.V060Rule.eventOf(it.ticker) }.forEach { (event, qs) ->
+            val close = qs.firstNotNullOfOrNull { it.closeTimeEpochMs } ?: return@forEach
+            val closeDay = java.time.Instant.ofEpochMilli(close).atZone(java.time.ZoneId.of("America/New_York")).dayOfWeek
+            if (closeDay == java.time.DayOfWeek.FRIDAY) return@forEach
+            val tau = (close - now) / 1000.0
+            if (com.dirk.kalshiodds.decision.V060Rule.checkpoint(tau) == null) return@forEach
+            if (container.ladder.hasEntry(com.dirk.kalshiodds.decision.V060Rule.ID, event)) return@forEach
+            val pick = com.dirk.kalshiodds.decision.V060Rule.bestPick(
+                qs.map {
+                    com.dirk.kalshiodds.decision.V060Rule.Quote(it.ticker, it.yesBid, it.yesAsk, it.noAsk, it.yesAskSize, it.noAskSize)
+                },
+                tau
+            ) ?: return@forEach
+            val q = qs.first { it.ticker == pick.ticker }
+            val visible = if (pick.side == "YES") q.yesAskSize else q.noAskSize
+            if (visible == null || visible + 1e-9 < pick.clip.contracts) return@forEach
+            container.ladder.record(
+                strategy = com.dirk.kalshiodds.decision.V060Rule.ID,
+                ticker = pick.ticker,
+                event = event,
+                side = pick.side,
+                clip = pick.clip,
+                price = pick.price,
+                note = String.format(java.util.Locale.US, "v060 %s @ %.0f¢ EV/$ %+.3f", pick.side, pick.price * 100, pick.evPerDollar)
+            )
+        }
+    }
+
+    /**
+     * Real ask-side size for a Kelly paper fill. Live book at/below the
+     * paid ask, else displayed YES best-ask size, else skip (never unlimited).
+     */
+    private fun paperAskDepth(
+        side: String,
+        ask: Double?,
+        ticker: String,
+        market: MarketUiModel?
+    ): Int? {
+        val px = KalshiPrice.usable(ask) ?: return null
+        val book = hub.scoring.book.snapshotBook(ticker)
+        return PaperAskDepth.contracts(side, px, book, market)
     }
 
     private fun scheduleChartBackfill(snap: MarketsSnapshot) {
@@ -1074,7 +2112,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (targets.isEmpty()) return
         targets.forEach { backfillStarted[it.ticker] = now }
         backfillJob?.cancel()
-        backfillJob = viewModelScope.launch(Dispatchers.IO) {
+        backfillJob = vmScope.launch(Dispatchers.IO) {
             for (m in targets) {
                 if (!isActive) break
                 val end = m.closeTimeEpochMs ?: now
@@ -1158,16 +2196,24 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             val jitter = if (half <= 0L) 0L else Random.nextLong(-half, half + 1)
             (currentIntervalMs + jitter).coerceAtLeast(MIN_POLL_MS)
         }
-        return minOf(poll, container.rollover.nextDelayMs()).coerceAtLeast(50L)
+        // Do not inherit MarketRollover's wake. That floor used to be 50ms
+        // and stacked a second GET /markets on top of this loop.
+        return poll.coerceAtLeast(MIN_POLL_MS)
     }
 
     companion object {
-        const val BASE_POLL_MS = 750L
+        /** ETH/SOL daily quotes are ledger-only; refresh every 2 min on the rate-limited lane. */
+        private const val OTHER_DAILY_MS = 5_000L // 0.3.45: daily cards every 5 s
+        const val BASE_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val JITTER_MS = 250L
-        const val MIN_POLL_MS = 500L
+        const val MIN_POLL_MS = KalshiPollBudget.HOME_VISIBLE_MS
         const val INITIAL_BACKOFF_MS = 2_000L
-        const val MAX_BACKOFF_MS = 60_000L
-        const val WS_METADATA_POLL_MS = 15_000L
+        const val MAX_BACKOFF_MS = 8_000L // 0.3.49: was 60 s
+        const val WS_METADATA_POLL_MS = 3_000L // 0.3.45
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
+        const val HOME_LIVE_THROTTLE_MS = 250L
+        const val SCALP_TAB_REFRESH_MS = 500L
+        const val SCALP_TAB_BOARDS_MS = 10_000L
+        const val SCALP_TAB_CI_MS = 60_000L
     }
 }

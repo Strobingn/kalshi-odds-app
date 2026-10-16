@@ -15,9 +15,10 @@ object HomeHelp {
 
     const val PAPER_TITLE = "Paper book"
     const val PAPER_BODY =
-        "Start / reset $100 · win-target sizing · never hits Kalshi. " +
+        "Start / reset $1,000 · half-Kelly on the paper bankroll · never hits Kalshi. " +
             "Paper UP / Paper DOWN on the Bitcoin card log a $10 paper bet at the live ask. " +
-            "The switch enables paper auto-log. Live Approve is the only path that can place a real V2 order."
+            "AI paper autopilot (default on) places Kelly-sized paper bets when the model sees +EV after fees. " +
+            "Live Approve is the only path that can place a real V2 order."
 
     const val SIGNALS_TITLE = "Signals"
     const val SIGNALS_BODY =
@@ -32,5 +33,6 @@ object HomeHelp {
             "Tap a card for the full-screen chart. The primary button opens an approve-gated ticket — " +
             "nothing is sent until you tap Approve. NO BET cards keep Buy anyway for a manual ticket. " +
             "Paper UP and Paper DOWN are always on the card in LIVE \$ and paper mode — they never send a real order. " +
-            "$10 min profit and $5 all-in are Settings; home only displays them."
+            "The last-minute play is retired (0.3.39). Autopilot runs Scalp (paper) — see the Scalp card. " +
+            "BTC daily 5 PM favourite (D3) sits below the Bitcoin card."
 }

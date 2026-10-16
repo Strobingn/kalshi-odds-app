@@ -24,8 +24,8 @@ class ThemeContrastTest {
         assertAa("light secondary / surface", p.textSecondary, p.surface)
         assertAa("light primary / surfaceAlt", p.textPrimary, p.surfaceAlt)
         assertAa("light secondary / surfaceAlt", p.textSecondary, p.surfaceAlt)
-        assertAa("light onUp / up", p.onUp, p.up)
-        assertAa("light onDown / down", p.onDown, p.down)
+        assertAa("light onUp / upButton", p.onUp, p.upButton)
+        assertAa("light onDown / downButton", p.onDown, p.downButton)
         assertAa("light onAccentBlue / blue", p.onAccentBlue, p.accentBlue)
         assertAa("light onAccentOrange / orange", p.onAccentOrange, p.accentOrange)
         assertAa("light UP on upContainer", p.up, p.upContainer)
@@ -41,8 +41,8 @@ class ThemeContrastTest {
         assertAa("dark secondary / surface", p.textSecondary, p.surface)
         assertAa("dark primary / surfaceAlt", p.textPrimary, p.surfaceAlt)
         assertAa("dark secondary / surfaceAlt", p.textSecondary, p.surfaceAlt)
-        assertAa("dark onUp / up", p.onUp, p.up)
-        assertAa("dark onDown / down", p.onDown, p.down)
+        assertAa("dark onUp / upButton", p.onUp, p.upButton)
+        assertAa("dark onDown / downButton", p.onDown, p.downButton)
         assertAa("dark onAccentBlue / blue", p.onAccentBlue, p.accentBlue)
         assertAa("dark onAccentOrange / orange", p.onAccentOrange, p.accentOrange)
         assertAa("dark UP on upContainer", p.up, p.upContainer)
@@ -76,8 +76,8 @@ class ThemeContrastTest {
                 Triple("MarketCard AI line", p.accentBlue, p.surface),
                 Triple("Past arrows UP", p.up, p.bg),
                 Triple("BidChart axis", p.textSecondary, p.surface),
-                Triple("UpDownBuyButtons UP", p.onUp, p.up),
-                Triple("UpDownBuyButtons DOWN", p.onDown, p.down),
+                Triple("UpDownBuyButtons UP", p.onUp, p.upButton),
+                Triple("UpDownBuyButtons DOWN", p.onDown, p.downButton),
                 Triple("PaperBookCard", p.textPrimary, p.surface),
                 Triple("TradeTicketCard body", p.textPrimary, p.surface),
                 Triple("History row", p.textPrimary, p.surfaceAlt),

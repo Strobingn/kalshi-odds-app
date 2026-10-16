@@ -164,9 +164,7 @@ object Guardrails {
         }
     }
 
-    fun isHit(e: PredictionLogEntry): Boolean {
-        return ForecastUnits.hit(e)
-    }
+    fun isHit(e: PredictionLogEntry): Boolean = ForecastUnits.hit(e)
 
     private fun eTimestamp(e: PredictionLogEntry): Long = e.settledAtMs ?: e.timestampMs
 

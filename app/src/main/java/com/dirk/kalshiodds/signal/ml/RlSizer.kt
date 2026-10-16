@@ -6,7 +6,7 @@ import kotlin.math.exp
 /**
  * Advisory contextual-bandit sizer. Softmax over stake fractions of the
  * user-configured ticket stake. **Never places an order.** Respects the
- * $5 default / $25 hard cap. Cold start is identity (1.0 × configured).
+ * $10 max ticket stake. Cold start is identity (1.0 × configured).
  */
 class RlSizer(
     val logits: DoubleArray = DoubleArray(ACTIONS.size),

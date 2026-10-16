@@ -41,10 +41,60 @@ class CalibratorTest {
         }
         val state = Calibrator.fit(samples, minSamples = 20)
         assertTrue(state.ready)
+        val gt10 = state.buckets[Calibrator.TteBucket.GT_10M.key]
+        assertNotNull(gt10)
+        assertTrue(gt10!!.ready)
+        assertTrue(gt10.temperature > 1.0)
         assertTrue(state.temperature > 1.0)
-        val cal = Calibrator.apply(0.90, state)
+        val cal = Calibrator.apply(0.90, state, tteSeconds = 800)
         assertTrue(cal < 0.90)
         assertTrue(cal > 0.40)
+    }
+
+    @Test
+    fun fitsRawNotDisplayedAndIgnoresColdBuckets() {
+        val raw = 0.90
+        val displayed = 0.55
+        val rows = (0 until 24).map { i ->
+            PredictionLogEntry(
+                ticker = "KXBTC15M-$i",
+                series = "KXBTC15M",
+                predictedYes = displayed,
+                predictedNo = 1.0 - displayed,
+                marketMid = 0.50,
+                timestampMs = 1_000L + i,
+                closeTimeMs = 1_000L + i,
+                outcome = if (i % 2 == 0) "yes" else "no",
+                rawPredictedYes = raw,
+                displayedYes = displayed,
+                tteSeconds = 700L
+            )
+        }
+        val state = Calibrator.fitEntries(rows)
+        val applied = Calibrator.apply(raw, state, tteSeconds = 700)
+        assertTrue("raw 0.90 overconfident vs 50/50 must shrink, got $applied", applied < 0.85)
+        val late = Calibrator.apply(raw, state, tteSeconds = 60)
+        assertEquals("cold <2m bucket is identity", raw, late, 1e-9)
+    }
+
+    @Test
+    fun displayedOnlyRowsAreNotFit() {
+        val rows = (0 until 24).map { i ->
+            PredictionLogEntry(
+                ticker = "KXBTC15M-D$i",
+                series = "KXBTC15M",
+                predictedYes = 0.90,
+                predictedNo = 0.10,
+                marketMid = 0.50,
+                timestampMs = 1_000L + i,
+                closeTimeMs = 1_000L + i,
+                outcome = if (i % 2 == 0) "yes" else "no"
+            )
+        }
+        val state = Calibrator.fitEntries(rows)
+        assertEquals(0, state.sampleCount)
+        assertFalse(state.ready)
+        assertEquals(0.90, Calibrator.apply(0.90, state, 700), 1e-9)
     }
 
     @Test
@@ -131,15 +181,15 @@ class ScorecardMetricsTest {
             entry("KXSOL15M-C", "KXSOL15M", 0.80, "void", null, null, 4.0, now)
         )
         val snap = ScorecardMetrics.compute(rows, nowMs = now, zoneId = ZoneOffset.UTC)
-        assertEquals(2, snap.sampleCount)
-        assertEquals(1, snap.voidCount)
-        assertEquals(0.5, snap.allTime.hitRate!!, 1e-9)
-        // Picked-side Brier: YES@0.70 hit → 0.09; NO@0.30 miss vs yes → (0.70−1)² = 0.09
+        assertEquals(1, snap.sampleCount)
+        assertEquals(0, snap.voidCount)
+        assertEquals(1.0, snap.allTime.hitRate!!, 1e-9)
         assertEquals(0.09, snap.allTime.brier!!, 1e-9)
-        assertEquals(0.29, snap.allTime.pUpBrier!!, 1e-9)
+        assertEquals(0.09, snap.allTime.pUpBrier!!, 1e-9)
         assertEquals(8.0, snap.allTime.avgEdgeWhenRight!!, 1e-9)
-        assertEquals(-6.0, snap.allTime.avgEdgeWhenWrong!!, 1e-9)
-        assertEquals(2, snap.perSeries.size)
+        assertEquals(null, snap.allTime.avgEdgeWhenWrong)
+        assertEquals(1, snap.perSeries.size)
+        assertEquals("KXBTC15M", snap.perSeries.single().series)
     }
 
     private fun entry(
@@ -303,7 +353,10 @@ class ScoringPredictabilityTest {
             hasDepth = true,
             hasCancel = true
         )!!
-        assertTrue(late.ai < early.ai)
+        assertEquals(0.0, ScoringEngine.W_AI, 0.0)
+        assertEquals(0.0, ScoringEngine.W_AI_LATE, 0.0)
+        assertEquals(0.0, early.ai, 1e-12)
+        assertEquals(0.0, late.ai, 1e-12)
         assertTrue(late.velocity > early.velocity)
         assertTrue(late.imbalance > early.imbalance)
         assertTrue(late.leadLag < early.leadLag)

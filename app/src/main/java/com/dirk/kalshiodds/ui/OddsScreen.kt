@@ -1,6 +1,9 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import com.dirk.kalshiodds.domain.MarketLifecycle
@@ -15,11 +18,21 @@ fun OddsScreen(
     onOpenData: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenSignalHistory: () -> Unit = onOpenHistory,
-    onOpenChart: (MarketUiModel) -> Unit
+    onOpenChart: (MarketUiModel) -> Unit,
+    onOpenScalp: () -> Unit = {}
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val scalpTrades by viewModel.scalpTrades.collectAsStateWithLifecycle()
+    val paperOrders by viewModel.paperOrders.collectAsStateWithLifecycle()
     HomeScreen(
         state = state,
+        paperOrders = paperOrders,
+        onSubmitPaperOrder = viewModel::submitPaperOrder,
+        onEditPaperOrder = viewModel::editPaperOrder,
+        onCancelPaperOrder = viewModel::cancelPaperOrder,
+        scalpLines = HomeScalpCopy.lines(scalpTrades, state.settings.paperTradingEnabled),
+        onOpenScalp = onOpenScalp,
+        onBuyDaily = { q, side -> viewModel.buyDaily(q, side) },
         onOpenSettings = onOpenSettings,
         onOpenApiKeySettings = onOpenApiKeySettings,
         onOpenScorecard = onOpenScorecard,
@@ -44,8 +57,76 @@ fun OddsScreen(
         onPaperSellTicket = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
         onCancelApprove = { viewModel.cancelTicketApprove() },
         onCancelOrder = { viewModel.cancelWorkingOrder(it) },
-        onResumeAlerts = { viewModel.resumeAlerts() }
+        onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) },
+        onResumeAlerts = { viewModel.resumeAlerts() },
+        onCancelResting = { id, ticker, typed -> viewModel.cancelRestingOrder(id, ticker, typed) }
     )
+}
+
+@Composable
+fun LiveApproveScreen(viewModel: OddsViewModel) {
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val hasKey = state.settings.tradingCredentialsConfigured()
+    androidx.compose.material3.Scaffold(
+        containerColor = com.dirk.kalshiodds.ui.theme.DipTheme.colors.bg,
+        contentWindowInsets = dipContentInsets()
+    ) { padding ->
+        androidx.compose.foundation.layout.Column(
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(com.dirk.kalshiodds.ui.theme.FieldMetrics.screenPadding)
+        ) {
+            LiveDecisionStatus(state.cfFeedLines, state.decisionLines)
+            com.dirk.kalshiodds.ui.components.TradeTicketsSection(
+                tickets = state.tickets,
+                credentialsConfigured = hasKey,
+                paperTradingEnabled = state.settings.paperTradingEnabled,
+                feeRate = state.settings.feeRate,
+                homeMode = false,
+                listVisible = true,
+                onReview = { viewModel.openTicketApprove(it) },
+                onDismiss = { viewModel.dismissTicket(it) },
+                onApprove = { viewModel.approveTicket(it) },
+                onApproveSell = { id, count, price -> viewModel.approveSellTicket(id, count, price) },
+                onPaper = { viewModel.paperTicket(it) },
+                onPaperSell = { id, count, price -> viewModel.paperSellTicket(id, count, price) },
+                onCancelApprove = { viewModel.cancelTicketApprove() },
+                onCancelOrder = { viewModel.cancelWorkingOrder(it) },
+                onLimitCents = { id, text -> viewModel.reviseTicketLimit(id, text) }
+            )
+        }
+    }
+}
+
+/** CF Benchmarks feed status (all three coins) and the latest deterministic gate verdicts. */
+@Composable
+private fun LiveDecisionStatus(cfLines: List<String>, decisionLines: List<String>) {
+    val colors = com.dirk.kalshiodds.ui.theme.DipTheme.colors
+    androidx.compose.foundation.layout.Column(Modifier.padding(bottom = androidx.compose.ui.unit.Dp(8f))) {
+        androidx.compose.material3.Text(
+            "Settlement feed (CF Benchmarks primary, Coinbase fallback)",
+            style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
+            color = colors.textPrimary
+        )
+        if (cfLines.isEmpty()) {
+            androidx.compose.material3.Text(
+                "CF feed status appears once markets load.",
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary
+            )
+        }
+        cfLines.forEach {
+            androidx.compose.material3.Text(it, style = androidx.compose.material3.MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+        }
+        decisionLines.take(6).forEach { line ->
+            androidx.compose.material3.Text(
+                line,
+                style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
+                color = if (line.contains("NO BET")) colors.textSecondary else colors.up
+            )
+        }
+    }
 }
 
 internal fun featuredLiveMarket(

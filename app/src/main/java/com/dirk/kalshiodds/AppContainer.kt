@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds
 
+import kotlinx.coroutines.launch
 import android.content.Context
 import com.dirk.kalshiodds.data.api.KalshiTradeClient
 import com.dirk.kalshiodds.data.api.NetworkModule
@@ -45,13 +46,47 @@ class AppContainer(context: Context) {
     val opportunities = com.dirk.kalshiodds.signal.notify.OpportunityNotifier(app)
     val newsCache = NewsPulseCache()
     val oomFlag = OomFlagStore(app)
-    private val resultsImpl = runCatching { SqliteResultsStore(app) as ResultsStore }
-        .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
+    private val resultsImpl: com.dirk.kalshiodds.data.local.results.ResultsDatabase =
+        runCatching { SqliteResultsStore(app) }
+            .getOrElse { com.dirk.kalshiodds.data.local.results.InMemoryResultsStore() }
     val resultsStore: ResultsStore = resultsImpl
-    val archive: com.dirk.kalshiodds.data.local.archive.DataArchive =
-        resultsImpl as com.dirk.kalshiodds.data.local.archive.DataArchive
+    val cfFeed = com.dirk.kalshiodds.signal.ws.CfBenchmarkStore()
+    val predictionLedger: com.dirk.kalshiodds.data.local.results.SqliteResultsStore? =
+        resultsImpl as? com.dirk.kalshiodds.data.local.results.SqliteResultsStore
+    val archive: com.dirk.kalshiodds.data.local.archive.DataArchive = resultsImpl
     val sessionId: String = java.util.UUID.randomUUID().toString()
     val dataPrefs = com.dirk.kalshiodds.data.prefs.DataPrefs(app)
+    /** 0.3.37 deterministic decision layer: calibration + gate + prediction ledger. No LLM. */
+    val decisions = com.dirk.kalshiodds.decision.DecisionRuntime(
+        sink = predictionLedger,
+        scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + com.dirk.kalshiodds.crash.SafeScopes.handler("decisions")),
+        longshot = com.dirk.kalshiodds.decision.LongshotResidual.loadAsset(app)
+    ).also { it.refitIfDue() }
+    val ladder = com.dirk.kalshiodds.decision.LadderStore(app)
+    /** 0.3.43 paper limit orders (paper_orders in the results DB). Fills hit the paper ledger only — never Kalshi. */
+    val paperOrders: com.dirk.kalshiodds.signal.paper.PaperOrderBook by lazy {
+        com.dirk.kalshiodds.signal.paper.PaperOrderBook(
+            store = (resultsImpl as? com.dirk.kalshiodds.signal.paper.PaperOrderPersistence)
+                ?: com.dirk.kalshiodds.signal.paper.InMemoryPaperOrderPersistence(),
+            sink = com.dirk.kalshiodds.signal.paper.PaperBookFillSink(paper.book)
+        )
+    }
+    /** 0.3.38 paper scalps (scalp_trades in the results DB). Never places orders. */
+    val scalpControls = com.dirk.kalshiodds.decision.SavedScalpControls(app)
+    val scalp = com.dirk.kalshiodds.decision.ScalpBook(
+        (resultsImpl as? com.dirk.kalshiodds.decision.ScalpPersistence)
+            ?: com.dirk.kalshiodds.decision.InMemoryScalpPersistence(),
+        tuneStore = com.dirk.kalshiodds.decision.SharedPrefsScalpTuneStore(app),
+        liveExtras = true,
+        controls = scalpControls,
+        // 0.3.40: total open scalp cost ≤ free paper bankroll (cash not tied up in Autopilot paper bets).
+        // 0.3.59 experiment: scalpers' paper bankroll is unlimited (no cash check). P&L still per algo; Autopilot unchanged.
+        bankrollUsd = { Double.POSITIVE_INFINITY }
+    )
+    /** Once-per-event trade notifications. */
+    val tradeEvents = com.dirk.kalshiodds.signal.notify.TradeEventNotifier(app)
+    /** 0.3.39: errors back off (30 s doubling to 10 min) and resume; they never disable Autopilot. */
+    val paperBackoff = com.dirk.kalshiodds.signal.paper.AutopilotBackoff()
     val importedModel = com.dirk.kalshiodds.prediction.ImportedModelStore(app)
     val resultsLog = RollingTextLog(File(app.filesDir, "results.log"))
     val resultsWriter = AsyncResultsWriter(resultsStore, resultsLog)
@@ -59,7 +94,9 @@ class AppContainer(context: Context) {
         model = model,
         heavy = HeavyMlRuntime().also { HeavyMlAssets.apply(app, it) },
         extended = ExtendedAiRuntime()
-    ).also { it.edgeModel = importedModel.current() }
+    ).also { engine ->
+        engine.edgeModel = importedModel.trustedCurrent()
+    }
     val support = DecisionSupport(
         logStore = logStore,
         adapterStore = adapterStore,
@@ -76,7 +113,29 @@ class AppContainer(context: Context) {
         results = resultsWriter
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
-    val paper = PaperBookStore(app)
+    val paper = PaperBookStore(app) { fills ->
+        runCatching { archive.upsertPaperFills(fills) }
+    }
+    val shadow = com.dirk.kalshiodds.signal.paper.ShadowBookStore(app)
+    val lastMinuteStore = com.dirk.kalshiodds.signal.lastminute.LastMinuteStore(app)
+    val lastMinuteEngine = com.dirk.kalshiodds.signal.lastminute.LastMinuteEngine(nowMs = { clock.nowMs() })
+    val brti = com.dirk.kalshiodds.signal.lastminute.BrtiCompositeClient()
+    val lastMinuteNotifier = com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier(app)
+    val d3Store = com.dirk.kalshiodds.signal.d3.D3Store(app)
+    val d3Engine = com.dirk.kalshiodds.signal.d3.D3Engine(nowMs = { clock.nowMs() })
+    val d3Notifier = com.dirk.kalshiodds.signal.d3.D3Notifier(app)
+    val kalshiTraffic = com.dirk.kalshiodds.data.api.KalshiTraffic()
+    val d3Markets = com.dirk.kalshiodds.signal.d3.D3MarketClient(
+        resolveApi = {
+            val keyed = hub.settings.tradingCredentialsConfigured()
+            NetworkModule.marketsApi(
+                demo = hub.settings.kalshiDemoEnabled,
+                credentials = if (keyed) ({ tradingCredentials() }) else null
+            )
+        },
+        rateLimiter = kalshiTraffic.limiter,
+        feedHealth = kalshiTraffic.health
+    )
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -99,12 +158,23 @@ class AppContainer(context: Context) {
     )
     val tickets = TicketSession(
         placeOrder = { ticket, clientOrderId ->
-            runCatching { tradeClient.createLimit(ticket, clientOrderId) }
+            runCatching { tradeClient.createLimit(ticket, clientOrderId) }.also { r ->
+                if (r.isSuccess) {
+                    tradeEvents.realBetPlaced(
+                        clientOrderId,
+                        "${if (ticket.isSell) "SELL" else "BUY"} ${ticket.side} ${ticket.contracts} × ${ticket.ticker} @ ${(ticket.limitPrice * 100).toInt()}¢"
+                    )
+                }
+            }
         },
         cancelOrder = { order ->
             runCatching { tradeClient.cancel(order) }
         },
-        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) }
+        onAttempt = { row: TicketAttemptRow -> resultsWriter.enqueueTicket(row) },
+        findExistingOrder = { clientOrderId, ticker ->
+            runCatching { tradeClient.findByClientOrderId(clientOrderId, ticker) }.getOrNull()
+        },
+        pendingOrderIds = resultsImpl
     )
     val clock: Clock = Clock.System
     val repository = MarketRepository(
@@ -118,12 +188,27 @@ class AppContainer(context: Context) {
         },
         model = model,
         logStore = logStore,
-        extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        extraOpenTickers = {
+            paper.book.openTickers() + shadow.book.openTickers() + d3Store.heldTickers() + d3Store.openTickers() +
+                ladder.openTickers() + decisions.unsettledTickers() + scalp.openTickers()
+        },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            shadow.book.settle(ticker, result)
+            lastMinuteStore.settle(ticker, result)
+            d3Store.settle(ticker, result)
+            runCatching { predictionLedger?.settleLedger(ticker, result, System.currentTimeMillis()) }
+            runCatching { ladder.settle(ticker, result) }
+            runCatching { scalp.settle(ticker, result) }
+            decisions.onSettled()
+        },
         onCalibration = { hub.applyCalibration(it) },
+        rateLimiter = kalshiTraffic.limiter,
+        feedHealth = kalshiTraffic.health,
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
             paper.book.settleFromLog(logStore.readAll())
+            decisions.refitIfDue()
             val tuned = com.dirk.kalshiodds.signal.feedback.EdgeAutoTuner.fromEntries(
                 logStore.readAll(),
                 feeRate = hub.settings.feeRate
@@ -145,6 +230,16 @@ class AppContainer(context: Context) {
         listOpen = { series -> repository.listOpen(series) },
         watchedSeries = {
             hub.settings.watchedSeries.toList().ifEmpty { CryptoMarkets.DEFAULT_SERIES }
+        },
+        onThrottle = { error ->
+            if (com.dirk.kalshiodds.data.api.KalshiRequestStatus.shouldBackoff(error)) {
+                val wait = kalshiTraffic.limiter.onFailure(
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.httpCode(error),
+                    com.dirk.kalshiodds.data.api.KalshiRequestStatus.retryAfterMs(error),
+                local = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isLocalThrottle(error)
+                )
+                kalshiTraffic.health.note(error, wait)
+            }
         }
     )
 
@@ -176,4 +271,13 @@ class AppContainer(context: Context) {
             )
         }
     }
+
+    init {
+        // 0.3.46: paper MARKET fills walk the live WS book (VWAP of consumed levels, capped at total displayed depth).
+        paper.book.depth = { ticker, side, buy ->
+            val b = scoring.book.snapshotBook(ticker)?.takeIf { scoring.book.hasSnapshot(ticker) }
+            if (b == null) null else com.dirk.kalshiodds.signal.paper.PaperDepthLevels.levels(side, buy, b.yes, b.no)
+        }
+    }
+
 }

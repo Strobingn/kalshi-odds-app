@@ -41,7 +41,12 @@ import com.dirk.kalshiodds.ui.theme.DipTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -> Unit) {
+fun DataScreen(
+    viewModel: DataViewModel,
+    onBack: () -> Unit,
+    onOpenHistory: () -> Unit,
+    showBack: Boolean = true
+) {
     val colors = DipTheme.colors
     val state by viewModel.state.collectAsStateWithLifecycle()
     val importFile = rememberLauncherForActivityResult(
@@ -59,18 +64,21 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
     Scaffold(
         containerColor = colors.bg,
+        contentWindowInsets = dipContentInsets(),
         topBar = {
             TopAppBar(
                 title = { Text("Data") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    if (showBack) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = colors.bg,
                     titleContentColor = colors.textPrimary,
-                    navigationIconContentColor = colors.accentBlue
+                    navigationIconContentColor = colors.textPrimary
                 )
             )
         }
@@ -120,7 +128,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
             Section("Import file")
             Text(
-                "Pick a DipHunter CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
+                "Pick a Kalshi Trader CSV/JSON export or a Kalshi account fill-history CSV. Parsing is streamed; duplicates (id / timestamp) are skipped.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -177,7 +185,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
 
             Section("Restore from Supabase")
             Text(
-                "Optional mirror. Paste the project URL and the publishable/anon key — never a service_role key. Reads diphunter_snapshots / diphunter_results / diphunter_settled.",
+                "Optional mirror. Paste the project URL and the publishable/anon key — never a service_role key. Restore reads kashi rows from diphunter_sync.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -214,14 +222,61 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
-            state.syncLine?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.accentBlue)
-            }
+            CloudSyncStatusBlock(state.settings)
             OutlinedButton(
                 onClick = viewModel::syncNow,
                 enabled = state.settings.supabaseConfigured && state.settings.syncEnabled,
                 modifier = Modifier.fillMaxWidth().height(48.dp)
             ) { Text("Sync now") }
+
+            Section("Memory")
+            val heapLine by androidx.compose.runtime.produceState(initialValue = com.dirk.kalshiodds.crash.HeapInfo.line()) {
+                while (true) { kotlinx.coroutines.delay(2_000); value = com.dirk.kalshiodds.crash.HeapInfo.line() }
+            }
+            Text(heapLine + " · GET cache ${com.dirk.kalshiodds.data.api.KalshiRest.gate.cacheEntries()} entries / ${com.dirk.kalshiodds.data.api.KalshiRest.gate.cacheBytes() shr 10} KB",
+                style = MaterialTheme.typography.bodySmall, color = colors.textPrimary)
+            Section("Kalshi request counters")
+            Text("Every Kalshi REST call this process made, by endpoint, plus 429s (from Kalshi vs our own limiter) and which loop owns each poll type. Refresh with the price log Refresh button.",
+                style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+            state.requestLines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+            Section("Price debug log")
+            Text(
+                "Every contract price input with its source (WS ticker / trade / orderbook, REST), Kalshi ts / sid / seq, field and what the app did with it (applied, dropped-stale, rest-suppressed-ws-fresh, seq-gap-resync, dropped-no-snapshot).",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            state.priceLogSummary?.let { Text(it, style = MaterialTheme.typography.bodySmall, color = colors.textPrimary) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(onClick = viewModel::refreshPriceLog, modifier = Modifier.weight(1f).height(48.dp)) { Text("Refresh") }
+                Button(onClick = viewModel::exportPriceLog, modifier = Modifier.weight(1f).height(48.dp)) { Text("Export CSV") }
+                OutlinedButton(onClick = viewModel::clearPriceLog, modifier = Modifier.weight(1f).height(48.dp)) { Text("Clear") }
+            }
+            state.priceLogLines.forEach {
+                Text(it, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = colors.textSecondary)
+            }
+            state.priceLogNote?.let { Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium) }
+
+            Section("Cloud storage")
+            Text(state.storageLine ?: "Supabase size: checking…", style = MaterialTheme.typography.bodyMedium,
+                color = if (state.storageWarn) com.dirk.kalshiodds.ui.theme.DownColor else colors.textSecondary)
+            OutlinedButton(onClick = viewModel::refreshStorage, modifier = Modifier.fillMaxWidth().height(48.dp)) { Text("Refresh size") }
+
+            Section("Prediction ledger")
+            Text(
+                state.cfFeedLine ?: "CF Benchmarks feed is off until Live signals connect with your Kalshi key. Coinbase is the fallback and is marked in the ledger.",
+                style = MaterialTheme.typography.labelMedium,
+                color = colors.textSecondary
+            )
+            Button(
+                onClick = viewModel::exportLedger,
+                modifier = Modifier.fillMaxWidth().height(52.dp)
+            ) { Text("Export prediction ledger CSV") }
+            state.ledgerNote?.let {
+                Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
+            }
+            state.championReport?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+            }
 
             Section("Import model")
             Text(
@@ -230,7 +285,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 color = colors.textSecondary
             )
             Text(
-                "Run Train edge model on chat-GTP to publish edge-model-chat-GTP. Get latest model checks the source and holdout Brier/log-loss before activation; that does not prove trading profit. Previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
+                "Get latest model checks the newest model-YYYYMMDD release, or ml/published/latest.json on kashi. edge-model-latest and edge-model-main are rejected. It checks package com.dirk.kalshiodds.kashi, sha256, non-synthetic, at least 5,000 rows, and activates only if beat_market is true (it beats the market out of sample after fees). A model that does not beat the market is rejected and the bundled DipHunter model stays active. The previous model stays for rollback. Private repo: paste a GitHub token (encrypted, not the Kalshi key) or use Import model JSON.",
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
             )
@@ -262,7 +317,7 @@ fun DataScreen(viewModel: DataViewModel, onBack: () -> Unit, onOpenHistory: () -
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
 
-            state.message?.let {
+            state.message?.takeIf { it != state.modelNote }?.let {
                 Text(it, color = colors.accentBlue, style = MaterialTheme.typography.bodyMedium)
             }
             Spacer(Modifier.height(24.dp))
@@ -277,7 +332,7 @@ private fun StatsCard(state: DataUiState) {
     Column(
         Modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp)
     ) {
         Text("DATA STATS", style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, fontWeight = FontWeight.Bold)

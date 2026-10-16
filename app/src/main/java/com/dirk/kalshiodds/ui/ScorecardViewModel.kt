@@ -15,6 +15,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,10 +31,8 @@ data class ScorecardUi(
     val sitOut: Boolean = false,
     val autoTuneNote: String = "",
     val modelNote: String? = null,
-    val forwardTest: com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary =
-        com.dirk.kalshiodds.signal.feedback.ForwardTest.Summary(),
-    val ticketForward: com.dirk.kalshiodds.signal.feedback.TicketForwardTest.Summary =
-        com.dirk.kalshiodds.signal.feedback.TicketForwardTest.Summary()
+    val honestLines: List<String> = emptyList(),
+    val ladderLine: String = com.dirk.kalshiodds.decision.StrategyLadder.rulesText()
 ) {
     companion object {
         val EMPTY = ScorecardUi(ScorecardCopy.EMPTY)
@@ -52,13 +51,11 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
                 runCatching {
                     val token = container.extraSecrets.githubToken
                     when (val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)) {
-                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready -> {
-                            if (out.fetch.decision.activate) {
-                                container.importedModel.activate(out.fetch.model, out.fetch.manifest)
-                                container.scoring.edgeModel = out.fetch.model
-                            }
-                            out.fetch.decision.reason
-                        }
+                        is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Ready ->
+                            com.dirk.kalshiodds.prediction.PublishedModelInstaller.apply(
+                                container.importedModel,
+                                out
+                            ) { model -> container.scoring.edgeModel = model }
                         is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.NeedsAuth -> out.message
                         is com.dirk.kalshiodds.prediction.LatestModelClient.Outcome.Failed -> out.message
                     }
@@ -82,55 +79,31 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
         }
     }
 
-    fun exportForwardTest() {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val csv = com.dirk.kalshiodds.signal.feedback.ForwardTest.csv(
-                        container.resultsStore.forwardTests()
-                    )
-                    ResultsFileExport.write(getApplication(), csv, prefix = "diphunter-forward-test")
-                }.getOrElse {
-                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
-                }
-            }
-            _exportMessage.value = result.message
-        }
-    }
-
-    fun exportTicketForward() {
-        viewModelScope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    val csv = com.dirk.kalshiodds.signal.feedback.TicketForwardTest.csv(
-                        container.resultsStore.ticketForward()
-                    )
-                    ResultsFileExport.write(getApplication(), csv, prefix = "diphunter-ticket-forward")
-                }.getOrElse {
-                    com.dirk.kalshiodds.data.local.results.ExportResult(false, null, it.message ?: "Export failed")
-                }
-            }
-            _exportMessage.value = result.message
-        }
-    }
-
     val snapshot: StateFlow<ScorecardUi> = combine(
         container.logStore.entriesFlow,
         container.paper.book.state,
-        container.adapterStore.stateFlow,
+        combine(container.lastMinuteStore.state, container.d3Store.state, container.shadow.book.state) { lm, d3, shadow ->
+            Triple(lm, d3, shadow)
+        },
         container.guardrailStore.stateFlow,
-        combine(_exportMessage, _modelNote, container.resultsWriter.forwardRevision) { export, note, _ -> export to note }
-    ) { entries, paper, adapter, guard, notes ->
-        val settings = container.hub.settings
-        val (windows, forwardRows, ticketRows) = withContext(Dispatchers.IO) {
-            Triple(
-                runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() },
-                runCatching { container.resultsStore.forwardTests() }.getOrElse { emptyList() },
-                runCatching { container.resultsStore.ticketForward() }.getOrElse { emptyList() }
-            )
+        combine(_exportMessage, _modelNote, container.adapterStore.stateFlow) { export, note, adapter ->
+            Triple(export, note, adapter)
         }
+    ) { entries, paper, books, guard, notes ->
+        val lastMinute = books.first
+        val d3 = books.second
+        val shadow = books.third
+        val settings = container.hub.settings
+        val windows = runCatching { container.archive.recentSettled(limit = 400) }.getOrElse { emptyList() }
         ScorecardUi(
-            view = ScorecardCopy.of(entries, paper, windows),
+            view = ScorecardCopy.of(
+                entries,
+                paper,
+                windows,
+                lastMinutePicks = lastMinute.picks,
+                d3Picks = d3.picks,
+                shadow = shadow
+            ),
             metrics = ScorecardMetrics.compute(
                 entries = entries,
                 calibration = container.scoring.calibration,
@@ -138,24 +111,41 @@ class ScorecardViewModel(application: Application) : AndroidViewModel(applicatio
                 edgeThresholdPp = settings.effectiveEdgeThresholdPp(),
                 minConfidence = settings.minConfidence,
                 requireUncertaintyPass = settings.uncertaintyGateEnabled,
-                maxUncertainty = settings.maxUncertainty
+                maxUncertainty = settings.maxUncertainty,
+                fills = paper.scorecardFills(),
+                settledWindows = windows
             ),
             allowlist = Allowlist.evaluate(entries, floor = settings.muteHitRateFloor),
-            adapter = adapter,
+            adapter = notes.third,
             guardrails = guard,
             extendedLine = extendedLine(),
             exportMessage = notes.first,
             sitOut = settings.isSittingOut(),
             autoTuneNote = settings.autoTuneNote,
             modelNote = notes.second,
-            forwardTest = com.dirk.kalshiodds.signal.feedback.ForwardTest.summarize(forwardRows),
-            ticketForward = com.dirk.kalshiodds.signal.feedback.TicketForwardTest.summarize(ticketRows)
+            honestLines = com.dirk.kalshiodds.decision.HonestScorecard.lines(
+                com.dirk.kalshiodds.decision.HonestScorecard.fromHistory(
+                    persistedPaperRows(),
+                    paper.scorecardFills()
+                )
+            )
         )
-    }.stateIn(
+    }.flowOn(Dispatchers.IO).stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         ScorecardUi.EMPTY
     )
+
+    @Volatile private var paperRowsCache: Pair<Long, List<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>>>? = null
+
+    /** All settled paper fills from SQLite (cached 30 s); the in-memory book only keeps 80. */
+    private fun persistedPaperRows(): List<Pair<String, com.dirk.kalshiodds.decision.HonestScorecard.Row>> {
+        val now = System.currentTimeMillis()
+        paperRowsCache?.let { (at, rows) -> if (now - at < 30_000L) return rows }
+        val rows = runCatching { container.predictionLedger?.settledPaperRows() }.getOrNull().orEmpty()
+        paperRowsCache = now to rows
+        return rows
+    }
 
     private fun extendedLine(): String {
         val ext = container.scoring.extended

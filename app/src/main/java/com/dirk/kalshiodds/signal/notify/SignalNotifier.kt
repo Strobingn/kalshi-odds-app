@@ -116,10 +116,37 @@ class SignalNotifier(private val context: Context) {
             .build()
     }
 
+    fun pausedNotification(): Notification {
+        ensureChannels(context)
+        val open = PendingIntent.getActivity(
+            context,
+            3,
+            Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                action = LiveSignalsPolicy.ACTION_RESUME
+            },
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val text = context.getString(R.string.live_signals_paused_text)
+        return NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentTitle(context.getString(R.string.live_signals_fg_title))
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setAutoCancel(true)
+            .setOnlyAlertOnce(false)
+            .setContentIntent(open)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_RECOMMENDATION)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build()
+    }
+
     companion object {
         const val CHANNEL_ALERTS = "diphunter_signal_alerts"
         const val CHANNEL_FOREGROUND = LiveSignalsPolicy.CHANNEL_ONGOING
         const val FG_NOTIFICATION_ID = 1001
+        const val PAUSED_NOTIFICATION_ID = 1002
         const val EXTRA_TICKER = "signal_ticker"
 
         fun ensureChannels(context: Context) {

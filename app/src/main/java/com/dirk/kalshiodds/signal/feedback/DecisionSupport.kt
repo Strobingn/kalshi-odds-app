@@ -33,11 +33,11 @@ class DecisionSupport(
     suspend fun bootstrap(settings: SignalSettings = SignalSettings()) {
         mutex.withLock {
             scoring.adapter = runCatching { adapterStore.read() }.getOrElse { OnlineAdapter.identity() }
-            val rawGuard = runCatching { guardrailStore.read() }.getOrElse { Guardrails.identity() }
             val entries = runCatching { logStore.readAll() }.getOrElse { emptyList() }
-            val corrected = Guardrails.migrateIfNeeded(rawGuard, entries, thresholds(settings))
+            val rawGuard = runCatching { guardrailStore.read() }.getOrElse { Guardrails.identity() }
+            val migrated = Guardrails.migrateIfNeeded(rawGuard, entries, thresholds(settings))
             val started = Guardrails.onNewSession(
-                corrected,
+                migrated,
                 thresholds(settings),
                 sessionId,
                 System.currentTimeMillis()

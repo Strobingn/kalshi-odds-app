@@ -42,20 +42,21 @@ object FeatureVector {
     ): FloatArray {
         val secsToClose = closeEpochMs?.let { ((it - nowMs) / 1000.0).coerceAtLeast(0.0) } ?: 900.0
         val tteFrac = (secsToClose / 900.0).coerceIn(0.0, 1.0)
-        val volumeNorm = ln(1.0 + volume) / ln(1.0 + 1_000_000.0)
+        val windowVol = volumeLastMinutes(series, nowMs, minutes = 8) ?: 0.0
+        val volumeNorm = ln(1.0 + windowVol) / ln(1.0 + 1_000_000.0)
         val oiNorm = ln(1.0 + openInterest.coerceAtLeast(0.0)) / ln(1.0 + 1_000_000.0)
 
-        val recent = series.takeLast(8)
-        val mids = recent.map { it.mid }
-        val volatility = when {
-            mids.size >= 3 -> {
-                val mean = mids.average()
-                sqrt(mids.map { (it - mean) * (it - mean) }.average()).coerceIn(0.0, 1.0)
-            }
-            else -> 0.05
+        val minute = lastMinute(series, nowMs)
+        val mids = minute.map { it.mid }
+        val volatility = if (mids.size >= 2) {
+            (mids.maxOrNull()!! - mids.minOrNull()!!).coerceIn(0.0, 1.0)
+        } else {
+            0.05
         }
+        val eightMin = lastMinutes(series, nowMs, minutes = 8)
+        val eightMids = eightMin.map { it.mid }
         val momentum = when {
-            mids.size >= 2 -> (mids.last() - mids.first()).coerceIn(-1.0, 1.0)
+            eightMids.size >= 2 -> (eightMids.last() - eightMids.first()).coerceIn(-1.0, 1.0)
             else -> 0.0
         }
         val meanReversion = 0.5 - mid
@@ -70,6 +71,34 @@ object FeatureVector {
             seriesId(ticker),
             oiNorm.toFloat()
         )
+    }
+
+    /** Points in the last [minutes] minutes, oldest first. */
+    fun lastMinutes(
+        series: List<FeatureHistory.Point>,
+        nowMs: Long,
+        minutes: Int
+    ): List<FeatureHistory.Point> {
+        val cut = nowMs - minutes * 60_000L
+        return series.filter { it.nowMs >= cut }
+    }
+
+    fun lastMinute(series: List<FeatureHistory.Point>, nowMs: Long): List<FeatureHistory.Point> =
+        lastMinutes(series, nowMs, 1)
+
+    /**
+     * 8-minute volume: delta of cumulative market volume over the window,
+     * matching training's sum of 8 one-minute candle volumes.
+     */
+    fun volumeLastMinutes(
+        series: List<FeatureHistory.Point>,
+        nowMs: Long,
+        minutes: Int
+    ): Double? {
+        val win = lastMinutes(series, nowMs, minutes)
+        if (win.size < 2) return null
+        val delta = win.last().volume - win.first().volume
+        return delta.coerceAtLeast(0.0)
     }
 
     fun standardize(raw: FloatArray, mean: FloatArray, std: FloatArray): FloatArray {

@@ -9,8 +9,8 @@ import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import kotlin.math.abs
 
 /**
- * Home list = one Bitcoin card from [CryptoMarkets.DEFAULT_SERIES].
- * The slot is keyed by series and shows only the current window
+ * Home list = BTC, ETH and SOL 15m cards (0.3.39 restores the pre-0.3.14 three-coin Home),
+ * filtered by the coin selector. Each slot is keyed by series and shows only that coin's window
  * (`open_time <= now < close_time`). A missing listing keeps the slot
  * with [NEXT_WINDOW_LOADING]. Never sorted by edge — [ranked] / [best]
  * feed "This window" only.
@@ -18,6 +18,78 @@ import kotlin.math.abs
 object HomeMarkets {
     val CARD_SERIES: List<String> = CryptoMarkets.DEFAULT_SERIES
     const val NEXT_WINDOW_LOADING = "Next window loading"
+
+    /** Home coin selector. ALL shows every coin; the others show one coin's 15m and daily views. */
+    enum class Coin(val label: String, val fifteen: String?, val daily: String?) {
+        ALL("All", null, null),
+        BTC("BTC", com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTC, com.dirk.kalshiodds.data.api.KalshiApi.SERIES_BTCD),
+        ETH("ETH", com.dirk.kalshiodds.data.api.KalshiApi.SERIES_ETH, com.dirk.kalshiodds.data.api.KalshiApi.SERIES_ETHD),
+        SOL("SOL", com.dirk.kalshiodds.data.api.KalshiApi.SERIES_SOL, com.dirk.kalshiodds.data.api.KalshiApi.SERIES_SOLD);
+
+        fun showsSeries(series: String): Boolean =
+            this == ALL || series.equals(fifteen, ignoreCase = true) || series.equals(daily, ignoreCase = true)
+    }
+
+    fun coinCards(
+        markets: List<MarketUiModel>,
+        nowMs: Long,
+        coin: Coin
+    ): List<CoinCard> = coinCards(markets, nowMs).filter { coin.showsSeries(it.series) }
+
+    /** Daily series to show for [coin], in Home order. */
+    fun dailySeries(coin: Coin): List<String> =
+        CryptoMarkets.DAILY_SERIES.filter { coin.showsSeries(it) }
+
+    /**
+     * The [count] daily 5 PM strikes nearest 50¢ for [series]. Only quotes whose ticker belongs
+     * to [series] are used, so one coin's daily prices can never show under another coin.
+     */
+    fun dailyRows(
+        quotesBySeries: Map<String, List<com.dirk.kalshiodds.signal.d3.D3Quote>>,
+        series: String,
+        count: Int = 5
+    ): List<com.dirk.kalshiodds.signal.d3.D3Quote> =
+        quotesBySeries[series].orEmpty()
+            .filter { CryptoMarkets.inferSeries(it.ticker).equals(series, ignoreCase = true) }
+            .filter { it.yesAsk != null || it.noAsk != null }
+            .sortedBy { q ->
+                val mid = listOfNotNull(q.yesBid, q.yesAsk).takeIf { it.isNotEmpty() }?.average() ?: 0.5
+                abs(mid - 0.5)
+            }
+            .take(count)
+            .sortedBy { it.strikeUsd ?: Double.MAX_VALUE }
+
+    /** A buyable market built only from this daily quote's own prices (no cross-coin data). */
+    fun dailyMarket(q: com.dirk.kalshiodds.signal.d3.D3Quote): MarketUiModel {
+        val kind = CryptoMarkets.kindFor(q.ticker)
+        val label = when (kind) {
+            com.dirk.kalshiodds.domain.SeriesKind.ETH -> "Ethereum"
+            com.dirk.kalshiodds.domain.SeriesKind.SOL -> "Solana"
+            else -> "Bitcoin"
+        }
+        val mid = listOfNotNull(q.yesBid, q.yesAsk).takeIf { it.isNotEmpty() }?.average()
+        return MarketUiModel(
+            ticker = q.ticker,
+            title = q.title,
+            subtitle = q.subtitle,
+            floorStrike = q.strikeUsd,
+            yesBid = q.yesBid,
+            yesAsk = q.yesAsk,
+            noBid = q.noBid,
+            noAsk = q.noAsk,
+            yesAskSize = q.yesAskSize,
+            lastPrice = null,
+            yesProbabilityPercent = mid?.let { it * 100.0 },
+            noProbabilityPercent = mid?.let { 100.0 - it * 100.0 },
+            spreadDollars = if (q.yesBid != null && q.yesAsk != null) q.yesAsk - q.yesBid else null,
+            volume = null,
+            volume24h = null,
+            closeTimeLocal = null,
+            closeTimeEpochMs = q.closeTimeEpochMs,
+            status = q.status,
+            seriesLabel = "$label daily 5 PM"
+        )
+    }
 
     data class CoinCard(
         val series: String,

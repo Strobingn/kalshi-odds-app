@@ -9,7 +9,7 @@ import kotlin.math.tanh
 object SpotFeatureMath {
 
     fun adjustPp(midPp: Double, features: AssetSpotFeatures?): Double? {
-        if (features == null) return null
+        if (features == null || !features.modelUsable) return null
         val ret = features.spotReturn5m ?: features.spotReturn1m
         val funding = features.fundingRate
         val vol = features.realizedVol15m
@@ -35,7 +35,16 @@ object SpotFeatureMath {
         features.realizedVol15m?.let {
             parts += String.format(java.util.Locale.US, "rvol %.2f%%", it * 100.0)
         }
+        if (parts.isEmpty() && features.displayPrice != null && !features.modelUsable) {
+            return String.format(
+                java.util.Locale.US,
+                "display $%,.0f (%s — not a model input)",
+                features.displayPrice,
+                features.displaySource ?: features.source
+            )
+        }
         if (parts.isEmpty()) return null
-        return parts.joinToString(" · ") + " (${features.source})"
+        val src = if (features.modelUsable) features.source else "${features.source} display-only"
+        return parts.joinToString(" · ") + " ($src)"
     }
 }

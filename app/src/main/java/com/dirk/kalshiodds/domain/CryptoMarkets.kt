@@ -3,14 +3,35 @@ package com.dirk.kalshiodds.domain
 import com.dirk.kalshiodds.data.api.KalshiApi
 
 /**
- * Live universe for Dip Hunter. 0.3.14 is **Bitcoin-only** ([KalshiApi.SERIES_BTC]).
- * ETH / SOL / extras are recognized so stored rows can be filtered out, but
- * they are never subscribed, polled, scored, alerted, or paper-traded.
- * WTI and other non-crypto contracts stay rejected.
+ * 0.3.39: Home, live books, charts and manual bets cover BTC, ETH and SOL 15-minute
+ * markets again (restored from the pre-0.3.14 three-coin Home), plus their daily 5 PM ET
+ * series. XRP, HYPE, sports, and other series stay out. WTI and other non-crypto contracts
+ * stay rejected.
  */
 object CryptoMarkets {
-    /** Single live watchlist. Home, rollover, WS, scoring, and paper all read this. */
-    val DEFAULT_SERIES: List<String> = listOf(KalshiApi.SERIES_BTC)
+    /** Home cards, live WS books and charts: BTC, ETH, SOL 15m (0.3.39; was BTC-only since 0.3.14). */
+    val DEFAULT_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTC,
+        KalshiApi.SERIES_ETH,
+        KalshiApi.SERIES_SOL
+    )
+
+    /** BTC, ETH, and SOL 15-minute markets. */
+    val FIFTEEN_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTC,
+        KalshiApi.SERIES_ETH,
+        KalshiApi.SERIES_SOL
+    )
+
+    /** Daily 5 PM ET above/below: BTC, ETH, SOL. */
+    val DAILY_SERIES: List<String> = listOf(
+        KalshiApi.SERIES_BTCD,
+        KalshiApi.SERIES_ETHD,
+        KalshiApi.SERIES_SOLD
+    )
+
+    /** 15-minute plus daily. Home card stays Bitcoin 15m. */
+    val AUTOPILOT_SERIES: List<String> = FIFTEEN_SERIES + DAILY_SERIES
 
     fun isLiveSeries(series: String): Boolean =
         DEFAULT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
@@ -18,15 +39,36 @@ object CryptoMarkets {
     fun isLiveTicker(ticker: String): Boolean =
         ticker.isNotBlank() && isLiveSeries(inferSeries(ticker))
 
+    /**
+     * The honest scorecard stays Bitcoin 15m only (its floors and history were built on BTC);
+     * 0.3.39 restores ETH/SOL views and bets, not their scorecard rows.
+     */
+    fun isScorecardTicker(ticker: String): Boolean =
+        ticker.trim().uppercase().startsWith(KalshiApi.SERIES_BTC)
+
     fun liveTickers(tickers: Iterable<String>): List<String> =
         tickers.map { it.trim() }.filter { it.isNotEmpty() && isLiveTicker(it) }.distinct()
 
-    /** KXETH15M / KXSOL15M — recognized so stored rows can be filtered, never live. */
-    fun isRetiredTicker(ticker: String): Boolean {
-        val series = inferSeries(ticker)
-        return series.equals(KalshiApi.SERIES_ETH, ignoreCase = true) ||
-            series.equals(KalshiApi.SERIES_SOL, ignoreCase = true)
+    fun isAutopilotSeries(series: String): Boolean =
+        AUTOPILOT_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
+
+    fun isDailySeries(series: String): Boolean =
+        DAILY_SERIES.any { it.equals(series.trim(), ignoreCase = true) }
+
+    fun isDailyTicker(ticker: String): Boolean {
+        val u = ticker.trim().uppercase()
+        return DAILY_SERIES.any { u.startsWith(it) }
     }
+
+    /** 15-minute BTC/ETH/SOL and the daily 5 PM ET series. */
+    fun isAutopilotTicker(ticker: String): Boolean {
+        val u = ticker.trim().uppercase()
+        if (u.isEmpty()) return false
+        return AUTOPILOT_SERIES.any { u.startsWith(it) }
+    }
+
+    /** Nothing in the Autopilot 15m set is retired. Other series are simply not watched. */
+    fun isRetiredTicker(ticker: String): Boolean = false
 
     /** Tokens that identify a crypto-denominated Kalshi series or ticker. */
     private val CRYPTO_TOKENS = listOf(
@@ -51,6 +93,9 @@ object CryptoMarkets {
     fun inferSeries(ticker: String): String {
         val u = ticker.uppercase()
         return when {
+            u.startsWith(KalshiApi.SERIES_BTCD) -> KalshiApi.SERIES_BTCD
+            u.startsWith(KalshiApi.SERIES_ETHD) -> KalshiApi.SERIES_ETHD
+            u.startsWith(KalshiApi.SERIES_SOLD) -> KalshiApi.SERIES_SOLD
             u.startsWith(KalshiApi.SERIES_ETH) || (u.contains("ETH") && !u.contains("BTC")) -> KalshiApi.SERIES_ETH
             u.startsWith(KalshiApi.SERIES_SOL) || u.contains("SOL") -> KalshiApi.SERIES_SOL
             u.startsWith(KalshiApi.SERIES_BTC) || u.contains("BTC") -> KalshiApi.SERIES_BTC
@@ -59,9 +104,9 @@ object CryptoMarkets {
     }
 
     fun kindFor(ticker: String): SeriesKind = when (inferSeries(ticker)) {
-        KalshiApi.SERIES_ETH -> SeriesKind.ETH
-        KalshiApi.SERIES_SOL -> SeriesKind.SOL
-        KalshiApi.SERIES_BTC -> SeriesKind.BTC
+        KalshiApi.SERIES_ETH, KalshiApi.SERIES_ETHD -> SeriesKind.ETH
+        KalshiApi.SERIES_SOL, KalshiApi.SERIES_SOLD -> SeriesKind.SOL
+        KalshiApi.SERIES_BTC, KalshiApi.SERIES_BTCD -> SeriesKind.BTC
         else -> SeriesKind.CRYPTO
     }
 }

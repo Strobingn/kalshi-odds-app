@@ -11,15 +11,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        // Independent install from the original DipHunter app. Keep this ID
-        // and the committed debug signing key stable for future APK updates.
-        applicationId = "com.dirk.kalshiodds.chatgtp"
+        applicationId = "com.dirk.kalshiodds.kashi"
         minSdk = 26
         targetSdk = 35
-        // GitHub Actions run numbers increase with each branch push, so a
-        // new APK updates this separate installation without version downgrades.
-        versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.0"
+        versionCode = 92
+        versionName = "0.3.77"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -130,8 +126,12 @@ dependencies {
 
     // WorkManager
     implementation("androidx.work:work-runtime-ktx:2.10.0")
+    // 0.3.68: Paging 3 for scalp trade history (keyset pages from SQLite)
+    implementation("androidx.paging:paging-runtime-ktx:3.3.6")
+    implementation("androidx.paging:paging-compose:3.3.6")
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
     // Real org.json for JVM unit tests (Android stubs JSONObject by default).
     testImplementation("org.json:json:20240303")
     testImplementation("org.robolectric:robolectric:4.14.1")

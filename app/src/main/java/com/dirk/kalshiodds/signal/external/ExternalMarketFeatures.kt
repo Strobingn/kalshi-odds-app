@@ -14,12 +14,12 @@ import java.util.concurrent.TimeUnit
 /**
  * Short-horizon **public** crypto market data for BTC / ETH / SOL.
  *
- * Sources (no paid keys, market-data only — never places exchange orders):
- *  1. Binance spot ticker + 1m klines + USDT-M funding (`premiumIndex`)
- *  2. Coinbase Exchange public ticker + 1m candles as REST fallback
+ * Model input is Coinbase Exchange USD (`BTC-USD` ticker `price` — the
+ * last trade, not a candle close). Official docs:
+ * https://docs.cdp.coinbase.com/exchange/reference/exchangerestapi_getproductticker
  *
- * Timeouts are short; results are cached; failures are swallowed so
- * scoring continues without this feature (weight drops out).
+ * Binance USDT is display-only. It is never used as a model spot without
+ * a USDT→USD conversion, which we do not have here.
  */
 data class AssetSpotFeatures(
     val asset: String,
@@ -29,7 +29,11 @@ data class AssetSpotFeatures(
     val fundingRate: Double? = null,
     val lastPrice: Double? = null,
     val source: String = "none",
-    val fetchedAtMs: Long = 0L
+    val fetchedAtMs: Long = 0L,
+    val minuteCloses: List<Double> = emptyList(),
+    val displayPrice: Double? = null,
+    val displaySource: String? = null,
+    val modelUsable: Boolean = source == "coinbase"
 )
 
 data class ExternalSnapshot(
@@ -62,9 +66,10 @@ class ExternalMarketClient(
 ) {
     fun fetchAsset(asset: String): AssetSpotFeatures? {
         val now = System.currentTimeMillis()
-        val binance = runCatching { fetchBinance(asset, now) }.getOrNull()
-        if (binance != null) return binance
-        return runCatching { fetchCoinbase(asset, now) }.getOrNull()
+        val coinbase = runCatching { fetchCoinbase(asset, now) }.getOrNull()
+        if (coinbase != null) return coinbase
+        val binance = runCatching { fetchBinanceDisplay(asset, now) }.getOrNull()
+        return binance
     }
 
     fun fetchAll(): ExternalSnapshot {
@@ -77,37 +82,27 @@ class ExternalMarketClient(
         )
     }
 
-    private fun fetchBinance(asset: String, now: Long): AssetSpotFeatures? {
+    /**
+     * Display-only USDT last. [AssetSpotFeatures.lastPrice] stays null so
+     * scoring / digital-fair / the edge model never ingest an unconverted
+     * USDT print against a USD strike.
+     */
+    private fun fetchBinanceDisplay(asset: String, now: Long): AssetSpotFeatures? {
         val symbol = when (asset.uppercase()) {
             "BTC" -> "BTCUSDT"
             "ETH" -> "ETHUSDT"
             "SOL" -> "SOLUSDT"
             else -> return null
         }
-        val klines = getJsonArray("https://api.binance.com/api/v3/klines?symbol=$symbol&interval=1m&limit=20")
-            ?: return null
-        val closes = (0 until klines.length()).mapNotNull { i ->
-            klines.optJSONArray(i)?.optString(4)?.toDoubleOrNull()
-        }
-        if (closes.size < 3) return null
-        val last = closes.last()
-        val ret1 = if (closes.size >= 2 && closes[closes.size - 2] > 0) {
-            (last - closes[closes.size - 2]) / closes[closes.size - 2]
-        } else null
-        val ret5 = if (closes.size >= 6 && closes[closes.size - 6] > 0) {
-            (last - closes[closes.size - 6]) / closes[closes.size - 6]
-        } else null
-        val funding = getJsonObject("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=$symbol")
-            ?.optString("lastFundingRate")
-            ?.toDoubleOrNull()
+        val ticker = getJsonObject("https://api.binance.com/api/v3/ticker/price?symbol=$symbol")
+        val px = ticker?.optString("price")?.toDoubleOrNull() ?: return null
         return AssetSpotFeatures(
             asset = asset.uppercase(),
-            spotReturn1m = ret1,
-            spotReturn5m = ret5,
-            realizedVol15m = realizedVol(closes.takeLast(16)),
-            fundingRate = funding,
-            lastPrice = last,
-            source = "binance",
+            lastPrice = null,
+            displayPrice = px,
+            displaySource = "binance-usdt",
+            source = "binance-display",
+            modelUsable = false,
             fetchedAtMs = now
         )
     }
@@ -119,8 +114,10 @@ class ExternalMarketClient(
             "SOL" -> "SOL-USD"
             else -> return null
         }
+        // Live last trade. Do not fall back to a candle close for lastPrice.
         val ticker = getJsonObject("https://api.exchange.coinbase.com/products/$product/ticker")
-        val last = ticker?.optString("price")?.toDoubleOrNull()
+            ?: return null
+        val last = ticker.optString("price").toDoubleOrNull() ?: return null
         val candles = getJsonArray(
             "https://api.exchange.coinbase.com/products/$product/candles?granularity=60"
         )
@@ -133,14 +130,12 @@ class ExternalMarketClient(
             }
             closes.reverse()
         }
-        if (closes.size < 3 && last == null) return null
-        val px = closes.lastOrNull() ?: last ?: return null
-        val series = if (closes.size >= 3) closes else listOf(px)
+        val series = if (closes.size >= 2) closes else emptyList()
         val ret1 = if (series.size >= 2 && series[series.size - 2] > 0) {
-            (px - series[series.size - 2]) / series[series.size - 2]
+            (last - series[series.size - 2]) / series[series.size - 2]
         } else null
         val ret5 = if (series.size >= 6 && series[series.size - 6] > 0) {
-            (px - series[series.size - 6]) / series[series.size - 6]
+            (last - series[series.size - 6]) / series[series.size - 6]
         } else null
         return AssetSpotFeatures(
             asset = asset.uppercase(),
@@ -148,9 +143,13 @@ class ExternalMarketClient(
             spotReturn5m = ret5,
             realizedVol15m = realizedVol(series.takeLast(16)),
             fundingRate = null,
-            lastPrice = px,
+            lastPrice = last,
             source = "coinbase",
-            fetchedAtMs = now
+            fetchedAtMs = now,
+            minuteCloses = series.takeLast(8),
+            displayPrice = last,
+            displaySource = "coinbase",
+            modelUsable = true
         )
     }
 
@@ -179,7 +178,7 @@ class ExternalMarketClient(
         val req = Request.Builder()
             .url(url)
             .header("Accept", "application/json")
-            .header("User-Agent", "DipHunter/0.2.1 (Android; market-data)")
+            .header("User-Agent", "DipHunter/0.3.18 (Android; market-data)")
             .build()
         http.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) return null

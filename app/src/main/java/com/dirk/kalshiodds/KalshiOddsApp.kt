@@ -35,7 +35,11 @@ class KalshiOddsApp : Application() {
     override fun onCreate() {
         super.onCreate()
         runCatching { CrashBreadcrumb.install(this) }
+        runCatching { com.dirk.kalshiodds.crash.CrashLog.install(this, BuildConfig.VERSION_NAME) } // 0.3.47
+        // 0.3.40 (owner): Autopilot/Scalp are paper-only — delete any persisted live arming (idempotent).
+        runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.deleteLegacyArming(this) }
         container = AppContainer(this)
+        appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }
         HeavyMlGuard.persistHook = { reason ->
             // SharedPreferences.apply() only — do not launch a coroutine
@@ -58,7 +62,9 @@ class KalshiOddsApp : Application() {
         runCatching { HeavyMlGuard.applyCrashHintIfNeeded() }
         runCatching { SignalNotifier.ensureChannels(this) }
         runCatching { com.dirk.kalshiodds.signal.notify.OpportunityNotifier.ensureChannel(this) }
-        runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this) }
+        runCatching { com.dirk.kalshiodds.signal.lastminute.LastMinuteNotifier.ensureChannel(this) }
+        // 0.3.41: WorkManager init/enqueues off the main thread.
+        appScope.launch(Dispatchers.IO) { runCatching { com.dirk.kalshiodds.worker.SyncWorker.enqueuePeriodic(this@KalshiOddsApp) } }
         // Do NOT start the FGS here. Application.onCreate is often still treated
         // as a background start (ForegroundServiceStartNotAllowedException) and
         // a throw in Service.onCreate kills the whole process mid-session too
@@ -66,8 +72,12 @@ class KalshiOddsApp : Application() {
         if (LiveSignalsPolicy.shouldPromoteFromApplicationOnCreate()) {
             LiveSignalsKeepAlive.ensureService(this)
         }
-        runCatching { MarketRefreshScheduler.enqueue(this) }
-        runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this) }
+        appScope.launch(Dispatchers.IO) {
+            runCatching { MarketRefreshScheduler.enqueue(this@KalshiOddsApp) }
+            runCatching { LiveSignalsKeepAlive.enqueueWatchdogs(this@KalshiOddsApp) }
+            runCatching { container.archive.repairInterruptedSessions(container.sessionId, System.currentTimeMillis()) }
+            runCatching { com.dirk.kalshiodds.crash.ProcessExitLog.capture(this@KalshiOddsApp) }
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onStart(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
@@ -75,27 +85,103 @@ class KalshiOddsApp : Application() {
 
             override fun onStop(owner: LifecycleOwner) {
                 LiveSignalsKeepAlive.markUiInForeground(false)
-                runCatching { container.endSession() }
+                appScope.launch(Dispatchers.IO) { runCatching { container.endSession() } }
             }
         })
         appScope.launch {
+            runCatching { checkKashiUpdateIfDue() }
+        }
+        // Real installs pull the published model after startup. Robolectric
+        // unit tests share this process with certificate loading; starting
+        // TLS there deadlocks the class loader, so tests use the button path.
+        if (!isRobolectric()) {
+            appScope.launch(Dispatchers.IO) {
+                runCatching { refreshPublishedEdgeModel() }
+            }
+        }
+        appScope.launch {
             runCatching { container.preferences.applySafeLightDefaultsIfNeeded() }
+            runCatching { container.preferences.applyPaperBankrollReset0340IfNeeded(container.paper.book) }
+            runCatching { container.preferences.applyPaperBankrollReset0328IfNeeded(container.paper.book) }
+            runCatching { container.preferences.applyPaperBankrollReset0346IfNeeded(container.paper.book) }
+            runCatching { container.preferences.applyLastMinuteStakeIfNeeded() }
             runCatching { restorePersistedHistory() }
             runCatching { firstLaunchSync() }
         }
         appScope.launch {
             runCatching {
                 container.preferences.settings
-                    .map { it.liveSignalsEnabled }
+                    .map {
+                        // 0.3.39: the service also stays up for always-on Autopilot.
+                        com.dirk.kalshiodds.signal.paper.AlwaysOnAutopilot.serviceWanted(
+                            liveSignalsEnabled = it.liveSignalsEnabled,
+                            paperTradingEnabled = it.paperTradingEnabled,
+                            aiPaperAutopilotEnabled = it.aiPaperAutopilotEnabled,
+                        )
+                    }
                     .distinctUntilChanged()
                     .collect { enabled ->
                         LiveSignalsKeepAlive.setEnabled(this@KalshiOddsApp, enabled)
                         if (enabled && LiveSignalsKeepAlive.isUiInForeground()) {
-                            LiveSignalsService.start(this@KalshiOddsApp)
+                            LiveSignalsKeepAlive.ensureServiceFromUi(this@KalshiOddsApp)
                         }
                         // Off: the running service observes DataStore and stopSelfs.
                     }
             }
+        }
+    }
+
+    private val appViewModelStore = androidx.lifecycle.ViewModelStore()
+
+    /**
+     * 0.3.39 always-on Autopilot: OddsViewModel is process-scoped, not Activity-scoped, so
+     * Autopilot keeps running after the Activity is gone and is re-created headless by the
+     * foreground service after process death / reboot (START_STICKY, boot receiver, watchdog).
+     */
+    val oddsViewModel: com.dirk.kalshiodds.ui.OddsViewModel by lazy {
+        androidx.lifecycle.ViewModelProvider(
+            appViewModelStore,
+            androidx.lifecycle.ViewModelProvider.AndroidViewModelFactory.getInstance(this)
+        )[com.dirk.kalshiodds.ui.OddsViewModel::class.java]
+    }
+
+    fun ensureAutopilotHost() {
+        if (isRobolectric()) return
+        oddsViewModel
+    }
+
+    private fun isRobolectric(): Boolean =
+        android.os.Build.FINGERPRINT.equals("robolectric", ignoreCase = true)
+
+    private fun refreshPublishedEdgeModel() {
+        val token = runCatching { container.extraSecrets.githubToken }.getOrNull()
+        val out = com.dirk.kalshiodds.prediction.LatestModelClient().download(token)
+        com.dirk.kalshiodds.prediction.PublishedModelInstaller.apply(
+            container.importedModel,
+            out
+        ) { model ->
+            container.scoring.edgeModel = model
+        }
+    }
+
+    private suspend fun checkKashiUpdateIfDue() {
+        val prefs = container.preferences
+        val now = System.currentTimeMillis()
+        val last = prefs.lastKashiUpdateCheckMs()
+        if (!com.dirk.kalshiodds.update.UpdateCheckSchedule.due(last, now)) return
+        val check = com.dirk.kalshiodds.update.KashiUpdateClient.http().check(
+            com.dirk.kalshiodds.ui.AppVersion.versionName
+        )
+        when (check) {
+            is com.dirk.kalshiodds.update.UpdateCheck.Available -> {
+                prefs.markKashiUpdateCheck(now)
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(check.release)
+            }
+            is com.dirk.kalshiodds.update.UpdateCheck.UpToDate -> {
+                prefs.markKashiUpdateCheck(now)
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(null)
+            }
+            is com.dirk.kalshiodds.update.UpdateCheck.Failed -> Unit
         }
     }
 

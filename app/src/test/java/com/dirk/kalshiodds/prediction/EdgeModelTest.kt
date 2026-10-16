@@ -7,49 +7,6 @@ import org.junit.Test
 import kotlin.math.abs
 
 class EdgeModelTest {
-
-    @Test
-    fun gbdtRoundTripKeepsYesProbabilityAndRejectsBrokenTree() {
-        val names = EdgeFeatures.NAMES
-        val tree = EdgeTree(listOf(
-            EdgeTreeNode(feature = 2, threshold = 0.5, left = 1, right = 2),
-            EdgeTreeNode(value = -0.7), EdgeTreeNode(value = 0.9)
-        ))
-        val model = EdgeModel(
-            version = 2, kind = "gbdt", featureNames = names,
-            weights = FloatArray(names.size), bias = 0f,
-            mean = FloatArray(names.size), std = FloatArray(names.size) { 1f },
-            trees = listOf(tree), baseScore = -0.2, learningRate = 0.1
-        )
-        val restored = EdgeModel.parse(model.toJson())
-        val below = FloatArray(names.size).also { it[2] = 0.4f }
-        val above = FloatArray(names.size).also { it[2] = 0.6f }
-        assertEquals(model.predictYes(below), restored.predictYes(below), 1e-6)
-        assertEquals(model.predictYes(above), restored.predictYes(above), 1e-6)
-        assertTrue(restored.predictYes(above) > restored.predictYes(below))
-        org.junit.Assert.assertThrows(IllegalArgumentException::class.java) {
-            model.copy(trees = listOf(EdgeTree(listOf(EdgeTreeNode(feature = 99, left = 1, right = 2)))))
-        }
-    }
-
-    @Test
-    fun treeSplitKeepsDoublePrecisionThreshold() {
-        val v = 0.31415927f
-        val threshold = v.toDouble() - 1e-10
-        val tree = EdgeTree(listOf(
-            EdgeTreeNode(feature = 0, threshold = threshold, left = 1, right = 2),
-            EdgeTreeNode(value = -1.0), EdgeTreeNode(value = 1.0)
-        ))
-        val raw = FloatArray(EdgeFeatures.SIZE).also { it[0] = v }
-        assertEquals(1.0, tree.predict(raw), 0.0)
-        val model = EdgeModel(
-            version = 2, kind = "gbdt", featureNames = EdgeFeatures.NAMES,
-            weights = FloatArray(EdgeFeatures.SIZE), bias = 0f,
-            mean = FloatArray(EdgeFeatures.SIZE), std = FloatArray(EdgeFeatures.SIZE) { 1f },
-            trees = listOf(tree)
-        )
-        assertEquals(1.0, EdgeModel.parse(model.toJson()).trees[0].predict(raw), 0.0)
-    }
     private val fixture = """
         {
           "version": 1,

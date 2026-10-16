@@ -1,18 +1,26 @@
 package com.dirk.kalshiodds.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import app.cash.paparazzi.DeviceConfig
 import app.cash.paparazzi.Paparazzi
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.d3.D3Copy
+import com.dirk.kalshiodds.signal.d3.D3Snapshot
+import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TradeTicket
+import com.dirk.kalshiodds.ui.components.D3Card
 import com.dirk.kalshiodds.ui.components.LiveSellConfirmSheet
 import com.dirk.kalshiodds.ui.components.MarketCard
 import com.dirk.kalshiodds.ui.components.PositionsCard
+import com.dirk.kalshiodds.ui.components.ThisWindowCard
 import com.dirk.kalshiodds.ui.theme.DipTheme
 import com.dirk.kalshiodds.ui.theme.KalshiOddsTheme
 import org.junit.After
@@ -25,6 +33,10 @@ import java.io.File
  * Each PNG is also copied to /opt/cursor/artifacts/ for the redesign report.
  */
 class HomeScreenScreenshotTest {
+
+    /** 0.3.39: last-minute play is retired; these tests cover its dormant code. */
+    @get:org.junit.Rule
+    val legacyLastMinute = com.dirk.kalshiodds.signal.lastminute.LegacyLastMinuteRule()
 
     @get:Rule
     val paparazzi = Paparazzi(
@@ -335,6 +347,204 @@ class HomeScreenScreenshotTest {
     fun darkSettings() = snapSettings("settings_dark", dark = true)
 
     @Test
+    fun deadWindowNoBetFlip() {
+        paparazzi.snapshot(name = "dead_window_no_bet_flip") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.deadWindowLotteryBtc(),
+                        decision = com.dirk.kalshiodds.signal.trade.BetCall.decide(
+                            HomeFixtures.deadWindowLotteryBtc(),
+                            HomeFixtures.settings(true),
+                            HomeFixtures.NOW_MS
+                        ),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("dead_window_no_bet_flip")
+    }
+
+    @Test
+    fun closeWindowStillEligible() {
+        paparazzi.snapshot(name = "close_window_eligible") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.closeWindowEligibleBtc(),
+                        decision = com.dirk.kalshiodds.signal.trade.BetCall.decide(
+                            HomeFixtures.closeWindowEligibleBtc(),
+                            HomeFixtures.settings(true),
+                            HomeFixtures.NOW_MS
+                        ),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("close_window_eligible")
+    }
+
+    @Test
+    fun homeDeadWindow() = snap(
+        "home_dead_window_no_bet",
+        dark = true,
+        HomeFixtures.state(
+            HomeFixtures.deadWindowLotteryBtc(),
+            HomeFixtures.noBetEth(),
+            HomeFixtures.noBetSol(),
+            hasKey = true
+        )
+    )
+
+    @Test
+    fun lastMinuteCardWaiting() {
+        paparazzi.snapshot(name = "last_minute_card_waiting") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteWaitingBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_waiting")
+    }
+
+    @Test
+    fun lastMinuteCardLive() {
+        paparazzi.snapshot(name = "last_minute_card_live") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteLiveBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_live")
+    }
+
+    @Test
+    fun lastMinuteCardFired() {
+        paparazzi.snapshot(name = "last_minute_card_fired") {
+            KalshiOddsTheme(darkTheme = true) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .background(DipTheme.colors.bg)
+                        .padding(16.dp)
+                ) {
+                    MarketCard(
+                        market = HomeFixtures.lastMinuteFiredBtc(),
+                        settings = HomeFixtures.settings(true),
+                        paperTradingEnabled = true,
+                        nowMs = HomeFixtures.NOW_MS,
+                        detailsInitiallyOpen = false,
+                        onBuyYes = {},
+                        onBuyNo = {},
+                        onPaperUp = {},
+                        onPaperDown = {}
+                    )
+                }
+            }
+        }
+        copyLatest("last_minute_card_fired")
+    }
+
+    @Test
+    fun lastMinuteConfirmUnproven() = snapSell(
+        "last_minute_confirm_unproven",
+        dark = true,
+        HomeFixtures.lastMinuteTicket()
+    )
+
+    @Test
+    fun lastMinuteScorecardSection() = snapScorecard(
+        "last_minute_scorecard_section",
+        dark = true,
+        ui = HomeFixtures.lastMinuteScorecardUi(),
+        height = 2200
+    )
+
+    @Test
+    fun lastMinuteSettings() = snapSettings("last_minute_settings", dark = false)
+
+    @Test
+    fun d3HomeWaiting() = snapD3Home("d3_home_waiting", dark = true, HomeFixtures.d3WaitingSnapshot())
+
+    @Test
+    fun d3HomeActive() = snapD3Home("d3_home_active", dark = true, HomeFixtures.d3ActiveSnapshot())
+
+    @Test
+    fun d3HomeWaitingLight() = snapD3Home("d3_home_waiting_light", dark = false, HomeFixtures.d3WaitingSnapshot())
+
+    @Test
+    fun d3HomeActiveLight() = snapD3Home("d3_home_active_light", dark = false, HomeFixtures.d3ActiveSnapshot())
+
+    @Test
+    fun d3ScorecardSection() = snapScorecard(
+        "d3_scorecard_section",
+        dark = true,
+        ui = HomeFixtures.d3ScorecardUi(),
+        height = 2400
+    )
+
+    @Test
+    fun d3Settings() = snapD3Settings("d3_settings", dark = false)
+
+    @Test
     fun beforeLightActionable() = snapBefore("before_0_3_11_light_actionable", dark = false, keyed = true)
 
     @Test
@@ -507,6 +717,91 @@ class HomeScreenScreenshotTest {
             }
         }
         copyLatest(name)
+    }
+
+    private fun snapD3Home(name: String, dark: Boolean, d3: D3Snapshot) {
+        val restore = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
+        try {
+            paparazzi.unsafeUpdateConfig(
+                deviceConfig = DeviceConfig.PIXEL_6.copy(
+                    softButtons = false,
+                    screenHeight = 2200
+                )
+            )
+            paparazzi.snapshot(name = name) {
+                KalshiOddsTheme(darkTheme = dark) {
+                    val btc = HomeFixtures.actionableBtc()
+                    val settings = HomeFixtures.settings(true)
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .background(DipTheme.colors.bg)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        ThisWindowCard(
+                            market = btc,
+                            decision = BetCall.decide(btc, settings, HomeFixtures.NOW_MS),
+                            nowMs = HomeFixtures.NOW_MS,
+                            scorecard = HomeFixtures.SAMPLE_SCORECARD,
+                            onOpenScorecard = {}
+                        )
+                        MarketCard(
+                            market = btc,
+                            settings = settings,
+                            paperTradingEnabled = true,
+                            nowMs = HomeFixtures.NOW_MS,
+                            detailsInitiallyOpen = false,
+                            onBuyYes = {},
+                            onBuyNo = {},
+                            onPaperUp = {},
+                            onPaperDown = {}
+                        )
+                        D3Card(snapshot = d3)
+                    }
+                }
+            }
+            copyLatest(name)
+        } finally {
+            paparazzi.unsafeUpdateConfig(deviceConfig = restore)
+        }
+    }
+
+    private fun snapD3Settings(name: String, dark: Boolean) {
+        val restore = DeviceConfig.PIXEL_6.copy(softButtons = false, screenHeight = 4200)
+        try {
+            paparazzi.unsafeUpdateConfig(
+                deviceConfig = DeviceConfig.PIXEL_6.copy(
+                    softButtons = false,
+                    screenHeight = 1600
+                )
+            )
+            paparazzi.snapshot(name = name) {
+                KalshiOddsTheme(darkTheme = dark) {
+                    Column(
+                        Modifier
+                            .fillMaxSize()
+                            .background(DipTheme.colors.bg)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            "D3 daily favourite (KXBTCD 5 PM ET)",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = DipTheme.colors.textPrimary
+                        )
+                        Text(
+                            D3Copy.SETTINGS_BODY,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = DipTheme.colors.textSecondary
+                        )
+                    }
+                }
+            }
+            copyLatest(name)
+        } finally {
+            paparazzi.unsafeUpdateConfig(deviceConfig = restore)
+        }
     }
 
     private fun snapSettings(name: String, dark: Boolean) {

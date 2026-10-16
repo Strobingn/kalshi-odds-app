@@ -5,8 +5,12 @@ import com.dirk.kalshiodds.data.dto.CreateOrderV2Request
 import com.dirk.kalshiodds.data.dto.CreateOrderV2Response
 import com.dirk.kalshiodds.data.dto.KalshiErrorEnvelope
 import com.dirk.kalshiodds.data.dto.MarketPositionDto
+import com.dirk.kalshiodds.data.dto.PortfolioOrderDto
+import com.dirk.kalshiodds.domain.KalshiPrice
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.LiveOrderSizer
 import com.dirk.kalshiodds.signal.trade.PlacedOrder
+import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import java.util.Locale
 import kotlinx.serialization.json.Json
@@ -27,9 +31,9 @@ import retrofit2.Response
  * Limit orders only — never market. Fail-soft with a clear message.
  * PEM / secrets are never written to logs.
  *
- * Live buys are clipped at the $5 all-in cap ([LiveOrderSizer.enforce])
+ * Live buys are clipped at the $10 all-in cap ([LiveOrderSizer.enforce])
  * immediately before the V2 body is built, so a leftover $50 win-target
- * cannot resize a live order above $5.
+ * cannot resize a live order above $10.
  */
 class KalshiTradeClient(
     private val primary: KalshiTradeApi,
@@ -50,6 +54,105 @@ class KalshiTradeClient(
     private fun activeFallback(): KalshiTradeApi? =
         if (useDemo()) demoFallback ?: fallback else fallback
 
+    /**
+     * Orders already accepted under [clientOrderId]. Used before an Approve
+     * retry so a timeout cannot create a second real order.
+     *
+     * Side, action, price, count, and ticker come from the Kalshi order.
+     * The lookup walks [MAX_ORDER_LOOKUP_PAGES] of the orders cursor and,
+     * when [ticker] is set, asks Kalshi to filter to that market.
+     */
+    suspend fun findByClientOrderId(clientOrderId: String, ticker: String? = null): PlacedOrder? {
+        if (clientOrderId.isBlank()) return null
+        ensureKeys()
+        return try {
+            val filter = ticker?.takeIf { it.isNotBlank() }
+            var cursor: String? = null
+            repeat(MAX_ORDER_LOOKUP_PAGES) {
+                val first = activePrimary().getOrders(limit = 100, cursor = cursor, ticker = filter)
+                val chosen = chooseHost(first) {
+                    activeFallback()?.getOrders(limit = 100, cursor = cursor, ticker = filter)
+                }
+                if (!chosen.isSuccessful) {
+                    if (chosen.code() == 429) {
+                        throw httpFailure(chosen.code(), chosen.errorBody()?.string())
+                    }
+                    return null
+                }
+                val body = chosen.body()
+                val hit = body?.orders.orEmpty().firstOrNull { it.clientOrderId == clientOrderId }
+                if (hit != null) return placedFromExisting(hit, clientOrderId)
+                val next = body?.cursor?.takeIf { it.isNotBlank() && it != cursor } ?: return null
+                cursor = next
+            }
+            null
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun placedFromExisting(hit: PortfolioOrderDto, clientOrderId: String): PlacedOrder {
+        val outcome = when (hit.side?.trim()?.uppercase()) {
+            "NO", "DOWN" -> "NO"
+            else -> "YES"
+        }
+        val isSell = hit.action?.trim()?.equals("sell", ignoreCase = true) == true
+        val yesPx = hit.yesPriceDollars.toDoubleOrNullSafe()
+        val noPx = hit.noPriceDollars.toDoubleOrNullSafe()
+            ?: yesPx?.let { (1.0 - it).takeIf { px -> px > 0.0 } }
+        val limit = when (outcome) {
+            "NO" -> noPx ?: yesPx ?: 0.0
+            else -> yesPx ?: noPx?.let { 1.0 - it } ?: 0.0
+        }
+        val yesLimit = when (outcome) {
+            "NO" -> yesPx ?: (1.0 - limit)
+            else -> yesPx ?: limit
+        }.let { KalshiPrice.clipLimit(it.coerceIn(0.0, 1.0)) }
+        val contracts = contractsOf(hit)
+        val stake = (contracts * limit).coerceAtLeast(0.0)
+        val bookSide = when {
+            isSell && outcome == "YES" -> "ask"
+            isSell -> "bid"
+            outcome == "YES" -> "bid"
+            else -> "ask"
+        }
+        val kind = if (isSell) TicketKind.SELL else TicketKind.MANUAL
+        return PlacedOrder(
+            ticket = TradeTicket(
+                id = clientOrderId,
+                ticker = hit.ticker.orEmpty(),
+                side = outcome,
+                bookSide = bookSide,
+                stakeUsd = stake,
+                limitPrice = limit,
+                yesLimitPrice = yesLimit,
+                contracts = contracts,
+                estimatedFillUsd = stake,
+                maxPayoutUsd = if (isSell) stake else contracts * SignalConstants.CONTRACT_SETTLEMENT_USD,
+                estimatedAvgFill = limit,
+                sizingNote = if (isSell) "existing sell" else "existing order",
+                kind = kind,
+                reduceOnly = isSell,
+                clientOrderId = clientOrderId
+            ),
+            clientOrderId = clientOrderId,
+            orderId = hit.orderId,
+            fillCount = (hit.fillCountFp ?: hit.fillCount).toDoubleOrNullSafe() ?: 0.0,
+            remainingCount = (hit.remainingCountFp ?: hit.remainingCount).toDoubleOrNullSafe() ?: 0.0,
+            averageFillPrice = limit.takeIf { it > 0.0 },
+            placedAtMs = System.currentTimeMillis()
+        )
+    }
+
+    private fun contractsOf(hit: PortfolioOrderDto): Int {
+        val fill = (hit.fillCountFp ?: hit.fillCount).toDoubleOrNullSafe() ?: 0.0
+        val remaining = (hit.remainingCountFp ?: hit.remainingCount).toDoubleOrNullSafe() ?: 0.0
+        val total = hit.initialCountFp.toDoubleOrNullSafe()
+            ?: hit.countFp.toDoubleOrNullSafe()
+            ?: (fill + remaining)
+        return kotlin.math.round(total).toInt().coerceAtLeast(0)
+    }
+
     suspend fun createLimit(ticket: TradeTicket, clientOrderId: String): PlacedOrder {
         if (!ticket.canApprove) {
             throw IllegalStateException(ticket.blockedReason ?: "Market closed")
@@ -60,6 +163,9 @@ class KalshiTradeClient(
         return try {
             val first = activePrimary().createOrderV2(body)
             val chosen = chooseHost(first) { activeFallback()?.createOrderV2(body) }
+            if (chosen.code() == 409) {
+                findByClientOrderId(clientOrderId, sized.ticker)?.let { return it }
+            }
             mapV2(sized, clientOrderId, chosen)
         } catch (e: Exception) {
             throw softFailure(e)
@@ -78,6 +184,20 @@ class KalshiTradeClient(
             if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
             val reduced = chosen.body()?.reducedBy
             order.copy(error = "cancelled" + (reduced?.let { " (−$it)" } ?: ""))
+        } catch (e: Exception) {
+            throw softFailure(e)
+        }
+    }
+
+    /** Cancel one resting order by id (Home Stop / open-bets Cancel). Throws on failure. */
+    suspend fun cancelById(orderId: String, ticker: String?) {
+        ensureKeys()
+        try {
+            val first = activePrimary().cancelOrderV2(orderId, marketTicker = ticker, exchangeIndex = -1)
+            val chosen = chooseHost(first) {
+                activeFallback()?.cancelOrderV2(orderId, marketTicker = ticker, exchangeIndex = -1)
+            }
+            if (!chosen.isSuccessful) throw httpFailure(chosen.code(), chosen.errorBody()?.string())
         } catch (e: Exception) {
             throw softFailure(e)
         }
@@ -104,6 +224,16 @@ class KalshiTradeClient(
      * Available cash for Live Approve sizing. Never logs the body.
      * Returns null if the key cannot read `portfolio/balance`.
      */
+    /** 0.3.45: read the account's real rate-limit tier + endpoint costs and size the global limiter to 90 % of it. */
+    suspend fun refreshRateLimits(): KalshiTier? = runCatching {
+        val api = activePrimary()
+        val limits = api.getAccountLimits().takeIf { it.isSuccessful }?.body()?.let { KalshiRest.tierFromLimits(it) }
+        runCatching { api.getEndpointCosts().takeIf { it.isSuccessful }?.body() }.getOrNull()?.let {
+            val (d, m) = KalshiRest.costsFrom(it); KalshiEndpointCosts.apply(d, m)
+        }
+        limits?.also { KalshiRest.bucket.configure(it) }
+    }.getOrNull()
+
     suspend fun getCashUsd(): Double? {
         return when (val r = testConnection()) {
             is ConnectionTestResult.Ok -> r.cashUsd
@@ -188,6 +318,40 @@ class KalshiTradeClient(
         return if (detail.isNotBlank()) "$hint — $detail" else hint
     }
 
+    suspend fun listRestingOrders(): List<com.dirk.kalshiodds.signal.trade.RestingOrder> {
+        ensureKeys()
+        return try {
+            val first = activePrimary().getOrders(limit = 50)
+            val chosen = chooseHost(first) { activeFallback()?.getOrders(limit = 50) }
+            if (!chosen.isSuccessful) return emptyList()
+            chosen.body()?.orders.orEmpty().mapNotNull { dto ->
+                val status = dto.status?.trim()?.lowercase().orEmpty()
+                val remaining = (dto.remainingCountFp ?: dto.remainingCount).toDoubleOrNullSafe() ?: 0.0
+                val filled = (dto.fillCountFp ?: dto.fillCount).toDoubleOrNullSafe() ?: 0.0
+                val open = status == "resting" || status == "pending" ||
+                    (remaining > 0.0 && status != "canceled" && status != "cancelled" && status != "executed")
+                if (!open) return@mapNotNull null
+                val yes = dto.yesPriceDollars.toDoubleOrNullSafe()
+                val no = dto.noPriceDollars.toDoubleOrNullSafe()
+                val side = when (dto.side?.trim()?.uppercase()) {
+                    "NO", "DOWN" -> "NO"
+                    else -> "YES"
+                }
+                com.dirk.kalshiodds.signal.trade.RestingOrder(
+                    orderId = dto.orderId.orEmpty(),
+                    ticker = dto.ticker.orEmpty(),
+                    side = side,
+                    remaining = remaining,
+                    filled = filled,
+                    price = if (side == "NO") no ?: yes else yes ?: no,
+                    status = status.ifBlank { "resting" }
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
     suspend fun listMarketPositions(): List<MarketPositionDto> {
         ensureKeys()
         return try {
@@ -217,6 +381,7 @@ class KalshiTradeClient(
                 ?: String.format(Locale.US, "%.4f", ticket.yesLimitPrice),
             timeInForce = timeInForce,
             clientOrderId = clientOrderId,
+            postOnly = ticket.postOnly,
             reduceOnly = reduceOnly
         )
     }
@@ -241,9 +406,20 @@ class KalshiTradeClient(
 
     private fun enforceLiveCap(ticket: TradeTicket): TradeTicket {
         if (ticket.isSell) return ticket
-        val clip = LiveOrderSizer.enforce(ticket)
+        if (ticket.kellyAutopilot) {
+            if (ticket.contracts < 1 || com.dirk.kalshiodds.domain.KalshiPrice.usable(ticket.limitPrice) == null) {
+                throw IllegalStateException("Autopilot order has no Kelly size")
+            }
+            return ticket
+        }
+        val feeRate = if (ticket.postOnly || ticket.kind == com.dirk.kalshiodds.signal.trade.TicketKind.D3) {
+            0.0
+        } else {
+            com.dirk.kalshiodds.signal.config.SignalConstants.DEFAULT_FEE_RATE
+        }
+        val clip = LiveOrderSizer.enforce(ticket, feeRate = feeRate)
         if (!clip.ok) {
-            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $5 all-in cap")
+            throw IllegalStateException(clip.refusedReason ?: "Cannot size a live order under the $10 all-in cap")
         }
         if (clip.allInUsd > LiveOrderSizer.LIVE_ALL_IN_CAP_USD + 1e-9) {
             throw IllegalStateException(
@@ -334,6 +510,8 @@ class KalshiTradeClient(
 
     companion object {
         private const val TAG = "DipHunterTrade"
+        /** Newest-100 was not enough; stop after this many order pages. */
+        const val MAX_ORDER_LOOKUP_PAGES = 5
         private val errorJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
         /** Documented V2 write path — never POST `/portfolio/orders`. */

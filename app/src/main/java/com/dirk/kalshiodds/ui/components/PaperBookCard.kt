@@ -37,8 +37,8 @@ fun PaperBookCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(2.dp, colors.border, RoundedCornerShape(16.dp))
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(2.dp, colors.border, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(14.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -56,7 +56,7 @@ fun PaperBookCard(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        "Start / reset $100 · win-target sizing · never hits Kalshi",
+                        "Start / reset $1,000 · half-Kelly on the paper bankroll · never hits Kalshi",
                         style = MaterialTheme.typography.labelMedium,
                         color = colors.textSecondary
                     )
@@ -73,7 +73,7 @@ fun PaperBookCard(
         }
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             PaperStat("Cash", String.format(Locale.US, "$%.2f", paper.cashUsd), colors.textPrimary)
-            PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.accentOrange)
+            PaperStat("Open", String.format(Locale.US, "$%.2f", paper.openStakeUsd), colors.textPrimary)
             val pnlColor = when {
                 paper.realizedPnlUsd > 0 -> colors.textPrimary
                 paper.realizedPnlUsd < 0 -> colors.textPrimary
@@ -86,7 +86,7 @@ fun PaperBookCard(
                 if (enabled) {
                     "AI hunter / LiveCall signals auto-log a paper fill here. Live Approve (below) is the only path that can place a real V2 order."
                 } else {
-                    "Paper trading is off. Flip the switch to auto-log $5 AI fills on this $100 book."
+                    "Paper trading is off. Flip the switch to auto-log Kelly AI fills on this $1,000 book."
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = colors.textSecondary
@@ -97,7 +97,7 @@ fun PaperBookCard(
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.height(44.dp)) {
-                Text("Reset paper to $1000")
+                Text("Reset paper to $1,000")
             }
             if (onViewHistory != null) {
                 OutlinedButton(onClick = onViewHistory, modifier = Modifier.height(44.dp)) {
@@ -152,7 +152,7 @@ private fun PaperLedgerRow(
         else -> "LOSS"
     }
     val color = when (status) {
-        "OPEN" -> colors.accentOrange
+        "OPEN" -> colors.textPrimary
         "WIN" -> colors.textPrimary
         "LOSS" -> colors.textPrimary
         else -> colors.accentBlue

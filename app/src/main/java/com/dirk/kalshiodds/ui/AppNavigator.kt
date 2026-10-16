@@ -17,9 +17,25 @@ object AppRoutes {
     const val HISTORY = "history"
     const val SIGNAL_HISTORY = "signal-history"
     const val CHART = "chart"
+    const val LIVE = "live"
+    const val MORE = "more"
+    const val REAL_MONEY = "real-money"
+    const val CALIBRATION = "calibration"
+    const val LADDER = "ladder"
+    const val SCALP = "scalp"
+    const val SCALP_DATA = "scalp-data"
+    const val CRASH_LOG = "crash-log"
+    /** 0.3.50 Scalp tab (six paper models, leaderboard, price ladder). */
+    const val SCALP_TAB = "scalp-tab"
+    /** 0.3.52 one scalp algorithm's own page. */
+    const val SCALP_ALGO = "scalp-algo"
+
+    /** FieldOps bottom bar, left to right. */
+    val TABS: List<String> = listOf(HOME, SCALP_TAB, SCORECARD, LIVE, REAL_MONEY, DATA, MORE)
 
     val ALL: List<String> = listOf(
-        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART
+        HOME, SETTINGS, SCORECARD, DATA, HISTORY, SIGNAL_HISTORY, CHART, LIVE, REAL_MONEY, MORE,
+        CALIBRATION, LADDER, SCALP, SCALP_DATA, CRASH_LOG, SCALP_TAB, SCALP_ALGO
     )
 }
 
@@ -36,6 +52,14 @@ class AppNavigator(initial: List<String> = listOf(AppRoutes.HOME)) {
     fun open(route: String) {
         require(route in AppRoutes.ALL) { "unknown route $route" }
         if (_stack.last() == route) return
+        _stack.add(route)
+    }
+
+    /** Bottom-tab switch. The selected tab becomes the only root. */
+    fun selectTab(route: String) {
+        require(route in AppRoutes.TABS) { "not a tab $route" }
+        if (_stack.size == 1 && _stack.last() == route) return
+        _stack.clear()
         _stack.add(route)
     }
 

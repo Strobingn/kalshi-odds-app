@@ -17,7 +17,35 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 - **Alerts:** local `NotificationCompat` HIGH channel via a foreground WS service
 - **Offline:** last successful crypto snapshot cached in DataStore
 
-Package: `com.dirk.kalshiodds` · version **0.3.15**
+Package: `com.dirk.kalshiodds` · version **0.3.24**
+
+## 0.3.24
+
+- Wildlife FieldOps chrome: gray accent, light and dark surfaces, type, spacing, and corner radii. Green is still UP / YES and red is still DOWN / NO.
+- Five tabs (Home, Scorecard, Live, Data, More). Settings, History, and Signal history stay on More. Approve still needs the REAL MONEY confirm.
+
+## 0.3.23
+
+- A failed BTC fetch still shows the last saved odds with the Offline banner. An empty successful fetch does not wipe that cache, and a stored `watch_btc=false` cannot turn Bitcoin off.
+- A timed-out order found on Kalshi keeps that order's side, action, price, count, and ticker (YES and NO). The lookup walks up to five order pages.
+- The pending `client_order_id` is stored in SQLite and reused after a process kill, a stake edit, a card rebuild, or dismiss-and-rebuy. Every live Approve looks for that id before sending.
+- The REAL MONEY sheet shows the contracts, cost, fee, and profit for the limit you typed, and that is what gets sent.
+- A Keystore lockout deletes only the broken encrypted prefs and recreates the master key so a replacement live key can be saved. It is never written in plaintext.
+- Data shows **Last synced** in local time. A failed sync shows the HTTP status and a short reason (401 bad key, 404 table missing, RLS denied, offline). Rows written to the shared `diphunter_sync` table are prefixed `kashi:`; pull reads only those rows. The Kalshi key is never uploaded.
+
+## 0.3.22
+
+- Refresh, poll, and REST paths catch IO and HTTP failures and show **Offline** or **Rate-limited, retrying in Ns** instead of crashing.
+- Shared Kalshi backoff (exponential + jitter, Retry-After) across ticker, settlement, D3, and scorecard. Refresh taps are debounced and single-flight.
+- In-app update checks only `v*-debug` releases built from branch `kashi` (asset `DipHunter-debug.apk`, package `com.dirk.kalshiodds.kashi`) and verifies package id plus the debug cert before install.
+- Each ticket gets one `client_order_id` at creation. Approve retries reuse it, look up an existing order first, and the Approve button stays off while a request is in flight.
+- Paper and live tickets accept a typed limit in cents (1–99). Stake, contracts, fee, and the $10 all-in cap recompute at that price. Live still needs Approve and REAL MONEY.
+- Live keys are never written to plaintext if the Android Keystore fails. The save is refused and live trading stays off. Existing encrypted keys still load.
+- CI on `kashi` runs `testDebugUnitTest`.
+
+## 0.3.21
+
+- **D3 daily favourite (KXBTCD 5 PM ET).** New home card below the Bitcoin 15m card and This window. From 14:00–16:00 ET, any strike whose favourite ask is 85–97¢ gets a post-only resting limit bid (best bid + 1¢ when the spread is ≥2¢). Paper (AI paper autopilot) fills only on a trade-through or after the size ahead of us trades; size is half-Kelly on the historical win rate with a book-depth cap. Live stays Approve + REAL MONEY, $10 all-in, never automatic. Maker fee is read from the series `fee_type` (quadratic; maker multiplier defaults to 0). Scorecard adds a separate D3 section. Settlement polls KXBTCD only for tickets we hold. Evidence (static): 297 fills, 284-13, +$137.66 after fees; BTC 115-4, +$70.52; forward test started 2026-09-30.
 
 ## 0.3.15
 
@@ -63,24 +91,6 @@ Package: `com.dirk.kalshiodds` · version **0.3.15**
 | Candlestick backfill | `LiveWindowBackfill.candles` | `ChartWindowRestoreTest.parseDocAccurateCandlestickSample` |
 | Header / labels / buttons | `MarketQuoteView.of` | `MarketQuoteViewTest` + `ChartWindowRestoreTest.labelsHeaderButtonsShareOneQuoteSource` |
 | Payout multiple | `KalshiQuoteDisplay.multiplier` + `KalshiFee.payoutMultiple` | `MarketQuoteViewTest.oneCentAtFiveDollarsIsHandComputed93_46x` |
-
-## `chat-GTP` separate install
-
-This branch builds **DipHunter GTP** with the independent Android application
-ID `com.dirk.kalshiodds.chatgtp` and a separate launcher icon. It installs
-alongside the original app and has its own local data and API-key settings.
-Each push to `chat-GTP` triggers the APK workflow and publishes the rolling
-`gtp-v1.0-chat-GTP` prerelease. Install future APKs from that same branch
-over this installation to keep its data: the signing certificate and package
-ID are stable and CI increases the version code for each new run. In **Settings
-→ Check for app update**, the app checks that same branch release and downloads
-the next APK. Android asks for approval to install an update from this app;
-confirm it to update in place without removing local data. Never switch APKs
-signed with another certificate or a different application ID.
-
-The branch-only model workflow publishes `edge-model-chat-GTP` when manually
-dispatched on `chat-GTP`. See [the audit](docs/ml-audit-chat-GTP-2026-09-27.md)
-for the current evidence and unresolved trading risks.
 
 ## 0.3.8
 

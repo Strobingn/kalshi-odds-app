@@ -21,6 +21,12 @@ class ScoringEngineTest {
     )
 
     @Test
+    fun aiNetworkBlendWeightIsZeroUntilHonestSplitBeatsMarket() {
+        assertEquals(0.0, ScoringEngine.W_AI, 0.0)
+        assertEquals(0.0, ScoringEngine.W_AI_LATE, 0.0)
+    }
+
+    @Test
     fun ignoresWtiTicks() {
         val engine = ScoringEngine(idFactory = { "id" })
         val tick = MarketTick(

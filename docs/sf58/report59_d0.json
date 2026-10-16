@@ -1,0 +1,287 @@
+{
+ "train": [
+  "2026-09-25",
+  "2026-09-26",
+  "2026-09-27",
+  "2026-09-28",
+  "2026-09-29",
+  "2026-09-30",
+  "2026-10-01",
+  "2026-10-02",
+  "2026-10-03",
+  "2026-10-04"
+ ],
+ "test": [
+  "2026-10-05",
+  "2026-10-06",
+  "2026-10-07",
+  "2026-10-08",
+  "2026-10-09",
+  "2026-10-10"
+ ],
+ "median_sigma": {
+  "BTC": 2.653980799718586e-05,
+  "ETH": 3.9903731715427785e-05,
+  "SOL": 7.569181745767672e-05
+ },
+ "rep": {
+  "sf01 Shock base (5bp/5s, lag 5\u00a2, 90s)": {
+   "params": {},
+   "train_n": 1284,
+   "train_net": 199.7,
+   "oos_n": 478,
+   "oos_net": 56.7,
+   "oos_per_trade": 0.1186,
+   "ci_lo": -0.0289,
+   "ci_hi": 0.2617
+  },
+  "sf02 Shock fast (3s)": {
+   "params": {
+    "Y": 3,
+    "X": 4,
+    "lag": 0.06,
+    "mh": 60
+   },
+   "train_n": 1375,
+   "train_net": 164.41,
+   "oos_n": 503,
+   "oos_net": 57.38,
+   "oos_per_trade": 0.1141,
+   "ci_lo": -0.0135,
+   "ci_hi": 0.2411
+  },
+  "sf03 Shock big move": {
+   "params": {
+    "X": 10,
+    "Y": 15,
+    "mh": 120
+   },
+   "train_n": 543,
+   "train_net": 98.76,
+   "oos_n": 222,
+   "oos_net": 20.05,
+   "oos_per_trade": 0.0903,
+   "ci_lo": -0.1644,
+   "ci_hi": 0.3246
+  },
+  "sf04 Shock wide lag": {
+   "params": {
+    "lag": 0.08
+   },
+   "train_n": 807,
+   "train_net": 229.43,
+   "oos_n": 290,
+   "oos_net": 83.65,
+   "oos_per_trade": 0.2884,
+   "ci_lo": 0.0923,
+   "ci_hi": 0.4848
+  },
+  "sf05 Shock quick exit": {
+   "params": {
+    "mh": 45
+   },
+   "train_n": 1458,
+   "train_net": 83.23,
+   "oos_n": 523,
+   "oos_net": 39.37,
+   "oos_per_trade": 0.0753,
+   "ci_lo": -0.0272,
+   "ci_hi": 0.1831
+  },
+  "sf06 Shock long hold": {
+   "params": {
+    "mh": 300
+   },
+   "train_n": 1053,
+   "train_net": 395.59,
+   "oos_n": 411,
+   "oos_net": 67.4,
+   "oos_per_trade": 0.164,
+   "ci_lo": -0.0549,
+   "ci_hi": 0.3801
+  },
+  "sf07 Shock hold to close": {
+   "params": {
+    "settle": true,
+    "mh": 900
+   },
+   "train_n": 770,
+   "train_net": 348.52,
+   "oos_n": 330,
+   "oos_net": 81.29,
+   "oos_per_trade": 0.2463,
+   "ci_lo": -0.1977,
+   "ci_hi": 0.6966
+  },
+  "sf08 Shock tight catch-up": {
+   "params": {
+    "conv": 0.03
+   },
+   "train_n": 1329,
+   "train_net": 197.05,
+   "oos_n": 489,
+   "oos_net": 55.36,
+   "oos_per_trade": 0.1132,
+   "ci_lo": -0.0258,
+   "ci_hi": 0.2435
+  },
+  "sf09 Shock BTC only": {
+   "params": {
+    "coins": [
+     "BTC"
+    ],
+    "X": 5,
+    "lag": 0.05
+   },
+   "train_n": 222,
+   "train_net": 67.47,
+   "oos_n": 93,
+   "oos_net": 9.32,
+   "oos_per_trade": 0.1002,
+   "ci_lo": -0.1478,
+   "ci_hi": 0.3631
+  },
+  "sf10 Shock ETH+SOL": {
+   "params": {
+    "coins": [
+     "ETH",
+     "SOL"
+    ],
+    "X": 5,
+    "lag": 0.05
+   },
+   "train_n": 1062,
+   "train_net": 132.23,
+   "oos_n": 385,
+   "oos_net": 47.38,
+   "oos_per_trade": 0.1231,
+   "ci_lo": -0.042,
+   "ci_hi": 0.2933
+  },
+  "sf11 Shock calm regime": {
+   "params": {
+    "vlo": 1.0
+   },
+   "train_n": 193,
+   "train_net": 61.38,
+   "oos_n": 75,
+   "oos_net": -1.26,
+   "oos_per_trade": -0.0168,
+   "ci_lo": -0.4752,
+   "ci_hi": 0.4052
+  },
+  "sf12 Shock hot regime": {
+   "params": {
+    "vhi": 1.0
+   },
+   "train_n": 1098,
+   "train_net": 140.97,
+   "oos_n": 406,
+   "oos_net": 59.44,
+   "oos_per_trade": 0.1464,
+   "ci_lo": -0.0061,
+   "ci_hi": 0.3019
+  },
+  "sf13 Shock + 30s momentum": {
+   "params": {
+    "momo": 2
+   },
+   "train_n": 540,
+   "train_net": 18.59,
+   "oos_n": 184,
+   "oos_net": -29.48,
+   "oos_per_trade": -0.1602,
+   "ci_lo": -0.4142,
+   "ci_hi": 0.0754
+  },
+  "sf14 Multi-shock": {
+   "params": {
+    "multi": 30
+   },
+   "train_n": 188,
+   "train_net": 4.36,
+   "oos_n": 67,
+   "oos_net": -25.29,
+   "oos_per_trade": -0.3774,
+   "ci_lo": -0.7366,
+   "ci_hi": -0.0417
+  },
+  "sf15 Shock mid-window": {
+   "params": {
+    "tw": [
+     180,
+     720
+    ]
+   },
+   "train_n": 841,
+   "train_net": 179.71,
+   "oos_n": 317,
+   "oos_net": 45.5,
+   "oos_per_trade": 0.1435,
+   "ci_lo": -0.0237,
+   "ci_hi": 0.3098
+  },
+  "sf16 Late fav base (60s, \u226590%, 5\u00a2)": {
+   "params": {},
+   "train_n": 133,
+   "train_net": 14.86,
+   "oos_n": 35,
+   "oos_net": 56.31,
+   "oos_per_trade": 1.609,
+   "ci_lo": 0.6284,
+   "ci_hi": 2.6355
+  },
+  "sf17 Late fav BRTI-60s fair": {
+   "params": {
+    "brti": true,
+    "fmin": 0.9,
+    "gap": 0.05
+   },
+   "train_n": 325,
+   "train_net": 86.87,
+   "oos_n": 146,
+   "oos_net": 21.81,
+   "oos_per_trade": 0.1494,
+   "ci_lo": -0.412,
+   "ci_hi": 0.6972
+  },
+  "sf18 Late fav wide window": {
+   "params": {
+    "tmax": 90,
+    "fmin": 0.85,
+    "gap": 0.08
+   },
+   "train_n": 213,
+   "train_net": 41.11,
+   "oos_n": 82,
+   "oos_net": -13.12,
+   "oos_per_trade": -0.16,
+   "ci_lo": -1.0525,
+   "ci_hi": 0.7983
+  },
+  "sf19 Late fav strict": {
+   "params": {
+    "fmin": 0.95,
+    "gap": 0.05,
+    "amax": 0.95
+   },
+   "train_n": 98,
+   "train_net": 9.78,
+   "oos_n": 29,
+   "oos_net": 49.74,
+   "oos_per_trade": 1.7152,
+   "ci_lo": 0.6573,
+   "ci_hi": 2.8318
+  },
+  "sf20 Combo shock\u2192fav hold + late fav": {
+   "params": {},
+   "train_n": 1417,
+   "train_net": 210.81,
+   "oos_n": 513,
+   "oos_net": 118.02,
+   "oos_per_trade": 0.2301,
+   "ci_lo": 0.0763,
+   "ci_hi": 0.3978
+  }
+ }
+}

@@ -2,6 +2,7 @@ package com.dirk.kalshiodds.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -69,7 +70,8 @@ fun ThisWindowCard(
     Column(
         modifier
             .fillMaxWidth()
-            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
+            .background(colors.surface, com.dirk.kalshiodds.ui.theme.FieldShapes.card)
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {

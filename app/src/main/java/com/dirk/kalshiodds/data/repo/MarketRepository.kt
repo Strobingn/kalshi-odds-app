@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.data.api.NetworkModule
 import com.dirk.kalshiodds.data.dto.MarketDto
 import com.dirk.kalshiodds.data.local.CachedMarketsPayload
 import com.dirk.kalshiodds.data.local.MarketCache
+import com.dirk.kalshiodds.data.local.MarketSnapshotCache
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.domain.EDGE_ALERT_THRESHOLD_PP
 import com.dirk.kalshiodds.domain.MarketUiModel
@@ -24,6 +25,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import com.dirk.kalshiodds.data.api.KalshiFeedHealth
+import com.dirk.kalshiodds.data.api.KalshiRateLimiter
+import com.dirk.kalshiodds.data.api.KalshiRequestStatus
+import kotlinx.coroutines.CancellationException
 import retrofit2.HttpException
 
 data class MarketsSnapshot(
@@ -34,8 +39,10 @@ data class MarketsSnapshot(
     val fetchedAtEpochMs: Long,
     val fromCache: Boolean,
     val errorMessage: String? = null,
-    /** True when Kalshi returned HTTP 429 or 503 — callers should back off. */
+    /** True when Kalshi returned HTTP 429 or 5xx — callers should back off. */
     val rateLimited: Boolean = false,
+    /** Suggested wait before the next try, when [rateLimited] or offline. */
+    val retryInMs: Long = 0L,
     val modelScoreCorrect: Int? = null,
     val modelScoreTotal: Int? = null,
     val modelMeanBrier: Double? = null,
@@ -71,22 +78,29 @@ data class MarketsSnapshot(
         }
         return copy(btc = btc.apply(), eth = eth.apply(), sol = sol.apply(), extra = extra.apply())
     }
+
+    fun mapMarkets(transform: (MarketUiModel) -> MarketUiModel): MarketsSnapshot =
+        copy(btc = btc.map(transform), eth = eth.map(transform), sol = sol.map(transform), extra = extra.map(transform))
 }
 
 class MarketRepository(
     context: Context,
     private val api: KalshiApi = NetworkModule.api,
     private val resolveApi: () -> KalshiApi = { api },
-    private val cache: MarketCache = MarketCache(context.applicationContext),
+    private val cache: MarketSnapshotCache = MarketCache(context.applicationContext),
     private val model: DipHunterModel = DipHunterModel(context.applicationContext),
     private val logStore: PredictionLogStore = PredictionLogStore(context.applicationContext),
     extraOpenTickers: () -> Set<String> = { emptySet() },
     onMarketSettled: (ticker: String, result: String) -> Unit = { _, _ -> },
+    private val rateLimiter: KalshiRateLimiter? = null,
+    private val feedHealth: KalshiFeedHealth? = null,
     private val scorer: SettlementScorer = SettlementScorer(
         resolveApi,
         logStore,
         extraOpenTickers,
-        onMarketSettled
+        onMarketSettled,
+        rateLimiter = rateLimiter,
+        feedHealth = feedHealth
     ),
     private val onCalibration: ((Calibrator.State) -> Unit)? = null,
     private val onAfterScore: (suspend () -> Unit)? = null
@@ -107,7 +121,7 @@ class MarketRepository(
     }
 
     suspend fun listOpen(series: String): List<MarketUiModel> {
-        val resp = resolveApi().getMarkets(seriesTicker = series, status = "open")
+        val resp = resolveApi().getMarkets(seriesTicker = series, status = "open", limit = OPEN_15M_LIMIT)
         val kind = when (series.uppercase()) {
             KalshiApi.SERIES_ETH -> SeriesKind.ETH
             KalshiApi.SERIES_SOL -> SeriesKind.SOL
@@ -123,6 +137,10 @@ class MarketRepository(
         scorer.maybeScore(nowMs, minIntervalMs = 0L)
     }
 
+    fun noteCloseTime(ticker: String, closeTimeMs: Long) {
+        scorer.noteCloseTime(ticker, closeTimeMs)
+    }
+
     suspend fun refresh(
         watchBtc: Boolean = true,
         watchEth: Boolean = true,
@@ -132,8 +150,8 @@ class MarketRepository(
     ): MarketsSnapshot = refreshMutex.withLock {
         refreshOnce(
             watchBtc = true,
-            watchEth = false,
-            watchSol = false,
+            watchEth = true,
+            watchSol = true,
             extraTickers = CryptoMarkets.liveTickers(extraTickers),
             edgeThresholdPp = edgeThresholdPp
         )
@@ -145,17 +163,48 @@ class MarketRepository(
         watchSol: Boolean,
         extraTickers: List<String>,
         edgeThresholdPp: Double
+    ): MarketsSnapshot {
+        // The try must sit *outside* coroutineScope. A failed async child
+        // (BTC fetch, offline) fails the scope after an inner catch returns,
+        // so the saved snapshot was computed and then thrown away.
+        return try {
+            fetchSnapshot(watchBtc, watchEth, watchSol, extraTickers, edgeThresholdPp)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            offlineSnapshot(e)
+        }
+    }
+
+    @Suppress("UNUSED_PARAMETER")
+    private suspend fun fetchSnapshot(
+        watchBtc: Boolean,
+        watchEth: Boolean,
+        watchSol: Boolean,
+        extraTickers: List<String>,
+        edgeThresholdPp: Double
     ): MarketsSnapshot = coroutineScope {
-        try {
+            val hold = rateLimiter?.remainingHoldMs() ?: 0L
+            if (hold > 0L) {
+                val message = feedHealth?.banner ?: KalshiRequestStatus.rateLimited(hold)
+                return@coroutineScope failureSnapshot(
+                    message = message,
+                    rateLimited = true,
+                    retryInMs = hold
+                )
+            }
+            val spacing = rateLimiter?.reserve(KalshiRateLimiter.Lane.TICKER) ?: 0L
+            if (spacing > 0L) kotlinx.coroutines.delay(spacing)
             val client = resolveApi()
+            // A stored watch_btc=false must not blank Bitcoin.
             val btcDeferred = async {
-                if (watchBtc) client.getMarkets(KalshiApi.SERIES_BTC, status = "open") else null
+                client.getMarkets(KalshiApi.SERIES_BTC, status = "open", limit = OPEN_15M_LIMIT)
             }
             val ethDeferred = async {
-                if (watchEth) client.getMarkets(KalshiApi.SERIES_ETH, status = "open") else null
+                if (watchEth) client.getMarkets(KalshiApi.SERIES_ETH, status = "open", limit = OPEN_15M_LIMIT) else null
             }
             val solDeferred = async {
-                if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open") else null
+                if (watchSol) client.getMarkets(KalshiApi.SERIES_SOL, status = "open", limit = OPEN_15M_LIMIT) else null
             }
             val extrasDeferred = CryptoMarkets.liveTickers(extraTickers).map { ticker ->
                 async { fetchExtra(ticker) }
@@ -168,7 +217,24 @@ class MarketRepository(
                 .cryptoOnly()
                 .filter { it.ticker !in seen }
             val now = System.currentTimeMillis()
-            cache.write(btcMarkets, ethMarkets, solMarkets, extraMarkets, now)
+            val emptySuccess = btcMarkets.isEmpty() &&
+                ethMarkets.isEmpty() &&
+                solMarkets.isEmpty() &&
+                extraMarkets.isEmpty()
+            if (emptySuccess) {
+                val kept = runCatching { cache.read() }.getOrNull()
+                if (kept != null && kept.btc.isNotEmpty()) {
+                    try {
+                        refreshScorecard()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                    }
+                    return@coroutineScope kept.toSnapshot(fromCache = true)
+                }
+            } else {
+                cache.write(btcMarkets, ethMarkets, solMarkets, extraMarkets, now)
+            }
             val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now, edgeThresholdPp)
             val ethUi = model.annotate(ethMarkets.map { it.toUiModel(SeriesKind.ETH) }, now, edgeThresholdPp)
             val solUi = model.annotate(solMarkets.map { it.toUiModel(SeriesKind.SOL) }, now, edgeThresholdPp)
@@ -181,8 +247,13 @@ class MarketRepository(
             logPredictions(ethUi, SeriesKind.ETH, now)
             logPredictions(solUi, SeriesKind.SOL, now)
             logPredictions(extraUi, SeriesKind.CRYPTO, now)
+            (btcUi + ethUi + solUi + extraUi).forEach { m ->
+                m.closeTimeEpochMs?.let { scorer.noteCloseTime(m.ticker, it) }
+            }
             runCatching { scorer.maybeScore(now) }
             refreshScorecard()
+            rateLimiter?.onSuccess()
+            feedHealth?.clear()
             MarketsSnapshot(
                 btc = btcUi,
                 eth = ethUi,
@@ -192,42 +263,75 @@ class MarketRepository(
                 fromCache = false,
                 errorMessage = null,
                 rateLimited = false,
+                retryInMs = 0L,
                 modelScoreCorrect = lastScoreCorrect,
                 modelScoreTotal = lastScoreTotal,
                 modelMeanBrier = lastMeanBrier,
                 avgEdgeWhenRight = lastEdgeRight,
                 avgEdgeWhenWrong = lastEdgeWrong
             )
-        } catch (e: Exception) {
-            val rateLimited = isRateLimited(e)
-            val message = when {
-                rateLimited -> "Rate limited — backing off"
-                else -> e.message ?: "Network error"
-            }
-            val cached = cache.read()
-            if (cached != null) {
-                cached.toSnapshot(fromCache = true, errorMessage = message, rateLimited = rateLimited)
-            } else {
-                MarketsSnapshot(
-                    btc = emptyList(),
-                    eth = emptyList(),
-                    sol = emptyList(),
-                    extra = emptyList(),
-                    fetchedAtEpochMs = 0L,
-                    fromCache = false,
-                    errorMessage = message,
-                    rateLimited = rateLimited,
-                    modelScoreCorrect = lastScoreCorrect,
-                    modelScoreTotal = lastScoreTotal,
-                    modelMeanBrier = lastMeanBrier,
-                    avgEdgeWhenRight = lastEdgeRight,
-                    avgEdgeWhenWrong = lastEdgeWrong
-                )
-            }
+    }
+
+    private suspend fun offlineSnapshot(e: Exception): MarketsSnapshot {
+        val retry = if (KalshiRequestStatus.shouldBackoff(e)) {
+            rateLimiter?.onFailure(
+                KalshiRequestStatus.httpCode(e),
+                KalshiRequestStatus.retryAfterMs(e),
+                local = com.dirk.kalshiodds.data.api.KalshiRequestStatus.isLocalThrottle(e)
+            ) ?: KalshiRequestStatus.retryAfterMs(e) ?: 1_000L
+        } else {
+            0L
+        }
+        val message = KalshiRequestStatus.message(e, retry)
+        feedHealth?.note(e, retry)
+        try {
+            refreshScorecard()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            // Local scorecard is best-effort. A log read must not hide the cache.
+        }
+        val cached = runCatching { cache.read() }.getOrNull()
+        val rateLimited = KalshiRequestStatus.isRateLimited(e) || KalshiRequestStatus.isServerError(e)
+        return if (cached != null) {
+            cached.toSnapshot(
+                fromCache = true,
+                errorMessage = message,
+                rateLimited = rateLimited,
+                retryInMs = retry
+            )
+        } else {
+            failureSnapshot(
+                message = message,
+                rateLimited = rateLimited,
+                retryInMs = retry
+            )
         }
     }
 
+    private fun failureSnapshot(
+        message: String,
+        rateLimited: Boolean,
+        retryInMs: Long
+    ): MarketsSnapshot = MarketsSnapshot(
+        btc = emptyList(),
+        eth = emptyList(),
+        sol = emptyList(),
+        extra = emptyList(),
+        fetchedAtEpochMs = 0L,
+        fromCache = false,
+        errorMessage = message,
+        rateLimited = rateLimited,
+        retryInMs = retryInMs,
+        modelScoreCorrect = lastScoreCorrect,
+        modelScoreTotal = lastScoreTotal,
+        modelMeanBrier = lastMeanBrier,
+        avgEdgeWhenRight = lastEdgeRight,
+        avgEdgeWhenWrong = lastEdgeWrong
+    )
+
     private suspend fun refreshScorecard() {
+        rateLimiter?.reserve(KalshiRateLimiter.Lane.SCORECARD)
         val entries = logStore.readAll()
         val fitted = Calibrator.fitEntries(entries)
         lastCalibration = fitted
@@ -259,13 +363,17 @@ class MarketRepository(
             val noPct = m.aiNoPercent ?: (100.0 - yesPct)
             val midPct = m.yesProbabilityPercent ?: continue
             runCatching {
-                val predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.sideFromProbability(yesPct / 100.0)
-                val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
-                    sideYes = predictedSide == "YES",
-                    yesAsk = m.yesAsk,
-                    noAsk = m.noAsk,
-                    yesBid = m.yesBid
-                )
+                val predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.loggedModelSide(yesPct)
+                val sized = if (predictedSide == "YES" || predictedSide == "NO") {
+                    com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
+                        sideYes = predictedSide == "YES",
+                        yesAsk = m.yesAsk,
+                        noAsk = m.noAsk,
+                        yesBid = m.yesBid
+                    )
+                } else {
+                    com.dirk.kalshiodds.signal.feedback.ScorecardLedger.StoredEntry(null, null, null, null)
+                }
                 logStore.upsertOpenPrediction(
                     ticker = m.ticker,
                     series = series.ticker.ifBlank { CryptoMarkets.inferSeries(m.ticker) },
@@ -314,7 +422,8 @@ class MarketRepository(
     private fun CachedMarketsPayload.toSnapshot(
         fromCache: Boolean,
         errorMessage: String? = null,
-        rateLimited: Boolean = false
+        rateLimited: Boolean = false,
+        retryInMs: Long = 0L
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
         return MarketsSnapshot(
@@ -330,6 +439,7 @@ class MarketRepository(
             fromCache = fromCache,
             errorMessage = errorMessage,
             rateLimited = rateLimited,
+            retryInMs = retryInMs,
             modelScoreCorrect = lastScoreCorrect,
             modelScoreTotal = lastScoreTotal,
             modelMeanBrier = lastMeanBrier,
@@ -338,3 +448,6 @@ class MarketRepository(
         )
     }
 }
+
+/** 0.3.52: a 15m series has 1–2 open markets; never pull the default 100-market page every 1–3 s. */
+const val OPEN_15M_LIMIT = 10

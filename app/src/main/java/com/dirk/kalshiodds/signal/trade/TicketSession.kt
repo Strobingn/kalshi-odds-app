@@ -1,5 +1,7 @@
 package com.dirk.kalshiodds.signal.trade
 
+import com.dirk.kalshiodds.data.local.results.PendingClientOrder
+import com.dirk.kalshiodds.data.local.results.PendingOrderIdStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -23,7 +25,14 @@ class TicketSession(
     private val idFactory: () -> String = { java.util.UUID.randomUUID().toString() },
     private val onAttempt: ((com.dirk.kalshiodds.data.local.results.TicketAttemptRow) -> Unit)? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
-    private val voidHoldMs: Long = VOID_HOLD_MS
+    private val voidHoldMs: Long = VOID_HOLD_MS,
+    /**
+     * Lookup of an order already accepted under this client_order_id.
+     * Called before a retry so a timed-out Approve cannot place a second
+     * real order. Null means Kalshi has no order with that id.
+     */
+    private val findExistingOrder: suspend (clientOrderId: String, ticker: String) -> PlacedOrder? = { _, _ -> null },
+    private val pendingOrderIds: PendingOrderIdStore = PendingOrderIdStore.None
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
@@ -31,6 +40,10 @@ class TicketSession(
 
     private val voidedAtMs = mutableMapOf<String, Long>()
     private val announcedVoidIds = mutableSetOf<String>()
+    /** One client_order_id per ticker + side + buy/sell, kept across retries and process death. */
+    private val orderIds = mutableMapOf<String, String>()
+    /** Ids that have already been sent (or attempted) to Kalshi. */
+    private val attemptedOrderIds = mutableSetOf<String>()
 
     /** Times [WINDOW_CLOSED_NOTICE] was raised for a newly voided ticket. */
     var windowClosedNoticeCount: Int = 0
@@ -43,6 +56,8 @@ class TicketSession(
         _state.value = TicketUiState(phase = TicketPhase.Idle)
         voidedAtMs.clear()
         announcedVoidIds.clear()
+        orderIds.clear()
+        attemptedOrderIds.clear()
         windowClosedNoticeCount = 0
     }
 
@@ -57,11 +72,12 @@ class TicketSession(
      * removed on the next refresh after [voidHoldMs] (default 5s).
      */
     fun replaceProposals(tickets: List<TradeTicket>, liveTickers: Set<String>? = null) {
+        val stamped = tickets.map { stamp(it) }
         _state.update { cur ->
             val now = nowMs()
             val submitting = cur.phase as? TicketPhase.Submitting
-            val incomingManuals = tickets.filter { it.isManualOrSell }
-            val incomingAuto = tickets.filterNot { it.isManualOrSell }
+            val incomingManuals = stamped.filter { it.isManualOrSell }
+            val incomingAuto = stamped.filterNot { it.isManualOrSell }
             val preservedManuals = cur.proposals.filter { t ->
                 t.isManualOrSell &&
                     incomingManuals.none { n -> ticketKey(n) == ticketKey(t) } &&
@@ -169,7 +185,14 @@ class TicketSession(
         val byKey = existing.associateBy { ticketKey(it) }
         return incoming.map { t ->
             val old = byKey[ticketKey(t)]
-            if (old != null) t.copy(id = old.id) else t
+            if (old != null) {
+                t.copy(
+                    id = old.id,
+                    clientOrderId = t.clientOrderId.ifBlank { old.clientOrderId }
+                )
+            } else {
+                t
+            }
         }
     }
 
@@ -178,13 +201,14 @@ class TicketSession(
      * Never places — only [approve] may call the trade client.
      */
     fun addManual(ticket: TradeTicket) {
+        val stamped = stamp(ticket)
         _state.update { cur ->
             val others = cur.proposals.filterNot {
-                ticketKey(it) == ticketKey(ticket) || isWindowClosedReason(it.blockedReason)
+                ticketKey(it) == ticketKey(stamped) || isWindowClosedReason(it.blockedReason)
             }
-            val next = listOf(ticket) + others
+            val next = listOf(stamped) + others
             cur.copy(
-                phase = confirmPhase(ticket, others),
+                phase = confirmPhase(stamped, others),
                 proposals = next,
                 lastError = null
             )
@@ -228,10 +252,11 @@ class TicketSession(
 
     /** Open the confirm sheet. Does **not** place. */
     fun openApprove(ticketId: String): Boolean {
+        if (_state.value.phase is TicketPhase.Submitting) return false
         val ticket = _state.value.proposals.firstOrNull { it.id == ticketId } ?: return false
         val others = _state.value.proposals.filterNot { it.id == ticketId }
         _state.update {
-            it.copy(phase = confirmPhase(ticket, others), lastError = null)
+            it.copy(phase = confirmPhase(stamp(ticket), others), lastError = null)
         }
         return true
     }
@@ -252,9 +277,11 @@ class TicketSession(
      */
     suspend fun approve(ticketId: String): TicketUiState = mutex.withLock {
         val cur = _state.value
+        if (cur.phase is TicketPhase.Submitting) return cur
         val ticket = when (val p = cur.phase) {
             is TicketPhase.AwaitingApprove -> p.ticket.takeIf { it.matchesApproval(ticketId) }
             is TicketPhase.Proposed -> p.tickets.firstOrNull { it.matchesApproval(ticketId) }
+            is TicketPhase.Failed -> p.ticket.takeIf { it.matchesApproval(ticketId) }
             else -> null
         } ?: run {
             _state.update {
@@ -271,25 +298,44 @@ class TicketSession(
             _state.update { it.copy(lastError = reason) }
             return _state.value
         }
-        if (cur.phase is TicketPhase.Submitting) return cur
-
-        val clientOrderId = (cur.phase as? TicketPhase.AwaitingApprove)
-            ?.clientOrderId
-            ?.takeIf { it.isNotBlank() }
-            ?: idFactory()
+        val clientOrderId = stableClientOrderId(ticket)
+        val stamped = if (ticket.clientOrderId == clientOrderId) ticket else ticket.copy(clientOrderId = clientOrderId)
+        // Look up before every live send, including the first attempt after a restart.
+        // A rate-limited lookup must not fall through into a second real order.
+        val lookup = runCatching { findExistingOrder(clientOrderId, stamped.ticker) }
+        val lookupErr = lookup.exceptionOrNull()
+        if (lookupErr != null && isRateLimitedMessage(lookupErr.message)) {
+            val msg = humanError(lookupErr)
+            val kept = cur.proposals.map { if (it.id == stamped.id) stamped else it }
+            val next = TicketUiState(
+                phase = TicketPhase.Failed(stamped, msg, kept),
+                proposals = kept,
+                working = cur.working,
+                lastError = msg,
+                placementCount = cur.placementCount
+            )
+            _state.value = next
+            return next
+        }
+        val existing = lookup.getOrNull()
+        if (existing != null) {
+            return adoptExisting(cur, stamped, existing.copy(clientOrderId = clientOrderId))
+        }
+        attemptedOrderIds.add(clientOrderId)
+        rememberPending(stamped, clientOrderId, attempted = true)
         _state.update {
             it.copy(
-                phase = TicketPhase.Submitting(ticket, clientOrderId),
+                phase = TicketPhase.Submitting(stamped, clientOrderId),
                 lastError = null
             )
         }
-        val result = runCatching { placeOrder(ticket, clientOrderId) }.getOrElse { Result.failure(it) }
+        val result = runCatching { placeOrder(stamped, clientOrderId) }.getOrElse { Result.failure(it) }
         runCatching {
             onAttempt?.invoke(
                 com.dirk.kalshiodds.data.local.results.TicketAttemptRow(
-                    ticker = ticket.ticker,
-                    side = ticket.side,
-                    stakeUsd = ticket.stakeUsd,
+                    ticker = stamped.ticker,
+                    side = stamped.side,
+                    stakeUsd = stamped.stakeUsd,
                     approved = true,
                     result = result.fold(
                         onSuccess = { ack -> ack.error ?: ack.orderId ?: "submitted" },
@@ -303,10 +349,11 @@ class TicketSession(
         }
         val next = result.fold(
             onSuccess = { ack ->
+                clearPending(stamped)
                 val working = cur.working + ack
                 TicketUiState(
-                    phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == ticket.id }),
-                    proposals = cur.proposals.filterNot { it.id == ticket.id },
+                    phase = TicketPhase.Submitted(ack, cur.proposals.filterNot { it.id == stamped.id }),
+                    proposals = cur.proposals.filterNot { it.id == stamped.id },
                     working = working,
                     lastError = ack.error,
                     placementCount = cur.placementCount + 1
@@ -314,9 +361,10 @@ class TicketSession(
             },
             onFailure = { err ->
                 val msg = humanError(err)
+                val kept = cur.proposals.map { if (it.id == stamped.id) stamped else it }
                 TicketUiState(
-                    phase = TicketPhase.Failed(ticket, msg, cur.proposals),
-                    proposals = cur.proposals,
+                    phase = TicketPhase.Failed(stamped, msg, kept),
+                    proposals = kept,
                     working = cur.working,
                     lastError = msg,
                     placementCount = cur.placementCount
@@ -355,8 +403,85 @@ class TicketSession(
         others: List<TradeTicket>,
         existingId: String? = null
     ): TicketPhase.AwaitingApprove {
-        val id = existingId?.takeIf { it.isNotBlank() } ?: idFactory()
-        return TicketPhase.AwaitingApprove(ticket, others, id)
+        val id = existingId?.takeIf { it.isNotBlank() } ?: stableClientOrderId(ticket)
+        val stamped = if (ticket.clientOrderId == id) ticket else ticket.copy(clientOrderId = id)
+        return TicketPhase.AwaitingApprove(stamped, others, id)
+    }
+
+    private fun adoptExisting(cur: TicketUiState, ticket: TradeTicket, existing: PlacedOrder): TicketUiState {
+        clearPending(ticket)
+        val adopted = existing.copy(
+            ticket = exchangeTerms(ticket, existing),
+            clientOrderId = existing.clientOrderId.ifBlank { ticket.clientOrderId }
+        )
+        val next = TicketUiState(
+            phase = TicketPhase.Submitted(adopted, cur.proposals.filterNot { it.id == ticket.id }),
+            proposals = cur.proposals.filterNot { it.id == ticket.id },
+            working = cur.working + adopted,
+            lastError = null,
+            placementCount = cur.placementCount
+        )
+        _state.value = next
+        return next
+    }
+
+    /**
+     * Stake, kind, and a rebuilt card do not mint a new id. Buy and sell stay distinct.
+     */
+    private fun orderKey(ticket: TradeTicket): String =
+        "${ticket.ticker.uppercase()}|${ticket.side.uppercase()}|${if (ticket.isSell) "SELL" else "BUY"}"
+
+    private fun stableClientOrderId(ticket: TradeTicket): String {
+        val key = orderKey(ticket)
+        orderIds[key]?.let { return it }
+        pendingOrderIds.find(key)?.takeIf { it.clientOrderId.isNotBlank() }?.let { pending ->
+            orderIds[key] = pending.clientOrderId
+            if (pending.attempted) attemptedOrderIds.add(pending.clientOrderId)
+            return pending.clientOrderId
+        }
+        val id = ticket.clientOrderId.takeIf { it.isNotBlank() } ?: idFactory()
+        orderIds[key] = id
+        rememberPending(ticket, id, attempted = false)
+        return id
+    }
+
+    private fun rememberPending(ticket: TradeTicket, clientOrderId: String, attempted: Boolean) {
+        val key = orderKey(ticket)
+        val prior = pendingOrderIds.find(key)
+        pendingOrderIds.save(
+            PendingClientOrder(
+                key = key,
+                clientOrderId = clientOrderId,
+                attempted = attempted || prior?.attempted == true,
+                ticker = ticket.ticker,
+                side = ticket.side,
+                kind = if (ticket.isSell) "SELL" else "BUY",
+                updatedAtMs = nowMs()
+            )
+        )
+    }
+
+    private fun clearPending(ticket: TradeTicket) {
+        val key = orderKey(ticket)
+        orderIds.remove(key)
+        pendingOrderIds.clear(key)
+    }
+
+    /** Exchange side, price, count, and ticker. Never the edited local ticket. */
+    private fun exchangeTerms(local: TradeTicket, existing: PlacedOrder): TradeTicket {
+        val remote = existing.ticket
+        return remote.copy(
+            id = local.id,
+            clientOrderId = existing.clientOrderId.ifBlank {
+                remote.clientOrderId.ifBlank { local.clientOrderId }
+            },
+            title = remote.title ?: local.title
+        )
+    }
+
+    private fun stamp(ticket: TradeTicket): TradeTicket {
+        val id = stableClientOrderId(ticket)
+        return if (ticket.clientOrderId == id) ticket else ticket.copy(clientOrderId = id)
     }
 
     fun failSoft(message: String) {
@@ -395,8 +520,10 @@ class TicketSession(
 
     private fun forgetDropped(before: List<TradeTicket>, after: List<TradeTicket>) {
         val keep = after.map { it.id }.toSet()
-        before.map { it.id }.filter { it !in keep }.forEach { id ->
-            voidedAtMs.remove(id)
+        val keepKeys = after.map { orderKey(it) }.toSet()
+        before.filter { it.id !in keep }.forEach { ticket ->
+            voidedAtMs.remove(ticket.id)
+            if (orderKey(ticket) !in keepKeys) clearPending(ticket)
         }
     }
 
@@ -445,6 +572,13 @@ class TicketSession(
             val lower = message.lowercase()
             return lower.startsWith("no ask to size") ||
                 lower.contains("no ask to size a limit")
+        }
+
+        fun isRateLimitedMessage(message: String?): Boolean {
+            val lower = message?.lowercase().orEmpty()
+            return lower.contains("rate limited") ||
+                lower.contains("too_many_requests") ||
+                lower.contains("429")
         }
 
         fun humanError(err: Throwable): String {

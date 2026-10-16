@@ -77,7 +77,7 @@ data class SeenKeys(
     val tickets: MutableSet<String> = hashSetOf(),
     val fills: MutableSet<String> = hashSetOf()
 ) {
-    fun snapshotKey(ticker: String, ts: Long) = "$ticker|$ts"
+    fun snapshotKey(ticker: String, ts: Long, side: String) = "$ticker|$ts|$side"
     fun alertKey(id: String, ticker: String, ts: Long) = id.ifBlank { "$ticker|$ts" }
     fun ticketKey(id: String?, ticker: String, ts: Long) = id?.takeIf { it.isNotBlank() } ?: "$ticker|$ts"
     fun fillKey(id: String) = id

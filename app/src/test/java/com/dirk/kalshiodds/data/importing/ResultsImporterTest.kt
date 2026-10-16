@@ -31,7 +31,7 @@ class ResultsImporterTest {
         assertEquals(1, first.batch.snapshots.size)
         assertEquals(1, first.summary.imported)
         val seen = SeenKeys()
-        seen.snapshots.add("KXBTC15M-A|1700000000000")
+        seen.snapshots.add(seen.snapshotKey("KXBTC15M-A", 1_700_000_000_000L, "YES"))
         val second = ResultsImporter.parse(StringReader(csv), seen)
         assertEquals(0, second.batch.snapshots.size)
         assertEquals(1, second.summary.skipped)

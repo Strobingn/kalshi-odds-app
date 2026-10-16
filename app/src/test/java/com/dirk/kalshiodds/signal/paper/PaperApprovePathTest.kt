@@ -2,7 +2,6 @@ package com.dirk.kalshiodds.signal.paper
 
 import com.dirk.kalshiodds.data.local.history.HistoryAssembler
 import com.dirk.kalshiodds.data.local.results.TicketAttemptRow
-import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
@@ -36,8 +35,8 @@ class PaperApprovePathTest {
         assertEquals(1, snap.fills.size)
         assertFalse(snap.fills.single().settled)
         assertEquals(1, snap.openCount)
-        assertTrue(snap.cashUsd < SignalConstants.PAPER_START_USD)
-        assertTrue(SignalConstants.PAPER_START_USD - snap.cashUsd + 1e-9 >= out.stakeUsd)
+        assertTrue(snap.cashUsd < SignalConstantsStart)
+        assertTrue(SignalConstantsStart - snap.cashUsd + 1e-9 >= out.stakeUsd)
         assertEquals(out.contracts, snap.fills.single().contracts)
         assertEquals(1, history.size)
         assertTrue(history.single().approved)
@@ -83,7 +82,7 @@ class PaperApprovePathTest {
         val (out, book, history) = runApprove(ticket)
         assertTrue(out.message, out.ok)
         assertTrue(out.capped)
-        val (maxQty, _) = PaperBuy.capContracts(4_000, SignalConstants.PAPER_START_USD, 0.40)
+        val (maxQty, _) = PaperBuy.capContracts(4_000, SignalConstantsStart, 0.40)
         assertEquals(maxQty, out.contracts)
         assertTrue(out.contracts in 1..2_499)
         assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
@@ -115,7 +114,7 @@ class PaperApprovePathTest {
                 error("V2 client must not run in paper mode")
             }
         )
-        val book = PaperBook(idFactory = { "p1" }, nowMs = { 9L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "p1" }, nowMs = { 9L })
         val t = ticket(TicketKind.MANUAL, "KXBTC15M-X", 5, 1.0, 0.20)
         session.addManual(t)
         val out = PaperApprove.apply(session, book, t.id)
@@ -147,7 +146,7 @@ class PaperApprovePathTest {
         val session = TicketSession(
             placeOrder = { _, _ -> error("no live V2") }
         )
-        val book = PaperBook(idFactory = { "fill-${ticket.ticker}" }, nowMs = { 42L })
+        val book = PaperBook(initial = com.dirk.kalshiodds.signal.paper.PaperBookState(startingUsd = 1_000.0, cashUsd = 1_000.0), idFactory = { "fill-${ticket.ticker}" }, nowMs = { 42L })
         session.addManual(ticket)
         val out = PaperApprove.apply(
             session = session,

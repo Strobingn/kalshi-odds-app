@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import com.dirk.kalshiodds.AppIdentity
 import com.dirk.kalshiodds.BuildConfig
 
 /**
@@ -11,5 +12,5 @@ object AppVersion {
     val versionCode: Int get() = BuildConfig.VERSION_CODE
 
     val label: String
-        get() = "DipHunter GTP v$versionName ($versionCode)"
+        get() = "${AppIdentity.LABEL} v$versionName ($versionCode)"
 }

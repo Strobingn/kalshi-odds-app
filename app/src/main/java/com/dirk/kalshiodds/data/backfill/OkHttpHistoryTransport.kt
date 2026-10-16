@@ -42,7 +42,10 @@ class OkHttpHistoryTransport(
 
     companion object {
         fun kalshi(): OkHttpHistoryTransport =
-            OkHttpHistoryTransport(KalshiApi.BASE_URL.trimEnd('/'))
+            OkHttpHistoryTransport(
+                KalshiApi.BASE_URL.trimEnd('/'),
+                NetworkModule.sharedClient()
+            )
 
         fun coinbase(): OkHttpHistoryTransport =
             OkHttpHistoryTransport("https://api.exchange.coinbase.com")

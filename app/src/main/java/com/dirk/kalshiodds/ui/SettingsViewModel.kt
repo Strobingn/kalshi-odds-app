@@ -37,6 +37,7 @@ data class SettingsUiState(
     val credentialMessage: String? = null,
     val extraRejected: String? = null,
     val bankrollDraft: String = "",
+    val paperBankrollDraft: String = "",
     val alertsPaused: Boolean = false,
     val pauseReason: String? = null,
     val pendingRaiseStake: Double? = null,
@@ -50,7 +51,11 @@ data class SettingsUiState(
     val connectionTestMessage: String? = null,
     val connectionTestOk: Boolean = false,
     val lastOrderError: String? = null,
-    val lastOrderErrorAtMs: Long = 0L
+    val lastOrderErrorAtMs: Long = 0L,
+    val updateMessage: String = "Checks v0.3.*-debug releases for DipHunter-debug.apk. Other tags are ignored.",
+    val updateBusy: Boolean = false,
+    val updateProgress: Int? = null,
+    val updateNeedsUnknownApps: Boolean = false
 )
 
 class SettingsViewModel(application: Application) : AndroidViewModel(application) {
@@ -69,9 +74,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                         settings = s,
                         keyIdDraft = s.apiKeyId,
                         bankrollDraft = String.format(java.util.Locale.US, "%.0f", s.bankrollUsd),
+                        paperBankrollDraft = String.format(java.util.Locale.US, "%.0f", s.paperBankrollStartUsd),
                         credentialMessage = when {
                             prefs.needsReenterKey() ->
-                                "Re-enter key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
+                                com.dirk.kalshiodds.signal.config.LiveCredentialVault.UNREADABLE
                             prefs.needsReenterDemoKey() ->
                                 "Re-enter demo key — device Keystore was invalidated. Import keys backup in Settings, or paste again."
                             else -> it.credentialMessage
@@ -91,6 +97,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                             String.format(java.util.Locale.US, "%.0f", s.bankrollUsd)
                         } else {
                             it.bankrollDraft
+                        },
+                        paperBankrollDraft = if (it.paperBankrollDraft.isBlank()) {
+                            String.format(java.util.Locale.US, "%.0f", s.paperBankrollStartUsd)
+                        } else {
+                            it.paperBankrollDraft
                         }
                     )
                 }
@@ -106,6 +117,11 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBankrollDraft(text: String) {
         _state.update { it.copy(bankrollDraft = text) }
         text.replace(",", "").toDoubleOrNull()?.let { setBankroll(it) }
+    }
+
+    fun setPaperBankrollDraft(text: String) {
+        _state.update { it.copy(paperBankrollDraft = text) }
+        text.replace(",", "").toDoubleOrNull()?.let { setPaperBankrollStart(it) }
     }
 
     fun refreshBatteryStatus() {
@@ -143,8 +159,16 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setBankroll(v: Double) = track("bankroll_usd", _state.value.settings.bankrollUsd, v) {
         prefs.updateBankrollUsd(v)
     }
+    fun setPaperBankrollStart(v: Double) = track(
+        "paper_bankroll_start",
+        _state.value.settings.paperBankrollStartUsd,
+        v
+    ) {
+        prefs.updatePaperBankrollStartUsd(v)
+    }
     fun setUseKelly(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(v) }
     fun setKellyFraction(v: Double) = viewModelScope.launch { prefs.updateKellyFraction(v) }
+    fun setPaperKellyFraction(v: Double) = viewModelScope.launch { prefs.updatePaperKellyFraction(v) }
     fun setFixedFraction(v: Boolean) = viewModelScope.launch { prefs.updateUseKelly(!v) }
     fun setFixedFractionValue(v: Double) = viewModelScope.launch { prefs.updateFixedFraction(v) }
     fun setMaxBankrollFraction(v: Double) = viewModelScope.launch { prefs.updateMaxBankrollFraction(v) }
@@ -184,12 +208,71 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setPaperTrading(v: Boolean) = track("paper_trading", _state.value.settings.paperTradingEnabled, v) {
         prefs.updatePaperTrading(v)
     }
+    fun setAiPaperAutopilot(v: Boolean) = track(
+        "ai_paper_autopilot",
+        _state.value.settings.aiPaperAutopilotEnabled,
+        v
+    ) {
+        prefs.updateAiPaperAutopilot(v)
+    }
+    fun setAutopilotMode(mode: com.dirk.kalshiodds.signal.paper.AutopilotMode) = track(
+        "autopilot_mode",
+        _state.value.settings.autopilotMode,
+        mode.name
+    ) {
+        prefs.updateAutopilotMode(mode.name)
+    }
     fun setKalshiDemo(v: Boolean) = viewModelScope.launch { prefs.updateKalshiDemo(v) }
-    fun resetPaperBook() {
+    /** 0.3.40: set the paper bankroll start to [usd] and reset the book there (history archived, not deleted). */
+    fun resetPaperBookTo(usd: Double) {
+        val v = usd.coerceIn(100.0, 1_000_000.0)
         val before = container.paper.book.snapshot().cashUsd
-        container.paper.book.reset()
-        track("paper_reset", before, 100.0) { }
-        _state.update { it.copy(credentialMessage = "Paper book archived and reset to $100 — no Kalshi orders") }
+        viewModelScope.launch {
+            prefs.updatePaperBankrollStartUsd(v)
+            container.paper.book.configure(startUsd = v)
+            container.paper.book.reset(v)
+        }
+        track("paper_reset", before, v) { }
+        _state.update {
+            it.copy(
+                paperBankrollDraft = String.format(java.util.Locale.US, "%.0f", v),
+                credentialMessage = String.format(java.util.Locale.US, "Paper bankroll set to $%,.0f — prior paper fills archived, no Kalshi orders", v)
+            )
+        }
+    }
+
+    /** 0.3.46 'Reset paper bankroll to $20,000' — archives history and marks a new reset point. */
+    fun resetPaperBankrollTo20k() {
+        val v = com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD
+        val before = container.paper.book.snapshot().cashUsd
+        viewModelScope.launch {
+            prefs.updatePaperBankrollStartUsd(v)
+            container.paper.book.configure(startUsd = v)
+            container.paper.resetTo20k()
+        }
+        track("paper_reset", before, v) { }
+        _state.update {
+            it.copy(
+                paperBankrollDraft = "20000",
+                credentialMessage = PaperResetCopy.DONE
+            )
+        }
+    }
+
+    fun resetPaperBook() {
+        val start = _state.value.settings.paperBankrollStartUsd
+        val before = container.paper.book.snapshot().cashUsd
+        container.paper.book.reset(start)
+        track("paper_reset", before, start) { }
+        _state.update {
+            it.copy(
+                credentialMessage = String.format(
+                    java.util.Locale.US,
+                    "Paper book archived and reset to $%.0f — no Kalshi orders",
+                    start
+                )
+            )
+        }
     }
 
     private fun track(key: String, old: Any?, new: Any?, block: suspend () -> Unit) {
@@ -250,20 +333,13 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun setPathSim(v: Boolean) = viewModelScope.launch { prefs.updatePathSim(v) }
 
     /**
-     * Lowering stake (or staying ≤ $5) writes immediately. Raising above the
-     * $5 soft cap opens a typed-confirm dialog. Hard cap is $25.
+     * 0.3.16: stake is $1–$10. Soft cap equals hard cap so RAISE is unused.
      */
     fun requestTicketStake(raw: Double) {
         val clipped = PayoutGate.clipStake(raw)
         val current = _state.value.settings.ticketStakeUsd
-        if (clipped <= current + 1e-9 || !PayoutGate.requiresRaiseConfirm(clipped)) {
-            track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
-            _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
-            return
-        }
-        _state.update {
-            it.copy(pendingRaiseStake = clipped, raiseDraft = "", raiseError = null)
-        }
+        track("ticket_stake_usd", current, clipped) { prefs.updateTicketStakeUsd(clipped) }
+        _state.update { it.copy(pendingRaiseStake = null, raiseDraft = "", raiseError = null) }
     }
 
     fun setRaiseDraft(text: String) = _state.update { it.copy(raiseDraft = text, raiseError = null) }
@@ -367,14 +443,113 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             }
             return
         }
-        prefs.saveCredentials(keyId, pem)
-        _state.update {
-            it.copy(
-                pemDraft = "",
-                credentialMessage = "Key stored on device (PEM never logged)",
-                connectionTestOk = false,
-                connectionTestMessage = null
-            )
+        when (val saved = prefs.saveCredentials(keyId, pem)) {
+            is com.dirk.kalshiodds.signal.config.CredentialSave.Refused ->
+                _state.update { it.copy(credentialMessage = saved.reason) }
+            com.dirk.kalshiodds.signal.config.CredentialSave.Stored ->
+                _state.update {
+                    it.copy(
+                        pemDraft = "",
+                        credentialMessage = "Key stored on device (encrypted, PEM never logged)",
+                        connectionTestOk = false,
+                        connectionTestMessage = null
+                    )
+                }
+        }
+    }
+
+    fun setColorStyle(style: String) {
+        viewModelScope.launch {
+            prefs.updateColorStyle(style)
+        }
+    }
+
+    fun openUnknownAppsSettings() {
+        val ctx = getApplication<Application>()
+        runCatching {
+            ctx.startActivity(com.dirk.kalshiodds.update.KashiApkInstaller(ctx).unknownAppsIntent())
+        }
+    }
+
+    fun checkForKashiUpdate() {
+        if (_state.value.updateBusy) return
+        viewModelScope.launch {
+            _state.update {
+                it.copy(
+                    updateBusy = true,
+                    updateProgress = null,
+                    updateNeedsUnknownApps = false,
+                    updateMessage = "Checking for updates…"
+                )
+            }
+            val outcome = withContext(Dispatchers.IO) {
+                runCatching { runUpdateCheck() }.getOrElse {
+                    UpdateOutcome.Message(com.dirk.kalshiodds.data.api.KalshiRequestStatus.OFFLINE)
+                }
+            }
+            _state.update {
+                it.copy(
+                    updateBusy = false,
+                    updateProgress = null,
+                    updateMessage = outcome.message,
+                    updateNeedsUnknownApps = outcome.needsUnknownApps
+                )
+            }
+        }
+    }
+
+    private suspend fun runUpdateCheck(): UpdateOutcome {
+        val client = com.dirk.kalshiodds.update.KashiUpdateClient.http()
+        val check = client.check(AppVersion.versionName)
+        prefs.markKashiUpdateCheck(System.currentTimeMillis())
+        return when (check) {
+            is com.dirk.kalshiodds.update.UpdateCheck.UpToDate -> {
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(null)
+                UpdateOutcome.Message("You're on the latest Kashi build (${AppVersion.versionName}).")
+            }
+            is com.dirk.kalshiodds.update.UpdateCheck.Failed -> UpdateOutcome.Message(check.message)
+            is com.dirk.kalshiodds.update.UpdateCheck.Available -> {
+                com.dirk.kalshiodds.update.UpdateAvailability.publish(check.release)
+                downloadAndPrompt(client, check.release)
+            }
+        }
+    }
+
+    private fun downloadAndPrompt(
+        client: com.dirk.kalshiodds.update.KashiUpdateClient,
+        release: com.dirk.kalshiodds.update.KashiReleasePolicy.Release
+    ): UpdateOutcome {
+        val ctx = getApplication<Application>()
+        val dest = java.io.File(ctx.cacheDir, "updates/DipHunter-debug.apk")
+        val downloaded = client.downloadTo(release, dest) { read, total ->
+            val pct = if (total > 0L) ((read * 100L) / total).toInt().coerceIn(0, 100) else null
+            _state.update { it.copy(updateProgress = pct, updateMessage = "Downloading ${release.tag}…") }
+        }
+        return when (downloaded) {
+            is com.dirk.kalshiodds.update.DownloadResult.Rejected ->
+                UpdateOutcome.Message(downloaded.reason)
+            is com.dirk.kalshiodds.update.DownloadResult.Failed ->
+                UpdateOutcome.Message(downloaded.message)
+            is com.dirk.kalshiodds.update.DownloadResult.Verified -> {
+                when (val prompt = com.dirk.kalshiodds.update.KashiApkInstaller(ctx).promptInstall(dest)) {
+                    com.dirk.kalshiodds.update.InstallPrompt.Started ->
+                        UpdateOutcome.Message("Opening the installer for ${release.tag}.")
+                    com.dirk.kalshiodds.update.InstallPrompt.NeedUnknownApps ->
+                        UpdateOutcome.Message(
+                            com.dirk.kalshiodds.update.InstallUnknownApps.GUIDE,
+                            needsUnknownApps = true
+                        )
+                    is com.dirk.kalshiodds.update.InstallPrompt.Rejected ->
+                        UpdateOutcome.Message(prompt.reason)
+                }
+            }
+        }
+    }
+
+    private data class UpdateOutcome(val message: String, val needsUnknownApps: Boolean = false) {
+        companion object {
+            fun Message(message: String, needsUnknownApps: Boolean = false) =
+                UpdateOutcome(message, needsUnknownApps)
         }
     }
 
@@ -406,7 +581,10 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                     val bytes = getApplication<Application>().contentResolver.openInputStream(uri)
                         ?.use { it.readBytes() } ?: error("could not read backup")
                     val bundle = CredentialBackup.decryptAll(bytes, pass.toCharArray())
-                    prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    val saved = prefs.saveCredentials(bundle.keyId, bundle.pem)
+                    if (saved is com.dirk.kalshiodds.signal.config.CredentialSave.Refused) {
+                        error(saved.reason)
+                    }
                     if (bundle.demoKeyId.isNotBlank() && bundle.demoPem.isNotBlank()) {
                         prefs.saveDemoCredentials(bundle.demoKeyId, bundle.demoPem)
                     }
@@ -414,7 +592,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 }.getOrElse { e ->
                     when (e) {
                         is CredentialBackup.WrongPassphrase -> "Wrong passphrase — key not changed"
-                        is CredentialBackup.BadFile -> "Not a DipHunter keys backup — key not changed"
+                        is CredentialBackup.BadFile -> "Not a Kalshi Trader keys backup — key not changed"
                         else -> e.message ?: "restore failed"
                     }
                 }

@@ -21,7 +21,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.model.MarketTick
 import com.dirk.kalshiodds.signal.model.SignalAlert
-import com.dirk.kalshiodds.signal.model.SignalStance
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.TickSource
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -66,10 +65,7 @@ class SignalHub(
         }
     )
     private val lastBookPublishMs = ConcurrentHashMap<String, Long>()
-    private val lastBookScoredMs = ConcurrentHashMap<String, Long>()
     private val lastOddsPersistMs = ConcurrentHashMap<String, Long>()
-    private val lastSnapshotPersistMs = ConcurrentHashMap<String, Long>()
-    private val forwardLoggedTickers = ConcurrentHashMap.newKeySet<String>()
     private val lastOddsMid = ConcurrentHashMap<String, Double>()
     private val lastChartPersistMs = ConcurrentHashMap<String, Long>()
     private val tickMailbox = LatestWinsMailbox<MarketTick>()
@@ -89,13 +85,6 @@ class SignalHub(
     val scores: StateFlow<Map<String, ScoringEngine.Score>> = _scores.asStateFlow()
 
     fun latestScores(): Map<String, ScoringEngine.Score> = _scores.value
-
-    /** A live book score, rather than an old cached quote after a WS gap. */
-    fun hasFreshBook(ticker: String, nowMs: Long, maxAgeMs: Long = 3_000L): Boolean {
-        val last = lastBookScoredMs[ticker] ?: return false
-        return wsLive && _status.value.state == WsConnectionState.CONNECTED &&
-            nowMs >= last && nowMs - last <= maxAgeMs
-    }
 
     fun applyCalibration(state: Calibrator.State) {
         scoring.calibration = state
@@ -127,6 +116,9 @@ class SignalHub(
         _watchTickers.value = tickers
         if (tickers.isNotEmpty()) {
             runCatching { scoring.book.pruneTo(tickers) }
+            // 0.3.52: per-ticker throttles/marks for closed windows were never dropped.
+            runCatching { scoring.pruneTo(tickers) }
+            listOf(lastBookPublishMs, lastOddsPersistMs, lastOddsMid, lastChartPersistMs).forEach { m -> m.keys.retainAll(tickers) }
             _scores.update { cur -> cur.filterKeys { it in tickers } }
         }
     }
@@ -172,10 +164,20 @@ class SignalHub(
         }
     }
 
+    /** 0.3.49: event-driven AI/scalp eval + Home refresh — fired for every WS ticker/book event of a market. */
+    @Volatile var onMarketEvent: ((String) -> Unit)? = null
+    @Volatile var lastWsEventAtMs: Long = 0L
+
+    private fun marketEvent(ticker: String) {
+        lastWsEventAtMs = System.currentTimeMillis()
+        runCatching { onMarketEvent?.invoke(ticker) }
+    }
+
     fun ingestTick(tick: MarketTick) {
         if (tickMailbox.offer(tick.ticker, tick)) {
             tickScope.launch { drainTicks() }
         }
+        marketEvent(tick.ticker)
     }
 
     fun ingestBookSnapshot(
@@ -189,6 +191,7 @@ class SignalHub(
         if (!settings.isWatchedTicker(ticker)) return
         runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
         requestBookScore(ticker, receiveElapsedNanos)
+        marketEvent(ticker)
     }
 
     fun ingestBookDelta(
@@ -205,6 +208,7 @@ class SignalHub(
         // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
         runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }
         requestBookScore(ticker, receiveElapsedNanos)
+        marketEvent(ticker)
     }
 
     private fun requestBookScore(ticker: String, receiveElapsedNanos: Long) {
@@ -284,7 +288,6 @@ class SignalHub(
         if (!BookScoreGate.shouldPublish(ticker, now, lastBookPublishMs)) return
         val tick = scoring.book.tickFromBook(ticker, receiveElapsedNanos) ?: return
         val scored = runCatching { scoring.score(tick, settings) }.getOrNull() ?: return
-        lastBookScoredMs[ticker] = now
         _scores.update { it + (ticker to scored) }
         persistScore(tick, scored)
         persistOddsMid(ticker, scored.marketMidPp)
@@ -342,37 +345,8 @@ class SignalHub(
 
     private fun persistScore(tick: MarketTick, scored: ScoringEngine.Score) {
         val now = System.currentTimeMillis()
-        val forwardWriter = results
-        if (forwardWriter != null && tick.source == TickSource.WS_ORDERBOOK &&
-            CryptoMarkets.isLiveTicker(tick.ticker) && scored.passedFilter &&
-            kotlin.math.abs(scored.deltaPp) >= settings.effectiveEdgeThresholdPp() &&
-            forwardLoggedTickers.add(tick.ticker)) {
-            val logged = runCatching {
-                val side = SignalStance.resolve(
-                    storedSide = scored.predictedSide,
-                    modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
-                    marketYes = scored.marketMidPp,
-                    fairYes = scored.fairValuePp
-                ).storedSide
-                val row = com.dirk.kalshiodds.signal.feedback.ForwardTest.capture(
-                    ticker = tick.ticker,
-                    series = tick.series,
-                    atMs = now,
-                    modelYes = scored.fairValuePp / 100.0,
-                    marketYes = scored.marketMidPp / 100.0,
-                    side = side,
-                    book = scoring.book.snapshotBook(tick.ticker),
-                    feeRate = settings.feeRate
-                ) ?: return@runCatching false
-                forwardWriter.enqueueForwardTest(row)
-                true
-            }.getOrDefault(false)
-            if (!logged) forwardLoggedTickers.remove(tick.ticker)
-        }
-        val lastSnapshot = lastSnapshotPersistMs[tick.ticker] ?: 0L
-        if (now - lastSnapshot >= 5_000L) {
-            lastSnapshotPersistMs[tick.ticker] = now
-            runCatching { results?.enqueueSnapshot(
+        runCatching {
+            results?.enqueueSnapshot(
                 ScoredSnapshotRow(
                     ticker = tick.ticker,
                     series = tick.series,
@@ -388,7 +362,7 @@ class SignalHub(
                     heavyMl = scored.heavyMl,
                     note = scored.ensembleNote
                 )
-            ) }
+            )
         }
         // SQLite/text already have the row. Skip the DataStore JSON rewrite
         // when heap is tight or another write is in flight — that rewrite is
@@ -399,23 +373,18 @@ class SignalHub(
         persistScope.launch {
             try {
                 runCatching {
-                    val predictedSide = SignalStance.resolve(
-                        storedSide = scored.predictedSide,
-                        modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp,
-                        marketYes = scored.marketMidPp,
-                        fairYes = scored.fairValuePp
-                    ).storedSide
-                    val sideYes = when (predictedSide?.trim()?.uppercase()) {
-                        "YES" -> true
-                        "NO" -> false
-                        else -> (scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp) > 50.0
+                    val modelYes = scored.importedModelPp ?: scored.aiPp ?: scored.fairValuePp
+                    val predictedSide = com.dirk.kalshiodds.signal.feedback.ForecastUnits.loggedModelSide(modelYes)
+                    val sized = if (predictedSide == "YES" || predictedSide == "NO") {
+                        com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
+                            sideYes = predictedSide == "YES",
+                            yesAsk = tick.yesAsk,
+                            noAsk = tick.noAsk,
+                            yesBid = tick.yesBid
+                        )
+                    } else {
+                        com.dirk.kalshiodds.signal.feedback.ScorecardLedger.StoredEntry(null, null, null, null)
                     }
-                    val sized = com.dirk.kalshiodds.signal.feedback.ScorecardLedger.captureEntryFromBook(
-                        sideYes = sideYes,
-                        yesAsk = tick.yesAsk,
-                        noAsk = tick.noAsk,
-                        yesBid = tick.yesBid
-                    )
                     store.upsertOpenPrediction(
                         ticker = tick.ticker,
                         series = tick.series,
@@ -445,7 +414,10 @@ class SignalHub(
                             entryAsk = sized.entryAsk,
                             contracts = sized.contracts,
                             stakeUsd = sized.stakeUsd,
-                            feeUsd = sized.feeUsd
+                            feeUsd = sized.feeUsd,
+                            rawPredictedYes = scored.rawFairValuePp / 100.0,
+                            displayedYes = scored.fairValuePp / 100.0,
+                            tteSeconds = scored.tteSeconds
                         )
                     )
                 }

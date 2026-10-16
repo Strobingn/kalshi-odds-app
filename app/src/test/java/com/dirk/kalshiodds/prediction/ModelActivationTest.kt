@@ -7,22 +7,52 @@ import org.junit.Test
 
 class ModelActivationTest {
 
+    private fun honestPass() = EdgeModelManifest(
+        version = "2",
+        trainedAt = "2026-09-25T00:00:00Z",
+        nSamples = 12000,
+        nRows = 12000,
+        nMarkets = 2500,
+        nHoldout = 800,
+        modelBrier = 0.160,
+        marketBrier = 0.186,
+        modelLogLoss = 0.480,
+        marketLogLoss = 0.520,
+        simPnl = 12.5,
+        simTrades = 40,
+        marketPnl = -3.0,
+        packageId = "com.dirk.kalshiodds.kashi",
+        countsPresent = true,
+        beatMarketFlag = true,
+        dataSource = EdgeModelManifest.PROVENANCE_LIVE
+    )
+
     @Test
     fun parseManifestAndBeatsMarket() {
         val raw = """
             {
-              "version": "1",
+              "version": "2",
               "trained_at": "2026-09-25T00:00:00Z",
-              "n_samples": 120,
-              "model_brier": 0.18,
-              "market_brier": 0.22,
-              "model_logloss": 0.50,
-              "market_logloss": 0.58,
+              "n_samples": 12000,
+              "n_rows": 12000,
+              "n_markets": 2500,
+              "n_holdout": 800,
+              "model_brier": 0.16,
+              "market_brier": 0.186,
+              "model_logloss": 0.48,
+              "market_logloss": 0.52,
+              "sim_pnl": 12.5,
+              "sim_trades": 40,
+              "market_pnl": -3.0,
+              "package": "com.dirk.kalshiodds.kashi",
+              "beat_market": true,
+              "synthetic": false,
               "data_source": "kalshi_settled_coinbase_spot_v1"
             }
         """.trimIndent()
         val m = EdgeModelManifest.parse(raw)
-        assertEquals(120, m.nSamples)
+        assertEquals(2500, m.nMarkets)
+        assertTrue(m.countsPresent)
         assertTrue(m.beatsMarket)
         val d = ModelActivation.decide(m, modelValid = true)
         assertTrue(d.activate)
@@ -30,50 +60,82 @@ class ModelActivationTest {
     }
 
     @Test
-    fun doesNotActivateWhenWorseThanMarket() {
-        val m = EdgeModelManifest(
-            version = "1",
-            trainedAt = "2026-09-25T00:00:00Z",
-            nSamples = 80,
-            modelBrier = 0.30,
-            marketBrier = 0.22,
-            modelLogLoss = 0.70,
-            marketLogLoss = 0.55,
-            dataSource = "kalshi_settled_coinbase_spot_v1"
+    fun refusesMissingCounts() {
+        val raw = """
+            {
+              "version": "1",
+              "trained_at": "2026-09-25T00:00:00Z",
+              "n_samples": 120,
+              "model_brier": 0.10,
+              "market_brier": 0.22,
+              "model_logloss": 0.40,
+              "market_logloss": 0.58,
+              "sim_pnl": 12.5,
+              "sim_trades": 40,
+              "market_pnl": -3.0,
+              "data_source": "kalshi_settled_coinbase_spot_v1"
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        assertFalse(m.countsPresent)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("lacks") || d.reason.contains("market-only"))
+    }
+
+    @Test
+    fun refusesSynthetic() {
+        val m = honestPass().copy(synthetic = true)
+        assertFalse(m.beatsMarket)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("synthetic"))
+    }
+
+    @Test
+    fun refusesBelowMinimumMarkets() {
+        val m = honestPass().copy(nMarkets = 60, nRows = 360, nHoldout = 270, nSamples = 360)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("too small") || d.reason.contains("market-only"))
+    }
+
+    @Test
+    fun refusesTinyMargin() {
+        val m = honestPass().copy(
+            modelBrier = 0.185,
+            marketBrier = 0.186,
+            modelLogLoss = 0.519,
+            marketLogLoss = 0.520,
+            brierMargin = 0.001,
+            logLossMargin = 0.001
         )
         assertFalse(m.beatsMarket)
         val d = ModelActivation.decide(m, modelValid = true)
         assertFalse(d.activate)
-        assertTrue(d.reason.contains("does not beat"))
+    }
+
+    @Test
+    fun doesNotActivateWhenWorseThanMarket() {
+        val m = honestPass().copy(
+            modelBrier = 0.30,
+            marketBrier = 0.22,
+            modelLogLoss = 0.70,
+            marketLogLoss = 0.55,
+            brierMargin = 0.22 - 0.30,
+            logLossMargin = 0.55 - 0.70
+        )
+        assertFalse(m.beatsMarket)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("does not beat") || d.reason.contains("market-only"))
     }
 
     @Test
     fun invalidModelKeepsPrevious() {
-        val m = EdgeModelManifest(
-            version = "1",
-            trainedAt = "2026-09-25T00:00:00Z",
-            nSamples = 80,
-            modelBrier = 0.10,
-            marketBrier = 0.22,
-            modelLogLoss = 0.40,
-            marketLogLoss = 0.55
-        )
-        val d = ModelActivation.decide(m, modelValid = false)
+        val d = ModelActivation.decide(honestPass(), modelValid = false)
         assertFalse(d.activate)
         assertTrue(d.reason.contains("failed validation"))
-    }
-
-    @Test
-    fun syntheticOrLegacyManifestCannotActivate() {
-        for (source in listOf("synthetic_fixture", "unknown")) {
-            val m = EdgeModelManifest(
-                version = "1", trainedAt = "2026-09-25T00:00:00Z", nSamples = 180,
-                modelBrier = 0.02, marketBrier = 0.18,
-                modelLogLoss = 0.10, marketLogLoss = 0.50, dataSource = source
-            )
-            assertFalse(m.beatsMarket)
-            assertFalse(ModelActivation.decide(m, modelValid = true).activate)
-        }
     }
 
     @Test
@@ -89,17 +151,96 @@ class ModelActivationTest {
 
     @Test
     fun jsonRoundTrip() {
-        val m = EdgeModelManifest(
-            version = "2",
-            trainedAt = "2026-09-25T08:17:00Z",
-            nSamples = 40,
-            modelBrier = 0.19,
-            marketBrier = 0.21,
-            modelLogLoss = 0.51,
-            marketLogLoss = 0.53
-        )
+        val m = honestPass()
         val again = EdgeModelManifest.parse(m.toJson())
-        assertEquals(m.nSamples, again.nSamples)
+        assertEquals(m.nMarkets, again.nMarkets)
+        assertEquals(m.nRows, again.nRows)
         assertEquals(m.beatsMarket, again.beatsMarket)
+        assertEquals(m.simTrades, again.simTrades)
+        assertEquals(m.packageId, again.packageId)
+        assertFalse(again.synthetic)
+    }
+
+    @Test
+    fun refusesMissingProvenanceOnAutoActivate() {
+        val raw = """
+            {
+              "version": "2",
+              "trained_at": "2026-09-25T00:00:00Z",
+              "n_samples": 12000,
+              "n_rows": 12000,
+              "n_markets": 2500,
+              "n_holdout": 800,
+              "model_brier": 0.16,
+              "market_brier": 0.186,
+              "model_logloss": 0.48,
+              "market_logloss": 0.52,
+              "sim_pnl": 12.5,
+              "sim_trades": 40,
+              "market_pnl": -3.0,
+              "beat_market": true
+            }
+        """.trimIndent()
+        val m = EdgeModelManifest.parse(raw)
+        assertEquals(EdgeModelManifest.PROVENANCE_UNKNOWN, m.dataSource)
+        assertTrue("metrics can still beat the market; auto-activate is a separate gate", m.beatsMarket)
+        val auto = ModelActivation.decide(m, modelValid = true)
+        assertFalse(auto.activate)
+        assertTrue(auto.reason.contains("provenance") || auto.reason.contains("synthetic"))
+        val manual = ModelActivation.decide(m, modelValid = true, requireProvenance = false)
+        assertTrue(manual.activate)
+    }
+
+    @Test
+    fun refusesSyntheticFixtureProvenance() {
+        val m = honestPass().copy(
+            synthetic = false,
+            dataSource = EdgeModelManifest.PROVENANCE_SYNTHETIC
+        )
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("synthetic") || d.reason.contains("provenance"))
+    }
+
+    @Test
+    fun refusesNegativeFeeAwarePnl() {
+        val m = honestPass().copy(simPnl = -4.0, marketPnl = -10.0)
+        assertFalse(m.beatsMarket)
+        val d = ModelActivation.decide(m, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("does not beat") || d.reason.contains("bundled"))
+    }
+
+    @Test
+    fun refusesWhenPnlLosesToMarketFollow() {
+        val m = honestPass().copy(simPnl = 5.0, marketPnl = 9.0)
+        assertFalse(m.beatsMarket)
+        assertFalse(ModelActivation.decide(m, modelValid = true).activate)
+    }
+
+    @Test
+    fun refusesExplicitBeatMarketFalse() {
+        val m = honestPass().copy(beatMarketFlag = false)
+        assertFalse(m.beatsMarket)
+        assertFalse(ModelActivation.decide(m, modelValid = true).activate)
+    }
+
+    @Test
+    fun rejectsFixtureSizedAndEdgeModelMain() {
+        val tiny = honestPass().copy(nRows = 270, nSamples = 270, nHoldout = 50, nMarkets = 40, tag = "edge-model-main")
+        val d = ModelActivation.decide(tiny, modelValid = true)
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("5,000") || d.reason.contains("edge-model-main") || d.reason.contains("too small"))
+        val legacy = honestPass().copy(tag = "edge-model-latest")
+        assertFalse(ModelActivation.decide(legacy, modelValid = true).activate)
+        assertFalse(ModelActivation.acceptableTag("edge-model-main"))
+        assertTrue(ModelActivation.acceptableTag("model-20261005"))
+    }
+
+    @Test
+    fun missingManifestFallsBackToMarketOnly() {
+        val d = ModelActivation.decideMissingManifest()
+        assertFalse(d.activate)
+        assertTrue(d.reason.contains("market-only"))
     }
 }
