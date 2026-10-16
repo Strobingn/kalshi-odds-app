@@ -120,7 +120,9 @@ class PaperBook(
             val peak = maxOf(open.peakPrice ?: open.limitPrice, px)
             if (open.peakPrice != null && peak <= open.peakPrice + 1e-9) return open
             val updated = open.copy(peakPrice = peak, peakUpdatedAtMs = atMs)
-            publish(cur.copy(fills = cur.fills.map { if (it.id == fillId) updated else it }))
+            publish(cur.copy(fills = cur.fills.map {
+                if (it.id == fillId && !it.settled) updated else it
+            }))
             return updated
         }
     }
@@ -133,6 +135,7 @@ class PaperBook(
         if (!enabled) return null
         if (!ticket.canApprove) return null
         if (ticket.kind == TicketKind.MANUAL || ticket.kind == TicketKind.SELL) return null
+        if (ticket.limitPrice > SignalConstants.MAX_PAPER_ENTRY_ASK + 1e-9) return null
         val source = if (ticket.kind == TicketKind.HUNTER) "AI hunter" else "AI ticket"
         return fill(
             ticker = ticket.ticker,
@@ -151,16 +154,23 @@ class PaperBook(
         )
     }
 
-    fun considerAlert(alert: SignalAlert, ask: Double?, enabled: Boolean): PaperFill? {
+    fun considerAlert(
+        alert: SignalAlert,
+        ask: Double?,
+        enabled: Boolean,
+        closeTimeMs: Long? = null
+    ): PaperFill? {
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
         val px = KalshiPrice.usable(ask) ?: return null
+        if (px > SignalConstants.MAX_PAPER_ENTRY_ASK + 1e-9) return null
         return fill(
             ticker = alert.ticker,
             side = alert.predictedSide,
             limitPrice = px,
             source = "AI signal",
-            note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" }
+            note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" },
+            closeTimeMs = closeTimeMs
         )
     }
 
@@ -488,6 +498,7 @@ class PaperBook(
             val pnl = proceeds - cost - entryFee
             val remaining = open.contracts - qty
             val sold = open.copy(
+                id = if (remaining > 0) uniqueFillId(cur.fills) else open.id,
                 // The sold slice is a realized ledger row even when a
                 // separate leftover row remains open.
                 settled = true,
@@ -541,7 +552,8 @@ class PaperBook(
             val pnl = proceeds - cost
             val remaining = open.contracts - qty
             val sold = open.copy(
-                settled = remaining <= 0,
+                id = if (remaining > 0) uniqueFillId(cur.fills) else open.id,
+                settled = true,
                 contracts = if (remaining <= 0) open.contracts else qty,
                 outcome = "sell",
                 won = pnl >= 0.0,
@@ -713,6 +725,18 @@ class PaperBook(
             )
             return row
         }
+    }
+
+    /** A realized partial slice must never share identity with its residual. */
+    private fun uniqueFillId(existing: List<PaperFill>): String {
+        val base = idFactory()
+        var candidate = base
+        var suffix = 1
+        while (existing.any { it.id == candidate }) {
+            candidate = "$base-$suffix"
+            suffix++
+        }
+        return candidate
     }
 
     private fun publish(next: PaperBookState) {

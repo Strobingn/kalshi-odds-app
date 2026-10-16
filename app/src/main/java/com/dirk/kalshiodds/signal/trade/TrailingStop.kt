@@ -10,7 +10,9 @@ data class PaperExitQuote(
     val price: Double,
     val availableContracts: Int? = null,
     val observedAtMs: Long = 0L,
-    val source: String = "quote"
+    val source: String = "quote",
+    /** Identifies one immutable depth observation; null means depth is unknown. */
+    val sourceSnapshotId: String? = null
 )
 
 /**
@@ -90,7 +92,7 @@ class TrailingStop(
         val stops = mutableListOf<StopOrder>()
         paperState.fills.filter { !it.settled }.forEach { fill ->
             val quote = quotes[fill.ticker] ?: quotes[fill.ticker.uppercase()] ?: return@forEach
-            if (quote.observedAtMs > 0L && nowMs - quote.observedAtMs > maxQuoteAgeMs) return@forEach
+            if (quote.observedAtMs <= 0L || nowMs - quote.observedAtMs > maxQuoteAgeMs) return@forEach
             val current = quote.price
             if (!current.isFinite()) return@forEach
             val state = calculatePositionState(fill, current, nowMs)
@@ -147,8 +149,14 @@ class TrailingStop(
         val trailingStopPrice = if (trailActivated) {
             (peak - distance).coerceIn(0.0, 1.0)
         } else null
-        val stopLossHit = stopLossPrice != null && currentPrice <= stopLossPrice
-        val trailingHit = trailingStopPrice != null && currentPrice <= trailingStopPrice
+        // A trailing stop is a profit-protection rule, not a disguised loss
+        // stop. A dip below entry may only be exited by the explicit
+        // time/settlement fallback below; there is no calibrated recovery
+        // model in this paper path to justify an earlier below-entry exit.
+        val stopLossHit = timeFallback && stopLossPrice != null && currentPrice <= stopLossPrice
+        val trailingHit = trailActivated && peak > entryPrice + 1e-9 &&
+            currentPrice >= entryPrice - 1e-9 &&
+            trailingStopPrice != null && currentPrice <= trailingStopPrice
         val stopHit = timeFallback || stopLossHit || trailingHit
         val stopType = when {
             timeFallback -> "TIME FALLBACK"

@@ -8,6 +8,7 @@ import com.dirk.kalshiodds.signal.trade.TicketPhase
 import com.dirk.kalshiodds.signal.trade.TicketSession
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import com.dirk.kalshiodds.signal.trade.KalshiFee
+import com.dirk.kalshiodds.signal.trade.getStopOrderManager
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -17,6 +18,50 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PaperBookTest {
+
+    @Test
+    fun partialPaperExitsKeepUniqueRealizedSlicesAndResidualPeak() {
+        val ticker = "KXBTC15M-PARTIAL"
+        val book = PaperBook(
+            idFactory = { "fixed-id" },
+            nowMs = { 1_000L }
+        )
+        val opened = book.forceFill(ticker, "YES", 0.40, 10, "test", "open")!!
+        book.updatePeak(opened.id, 0.50, 2_000L)
+        val first = book.sellAtPrice(ticker, "YES", 0.49, 2, "test", "partial")!!
+        val afterFirst = book.snapshot()
+        assertTrue(first.settled)
+        assertEquals(2, first.contracts)
+        assertEquals(1, afterFirst.fills.count { it.id == opened.id })
+        assertEquals(8, afterFirst.fills.first { it.id == opened.id }.contracts)
+        assertEquals(0.50, afterFirst.fills.first { it.id == opened.id }.peakPrice!!, 1e-9)
+        assertEquals(afterFirst.fills.size, afterFirst.fills.map { it.id }.toSet().size)
+
+        val second = book.sellAtPrice(ticker, "YES", 0.48, 3, "test", "partial")!!
+        val final = book.snapshot()
+        assertTrue(second.settled)
+        assertEquals(3, second.contracts)
+        assertEquals(5, final.fills.first { it.id == opened.id }.contracts)
+        assertEquals(2, final.fills.count { it.settled })
+        assertEquals(10, final.fills.sumOf { it.contracts })
+        assertEquals(
+            final.fills.filter { it.settled }.sumOf { it.pnlUsd ?: 0.0 },
+            final.realizedPnlUsd,
+            1e-9
+        )
+    }
+
+    @Test
+    fun unknownOrRepeatedDepthCannotSellMoreThanOneSnapshot() {
+        val ticker = "KXBTC15M-DEPTH"
+        val opened = PaperBook(idFactory = { "depth-id" }, nowMs = { 1_000L })
+            .also { it.forceFill(ticker, "YES", 0.40, 10, "test", "open") }
+        val manager = opened.getStopOrderManager(stopLossDelayMs = Long.MAX_VALUE, maxHoldMs = Long.MAX_VALUE)
+        assertTrue(manager.checkAndExecute(mapOf(ticker to com.dirk.kalshiodds.signal.trade.PaperExitQuote(0.50, 2, 2_000L, "book", "same")), 2_000L).isEmpty())
+        assertTrue(manager.checkAndExecute(mapOf(ticker to com.dirk.kalshiodds.signal.trade.PaperExitQuote(0.49, 2, 2_000L, "book", "same")), 2_000L).isNotEmpty())
+        assertTrue(manager.checkAndExecute(mapOf(ticker to com.dirk.kalshiodds.signal.trade.PaperExitQuote(0.49, 2, 2_000L, "book", "same")), 2_000L).isEmpty())
+        assertEquals(8, opened.snapshot().fills.first { !it.settled }.contracts)
+    }
 
     @Test
     fun startsAtOneHundredAndPapersFiveDollarAiFill() {

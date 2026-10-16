@@ -169,6 +169,7 @@ object KalshiWsMessages {
             closeTimeEpochMs = null,
             source = TickSource.WS_TICKER,
             receiveElapsedNanos = receiveElapsedNanos,
+            observedAtMs = System.currentTimeMillis(),
             exchangeTsMs = msg.longField("ts_ms") ?: msg.longField("ts")?.times(1000),
             tradeSize = msg.rawDouble("last_trade_size_fp"),
             noBid = snap?.noBid ?: noBid,
@@ -191,6 +192,7 @@ object KalshiWsMessages {
             closeTimeEpochMs = null,
             source = TickSource.WS_TRADE,
             receiveElapsedNanos = receiveElapsedNanos,
+            observedAtMs = System.currentTimeMillis(),
             exchangeTsMs = msg.longField("ts_ms") ?: msg.longField("ts")?.times(1000),
             tradeSize = msg.rawDouble("count_fp", "count"),
             takerSide = msg.stringField("taker_side") ?: msg.stringField("taker_outcome_side")

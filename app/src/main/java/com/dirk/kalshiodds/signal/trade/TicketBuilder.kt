@@ -40,7 +40,9 @@ object TicketBuilder {
         val bankrollSource: String? = null,
         /** Applied only to paper proposals; live tickets never use paper learning. */
         val adaptiveConfig: AdaptiveStrategy.AdaptiveConfig? = null,
-        val adaptiveTradingAllowed: Boolean = true
+        val adaptiveTradingAllowed: Boolean = true,
+        /** Paper entry/exit paths must reject unstamped or stale quotes. */
+        val requireFreshQuotes: Boolean = false
     ) {
         fun heldOpposite(ticker: String, buySide: String): Int {
             val opposite = if (buySide == "NO") "YES" else "NO"
@@ -358,6 +360,9 @@ object TicketBuilder {
             if (ctx.alertsPaused) return null
         }
         val ask = bestAsk(market, side, ctx) ?: return null
+        if (kind != TicketKind.MANUAL && !ctx.adaptiveTradingAllowed) return null
+        val adaptive = ctx.adaptiveConfig
+        if (kind != TicketKind.MANUAL && adaptive != null && ask > adaptive.maxAskFilter + 1e-9) return null
         if (kind == TicketKind.HUNTER) {
             val hunterMax = PayoutGate.maxLimitForPayout(
                 SignalConstants.HUNTER_STAKE_USD,
@@ -380,15 +385,20 @@ object TicketBuilder {
         // quoted touch. The payout check below can require a much smaller
         // $1 clip, so passing it alone does not make the displayed size real.
         val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
+        val allInCap = adaptive?.stakeUsd?.coerceIn(1.0, SignalConstants.LIVE_ALL_IN_CAP_USD)
+            ?: SignalConstants.LIVE_ALL_IN_CAP_USD
+        val sizingStakeUsd = if (kind != TicketKind.MANUAL) {
+            adaptive?.stakeUsd?.coerceIn(1.0, SignalConstants.LIVE_ALL_IN_CAP_USD) ?: stakeUsd
+        } else stakeUsd
         val live = if (kind != TicketKind.MANUAL && liveBook != null) {
             LiveOrderSizer.sizeWithinDepth(
                 ask,
                 kotlin.math.floor((quoted ?: 0.0) + 1e-9).toInt(),
-                SignalConstants.LIVE_ALL_IN_CAP_USD,
+                allInCap,
                 ctx.settings.feeRate
             )
         } else {
-            LiveOrderSizer.size(ask, SignalConstants.LIVE_ALL_IN_CAP_USD, ctx.settings.feeRate)
+            LiveOrderSizer.size(ask, allInCap, ctx.settings.feeRate)
         }
         if (!live.ok) {
             return if (kind == TicketKind.MANUAL) {
@@ -398,7 +408,7 @@ object TicketBuilder {
             }
         }
         val payoutCheck = PayoutGate.evaluate(
-            stakeUsd = stakeUsd,
+            stakeUsd = sizingStakeUsd,
             bestAsk = ask,
             askLevels = levels,
             quotedSize = quoted,
@@ -617,10 +627,25 @@ object TicketBuilder {
      * the book bid was 0.1¢.
      */
     fun freshBestBid(market: MarketUiModel, side: String, ctx: Context): Double? {
-        bookBid(ctx.books[market.ticker], side)?.let { return it }
-        tickBid(ctx.ticks[market.ticker], side)?.let { return it }
+        val book = ctx.books[market.ticker]
+        if (book != null) {
+            val levels = if (side.equals("NO", true)) book.no else book.yes
+            if (levels.isEmpty()) return null
+            if (ctx.requireFreshQuotes && !isFresh(book.updatedAtMs, ctx.nowMs)) return null
+            bookBid(book, side)?.let { return it }
+            return null
+        }
+        val tick = ctx.ticks[market.ticker]
+        if (tick != null) {
+            if (ctx.requireFreshQuotes && !isFresh(tick.observedAtMs, ctx.nowMs)) return null
+            tickBid(tick, side)?.let { return it }
+        }
+        if (ctx.requireFreshQuotes && !isFresh(market.quoteObservedAtMs, ctx.nowMs)) return null
         return quoteBid(market, side)
     }
+
+    private fun isFresh(observedAtMs: Long, nowMs: Long): Boolean =
+        observedAtMs > 0L && nowMs - observedAtMs <= SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS
 
     private fun quoteBid(market: MarketUiModel, side: String): Double? =
         if (side == "YES") {
@@ -669,8 +694,17 @@ object TicketBuilder {
         // across observations at different times can fabricate a cheap ask.
         // A book with no sellers on this side must not fall back to an older
         // quote that suggests a fill is available.
-        if (book != null && !book.isEmpty()) return bookAsk(side, book)
-        return fromTick ?: fromQuote
+        if (book != null) {
+            if (ctx.requireFreshQuotes && !isFresh(book.updatedAtMs, ctx.nowMs)) return null
+            if (!book.isEmpty()) return bookAsk(side, book)
+            return null
+        }
+        if (tick != null) {
+            if (ctx.requireFreshQuotes && !isFresh(tick.observedAtMs, ctx.nowMs)) return null
+            return fromTick
+        }
+        if (ctx.requireFreshQuotes && !isFresh(market.quoteObservedAtMs, ctx.nowMs)) return null
+        return fromQuote
     }
 
     /**

@@ -19,6 +19,8 @@ data class MarketUiModel(
     val yesAsk: Double? = null,
     val noBid: Double? = null,
     val noAsk: Double? = null,
+    /** Wall-clock time the REST/WS quote was observed, not cache-read time. */
+    val quoteObservedAtMs: Long = 0L,
     /** Contracts at the YES ask (`yes_ask_size_fp`). */
     val yesAskSize: Double? = null,
     val lastPrice: Double? = null,
@@ -132,7 +134,10 @@ fun MarketUiModel.withLiveQuote(tick: com.dirk.kalshiodds.signal.model.MarketTic
     val nb = quote.noBid
     val na = quote.noAsk
     val last = if (sameTicker) KalshiPrice.usable(tick?.lastPrice) ?: lastPrice else lastPrice
-    if (yb == yesBid && ya == yesAsk && nb == noBid && na == noAsk && last == lastPrice) return this
+    val observedAt = tick?.observedAtMs ?: quoteObservedAtMs
+    if (yb == yesBid && ya == yesAsk && nb == noBid && na == noAsk &&
+        last == lastPrice && observedAt == quoteObservedAtMs
+    ) return this
     val yesImplied = when {
         yb != null && ya != null -> (yb + ya) / 2.0
         last != null -> last
@@ -149,6 +154,7 @@ fun MarketUiModel.withLiveQuote(tick: com.dirk.kalshiodds.signal.model.MarketTic
         yesAsk = ya,
         noBid = nb,
         noAsk = na,
+        quoteObservedAtMs = observedAt,
         lastPrice = last,
         yesProbabilityPercent = yesImplied?.times(100.0),
         noProbabilityPercent = noImplied?.times(100.0),
@@ -182,6 +188,7 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         yesAsk = yesAsk,
         noBid = noBid,
         noAsk = noAsk,
+        quoteObservedAtMs = System.currentTimeMillis(),
         yesAskSize = KalshiPrice.parseCount(yesAskSizeFp),
         lastPrice = last,
         yesProbabilityPercent = yesImplied?.times(100.0),

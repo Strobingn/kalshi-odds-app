@@ -27,6 +27,8 @@ data class MarketTick(
     val source: TickSource,
     val receiveElapsedNanos: Long,
     val exchangeTsMs: Long? = null,
+    /** Wall-clock time this quote was observed by the app, not read from cache. */
+    val observedAtMs: Long = 0L,
     val tradeSize: Double? = null,
     val takerSide: String? = null,
     /** Kalshi floor / target price in USD when the REST snapshot provided it. */
@@ -59,6 +61,7 @@ data class MarketTick(
                 closeTimeEpochMs = model.closeTimeEpochMs,
                 source = source,
                 receiveElapsedNanos = receiveElapsedNanos,
+                observedAtMs = System.currentTimeMillis(),
                 floorStrike = model.floorStrike,
                 noBid = model.noBid,
                 noAsk = model.noAsk

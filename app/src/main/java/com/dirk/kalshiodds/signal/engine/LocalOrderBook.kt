@@ -16,7 +16,11 @@ import kotlin.math.tanh
 /** Immutable YES/NO rungs copied off the live TreeMap for UI / tickets. */
 data class BookLevelSnapshot(
     val yes: List<Pair<Double, Double>> = emptyList(),
-    val no: List<Pair<Double, Double>> = emptyList()
+    val no: List<Pair<Double, Double>> = emptyList(),
+    /** Wall-clock observation time; this is set on ingest, never on read. */
+    val updatedAtMs: Long = 0L,
+    /** Monotonic local revision used to avoid consuming one snapshot twice. */
+    val revision: Long = 0L
 ) {
     fun isEmpty(): Boolean = yes.isEmpty() && no.isEmpty()
 }
@@ -39,6 +43,8 @@ class LocalOrderBook {
     private var lastAsk: Double? = null
     private var cancelEma: Double = 0.0
     private var pullEma: Double = 0.0
+    private var updatedAtMs: Long = 0L
+    private var revision: Long = 0L
 
     @Synchronized
     fun isEmpty(): Boolean = yes.isEmpty() && no.isEmpty()
@@ -53,6 +59,8 @@ class LocalOrderBook {
         lastAsk = null
         cancelEma = 0.0
         pullEma = 0.0
+        updatedAtMs = System.currentTimeMillis()
+        revision++
     }
 
     @Synchronized
@@ -62,7 +70,8 @@ class LocalOrderBook {
     fun replaceSnapshot(
         yesLevels: List<Pair<Double, Double>>,
         noLevels: List<Pair<Double, Double>>,
-        seq: Int? = null
+        seq: Int? = null,
+        atMs: Long = System.currentTimeMillis()
     ) {
         yes.clear()
         no.clear()
@@ -70,6 +79,8 @@ class LocalOrderBook {
         for ((price, size) in noLevels) putLevel(no, price, size)
         lastSeq = seq
         sawGap = false
+        updatedAtMs = atMs
+        revision++
         noteQuoteMove()
     }
 
@@ -78,7 +89,13 @@ class LocalOrderBook {
      * of [lastSeq] (caller should wait for a fresh snapshot).
      */
     @Synchronized
-    fun applyDelta(price: Double, delta: Double, side: String, seq: Int? = null): Boolean {
+    fun applyDelta(
+        price: Double,
+        delta: Double,
+        side: String,
+        seq: Int? = null,
+        atMs: Long = System.currentTimeMillis()
+    ): Boolean {
         if (seq != null && lastSeq != null && seq > lastSeq!! + 1) {
             sawGap = true
             return false
@@ -91,6 +108,8 @@ class LocalOrderBook {
         val next = (book[price] ?: 0.0) + delta
         putLevel(book, price, next)
         if (seq != null) lastSeq = seq
+        updatedAtMs = atMs
+        revision++
         if (delta <= -SignalConstants.CANCEL_SPIKE_SIZE) {
             val signed = if (side.lowercase() == "yes") -1.0 else 1.0
             val mag = tanh((-delta) / 40.0)
@@ -201,7 +220,12 @@ class LocalOrderBook {
 
     /** Copy rungs so another thread can read them without racing [applyDelta]. */
     @Synchronized
-    fun snapshot(): BookLevelSnapshot = BookLevelSnapshot(yes = yesLevelsUnlocked(), no = noLevelsUnlocked())
+    fun snapshot(): BookLevelSnapshot = BookLevelSnapshot(
+        yes = yesLevelsUnlocked(),
+        no = noLevelsUnlocked(),
+        updatedAtMs = updatedAtMs,
+        revision = revision
+    )
 
     private fun yesLevelsUnlocked(): List<Pair<Double, Double>> = yes.entries.map { it.key to it.value }
 

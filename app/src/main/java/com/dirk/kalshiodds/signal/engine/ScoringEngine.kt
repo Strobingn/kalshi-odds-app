@@ -191,16 +191,18 @@ class ScoringEngine(
         ticker: String,
         yesLevels: List<Pair<Double, Double>>,
         noLevels: List<Pair<Double, Double>>,
-        seq: Int? = null
-    ): LocalOrderBook? = book.applySnapshot(ticker, yesLevels, noLevels, seq)
+        seq: Int? = null,
+        atMs: Long = System.currentTimeMillis()
+    ): LocalOrderBook? = book.applySnapshot(ticker, yesLevels, noLevels, seq, atMs)
 
     fun applyDelta(
         ticker: String,
         price: Double,
         delta: Double,
         side: String,
-        seq: Int? = null
-    ): LocalOrderBook? = book.applyDelta(ticker, price, delta, side, seq)
+        seq: Int? = null,
+        atMs: Long = System.currentTimeMillis()
+    ): LocalOrderBook? = book.applyDelta(ticker, price, delta, side, seq, atMs)
 
     fun score(tick: MarketTick, settings: SignalSettings, nowMs: Long = System.currentTimeMillis()): Score? {
         return try {

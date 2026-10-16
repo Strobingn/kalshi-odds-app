@@ -110,8 +110,32 @@ class TrailingStopTest {
         assertFalse(stop.calculatePositionState(f, 0.38, 5_000L).stopHit)
         val delayed = stop.calculatePositionState(f, 0.38, 11_000L)
         assertEquals(0.388, delayed.stopLossPrice!!, 0.0001)
-        assertTrue(delayed.stopHit)
-        assertEquals("STOP LOSS", delayed.stopType)
+        assertFalse(delayed.stopHit)
+        assertEquals(null, delayed.stopType)
+    }
+
+    @Test
+    fun `below entry dip after tiny peak does not trigger profit trail`() {
+        val f = fill(entry = 0.40, peak = 0.402, created = 1_000L)
+        val stop = manager(PaperBookState(fills = listOf(f)), lossDelay = 10_000L)
+        val state = stop.calculatePositionState(f, 0.394, 2_000L)
+        assertTrue(state.trailActivated)
+        assertEquals(0.394, state.trailingStopPrice!!, 0.0001)
+        assertFalse(state.stopHit)
+    }
+
+    @Test
+    fun `below entry exit is reserved for explicit time fallback`() {
+        val f = fill(entry = 0.40, created = 1_000L)
+        val stop = manager(
+            PaperBookState(fills = listOf(f)),
+            lossDelay = 10_000L,
+            maxHold = 12_000L
+        )
+        val state = stop.calculatePositionState(f, 0.38, 13_000L)
+        assertTrue(state.timeFallback)
+        assertTrue(state.stopHit)
+        assertEquals("TIME FALLBACK", state.stopType)
     }
 
     @Test
@@ -127,9 +151,9 @@ class TrailingStopTest {
                 maxHoldMs = Long.MAX_VALUE
             )
         )
-        assertTrue(stops.checkAndExecute(mapOf(ticker to PaperExitQuote(0.50, observedAtMs = 2_000L)), 2_000L).isEmpty())
+        assertTrue(stops.checkAndExecute(mapOf(ticker to PaperExitQuote(0.50, 10, 2_000L, "book", "r1")), 2_000L).isEmpty())
         assertEquals(0.50, book.snapshot().fills.first().peakPrice!!, 0.0001)
-        val execution = stops.checkAndExecute(mapOf(ticker to PaperExitQuote(0.49, observedAtMs = 3_000L)), 3_000L)
+        val execution = stops.checkAndExecute(mapOf(ticker to PaperExitQuote(0.49, 10, 3_000L, "book", "r2")), 3_000L)
         assertEquals(1, execution.size)
         assertEquals(10, execution.single().contracts)
     }
@@ -148,7 +172,7 @@ class TrailingStopTest {
             )
         )
         val result = manager.checkAndExecute(
-            mapOf(ticker to PaperExitQuote(0.49, availableContracts = 2, observedAtMs = 2_000L)),
+            mapOf(ticker to PaperExitQuote(0.49, availableContracts = 2, observedAtMs = 2_000L, sourceSnapshotId = "r1")),
             2_000L
         )
         assertEquals(1, result.size)
@@ -162,7 +186,7 @@ class TrailingStopTest {
     fun `stale quote is ignored`() {
         val f = fill(entry = 0.40, peak = 0.50)
         val m = manager(PaperBookState(fills = listOf(f)), maxAge = 1_000L)
-        val orders = m.checkPositions(mapOf(ticker to PaperExitQuote(0.49, observedAtMs = 1_000L)), 2_500L)
+        val orders = m.checkPositions(mapOf(ticker to PaperExitQuote(0.49, 10, 1_000L)), 2_500L)
         assertTrue(orders.isEmpty())
     }
 
@@ -170,7 +194,7 @@ class TrailingStopTest {
     fun `close fallback exits rather than holding to settlement`() {
         val f = fill(entry = 0.40, created = 1_000L, close = 10_000L)
         val m = manager(PaperBookState(fills = listOf(f)), lossDelay = Long.MAX_VALUE, settlementFallback = 2_000L)
-        val orders = m.checkPositions(mapOf(ticker to PaperExitQuote(0.39, observedAtMs = 8_500L)), 8_500L)
+        val orders = m.checkPositions(mapOf(ticker to PaperExitQuote(0.39, 10, 8_500L)), 8_500L)
         assertEquals(1, orders.size)
         assertTrue(orders.single().isTimeFallback)
     }

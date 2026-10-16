@@ -413,11 +413,12 @@ class TickBook(private val maxPoints: Int = 80) {
         ticker: String,
         yesLevels: List<Pair<Double, Double>>,
         noLevels: List<Pair<Double, Double>>,
-        seq: Int? = null
+        seq: Int? = null,
+        atMs: Long = System.currentTimeMillis()
     ): LocalOrderBook? {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val book = books.getOrPut(ticker) { LocalOrderBook() }
-        book.replaceSnapshot(yesLevels, noLevels, seq)
+        book.replaceSnapshot(yesLevels, noLevels, seq, atMs)
         tickFromBook(ticker, 0L)?.let { fromBook ->
             lastTickByTicker[ticker] = mergeLastTick(lastTickByTicker[ticker], fromBook)
         }
@@ -439,11 +440,12 @@ class TickBook(private val maxPoints: Int = 80) {
         price: Double,
         delta: Double,
         side: String,
-        seq: Int? = null
+        seq: Int? = null,
+        atMs: Long = System.currentTimeMillis()
     ): LocalOrderBook? {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return null
         val book = books.getOrPut(ticker) { LocalOrderBook() }
-        if (!book.applyDelta(price, delta, side, seq)) {
+        if (!book.applyDelta(price, delta, side, seq, atMs)) {
             book.clear()
             return null
         }
@@ -634,6 +636,7 @@ class TickBook(private val maxPoints: Int = 80) {
             source = TickSource.WS_ORDERBOOK,
             receiveElapsedNanos = receiveElapsedNanos,
             exchangeTsMs = nowMs,
+            observedAtMs = nowMs,
             floorStrike = last?.floorStrike ?: strikeByTicker[ticker],
             noBid = noBid ?: ask?.let { (1.0 - it).coerceIn(0.0, 1.0) },
             noAsk = noAsk ?: bid?.let { (1.0 - it).coerceIn(0.0, 1.0) }

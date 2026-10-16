@@ -42,6 +42,7 @@ class StopOrderManager(
 
     private val _executions = MutableStateFlow<List<StopExecution>>(emptyList())
     val executions: StateFlow<List<StopExecution>> = _executions.asStateFlow()
+    private val consumedDepthBySnapshot = mutableMapOf<String, Int>()
 
     /** Convenience compatibility path for tests; production uses quote depth. */
     fun checkAndExecute(currentPrices: Map<String, Double>): List<StopExecution> =
@@ -51,7 +52,7 @@ class StopOrderManager(
         if (!enabled() || !autoExecute || !config.autoExecute) return emptyList()
         paperBook.snapshot().fills.filter { !it.settled }.forEach { fill ->
             val quote = quotes[fill.ticker] ?: quotes[fill.ticker.uppercase()]
-            quote?.let { paperBook.updatePeak(fill.id, it.price, nowMs) }
+            quote?.takeIf { isFresh(it, nowMs) }?.let { paperBook.updatePeak(fill.id, it.price, nowMs) }
         }
         val current = paperBook.snapshot()
         val manager = current.getTrailingStopManager(
@@ -69,8 +70,12 @@ class StopOrderManager(
         orders.forEach { order ->
             val quote = quotes[order.ticker] ?: quotes[order.ticker.uppercase()] ?: return@forEach
             val held = current.fills.firstOrNull { it.id == order.fillId && !it.settled } ?: return@forEach
-            val depth = order.availableContracts?.coerceAtLeast(0) ?: held.contracts
-            val qty = minOf(held.contracts, depth)
+            val depth = order.availableContracts?.coerceAtLeast(0) ?: return@forEach
+            val snapshotId = quote.sourceSnapshotId ?: return@forEach
+            val consumedKey = "${order.fillId}|$snapshotId"
+            val alreadyConsumed = consumedDepthBySnapshot[consumedKey] ?: 0
+            val remainingDepth = (depth - alreadyConsumed).coerceAtLeast(0)
+            val qty = minOf(held.contracts, remainingDepth)
             if (qty <= 0) return@forEach
             val exitFee = KalshiFee.total(qty, quote.price)
             val entryFee = if (held.contracts > 0) held.entryFeeUsd * qty.toDouble() / held.contracts else 0.0
@@ -83,6 +88,7 @@ class StopOrderManager(
                 source = "STOP ${order.reason.uppercase()}",
                 note = "Paper stop at executable ${quote.source} bid"
             ) ?: return@forEach
+            consumedDepthBySnapshot[consumedKey] = alreadyConsumed + sold.contracts
             val execution = StopExecution(
                 fillId = order.fillId,
                 ticker = order.ticker,
@@ -124,7 +130,13 @@ class StopOrderManager(
 
     fun getExecutions(): List<StopExecution> = _executions.value
 
-    fun clearExecutions() { _executions.value = emptyList() }
+    fun clearExecutions() {
+        _executions.value = emptyList()
+        consumedDepthBySnapshot.clear()
+    }
+
+    private fun isFresh(quote: PaperExitQuote, nowMs: Long): Boolean =
+        quote.observedAtMs > 0L && nowMs - quote.observedAtMs <= config.maxQuoteAgeMs
 }
 
 fun PaperBook.getStopOrderManager(

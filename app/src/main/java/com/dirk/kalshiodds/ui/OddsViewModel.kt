@@ -7,6 +7,7 @@ import com.dirk.kalshiodds.KalshiOddsApp
 import com.dirk.kalshiodds.data.local.results.ScoredSnapshotRow
 import com.dirk.kalshiodds.data.repo.MarketsSnapshot
 import com.dirk.kalshiodds.signal.config.SignalSettings
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.engine.OverlayThrottle
@@ -815,17 +816,20 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 quiet = s.settings.opportunityQuiet
             )
         }
+        val paperCtx = ctx.copy(
+            bankrollUsd = paperBook.snapshot().equityUsd,
+            bankrollSource = "paper",
+            adaptiveConfig = adaptiveConfig,
+            adaptiveTradingAllowed = adaptiveAllowed,
+            requireFreshQuotes = true
+        )
         if (s.settings.paperTradingEnabled) {
-            val paperCtx = ctx.copy(
-                bankrollUsd = paperBook.snapshot().equityUsd,
-                bankrollSource = "paper",
-                adaptiveConfig = adaptiveConfig,
-                adaptiveTradingAllowed = adaptiveAllowed
-            )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
-            evaluatePaperStops(paperCtx, now)
         }
+        // Existing paper positions remain risk-managed even when automatic
+        // paper entry is toggled off.
+        evaluatePaperStops(paperCtx, now)
         refreshPositionMarks()
     }
 
@@ -849,7 +853,8 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     price = bid,
                     availableContracts = touchDepth,
                     observedAtMs = nowMs,
-                    source = if (touchDepth != null) "book" else "quote"
+                    source = if (touchDepth != null) "book" else "quote",
+                    sourceSnapshotId = book?.let { "${it.updatedAtMs}:${it.revision}" }
                 )
             }
             .toMap()
@@ -1051,14 +1056,25 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (!_state.value.settings.paperTradingEnabled) return
         val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
         val now = System.currentTimeMillis()
+        val adaptive = AdaptiveStrategy(paperBook.snapshot())
+        val adaptiveConfig = adaptive.getAdaptiveConfig()
         alerts.forEach { alert ->
             if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
             val market = markets[alert.ticker]
             if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
+            if (!adaptive.shouldTrade(market ?: return@forEach)) return@forEach
             val ask = market?.let {
                 TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
             }
-            paperBook.considerAlert(alert, ask, enabled = true)
+            if (ask == null || ask > SignalConstants.MAX_PAPER_ENTRY_ASK + 1e-9 ||
+                ask > adaptiveConfig.maxAskFilter + 1e-9
+            ) return@forEach
+            paperBook.considerAlert(
+                alert,
+                ask,
+                enabled = true,
+                closeTimeMs = market?.closeTimeEpochMs
+            )
         }
     }
 

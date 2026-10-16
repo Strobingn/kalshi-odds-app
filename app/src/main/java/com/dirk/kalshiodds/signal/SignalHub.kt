@@ -187,7 +187,7 @@ class SignalHub(
     ) {
         if (!CryptoMarkets.isCryptoTicker(ticker)) return
         if (!settings.isWatchedTicker(ticker)) return
-        runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq) }
+        runCatching { scoring.applySnapshot(ticker, yesLevels, noLevels, seq, System.currentTimeMillis()) }
         requestBookScore(ticker, receiveElapsedNanos)
     }
 
@@ -203,7 +203,7 @@ class SignalHub(
         if (!settings.isWatchedTicker(ticker)) return
         // Apply on the WS thread under TickBook's lock — cheap. Scoring is
         // latest-wins so a 50 Hz delta flood cannot enqueue 50 coroutines.
-        runCatching { scoring.applyDelta(ticker, price, delta, side, seq) }
+        runCatching { scoring.applyDelta(ticker, price, delta, side, seq, System.currentTimeMillis()) }
         requestBookScore(ticker, receiveElapsedNanos)
     }
 
