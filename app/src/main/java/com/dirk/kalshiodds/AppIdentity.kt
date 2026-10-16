@@ -9,9 +9,9 @@ package com.dirk.kalshiodds
  * 0.3.15 so `adb run-as` can copy the old app's DB/prefs in.
  */
 object AppIdentity {
-    const val APPLICATION_ID = "com.dirk.kalshiodds.kashi"
+    const val APPLICATION_ID = "com.dirk.kalshiodds.scalp"
     const val NAMESPACE = "com.dirk.kalshiodds"
-    const val LABEL = "Kalshi Trader"
+    const val LABEL = "Kalshi Scalper"
 
     /** FileProvider for the in-app debug APK. Authority stays on this applicationId. */
     const val FILE_PROVIDER_AUTHORITY = "$APPLICATION_ID.fileprovider"

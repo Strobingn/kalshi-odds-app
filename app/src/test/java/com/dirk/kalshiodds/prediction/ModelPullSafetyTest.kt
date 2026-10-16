@@ -8,7 +8,7 @@ import org.junit.Test
 
 class ModelPullSafetyTest {
     private val model = """{"kind":"logit","version":"3"}"""
-    private val pkg = "com.dirk.kalshiodds.kashi"
+    private val pkg = "com.dirk.kalshiodds.scalp"
 
     private fun good() = EdgeModelManifest(
         version = "3",

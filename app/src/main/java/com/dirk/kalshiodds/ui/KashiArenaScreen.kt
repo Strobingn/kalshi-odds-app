@@ -145,6 +145,7 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
                 if (points.size >= 2) Box(Modifier.width(76.dp)) { ArenaProfitChart(points, compact = true) }
             }
         }
+        if (ScalpModels.isV2(row.model)) Text(com.dirk.kalshiodds.decision.ScalperBrain.summary(row.model.code), color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
         Text(if (paused) "Entries paused · view chart →" else "Live 15m chart & trades →", color = c.accentBlue, style = MaterialTheme.typography.labelSmall)
     }
 }

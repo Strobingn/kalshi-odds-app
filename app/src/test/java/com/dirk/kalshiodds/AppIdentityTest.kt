@@ -38,8 +38,8 @@ class AppIdentityTest {
         assertEquals(AppIdentity.LABEL, ctx.applicationInfo.loadLabel(ctx.packageManager).toString())
         assertEquals("com.dirk.kalshiodds", AppIdentity.NAMESPACE)
         assertTrue(BuildConfig.APPLICATION_ID.startsWith("${AppIdentity.NAMESPACE}."))
-        assertEquals(92, BuildConfig.VERSION_CODE)
-        assertEquals("0.3.77", BuildConfig.VERSION_NAME)
+        assertEquals(1, BuildConfig.VERSION_CODE)
+        assertEquals("1.0.0", BuildConfig.VERSION_NAME)
         assertEquals(AppIdentity.LABEL, HomeCopy.TITLE)
         assertEquals(AppIdentity.LABEL, LiveSignalsPolicy.NOTIFICATION_TITLE)
         assertTrue(AppVersion.label.startsWith("${AppIdentity.LABEL} v"))
@@ -52,9 +52,9 @@ class AppIdentityTest {
             File("build.gradle.kts")
         ).first { it.isFile && it.readText().contains("applicationId") }.readText()
         assertTrue(gradle.contains("namespace = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.kashi\""))
+        assertTrue(gradle.contains("applicationId = \"com.dirk.kalshiodds.scalp\""))
         assertFalse(gradle.contains("applicationId = \"com.dirk.kalshiodds\""))
-        assertTrue(gradle.contains("versionCode = 92"))
+        assertTrue(gradle.contains("versionCode = 1"))
         assertTrue(gradle.contains("versionName = \"0.3.77\""))
         val manifest = listOf(
             File("app/src/main/AndroidManifest.xml"),
@@ -124,9 +124,9 @@ class AppIdentityStorageAuditTest {
         assertEquals(AppIdentity.WM_CLOUD_ONCE, SyncWorker.ONCE)
         assertEquals(AppIdentity.WM_BACKFILL, BackfillWorker.UNIQUE)
         assertEquals(AppIdentity.WM_MARKET_REFRESH, MarketRefreshWorker.UNIQUE_NAME)
-        assertEquals("com.dirk.kalshiodds.kashi.fileprovider", AppIdentity.FILE_PROVIDER_AUTHORITY)
+        assertEquals("com.dirk.kalshiodds.scalp.fileprovider", AppIdentity.FILE_PROVIDER_AUTHORITY)
         assertEquals(
-            "package:com.dirk.kalshiodds.kashi",
+            "package:com.dirk.kalshiodds.scalp",
             LiveSignalsPolicy.batteryPackageUri(AppIdentity.APPLICATION_ID)
         )
     }
@@ -147,7 +147,7 @@ class AppIdentityStorageAuditTest {
             )
         }
         val strings = files.first { it.name == "strings.xml" }.readText()
-        assertTrue(strings.contains(">Kalshi Trader<"))
+        assertTrue(strings.contains(">Kalshi Scalper<"))
     }
 
     @Test
@@ -364,7 +364,7 @@ class AppIdentityStorageAuditTest {
     fun wiringAuditListsEveryApplicationIdSurface() {
         val items = AppIdentity.wiringAuditItems()
         listOf(
-            "com.dirk.kalshiodds.kashi",
+            "com.dirk.kalshiodds.scalp",
             "FileProvider",
             "ContentProvider",
             "deep links",

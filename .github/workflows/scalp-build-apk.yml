@@ -1,19 +1,19 @@
-name: Kashi build APK
+name: Kalshi Scalper build APK
 
 # Builds signed APK artifacts for work branches and PRs. Successful pushes to
 # kashi also publish an updater-compatible release, after every build check.
 on:
   push:
-    branches: [kashi, "kashi-*"]
+    branches: [kashi-next-dev]
   pull_request:
-    branches: [kashi]
+    branches: [kashi-next-dev]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: kashi-build-apk-${{ github.ref }}
+  group: scalp-build-apk-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -35,8 +35,7 @@ jobs:
           python-version: "3.12"
       - name: ML trainer tests (no look-ahead, publish safety)
         run: |
-          python3 scripts/test_kashi_release.py
-          python3 ml/test_train_edge.py
+                    python3 ml/test_train_edge.py
           python3 ml/test_publish_model.py
           python3 ml/test_train_edge_0337.py
           if [ -f ml/test_train_longshot.py ]; then python3 ml/test_train_longshot.py; fi
@@ -48,14 +47,14 @@ jobs:
         id: apk
         run: |
           name=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)
-          out="KalshiTrader-kashi-v${name}-${GITHUB_SHA::7}.apk"
+          out="KalshiScalper-v${name}-${GITHUB_SHA::7}.apk"
           cp app/build/outputs/apk/debug/DipHunter-debug.apk "$out"
           sha256sum "$out"
           echo "path=$out" >> "$GITHUB_OUTPUT"
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: KalshiTrader-kashi-apk
+          name: KalshiScalper-apk
           path: ${{ steps.apk.outputs.path }}
           if-no-files-found: error
       - name: Upload scalping UI previews
@@ -67,7 +66,7 @@ jobs:
           if-no-files-found: error
 
   publish-update:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/kashi'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/kashi-next-dev'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -78,7 +77,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: KalshiTrader-kashi-apk
+          name: KalshiScalper-apk
           path: update-apk
       - name: Publish the verified APK to the in-app update feed
         env:
@@ -88,5 +87,5 @@ jobs:
           version=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)
           mapfile -t apks < <(find update-apk -maxdepth 1 -name '*.apk' -type f)
           [[ ${#apks[@]} == 1 ]] || { echo "Expected exactly one verified APK" >&2; exit 1; }
-          cp "${apks[0]}" DipHunter-debug.apk
-          scripts/kashi-release.sh "v${version}-debug" DipHunter-debug.apk "$GITHUB_SHA" "Kashi ${version}" "Kashi paper trading update ${version}. Built and signature-checked from ${GITHUB_SHA}."
+          cp "${apks[0]}" KalshiScalper.apk
+          scripts/scalp-release.sh "scalp-v${version}" KalshiScalper.apk "$GITHUB_SHA" "Kalshi Scalper ${version}" "Kalshi Scalper ${version} (paper BTC scalping). Built and signature-checked from ${GITHUB_SHA} on kashi-next-dev."

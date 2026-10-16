@@ -11,8 +11,8 @@ package com.dirk.kalshiodds.decision
  */
 object ScalpV2 {
     const val PREFIX = "v2-"
-    const val MAX_ASK = 0.50
-    const val TRAIL = 0.02
+    const val MAX_ASK = 0.55
+    const val TRAIL = 0.03
     const val ENTRY_DELAY_MS = 2_000L
     const val GIVE_UP_MS = 6_000L
     const val CLIP = 10
@@ -27,12 +27,13 @@ object ScalpV2 {
     fun fresh(q: ScalpRule.Quote): Boolean = !q.bookGap && q.nowMs - q.bookAtMs in 0..BOOK_MAX_AGE_MS
 
     /** A conservative hold hypothesis, not knowledge of the settlement result. Missing CF data means exit. */
-    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int): String? {
+    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int, code: String = side): String? {
         if (q.tauS > EXIT_BY_S) return null
         val bid = q.bid(side)
         val fair = q.cfFair(side)
+        // Never hold to close unless confidence the side settles in the money is over 95% (self-learned model, fair-value fallback).
         val hold = fresh(q) && bid != null && bid.isFinite() && bid >= 0.90 &&
-            fair != null && fair.isFinite() && fair >= 0.97 &&
+            fair != null && fair.isFinite() && ScalperBrain.holdConfidence(code, bid, fair) > ScalperBrain.HOLD_CONF &&
             fair > bid - ScalpRule.feePerContract(n.coerceAtLeast(1), bid) + 0.01 &&
             ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) > 0.0
         return if (hold) null else "v2 exit before close: no strong fresh winning evidence"
@@ -98,25 +99,25 @@ object ScalpV2 {
      * different sells) and two size copies (x5/x10) whose paper fills walk the real order-book depth.
      */
     data class Spec(val id: String, val base: String, val maxAsk: Double = MAX_ASK, val trail: Double = TRAIL,
-                    val stop: Double? = null, val clip: Int = CLIP, val walk: Boolean = false, val tag: String = "")
+                    val stop: Double? = null, val clip: Int = CLIP, val walk: Boolean = false, val tag: String = "", val openMin: Double = 3.0)
 
-    private val SHOCK_ASK = listOf(0.50, 0.48, 0.46, 0.44, 0.42)
-    private val SHOCK_TRAIL = listOf(0.02, 0.01, 0.03, 0.04)
+    private val SHOCK_ASK = listOf(0.55, 0.53, 0.51, 0.49, 0.47)
+    private val SHOCK_OPEN = listOf(2.0, 3.0, 4.0, 5.0)
     private val SHOCK_SPECS: List<Spec> = (1..20).map { i ->
         val b = String.format(java.util.Locale.US, "sf%02d", i)
-        Spec(PREFIX + b, b, maxAsk = SHOCK_ASK[(i - 1) % 5], trail = SHOCK_TRAIL[(i - 1) / 5])
+        Spec(PREFIX + b, b, maxAsk = SHOCK_ASK[(i - 1) % 5], trail = TRAIL, openMin = SHOCK_OPEN[(i - 1) / 5])
     }
     private val SIMPLE_BASES = listOf("sf41", "sf42", "sf43", "sf44")
     val EXTRA_SPECS: List<Spec> = SIMPLE_BASES.flatMapIndexed { k, b ->
         listOf(
-            Spec(PREFIX + b + "t1", b, maxAsk = 0.44 + 0.01 * k, trail = 0.01, stop = 0.10 + 0.02 * k, tag = "tweak 1"),
-            Spec(PREFIX + b + "t2", b, maxAsk = MAX_ASK, trail = 0.03, stop = 0.20 + 0.02 * k, tag = "tweak 2"),
-            Spec(PREFIX + b + "x5", b, clip = 5, walk = true, tag = "5 contracts"),
-            Spec(PREFIX + b + "x10", b, clip = 10, walk = true, tag = "10 contracts")
+            Spec(PREFIX + b + "t1", b, maxAsk = 0.46 + 0.01 * k, stop = 0.10 + 0.02 * k, tag = "tweak 1", openMin = 2.0 + 0.5 * k),
+            Spec(PREFIX + b + "t2", b, maxAsk = MAX_ASK - 0.01 * k, stop = 0.20 + 0.02 * k, tag = "tweak 2", openMin = 4.0 + 0.5 * k),
+            Spec(PREFIX + b + "x5", b, maxAsk = 0.52 - 0.01 * k, clip = 5, walk = true, tag = "5 contracts", openMin = 3.0 + 0.25 * k),
+            Spec(PREFIX + b + "x10", b, maxAsk = 0.50 - 0.01 * k, clip = 10, walk = true, tag = "10 contracts", openMin = 3.5 + 0.25 * k)
         )
     }
     private val BY_ID: Map<String, Spec> = (SHOCK_SPECS + EXTRA_SPECS).associateBy { it.id }
-    fun spec(variantId: String): Spec = BY_ID[variantId] ?: Spec(variantId, variantId.removePrefix(PREFIX))
+    fun spec(variantId: String): Spec = BY_ID[variantId] ?: Spec(variantId, variantId.removePrefix(PREFIX), maxAsk = MAX_ASK - 0.01 * Math.floorMod(variantId.hashCode(), 6), openMin = 2.0 + Math.floorMod(variantId.hashCode() / 7, 4))
     /** Extra (non-plain) v2 copies to spawn for one original signal. */
     fun extrasFor(originalVariantId: String): List<Spec> = EXTRA_SPECS.filter { it.base == originalVariantId }
     fun isExtra(variantId: String): Boolean = EXTRA_SPECS.any { it.id == variantId }

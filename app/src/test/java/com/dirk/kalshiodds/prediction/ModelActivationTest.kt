@@ -21,7 +21,7 @@ class ModelActivationTest {
         simPnl = 12.5,
         simTrades = 40,
         marketPnl = -3.0,
-        packageId = "com.dirk.kalshiodds.kashi",
+        packageId = "com.dirk.kalshiodds.scalp",
         countsPresent = true,
         beatMarketFlag = true,
         dataSource = EdgeModelManifest.PROVENANCE_LIVE
@@ -44,7 +44,7 @@ class ModelActivationTest {
               "sim_pnl": 12.5,
               "sim_trades": 40,
               "market_pnl": -3.0,
-              "package": "com.dirk.kalshiodds.kashi",
+              "package": "com.dirk.kalshiodds.scalp",
               "beat_market": true,
               "synthetic": false,
               "data_source": "kalshi_settled_coinbase_spot_v1"

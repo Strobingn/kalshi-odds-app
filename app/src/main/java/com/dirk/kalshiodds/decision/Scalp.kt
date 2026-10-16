@@ -62,7 +62,7 @@ object ScalpRule {
     const val CHEAP_MIN = 0.02
     const val CHEAP_MAX = 0.15
     const val ENTRY_LO = 0.10
-    const val ENTRY_HI = 0.50
+    const val ENTRY_HI = 0.55
 
     /** Hard ceiling for every scalping buy, independent of settings or saved strategy rules. */
     fun buyPriceOk(price: Double?): Boolean = price != null && price.isFinite() && price > 0.0 && price <= ENTRY_HI + 1e-9
@@ -1363,6 +1363,8 @@ class ScalpBook(
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
         if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
         if (prev == null && liveExtras) spawnV2(t)
+        if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && ScalpV2.isV2(t.variantId))
+            ScalperBrain.parse(t.note)?.let { x -> ScalperBrain.learn(ScalpModels.modelOf(t)?.code ?: t.variantId, x, (t.netUsd ?: 0.0) > 0.0) }
         val cur = _all.value
         val idx = cur.indexOfFirst { it.id == t.id }
         _all.value = when {
@@ -1490,14 +1492,21 @@ class ScalpBook(
             val knobs = cfg.settings(model.code)
             val close = ScalpTicker.closeMs(t.ticker)
             if (close != null && !knobs.timeOk(t.signalAtMs, close)) continue
+            // Kalshi Scalper rules: entries only in the first minutes of each 15-minute window, and only when this
+            // strategy's self-learned confidence clears its own learned threshold.
+            val minuteIn = close?.let { 15.0 - (it - t.signalAtMs) / 60_000.0 } ?: 99.0
+            if (minuteIn < 0.0 || minuteIn > seed.openMin) continue
+            val bx = ScalperBrain.features(t.signalAsk, t.fairAtSignal.takeIf { it.isFinite() }, minuteIn)
+            val conf = ScalperBrain.p(model.code, bx)
+            if (conf < ScalperBrain.minConf(model.code)) continue
             val checkKey = "${t.ticker}|${model.code}|${t.side}"
             val lastCheck = strategyEntryChecks[checkKey]
             if (lastCheck != null && t.signalAtMs - lastCheck < knobs.cadenceSeconds * 1000L) continue
             strategyEntryChecks[checkKey] = t.signalAtMs
             if (strategyEntryChecks.size > 2000) strategyEntryChecks.keys.filter { (ScalpTicker.closeMs(it.substringBefore('|')) ?: 0) < t.signalAtMs }.forEach { strategyEntryChecks.remove(it) }
             val plan = cfg.plan(informed, model.code)
-            val sp = if (cfg.peakTrailEnabled) plan.spec.copy(trail = (knobs.trailCents ?: cfg.peakTrailCents) / 100.0)
-                else plan.spec.copy(trail = knobs.trailCents?.div(100.0) ?: plan.spec.trail)
+            // Hard rule: every Kalshi Scalper strategy trails 3¢ below the peak bid, active from entry.
+            val sp = plan.spec.copy(trail = ScalpV2.TRAIL)
             val stopPct = knobs.stopLossPercent ?: cfg.stopLossPercent
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
@@ -1507,8 +1516,8 @@ class ScalpBook(
                     if (sp.walk) " depth-walk" else "", stop) +
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
                     String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", (knobs.takeProfitCents ?: if (cfg.manual) cfg.takeProfitCents else 0) / 100.0, knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
-                    (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "") +
-                    " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",
+                    (if (true) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "") +
+                    String.format(Locale.US, " · %s · conf=%.3f", ScalperBrain.tag(bx), conf) + " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
@@ -1628,7 +1637,7 @@ class ScalpBook(
                         else ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it)))
                             ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }
-                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
+                    val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts, ScalpModels.modelOf(t)?.code ?: t.variantId)
                     if (reason == null) { if (marked != t) out += marked; continue }
                     val base = if (t.state == ScalpState.OPEN) marked.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else marked
                     val decided = base.exitDecidedAtMs ?: q.nowMs

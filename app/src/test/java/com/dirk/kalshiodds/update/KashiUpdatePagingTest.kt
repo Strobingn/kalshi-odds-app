@@ -31,10 +31,10 @@ class KashiUpdatePagingTest {
     @Test fun findsOurReleaseOnPageTwoBehindOtherBranches() {
         val urls = ArrayList<String>()
         val p1 = filler("swarm", 100)
-        val p2 = listOf(rel("v0.3.48-debug")) + filler("swarm2", 20)
+        val p2 = listOf(rel("scalp-v0.3.48")) + filler("swarm2", 20)
         val c = KashiUpdateClient(fetchText = { urls += it; pages(p1, p2)(it) })
         val r = c.check("0.3.47")
-        assertTrue(r.toString(), r is UpdateCheck.Available && r.release.tag == "v0.3.48-debug")
+        assertTrue(r.toString(), r is UpdateCheck.Available && r.release.tag == "scalp-v0.3.48")
         assertEquals(2, urls.size) // short page 2 stops paging
     }
 
@@ -49,22 +49,22 @@ class KashiUpdatePagingTest {
     @Test fun filtersByTagPatternAndKeepsSafetyChecks() {
         val list = listOf(
             rel("v9.9.9"),                                  // not -debug
-            rel("v0.3.99-debug", body = "no marker"),       // missing app-id
-            rel("v0.3.98-debug", asset = "other.apk"),      // wrong asset
-            rel("v0.3.97-debug", draft = true),             // draft
-            rel("v0.3.47-debug"),                           // not newer
-            rel("v0.3.48-debug")
+            rel("scalp-v0.3.99", body = "no marker"),       // missing app-id
+            rel("scalp-v0.3.98", asset = "other.apk"),      // wrong asset
+            rel("scalp-v0.3.97", draft = true),             // draft
+            rel("scalp-v0.3.47"),                           // not newer
+            rel("scalp-v0.3.48")
         )
         val c = KashiUpdateClient(fetchText = { JSONArray(list).toString() })
         val all = c.listReleases()!!
         assertTrue(all.all { KashiReleasePolicy.TAG.matches(it.tag) })
         val r = c.check("0.3.47")
-        assertTrue(r is UpdateCheck.Available && r.release.tag == "v0.3.48-debug")
+        assertTrue(r is UpdateCheck.Available && r.release.tag == "scalp-v0.3.48")
         assertEquals(UpdateCheck.UpToDate, c.check("0.3.49"))
     }
 
     @Test fun laterPageFailureKeepsEarlierResultsFirstPageFailureFails() {
-        val p1 = listOf(rel("v0.3.48-debug")) + filler("y", 99)
+        val p1 = listOf(rel("scalp-v0.3.48")) + filler("y", 99)
         val c = KashiUpdateClient(fetchText = { if (it.endsWith("page=1")) JSONArray(p1).toString() else throw IOException("boom") })
         assertTrue(c.check("0.3.47") is UpdateCheck.Available)
         val bad = KashiUpdateClient(fetchText = { throw IOException("down") })

@@ -19,11 +19,11 @@ import org.json.JSONObject
 object KashiReleasePolicy {
     const val OWNER = "Strobingn"
     const val REPO = "kalshi-odds-app"
-    const val BRANCH = "kashi"
-    const val ASSET_NAME = "DipHunter-debug.apk"
-    const val PACKAGE_ID = "com.dirk.kalshiodds.kashi"
+    const val BRANCH = "kashi-next-dev"
+    const val ASSET_NAME = "KalshiScalper.apk"
+    const val PACKAGE_ID = "com.dirk.kalshiodds.scalp"
     const val CERT_SHA256 = "64e2a43a6897c4556a36b82ea31dc89550c65e56b053658e1438bdf3c4cc4608"
-    const val APP_ID_MARKER = "app-id: com.dirk.kalshiodds.kashi"
+    const val APP_ID_MARKER = "app-id: com.dirk.kalshiodds.scalp"
     /** 0.3.48: 100 per page, up to [MAX_PAGES] pages, so other branches' releases can't push ours out of view. */
     const val PER_PAGE = 100
     const val MAX_PAGES = 3
@@ -31,7 +31,7 @@ object KashiReleasePolicy {
 
     fun pageUrl(page: Int): String = "$RELEASES_URL&page=$page"
 
-    val TAG: Regex = Regex("^v\\d+\\.\\d+\\.\\d+-debug$")
+    val TAG: Regex = Regex("^scalp-v\\d+\\.\\d+\\.\\d+$")
 
     fun assetUrl(tag: String): String =
         "https://github.com/$OWNER/$REPO/releases/download/$tag/$ASSET_NAME"
@@ -45,7 +45,7 @@ object KashiReleasePolicy {
         val asset: Asset?,
         val notes: String = ""
     ) {
-        val versionName: String get() = tag.removePrefix("v").removeSuffix("-debug")
+        val versionName: String get() = tag.removePrefix("scalp-v")
     }
 
     fun hasAppIdMarker(notes: String?): Boolean =
@@ -116,7 +116,7 @@ object KashiReleasePolicy {
     }
 
     fun versionOf(name: String): Triple<Int, Int, Int>? {
-        val parts = name.trim().removePrefix("v").removeSuffix("-debug").split(".")
+        val parts = name.trim().removePrefix("scalp-").removePrefix("v").removeSuffix("-debug").split(".")
         if (parts.size != 3) return null
         val nums = parts.map { it.toIntOrNull() ?: return null }
         return Triple(nums[0], nums[1], nums[2])
@@ -146,7 +146,7 @@ sealed class ApkInstallDecision {
  */
 object InstalledApkCheck {
     const val REFUSE_PACKAGE =
-        "Refusing install — this APK is not Kalshi Trader (com.dirk.kalshiodds.kashi)."
+        "Refusing install — this APK is not Kalshi Scalper (com.dirk.kalshiodds.scalp)."
     const val REFUSE_CERT =
         "Refusing install — the APK is not signed with this app's certificate."
     const val REFUSE_UNREADABLE =

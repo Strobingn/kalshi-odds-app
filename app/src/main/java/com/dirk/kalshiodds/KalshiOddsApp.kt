@@ -38,6 +38,7 @@ class KalshiOddsApp : Application() {
         runCatching { com.dirk.kalshiodds.crash.CrashLog.install(this, BuildConfig.VERSION_NAME) } // 0.3.47
         // 0.3.40 (owner): Autopilot/Scalp are paper-only — delete any persisted live arming (idempotent).
         runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.deleteLegacyArming(this) }
+        runCatching { com.dirk.kalshiodds.decision.ScalperBrain.init(filesDir) }
         container = AppContainer(this)
         appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }
         runCatching { container.lastOrderError.clearStaleLifecycleNotice() }

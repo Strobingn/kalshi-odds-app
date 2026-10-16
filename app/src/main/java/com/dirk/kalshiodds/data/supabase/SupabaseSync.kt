@@ -311,7 +311,7 @@ class SupabaseSync(
             .addPathSegments("rest/v1/$table")
             .addEncodedQueryParameter("select", "*")
             .addEncodedQueryParameter("limit", PULL_LIMIT_PER_KIND.toString())
-            .addEncodedQueryParameter("key", "like.kashi:*")
+            .addEncodedQueryParameter("key", "like.scalp:*")
             // 0.3.55: never pull snapshots/scalp/shadow back; 0.3.60: positive per-kind equality (index-backed).
             .addEncodedQueryParameter("kind", "eq.$kind")
             // Newest first; direction matches the (kind, updated_at, key) index so it is a plain backward index scan.
@@ -389,9 +389,9 @@ class SupabaseSync(
         /** 0.3.60: kinds merged back on pull (everything except snapshot / scalp / shadow, which are push-only). */
         val PULL_KINDS = listOf("alert", "paper", "ticket", "settings", "settings_snapshot")
         const val PULL_LIMIT_PER_KIND = 1000
-        const val KEY_PREFIX = "kashi:"
+        const val KEY_PREFIX = "scalp:"
         /** PostgREST `like` filter. `*` is the wildcard. */
-        const val PULL_FILTER = "key=like.kashi:*"
+        const val PULL_FILTER = "key=like.scalp:*"
         private val JSON = "application/json; charset=utf-8".toMediaType()
         val FORBIDDEN_SETTING_KEYS = setOf(
             "api_key_id", "apikeyid", "private_key_pem", "pem", "github_token", "githubtoken"
