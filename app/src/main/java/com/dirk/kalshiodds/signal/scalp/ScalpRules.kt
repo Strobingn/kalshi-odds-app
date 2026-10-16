@@ -64,26 +64,26 @@ object ScalpCatalog {
      * fixed profit, stop out 5¢ under the entry.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        dip("late_squeeze", "Trail 2¢", 0.0, 0.02, 0.50, 0.25, "Buy under 50¢. Sell 2¢ off the high."),
-        dip("all_in_cheap", "Trail 3¢", 0.0, 0.03, 0.50, 0.25, "Buy under 50¢. Sell 3¢ off the high."),
-        dip("all_in_under_50", "Trail 4¢", 0.0, 0.04, 0.50, 0.25, "Buy under 50¢. Sell 4¢ off the high."),
-        dip("first_5", "Trail 5¢", 0.0, 0.05, 0.50, 0.25, "Buy under 50¢. Sell 5¢ off the high."),
-        dip("no_cap", "Trail 6¢", 0.0, 0.06, 0.50, 0.25, "Buy under 50¢. Sell 6¢ off the high."),
-        dip("slow_trail", "Trail 7¢", 0.0, 0.07, 0.50, 0.25, "Buy under 50¢. Sell 7¢ off the high."),
-        dip("tight_spread", "Trail 8¢", 0.0, 0.08, 0.50, 0.25, "Buy under 50¢. Sell 8¢ off the high."),
-        dip("tight_4c", "Trail 5¢ 20%", 0.0, 0.05, 0.50, 0.20, "Buy under 50¢. 20%. Sell 5¢ off the high."),
-        dip("penny_press", "Trail 5¢ 30%", 0.0, 0.05, 0.50, 0.30, "Buy under 50¢. 30%. Sell 5¢ off the high."),
-        dip("deep_value", "Trail 4¢ 15%", 0.0, 0.04, 0.50, 0.15, "Buy under 50¢. 15%. Sell 4¢ off the high."),
-        dip("dip_buy", "Trail 3¢ 20%", 0.0, 0.03, 0.50, 0.20, "Buy under 50¢. 20%. Sell 3¢ off the high."),
-        dip("wide_gap", "Trail 6¢ 20%", 0.0, 0.06, 0.50, 0.20, "Buy under 50¢. 20%. Sell 6¢ off the high."),
-        dip("burst", "Trail 5¢ 15%", 0.0, 0.05, 0.50, 0.15, "Buy under 50¢. 15%. Sell 5¢ off the high."),
-        dip("reclaim", "Trail 4¢ 30%", 0.0, 0.04, 0.50, 0.30, "Buy under 50¢. 30%. Sell 4¢ off the high."),
-        dip("min_5_7", "Trail 2¢ 20%", 0.0, 0.02, 0.50, 0.20, "Buy under 50¢. 20%. Sell 2¢ off the high."),
-        dip("dump_catch", "Trail 7¢ 20%", 0.0, 0.07, 0.50, 0.20, "Buy under 50¢. 20%. Sell 7¢ off the high."),
-        dip("fade_spike", "Trail 8¢ 15%", 0.0, 0.08, 0.50, 0.15, "Buy under 50¢. 15%. Sell 8¢ off the high."),
-        dip("gap_side", "Trail 5¢ 25%", 0.0, 0.05, 0.50, 0.25, "Buy under 50¢. 25%. Sell 5¢ off the high."),
-        dip("breakout_50", "Trail 3¢ 25%", 0.0, 0.03, 0.50, 0.25, "Buy under 50¢. 25%. Sell 3¢ off the high."),
-        dip("momentum", "Trail 6¢ 25%", 0.0, 0.06, 0.50, 0.25, "Buy under 50¢. 25%. Sell 6¢ off the high.")
+        dip("late_squeeze", "Late fav 85", 0.0, 0.0, 0.85, 0.15, "Last 2 min. Buy the favourite at 85¢+."),
+        dip("all_in_cheap", "Late fav 90", 0.0, 0.0, 0.90, 0.15, "Last 2 min. Buy the favourite at 90¢+."),
+        dip("all_in_under_50", "Late fav 88", 0.0, 0.0, 0.88, 0.15, "Last 2 min. Buy the favourite at 88¢+."),
+        dip("first_5", "Late fav 92", 0.0, 0.0, 0.92, 0.15, "Last 2 min. Buy the favourite at 92¢+."),
+        dip("no_cap", "Late fav 95", 0.0, 0.0, 0.95, 0.15, "Last 2 min. Buy the favourite at 95¢+."),
+        dip("slow_trail", "Late fav 87", 0.0, 0.0, 0.87, 0.15, "Last 2 min. Buy the favourite at 87¢+."),
+        dip("tight_spread", "Late fav 85 10%", 0.0, 0.0, 0.85, 0.10, "Last 2 min. 10%. Buy the favourite at 85¢+."),
+        dip("tight_4c", "Late fav 90 10%", 0.0, 0.0, 0.90, 0.10, "Last 2 min. 10%. Buy the favourite at 90¢+."),
+        dip("penny_press", "Late fav 88 20%", 0.0, 0.0, 0.88, 0.20, "Last 2 min. 20%. Buy the favourite at 88¢+."),
+        dip("deep_value", "Late fav 92 10%", 0.0, 0.0, 0.92, 0.10, "Last 2 min. 10%. Buy the favourite at 92¢+."),
+        dip("dip_buy", "Late fav 95 10%", 0.0, 0.0, 0.95, 0.10, "Last 2 min. 10%. Buy the favourite at 95¢+."),
+        dip("wide_gap", "Late fav 85 20%", 0.0, 0.0, 0.85, 0.20, "Last 2 min. 20%. Buy the favourite at 85¢+."),
+        dip("burst", "Late fav 90 20%", 0.0, 0.0, 0.90, 0.20, "Last 2 min. 20%. Buy the favourite at 90¢+."),
+        dip("reclaim", "Late fav 87 10%", 0.0, 0.0, 0.87, 0.10, "Last 2 min. 10%. Buy the favourite at 87¢+."),
+        dip("min_5_7", "Late fav 88 10%", 0.0, 0.0, 0.88, 0.10, "Last 2 min. 10%. Buy the favourite at 88¢+."),
+        dip("dump_catch", "Late fav 92 20%", 0.0, 0.0, 0.92, 0.20, "Last 2 min. 20%. Buy the favourite at 92¢+."),
+        dip("fade_spike", "Late fav 95 20%", 0.0, 0.0, 0.95, 0.20, "Last 2 min. 20%. Buy the favourite at 95¢+."),
+        dip("gap_side", "Late fav 85 15%", 0.0, 0.0, 0.85, 0.15, "Last 2 min. 15%. Buy the favourite at 85¢+."),
+        dip("breakout_50", "Late fav 90 15%", 0.0, 0.0, 0.90, 0.15, "Last 2 min. 15%. Buy the favourite at 90¢+."),
+        dip("momentum", "Late fav 88 15%", 0.0, 0.0, 0.88, 0.15, "Last 2 min. 15%. Buy the favourite at 88¢+.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
@@ -173,9 +173,11 @@ object ScalpCatalog {
         algo(id, name, rule) { a, t ->
             val pos = a.position
             if (pos == null) {
-                val side = cheaper(t)
+                val mins = t.tteMs / 60_000.0
+                if (mins > 2.0) return@algo ScalpIntent.Hold
+                val side = if (t.yesBid > t.noBid) "YES" else "NO"
                 val aPx = ask(t, side)
-                if (aPx <= 0.50) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
+                if (aPx >= 0.85) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
                 when {
