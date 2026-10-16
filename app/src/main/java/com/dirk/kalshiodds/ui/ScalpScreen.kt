@@ -68,6 +68,7 @@ fun ScalpScreen(
             color = if (total >= 0.0) colors.up else colors.down
         )
         state.tape?.let { LivePriceChart(it) }
+        ScalpSettingsCard()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) { Text("Reset all") }
             OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) { Text("Export") }
