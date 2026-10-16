@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -27,8 +28,41 @@ fun SwarmScalpSettingsDialog(onClose: () -> Unit) {
     val store = remember(ctx) { SavedScalpControls(ctx) }
     DisposableEffect(store) { onDispose { store.close() } }
     val saved by store.state.collectAsStateWithLifecycle()
-    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        SwarmScalpSettingsContent(saved, onClose) { store.save(it); onClose() }
+    var selected by remember { mutableStateOf<ScalpModels.Model?>(null) }
+    var global by remember { mutableStateOf(false) }
+    fun back() { if (selected != null) selected = null else if (global) global = false else onClose() }
+    Dialog(onDismissRequest = ::back, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        val model = selected
+        if (model != null) ScalpStrategySettingsContent(model, saved, onBack = { selected = null },
+            onChange = { store.save(store.state.value.copy(strategySettings = store.state.value.strategySettings + (model.code to it))) },
+            onEnabled = { enabled -> val current = store.state.value; store.save(current.copy(disabledStrategies = if (enabled) current.disabledStrategies - model.code else current.disabledStrategies + model.code)) })
+        else if (global) SwarmScalpSettingsContent(saved, onBack = { global = false }) { store.save(it); global = false }
+        else ScalpSettingsChooser(onClose, { global = true }, { selected = it })
+    }
+}
+
+
+/** The arena gear opens the strategy picker first; global risk controls are one tap away. */
+@Composable
+internal fun ScalpSettingsChooser(onBack: () -> Unit = {}, onGlobal: () -> Unit = {}, onStrategy: (ScalpModels.Model) -> Unit = {}) {
+    val c = DipTheme.colors
+    LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        item(key = "header") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = c.accentBlue) }
+                Text("Strategy settings", color = c.textPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+            }
+            Text("Choose a V2 strategy to adjust its sliders. Changes apply to its next order.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
+        item(key = "global") { OutlinedButton(onClick = onGlobal, modifier = Modifier.fillMaxWidth()) { Text("Global controls & limits") } }
+        items(ScalpModels.V2_MODELS, key = { it.code }) { model ->
+            ArenaCard {
+                TextButton(onClick = { onStrategy(model) }, modifier = Modifier.fillMaxWidth()) {
+                    Text(model.label, color = c.textPrimary, modifier = Modifier.weight(1f))
+                    Text("Tune →", color = c.accentBlue)
+                }
+            }
+        }
     }
 }
 
