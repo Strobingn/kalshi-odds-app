@@ -58,7 +58,7 @@ fun ScalpScreen(
     val ranked = state.accounts.sortedByDescending { it.pnlUsd() }
     val total = state.accounts.sumOf { it.pnlUsd() }
     Column(
-        modifier = Modifier.fillMaxSize().background(colors.background).padding(12.dp),
+        modifier = Modifier.fillMaxSize().background(colors.bg).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         Text("Scalp", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
@@ -108,7 +108,6 @@ private fun CompactRow(rank: Int, account: ScalpAccount, onReset: () -> Unit) {
             fontWeight = FontWeight.Bold
         )
     }
-}
 }
 
 @Composable
