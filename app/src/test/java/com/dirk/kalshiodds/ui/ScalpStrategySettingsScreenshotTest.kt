@@ -9,6 +9,9 @@ import org.junit.Test
 
 class ScalpStrategySettingsScreenshotTest {
     @get:Rule val paparazzi = Paparazzi(deviceConfig = DeviceConfig.PIXEL_6.copy(screenWidth = 1080, screenHeight = 2340, softButtons = false), theme = "android:Theme.Material3.DayNight.NoActionBar")
+    @Test fun strategyPicker() { paparazzi.snapshot(name = "strategy_slider_picker") {
+        KalshiOddsTheme(darkTheme = true, colorStyle = ColorStyles.CLASSIC) { ScalpSettingsChooser() }
+    } }
     @Test fun strategySettingsDark() = shot(true)
     @Test fun strategySettingsLight() = shot(false)
     private fun shot(dark: Boolean) { paparazzi.snapshot(name = "strategy_slider_settings_${if (dark) "dark" else "light"}") {

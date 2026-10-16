@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
@@ -45,7 +46,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     val enabled = model.code !in controls.disabledStrategies
     val high = settings.maxEntryCents ?: if (controls.manual) controls.maxAskCents else (spec.maxAsk * 100).roundToInt()
     val low = settings.minEntryCents.coerceAtMost(high)
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().background(c.bg), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item(key = "settings-header") {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to strategy", tint = c.accentBlue) }
