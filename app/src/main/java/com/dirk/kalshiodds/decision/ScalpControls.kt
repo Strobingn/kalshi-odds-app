@@ -19,7 +19,7 @@ data class ScalpControls(
     val disabledStrategies: Set<String> = emptySet(),
     val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20
 ) {
-    fun normalized() = copy(peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 99), stopCents = stopCents.coerceIn(1, 99),
+    fun normalized() = copy(peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 50), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
@@ -28,9 +28,12 @@ data class ScalpControls(
         maxOpen = maxOpen.coerceIn(0, 1000), windowSeconds = windowSeconds.coerceIn(10, 600),
         dipCents = dipCents.takeIf { it.isFinite() }?.coerceIn(0.0, 30.0) ?: 0.0)
     fun permits(modelCode: String) = enabled && !killSwitch && modelCode !in disabledStrategies
-    fun plan(base: ScalpV2.Plan): ScalpV2.Plan = if (!manual) base else base.copy(
-        spec = base.spec.copy(maxAsk = maxAskCents / 100.0, trail = trailCents / 100.0, clip = contracts),
-        stop = stopCents / 100.0, arm = armCents / 100.0, adjusted = false, note = "v2ai=manual; user parameters")
+    fun plan(base: ScalpV2.Plan): ScalpV2.Plan {
+        val chosen = if (!manual) base else base.copy(
+            spec = base.spec.copy(maxAsk = maxAskCents.coerceIn(1, 50) / 100.0, trail = trailCents / 100.0, clip = contracts),
+            stop = stopCents / 100.0, arm = armCents / 100.0, adjusted = false, note = "v2ai=manual; user parameters")
+        return chosen.copy(spec = chosen.spec.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, chosen.spec.maxAsk)))
+    }
     fun entryBlock(modelCode: String, open: Int, entriesLastHour: Int, todayNet: Double): String? = when {
         !permits(modelCode) -> "V2 entries paused or strategy disabled"
         maxOpen > 0 && open >= maxOpen -> "V2 open-position limit"
@@ -47,7 +50,7 @@ data class ScalpControls(
     fun walkBuy(levels: List<Pair<Double, Double>>, wanted: Int, limit: Double): Triple<Int, Double, Double> {
         var count = 0; var value = 0.0; var fees = 0.0
         for ((price, size) in levels.sortedBy { it.first }) {
-            if (!price.isFinite() || price <= 0 || price > limit || !size.isFinite() || size < 1) continue
+            if (!ScalpRule.buyPriceOk(price) || price > limit || !size.isFinite() || size < 1) continue
             var lo = 0
             var hi = minOf(wanted - count, kotlin.math.floor(size).coerceAtMost(Int.MAX_VALUE.toDouble()).toInt()).coerceAtLeast(0)
             while (lo < hi) {

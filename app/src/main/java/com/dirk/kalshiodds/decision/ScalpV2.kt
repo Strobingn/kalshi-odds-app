@@ -110,7 +110,7 @@ object ScalpV2 {
     val EXTRA_SPECS: List<Spec> = SIMPLE_BASES.flatMapIndexed { k, b ->
         listOf(
             Spec(PREFIX + b + "t1", b, maxAsk = 0.44 + 0.01 * k, trail = 0.01, stop = 0.10 + 0.02 * k, tag = "tweak 1"),
-            Spec(PREFIX + b + "t2", b, maxAsk = 0.52 + 0.01 * k, trail = 0.03, stop = 0.20 + 0.02 * k, tag = "tweak 2"),
+            Spec(PREFIX + b + "t2", b, maxAsk = MAX_ASK, trail = 0.03, stop = 0.20 + 0.02 * k, tag = "tweak 2"),
             Spec(PREFIX + b + "x5", b, clip = 5, walk = true, tag = "5 contracts"),
             Spec(PREFIX + b + "x10", b, clip = 10, walk = true, tag = "10 contracts")
         )
@@ -126,7 +126,7 @@ object ScalpV2 {
     fun walk(levels: List<Pair<Double, Double>>, want: Int, ok: (Double) -> Boolean): Pair<Int, Double> {
         var n = 0; var usd = 0.0
         for ((px, sz) in levels) {
-            if (n >= want || !ok(px)) break
+            if (n >= want || !ScalpRule.buyPriceOk(px) || !ok(px)) break
             val take = minOf(want - n, kotlin.math.floor(sz + 1e-9).toInt())
             if (take <= 0) continue
             n += take; usd += take * px
@@ -144,7 +144,7 @@ object ScalpV2 {
         else -> ScalpParams.byId(originalVariantId)?.stop ?: 0.10
     }.coerceIn(0.01, 0.99)
 
-    fun entryOk(ask: Double?, maxAsk: Double = MAX_ASK): Boolean = ask != null && ask > 0.0 && ask <= maxAsk + 1e-9
+    fun entryOk(ask: Double?, maxAsk: Double = MAX_ASK): Boolean = ScalpRule.buyPriceOk(ask) && maxAsk.isFinite() && ask!! <= minOf(MAX_ASK, maxAsk) + 1e-9
 
     /** Uses the actual entry fees (including level-by-level rounding) and any partial proceeds. */
     fun netPerContract(t: ScalpTrade, bid: Double): Double =
