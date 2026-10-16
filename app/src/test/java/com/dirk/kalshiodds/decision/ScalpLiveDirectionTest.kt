@@ -42,13 +42,14 @@ class ScalpLiveDirectionTest {
         val book = book()
         tick(book, quote(0, .49, .51))
         tick(book, quote(1, .53, .55))
-        tick(book, quote(3, .45, .47))
+        tick(book, quote(4, .45, .47))
+        assertEquals(ScalpState.NO_FILL, book.snapshot().single { it.variantId == "sf51" && it.side == "YES" }.state)
         val rows = book.snapshot().filter { it.variantId == "v2-sf51" }
         assertEquals(ScalpState.NO_FILL, rows.single { it.side == "YES" }.state)
         assertEquals(ScalpState.PENDING_ENTRY, rows.single { it.side == "NO" }.state)
-        tick(book, quote(4, .45, .47))
-        assertTrue(book.snapshot().none { it.variantId == "v2-sf51" && it.state == ScalpState.OPEN })
         tick(book, quote(5, .45, .47))
+        assertTrue(book.snapshot().none { it.variantId == "v2-sf51" && it.state == ScalpState.OPEN })
+        tick(book, quote(6, .45, .47))
         assertEquals("NO", book.snapshot().single { it.variantId == "v2-sf51" && it.state == ScalpState.OPEN }.side)
     }
 

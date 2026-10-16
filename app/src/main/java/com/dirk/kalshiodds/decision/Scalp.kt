@@ -573,6 +573,15 @@ class ScalpBook(
         changed += stepV2(q)
         mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
             val p = ScalpParams.byId(t.variantId) ?: primary
+            // Opening originals also pass through this generic execution lane. Never fill an obsolete side here.
+            if (t.state == ScalpState.PENDING_ENTRY && ShockFav.byVariantId(t.variantId)?.o50 == ShockFav.O50.UPTICK) {
+                if (!ScalpV2.fresh(q)) return@forEach
+                if (openingDirection(q) != t.side) {
+                    changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
+                        note = "${t.note}; opening direction changed before fill; wait for a new live signal")
+                    return@forEach
+                }
+            }
             step(t, q, p)?.let { changed += it }
         }
         if (enabled) {
