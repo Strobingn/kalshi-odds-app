@@ -67,10 +67,22 @@ jobs:
             --tests 'com.dirk.kalshiodds.signal.feedback.TicketForwardSqliteTest' \
             --tests 'com.dirk.kalshiodds.signal.ResultsPersistenceTest' \
             --tests 'com.dirk.kalshiodds.ui.AppUpdaterTest' \
+            --tests 'com.dirk.kalshiodds.ui.ExecutionWindowDataTest' \
+            --tests 'com.dirk.kalshiodds.ui.PaperWindowChartDataTest' \
             --no-daemon --stacktrace || {
               echo "Selected regression tests missing or failed on this branch — falling back to full unit suite"
               ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
             }
+
+      - name: Execution chart UI previews
+        run: ./gradlew :app:recordPaparazziDebug --tests 'com.dirk.kalshiodds.ui.ExecutionWindowScreenshotTest' --no-daemon --stacktrace
+
+      - name: Upload execution chart previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: execution-chart-previews
+          path: app/build/reports/paparazzi/debug/
+          if-no-files-found: error
 
       - name: Rename APK
         id: apk
@@ -103,3 +115,4 @@ jobs:
             --prerelease
           gh release edit "$tag" --draft=false --prerelease
           gh release view "$tag" --json isDraft --jq '.isDraft' | grep -qx false
+
