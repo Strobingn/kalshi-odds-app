@@ -364,7 +364,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val model = selected.model ?: return
         val now = container.clock.nowMs()
         container.scalp.flushWrites()
-        val active = container.scalp.all.value.filter { com.dirk.kalshiodds.decision.ScalpModels.modelOf(it) == model }
+        val active = container.scalp.all.value.filter { com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(it) == model.code }
         val page = container.scalp.pageTrades(model.code, limit = 80)
         val liveMarkets = _state.value.snapshot?.allMarkets.orEmpty().filter {
             com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES &&
