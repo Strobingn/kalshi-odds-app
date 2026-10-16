@@ -20,14 +20,14 @@ import kotlinx.coroutines.flow.asStateFlow
 class StopOrderManager(
     private val paperBook: PaperBook,
     private val trailingStopCents: Double = 3.0,    // 3 cent trailing stop
-    private val stopLossPct: Double = 20.0,        // 20% stop loss
+    private val stopLossPct: Double = 3.0,         // 3% stop loss (more reasonable for prediction markets)
     private val minProfitCents: Double = 0.0,      // No minimum - active from entry
     private val autoExecute: Boolean = true
 ) {
 
     data class StopConfig(
         val trailingStopCents: Double = 3.0,
-        val stopLossPct: Double = 20.0,
+        val stopLossPct: Double = 3.0,         // 3% stop loss default
         val minProfitCents: Double = 0.0,
         val autoExecute: Boolean = true,
         val enabled: Boolean = true
@@ -189,7 +189,7 @@ class StopOrderManager(
  */
 fun PaperBook.getStopOrderManager(
     trailingStopCents: Double = 3.0,
-    stopLossPct: Double = 20.0,
+    stopLossPct: Double = 3.0,         // 3% stop loss (more reasonable for prediction markets)
     minProfitCents: Double = 0.0,
     autoExecute: Boolean = true
 ): StopOrderManager {
@@ -201,7 +201,7 @@ fun PaperBook.getStopOrderManager(
  */
 object DefaultStopConfig {
     const val TRAILING_STOP_CENTS = 3.0
-    const val STOP_LOSS_PCT = 20.0
+    const val STOP_LOSS_PCT = 3.0       // Changed from 20% to 3% for prediction markets
     const val MIN_PROFIT_CENTS = 0.0
     const val AUTO_EXECUTE = true
     const val ENABLED = true

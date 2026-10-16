@@ -23,13 +23,13 @@ import kotlin.math.min
 class TrailingStop(
     private val paperState: PaperBookState,
     private val trailingStopCents: Double = 3.0,  // 3 cent trailing stop (0.03)
-    private val stopLossPct: Double = 20.0,      // 20% stop loss
+    private val stopLossPct: Double = 3.0,       // 3% stop loss (more reasonable for prediction markets)
     private val minProfitCents: Double = 0.0      // No minimum - trailing stop active from entry
 ) {
 
     data class StopConfig(
         val trailingStopCents: Double = 3.0,
-        val stopLossPct: Double = 20.0,
+        val stopLossPct: Double = 3.0,         // 3% stop loss default
         val minProfitCents: Double = 0.0,
         val enabled: Boolean = true
     )
@@ -278,7 +278,7 @@ class TrailingStop(
  */
 fun PaperBookState.getTrailingStopManager(
     trailingStopCents: Double = 3.0,
-    stopLossPct: Double = 20.0,
+    stopLossPct: Double = 3.0,         // 3% stop loss (more reasonable for prediction markets)
     minProfitCents: Double = 0.0
 ): TrailingStop {
     return TrailingStop(this, trailingStopCents, stopLossPct, minProfitCents)
