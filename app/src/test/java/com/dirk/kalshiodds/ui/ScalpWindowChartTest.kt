@@ -57,6 +57,22 @@ class ScalpWindowChartTest {
         assertEquals(recorded.note, ScalpFills.orderNote(recorded, recorded))
     }
 
+    @Test fun lateSettlementPlotsAtCloseButKeepsItsActualRecordedTime() {
+        val sold = ScalpFills.sell(trade(), close + 12_000, 10, 10.0, 0.0, true)
+        val marker = ScalpWindowChartData(tk, close, close + 20_000, trades = listOf(sold)).markers("YES").last()
+        assertEquals(ScalpWindowChartData.Kind.SETTLEMENT, marker.kind)
+        assertEquals(close, marker.atMs)
+        assertEquals(close + 12_000, marker.recordedAtMs)
+    }
+
+    @Test fun pickerKeepsLiveWindowAndOnlyRecentWindowsWithRecordedQuotes() {
+        val live = ScalpTabMarket(tk, "BTC", close, "Live")
+        val old = ScalpTabMarket("older", "BTC", close - 900_000, "Older")
+        val missing = ScalpTabMarket("missing", "BTC", close - 1_800_000, "Missing")
+        val choices = ScalpWindowChartData.availableMarkets(listOf(live), listOf(live, old, missing)) { it.ticker == old.ticker }
+        assertEquals(listOf(tk, "older"), choices.map { it.ticker })
+    }
+
     @Test fun bookPartialExitRecordsSurvivePersistenceAndRestart() {
         val store = InMemoryScalpPersistence().also { it.seed(listOf(trade().copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = start + 80_000, exitReason = "trail"))) }
         val book = ScalpBook(store, variants = emptyList(), liveExtras = true)
