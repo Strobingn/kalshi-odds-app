@@ -68,7 +68,11 @@ fun ScalpScreen(
             color = if (total >= 0.0) colors.up else colors.down
         )
         state.tape?.let { LivePriceChart(it) }
-        ScalpSettingsCard()
+        var showSettings by remember { mutableStateOf(false) }
+        OutlinedButton(onClick = { showSettings = !showSettings }, modifier = Modifier.fillMaxWidth()) {
+            Text(if (showSettings) "Hide settings" else "Settings")
+        }
+        if (showSettings) ScalpSettingsCard()
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) { Text("Reset all") }
             OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) { Text("Export") }
@@ -207,7 +211,7 @@ private fun LivePriceChart(tape: com.dirk.kalshiodds.signal.scalp.ScalpTape) {
             style = MaterialTheme.typography.labelMedium,
             color = colors.textSecondary
         )
-        Canvas(Modifier.fillMaxWidth().height(100.dp)) {
+        Canvas(Modifier.fillMaxWidth().height(200.dp)) {
             val yes = tape.yesBids.map { it.toFloat() }
             val no = tape.noBids.map { it.toFloat() }
             if (yes.size < 2) return@Canvas
