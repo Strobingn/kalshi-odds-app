@@ -32,9 +32,9 @@ class ReleaseGate0353Test {
     }
 
     @Test fun entryAndExitRules() {
-        assertTrue(ForecastScalp.wantsEntry(0.50, 0.01, 0.51, 0.08, 600.0))
+        assertTrue(ForecastScalp.wantsEntry(0.50, 0.01, 0.50, 0.08, 600.0))
         assertTrue(!ForecastScalp.wantsEntry(0.70, 0.01, 0.71, 0.20, 600.0)) // outside band
-        assertTrue(!ForecastScalp.wantsEntry(0.50, 0.01, 0.51, 0.03, 600.0)) // edge below spread + both fees
+        assertTrue(!ForecastScalp.wantsEntry(0.50, 0.01, 0.50, 0.03, 600.0)) // edge below spread + both fees
         assertEquals("take profit ≥ 90¢", ForecastScalp.wantsExit(0.05, 0.91, 10.0, 300, 600.0))
         assertEquals("forecast flipped hard", ForecastScalp.wantsExit(-0.05, 0.55, 10.0, 300, 600.0))
         assertEquals("horizon reached", ForecastScalp.wantsExit(0.05, 0.55, 300.0, 300, 600.0))
@@ -42,7 +42,7 @@ class ReleaseGate0353Test {
         assertNull(ForecastScalp.wantsExit(0.05, 0.55, 10.0, 300, 600.0))
     }
 
-    @Test fun rideAndFadeMirrorInTheBook() {
+    @Test fun rideAndFadeRespectTheBuyCeilingInTheBook() {
         val b = ScalpBook(bankrollUsd = { 20_000.0 })
         val close = 1_791_000_900_000L
         val t0 = close - 800_000L
@@ -58,8 +58,9 @@ class ReleaseGate0353Test {
         val fc = b.snapshot().filter { ForecastScalp.isForecast(it) }
         val ride = fc.filter { ScalpModels.modelOf(it) == ScalpModels.Model.FORECAST_RIDE }
         val fade = fc.filter { ScalpModels.modelOf(it) == ScalpModels.Model.FORECAST_FADE }
-        assertEquals(ride.size, fade.size) // same signals, mirrored
-        ride.zip(fade.sortedBy { it.signalAtMs }.let { f -> f }).forEach { (r, f) -> assertTrue(r.side != f.side) }
+        // The opposite ask can exceed 50¢, so ride/fade no longer have to enter together.
+        assertTrue(fc.all { it.signalAsk <= .50 + 1e-9 })
+        ride.forEach { r -> fade.filter { it.signalAtMs == r.signalAtMs }.forEach { f -> assertTrue(r.side != f.side) } }
         assertTrue(fc.all { it.state != ScalpState.CLOSED || it.entryFeeUsd > 0.0 }) // fees on every fill
         assertTrue(n == 200)
     }

@@ -53,10 +53,10 @@ class ReleaseGate0357Test {
         val book = ScalpBook(bankrollUsd = { 20_000.0 })
         val t = close - 40_000L
         warm(book, t, 100_400.0)
-        assertTrue(book.onShockFavQuote(q(t, 100_400.0, 0.85, 0.83), false).isEmpty())
-        val a = book.onShockFavQuote(q(t + 1000, 100_400.0, 0.85, 0.83), true).filter { ShockFav.isFavLeg(it.variantId) }
+        assertTrue(book.onShockFavQuote(q(t, 100_400.0, 0.50, 0.48), false).isEmpty())
+        val a = book.onShockFavQuote(q(t + 1000, 100_400.0, 0.50, 0.48), true).filter { ShockFav.isFavLeg(it.variantId) }
         assertTrue(a.isNotEmpty())
-        val b = book.onShockFavQuote(q(t + 2000, 100_400.0, 0.85, 0.83), true).filter { ShockFav.isFavLeg(it.variantId) }
+        val b = book.onShockFavQuote(q(t + 2000, 100_400.0, 0.50, 0.48), true).filter { ShockFav.isFavLeg(it.variantId) }
         assertTrue(b.isEmpty())
     }
 

@@ -74,7 +74,7 @@ class AppIdentityStorageAuditTest {
         assertEquals(AppIdentity.DB_RESULTS, SqliteResultsStore.DB_NAME)
         assertEquals(AppIdentity.DB_VERSION, SqliteResultsStore.DB_VERSION)
         assertEquals(8, com.dirk.kalshiodds.data.local.paper.PaperFillSchema.VERSION)
-        assertTrue(AppIdentity.DB_VERSION >= com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.VERSION) // 0.3.43 v9, 0.3.73 v10
+        assertTrue(AppIdentity.DB_VERSION >= com.dirk.kalshiodds.data.local.paper.PaperOrderSchema.VERSION) // 0.3.43 v9, 0.3.72 v10
         assertEquals(AppIdentity.PREFS_KEEPALIVE, LiveSignalsPolicy.PREFS_NAME)
         assertEquals("diphunter_paper_book", AppIdentity.PREFS_PAPER)
         assertEquals("diphunter_last_minute", AppIdentity.PREFS_LAST_MINUTE)
