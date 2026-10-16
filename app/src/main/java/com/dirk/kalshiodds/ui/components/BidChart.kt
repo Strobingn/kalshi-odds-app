@@ -222,7 +222,8 @@ private fun SpotPathCanvas(
     lastSpot: Double?,
     axisColor: androidx.compose.ui.graphics.Color
 ) {
-    val colors = DipTheme.colors
+    // Spot has a fixed orange meaning in the chart legend, independent of the app accent.
+    val spotColor = DipTheme.colors.spot
     val (minY, maxY) = range
     val t0 = windowStartMs
     val t1 = windowEndMs
@@ -257,19 +258,19 @@ private fun SpotPathCanvas(
                 val y = yOf(px)
                 if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
             }
-            drawPath(path, colors.accentBlue, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path, spotColor, style = Stroke(width = 2.5.dp.toPx(), cap = StrokeCap.Round))
         }
         val endPx = lastSpot ?: series.lastOrNull()?.second
         val endT = series.lastOrNull()?.first ?: t1
         if (endPx != null) {
-            drawCircle(colors.accentBlue, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
+            drawCircle(spotColor, 5.dp.toPx(), Offset(xOf(endT), yOf(endPx)))
         }
     }
     Row(Modifier.fillMaxWidth().padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
         val now = lastSpot ?: series.lastOrNull()?.second
         Text(
             now?.let { String.format(Locale.US, "Now $%,.2f", it) } ?: "Spot",
-            color = colors.accentBlue,
+            color = spotColor,
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold
         )

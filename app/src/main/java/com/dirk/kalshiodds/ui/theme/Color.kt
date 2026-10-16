@@ -35,6 +35,9 @@ val DownInk = Color(0xFFDE4439)
 val DownButton = Color(0xFF9E2020)
 /** Darker maroon behind the DOWN tile. */
 val DownContainer = Color(0xFF160808)
+/** Spot-price chart encoding stays orange in both app styles. */
+val SpotOrangeDark = Color(0xFFFFA726)
+val SpotOrangeLight = Color(0xFFB45309)
 val AccentOrange = Color(0xFFD29922)
 val AccentRed = DownColor
 val OnAccentDark = Color(0xFF0D1117)
