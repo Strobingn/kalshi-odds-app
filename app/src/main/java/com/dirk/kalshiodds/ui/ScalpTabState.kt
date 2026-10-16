@@ -49,5 +49,8 @@ data class ScalpAlgoDetail(
     val today: ScalpModels.Row? = null,
     val byCoin: Map<String, ScalpModels.Row> = emptyMap(),
     val trades: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
-    val equity: List<Double> = emptyList()
+    val equity: List<Double> = emptyList(),
+    val chart: ScalpWindowChartData = ScalpWindowChartData(),
+    val chartMarkets: List<ScalpTabMarket> = emptyList(),
+    val followLive: Boolean = true
 )

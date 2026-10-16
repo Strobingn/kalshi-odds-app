@@ -159,6 +159,7 @@ class SupabaseSync(
                 .put("stopLevel", com.dirk.kalshiodds.decision.ScalpModels.modelOf(t)?.let { com.dirk.kalshiodds.decision.ScalpModels.stopLabel(it) } ?: "")
                 .put("group", if (com.dirk.kalshiodds.decision.ScalpV2.isV2(t.variantId)) "v2" else (com.dirk.kalshiodds.decision.ShockFav.byVariantId(t.variantId)?.group ?: ""))
                 .put("note", t.note.take(2_000))
+                .put("executionNotes", com.dirk.kalshiodds.decision.ScalpFills.executionNotes(t.note))
             out.add(rec("scalp:${t.id}", "scalp", at, payload))
         }
         bundle.shadow.forEach { s ->
@@ -526,11 +527,15 @@ internal object SyncRows {
         return com.dirk.kalshiodds.decision.ScalpTrade(
             id = id, ticker = o.optString("ticker"), side = o.optString("side"),
             state = com.dirk.kalshiodds.decision.ScalpState.CLOSED,
-            signalAtMs = o.optLong("entryAtMs").takeIf { it > 0 } ?: closed, signalAsk = entry ?: 0.0, fairAtSignal = entry ?: 0.0,
-            contracts = n, entryPrice = entry, entryFeeUsd = o.dOrNull("feesUsd") ?: 0.0,
-            entryAtMs = o.optLong("entryAtMs").takeIf { it > 0 }, soldContracts = n,
+            signalAtMs = o.optLong("signalAtMs").takeIf { it > 0 } ?: o.optLong("entryAtMs").takeIf { it > 0 } ?: closed,
+            signalAsk = o.dOrNull("signalAsk") ?: entry ?: 0.0, fairAtSignal = o.dOrNull("fairAtSignal") ?: entry ?: 0.0,
+            contracts = n, entryPrice = entry, entryFeeUsd = o.dOrNull("entryFeeUsd") ?: ((o.dOrNull("feesUsd") ?: 0.0) - (o.dOrNull("exitFeeUsd") ?: 0.0)).coerceAtLeast(0.0),
+            exitFeeUsd = o.dOrNull("exitFeeUsd") ?: 0.0,
+            exitDecidedAtMs = o.optLong("exitDecidedAtMs").takeIf { it > 0 }, adverse30 = o.dOrNull("adverse30"), adverse60 = o.dOrNull("adverse60"),
+            entryAtMs = o.optLong("entryAtMs").takeIf { it > 0 }, soldContracts = if (o.has("soldContracts")) o.optInt("soldContracts").coerceIn(0, n.coerceAtLeast(0)) else n,
             proceedsUsd = (o.dOrNull("exitAvg") ?: 0.0) * n, closedAtMs = closed, netUsd = o.dOrNull("netUsd"),
-            exitReason = o.optString("exitReason").ifBlank { null }, note = "restored from diphunter_sync",
+            exitReason = o.optString("exitReason").ifBlank { null },
+            note = com.dirk.kalshiodds.decision.ScalpFills.restoreNote(if (o.isNull("note")) "" else o.optString("note"), if (o.isNull("executionNotes")) "" else o.optString("executionNotes")),
             ruleVersion = "restored|${o.optString("variant").ifBlank { com.dirk.kalshiodds.decision.ScalpParams.LEGACY_ID }}|${if (o.optBoolean("primary", true)) "P" else "S"}"
         )
     }

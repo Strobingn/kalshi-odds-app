@@ -337,25 +337,71 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             ScalpTradePagingSource(container.scalp, model.code)
         }.flow
 
+    private var scalpAlgoJob: Job? = null
     fun openScalpAlgo(model: com.dirk.kalshiodds.decision.ScalpModels.Model) {
+        scalpAlgoJob?.cancel()
         _scalpAlgo.value = ScalpAlgoDetail(model = model)
-        vmScope.launch(Dispatchers.Default) {
-            runCatching {
-                val now = container.clock.nowMs()
-                container.scalp.flushWrites()
-                val st = container.scalp.stats.value.firstOrNull { it.scalperId == model.code } ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)
-                val page = container.scalp.pageTrades(model.code, limit = 80)
-                val ex = container.scalp.loadExits().filter { it.scalperId == model.code }
-                val td = container.scalp.loadDaily(com.dirk.kalshiodds.decision.ScalpModels.dayEt(now)).firstOrNull { it.scalperId == model.code }
-                _scalpAlgo.value = ScalpAlgoDetail(
-                    model = model,
-                    allTime = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st, exits = ex),
-                    today = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(td?.asStat() ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)),
-                    byCoin = emptyMap(),
-                    trades = page,
-                    equity = page.filter { it.netUsd != null }.asReversed().runningFold(0.0) { a, t -> a + (t.netUsd ?: 0.0) }.drop(1)
-                )
+    }
+    fun setScalpAlgoVisible(visible: Boolean) {
+        if (!visible) { scalpAlgoJob?.cancel(); scalpAlgoJob = null; return }
+        if (scalpAlgoJob?.isActive == true) return
+        scalpAlgoJob = vmScope.launch(Dispatchers.IO) {
+            while (isActive) {
+                try { refreshScalpAlgo() }
+                catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                catch (_: Exception) { _scalpAlgo.update { it.copy(chart = it.chart.copy(error = "Unable to refresh. Retrying…")) } }
+                delay(1_000)
             }
+        }
+    }
+    fun selectScalpChartWindow(ticker: String) {
+        _scalpAlgo.update { it.copy(followLive = false, chart = ScalpWindowChartData(ticker = ticker)) }
+    }
+    fun followScalpChartLive() { _scalpAlgo.update { it.copy(followLive = true) } }
+
+    private fun refreshScalpAlgo() {
+        val selected = _scalpAlgo.value
+        val model = selected.model ?: return
+        val now = container.clock.nowMs()
+        container.scalp.flushWrites()
+        val active = container.scalp.all.value.filter { com.dirk.kalshiodds.decision.ScalpModels.scalperIdOf(it) == model.code }
+        val page = container.scalp.pageTrades(model.code, limit = 80)
+        val liveMarkets = _state.value.snapshot?.allMarkets.orEmpty().filter {
+            com.dirk.kalshiodds.domain.CryptoMarkets.inferSeries(it.ticker) in com.dirk.kalshiodds.domain.CryptoMarkets.FIFTEEN_SERIES &&
+                com.dirk.kalshiodds.decision.ScalpParams.coinOf(it.ticker) == "BTC" && (it.closeTimeEpochMs ?: 0) in (now + 1)..(now + 900_000)
+        }.map { ScalpTabMarket(it.ticker, "BTC", it.closeTimeEpochMs, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(it.ticker, it.closeTimeEpochMs)) }
+        val recent = (active + page).mapNotNull { t -> com.dirk.kalshiodds.decision.ScalpTicker.closeMs(t.ticker)?.let { end ->
+            ScalpTabMarket(t.ticker, t.coin, end, com.dirk.kalshiodds.decision.ScalpModels.chipLabel(t.ticker, end)) } }
+        val markets = ScalpWindowChartData.availableMarkets(liveMarkets, recent) { m ->
+            val endMs = m.closeMs ?: return@availableMarkets false
+            container.archive.chartTicks(m.ticker, endMs - 900_000, endMs, 240).any { it.yesBid != null || it.noBid != null } ||
+                hub.scoring.book.bidHistory(m.ticker).any { it.tMs in (endMs - 900_000)..endMs && (it.upBidCents != null || it.downBidCents != null) }
+        }
+        val ticker = if (!selected.followLive && selected.chart.ticker.isNotEmpty()) selected.chart.ticker
+            else liveMarkets.minByOrNull { it.closeMs ?: Long.MAX_VALUE }?.ticker
+                ?: markets.filter { (it.closeMs ?: 0) > now }.maxByOrNull { it.closeMs ?: 0 }?.ticker
+                ?: markets.maxByOrNull { it.closeMs ?: 0 }?.ticker.orEmpty()
+        val end = markets.firstOrNull { it.ticker == ticker }?.closeMs ?: com.dirk.kalshiodds.decision.ScalpTicker.closeMs(ticker) ?: 0L
+        val chartTrades = if (ticker.isEmpty()) emptyList() else
+            (container.scalp.windowTrades(model.code, ticker) + active.filter { it.ticker == ticker }).associateBy { it.id }.values.sortedBy { it.signalAtMs }
+        val points = if (ticker.isEmpty() || end == 0L) emptyList() else
+            com.dirk.kalshiodds.chart.ChartDownsampler.downsample(com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(
+                container.archive.chartTicks(ticker, end - 900_000, end, 2000).map { it.toBidPoint() },
+                hub.scoring.book.bidHistory(ticker)).filter { it.tMs in (end - 900_000)..minOf(end, now) }, 360)
+        val marks = container.scalp.marks.value
+        val st = container.scalp.stats.value.firstOrNull { it.scalperId == model.code } ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)
+        val td = container.scalp.loadDaily(com.dirk.kalshiodds.decision.ScalpModels.dayEt(now)).firstOrNull { it.scalperId == model.code }
+        val open = active.filter { it.state == com.dirk.kalshiodds.decision.ScalpState.OPEN || it.state == com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT }
+        val allRow = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(st, exits = container.scalp.loadExits().filter { it.scalperId == model.code })
+            .copy(open = active.count { it.state in listOf(com.dirk.kalshiodds.decision.ScalpState.PENDING_ENTRY, com.dirk.kalshiodds.decision.ScalpState.OPEN, com.dirk.kalshiodds.decision.ScalpState.PENDING_EXIT) }, unrealizedUsd = open.sumOf { it.unrealizedUsd(marks[it.ticker]?.bid(it.side)) ?: 0.0 })
+        val chart = ScalpWindowChartData(ticker, end, now, marks[ticker]?.bookAtMs, points, chartTrades)
+        _scalpAlgo.update { current ->
+            if (current.model != model || current.followLive != selected.followLive || current.chart.ticker != selected.chart.ticker) current
+            else current.copy(allTime = allRow,
+                today = com.dirk.kalshiodds.decision.ScalpModels.rowFromStat(td?.asStat() ?: com.dirk.kalshiodds.decision.ScalpStat(model.code)),
+                trades = (active + page).distinctBy { it.id }.sortedByDescending { it.entryAtMs ?: it.signalAtMs },
+                equity = page.asReversed().runningFold(0.0) { a, t -> a + (t.netUsd ?: 0.0) }.drop(1),
+                chart = chart, chartMarkets = markets)
         }
     }
 
