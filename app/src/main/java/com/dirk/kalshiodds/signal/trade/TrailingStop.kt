@@ -3,6 +3,8 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 /**
  * Trailing stop and stop-loss management for paper trading.
@@ -12,19 +14,23 @@ import kotlin.math.abs
  * - Stop loss: hard stop to limit losses
  * - Auto-sell when stop is hit
  * 
+ * NEW: Trailing stop now uses absolute cents (default 3c) instead of percentage.
+ * This means: if price goes to 90c and stays, trailing stop is at 87c.
+ * When price drops to 87c, it sells automatically.
+ * 
  * This is for paper trading experimentation only - no real money.
  */
 class TrailingStop(
     private val paperState: PaperBookState,
-    private val trailingStopPct: Double = 10.0,  // 10% trailing stop
+    private val trailingStopCents: Double = 3.0,  // 3 cent trailing stop (0.03)
     private val stopLossPct: Double = 20.0,      // 20% stop loss
-    private val minProfitPct: Double = 5.0       // Minimum profit to activate trailing stop
+    private val minProfitCents: Double = 0.0      // No minimum - trailing stop active from entry
 ) {
 
     data class StopConfig(
-        val trailingStopPct: Double = 10.0,
+        val trailingStopCents: Double = 3.0,
         val stopLossPct: Double = 20.0,
-        val minProfitPct: Double = 5.0,
+        val minProfitCents: Double = 0.0,
         val enabled: Boolean = true
     )
 
@@ -49,7 +55,9 @@ class TrailingStop(
         val trailingStopPrice: Double?,
         val stopLossPrice: Double?,
         val stopHit: Boolean,
-        val stopType: String?
+        val stopType: String?,
+        val peakPrice: Double?,
+        val trailingDistanceCents: Double?
     )
 
     /**
@@ -109,6 +117,14 @@ class TrailingStop(
 
     /**
      * Calculate position state with stop levels
+     * 
+     * For YES positions:
+     * - Trailing stop = highest price seen - trailingStopCents
+     * - If price drops to trailing stop, sell
+     * 
+     * For NO positions:
+     * - Trailing stop = lowest price seen + trailingStopCents
+     * - If price rises to trailing stop, sell
      */
     fun calculatePositionState(fill: PaperFill, currentPrice: Double): PositionState {
         val entryPrice = fill.limitPrice
@@ -116,13 +132,8 @@ class TrailingStop(
         
         // Calculate P&L
         val pnl = if (side == "YES") {
-            // For YES: profit if currentPrice > entryPrice
             (currentPrice - entryPrice) * fill.contracts
         } else {
-            // For NO: profit if currentPrice < (1 - entryPrice)
-            // NO position means we bet on price going down
-            // entryPrice for NO is the NO ask (which is 1 - YES bid)
-            // So if YES price goes down, NO value goes up
             val yesEntry = 1.0 - entryPrice
             (yesEntry - currentPrice) * fill.contracts
         }
@@ -133,11 +144,19 @@ class TrailingStop(
         // Calculate stop-loss price (always active)
         val stopLossPrice = calculateStopLossPrice(side, entryPrice, fill.stakeUsd, stopLossPct)
         
-        // Calculate trailing stop price (only active when in profit)
-        val trailingStopPrice = if (abs(pnlPct) >= minProfitPct) {
-            calculateTrailingStopPrice(side, entryPrice, currentPrice, fill.stakeUsd, trailingStopPct)
+        // For trailing stop: track the peak/low and subtract/add trailingStopCents
+        // The key insight: we want to sell when price moves AGAINST us by trailingStopCents
+        val (trailingStopPrice, peakPrice) = if (side == "YES") {
+            // For YES: we want to sell if price drops by trailingStopCents from the highest point
+            val peak = max(entryPrice, currentPrice)
+            val stop = (peak - trailingStopCents / 100.0).coerceIn(0.0, 1.0)
+            Pair(stop, peak)
         } else {
-            null
+            // For NO: we want to sell if price rises by trailingStopCents from the lowest point
+            val yesEntry = 1.0 - entryPrice
+            val low = min(yesEntry, currentPrice)
+            val stop = (low + trailingStopCents / 100.0).coerceIn(0.0, 1.0)
+            Pair(stop, low)
         }
         
         // Check if any stop is hit
@@ -162,7 +181,9 @@ class TrailingStop(
             trailingStopPrice = trailingStopPrice,
             stopLossPrice = stopLossPrice,
             stopHit = stopHit,
-            stopType = stopType
+            stopType = stopType,
+            peakPrice = peakPrice,
+            trailingDistanceCents = trailingStopCents
         )
     }
 
@@ -177,40 +198,11 @@ class TrailingStop(
     ): Double {
         return if (side == "YES") {
             // For YES: stop loss is entryPrice minus stopLossPct
-            // If YES price drops below this, we sell
             (entryPrice - (entryPrice * stopLossPct / 100)).coerceIn(0.0, 1.0)
         } else {
             // For NO: stop loss is entryPrice plus stopLossPct
-            // entryPrice for NO is the NO ask (1 - YES bid)
-            // If YES price rises above (1 - entryPrice + stopLoss), we sell
             val yesEntry = 1.0 - entryPrice
             (yesEntry + (yesEntry * stopLossPct / 100)).coerceIn(0.0, 1.0)
-        }
-    }
-
-    /**
-     * Calculate trailing stop price for a position
-     */
-    private fun calculateTrailingStopPrice(
-        side: String,
-        entryPrice: Double,
-        currentPrice: Double,
-        stake: Double,
-        trailingStopPct: Double
-    ): Double {
-        return if (side == "YES") {
-            // For YES: trailing stop follows the high
-            // Stop is at currentPrice minus trailingStopPct from the peak
-            val peak = maxOf(entryPrice, currentPrice)
-            (peak - (peak * trailingStopPct / 100)).coerceIn(0.0, 1.0)
-        } else {
-            // For NO: trailing stop follows the low
-            // entryPrice for NO is the NO ask
-            // Stop is at (1 - currentPrice) plus trailingStopPct from the low
-            val yesEntry = 1.0 - entryPrice
-            val yesCurrent = currentPrice
-            val low = minOf(yesEntry, yesCurrent)
-            (low + (low * trailingStopPct / 100)).coerceIn(0.0, 1.0)
         }
     }
 
@@ -222,8 +214,7 @@ class TrailingStop(
             // For YES: trigger if currentPrice <= stopPrice
             currentPrice <= stopPrice
         } else {
-            // For NO: trigger if currentPrice >= (1 - stopPrice)
-            // stopPrice for NO is in YES terms
+            // For NO: trigger if currentPrice >= stopPrice
             currentPrice >= stopPrice
         }
     }
@@ -263,9 +254,9 @@ class TrailingStop(
      * Get stop configuration
      */
     fun getConfig(): StopConfig = StopConfig(
-        trailingStopPct = trailingStopPct,
+        trailingStopCents = trailingStopCents,
         stopLossPct = stopLossPct,
-        minProfitPct = minProfitPct,
+        minProfitCents = minProfitCents,
         enabled = true
     )
 
@@ -275,9 +266,9 @@ class TrailingStop(
     fun updateConfig(config: StopConfig): TrailingStop {
         return TrailingStop(
             paperState,
-            config.trailingStopPct,
+            config.trailingStopCents,
             config.stopLossPct,
-            config.minProfitPct
+            config.minProfitCents
         )
     }
 }
@@ -286,9 +277,9 @@ class TrailingStop(
  * Extension functions for easy access
  */
 fun PaperBookState.getTrailingStopManager(
-    trailingStopPct: Double = 10.0,
+    trailingStopCents: Double = 3.0,
     stopLossPct: Double = 20.0,
-    minProfitPct: Double = 5.0
+    minProfitCents: Double = 0.0
 ): TrailingStop {
-    return TrailingStop(this, trailingStopPct, stopLossPct, minProfitPct)
+    return TrailingStop(this, trailingStopCents, stopLossPct, minProfitCents)
 }

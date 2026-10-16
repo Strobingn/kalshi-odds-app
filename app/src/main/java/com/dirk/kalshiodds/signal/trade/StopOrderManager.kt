@@ -1,6 +1,5 @@
 package com.dirk.kalshiodds.signal.trade
 
-import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.paper.PaperBook
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
@@ -12,20 +11,24 @@ import kotlinx.coroutines.flow.asStateFlow
  * Manages stop orders (trailing stops and stop losses) for paper trading.
  * Automatically executes sell orders when stops are triggered.
  * 
+ * UPDATED: Now uses absolute cents for trailing stop (default 3c).
+ * Example: If price goes to 90c, trailing stop is at 87c.
+ * When price drops to 87c, it auto-sells.
+ * 
  * This is for paper trading experimentation only - no real money.
  */
 class StopOrderManager(
     private val paperBook: PaperBook,
-    private val trailingStopPct: Double = 10.0,
-    private val stopLossPct: Double = 20.0,
-    private val minProfitPct: Double = 5.0,
+    private val trailingStopCents: Double = 3.0,    // 3 cent trailing stop
+    private val stopLossPct: Double = 20.0,        // 20% stop loss
+    private val minProfitCents: Double = 0.0,      // No minimum - active from entry
     private val autoExecute: Boolean = true
 ) {
 
     data class StopConfig(
-        val trailingStopPct: Double = 10.0,
+        val trailingStopCents: Double = 3.0,
         val stopLossPct: Double = 20.0,
-        val minProfitPct: Double = 5.0,
+        val minProfitCents: Double = 0.0,
         val autoExecute: Boolean = true,
         val enabled: Boolean = true
     )
@@ -46,8 +49,6 @@ class StopOrderManager(
     private val _executions = MutableStateFlow<List<StopExecution>>(emptyList())
     val executions: StateFlow<List<StopExecution>> = _executions.asStateFlow()
 
-    private val _triggeredStops = MutableStateFlow<List<StopOrderManager.StopExecution>>(emptyList())
-
     /**
      * Check all open positions and execute stops if triggered
      */
@@ -56,7 +57,7 @@ class StopOrderManager(
         
         val currentState = paperBook.snapshot()
         val manager = currentState.getTrailingStopManager(
-            trailingStopPct, stopLossPct, minProfitPct
+            trailingStopCents, stopLossPct, minProfitCents
         )
         
         val stopOrders = manager.checkPositions(currentPrices)
@@ -84,16 +85,13 @@ class StopOrderManager(
         val pnlAtStop = calculatePnLAtStop(fill, order.stopPrice, order.isTrailing)
         
         // Create a paper sell
-        val sellFill = createSellFill(fill, currentPrice, order)
-        
-        // Add sell to paper book
         paperBook.forceFill(
             ticker = fill.ticker,
             side = if (fill.side == "YES") "NO" else "YES",
             limitPrice = currentPrice,
             contracts = fill.contracts,
             source = "STOP ${if (order.isTrailing) "TRAILING" else "LOSS"}",
-            note = "Auto-stop executed: ${order.side} @ ${order.stopPrice} (current: $currentPrice)"
+            note = "Auto-stop executed: ${fill.side} @ ${order.stopPrice} (current: $currentPrice)"
         )
         
         val execution = StopExecution(
@@ -128,32 +126,9 @@ class StopOrderManager(
             (stopPrice - entryPrice) * fill.contracts
         } else {
             // For NO: entryPrice is NO ask, so YES bid = 1 - entryPrice
-            // P&L = (yesEntry - stopPrice) * contracts
             val yesEntry = 1.0 - entryPrice
             (yesEntry - stopPrice) * fill.contracts
         }
-    }
-
-    /**
-     * Create a sell fill record for the stop
-     */
-    private fun createSellFill(
-        buyFill: PaperFill,
-        currentPrice: Double,
-        stopOrder: TrailingStop.StopOrder
-    ): PaperFill {
-        return PaperFill(
-            id = "STOP-${buyFill.id}-${System.currentTimeMillis()}",
-            ticker = buyFill.ticker,
-            side = if (buyFill.side == "YES") "NO" else "YES",
-            stakeUsd = buyFill.stakeUsd,
-            contracts = buyFill.contracts,
-            limitPrice = currentPrice,
-            source = "STOP ${if (stopOrder.isTrailing) "TRAILING" else "LOSS"}",
-            createdAtMs = System.currentTimeMillis(),
-            settled = false,
-            note = "Auto-stop: ${stopOrder.side} @ ${stopOrder.stopPrice} (triggered at $currentPrice)"
-        )
     }
 
     /**
@@ -162,7 +137,7 @@ class StopOrderManager(
     fun getActiveStops(currentPrices: Map<String, Double>): List<TrailingStop.PositionState> {
         val currentState = paperBook.snapshot()
         val manager = currentState.getTrailingStopManager(
-            trailingStopPct, stopLossPct, minProfitPct
+            trailingStopCents, stopLossPct, minProfitCents
         )
         return manager.getPositionsWithStops(currentPrices)
     }
@@ -171,9 +146,9 @@ class StopOrderManager(
      * Get stop configuration
      */
     fun getConfig(): StopConfig = StopConfig(
-        trailingStopPct = trailingStopPct,
+        trailingStopCents = trailingStopCents,
         stopLossPct = stopLossPct,
-        minProfitPct = minProfitPct,
+        minProfitCents = minProfitCents,
         autoExecute = autoExecute,
         enabled = true
     )
@@ -184,9 +159,9 @@ class StopOrderManager(
     fun updateConfig(config: StopConfig): StopOrderManager {
         return StopOrderManager(
             paperBook,
-            config.trailingStopPct,
+            config.trailingStopCents,
             config.stopLossPct,
-            config.minProfitPct,
+            config.minProfitCents,
             config.autoExecute
         )
     }
@@ -213,21 +188,21 @@ class StopOrderManager(
  * Extension function to create a stop order manager from a paper book
  */
 fun PaperBook.getStopOrderManager(
-    trailingStopPct: Double = 10.0,
+    trailingStopCents: Double = 3.0,
     stopLossPct: Double = 20.0,
-    minProfitPct: Double = 5.0,
+    minProfitCents: Double = 0.0,
     autoExecute: Boolean = true
 ): StopOrderManager {
-    return StopOrderManager(this, trailingStopPct, stopLossPct, minProfitPct, autoExecute)
+    return StopOrderManager(this, trailingStopCents, stopLossPct, minProfitCents, autoExecute)
 }
 
 /**
  * Default stop configuration
  */
 object DefaultStopConfig {
-    const val TRAILING_STOP_PCT = 10.0
+    const val TRAILING_STOP_CENTS = 3.0
     const val STOP_LOSS_PCT = 20.0
-    const val MIN_PROFIT_PCT = 5.0
+    const val MIN_PROFIT_CENTS = 0.0
     const val AUTO_EXECUTE = true
     const val ENABLED = true
 }

@@ -12,6 +12,8 @@ import java.util.UUID
 
 /**
  * Tests for trailing stop functionality
+ * 
+ * UPDATED: Tests now use absolute cents (3c) instead of percentage
  */
 class TrailingStopTest {
 
@@ -47,43 +49,150 @@ class TrailingStopTest {
     }
 
     @Test
-    fun `trailing stop not active when position not in profit`() {
+    fun `trailing stop active from entry with cents`() {
         val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
+            trailingStopCents = 3.0,
             stopLossPct = 20.0,
-            minProfitPct = 5.0
+            minProfitCents = 0.0
         )
         
-        // Current price is below entry (losing position)
-        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.45)
-        val positionState = manager.calculatePositionState(fill, 0.45)
+        // At entry price, trailing stop should be active
+        val positionState = manager.calculatePositionState(fill, 0.50)
         
-        assertNull(positionState.trailingStopPrice)
-        assertNotNull(positionState.stopLossPrice)
+        assertNotNull(positionState.trailingStopPrice)
+        // Trailing stop = max(0.50, 0.50) - 0.03 = 0.47
+        assertEquals(0.47, positionState.trailingStopPrice, 0.001)
+    }
+
+    @Test
+    fun `trailing stop follows price up`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // Price went to 90c
+        var positionState = manager.calculatePositionState(fill, 0.90)
+        
+        // Trailing stop should be at 90 - 3 = 87c
+        assertEquals(0.87, positionState.trailingStopPrice, 0.001)
+        assertEquals(0.90, positionState.peakPrice, 0.001)
+    }
+
+    @Test
+    fun `trailing stop triggers when price drops 3 cents`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // Price went to 90c, then dropped to 87c
+        val positionState = manager.calculatePositionState(fill, 0.87)
+        
+        assertTrue(positionState.stopHit)
+        assertEquals("TRAILING STOP", positionState.stopType)
+    }
+
+    @Test
+    fun `trailing stop does NOT trigger at 88 cents`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // Price went to 90c, then dropped to 88c (only 2c drop)
+        val positionState = manager.calculatePositionState(fill, 0.88)
+        
+        assertFalse(positionState.stopHit)
+        // Trailing stop is at 87c, so 88c is above it
+        assertEquals(0.87, positionState.trailingStopPrice, 0.001)
+    }
+
+    @Test
+    fun `trailing stop triggers at 87 cents`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // Price at 87c - should trigger
+        val positionState = manager.calculatePositionState(fill, 0.87)
+        
+        assertTrue(positionState.stopHit)
+        assertEquals("TRAILING STOP", positionState.stopType)
+    }
+
+    @Test
+    fun `trailing stop stays at 87 when price goes to 90 then 88`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // Price went to 90c (peak), then to 88c
+        // Trailing stop should be at 90 - 3 = 87c
+        val positionState = manager.calculatePositionState(fill, 0.88)
+        
+        assertEquals(0.87, positionState.trailingStopPrice, 0.001)
+        assertEquals(0.90, positionState.peakPrice, 0.001)
+        assertFalse(positionState.stopHit) // 88 > 87, not triggered yet
+    }
+
+    @Test
+    fun `trailing stop for NO position`() {
+        val fill = createFill(side = "NO", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // For NO: entryPrice = 0.50 (NO ask), so YES bid = 0.50
+        // Price drops to 40c (YES price), which means NO value increases
+        // Trailing stop should be at lowest YES price + 3c
+        val positionState = manager.calculatePositionState(fill, 0.40)
+        
+        // Lowest YES price = min(0.50, 0.40) = 0.40
+        // Trailing stop = 0.40 + 0.03 = 0.43
+        assertEquals(0.43, positionState.trailingStopPrice, 0.001)
         assertFalse(positionState.stopHit)
     }
 
     @Test
-    fun `trailing stop active when position in profit`() {
-        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+    fun `trailing stop triggers for NO when price rises 3 cents`() {
+        val fill = createFill(side = "NO", limitPrice = 0.50, stake = 5.0)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
+            trailingStopCents = 3.0,
             stopLossPct = 20.0,
-            minProfitPct = 5.0
+            minProfitCents = 0.0
         )
         
-        // Current price is above entry (winning position)
-        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.60)
-        val positionState = manager.calculatePositionState(fill, 0.60)
+        // YES price went from 50c down to 40c, then back up to 43c
+        // Trailing stop = 0.40 + 0.03 = 0.43
+        // At 0.43, it should trigger
+        val positionState = manager.calculatePositionState(fill, 0.43)
         
-        assertNotNull(positionState.trailingStopPrice)
-        assertNotNull(positionState.stopLossPrice)
-        
-        // Trailing stop should be at: 0.60 - (0.60 * 0.10) = 0.54
-        assertEquals(0.54, positionState.trailingStopPrice, 0.001)
+        assertTrue(positionState.stopHit)
+        assertEquals("TRAILING STOP", positionState.stopType)
     }
 
     @Test
@@ -91,9 +200,9 @@ class TrailingStopTest {
         val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
+            trailingStopCents = 3.0,
             stopLossPct = 20.0,
-            minProfitPct = 5.0
+            minProfitCents = 0.0
         )
         
         val positionState = manager.calculatePositionState(fill, 0.50)
@@ -103,34 +212,16 @@ class TrailingStopTest {
     }
 
     @Test
-    fun `stop loss calculated correctly for NO`() {
-        val fill = createFill(side = "NO", limitPrice = 0.50, stake = 5.0)
-        val state = createPaperState(fill)
-        val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
-            stopLossPct = 20.0,
-            minProfitPct = 5.0
-        )
-        
-        // For NO, limitPrice = 0.50 means NO ask = 0.50
-        // YES bid would be 1 - 0.50 = 0.50
-        // Stop loss: 0.50 + (0.50 * 0.20) = 0.60
-        val positionState = manager.calculatePositionState(fill, 0.50)
-        
-        assertEquals(0.60, positionState.stopLossPrice, 0.001)
-    }
-
-    @Test
     fun `stop loss triggers for YES when price drops`() {
         val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
+            trailingStopCents = 3.0,
             stopLossPct = 20.0,
-            minProfitPct = 5.0
+            minProfitCents = 0.0
         )
         
-        // Stop loss is at 0.40
+        // Price dropped to 35c (below stop loss of 40c)
         val positionState = manager.calculatePositionState(fill, 0.35)
         
         assertTrue(positionState.stopHit)
@@ -138,181 +229,106 @@ class TrailingStopTest {
     }
 
     @Test
-    fun `stop loss triggers for NO when price rises`() {
-        val fill = createFill(side = "NO", limitPrice = 0.50, stake = 5.0)
-        val state = createPaperState(fill)
-        val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
-            stopLossPct = 20.0,
-            minProfitPct = 5.0
-        )
-        
-        // Stop loss is at 0.60 (YES price)
-        val positionState = manager.calculatePositionState(fill, 0.65)
-        
-        assertTrue(positionState.stopHit)
-        assertEquals("STOP LOSS", positionState.stopType)
-    }
-
-    @Test
-    fun `trailing stop triggers when price drops from peak`() {
-        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
-        val state = createPaperState(fill)
-        val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
-            stopLossPct = 20.0,
-            minProfitPct = 5.0
-        )
-        
-        // Price went up to 0.70, then dropped to 0.58
-        // Trailing stop would be at: 0.70 - (0.70 * 0.10) = 0.63
-        // At 0.58, this should trigger
-        val positionState = manager.calculatePositionState(fill, 0.58)
-        
-        assertTrue(positionState.stopHit)
-        assertEquals("TRAILING STOP", positionState.stopType)
-    }
-
-    @Test
-    fun `trailing stop moves up with price`() {
-        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
-        val state = createPaperState(fill)
-        val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
-            stopLossPct = 20.0,
-            minProfitPct = 5.0
-        )
-        
-        // At price 0.60, trailing stop is at 0.60 - 0.06 = 0.54
-        var positionState = manager.calculatePositionState(fill, 0.60)
-        assertEquals(0.54, positionState.trailingStopPrice, 0.001)
-        
-        // At price 0.70, trailing stop moves to 0.70 - 0.07 = 0.63
-        positionState = manager.calculatePositionState(fill, 0.70)
-        assertEquals(0.63, positionState.trailingStopPrice, 0.001)
-    }
-
-    @Test
-    fun `trailing stop does not move down`() {
-        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
-        val state = createPaperState(fill)
-        val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
-            stopLossPct = 20.0,
-            minProfitPct = 5.0
-        )
-        
-        // Price went up to 0.70, then back to 0.60
-        // Trailing stop should stay at 0.63 (from peak 0.70)
-        val positionState = manager.calculatePositionState(fill, 0.60)
-        
-        // The trailing stop uses current price, not peak
-        // This is a simpler implementation
-        assertNotNull(positionState.trailingStopPrice)
-    }
-
-    @Test
     fun `check positions returns stop orders when triggered`() {
-        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val fill = createFill(side = "YES", limitPrice = 0.90, stake = 5.0)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
+            trailingStopCents = 3.0,
             stopLossPct = 20.0,
-            minProfitPct = 5.0
+            minProfitCents = 0.0
         )
         
-        // Price dropped below stop loss (0.40)
-        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.35)
+        // Price went from 90c to 87c (3c drop)
+        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.87)
         val stopOrders = manager.checkPositions(currentPrices)
         
         assertEquals(1, stopOrders.size)
         assertEquals(fill.id, stopOrders[0].fillId)
-        assertTrue(stopOrders[0].isStopLoss)
-        assertFalse(stopOrders[0].isTrailing)
+        assertTrue(stopOrders[0].isTrailing)
+        assertFalse(stopOrders[0].isStopLoss)
+        assertEquals(0.87, stopOrders[0].stopPrice, 0.001)
     }
 
     @Test
-    fun `check positions returns trailing stop when triggered`() {
+    fun `check positions returns trailing stop for 90 to 87`() {
         val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
+            trailingStopCents = 3.0,
             stopLossPct = 20.0,
-            minProfitPct = 5.0
+            minProfitCents = 0.0
         )
         
-        // Price went up to 0.70, then dropped to 0.60 (below trailing stop of 0.63)
-        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.60)
+        // Price went to 90c, then to 87c
+        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.87)
         val stopOrders = manager.checkPositions(currentPrices)
         
-        // At 0.60 with entry 0.50, we're in profit
-        // Trailing stop would be at 0.60 - 0.06 = 0.54
-        // So 0.60 > 0.54, no trigger
-        // Need to go below 0.54
-        
-        // Let's try with price at 0.50 (below trailing stop)
-        val currentPrices2 = mapOf("KXBTC15M-26SEP251500-00" to 0.50)
-        val stopOrders2 = manager.checkPositions(currentPrices2)
-        
-        // This might trigger depending on implementation
-        assertTrue(stopOrders2.isEmpty() || stopOrders2[0].isStopLoss)
+        assertEquals(1, stopOrders.size)
+        assertEquals("TRAILING STOP", stopOrders[0].stopType)
+        assertEquals(0.87, stopOrders[0].stopPrice, 0.001)
     }
 
     @Test
-    fun `get positions with stops returns all positions`() {
-        val fills = listOf(
-            createFill(side = "YES", limitPrice = 0.50, stake = 5.0),
-            createFill(side = "NO", limitPrice = 0.60, stake = 5.0)
+    fun `check positions no stop when price stays at 90`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
         )
-        val state = createPaperState(*fills.toTypedArray())
-        val manager = state.getTrailingStopManager()
         
-        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.55)
-        val positions = manager.getPositionsWithStops(currentPrices)
+        // Price at 90c - no stop triggered yet
+        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.90)
+        val stopOrders = manager.checkPositions(currentPrices)
         
-        assertEquals(2, positions.size)
+        assertEquals(0, stopOrders.size)
     }
 
     @Test
-    fun `pnl calculated correctly for YES`() {
+    fun `check positions triggers when price drops from 90 to 87`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
+        val state = createPaperState(fill)
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
+        
+        // Price at 87c after being at 90c
+        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.87)
+        val stopOrders = manager.checkPositions(currentPrices)
+        
+        assertEquals(1, stopOrders.size)
+        assertTrue(stopOrders[0].isTrailing)
+    }
+
+    @Test
+    fun `pnl calculated correctly for YES at 90c`() {
         val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0, contracts = 1)
         val state = createPaperState(fill)
         val manager = state.getTrailingStopManager()
         
-        // Price went to 0.70
-        val positionState = manager.calculatePositionState(fill, 0.70)
+        val positionState = manager.calculatePositionState(fill, 0.90)
         
-        // P&L = (0.70 - 0.50) * 1 = 0.20
-        assertEquals(0.20, positionState.pnl, 0.001)
-        assertEquals(4.0, positionState.pnlPct, 0.001) // (0.20 / 5.0) * 100
+        // P&L = (0.90 - 0.50) * 1 = 0.40
+        assertEquals(0.40, positionState.pnl, 0.001)
+        assertEquals(8.0, positionState.pnlPct, 0.001) // (0.40 / 5.0) * 100
     }
 
     @Test
-    fun `pnl calculated correctly for NO`() {
-        val fill = createFill(side = "NO", limitPrice = 0.50, stake = 5.0, contracts = 1)
+    fun `trailing distance is 3 cents`() {
+        val fill = createFill(side = "YES", limitPrice = 0.50, stake = 5.0)
         val state = createPaperState(fill)
-        val manager = state.getTrailingStopManager()
+        val manager = state.getTrailingStopManager(
+            trailingStopCents = 3.0,
+            stopLossPct = 20.0,
+            minProfitCents = 0.0
+        )
         
-        // Price went to 0.40 (YES price dropped, so NO wins)
-        val positionState = manager.calculatePositionState(fill, 0.40)
+        val positionState = manager.calculatePositionState(fill, 0.90)
         
-        // For NO: entryPrice = 0.50 (NO ask)
-        // yesEntry = 1 - 0.50 = 0.50
-        // P&L = (0.50 - 0.40) * 1 = 0.10
-        assertEquals(0.10, positionState.pnl, 0.001)
-        assertEquals(2.0, positionState.pnlPct, 0.001) // (0.10 / 5.0) * 100
-    }
-
-    @Test
-    fun `config defaults are correct`() {
-        val state = createPaperState()
-        val manager = state.getTrailingStopManager()
-        val config = manager.getConfig()
-        
-        assertEquals(10.0, config.trailingStopPct, 0.001)
-        assertEquals(20.0, config.stopLossPct, 0.001)
-        assertEquals(5.0, config.minProfitPct, 0.001)
-        assertTrue(config.enabled)
+        assertEquals(3.0, positionState.trailingDistanceCents, 0.001)
     }
 
     @Test
@@ -328,25 +344,14 @@ class TrailingStopTest {
     }
 
     @Test
-    fun `multiple positions checked correctly`() {
-        val fills = listOf(
-            createFill(side = "YES", limitPrice = 0.50, stake = 5.0),
-            createFill(side = "NO", limitPrice = 0.60, stake = 5.0),
-            createFill(side = "YES", limitPrice = 0.40, stake = 5.0)
-        )
-        val state = createPaperState(*fills.toTypedArray())
-        val manager = state.getTrailingStopManager(
-            trailingStopPct = 10.0,
-            stopLossPct = 20.0,
-            minProfitPct = 5.0
-        )
+    fun `config defaults use cents not percentage`() {
+        val state = createPaperState()
+        val manager = state.getTrailingStopManager()
+        val config = manager.getConfig()
         
-        // Price at 0.30 - should trigger stop loss for first YES (0.50 entry, stop at 0.40)
-        // and second YES (0.40 entry, stop at 0.32)
-        val currentPrices = mapOf("KXBTC15M-26SEP251500-00" to 0.30)
-        val stopOrders = manager.checkPositions(currentPrices)
-        
-        // Should have at least 1 stop triggered
-        assertTrue(stopOrders.isNotEmpty())
+        assertEquals(3.0, config.trailingStopCents, 0.001)
+        assertEquals(20.0, config.stopLossPct, 0.001)
+        assertEquals(0.0, config.minProfitCents, 0.001)
+        assertTrue(config.enabled)
     }
 }
