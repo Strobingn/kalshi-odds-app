@@ -241,7 +241,7 @@ fun ScalpTabContent(
         }
         if (page == ScalpLabUi.Page.LIVE) {
             item(key = "algorithm-picker") {
-                ScalpAlgorithmPicker(liveModel, onSelect = { liveModel = it; selectedTradeId = null }, onSliders = { slidersOpen = !slidersOpen })
+                ScalpAlgorithmPicker(liveModel, onSelect = { liveModel = it; selectedTradeId = null }, onSliders = { slidersOpen = true })
                 Text("All scalpers: 2¢ stop enabled · buy price ≤50¢", style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold, color = c.accentBlue)
             }
@@ -405,7 +405,7 @@ internal fun AlgoCard(
         ScalpModels.tag(m)?.let { tg ->
             Text(tg, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Text(ScalpModels.stopLabel(m) + " · " + ScalpTabCopy.stopSaved(all), style = MaterialTheme.typography.labelSmall, color = c.textSecondary,
+        Text("2¢ global stop · historical: " + ScalpTabCopy.stopSaved(all), style = MaterialTheme.typography.labelSmall, color = c.textSecondary,
             maxLines = 1, overflow = TextOverflow.Ellipsis)
         com.dirk.kalshiodds.decision.ShockFav.byVariantId(m.code)?.let { p ->
             Text(p.summary(), style = MaterialTheme.typography.labelSmall, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)

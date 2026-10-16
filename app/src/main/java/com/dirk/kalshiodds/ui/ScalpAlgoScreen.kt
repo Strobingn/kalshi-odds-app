@@ -14,6 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -82,14 +86,17 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
     onApply: ((com.dirk.kalshiodds.decision.ScalpControlSpec.Config) -> Unit)? = null, onReset: () -> Unit = {}) {
     val c = DipTheme.colors
     val m = d.model
+    val listState = rememberLazyListState()
+    val uiScope = rememberCoroutineScope()
     LazyColumn(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp), state = listState
     ) {
         item(key = "hdr") {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = c.textPrimary) }
-                Text(m?.label ?: "Algorithm", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = c.textPrimary, maxLines = 1)
+                Text(m?.label ?: "Algorithm", modifier = Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = c.textPrimary, maxLines = 1)
+                if (onApply != null) TextButton(onClick = { uiScope.launch { listState.animateScrollToItem(2) } }) { Text("Sliders") }
             }
             if (m != null) Text(m.blurb + " · paper only", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
         }

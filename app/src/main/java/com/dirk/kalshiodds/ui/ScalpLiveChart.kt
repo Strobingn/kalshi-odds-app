@@ -44,6 +44,7 @@ internal object ScalpChartCopy {
     fun minute(ms: Long) = minute.format(Instant.ofEpochMilli(ms))
     fun dollars(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "$%,.2f", it) } ?: "—"
     fun cents(v: Double?) = v?.takeIf { it.isFinite() }?.let { String.format(Locale.US, "%.1f¢", it * 100) } ?: "—"
+    fun stop(t: ScalpTrade): Double? = t.entryPrice?.let { entry -> (entry - minOf(.02, ScalpControlSpec.frozen(t)?.get(ScalpControlSpec.Key.STOP)?.div(100) ?: .02)).coerceAtLeast(0.0) }
     fun side(side: String) = if (side == "NO") "DOWN" else "UP"
 }
 
@@ -52,12 +53,13 @@ internal fun ScalpAlgorithmPicker(code: String, onSelect: (String) -> Unit, onSl
     val c = DipTheme.colors
     var picking by remember { mutableStateOf(false) }
     var search by remember { mutableStateOf("") }
+    var slidersAfterPick by remember { mutableStateOf(false) }
     val model = ScalpModels.modelByCode(code)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        OutlinedButton(onClick = { picking = true }, modifier = Modifier.weight(1f)) {
+        OutlinedButton(onClick = { slidersAfterPick = false; picking = true }, modifier = Modifier.weight(1f)) {
             Text((model?.label ?: "All algorithms") + " ▾", maxLines = 2)
         }
-        Button(onClick = { if (model == null) picking = true else onSliders() }) { Text("Sliders") }
+        Button(onClick = { if (model == null) { slidersAfterPick = true; picking = true } else onSliders() }) { Text("Sliders") }
     }
     if (picking) AlertDialog(onDismissRequest = { picking = false }, confirmButton = {
         TextButton(onClick = { picking = false }) { Text("Close") }
@@ -68,7 +70,7 @@ internal fun ScalpAlgorithmPicker(code: String, onSelect: (String) -> Unit, onSl
             LazyColumn(Modifier.heightIn(max = 420.dp)) {
                 item { TextButton(onClick = { onSelect("*"); picking = false }) { Text("All algorithms · compare fills") } }
                 items(ScalpModels.ALL.filter { it.label.contains(search, true) || it.code.contains(search, true) }, key = { it.code }) { m ->
-                    Column(Modifier.fillMaxWidth().clickable { onSelect(m.code); picking = false; onSliders() }.padding(vertical = 12.dp)) {
+                    Column(Modifier.fillMaxWidth().clickable { onSelect(m.code); picking = false; if (slidersAfterPick) onSliders() }.padding(vertical = 12.dp)) {
                         Text(m.label, color = c.textPrimary, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
                         Text(m.code, color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                     }
@@ -105,6 +107,8 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
             QuoteCell("UP bid / ask", ScalpChartCopy.cents(q?.bid("YES")) + " / " + ScalpChartCopy.cents(q?.ask("YES")), c.up, Modifier.weight(1f))
             QuoteCell("DOWN bid / ask", ScalpChartCopy.cents(q?.bid("NO")) + " / " + ScalpChartCopy.cents(q?.ask("NO")), c.down, Modifier.weight(1f))
         }
+        Text("Depth (bid / ask): UP ${q?.bidSize("YES")?.toInt() ?: "—"} / ${q?.askSize("YES")?.toInt() ?: "—"} ct · DOWN ${q?.bidSize("NO")?.toInt() ?: "—"} / ${q?.askSize("NO")?.toInt() ?: "—"} ct",
+            style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
         Text("Bid lines: UP green · DOWN red. ▲ BUY · ■ SELL · ○ settlement", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
         val plotHeight = 250.dp
         Canvas(Modifier.fillMaxWidth().height(plotHeight).semantics {
@@ -157,9 +161,9 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
             line(true); line(false)
             drawLine(c.accentBlue.copy(alpha = .65f), Offset(left, y(.50)), Offset(right, y(.50)), 1.dp.toPx(),
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx())))
-            selected?.entryPrice?.let { entry ->
-                if (selected.remaining > 0) drawLine(c.accentOrange, Offset(left, y((entry - .02).coerceAtLeast(0.0))),
-                    Offset(right, y((entry - .02).coerceAtLeast(0.0))), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
+            selected?.let(ScalpChartCopy::stop)?.let { stop ->
+                if ((selected?.remaining ?: 0) > 0) drawLine(c.accentOrange, Offset(left, y(stop)),
+                    Offset(right, y(stop)), 1.dp.toPx(), pathEffect = PathEffect.dashPathEffect(floatArrayOf(3.dp.toPx(), 3.dp.toPx())))
             }
             markers.forEach { marker ->
                 val fill = marker.fill; val px = x(fill.atMs); val py = y(fill.price)
@@ -172,17 +176,32 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
                     ScalpFillLog.Kind.SELL -> drawRect(ink, Offset(px - radius, py - radius), Size(radius * 2, radius * 2))
                     ScalpFillLog.Kind.SETTLE -> drawCircle(ink, radius, Offset(px, py), style = Stroke(2.dp.toPx()))
                 }
+                if (chosen) {
+                    val label = "${fill.kind}${if (fill.aggregate) " AVG" else ""} ${ScalpChartCopy.cents(fill.price)}"
+                    paint.color = ink.toArgb()
+                    val tx = (px - paint.measureText(label) / 2).coerceIn(left, (right - paint.measureText(label)).coerceAtLeast(left))
+                    val ty = (py + if (fill.kind == ScalpFillLog.Kind.BUY) -10.dp.toPx() else 17.dp.toPx()).coerceIn(12.dp.toPx(), bottom - 3.dp.toPx())
+                    drawContext.canvas.nativeCanvas.drawText(label, tx, ty, paint)
+                }
             }
             scrubAt?.let { drawLine(c.textSecondary, Offset(x(it), top), Offset(x(it), bottom), 1.dp.toPx()) }
         }
         if (window.points.isEmpty()) Text("Waiting for quote history. The chart stays on the full 15-minute axis; missing prices are left blank.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+        selected?.let { trade ->
+            ScalpFillLog.display(trade).minByOrNull { abs(it.atMs - (scrubAt ?: it.atMs)) }?.let { fill ->
+                Text("${fill.kind}${if (fill.aggregate) " AVG / final close" else ""} ${ScalpChartCopy.side(trade.side)} · ${fill.qty} ct @ ${ScalpChartCopy.cents(fill.price)} · ${ScalpChartCopy.time(fill.atMs)} ET · fee ${ScalpChartCopy.dollars(fill.fee)}",
+                    style = MaterialTheme.typography.labelMedium, color = c.accentBlue, fontWeight = FontWeight.SemiBold)
+            }
+        }
         point?.let { p -> Text("${ScalpChartCopy.time(p.tMs)} ET · UP ${ScalpChartCopy.cents(p.upBidCents?.toDouble()?.div(100))} · DOWN ${ScalpChartCopy.cents(p.downBidCents?.toDouble()?.div(100))} · spot ${ScalpChartCopy.dollars(p.spotUsd)}",
             style = MaterialTheme.typography.labelMedium, color = c.textPrimary) }
-        Text("Tap a marker or trade to inspect it. Drag sideways to read quotes. Dashed blue = 50¢ buy cap; orange = selected position’s 2¢ stop.", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+        Text("Tap a marker or trade to inspect it. Drag sideways to read quotes. Dashed blue = 50¢ buy cap; orange = selected position’s stop.", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             QuoteCell("Spot", ScalpChartCopy.dollars(q?.spot), c.textPrimary, Modifier.weight(1f))
             QuoteCell("Strike", ScalpChartCopy.dollars(q?.strike), c.textPrimary, Modifier.weight(1f))
         }
+        StatPair("Spot − strike", if (q?.spot != null && q.strike != null) ScalpTabCopy.money(q.spot - q.strike) else "—",
+            "UP spread", ScalpChartCopy.cents(if (q?.yesAsk != null && q.yesBid != null) q.yesAsk - q.yesBid else null))
         SpotWindowCanvas(window)
         val closed = trades.filter { it.state == ScalpState.CLOSED }
         val active = trades.filter { it.entryPrice != null && it.remaining > 0 && it.state != ScalpState.CLOSED }
@@ -235,7 +254,7 @@ internal fun ScalpWindowTradeCard(t: ScalpTrade, selected: Boolean, q: ScalpRule
             Text("${ScalpChartCopy.time(fill.atMs)} ${fill.kind}${if (fill.aggregate) " AVG / final close" else ""} · ${fill.qty} ct @ ${ScalpChartCopy.cents(fill.price)} · fee ${ScalpChartCopy.dollars(fill.fee)}",
                 style = MaterialTheme.typography.labelMedium, color = when (fill.kind) { ScalpFillLog.Kind.BUY -> c.accentBlue; ScalpFillLog.Kind.SELL -> c.accentOrange; ScalpFillLog.Kind.SETTLE -> c.textSecondary })
         }
-        if (t.entryPrice != null) StatPair("Stop trigger", ScalpChartCopy.cents((t.entryPrice - .02).coerceAtLeast(0.0)), "Fees paid", ScalpChartCopy.dollars(t.entryFeeUsd + t.exitFeeUsd))
+        if (t.entryPrice != null) StatPair(if (t.state == ScalpState.CLOSED) "Stop reference" else "Stop trigger", ScalpChartCopy.cents(ScalpChartCopy.stop(t)), "Fees paid", ScalpChartCopy.dollars(t.entryFeeUsd + t.exitFeeUsd))
         Text("Net ${t.netUsd?.let(ScalpTabCopy::money) ?: "open"}" + (t.holdMs?.let { " · held ${it / 1000}s" } ?: "") +
             (t.exitReason?.let { " · $it" } ?: ""), style = MaterialTheme.typography.bodySmall, color = c.textPrimary)
         if (t.soldContracts > ScalpFillLog.display(t).filter { it.kind != ScalpFillLog.Kind.BUY }.sumOf { it.qty })

@@ -76,4 +76,15 @@ class ScalpExecutionLimitsTest {
             assertEquals(2.0, restored[K.STOP], 0.0); assertEquals(50.0, restored[K.MAX_ASK], 0.0)
         }
     }
+    @Test fun depthWalkingNeverConsumesAnAskAboveFiftyEvenWhenSavedV2SettingsAllowIt() {
+        val pending = held("v2-sf41x10").copy(state = ScalpState.PENDING_ENTRY, contracts = 0,
+            signalAtMs = now - 3000, signalAsk = .50, entryPrice = null, entryAtMs = null, entryFeeUsd = 0.0,
+            note = "v2ask=0.60")
+        val book = book(listOf(pending))
+        book.onQuote(q(bid = .49).copy(yesAsk = .50, noBidsDesc = listOf(.50 to 3.0, .49 to 20.0)), false)
+        val fill = book.snapshot().single()
+        assertEquals(ScalpState.OPEN, fill.state)
+        assertEquals(3, fill.contracts)
+        assertEquals(.50, fill.entryPrice!!, 1e-9)
+    }
 }

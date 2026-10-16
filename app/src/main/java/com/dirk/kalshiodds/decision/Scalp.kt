@@ -1444,7 +1444,7 @@ class ScalpBook(
             t.entryPrice?.let { peakBid[t.id] = q?.bid(t.side) ?: it }
         }
         if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && !note.contains("exitBook[")) {
-            val stop = ScalpModels.modelOf(t)?.let { ScalpModels.stopLabel(it) } ?: "n/a"
+            val stop = if (executionLimits != null) "2c global" else ScalpModels.modelOf(t)?.let { ScalpModels.stopLabel(it) } ?: "n/a"
             note += " · exitBook[" + bookStr(q, t.side) + "]" + String.format(Locale.US, " · peakBid=%s · stopLevel=%s · fees=%.2f",
                 peakBid[t.id]?.let { "%.2f".format(Locale.US, it) } ?: "n/a", stop, t.entryFeeUsd + t.exitFeeUsd)
             peakBid.remove(t.id); v2Armed.remove(t.id)
