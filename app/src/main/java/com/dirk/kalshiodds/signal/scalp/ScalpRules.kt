@@ -180,10 +180,14 @@ object ScalpCatalog {
                 if (aPx >= 0.85) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
+                val mins = t.tteMs / 60_000.0
+                val drop = pos.peakBid - b
+                val recover = mins > 5.0 && drop < 0.08
                 when {
-                    pos.peakBid - b + 1e-9 >= 0.02 -> ScalpIntent.Sell(force = true)
-                    b + 1e-9 <= pos.entry - 0.03 -> ScalpIntent.Sell(force = true)
-                    t.tteMs in 1..90_000L -> ScalpIntent.Sell(force = true)
+                    recover -> ScalpIntent.Hold
+                    drop + 1e-9 >= 0.03 -> ScalpIntent.Sell(force = true)
+                    b + 1e-9 <= pos.entry - 0.05 -> ScalpIntent.Sell(force = true)
+                    t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
                 }
             }
