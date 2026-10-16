@@ -19,7 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -145,7 +145,7 @@ private fun SignedBars(accounts: List<ScalpAccount>, value: (ScalpAccount) -> Do
             val frac = (v / maxAbs).toFloat().coerceIn(-1f, 1f)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Name(account.name)
-                Canvas(Modifier.weight(1f).height(10.dp).padding(horizontal = 6.dp)) {
+                Canvas(Modifier.weight(1f).height(10.dp).padding(horizontal = 6.dp).clipToBounds()) {
                     val mid = size.width / 2f
                     val bar = size.width / 2f * abs(frac)
                     drawRoundRect(colors.border, cornerRadius = CornerRadius(4.dp.toPx(), 4.dp.toPx()), size = Size(size.width, size.height))
