@@ -584,7 +584,11 @@ class ScalpBook(
         // 0.3.65: peak bid for every open trade (stored on close) + v2 lane.
         mineAll.forEach { t -> if ((!ScalpV2.isV2(t.variantId) || ScalpV2.fresh(q)) && (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT)) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
         changed += stepV2(q)
-        mineAll.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
+        changed += stepResearch(q, enabled)
+        // 1.0.2: Dirk's manual sliders on original strategies (stop % below fill, take profit after fees, max hold).
+        val overlay = settingsExits(mineAll, q); changed += overlay.values
+        val mineCur = if (overlay.isEmpty()) mineAll else mineAll.map { overlay[it.id] ?: it }
+        mineCur.filter { isActive(it) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) && !Research.isResearch(it.variantId) }.forEach { t ->
             // 0.3.69 fix: sf rows have their own lane (entries + TP/stop/60 s exits). They used to also fall through here with
             // the generic primary params, whose profit-target / fair take-profit / turn-down exits fired first, so the sf
             // take-profit never decided (sf41≡sf42, sf43≡sf44). Here they now only get the adverse-selection marks.
@@ -1380,13 +1384,14 @@ class ScalpBook(
         add.size
     }
 
-    private fun save(t0: ScalpTrade) {
-        val prev = _all.value.firstOrNull { it.id == t0.id }
+    private fun save(tIn: ScalpTrade) {
+        val prev = _all.value.firstOrNull { it.id == tIn.id }
+        val t0 = if (prev == null) settingsEntryFilter(tIn) else tIn
         val t = if (liveExtras) withDetail(t0, prev) else t0
         // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
         if (writeQ.size >= 80) flushWrites() // 0.3.67: never let the queue grow unboundedly (soak / burst quotes)
-        if (prev == null && liveExtras) spawnV2(t)
+        if (prev == null && liveExtras) spawnV2(if (t0 !== tIn) tIn else t)
         if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && ScalpV2.isV2(t.variantId))
             ScalperBrain.parse(t.note)?.let { x -> ScalperBrain.learn(ScalpModels.modelOf(t)?.code ?: t.variantId, x, (t.netUsd ?: 0.0) > 0.0) }
         val cur = _all.value
@@ -1425,6 +1430,7 @@ class ScalpBook(
                 val (t, prev) = pair
                 if (ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED)
                     controls.recordOutcome(ScalpModels.modelOf(t)?.code ?: t.variantId, t)
+                if (t.isPrimary && t.state == ScalpState.CLOSED && prev != null && prev.state != ScalpState.CLOSED) aiLearn(t)
                 written++
             } catch (e: Exception) {
                 // Preserve the newest row but retain the first transition for retry/learning.
@@ -1570,6 +1576,160 @@ class ScalpBook(
                 conf, 0.10, ScalpV2.MAX_ASK, ScalpV2.TRAIL, 0.10, ScalpV2.CLIP, ScalperBrain.tag(bx)),
             ruleVersion = "${ScalpRule.VERSION}|v2-llm|P"))
         null
+    }
+
+    // ---------------- Kalshi Scalper 1.0.2: Research lane + per-strategy sliders for every strategy ----------------
+    private val _researchStatus = MutableStateFlow("Research: waiting for a BTC quote")
+    /** Fair value source, BRTI-vs-Binance gap and current settlement-aware p(YES), for the Research cards. */
+    val researchStatus: StateFlow<String> = _researchStatus.asStateFlow()
+
+    private fun codeOf(t: ScalpTrade) = ScalpModels.modelOf(t)?.code ?: t.variantId
+    private fun explicit(code: String): ScalpStrategySettings? = controls.state.value.strategySettings[code]?.normalized()
+
+    /** "AI learns": nudge one slider of this strategy from its own closed paper trades (bounded; see [Research.learn]). */
+    private fun aiLearn(t: ScalpTrade) {
+        val code = codeOf(t)
+        val cur = controls.state.value
+        val s = cur.settings(code)
+        if (!s.aiLearns) return
+        val defMax = when { Research.isResearch(code) -> 99; ScalpV2.isV2(code) -> Math.round(ScalpV2.spec(code).maxAsk * 100).toInt(); else -> Math.round(ScalpRule.ENTRY_HI * 100).toInt() }
+        val nx = Research.learn(code, s, t.netUsd ?: 0.0, defMax)
+        if (nx != s) controls.save(cur.copy(strategySettings = cur.strategySettings + (code to nx)))
+    }
+
+    /** Original strategies: Dirk's price range / until-minute sliders gate new entries (v2, research and LLM have their own). */
+    private fun settingsEntryFilter(t: ScalpTrade): ScalpTrade {
+        if (t.state != ScalpState.PENDING_ENTRY || !t.isPrimary || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId)) return t
+        val s = explicit(codeOf(t)) ?: return t
+        val close = ScalpTicker.closeMs(t.ticker)
+        val px = t.signalAsk
+        val bad = px < s.minEntryCents / 100.0 - 1e-9 || (s.maxEntryCents != null && px > s.maxEntryCents / 100.0 + 1e-9) ||
+            (close != null && !s.timeOk(t.signalAtMs, close))
+        return if (!bad) t else t.copy(state = ScalpState.NO_FILL, closedAtMs = t.signalAtMs, note = "${t.note}; skipped by your strategy sliders (price range / until minute)")
+    }
+
+    /** Original strategies: optional stop % below fill, take profit after fees and max hold from Dirk's sliders. */
+    private fun settingsExits(mine: List<ScalpTrade>, q: ScalpRule.Quote): Map<String, ScalpTrade> {
+        val out = HashMap<String, ScalpTrade>()
+        for (t in mine) {
+            if (t.state != ScalpState.OPEN || ScalpV2.isV2(t.variantId) || Research.isResearch(t.variantId) || ForecastScalp.isForecast(t)) continue
+            val s = explicit(codeOf(t)) ?: continue
+            val bid = q.bid(t.side)?.takeIf { it > 0 } ?: continue
+            val entry = t.entryPrice ?: continue
+            val held = (q.nowMs - (t.entryAtMs ?: q.nowMs)) / 1000
+            val reason = when {
+                s.stopLossPercent != null && bid <= entry * (1 - s.stopLossPercent / 100.0) + 1e-9 -> "your slider: stop ${s.stopLossPercent}% below fill"
+                (s.takeProfitCents ?: 0) > 0 && ScalpV2.netPerContract(t, bid) >= s.takeProfitCents!! / 100.0 - 1e-9 -> "your slider: take profit ${s.takeProfitCents}¢ after fees"
+                (s.maxHoldSeconds ?: 0) > 0 && held >= s.maxHoldSeconds!! -> "your slider: max hold ${s.maxHoldSeconds}s"
+                else -> null
+            } ?: continue
+            out[t.id] = t.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason)
+        }
+        return out
+    }
+
+    private fun researchNote(note: String, key: String, v: Double) = "$note · $key=" + String.format(Locale.US, "%.4f", v)
+
+    /** Research paper strategies (BTC only). Exempt from the 3¢ trail / window-start / >95% rules. */
+    private fun stepResearch(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> {
+        if (!liveExtras || ScalpParams.coinOf(q.ticker) != ShockFav.TRADE_COIN) return emptyList()
+        val f = Research.fair(q) ?: return emptyList()
+        _researchStatus.value = String.format(Locale.US, "Fair value: %s · p(YES) %.0f%% · BRTI vs Binance gap %s",
+            if (f.brti) "BRTI live (settlement average)" else "FALLBACK exchange spot (no fresh BRTI)", f.pYes * 100,
+            f.gapUsd?.let { String.format(Locale.US, "%+.2f", it) } ?: "n/a")
+        val cfg = controls.state.value
+        val rp = cfg.research.normalized()
+        val out = ArrayList<ScalpTrade>()
+        val mine = _all.value.filter { it.ticker.equals(q.ticker, true) && Research.isResearch(it.variantId) }
+        fun pOf(side: String) = if (side == "YES") f.pYes else 1.0 - f.pYes
+        val midOf = { side: String -> q.bid(side)?.let { b -> q.ask(side)?.let { (b + it) / 2 } } }
+        for (t in mine) {
+            if (!isActive(t)) continue
+            val ps = pOf(t.side)
+            when (t.state) {
+                ScalpState.PENDING_ENTRY -> if (t.restingLimit != null) {
+                    val lim = t.restingLimit
+                    if (q.tauS <= 60 || ps - lim < rp.makerEdgeCents / 200.0) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; maker bid cancelled (fair moved or final minute)"); continue }
+                    val ask = q.ask(t.side) ?: continue
+                    if (ask <= lim - 0.01 + 1e-9) { // trade-through: the offer moved below our resting bid
+                        val n = ScalpV2.savedNumber(t.note, "rn", rp.clip.toDouble()).toInt().coerceAtLeast(1)
+                        out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = lim, entryFeeUsd = 0.0, entryAtMs = q.nowMs,
+                            note = researchNote("${t.note}; maker fill @ ${Math.round(lim * 100)}¢ (fee 0)", "fillmid", midOf(t.side) ?: lim))
+                    }
+                } else {
+                    val age = q.nowMs - t.signalAtMs
+                    if (age > 6_000 || q.tauS <= 0) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill within 6 s"); continue }
+                    if (age < 1_000 || !q.fresh()) continue
+                    val ask = q.ask(t.side) ?: continue
+                    if (ask > t.signalAsk + 0.01 + 1e-9) continue
+                    val want = ScalpV2.savedNumber(t.note, "rn", rp.clip.toDouble()).toInt().coerceAtLeast(1)
+                    val n = minOf(want, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
+                    if (n <= 0) continue
+                    out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
+                        note = String.format(Locale.US, "%s; filled %d @ %.0f¢ (fee $%.2f)", t.note, n, ask * 100, ScalpRule.orderFee(n, ask)))
+                }
+                ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
+                    var cur = t
+                    if (t.variantId == Research.MAKER) {
+                        val fm = ScalpV2.savedNumber(t.note, "fillmid", Double.NaN); val m = midOf(t.side); val held = q.nowMs - (t.entryAtMs ?: q.nowMs)
+                        if (fm.isFinite() && m != null) {
+                            if (held >= 5_000 && !t.note.contains("drift5=")) cur = cur.copy(note = researchNote(cur.note, "drift5", m - fm))
+                            if (held >= 30_000 && !cur.note.contains("drift30=")) cur = cur.copy(note = researchNote(cur.note, "drift30", m - fm))
+                        }
+                    }
+                    if (t.variantId == Research.HOLD || t.variantId == Research.KELLY) {
+                        val bid = q.bid(t.side)?.takeIf { it > 0 }
+                        val reason = cur.exitReason.takeIf { cur.state == ScalpState.PENDING_EXIT } ?: bid?.let { Research.fairExit(ps, it, cur.entryPrice ?: 1.0, cur.remaining.coerceAtLeast(1)) }
+                        if (reason != null && bid != null && q.fresh()) {
+                            val base = if (cur.state == ScalpState.OPEN) cur.copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = q.nowMs, exitReason = reason) else cur
+                            val n = minOf(base.remaining, kotlin.math.floor((q.bidSize(t.side) ?: 0.0) + 1e-9).toInt())
+                            cur = if (n <= 0) base else ScalpFills.sell(base, q.nowMs, n, n * bid, ScalpRule.orderFee(n, bid)).let { if (it.remaining <= 0) close(it, q.nowMs, reason) else it }
+                        }
+                    }
+                    if (cur != t) out += cur
+                }
+                else -> {}
+            }
+        }
+        if (!enabled || q.tauS <= 0 || !q.fresh()) return out
+        var exposure = (mine.filter { isActive(it) } .map { o -> out.firstOrNull { it.id == o.id } ?: o }).filter { isActive(it) }.sumOf { activeCost(it) }
+        for (id in Research.IDS) {
+            if (!cfg.permits(id) || mine.any { it.variantId == id }) continue
+            val s = cfg.settings(id)
+            val edge = (s.edgeCents ?: Research.defaultEdge(id)).toDouble()
+            val lo = if (id == Research.LATE) maxOf(s.minEntryCents, rp.lateLoCents, 20) else maxOf(s.minEntryCents, 1)
+            val hi = if (id == Research.LATE) minOf(s.maxEntryCents ?: rp.lateHiCents, rp.lateHiCents) else (s.maxEntryCents ?: 99)
+            if (id == Research.LATE && (q.tauS < rp.lateMinS || q.tauS > rp.lateMaxS)) continue
+            val clip = s.contracts ?: rp.clip
+            var placed: ScalpTrade? = null
+            for (side in listOf("YES", "NO")) {
+                val ps = pOf(side); val ask = q.ask(side) ?: continue
+                if (id == Research.MAKER) {
+                    val lim = kotlin.math.floor((ps - rp.makerEdgeCents / 100.0) * 100 + 1e-9) / 100.0
+                    if (lim !in maxOf(0.05, lo / 100.0)..minOf(0.95, hi / 100.0) || lim >= ask - 0.005) continue
+                    if (exposure + clip * lim > rp.windowCapUsd + 1e-9) continue
+                    placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                        signalAsk = lim, fairAtSignal = ps, restingLimit = lim, restingSinceMs = q.nowMs,
+                        note = String.format(Locale.US, "Research maker: resting bid %.0f¢ = fair %.1f¢ − %.1f¢ · rn=%d", lim * 100, ps * 100, rp.makerEdgeCents, clip),
+                        ruleVersion = "${ScalpRule.VERSION}|$id|P")
+                    exposure += clip * lim; break
+                }
+                if (ask < lo / 100.0 - 1e-9 || ask > hi / 100.0 + 1e-9) continue
+                val hold = id == Research.LATE
+                val n = if (id == Research.KELLY) minOf(Research.kellyContracts(ps, ask, rp.kellyFraction, rp.kellyBankrollUsd, rp.windowCapUsd - exposure), 1000) else clip
+                if (n <= 0 || !Research.gateOk(ps, ask, n, hold, edge)) continue
+                val cost = n * ask + ScalpRule.orderFee(n, ask)
+                if (exposure + cost > rp.windowCapUsd + 1e-9) continue
+                placed = ScalpTrade(id = idFactory(), ticker = q.ticker.uppercase(), side = side, state = ScalpState.PENDING_ENTRY, signalAtMs = q.nowMs,
+                    signalAsk = ask, fairAtSignal = ps,
+                    note = String.format(Locale.US, "Research %s: fair %.1f¢ vs ask %.0f¢ · edge after fees %.1f¢ (gate %.0f¢) · %s · rn=%d", id, ps * 100, ask * 100,
+                        Research.edgeAfterCosts(ps, ask, n, hold) * 100, edge, if (f.brti) "BRTI" else "spot fallback", n),
+                    ruleVersion = "${ScalpRule.VERSION}|$id|P")
+                exposure += cost; break
+            }
+            placed?.let { out += it }
+        }
+        return out
     }
 
     /** Lift ask levels (best first) up to [maxPx] for [want] contracts → (filled, $ cost, fees per level). */

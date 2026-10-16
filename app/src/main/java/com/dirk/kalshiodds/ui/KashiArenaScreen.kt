@@ -139,12 +139,21 @@ internal fun ArenaStrategyRow(row: ScalpModels.Row, st: ScalpTabState, onOpen: (
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text(row.model.label, color = c.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (ScalpModels.isResearch(row.model)) Text("RESEARCH", color = c.spot, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                 Text("${row.roundTrips} trades · ${ScalpTabCopy.pct(row.winRate)} won · ${row.open} open", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+                if (row.roundTrips > 0) Text("Gross ${ScalpTabCopy.money(row.netUsd + row.feesUsd)} · fees ${ScalpTabCopy.money(-row.feesUsd)} · net ${ScalpTabCopy.money(row.netUsd)}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
             Column(horizontalAlignment = Alignment.End) {
                 Text(if (row.roundTrips > 0) ScalpTabCopy.money(row.netUsd) else "—", color = pnlColor(row.netUsd), style = ArenaUi.mono(MaterialTheme.typography.titleMedium), fontWeight = FontWeight.Bold)
                 if (points.size >= 2) Box(Modifier.width(76.dp)) { ArenaProfitChart(points, compact = true) }
             }
+        }
+        val ai = st.controls.settings(row.model.code)
+        Text(if (ai.aiLearns) "AI learns: on" + (if (ai.aiNote.isNotBlank()) " · last adjusted: ${ai.aiNote}" else "") else "AI learns: off", color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
+        if (ScalpModels.isResearch(row.model)) {
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp
+            val rs = app?.let { runCatching { it.container.scalp.researchStatus }.getOrNull() }?.collectAsState()?.value
+            if (rs != null) Text(rs, color = c.textSecondary, style = MaterialTheme.typography.labelSmall, maxLines = 2)
         }
         if (row.model == ScalpModels.Model.V2_LLM) {
             val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as? com.dirk.kalshiodds.KalshiOddsApp

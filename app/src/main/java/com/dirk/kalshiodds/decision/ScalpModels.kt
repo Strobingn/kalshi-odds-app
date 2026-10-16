@@ -79,6 +79,11 @@ object ScalpModels {
         V2_MAKER_DIP("v2-mkdip", "v2 · Maker dip-rebound", V2_BLURB),
         V2_FORECAST_RIDE("v2-fcride", "v2 · Forecast ride", V2_BLURB),
         /** Kalshi Scalper: the one LLM paper strategy (needs an API key in Settings). Same hard rules, enforced in code. */
+        /** Kalshi Scalper 1.0.2 Research strategies: exempt from the 3¢ trail / window-start / >95% rules. BTC, paper only. */
+        R_LATE("r-late", "Research · Late favourite settle", "Last 2–5 min, buys 80–95¢ when settlement-aware fair value beats price by fee + 1¢; holds to settlement; never under 20¢."),
+        R_HOLD("r-hold", "Research · Fair-value hold", "Buys whenever fair value beats price after entry fee and expected exit fee by the edge; sells only if bid beats fair + exit fee or fair falls below entry − fee; else holds to settlement."),
+        R_MAKER("r-maker", "Research · Passive maker entry", "Rests a paper bid at fair − edge; fills only when the market trades through; logs 5 s / 30 s drift after the fill; holds to settlement."),
+        R_KELLY("r-kelly", "Research · Kelly-sized fair value", "Same entry gate and exits as Fair-value hold; size = quarter-Kelly (p − c)/(1 − c) of a reference bankroll, capped per window."),
         V2_LLM("v2-llm", "LLM · paper", "One LLM call per BTC window at the window start proposes YES/NO + confidence; code enforces ask ≤ 55¢, 3¢ peak trail and the > 95% hold gate. Paper only."),
         V2_FORECAST_FADE("v2-fcfade", "v2 · Forecast fade", V2_BLURB),
         V2_DIP_HOLD("v2-diph60", "v2 · Dip-hunter hold", V2_BLURB),
@@ -155,6 +160,7 @@ object ScalpModels {
     fun v2Of(m: Model): Model? = V2_BY_ORIG[m]
     fun originalOf(v2: Model): Model? = ORIG_BY_CODE[ScalpV2.baseOf(v2.code)]?.takeIf { isV2(v2) }
     fun isV2(m: Model): Boolean = m.code.startsWith(ScalpV2.PREFIX)
+    fun isResearch(m: Model): Boolean = Research.isResearch(m.code)
     /** Stable id for the incremental stats table (model code, or variantId when unknown). */
     fun scalperIdOf(t: ScalpTrade): String? = if (!t.isPrimary) null else (modelOf(t)?.code ?: t.variantId)
     fun dayEt(atMs: Long): String = java.time.Instant.ofEpochMilli(atMs).atZone(java.time.ZoneId.of("America/New_York")).toLocalDate().toString()
@@ -229,6 +235,7 @@ object ScalpModels {
     private val MODEL_BY_VARIANT = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private fun modelOfVariant(vid: String): Model? {
         if (vid == "v2-llm") return Model.V2_LLM
+        if (Research.isResearch(vid)) return BY_CODE[vid]
         if (ScalpV2.isExtra(vid)) return ALL.firstOrNull { it.code == vid }
         if (ScalpV2.isV2(vid)) return modelOfVariant(vid.removePrefix(ScalpV2.PREFIX))?.let { v2Of(it) }
         if (vid.startsWith(ForecastScalp.RIDE_PREFIX)) return Model.FORECAST_RIDE

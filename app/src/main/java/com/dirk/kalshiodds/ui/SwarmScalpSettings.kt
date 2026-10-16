@@ -52,10 +52,10 @@ internal fun ScalpSettingsChooser(onBack: () -> Unit = {}, onGlobal: () -> Unit 
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = c.accentBlue) }
                 Text("Strategy settings", color = c.textPrimary, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
             }
-            Text("Choose a V2 strategy to adjust its sliders. Changes apply to its next order.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            Text("Choose any strategy to adjust its sliders or its AI learns switch. Changes apply to its next order.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         }
         item(key = "global") { OutlinedButton(onClick = onGlobal, modifier = Modifier.fillMaxWidth()) { Text("Global controls & limits") } }
-        items(ScalpModels.V2_MODELS, key = { it.code }) { model ->
+        items(ScalpModels.ALL, key = { it.code }) { model ->
             ArenaCard {
                 TextButton(onClick = { onStrategy(model) }, modifier = Modifier.fillMaxWidth()) {
                     Text(model.label, color = c.textPrimary, modifier = Modifier.weight(1f))
@@ -107,6 +107,17 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 SwarmNumber("Arm trail at net gain (¢/contract)", draft.armCents.toDouble(), 1.0..99.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(armCents = it.toInt()) }
                 SwarmNumber("Max hold (seconds; 0 = no hold timer)", draft.maxHoldSeconds.toDouble(), 0.0..3600.0, true, ::number) { draft = draft.copy(maxHoldSeconds = it.toInt()) }
                 Text("Net take-profit and legacy trail arming include fees. Peak-mode distance and percent stop use prices. Every position keeps its saved protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            } }
+            item { SwarmCard("Research strategies (shared)") {
+                val r = draft.research
+                Text("Window exposure cap: $${Math.round(r.windowCapUsd)} across all Research strategies", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Slider(value = r.windowCapUsd.toFloat(), onValueChange = { draft = draft.copy(research = r.copy(windowCapUsd = Math.round(it).toDouble())) }, valueRange = 10f..2000f)
+                Text("Kelly fraction: ${Math.round(r.kellyFraction * 100)}% of Kelly · reference bankroll $${Math.round(r.kellyBankrollUsd)}", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Slider(value = r.kellyFraction.toFloat(), onValueChange = { draft = draft.copy(research = r.copy(kellyFraction = Math.round(it * 20) / 20.0)) }, valueRange = 0.05f..1f)
+                Text("Maker bid sits ${Math.round(r.makerEdgeCents)}¢ below fair value", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Slider(value = r.makerEdgeCents.toFloat(), onValueChange = { draft = draft.copy(research = r.copy(makerEdgeCents = Math.round(it).toDouble())) }, valueRange = 0f..15f)
+                Text("Late favourite window: last ${r.lateMinS / 60.0}–${r.lateMaxS / 60.0} min", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Slider(value = r.lateMaxS.toFloat(), onValueChange = { draft = draft.copy(research = r.copy(lateMaxS = (Math.round(it / 30f) * 30).coerceAtLeast(r.lateMinS))) }, valueRange = 60f..600f)
             } }
             item { SwarmCard("Sizing and optional limits") {
                 Text("Winners bet bigger: ${draft.greenContracts} contracts per trade once a scalper is net positive after fees (20+ closes), filled by walking real book depth", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)

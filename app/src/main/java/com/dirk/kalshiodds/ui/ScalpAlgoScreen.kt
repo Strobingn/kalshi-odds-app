@@ -87,7 +87,7 @@ fun ScalpAlgoScreen(viewModel: OddsViewModel, onBack: () -> Unit) {
             onChange = { viewModel.saveScalpStrategySettings(model.code, it) },
             onEnabled = { viewModel.enableScalpStrategy(model.code, it) })
     } else ScalpAlgoContent(d, onBack, paged, viewModel::selectScalpChartWindow, viewModel::followScalpChartLive,
-        onSettings = if (model != null && com.dirk.kalshiodds.decision.ScalpModels.isV2(model)) ({ settingsOpen = true }) else null)
+        onSettings = if (model != null) ({ settingsOpen = true }) else null)
 }
 
 @Composable

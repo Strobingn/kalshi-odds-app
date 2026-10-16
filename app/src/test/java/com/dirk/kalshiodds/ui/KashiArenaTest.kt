@@ -18,9 +18,9 @@ class KashiArenaTest {
     @Test fun noTradesStillShowsEveryStrategyAndUntradedDoesNotBeatALoss() {
         val row = ScalpModels.rowFromStat(ScalpStat(v2.code)).copy(roundTrips = 1, netUsd = -3.0, winRate = 0.0)
         val rows = KashiArenaData.rows(ScalpTabState(algoAllTime = mapOf(v2 to row)), true)
-        assertEquals(ScalpModels.ALL.count { ScalpModels.isV2(it) }, rows.size)
+        assertEquals(ScalpModels.ALL.count { ScalpModels.isV2(it) || ScalpModels.isResearch(it) }, rows.size)
         assertEquals(v2, rows.first().model)
-        assertTrue(rows.all { ScalpModels.isV2(it.model) })
+        assertTrue(rows.all { ScalpModels.isV2(it.model) || ScalpModels.isResearch(it.model) })
     }
     @Test fun windowReadExcludesCounterfactualsAndOtherTickers() {
         val store = InMemoryScalpPersistence()
