@@ -452,9 +452,10 @@ class KnownIssuesRegressionTest {
         assertTrue(copy.detail.contains("DOWN"))
         assertTrue(copy.detail.contains("UP"))
         assertTrue(copy.detail.contains("Market + spot"))
+        // Kalshi data only (1.9.6): the model no longer makes the call, so this is NO BET; the label still shows.
         val decision = BetCall.decide(disagree, SignalSettings(), nowMs)
-        assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
-        assertTrue(decision.isActionable)
+        assertEquals(BetCall.Headline.NO_BET, decision.headline)
+        assertFalse(decision.isActionable)
         assertNotNull(DisagreementLabel.of(disagree))
 
         assertNull(

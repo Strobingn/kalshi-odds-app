@@ -48,7 +48,16 @@ object TicketBuilder {
         }
     }
 
+    /**
+     * Automatic tickets (hunter, long-shot, configured) were picked by the AI
+     * model, whose chance comes from an outside Bitcoin feed. Kalshi data
+     * only (since 1.9.6): none are proposed. Buy on a card, limit orders and
+     * the clear-lead ticket still work.
+     */
+    const val AUTOMATIC_TICKETS = false
+
     fun proposeAll(markets: List<MarketUiModel>, ctx: Context): List<TradeTicket> {
+        if (!AUTOMATIC_TICKETS) return emptyList()
         if (!ctx.settings.ticketsEnabled) return emptyList()
         if (ctx.settings.isSittingOut()) return emptyList()
         val live = MarketLifecycle.tradable(markets, ctx.nowMs)
@@ -201,15 +210,12 @@ object TicketBuilder {
 
     fun clearLeadNote(market: MarketUiModel, nowMs: Long): String {
         val tte = market.closeTimeEpochMs?.let { ((it - nowMs) / 1000L).coerceAtLeast(0L) }
-        val bp = market.clearLeadBp
-        val why = if (bp != null && bp.isFinite() && tte != null) {
-            com.dirk.kalshiodds.signal.trend.ClearLeadRule.Signal(
-                side = if (bp >= 0.0) "YES" else "NO",
-                distanceBp = bp,
-                tteSeconds = tte
-            ).reason
+        val ask = market.clearLeadAsk
+        val side = market.clearLeadSide
+        val why = if (ask != null && ask.isFinite() && side != null && tte != null) {
+            com.dirk.kalshiodds.signal.trend.ClearLeadRule.Signal(side = side, ask = ask, tteSeconds = tte).reason
         } else {
-            "Bitcoin is clearly ahead on this side"
+            "Kalshi prices this side as the clear favourite"
         }
         return "Clear lead · $why · $5 all-in cap including fees · Approve still required"
     }

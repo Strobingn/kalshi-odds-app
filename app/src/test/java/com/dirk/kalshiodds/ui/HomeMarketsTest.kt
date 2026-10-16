@@ -8,6 +8,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.signal.trade.BetCall
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -29,9 +30,10 @@ class HomeMarketsTest {
         val decisions = HomeMarkets.decisions(live, ctx)
         val ranked = HomeMarkets.ranked(live, decisions, settings)
         assertEquals("KXBTC15M-25SEP181700-50", ranked.single().ticker)
-        assertTrue(decisions[ranked.first().ticker]!!.isActionable)
+        // Kalshi data only (1.9.6): a model-only fixture is NO BET, and the card is still the one shown.
+        assertFalse(decisions[ranked.first().ticker]!!.isActionable)
         val best = HomeMarkets.best(ranked, decisions)!!
-        assertEquals(BetCall.Headline.BET_UP, best.second.headline)
+        assertEquals(BetCall.Headline.NO_BET, best.second.headline)
     }
 
     @Test

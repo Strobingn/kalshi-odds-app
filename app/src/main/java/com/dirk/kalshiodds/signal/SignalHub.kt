@@ -421,15 +421,14 @@ class SignalHub(
     /**
      * Paper record of the clear-lead rule
      * ([com.dirk.kalshiodds.signal.trend.ClearLeadRule]): the first moment in
-     * a window the engine's score says Bitcoin is clearly ahead, log a $5 buy
+     * a window Kalshi prices one side at 80–90¢ (minutes 3–10), log a $5 buy
      * of that side at the ask. Logs to [clearLead]; there is no path from
      * here to an order.
      */
     private fun maybeClearLead(tick: MarketTick, scored: ScoringEngine.Score) {
         val ledger = clearLead ?: return
         if (!settings.clearLeadEnabled) return
-        val side = scored.clearLeadSide ?: return
-        val bp = scored.clearLeadBp ?: return
+        if (scored.clearLeadSide == null) return
         val tte = scored.tteSeconds ?: return
         if (!CryptoMarkets.isLiveTicker(tick.ticker) || ledger.hasEntry(tick.ticker)) return
         runCatching {
@@ -442,10 +441,12 @@ class SignalHub(
                 ?: KalshiPrice.impliedAskFromOppositeBid(noBid)
             val noAsk = KalshiPrice.usable(top?.noAsk ?: tick.noAsk.takeIf { quoted })
                 ?: KalshiPrice.impliedAskFromOppositeBid(yesBid)
+            // Re-check on the book's own asks (Kalshi only): the signal must still hold at the price paid.
+            val signal = com.dirk.kalshiodds.signal.trend.ClearLeadRule.signal(tte, yesAsk, noAsk) ?: return
             val decision = com.dirk.kalshiodds.signal.trend.ClearLeadRule.decide(
                 ticker = tick.ticker,
                 nowMs = System.currentTimeMillis(),
-                signal = com.dirk.kalshiodds.signal.trend.ClearLeadRule.Signal(side, bp, tte),
+                signal = signal,
                 yesAsk = yesAsk,
                 noAsk = noAsk
             ) ?: return
@@ -548,6 +549,9 @@ class SignalHub(
      * Logs to [lateFavorite]; there is no path from here to an order.
      */
     private fun maybeLateFavorite(tick: MarketTick, scored: ScoringEngine.Score) {
+        // Kalshi data only (since 1.9.6): this rule needs an outside Bitcoin price (its z-score), so it no
+        // longer records. Its card keeps the record it already has.
+        if (!LATE_FAVORITE_ON_OUTSIDE_DATA) return
         val ledger = lateFavorite ?: return
         if (!settings.lateFavoriteEnabled) return
         val tte = scored.tteSeconds ?: return
@@ -716,6 +720,9 @@ class SignalHub(
     }
 
     private suspend fun emitAlert(alert: SignalAlert) {
+        // Kalshi data only (since 1.9.6): these alerts come from the AI model, whose chance uses an
+        // outside Bitcoin feed, so they are no longer sent.
+        if (!MODEL_ALERTS) return
         if (scoring.guardrails.paused) return
         val posted = if (settings.notificationsEnabled) {
             withContext(Dispatchers.Main.immediate) { notifier.notify(alert) }
@@ -744,6 +751,9 @@ class SignalHub(
     }
 
     companion object {
+        /** Model alerts and the late-favorite tracker use an outside Bitcoin feed: off (Kalshi data only). */
+        const val MODEL_ALERTS = false
+        const val LATE_FAVORITE_ON_OUTSIDE_DATA = false
         private const val TAG = "DipHunterTick"
         const val MAX_ALERTS = 30
 

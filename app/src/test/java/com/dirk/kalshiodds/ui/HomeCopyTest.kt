@@ -46,11 +46,11 @@ class HomeCopyTest {
     }
 
     @Test
-    fun actionableDownFixtureIsBetDown() {
+    fun modelOnlyDownFixtureIsNoBet() {
+        // Kalshi data only (1.9.6): the model's DOWN lean is not a call.
         val down = HomeFixtures.actionableDownBtc()
         val call = BetCall.decide(down, SignalSettings(), nowMs)
-        assertEquals(BetCall.Headline.BET_DOWN, call.headline)
-        assertTrue(call.isActionable)
+        assertEquals(BetCall.Headline.NO_BET, call.headline)
     }
 
     @Test
@@ -58,11 +58,11 @@ class HomeCopyTest {
         val up = HomeFixtures.market(
             ticker = "KXBTC15M-WIN-50",
             seriesLabel = "Bitcoin",
-            yesAsk = 0.20,
+            yesAsk = 0.84,
             aiYes = 80.0,
             predicted = "YES",
             closeMs = nowMs + 372_000L
-        )
+        ).copy(clearLeadSide = "YES", clearLeadAsk = 0.84)
         val upCall = BetCall.decide(up, SignalSettings(), nowMs)
         assertTrue(upCall.isActionable)
         val line = HomeCopy.thisWindowHeadline(upCall, up, nowMs)

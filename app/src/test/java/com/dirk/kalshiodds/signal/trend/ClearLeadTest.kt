@@ -24,7 +24,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Dirk's clear-lead rule: the pure rule, the engine score, the BET headline,
+ * Dirk's clear-lead rule (Kalshi prices only): the pure rule, the engine score, the BET headline,
  * the $5 ticket (no min-profit gate on its side) and the paper record.
  */
 class ClearLeadTest {
@@ -45,49 +45,34 @@ class ClearLeadTest {
     // ---- the rule ----
 
     @Test
-    fun callsTheSideBitcoinIsOnInsideTheBand() {
-        val up = ClearLeadRule.signal(480L, strike * 1.0015, strike)
-        assertNotNull(up)
-        assertEquals("YES", up!!.side)
-        assertEquals(15.0, up.distanceBp, 1e-6)
-        val down = ClearLeadRule.signal(480L, strike * 0.9985, strike)
-        assertEquals("NO", down!!.side)
-        assertEquals(-15.0, down.distanceBp, 1e-6)
+    fun callsTheSideKalshiPricesAtEightyToNinetyCents() {
+        val up = ClearLeadRule.signal(480L, yesAsk = 0.84, noAsk = 0.17)!!
+        assertEquals("YES", up.side)
+        assertEquals(0.84, up.ask, 1e-9)
+        val down = ClearLeadRule.signal(480L, yesAsk = 0.13, noAsk = 0.88)!!
+        assertEquals("NO", down.side)
+        assertNull("79c is not a clear lead", ClearLeadRule.signal(480L, 0.79, 0.22))
+        assertNotNull("80c is in", ClearLeadRule.signal(480L, 0.80, 0.21))
+        assertNotNull("89c is in", ClearLeadRule.signal(480L, 0.89, 0.12))
+        assertNull("90c is out", ClearLeadRule.signal(480L, 0.90, 0.11))
+        assertNull("a coin flip is out", ClearLeadRule.signal(480L, 0.51, 0.50))
     }
 
     @Test
-    fun distanceBandIsTenInclusiveToTwentyExclusive() {
-        assertNull("9.9 bp is not clearly ahead", ClearLeadRule.signal(480L, strike * 1.00099, strike))
-        assertNotNull("10 bp is in", ClearLeadRule.signal(480L, strike * 1.0010, strike))
-        assertNotNull("19.9 bp is in", ClearLeadRule.signal(480L, strike * 1.00199, strike))
-        assertNull("20 bp is out", ClearLeadRule.signal(480L, strike * 1.0020, strike))
-        assertNull("far ahead is out", ClearLeadRule.signal(480L, strike * 1.0050, strike))
-    }
-
-    @Test
-    fun timeBandIsMinuteThreeToMinuteTen() {
-        val spot = strike * 1.0015
-        assertNull("minute 2: 12:01 left", ClearLeadRule.signal(721L, spot, strike))
-        assertNotNull("minute 3: 12:00 left", ClearLeadRule.signal(720L, spot, strike))
-        assertNotNull("minute 10: 5:00 left", ClearLeadRule.signal(300L, spot, strike))
-        assertNull("4:59 left", ClearLeadRule.signal(299L, spot, strike))
-        assertNull(ClearLeadRule.signal(null, spot, strike))
-    }
-
-    @Test
-    fun badInputsNeverCall() {
-        assertNull(ClearLeadRule.signal(480L, null, strike))
-        assertNull(ClearLeadRule.signal(480L, strike * 1.0015, null))
-        assertNull(ClearLeadRule.signal(480L, Double.NaN, strike))
-        assertNull(ClearLeadRule.signal(480L, strike * 1.0015, 0.0))
+    fun onlyBetweenMinuteThreeAndMinuteTen() {
+        assertNull("minute 2: 12:01 left", ClearLeadRule.signal(721L, 0.84, 0.17))
+        assertNotNull("minute 3: 12:00 left", ClearLeadRule.signal(720L, 0.84, 0.17))
+        assertNotNull("minute 10: 5:00 left", ClearLeadRule.signal(300L, 0.84, 0.17))
+        assertNull("4:59 left", ClearLeadRule.signal(299L, 0.84, 0.17))
+        assertNull(ClearLeadRule.signal(null, 0.84, 0.17))
+        assertNull(ClearLeadRule.signal(480L, null, null))
+        assertNull(ClearLeadRule.signal(480L, Double.NaN, 0.17))
     }
 
     @Test
     fun reasonReadsInPlainWords() {
-        val s = ClearLeadRule.signal(430L, strike * 1.0013, strike)!!
-        assertEquals("Bitcoin is 0.13% above the start price with 7:10 left", s.reason)
-        val d = ClearLeadRule.signal(305L, strike * 0.9988, strike)!!
-        assertEquals("Bitcoin is 0.12% below the start price with 5:05 left", d.reason)
+        assertEquals("Kalshi prices UP at 84¢ with 7:10 left", ClearLeadRule.signal(430L, 0.84, 0.17)!!.reason)
+        assertEquals("Kalshi prices DOWN at 88¢ with 5:05 left", ClearLeadRule.signal(305L, 0.13, 0.88)!!.reason)
     }
 
     @Test
@@ -96,8 +81,6 @@ class ClearLeadTest {
             ticker = "KXBTC15M-26OCT091015-15",
             nowMs = now,
             tteSeconds = 480L,
-            spotUsd = strike * 1.0015,
-            strikeUsd = strike,
             yesAsk = 0.80,
             noAsk = 0.21
         )
@@ -110,7 +93,7 @@ class ClearLeadTest {
         assertEquals(KalshiFee.totalCost(6, 0.80), d.sized.costUsd, 1e-9)
         assertEquals(4.87, d.sized.costUsd, 1e-9)
         assertNull("one entry per window", ClearLeadRule.evaluate(inputs, alreadyEntered = true))
-        assertNull("no ask on that side, no bet", ClearLeadRule.evaluate(inputs.copy(yesAsk = null), false))
+        assertNull("no ask in the band, no bet", ClearLeadRule.evaluate(inputs.copy(yesAsk = null), false))
         assertNull(
             "ETH / SOL windows are not traded",
             ClearLeadRule.evaluate(inputs.copy(ticker = "KXETH15M-26OCT091015-15"), false)
@@ -120,7 +103,7 @@ class ClearLeadTest {
     @Test
     fun ledgerRecordsOncePerWindowAndSettles() {
         val ledger = LateFavoriteLedger()
-        val signal = ClearLeadRule.Signal("YES", 15.0, 480L)
+        val signal = ClearLeadRule.Signal("YES", 0.80, 480L)
         val d = ClearLeadRule.decide("KXBTC15M-26OCT091015-15", now, signal, yesAsk = 0.80, noAsk = 0.21)!!
         assertNotNull(ledger.record(d))
         assertNull("second call in the same window is ignored", ledger.record(d))
@@ -139,25 +122,24 @@ class ClearLeadTest {
     // ---- the engine ----
 
     @Test
-    fun engineScoreCarriesTheCallIntoTheMarketModel() {
-        val engine = engineWithSpot(lastPrice = strike * 1.0015)
-        val score = engine.score(tick(close = now + 480_000L, yesBid = 0.79, yesAsk = 0.80), SignalSettings(), now)
+    fun engineReadsTheCallFromKalshiQuotesWithNoBitcoinFeed() {
+        // A spot far from the strike must not matter: the call comes from Kalshi's prices.
+        val engine = engineWithSpot(lastPrice = strike * 1.0300)
+        val score = engine.score(tick(close = now + 480_000L, yesBid = 0.83, yesAsk = 0.84), SignalSettings(), now)
         assertNotNull(score)
         assertEquals("YES", score!!.clearLeadSide)
-        assertEquals(15.0, score.clearLeadBp!!, 1e-6)
-        val ui = market(yesAsk = 0.80, noAsk = 0.21).withSignalScore(score, thresholdPp = 5.0)
+        assertEquals(0.84, score.clearLeadAsk!!, 1e-9)
+        val ui = market(yesAsk = 0.84, noAsk = 0.17).withSignalScore(score, thresholdPp = 5.0)
         assertEquals("YES", ui.clearLeadSide)
-        assertEquals(15.0, ui.clearLeadBp!!, 1e-6)
+        assertEquals(0.84, ui.clearLeadAsk!!, 1e-9)
     }
 
     @Test
     fun engineDoesNotCallOutsideTheBands() {
-        val near = engineWithSpot(lastPrice = strike * 1.0005)
-        assertNull(near.score(tick(now + 480_000L, 0.60, 0.61), SignalSettings(), now)!!.clearLeadSide)
-        val early = engineWithSpot(lastPrice = strike * 1.0015)
-        assertNull(early.score(tick(now + 800_000L, 0.70, 0.71), SignalSettings(), now)!!.clearLeadSide)
-        val late = engineWithSpot(lastPrice = strike * 1.0015)
-        assertNull(late.score(tick(now + 120_000L, 0.95, 0.96), SignalSettings(), now)!!.clearLeadSide)
+        val e = engineWithSpot(lastPrice = strike * 1.0015)
+        assertNull(e.score(tick(now + 480_000L, 0.60, 0.61), SignalSettings(), now)!!.clearLeadSide)
+        assertNull(e.score(tick(now + 800_000L, 0.83, 0.84), SignalSettings(), now)!!.clearLeadSide)
+        assertNull(e.score(tick(now + 120_000L, 0.95, 0.96), SignalSettings(), now)!!.clearLeadSide)
     }
 
     // ---- headline and ticket ----
@@ -180,18 +162,18 @@ class ClearLeadTest {
         assertNull("the $10 min-profit gate does not block the rule's side", t.blockedReason)
         assertFalse(t.belowMinProfit)
         val note = t.gateNote!!
-        assertTrue(note, note.startsWith("Clear lead · Bitcoin is 0.15% above the start price with 8:00 left"))
+        assertTrue(note, note.startsWith("Clear lead · Kalshi prices UP at 80¢ with 8:00 left"))
         assertTrue(note, note.endsWith("Approve still required"))
     }
 
     @Test
-    fun headlineIsBetDownWhenBitcoinIsBelow() {
-        val m = market(yesAsk = 0.22, noAsk = 0.79, lead = "NO", bp = -15.0)
+    fun headlineIsBetDownWhenKalshiFavoursDown() {
+        val m = market(yesAsk = 0.20, noAsk = 0.81, lead = "NO")
         val call = BetCall.decide(m, TicketBuilder.Context(SignalSettings(), alertsPaused = false, nowMs = now))
         assertEquals(BetCall.Headline.BET_DOWN, call.headline)
         assertEquals("NO", call.ticket!!.side)
         assertTrue(call.ticket!!.clearLead)
-        assertTrue(call.ticket!!.gateNote, call.ticket!!.gateNote!!.contains("0.15% below the start price"))
+        assertTrue(call.ticket!!.gateNote, call.ticket!!.gateNote!!.contains("Kalshi prices DOWN at 81¢"))
     }
 
     @Test
@@ -206,7 +188,7 @@ class ClearLeadTest {
         assertFalse(plain.clearLead)
         assertFalse(plain.canApprove)
         assertTrue(plain.blockedReason!!.contains("below the $10 minimum"))
-        // The side Bitcoin is NOT on is an ordinary manual buy.
+        // The other side is an ordinary manual buy.
         assertFalse(TicketBuilder.proposeManual(m, "NO", ctx)!!.clearLead)
     }
 
@@ -270,7 +252,7 @@ class ClearLeadTest {
         floorStrike = strike
     )
 
-    private fun market(yesAsk: Double, noAsk: Double, lead: String? = null, bp: Double = 15.0) = MarketUiModel(
+    private fun market(yesAsk: Double, noAsk: Double, lead: String? = null) = MarketUiModel(
         ticker = "KXBTC15M-LEAD",
         title = "Bitcoin price up?",
         subtitle = null,
@@ -291,6 +273,6 @@ class ClearLeadTest {
         status = "active",
         seriesLabel = "Bitcoin",
         clearLeadSide = lead,
-        clearLeadBp = lead?.let { bp }
+        clearLeadAsk = lead?.let { if (it == "NO") noAsk else yesAsk }
     )
 }

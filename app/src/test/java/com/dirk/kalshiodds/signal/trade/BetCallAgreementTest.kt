@@ -11,38 +11,20 @@ import org.junit.Test
 class BetCallAgreementTest {
 
     @Test
-    fun betUpHeadlineMatchesTicketAndApproveSide() {
-        val market = sample(yesAsk = 0.20, noAsk = 0.80, aiYes = 80.0, predicted = "YES")
+    fun theModelAloneNeverMakesTheCall() {
+        // Kalshi data only (1.9.6): the AI chance comes from an outside Bitcoin feed, so it never says BET.
         val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
-        val decision = BetCall.decide(market, ctx)
-        assertEquals(BetCall.Headline.BET_UP, decision.headline)
-        assertEquals("YES", decision.side)
-        assertEquals("YES", decision.ticket!!.side)
-        assertTrue(decision.ticket!!.canApprove)
-        assertEquals(decision.side, decision.ticket!!.side)
-    }
-
-    @Test
-    fun betDownHeadlineMatchesTicketAndApproveSide() {
-        val market = sample(yesAsk = 0.80, noAsk = 0.20, aiYes = 10.0, predicted = "NO")
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
-        val decision = BetCall.decide(market, ctx)
-        assertEquals(BetCall.Headline.BET_DOWN, decision.headline)
-        assertEquals("NO", decision.side)
-        assertEquals("NO", decision.ticket!!.side)
-        assertTrue(decision.ticket!!.canApprove)
-        assertEquals(decision.side, decision.ticket!!.side)
-    }
-
-    @Test
-    fun noBetWhenSixtyThreeCentsMissesMinProfit() {
-        val market = sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 70.0, predicted = "YES")
-        val ctx = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)
-        val decision = BetCall.decide(market, ctx)
-        assertEquals(BetCall.Headline.NO_BET, decision.headline)
-        assertNull(decision.side)
-        assertFalse(decision.isActionable)
-        assertTrue(decision.noBetReason!!.contains("below") || decision.noBetReason!!.contains("No side"))
+        for (m in listOf(
+            sample(yesAsk = 0.20, noAsk = 0.80, aiYes = 80.0, predicted = "YES"),
+            sample(yesAsk = 0.80, noAsk = 0.20, aiYes = 10.0, predicted = "NO"),
+            sample(yesAsk = 0.63, noAsk = 0.37, aiYes = 70.0, predicted = "YES")
+        )) {
+            val d = BetCall.decide(m, ctx)
+            assertEquals(BetCall.Headline.NO_BET, d.headline)
+            assertNull(d.side)
+            assertFalse(d.isActionable)
+            assertEquals(BetCall.NO_RULE, d.noBetReason)
+        }
     }
 
     @Test
@@ -69,8 +51,9 @@ class BetCallAgreementTest {
 
     @Test
     fun sortPutsActionableFirst() {
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())) == 0)
-        assertTrue(BetCall.sortKey(BetCall.decide(sample(0.63, 0.37, 70.0, "YES"), SignalSettings())) == 1)
+        assertEquals(1, BetCall.sortKey(BetCall.decide(sample(0.20, 0.80, 80.0, "YES"), SignalSettings())))
+        val lead = sample(0.84, 0.17, 50.0, "YES").copy(clearLeadSide = "YES", clearLeadAsk = 0.84)
+        assertEquals(0, BetCall.sortKey(BetCall.decide(lead, SignalSettings())))
     }
 
     private fun sample(yesAsk: Double, noAsk: Double, aiYes: Double, predicted: String) = MarketUiModel(

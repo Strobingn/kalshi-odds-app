@@ -147,13 +147,13 @@ class ScoringEngine(
         val modelBacked: Boolean = false,
         val blendWeight: Double? = null,
         /**
-         * [com.dirk.kalshiodds.signal.trend.ClearLeadRule]: the side Bitcoin
-         * is clearly ahead on right now ("YES" / "NO"), or null when the rule
-         * is not on. Independent of the model and of the sit-out switch.
+         * [com.dirk.kalshiodds.signal.trend.ClearLeadRule]: the side Kalshi
+         * prices as the clear favourite right now ("YES" / "NO"), or null.
+         * Kalshi prices only. Independent of the model and of the sit-out switch.
          */
         val clearLeadSide: String? = null,
-        /** Signed distance of spot from the start price in basis points while the rule is on. */
-        val clearLeadBp: Double? = null
+        /** That side's ask while the rule is on. */
+        val clearLeadAsk: Double? = null
     )
 
     data class BlendWeights(
@@ -649,8 +649,13 @@ class ScoringEngine(
         // had to come from the Coinbase tape.
         val fairSpot = cf?.value ?: spotFeat?.lastPrice
         val cfExact = cf != null && (!inFinalMinute || cfFinalAvg != null)
-        // Dirk's rule: the side Bitcoin is clearly ahead on, minutes 3-10.
-        val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadRule.signal(tteSec, fairSpot, strikeUsd)
+        // Dirk's rule: the side Kalshi prices at 80-90c, minutes 3-10.
+        // Kalshi prices only (no Bitcoin feed).
+        val clearLead = com.dirk.kalshiodds.signal.trend.ClearLeadRule.signal(
+            tteSec,
+            com.dirk.kalshiodds.domain.KalshiPrice.usable(tick.yesAsk),
+            com.dirk.kalshiodds.domain.KalshiPrice.usable(tick.noAsk ?: tick.yesBid?.let { 1.0 - it })
+        )
         val digitalFairPp = if (fairSpot != null && strikeUsd != null && sigmaAnnual != null) {
             com.dirk.kalshiodds.signal.fair.DigitalOptionFairValue.pSettleAtLeast(
                 spot = fairSpot,
@@ -946,7 +951,7 @@ class ScoringEngine(
             modelBacked = loaded?.beatsMarket == true,
             blendWeight = importedBlendW,
             clearLeadSide = clearLead?.side,
-            clearLeadBp = clearLead?.distanceBp
+            clearLeadAsk = clearLead?.ask
         )
     }
 

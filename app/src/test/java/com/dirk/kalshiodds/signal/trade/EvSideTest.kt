@@ -115,45 +115,11 @@ class EvSideTest {
     }
 
     @Test
-    fun betCallIsNoBetWhenNeitherSideClearsEv() {
-        // BetCallAgreementTest calls this BET UP from the hero side and an 80% AI;
-        // with the engine's fair at the price, EV at the ask says no bet.
-        val m = market(yesAsk = 0.20, noAsk = 0.80, hero = "YES", fairPp = 20.5, aiYes = 80.0)
-        val d = BetCall.decide(m, ctx())
-        assertEquals(BetCall.Headline.NO_BET, d.headline)
-        assertNull(d.side)
-        assertTrue(d.noBetReason!!, d.noBetReason!!.startsWith("Neither side"))
-    }
-
-    @Test
-    fun betCallFollowsTheEvSideAgainstTheHero() {
-        val m = market(yesAsk = 0.80, noAsk = 0.20, hero = "YES", fairPp = 10.0)
-        val d = BetCall.decide(m, ctx())
-        assertEquals(BetCall.Headline.BET_DOWN, d.headline)
-        assertEquals("NO", d.side)
-        assertEquals("NO", d.ticket!!.side)
-        assertTrue(d.ticket!!.canApprove)
-    }
-
-    @Test
-    fun engineScoredBetCallFixturesKeepTheirCalls() {
-        // BetCallAgreementTest fixtures, now carrying the engine fair they show.
-        val cases = listOf(
-            Triple(market(0.20, 0.80, hero = "YES", fairPp = 80.0), BetCall.Headline.BET_UP, "YES"),
-            Triple(market(0.80, 0.20, hero = "NO", fairPp = 10.0), BetCall.Headline.BET_DOWN, "NO"),
-            // EV picks UP at 63¢, but that ticket misses the $10 min profit.
-            Triple(market(0.63, 0.37, hero = "YES", fairPp = 70.0), BetCall.Headline.NO_BET, null),
-            // 3¢ print with a 4% fair: EV too small after the fee.
-            Triple(market(0.03, 0.97, hero = "YES", fairPp = 4.0), BetCall.Headline.NO_BET, null)
-        )
-        for ((m, headline, side) in cases) {
-            val d = BetCall.decide(m, ctx())
-            assertEquals("${m.yesAsk}", headline, d.headline)
-            assertEquals("${m.yesAsk}", side, d.side)
-            if (side != null) assertEquals(side, d.ticket!!.side)
+    fun evNoLongerDrivesTheCardCall() {
+        // Kalshi data only (1.9.6): the engine fair uses an outside Bitcoin feed, so BetCall ignores it.
+        for (m in listOf(market(0.20, 0.80, hero = "YES", fairPp = 80.0), market(0.80, 0.20, hero = "NO", fairPp = 10.0))) {
+            assertEquals(BetCall.Headline.NO_BET, BetCall.decide(m, ctx()).headline)
         }
-        val minProfit = BetCall.decide(market(0.63, 0.37, hero = "YES", fairPp = 70.0), ctx())
-        assertTrue(minProfit.noBetReason!!, minProfit.noBetReason!!.contains("below"))
     }
 
     private fun ctx() = TicketBuilder.Context(settings = SignalSettings(), alertsPaused = false)

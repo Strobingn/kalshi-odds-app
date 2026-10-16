@@ -13,27 +13,19 @@ import kotlin.math.abs
 
 /**
  * "Clear lead": bet the way Bitcoin is going, once it is clearly ahead.
+ * **Kalshi data only** (since 1.9.6): the lead is read from Kalshi's own
+ * prices, not from an outside Bitcoin feed. A side Kalshi prices at 80–90¢
+ * between minute 3 and minute 10 is the side Bitcoin is clearly ahead on.
  *
- * Dirk's rule: watch the market; if Bitcoin is going up, go UP, and the same
- * for DOWN. Tested on every settled KXBTC15M window from 2026-08-24 to
- * 2026-10-08 (4,264 windows, Kalshi 1-minute quotes, Coinbase 1-minute
- * closes): betting the side Bitcoin is on wins often but the ask already
- * charges for it (minutes 3–12 pooled: 75.7% wins at 75.2¢, −0.6¢ per
- * contract after the fee). One slice of it came out ahead in both halves of
- * the data:
+ *  - between minute 3 and minute 10 ([MAX_TTE_SECONDS] to [MIN_TTE_SECONDS] left),
+ *  - the favourite's ask is in [[MIN_ASK], [MAX_ASK]),
+ *  - buy that side at the ask, once per window (first time).
  *
- *  - Bitcoin is between [MIN_BP] and [MAX_BP] basis points (0.10–0.20%) from
- *    the window's start price,
- *  - between minute 3 and minute 10 of the window ([MAX_TTE_SECONDS] to
- *    [MIN_TTE_SECONDS] left),
- *  - buy the side Bitcoin is on at the ask, once per window (first time).
- *
- * First 23 days: 82.9% wins at 79.9¢, +2.0¢ per contract, 95% interval
- * [+0.0, +3.9]. Last 23 days: 84.1% at 82.2¢, +0.9¢, [−1.3, +2.8].
- * **A lead, not proof**: the slice was found after looking at the data and
- * the second half's interval includes zero. The paper ledger below is the
- * real test; [TARGET_SETTLED] settled windows are needed before it means
- * anything.
+ * History, Kalshi 1-minute prices only, 4,264 windows 2026-08-24 → 10-08
+ * (`tools/research/clear_lead_kalshi.py`): first 23 days 84.9% wins at
+ * 83.3¢, +0.66¢ per contract [−1.31, +2.51]; last 23 days 84.9% at 83.4¢,
+ * +0.48¢ [−1.36, +2.27]. Same size as the old Bitcoin-feed version, and like
+ * it **not clear of zero**. The paper record is the real test.
  *
  * Pure math. Never places an order: the live ticket still needs Approve and
  * is capped at $5 all-in like every other live buy.
@@ -46,58 +38,53 @@ object ClearLeadRule {
     /** Minute 3 of the window: do not enter with more than this left. */
     const val MAX_TTE_SECONDS = 720L
 
-    /** Distance of spot from the start price, in basis points: [MIN_BP, MAX_BP). */
-    const val MIN_BP = 10.0
-    const val MAX_BP = 20.0
+    /** The favourite's ask must be in [MIN_ASK, MAX_ASK). */
+    const val MIN_ASK = 0.80
+    const val MAX_ASK = 0.90
 
     const val TARGET_SETTLED = 1000
 
     private const val EPS = 1e-9
 
     data class Signal(
-        /** "YES" (UP) or "NO" (DOWN): the side Bitcoin is on. */
+        /** "YES" (UP) or "NO" (DOWN): the side Kalshi prices as the clear favourite. */
         val side: String,
-        /** Signed distance from the start price in basis points (+ above, − below). */
-        val distanceBp: Double,
+        /** That side's ask, dollars. */
+        val ask: Double,
         val tteSeconds: Long
     ) {
-        /** `Bitcoin is 0.13% above the start price with 7:10 left` */
+        /** `Kalshi prices UP at 84¢ with 7:10 left` */
         val reason: String
             get() = String.format(
                 Locale.US,
-                "Bitcoin is %.2f%% %s the start price with %d:%02d left",
-                abs(distanceBp) / 100.0,
-                if (distanceBp >= 0.0) "above" else "below",
+                "Kalshi prices %s at %.0f¢ with %d:%02d left",
+                if (side == "NO") "DOWN" else "UP",
+                ask * 100.0,
                 tteSeconds / 60L,
                 tteSeconds % 60L
             )
     }
 
-    /** Signed distance of [spotUsd] from [strikeUsd] in basis points, or null on bad input. */
-    fun distanceBp(spotUsd: Double?, strikeUsd: Double?): Double? {
-        val s = spotUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return null
-        val k = strikeUsd?.takeIf { it.isFinite() && it > 0.0 } ?: return null
-        return (s / k - 1.0) * 10_000.0
-    }
-
     fun inTimeBand(tteSeconds: Long?): Boolean =
         tteSeconds != null && tteSeconds in MIN_TTE_SECONDS..MAX_TTE_SECONDS
 
-    /** The rule's call right now, or null when Bitcoin is not clearly ahead inside the time band. */
-    fun signal(tteSeconds: Long?, spotUsd: Double?, strikeUsd: Double?): Signal? {
+    fun inBand(ask: Double?): Boolean =
+        ask != null && ask.isFinite() && ask >= MIN_ASK - EPS && ask < MAX_ASK - EPS
+
+    /** The rule's call right now from Kalshi's asks, or null. */
+    fun signal(tteSeconds: Long?, yesAsk: Double?, noAsk: Double?): Signal? {
         val tte = tteSeconds?.takeIf { inTimeBand(it) } ?: return null
-        val bp = distanceBp(spotUsd, strikeUsd) ?: return null
-        val gap = abs(bp)
-        if (gap + EPS < MIN_BP || gap >= MAX_BP - EPS) return null
-        return Signal(side = if (bp > 0.0) "YES" else "NO", distanceBp = bp, tteSeconds = tte)
+        return when {
+            inBand(yesAsk) -> Signal("YES", yesAsk!!, tte)
+            inBand(noAsk) -> Signal("NO", noAsk!!, tte)
+            else -> null
+        }
     }
 
     data class Inputs(
         val ticker: String,
         val nowMs: Long,
         val tteSeconds: Long?,
-        val spotUsd: Double?,
-        val strikeUsd: Double?,
         val yesAsk: Double?,
         val noAsk: Double?
     )
@@ -105,12 +92,12 @@ object ClearLeadRule {
     /**
      * The paper bet the rule takes now ($5 all-in at the ask, exact taker
      * fee), or null. [alreadyEntered] enforces one entry per window.
-     * `z` in the returned decision is the signed distance in basis points.
+     * `z` in the returned decision is the ask in cents.
      */
     fun evaluate(inputs: Inputs, alreadyEntered: Boolean): LateFavoriteRule.Decision? {
         if (alreadyEntered) return null
         if (!CryptoMarkets.isLiveTicker(inputs.ticker)) return null
-        val sig = signal(inputs.tteSeconds, inputs.spotUsd, inputs.strikeUsd) ?: return null
+        val sig = signal(inputs.tteSeconds, inputs.yesAsk, inputs.noAsk) ?: return null
         return decide(inputs.ticker, inputs.nowMs, sig, inputs.yesAsk, inputs.noAsk)
     }
 
@@ -129,7 +116,7 @@ object ClearLeadRule {
             ticker = ticker,
             nowMs = nowMs,
             tteSeconds = signal.tteSeconds,
-            z = signal.distanceBp,
+            z = signal.ask * 100.0,
             side = signal.side,
             ask = ask,
             sized = sized,
@@ -174,10 +161,10 @@ class ClearLeadStore(context: Context) {
 object ClearLeadSummary {
     const val TITLE = "Clear lead (your rule) · PAPER RECORD"
     const val NOTE =
-        "Bets the side Bitcoin is on when it is 0.10–0.20% from the start price, between minute 3 and minute 10, " +
-            "once per window, $5 at the ask. History (46 days): about +11¢ per $5 bet in the first half and +6¢ in " +
-            "the second; the second half is not clear of zero. This card is the real test: every window is logged " +
-            "here whether or not you approve the live ticket."
+        "Kalshi data only: bets the side Kalshi prices at 80–90¢ between minute 3 and minute 10, once per " +
+            "window, $5 at the ask. History (46 days of Kalshi prices): about +4¢ per $5 bet in the first half and " +
+            "+3¢ in the second; neither is clear of zero. This card is the real test: every window is logged here " +
+            "whether or not you approve the live ticket."
 
     fun of(state: LateFavoriteState): FlowFadeSummary {
         val base = FlowFadeSummary.of(state)
