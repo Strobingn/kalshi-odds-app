@@ -24,8 +24,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -225,7 +223,7 @@ private fun SpotPathCanvas(
     axisColor: androidx.compose.ui.graphics.Color
 ) {
     // Spot has a fixed orange meaning in the chart legend, independent of the app accent.
-    val spotColor = if (MaterialTheme.colorScheme.surface.luminance() < 0.5f) Color(0xFFFFA726) else Color(0xFFB45309)
+    val spotColor = DipTheme.colors.spot
     val (minY, maxY) = range
     val t0 = windowStartMs
     val t1 = windowEndMs
