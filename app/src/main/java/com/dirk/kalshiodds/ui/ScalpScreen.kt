@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.material3.Slider
@@ -217,6 +218,7 @@ private fun loadScalpSettings(prefs: android.content.SharedPreferences) {
     ScalpSettings.cadenceMs = prefs.getInt("cadence", (ScalpSettings.cadenceMs / 1000L).toInt()).toLong() * 1000L
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun KnobSlider(
     label: String,
