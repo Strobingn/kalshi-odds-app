@@ -54,17 +54,24 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 SwarmToggle("Adaptive tuning · learning always runs", draft.adaptive) { draft = draft.copy(adaptive = it) }
                 Text("Pausing entries keeps existing stops and exits running. Trade-count limits are unlimited when set to 0.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             } }
+            item { SwarmCard("Peak trail and protective stop") {
+                SwarmToggle("Use peak trail + percent stop", draft.peakTrailEnabled) { draft = draft.copy(peakTrailEnabled = it) }
+                SwarmNumber("Peak trailing distance (¢)", draft.peakTrailCents.toDouble(), 1.0..20.0, draft.peakTrailEnabled, ::number) { draft = draft.copy(peakTrailCents = it.toInt()) }
+                SwarmNumber("Stop loss below fill price (%)", draft.stopLossPercent.toDouble(), 1.0..99.0, draft.peakTrailEnabled, ::number) { draft = draft.copy(stopLossPercent = it.toInt()) }
+                Text("Active from entry; no profit threshold. A 3¢ trail holds at 90¢, triggers at 87¢, then moves to 92¢ if the bid rises to 95¢. The percent stop uses the actual fill price before fees. Both use the held side's bid; exits fill at later available bids and may slip.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("Applies to new V2 trades. Existing trades keep saved rules. Optional profit targets, hold timers and the final-minute exit check still apply.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            } }
             item { SwarmCard("Entry and exit parameters") {
                 SwarmToggle("Use my parameters", draft.manual) { draft = draft.copy(manual = it) }
-                Text(if (draft.manual) "Your values override adaptive entry, stop, target and trail settings." else "Strategy defaults and learned adjustments are active. Turn this on to use the values below.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text(if (draft.manual) "Your values override adaptive entry/target settings and legacy exits when peak mode is off." else "Strategy entries and learned adjustments are active. Peak-mode exits are controlled above.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 SwarmNumber("Maximum entry price (¢)", draft.maxAskCents.toDouble(), 1.0..99.0, draft.manual, ::number) { draft = draft.copy(maxAskCents = it.toInt()) }
                 SwarmNumber("Contracts per entry", draft.contracts.toDouble(), 1.0..1000.0, draft.manual, ::number) { draft = draft.copy(contracts = it.toInt()) }
-                SwarmNumber("Stop-loss distance (¢)", draft.stopCents.toDouble(), 1.0..99.0, draft.manual, ::number) { draft = draft.copy(stopCents = it.toInt()) }
+                SwarmNumber("Stop-loss distance (¢)", draft.stopCents.toDouble(), 1.0..99.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(stopCents = it.toInt()) }
                 SwarmNumber("Net take-profit (¢/contract; 0 = off)", draft.takeProfitCents.toDouble(), 0.0..99.0, draft.manual, ::number) { draft = draft.copy(takeProfitCents = it.toInt()) }
-                SwarmNumber("Trailing distance (¢)", draft.trailCents.toDouble(), 1.0..20.0, draft.manual, ::number) { draft = draft.copy(trailCents = it.toInt()) }
-                SwarmNumber("Arm trail at net gain (¢/contract)", draft.armCents.toDouble(), 1.0..99.0, draft.manual, ::number) { draft = draft.copy(armCents = it.toInt()) }
+                SwarmNumber("Trailing distance (¢)", draft.trailCents.toDouble(), 1.0..20.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(trailCents = it.toInt()) }
+                SwarmNumber("Arm trail at net gain (¢/contract)", draft.armCents.toDouble(), 1.0..99.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(armCents = it.toInt()) }
                 SwarmNumber("Max hold (seconds; 0 = no hold timer)", draft.maxHoldSeconds.toDouble(), 0.0..3600.0, true, ::number) { draft = draft.copy(maxHoldSeconds = it.toInt()) }
-                Text("Take-profit and trail arming include both fees. Every position keeps a stop-loss and the final-minute exit check.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                Text("Net take-profit and legacy trail arming include fees. Peak-mode distance and percent stop use prices. Every position keeps its saved protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             } }
             item { SwarmCard("Sizing and optional limits") {
                 SwarmNumber("Max stake including fee ($; 0 = no cap)", draft.maxStakeUsd, 0.0..100000.0, true, ::number) { draft = draft.copy(maxStakeUsd = it) }
@@ -87,7 +94,7 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                     draft = draft.copy(disabledStrategies = if (enabled) draft.disabledStrategies - model.code else draft.disabledStrategies + model.code)
                 } }
             }
-            item { OutlinedButton(onClick = { draft = ScalpControls(); errors = emptySet() }, modifier = Modifier.fillMaxWidth()) { Text("Restore strategy defaults · unlimited entries") } }
+            item { OutlinedButton(onClick = { draft = ScalpControls(); errors = emptySet() }, modifier = Modifier.fillMaxWidth()) { Text("Restore defaults · unlimited entries") } }
             item { Spacer(Modifier.height(24.dp)) }
         }
     }

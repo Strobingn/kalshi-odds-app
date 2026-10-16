@@ -1407,10 +1407,10 @@ class ScalpBook(
         var note = t.note
         if (t.state == ScalpState.OPEN && prev?.state != ScalpState.OPEN && !note.contains("entryBook[")) {
             note += " · entryBook[" + bookStr(q, t.side) + "]"
-            t.entryPrice?.let { peakBid[t.id] = q?.bid(t.side) ?: it }
+            t.entryPrice?.let { peakBid[t.id] = if (ScalpV2.peakRule(t)) q?.bid(t.side)?.takeIf { b -> b.isFinite() && b > 0 } ?: 0.0 else q?.bid(t.side) ?: it }
         }
         if (t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED && !note.contains("exitBook[")) {
-            val stop = ScalpModels.modelOf(t)?.let { ScalpModels.stopLabel(it) } ?: "n/a"
+            val stop = if (ScalpV2.peakRule(t)) ScalpV2.riskLabel(t) else ScalpModels.modelOf(t)?.let { ScalpModels.stopLabel(it) } ?: "n/a"
             note += " · exitBook[" + bookStr(q, t.side) + "]" + String.format(Locale.US, " · peakBid=%s · stopLevel=%s · fees=%.2f",
                 peakBid[t.id]?.let { "%.2f".format(Locale.US, it) } ?: "n/a", stop, t.entryFeeUsd + t.exitFeeUsd)
             peakBid.remove(t.id); v2Armed.remove(t.id)
@@ -1439,7 +1439,7 @@ class ScalpBook(
             val informed = if (learned.adjusted && feedback.trades > 0 && feedback.recentNetPerContract < 0)
                 learned.copy(arm = (learned.arm + feedback.recentNetPerContract * .1).coerceIn(.01, learned.arm)) else learned
             val plan = cfg.plan(informed)
-            val sp = plan.spec
+            val sp = if (cfg.peakTrailEnabled) plan.spec.copy(trail = cfg.peakTrailCents / 100.0) else plan.spec
             val stop = plan.stop
             save(ScalpTrade(id = idFactory(), ticker = t.ticker.uppercase(), side = t.side, state = ScalpState.PENDING_ENTRY,
                 signalAtMs = t.signalAtMs, signalAsk = t.signalAsk, fairAtSignal = t.fairAtSignal,
@@ -1447,7 +1447,8 @@ class ScalpBook(
                     m.label, t.variantId, if (sp.tag.isNotEmpty()) " " + sp.tag else "", sp.maxAsk * 100, sp.trail * 100, sp.clip,
                     if (sp.walk) " depth-walk" else "", stop) +
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
-                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", if (cfg.manual) cfg.takeProfitCents / 100.0 else 0.0, cfg.maxHoldSeconds, sp.clip),
+                    String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", if (cfg.manual) cfg.takeProfitCents / 100.0 else 0.0, cfg.maxHoldSeconds, sp.clip) +
+                    (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=${cfg.stopLossPercent} · exit policy: ${cfg.stopLossPercent}% below fill / ${cfg.peakTrailCents}¢ below bid peak, active from entry" else ""),
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
@@ -1493,14 +1494,14 @@ class ScalpBook(
                         val avg = usd / n
                         controls.recordEntry(q.nowMs); openCount++
                         out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = avg, entryFeeUsd = fee, entryAtMs = q.nowMs,
-                            note = String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask * 100, age / 1000.0))
+                            note = ScalpV2.entryRiskNote(String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask * 100, age / 1000.0), q.bid(t.side)))
                         continue
                     }
                     val n = minOf(cfg.affordableContracts(ask, sp.clip), kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
                     if (n <= 0) continue
                     controls.recordEntry(q.nowMs); openCount++
                     out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
-                        note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
+                        note = ScalpV2.entryRiskNote(String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0), q.bid(t.side)))
                 }
                 ScalpState.OPEN, ScalpState.PENDING_EXIT -> {
                     if (q.nowMs >= q.closeMs) continue
@@ -1523,14 +1524,15 @@ class ScalpBook(
                     val arm = ScalpV2.savedNumber(t.note, "v2arm", stop).coerceIn(0.01, 0.99)
                     val wasArmed = t.id in v2Armed || ScalpV2.savedNumber(t.note, "v2armed", 0.0) == 1.0
                     // Reconstruct arming from the persisted peak, including after process death.
-                    val armed = wasArmed || ScalpV2.netPerContract(t, pk) >= arm - 1e-9
+                    val armed = ScalpV2.peakRule(t) || wasArmed || ScalpV2.netPerContract(t, pk) >= arm - 1e-9
                     if (armed) v2Armed += t.id
                     val note = ScalpV2.tag(ScalpV2.tag(t.note, "v2peak", String.format(Locale.US, "%.6f", pk)), "v2armed", if (armed) "1" else "0")
                     val marked = t.copy(note = note)
                     val target = ScalpV2.savedNumber(t.note, "v2tp", 0.0)
                     val timeExit = if (holdExpired) "V2 user max hold reached" else null
                     val priceExit = bid?.let {
-                        ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it))
+                        (if (ScalpV2.peakRule(t)) ScalpV2.peakExit(entry, ScalpV2.stopPercent(t), pk, it, trail)
+                        else ScalpV2.exit(entry, stop, pk, it, armed, t.contracts, trail, armThreshold = arm, netGain = ScalpV2.netPerContract(t, it)))
                             ?: if (target > 0 && ScalpV2.netPerContract(t, it) >= target - 1e-9) "V2 user net take-profit" else null
                     }
                     val reason = t.exitReason.takeIf { t.state == ScalpState.PENDING_EXIT } ?: priceExit ?: timeExit ?: ScalpV2.closeExit(q, t.side, entry, t.contracts)
