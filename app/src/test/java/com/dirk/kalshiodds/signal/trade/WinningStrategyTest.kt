@@ -1,6 +1,8 @@
 package com.dirk.kalshiodds.signal.trade
 
 import com.dirk.kalshiodds.domain.MarketUiModel
+import com.dirk.kalshiodds.signal.trade.WinningStrategy.passesWinningStrategy
+import com.dirk.kalshiodds.signal.trade.WinningStrategy.winningStrategyReason
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -24,14 +26,14 @@ class WinningStrategyTest {
 
     @Test
     fun `isCheapEnough returns true for cheap ask`() {
-        val config = WinningStrategy.Config(maxAskFilter = 0.40)
+        val config = WinningStrategy.Config(enabled = true, maxAskFilter = 0.40)
         assertTrue(config.isCheapEnough(0.30))
         assertTrue(config.isCheapEnough(0.40))
     }
 
     @Test
     fun `isCheapEnough returns false for expensive ask`() {
-        val config = WinningStrategy.Config(maxAskFilter = 0.40)
+        val config = WinningStrategy.Config(enabled = true, maxAskFilter = 0.40)
         assertFalse(config.isCheapEnough(0.41))
         assertFalse(config.isCheapEnough(0.50))
         assertFalse(config.isCheapEnough(0.75))
@@ -76,12 +78,13 @@ class WinningStrategyTest {
     @Test
     fun `passes returns true for valid market`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
         )
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -96,9 +99,9 @@ class WinningStrategyTest {
 
     @Test
     fun `passes returns false for expensive ask`() {
-        val config = WinningStrategy.Config(maxAskFilter = 0.40)
+        val config = WinningStrategy.Config(enabled = true, maxAskFilter = 0.40)
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.75,
@@ -112,6 +115,7 @@ class WinningStrategyTest {
     @Test
     fun `passes returns false for wrong time window`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
@@ -119,7 +123,7 @@ class WinningStrategyTest {
         val nowMs = System.currentTimeMillis()
         
         // Too early
-        val earlyMarket = MarketUiModel(
+        val earlyMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -128,7 +132,7 @@ class WinningStrategyTest {
         assertFalse(config.passes(earlyMarket, nowMs))
         
         // Too close
-        val closeMarket = MarketUiModel(
+        val closeMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -140,12 +144,13 @@ class WinningStrategyTest {
     @Test
     fun `filterMarket returns true for valid market`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
         )
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -158,6 +163,7 @@ class WinningStrategyTest {
     @Test
     fun `filterMarket returns false for invalid market`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
@@ -165,7 +171,7 @@ class WinningStrategyTest {
         val nowMs = System.currentTimeMillis()
         
         // No close time
-        val noCloseMarket = MarketUiModel(
+        val noCloseMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35
@@ -173,7 +179,7 @@ class WinningStrategyTest {
         assertFalse(WinningStrategy.filterMarket(noCloseMarket, config, nowMs))
         
         // Expensive ask
-        val expensiveMarket = MarketUiModel(
+        val expensiveMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.75,
@@ -185,12 +191,13 @@ class WinningStrategyTest {
     @Test
     fun `filterReason returns null for valid market`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
         )
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -202,9 +209,9 @@ class WinningStrategyTest {
 
     @Test
     fun `filterReason returns reason for expensive ask`() {
-        val config = WinningStrategy.Config(maxAskFilter = 0.40)
+        val config = WinningStrategy.Config(enabled = true, maxAskFilter = 0.40)
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.75,
@@ -221,6 +228,7 @@ class WinningStrategyTest {
     @Test
     fun `filterReason returns reason for wrong time`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
@@ -228,7 +236,7 @@ class WinningStrategyTest {
         val nowMs = System.currentTimeMillis()
         
         // Too early
-        val earlyMarket = MarketUiModel(
+        val earlyMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -239,7 +247,7 @@ class WinningStrategyTest {
         assertTrue(reason!!.contains("Too early") || reason.contains("420"))
         
         // Too close
-        val closeMarket = MarketUiModel(
+        val closeMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -276,9 +284,9 @@ class WinningStrategyTest {
 
     @Test
     fun `passesForSide returns true for cheap YES side`() {
-        val config = WinningStrategy.Config(maxAskFilter = 0.40)
+        val config = WinningStrategy.Config(enabled = true, maxAskFilter = 0.40)
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -292,9 +300,9 @@ class WinningStrategyTest {
 
     @Test
     fun `passesForSide returns true for cheap NO side`() {
-        val config = WinningStrategy.Config(maxAskFilter = 0.40)
+        val config = WinningStrategy.Config(enabled = true, maxAskFilter = 0.40)
         val nowMs = System.currentTimeMillis()
-        val market = MarketUiModel(
+        val market = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.65,
@@ -309,13 +317,14 @@ class WinningStrategyTest {
     @Test
     fun `extension functions work correctly`() {
         val config = WinningStrategy.Config(
+            enabled = true,
             maxAskFilter = 0.40,
             timeWindowMs = 360_000L,
             minTimeToCloseMs = 300_000L
         )
         val nowMs = System.currentTimeMillis()
         
-        val validMarket = MarketUiModel(
+        val validMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.35,
@@ -325,7 +334,7 @@ class WinningStrategyTest {
         assertTrue(validMarket.passesWinningStrategy(config, nowMs))
         assertNull(validMarket.winningStrategyReason(config, nowMs))
         
-        val expensiveMarket = MarketUiModel(
+        val expensiveMarket = testMarket(
             ticker = "KXBTC15M-26SEP251500-00",
             series = "KXBTC15M",
             yesAsk = 0.75,

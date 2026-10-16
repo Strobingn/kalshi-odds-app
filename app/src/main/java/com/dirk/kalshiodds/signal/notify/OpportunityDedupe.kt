@@ -19,6 +19,7 @@ object OpportunityDedupe {
         TicketKind.HUNTER_VALUE -> "longshot"
         TicketKind.HUNTER -> "hunter"
         TicketKind.CONFIGURED -> "wintarget"
+        TicketKind.WINNING_STRATEGY -> "strategy"
         TicketKind.MANUAL -> "manual"
         TicketKind.SELL -> "sell"
     }

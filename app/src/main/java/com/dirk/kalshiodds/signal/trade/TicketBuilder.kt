@@ -106,7 +106,7 @@ object TicketBuilder {
             TicketKind.HUNTER -> proposeHunter(market, ctx)
             TicketKind.HUNTER_VALUE -> proposeHunterValue(market, ctx)
             TicketKind.MANUAL -> proposeManual(market, ticket.side, ctx)
-            TicketKind.CONFIGURED -> propose(market, ctx)
+            TicketKind.CONFIGURED, TicketKind.WINNING_STRATEGY -> propose(market, ctx)
             TicketKind.SELL -> ticket
         } ?: ticket
     }
@@ -430,7 +430,7 @@ object TicketBuilder {
                 )
                 TicketKind.MANUAL ->
                     "Manual buy · $5 all-in cap including fees · Approve still required"
-                TicketKind.CONFIGURED -> gateSummary(market, ctx)
+                TicketKind.CONFIGURED, TicketKind.WINNING_STRATEGY -> gateSummary(market, ctx)
                 TicketKind.SELL -> SELL_IOC_NOTE
             },
             createdAtMs = ctx.nowMs,
