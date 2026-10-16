@@ -54,9 +54,9 @@ object ScalperBrain {
     fun minConf(code: String): Double = synchronized(lock) { st(code).minConf }
     fun trained(code: String): Boolean = synchronized(lock) { st(code).n >= MIN_TRAINED }
 
-    /** Confidence the held side settles in the money. Untrained → CF fair only; trained → the lower of fair and model. */
-    fun holdConfidence(code: String, bid: Double, fair: Double?): Double {
-        val f = fair?.takeIf { it.isFinite() } ?: return 0.0
+    /** Confidence the held side settles in the money: on-device GBM (fair value if missing); once trained, the lower of that and this strategy's learner. */
+    fun holdConfidence(code: String, bid: Double, fair: Double?, gbm: Double? = null): Double {
+        val f = gbm?.takeIf { it.isFinite() } ?: fair?.takeIf { it.isFinite() } ?: return 0.0
         if (!trained(code)) return f
         val pm = synchronized(lock) { sig(dot(st(code).w, features(bid, f, 15.0))) }
         return minOf(f, pm)

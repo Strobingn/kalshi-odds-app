@@ -39,6 +39,7 @@ class KalshiOddsApp : Application() {
         // 0.3.40 (owner): Autopilot/Scalp are paper-only — delete any persisted live arming (idempotent).
         runCatching { com.dirk.kalshiodds.signal.paper.LiveOffMigration.deleteLegacyArming(this) }
         runCatching { com.dirk.kalshiodds.decision.ScalperBrain.init(filesDir) }
+        runCatching { com.dirk.kalshiodds.decision.GbmModel.load(assets.open("btc15_gbm.json").bufferedReader().readText()) }
         container = AppContainer(this)
         runCatching { container.llmStrategy.start(appScope) }
         appScope.launch { runCatching { container.preferences.migrateAutopilotModePaperOnly() } }

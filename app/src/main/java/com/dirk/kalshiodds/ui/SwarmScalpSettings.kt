@@ -109,6 +109,8 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 Text("Net take-profit and legacy trail arming include fees. Peak-mode distance and percent stop use prices. Every position keeps its saved protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             } }
             item { SwarmCard("Sizing and optional limits") {
+                Text("Winners bet bigger: ${draft.greenContracts} contracts per trade once a scalper is net positive after fees (20+ closes), filled by walking real book depth", color = c.textPrimary, style = MaterialTheme.typography.bodyMedium)
+                androidx.compose.material3.Slider(value = draft.greenContracts.toFloat(), onValueChange = { draft = draft.copy(greenContracts = Math.round(it)) }, valueRange = 1f..200f)
                 SwarmNumber("Max stake including fee ($; 0 = no cap)", draft.maxStakeUsd, 0.0..100000.0, true, ::number) { draft = draft.copy(maxStakeUsd = it) }
                 SwarmNumber("Entries per hour (0 = unlimited)", draft.maxTradesPerHour.toDouble(), 0.0..10000.0, true, ::number) { draft = draft.copy(maxTradesPerHour = it.toInt()) }
                 SwarmNumber("Open positions (0 = unlimited)", draft.maxOpen.toDouble(), 0.0..1000.0, true, ::number) { draft = draft.copy(maxOpen = it.toInt()) }

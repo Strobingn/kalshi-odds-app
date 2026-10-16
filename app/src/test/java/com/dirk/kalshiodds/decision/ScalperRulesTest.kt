@@ -45,6 +45,15 @@ class ScalperRulesTest {
         assertEquals(ScalpModels.Model.V2_LLM, ScalpModels.modelByCode("v2-llm"))
     }
 
+    @Test fun sfWindowStartLimitsAreDistinctAndShort() {
+        val m = (1..61).map { ScalpV2.sfOpenMin(String.format("sf%02d", it)) }
+        assertTrue(m.all { it in 2.0..5.0 }); assertTrue(m.toSet().size > 1)
+    }
+
+    @Test fun holdGatePrefersGbm() {
+        assertEquals(0.90, ScalperBrain.holdConfidence("untrained-z", 0.93, 0.99, 0.90), 1e-9)
+    }
+
     @Test fun identity() {
         assertEquals("com.dirk.kalshiodds.scalp", KashiReleasePolicy.PACKAGE_ID)
         assertEquals("app-id: com.dirk.kalshiodds.scalp", KashiReleasePolicy.APP_ID_MARKER)

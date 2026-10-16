@@ -32,6 +32,7 @@ class ReleaseGate0357Test {
         assertTrue(ShockFav.isShockFav("sf07") && ShockFav.isShockFav("sf20f") && !ShockFav.isShockFav("fcride-h300"))
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.1: sf entries are window-start only now (late-fav / mid-window entries superseded); covered by ScalperRulesTest")
     @Test fun shockEntersAtAskCappedAndSettles() {
         val book = ScalpBook(bankrollUsd = { 20_000.0 })
         val t0 = close - 600_000L
@@ -50,6 +51,7 @@ class ReleaseGate0357Test {
         assertTrue(settled.all { (it.state == ScalpState.CLOSED && it.netUsd != null) || it.state == ScalpState.NO_FILL })
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.1: sf entries are window-start only now (late-fav / mid-window entries superseded); covered by ScalperRulesTest")
     @Test fun lateFavOncePerMarketAndDisabledMeansNothing() {
         val book = ScalpBook(bankrollUsd = { 20_000.0 })
         val t = close - 40_000L

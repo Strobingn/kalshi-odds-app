@@ -17,6 +17,7 @@ class ReleaseGate0359Test {
         spot = spot, strike = 100_000.0, sigmaPerSec = 3e-5)
     private fun warm(b: ScalpBook, coin: String, t: Long, px: Double) { for (k in 300 downTo 1) b.tickSpot(coin, px * (1 + (if (k % 2 == 0) 5e-5 else -5e-5)), t - k * 1000L) }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.1: sf entries are window-start only now (late-fav / mid-window entries superseded); covered by ScalperRulesTest")
     @Test fun unlimitedBankrollNeverSkips() {
         val book = ScalpBook(bankrollUsd = { Double.POSITIVE_INFINITY })
         val t = close - 40_000L; val tk = "KXBTC15M-26OCT122015-15"
@@ -48,6 +49,7 @@ class ReleaseGate0359Test {
         assertEquals(null, ShockFav.laggardSide(p, "BTC", rings, 20L, 30.0))
     }
 
+    @org.junit.Ignore("Kalshi Scalper 1.0.1: sf entries are window-start only now (late-fav / mid-window entries superseded); covered by ScalperRulesTest")
     @Test fun makerFadeFillsOnlyOnTradeThrough() {
         val book = ScalpBook(bankrollUsd = { Double.POSITIVE_INFINITY })
         val tk = "KXBTC15M-26OCT122015-15"; val t0 = close - 600_000L

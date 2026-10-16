@@ -27,13 +27,13 @@ object ScalpV2 {
     fun fresh(q: ScalpRule.Quote): Boolean = !q.bookGap && q.nowMs - q.bookAtMs in 0..BOOK_MAX_AGE_MS
 
     /** A conservative hold hypothesis, not knowledge of the settlement result. Missing CF data means exit. */
-    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int, code: String = side): String? {
+    fun closeExit(q: ScalpRule.Quote, side: String, entry: Double, n: Int, code: String = side, gbm: Double? = null): String? {
         if (q.tauS > EXIT_BY_S) return null
         val bid = q.bid(side)
         val fair = q.cfFair(side)
         // Never hold to close unless confidence the side settles in the money is over 95% (self-learned model, fair-value fallback).
         val hold = fresh(q) && bid != null && bid.isFinite() && bid >= 0.90 &&
-            fair != null && fair.isFinite() && ScalperBrain.holdConfidence(code, bid, fair) > ScalperBrain.HOLD_CONF &&
+            fair != null && fair.isFinite() && ScalperBrain.holdConfidence(code, bid, fair, gbm) > ScalperBrain.HOLD_CONF &&
             fair > bid - ScalpRule.feePerContract(n.coerceAtLeast(1), bid) + 0.01 &&
             ScalpRule.netAfterFees(entry, bid, n.coerceAtLeast(1)) > 0.0
         return if (hold) null else "v2 exit before close: no strong fresh winning evidence"
@@ -89,6 +89,9 @@ object ScalpV2 {
         val rx = Regex("${Regex.escape(key)}=[^ ;·]+")
         return if (rx.containsMatchIn(note)) rx.replace(note, "$key=$value") else "$note · $key=$value"
     }
+
+    /** Window-start entry limit (minutes after the open) for original sf strategies: 2–5, distinct by code. */
+    fun sfOpenMin(code: String): Double = 2.0 + Math.floorMod(code.hashCode(), 4)
 
     fun isV2(variantId: String): Boolean = variantId.startsWith(PREFIX)
 
