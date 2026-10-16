@@ -576,7 +576,8 @@ class ScalpBook(
             // Opening originals also pass through this generic execution lane. Never fill an obsolete side here.
             if (t.state == ScalpState.PENDING_ENTRY && ShockFav.byVariantId(t.variantId)?.o50 == ShockFav.O50.UPTICK) {
                 if (!ScalpV2.fresh(q)) return@forEach
-                if (openingDirection(q) != t.side) {
+                val direction = openingDirection(q) ?: return@forEach
+                if (direction != t.side) {
                     changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
                         note = "${t.note}; opening direction changed before fill; wait for a new live signal")
                     return@forEach
@@ -845,7 +846,7 @@ class ScalpBook(
         if (ScalpV2.fresh(q)) {
             val direction = openingDirection(q)
             _trades.value.filter { it.ticker == key && it.state == ScalpState.PENDING_ENTRY &&
-                ShockFav.byVariantId(it.variantId)?.o50 == ShockFav.O50.UPTICK && it.side != direction
+                ShockFav.byVariantId(it.variantId)?.o50 == ShockFav.O50.UPTICK && direction != null && it.side != direction
             }.forEach { save(it.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
                 note = "${it.note}; opening direction changed before fill; wait for a new live signal")) }
         }
@@ -885,10 +886,13 @@ class ScalpBook(
             }
             if (age < ShockFav.ENTRY_DELAY_MS || !q.fresh()) continue
             val pk = ShockFav.byVariantId(t.variantId)
-            if (pk?.o50 == ShockFav.O50.UPTICK && openingDirection(q) != t.side) {
-                changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
-                    note = "${t.note}; opening direction changed before fill; wait for a new live signal")
-                continue
+            if (pk?.o50 == ShockFav.O50.UPTICK) {
+                val direction = openingDirection(q) ?: continue
+                if (direction != t.side) {
+                    changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
+                        note = "${t.note}; opening direction changed before fill; wait for a new live signal")
+                    continue
+                }
             }
             if (pk?.o50 == ShockFav.O50.MAKER) {
                 // 0.3.64 Open 50 maker: resting 49¢ bid; filled only when the side ask trades THROUGH (≤ 48¢) — adverse-selection aware, fee 0.
@@ -1551,10 +1555,13 @@ class ScalpBook(
                         pendingEntryChecks.keys.retainAll(activeIds)
                     }
                     val seed = ScalpV2.spec(t.variantId)
-                    if (ShockFav.byVariantId(seed.base)?.o50 == ShockFav.O50.UPTICK && openingDirection(q) != t.side) {
-                        out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
-                            note = "${t.note}; opening direction changed before fill; wait for a new live signal")
-                        continue
+                    if (ShockFav.byVariantId(seed.base)?.o50 == ShockFav.O50.UPTICK) {
+                        val direction = openingDirection(q) ?: continue
+                        if (direction != t.side) {
+                            out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs,
+                                note = "${t.note}; opening direction changed before fill; wait for a new live signal")
+                            continue
+                        }
                     }
                     val sp = seed.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk)),
                         clip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceIn(1, 1000))

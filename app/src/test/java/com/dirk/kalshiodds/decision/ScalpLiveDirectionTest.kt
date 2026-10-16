@@ -67,6 +67,25 @@ class ScalpLiveDirectionTest {
         }
     }
 
+    @Test fun missingMidpointOrNeutralMoveWaitsWithoutCancellingOrFillingTheOrder() {
+        for (side in listOf("YES", "NO")) for (oneSided in listOf(false, true)) {
+            val book = book()
+            tick(book, quote(0, .49, .51))
+            val signal = if (side == "YES") quote(1, .53, .55) else quote(1, .45, .47)
+            tick(book, signal)
+            val uncertain = if (!oneSided) quote(4, .49, .51) else
+                signal.copy(nowMs = start + 4000, bookAtMs = start + 4000,
+                    yesBid = if (side == "YES") null else signal.yesBid,
+                    yesAsk = if (side == "NO") null else signal.yesAsk)
+            tick(book, uncertain)
+            val pending = book.snapshot().filter { it.variantId in listOf("sf51", "v2-sf51") }
+            assertEquals(2, pending.size)
+            assertTrue(pending.all { it.state == ScalpState.PENDING_ENTRY && it.side == side })
+            tick(book, signal.copy(nowMs = start + 5000, bookAtMs = start + 5000))
+            assertEquals(ScalpState.OPEN, book.snapshot().single { it.variantId == "v2-sf51" }.state)
+        }
+    }
+
     @Test fun dipSelectionComparesBothEligibleSidesAndWaitsOnEqualStrength() {
         val p = ShockFav.v("sf41")
         assertEquals("NO", ShockFav.simpleDipSide(p, .50, .57, .49, .60))
