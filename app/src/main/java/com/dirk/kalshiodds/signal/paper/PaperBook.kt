@@ -39,7 +39,13 @@ data class PaperFill(
     val peakPrice: Double? = null,
     val peakUpdatedAtMs: Long? = null,
     /** Optional market close time used by the paper risk fallback. */
-    val closeTimeMs: Long? = null
+    val closeTimeMs: Long? = null,
+    /** Original buy ID, shared by partial-sale slices. Old ledgers default to their row ID. */
+    val positionId: String? = null,
+    /** Actual paper execution, persisted so chart markers survive restarts. */
+    val exitPrice: Double? = null,
+    val exitAtMs: Long? = null,
+    val exitFeeUsd: Double = 0.0
 ) {
     val displaySide: String get() = side.uppercase()
 }
@@ -488,6 +494,11 @@ class PaperBook(
             val pnl = proceeds - cost - entryFee
             val remaining = open.contracts - qty
             val sold = open.copy(
+                id = if (remaining > 0) idFactory() else open.id,
+                positionId = open.positionId ?: open.id,
+                exitPrice = px,
+                exitAtMs = nowMs(),
+                exitFeeUsd = exitFee,
                 // The sold slice is a realized ledger row even when a
                 // separate leftover row remains open.
                 settled = true,
@@ -606,7 +617,10 @@ class PaperBook(
                     settled = true,
                     outcome = outcome,
                     won = won,
-                    pnlUsd = pnl
+                    pnlUsd = pnl,
+                    exitAtMs = nowMs(),
+                    exitPrice = if (fill.contracts > 0) payout / fill.contracts else null,
+                    exitFeeUsd = 0.0
                 ).also { changed += it }
             }
             if (changed.isEmpty()) return emptyList()
@@ -722,3 +736,4 @@ class PaperBook(
 
     private fun fmt(v: Double): String = String.format(java.util.Locale.US, "$%.2f", v)
 }
+

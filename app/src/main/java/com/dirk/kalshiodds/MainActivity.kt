@@ -177,17 +177,9 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ChartDetailScreen(
                                     market = market,
-                                    points = market.bidHistory.ifEmpty {
-                                        market.oddsHistory.mapIndexed { i, mid ->
-                                            com.dirk.kalshiodds.chart.BidPoint(
-                                                tMs = (market.closeTimeEpochMs ?: 0L) -
-                                                    (market.oddsHistory.size - 1 - i) * 2_000L,
-                                                upBidCents = mid,
-                                                downBidCents = 100f - mid,
-                                                spotUsd = market.spotUsd
-                                            )
-                                        }
-                                    },
+                                    points = market.bidHistory,
+                                    paper = oddsState.paper,
+                                    viewModel = oddsViewModel,
                                     onBack = {
                                         chartTicker = null
                                         navigator.back()
@@ -250,3 +242,4 @@ class MainActivity : ComponentActivity() {
         if (!granted) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
     }
 }
+

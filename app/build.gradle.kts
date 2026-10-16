@@ -19,7 +19,7 @@ android {
         // GitHub Actions run numbers increase with each branch push, so a
         // new APK updates this separate installation without version downgrades.
         versionCode = 1_000_000 + (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 0)
-        versionName = "1.0"
+        versionName = "1.0.1"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -182,3 +182,4 @@ afterEvaluate {
         }
     }
 }
+

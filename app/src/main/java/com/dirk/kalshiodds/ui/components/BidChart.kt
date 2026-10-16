@@ -211,6 +211,19 @@ fun BidChart(
     }
 }
 
+/** Spot context for the execution chart, without a second bid plot. */
+@Composable
+fun MarketSpotChart(points: List<BidPoint>, spotUsd: Double?, strikeUsd: Double?, startMs: Long, endMs: Long) {
+    val colors = DipTheme.colors
+    val series = remember(points, spotUsd) {
+        points.mapNotNull { p -> p.spotUsd?.takeIf { it.isFinite() && it > 0 }?.let { p.tMs to it } }
+    }
+    val range = remember(series, spotUsd, strikeUsd) { SpotAxis.range(series.map { it.second } + listOfNotNull(spotUsd), strikeUsd) }
+    if (range != null && endMs > startMs) SpotPathCanvas(series, strikeUsd, range, startMs, endMs,
+        160, spotUsd ?: series.lastOrNull()?.second, colors.textSecondary)
+    else Text("Spot history unavailable", color = colors.textSecondary, style = MaterialTheme.typography.bodySmall)
+}
+
 @Composable
 private fun SpotPathCanvas(
     series: List<Pair<Long, Double>>,
@@ -320,3 +333,4 @@ private fun BidChartPreview() {
         strikeUsd = 84_278.84
     )
 }
+

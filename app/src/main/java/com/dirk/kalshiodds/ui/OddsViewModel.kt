@@ -44,6 +44,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -112,6 +113,31 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             )
         )
     }
+    /** Full quote path for the visible chart; database reads stay off the UI thread. */
+    fun paperWindowChart(ticker: String, closeMs: Long): kotlinx.coroutines.flow.Flow<ExecutionWindowData> =
+        kotlinx.coroutines.flow.flow {
+            var last = ExecutionWindowData(ticker = ticker, closeMs = closeMs)
+            while (kotlin.coroutines.coroutineContext.isActive) {
+                val now = System.currentTimeMillis()
+                last = try {
+                    val points = com.dirk.kalshiodds.chart.ChartSeriesMerge.merge(
+                        container.archive.chartTicks(ticker, closeMs - 900_000, closeMs, 2000).map { it.toBidPoint() },
+                        hub.scoring.book.bidHistory(ticker))
+                        .filter { it.tMs in (closeMs - 900_000)..minOf(closeMs, now) }
+                    val tick = hub.scoring.book.lastTick(ticker)
+                    val quoteAt = tick?.takeIf { it.receiveElapsedNanos > 0 }?.let {
+                        val ageMs = (android.os.SystemClock.elapsedRealtimeNanos() - it.receiveElapsedNanos) / 1_000_000
+                        (now - ageMs).takeIf { ageMs >= 0 }
+                    }
+                    PaperWindowChartData.build(ticker, closeMs, now,
+                        com.dirk.kalshiodds.chart.ChartDownsampler.downsample(points, 720), paperBook.snapshot(), quoteAt)
+                } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+                  catch (_: Exception) { last.copy(nowMs = now, error = "Unable to refresh chart. Retrying…") }
+                emit(last)
+                delay(1_000)
+            }
+        }.flowOn(Dispatchers.IO)
+
     private val backfillStarted = ConcurrentHashMap<String, Long>()
     private var backfillJob: Job? = null
     private var lastWsState: WsConnectionState? = null
@@ -1171,3 +1197,4 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val SCORE_OVERLAY_THROTTLE_MS = 250L
     }
 }
+
