@@ -27,9 +27,9 @@ class ScalpStrategySettingsTest {
         assertEquals(ScalpState.PENDING_EXIT, book.snapshot().first { it.id == held.id }.state)
         assertTrue(book.snapshot().first { it.id == held.id }.exitReason!!.contains("10%"))
     }
-    @Test fun rangesAndPerModelPlansCannotExceedFiftyOrDisableStops() {
+    @Test fun rangesAndPerModelPlansCannotExceedFiftyFiveOrDisableStops() {
         val knobs = ScalpStrategySettings(maxEntryCents = 90, minEntryCents = 80, stopLossPercent = 0, trailCents = 0, contracts = 0, untilMinute = 15).normalized()
-        assertEquals(50, knobs.maxEntryCents); assertEquals(50, knobs.minEntryCents)
+        assertEquals(55, knobs.maxEntryCents); assertEquals(55, knobs.minEntryCents)
         assertEquals(1, knobs.stopLossPercent); assertEquals(1, knobs.trailCents); assertEquals(14, knobs.untilMinute)
         val cfg = ScalpControls(strategySettings = mapOf("v2-sf41" to ScalpStrategySettings(contracts = 3, maxEntryCents = 42)))
         val base = ScalpV2.plan("v2-sf41", emptyList(), at)

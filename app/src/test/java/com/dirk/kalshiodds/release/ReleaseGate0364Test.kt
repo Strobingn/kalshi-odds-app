@@ -27,7 +27,7 @@ class ReleaseGate0364Test {
     @Test
     fun entryWindowAndUptick() {
         assertTrue(ShockFav.o50InEntryWindow(890.0)); assertTrue(ShockFav.o50InEntryWindow(870.0))
-        assertTrue(!ShockFav.o50InEntryWindow(897.0)); assertTrue(!ShockFav.o50InEntryWindow(860.0))
+        assertTrue(ShockFav.o50InEntryWindow(897.0)); assertTrue(!ShockFav.o50InEntryWindow(860.0))
         assertEquals("YES", ShockFav.o50UptickSide(0.50, 0.51)); assertEquals("NO", ShockFav.o50UptickSide(0.50, 0.49)); assertNull(ShockFav.o50UptickSide(0.50, 0.505))
     }
 

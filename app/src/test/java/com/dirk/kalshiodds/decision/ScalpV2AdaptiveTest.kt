@@ -35,7 +35,7 @@ class ScalpV2AdaptiveTest {
         val rows = windows(-1.0)
         val plan = ScalpV2.plan("v2-sf41", rows, now)
         assertTrue(plan.adjusted)
-        assertEquals(.48, plan.spec.maxAsk, 1e-9)
+        assertEquals(.53, plan.spec.maxAsk, 1e-9)
         assertEquals(.12, plan.stop, 1e-9)
         assertEquals(.04, plan.arm, 1e-9)
         assertFalse(ScalpV2.plan("v2-sf42", rows, now).adjusted)

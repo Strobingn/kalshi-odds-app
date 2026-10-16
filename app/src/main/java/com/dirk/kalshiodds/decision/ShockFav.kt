@@ -89,10 +89,10 @@ object ShockFav {
         } + (if (offUsHours) " · off-US hours" else "")
         private fun o50Summary(): String = buildString {
             append(when (o50) {
-                O50.UPTICK -> "5–30 s after open: buy the side that first ticks up"
-                O50.BOTH -> "5–30 s after open: buy both sides"
+                O50.UPTICK -> "0–30 s after open: buy the side that first ticks up"
+                O50.BOTH -> "0–30 s after open: buy both sides"
                 O50.MAKER -> "rest 49¢ bids both sides at open (fills only when ask trades through)"
-                O50.AI -> "5–30 s after open: GBM ${Open50Model.VERSION} predicts 60 s bid move; buy if net > ${Math.round(Open50Model.THRESHOLD * 100)}¢; exit if it predicts a drop"
+                O50.AI -> "0–30 s after open: GBM ${Open50Model.VERSION} predicts 60 s bid move; buy if net > ${Math.round(Open50Model.THRESHOLD * 100)}¢; exit if it predicts a drop"
                 null -> ""
             })
             trail?.let { append(String.format(java.util.Locale.US, "; sell %.0f¢ below peak bid", it * 100)) }
@@ -126,7 +126,7 @@ object ShockFav {
     }
     /** Variant id per side: both-side modes use "<code>n" for the NO leg. Keyed per window ticker, so every open is fresh. */
     fun o50VariantId(p: Params, side: String): String = if (side == "NO" && (p.o50 == O50.BOTH || p.o50 == O50.MAKER)) p.code + "n" else p.code
-    fun o50InEntryWindow(tauS: Double): Boolean = (900.0 - tauS) in 5.0..30.0
+    fun o50InEntryWindow(tauS: Double): Boolean = (900.0 - tauS) in 0.0..30.0
     /** Open 50 exit (no stop): trailing drop below peak, net TP, AI drop, max hold, τ < 30 s. */
     fun o50Exit(p: Params, entry: Double, peakBid: Double, bid: Double, heldS: Double, tauS: Double, aiPred: Double? = null, clip: Int = CLIP): String? {
         val net = (bid - entry) - (ScalpRule.orderFee(clip, bid) + ScalpRule.orderFee(clip, entry)) / clip
@@ -141,11 +141,17 @@ object ShockFav {
     }
     const val SIMPLE_WINDOW_MS = 300_000L
     const val SIMPLE_MIN_HISTORY_MS = 240_000L
-    /** Pure Simple-dip entry rule. */
-    fun simpleDipSide(p: Params, askYes: Double?, avgYes: Double, askNo: Double?, avgNo: Double): String? = when {
-        askYes != null && askYes in 0.05..0.95 && askYes <= avgYes - p.dip + 1e-9 -> "YES"
-        askNo != null && askNo in 0.05..0.95 && askNo <= avgNo - p.dip + 1e-9 -> "NO"
-        else -> null
+    /** Compare eligible live dips on both sides. An equal signal waits instead of preferring UP. */
+    fun simpleDipSide(p: Params, askYes: Double?, avgYes: Double, askNo: Double?, avgNo: Double): String? {
+        fun strength(ask: Double?, avg: Double): Double? =
+            if (ScalpRule.buyPriceOk(ask) && ask!! >= 0.05 && avg.isFinite() && avg - ask >= p.dip - 1e-9) avg - ask else null
+        val yes = strength(askYes, avgYes)
+        val no = strength(askNo, avgNo)
+        return when {
+            yes != null && (no == null || yes > no + 1e-9) -> "YES"
+            no != null && (yes == null || no > yes + 1e-9) -> "NO"
+            else -> null
+        }
     }
     fun v(code: String): Params = VARIANTS.first { it.code == code }
     val VARIANTS: List<Params> = listOf(

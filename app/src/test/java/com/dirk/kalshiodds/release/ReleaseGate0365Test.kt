@@ -27,7 +27,7 @@ class ReleaseGate0365Test {
     }
 
     @Test fun v2EntryAndExitRule() {
-        assertTrue(ScalpV2.entryOk(0.50)); assertFalse(ScalpV2.entryOk(0.51)); assertFalse(ScalpV2.entryOk(null))
+        assertTrue(ScalpV2.entryOk(0.50)); assertFalse(ScalpV2.entryOk(0.56)); assertFalse(ScalpV2.entryOk(null))
         val stop = 0.10
         // below stop size net: hold even if it dips 2¢ off peak
         assertNull(ScalpV2.exit(0.40, stop, 0.48, 0.46, wasArmed = false))
