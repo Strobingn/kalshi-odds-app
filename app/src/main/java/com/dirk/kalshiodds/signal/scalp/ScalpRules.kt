@@ -11,6 +11,7 @@ class ScalpAlgo(
     val decide: (ScalpAccount, ScalpTape) -> ScalpIntent
 )
 
+@kotlinx.serialization.Serializable
 data class ScalpTape(
     val ticker: String,
     val yesBid: Double,
