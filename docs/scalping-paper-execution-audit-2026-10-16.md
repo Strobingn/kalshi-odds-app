@@ -12,7 +12,7 @@ The highest-confidence improvements were execution and ledger correctness fixes,
 2. Partial paper exits now create unique realized-slice identities while retaining the residual's immutable open identity. Peak updates only touch open rows. This preserves holdings, realized P&L, and future peak tracking.
 3. Exit quotes and local books carry ingest timestamps and monotonic revisions. Stale quotes are rejected before peak mutation; an empty held-side book does not fall back to an old quote; unknown depth is not treated as unlimited; and one depth snapshot cannot be consumed repeatedly beyond its displayed size.
 4. Automatic paper entries share the adaptive pause, adaptive stake cap, close-time propagation, and hard `$0.50` entry ceiling. Existing paper positions continue to be risk-managed when automatic paper entry is toggled off.
-5. Alert-created paper entries now use the same strict fresh-source and known-ask-depth path as automatic tickets and honor the adaptive stake cap rather than a fixed `$5` clip. Cached market reads preserve their original observation timestamp instead of being stamped fresh on re-read.
+5. Alert-created paper entries now use the same strict fresh-source and known-ask-depth path as automatic tickets and honor the adaptive stake cap rather than a fixed `$5` clip. Strict automatic paper execution requires actual complementary-side book depth; volume, open interest, and dollar-liquidity analytics are never treated as executable contracts. Cached market reads preserve their original observation timestamp instead of being stamped fresh on re-read.
 
 These changes improve the validity of measured paper results. They do not establish a profitable strategy.
 
@@ -35,7 +35,7 @@ Key paths:
 
 The prior calculation activated the trail after a small favorable move and then treated `current <= peak - distance` as a hit even when the current executable bid was below entry. With a `$0.400` entry, `$0.402` peak, and 2% entry-relative distance, `$0.394` could be classified as a trailing exit. The delayed stop loss also became a loss exit solely because a timer elapsed.
 
-The implementation now separates profit trailing from risk fallback. Profit trailing requires a peak above entry and a current held-side bid at or above entry. Before the emergency fallback, a below-entry exit requires a known close within 120 seconds plus three fresh observations within 60 seconds that decline monotonically by at least 0.2 cents per step. Any rebound breaks the rule. This is a transparent trend heuristic, not a calibrated recovery estimate, and is deliberately not presented as one.
+The implementation now separates profit trailing from risk fallback. Profit trailing requires a peak above entry and a current held-side bid at or above entry. Before the emergency fallback, a below-entry exit requires a known close within 120 seconds plus three fresh observations within 60 seconds that decline monotonically by at least 0.2 cents per step. Any rebound breaks the rule. The stop manager records the current quote once and the evaluator deduplicates an already-persisted timestamp/price, so the production path has the same three-observation semantics as direct evaluation. This is a transparent trend heuristic, not a calibrated recovery estimate, and is deliberately not presented as one.
 
 ### P0: partial-exit identity corrupted the ledger — fixed
 
@@ -61,7 +61,7 @@ Automatic paper tickets from hunter/value/configured paths were still proposed w
 
 Automatic non-manual ticket construction now honors the adaptive pause, adaptive max-ask and reduced stake cap. Alert-created entries apply the same hard price cap, adaptive eligibility, and authoritative market close time. Explicit manual paper actions remain user-controlled. Existing open positions are evaluated independently of the automatic paper-entry switch.
 
-Strict paper alert/ticket contexts require a fresh source timestamp and whole-contract displayed ask depth. Cached/offline DTO re-reads preserve the cache fetch timestamp; unknown timestamps remain ineligible for strict paper execution.
+Strict paper alert/ticket contexts require a fresh source timestamp and actual whole-contract displayed ask depth from the complementary side of a non-empty book. A fresh REST/tick quote with no book, or a book without the side-appropriate asks, is a no-fill; volume/open-interest/liquidity-dollar proxies remain analytical only. Cached/offline DTO re-reads preserve the cache fetch timestamp; unknown timestamps remain ineligible for strict paper execution.
 
 ### P1: simulated exit is still not a resting exchange order — remaining limitation
 
@@ -98,8 +98,10 @@ No profitability conclusion is justified until this protocol produces locked out
 
 Focused tests run on this branch include:
 
-- `TrailingStopTest` and `PaperBookTest`: stop semantics, time fallback, unique partial identities, peak retention, fee-aware exits, stale handling, and repeated-depth protection.
+- `TrailingStopTest` and `PaperBookTest`: stop semantics, time fallback, unique partial identities, peak retention, fee-aware exits, stale handling, repeated-depth protection, exactly-once trend observations, rebound rejection, and stop-label precedence through `StopOrderManager`.
 - `TradeTicketTest`, `PositionSellTest`, `TickBookMathTest`, `KalshiFeeAndWinTargetTest`, and `AdaptiveStrategyTest`: executable side pricing, book/tick behavior, fees, ticket sizing, and adaptive controls.
+
+The focused post-review gate (`TrailingStopTest`, `TradeTicketTest`) passed under JDK 21. A full `:app:testDebugUnitTest` rerun under JDK 21 executed 734 tests with 5 failures. Four substantive failures reproduce unchanged on the isolated pre-review `a23fc3f` tree: `KnownIssuesRegressionTest.cheapHunterWithNoModelEdgeIsNoBetHeadline`, `ScorecardMetricsTest.hitRateBrierAndEdgeSplit`, `ScoringPredictabilityTest.lateWeightsShiftAwayFromAiTowardMicro`, and `BetCallAgreementTest.cheapHunterWithoutModelEdgeIsNoBetHeadline`. The fifth is `TicketForwardSqliteTest.existingVersionSixDatabaseGetsNewTableWithoutLosingForwardSignals`, a Robolectric/sqlite fixture collision (`settled_windows already exists`). These failures are not in the changed execution files and are not claimed as caused or fixed by this patch. The sandbox's default Android Studio JBR 25.0.2 is incompatible with the repository Kotlin tooling; the reruns used the installed Temurin JDK 21. CI remains the release authority.
 
 The full repository suite has known environment-sensitive Robolectric/Android-all download failures and several pre-existing substantive failures from the earlier branch baseline; those are not presented as proof of this patch. CI must remain the release build authority.
 

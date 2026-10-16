@@ -106,14 +106,16 @@ class TrailingStop(
             if (!current.isFinite()) return@forEach
             val state = calculatePositionState(fill, current, nowMs)
             if (!state.stopHit) return@forEach
-            val timeFallback = state.timeFallback
-            val stopLoss = state.stopLossPrice != null && current <= state.stopLossPrice
-            val trailing = state.trailingStopPrice != null && current <= state.trailingStopPrice
-            val earlyLoss = state.earlyLossHit
+            // PositionState.stopType is the authoritative trigger. Re-testing
+            // raw price thresholds here can relabel a trend-risk exit as a
+            // stop loss or trailing stop after the state was evaluated.
+            val timeFallback = state.stopType == "TIME FALLBACK"
+            val stopLoss = state.stopType == "STOP LOSS"
+            val trailing = state.stopType == "TRAILING STOP"
             val stopPrice = when {
                 timeFallback -> current
-                stopLoss -> state.stopLossPrice!!
-                trailing -> state.trailingStopPrice!!
+                stopLoss -> state.stopLossPrice ?: current
+                trailing -> state.trailingStopPrice ?: current
                 else -> current
             }
             stops += StopOrder(
@@ -132,7 +134,7 @@ class TrailingStop(
                     timeFallback -> "time fallback"
                     stopLoss -> "stop loss"
                     trailing -> "trailing stop"
-                    earlyLoss -> "trend risk exit"
+                    state.stopType == "TREND RISK EXIT" -> "trend risk exit"
                     else -> "risk fallback"
                 }
             )
@@ -205,8 +207,13 @@ class TrailingStop(
      * executable bids qualifies. This is not a probability of recovery.
      */
     private fun sustainedDecline(fill: PaperFill, currentPrice: Double, nowMs: Long): Boolean {
-        val points = (fill.quoteHistory + com.dirk.kalshiodds.signal.paper.PaperPriceObservation(currentPrice, nowMs))
+        val current = com.dirk.kalshiodds.signal.paper.PaperPriceObservation(currentPrice, nowMs)
+        val alreadyRecorded = fill.quoteHistory.lastOrNull()?.let {
+            it.observedAtMs == current.observedAtMs && kotlin.math.abs(it.price - current.price) <= 1e-9
+        } == true
+        val points = (if (alreadyRecorded) fill.quoteHistory else fill.quoteHistory + current)
             .filter { it.observedAtMs in (nowMs - recoveryTrendWindowMs)..nowMs }
+            .distinctBy { it.observedAtMs to it.price }
             .takeLast(recoveryTrendLookback)
         if (points.size < recoveryTrendLookback) return false
         return points.zipWithNext().all { (a, b) -> a.price - b.price >= recoveryTrendStep }

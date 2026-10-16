@@ -378,13 +378,20 @@ object TicketBuilder {
             val configuredMax = PayoutGate.maxLimitForPayout(stakeUsd, minPayoutUsd)
             if (configuredMax != null && ask > configuredMax + 1e-9) return null
         }
-        val levels = askLevels(market, side, ctx.books[market.ticker])
-        val quoted = quotedSize(market, side, ctx.books[market.ticker])
+        val book = ctx.books[market.ticker]
+        val strictExecutionDepth = ctx.requireFreshQuotes && kind != TicketKind.MANUAL
+        val levels = askLevels(market, side, book)
+        val quoted = if (strictExecutionDepth) {
+            executableQuotedSize(market, side, book)
+        } else {
+            quotedSize(market, side, book)
+        }
         val bankroll = ctx.bankrollUsd ?: ctx.settings.bankrollUsd
         // For automatic suggestions, the actual $5 clip must fit at the
         // quoted touch. The payout check below can require a much smaller
         // $1 clip, so passing it alone does not make the displayed size real.
-        val liveBook = ctx.books[market.ticker]?.takeIf { !it.isEmpty() }
+        val liveBook = book?.takeIf { !it.isEmpty() }
+        if (strictExecutionDepth && (liveBook == null || quoted == null || quoted <= 0.0)) return null
         val allInCap = adaptive?.stakeUsd?.coerceIn(1.0, SignalConstants.LIVE_ALL_IN_CAP_USD)
             ?: SignalConstants.LIVE_ALL_IN_CAP_USD
         val sizingStakeUsd = if (kind != TicketKind.MANUAL) {
@@ -739,6 +746,16 @@ object TicketBuilder {
             market.yesAskSize?.takeIf { it > 0.0 }?.let { return it }
         }
         return listOfNotNull(market.volume, market.openInterest, market.liquidityDollars).maxOrNull()
+    }
+
+    /** Actual executable touch depth only; never falls back to analytics proxies. */
+    fun executableQuotedSize(market: MarketUiModel, side: String, book: BookLevelSnapshot?): Double? {
+        if (book == null || book.isEmpty()) return null
+        val levels = askLevels(market, side, book)
+        val ask = bookAsk(side, book) ?: return null
+        return levels.filter { it.first <= ask + 1e-9 }
+            .sumOf { it.second }
+            .takeIf { it > 0.0 }
     }
 
     private fun bookAsk(side: String, book: BookLevelSnapshot?): Double? {

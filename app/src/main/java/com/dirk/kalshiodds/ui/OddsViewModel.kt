@@ -1076,7 +1076,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 ask > adaptiveConfig.maxAskFilter + 1e-9
             ) return@forEach
             val visible = floor(
-                TicketBuilder.quotedSize(market, alert.predictedSide, paperCtx.books[market.ticker]) ?: 0.0
+                TicketBuilder.executableQuotedSize(
+                    market,
+                    alert.predictedSide,
+                    paperCtx.books[market.ticker]
+                ) ?: 0.0
             ).toInt().coerceAtLeast(0)
             val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.sizeWithinDepth(
                 price = ask,

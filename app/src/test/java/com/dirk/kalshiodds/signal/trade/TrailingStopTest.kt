@@ -203,6 +203,61 @@ class TrailingStopTest {
     }
 
     @Test
+    fun `stop manager trend risk uses three distinct fresh declines`() {
+        val f = fill(entry = 0.40, contracts = 2, created = 1_000L, close = 100_000L)
+        val book = PaperBook(PaperBookState(cashUsd = 99.2, fills = listOf(f)))
+        val stops = StopOrderManager(
+            book,
+            StopOrderManager.StopConfig(
+                stopLossDelayMs = Long.MAX_VALUE,
+                maxHoldMs = Long.MAX_VALUE,
+                settlementFallbackMs = 1_000L,
+                earlyLossTimeRemainingMs = 20_000L,
+                recoveryTrendLookback = 3,
+                recoveryTrendStep = 0.002,
+                recoveryTrendWindowMs = 60_000L
+            )
+        )
+        val first = PaperExitQuote(0.398, 2, 88_000L, "book", "r1")
+        val second = PaperExitQuote(0.392, 2, 89_000L, "book", "r2")
+        val third = PaperExitQuote(0.386, 2, 90_000L, "book", "r3")
+        assertTrue(stops.checkAndExecute(mapOf(ticker to first), 88_000L).isEmpty())
+        assertTrue(stops.checkAndExecute(mapOf(ticker to second), 89_000L).isEmpty())
+        assertTrue(stops.checkAndExecute(mapOf(ticker to third), 90_000L).isNotEmpty())
+        val execution = stops.getExecutions().single()
+        assertFalse(execution.isTrailing)
+        assertFalse(execution.isStopLoss)
+        assertFalse(execution.isTimeFallback)
+    }
+
+    @Test
+    fun `rebound and repeated timestamp do not manufacture trend evidence`() {
+        val f = fill(entry = 0.40, contracts = 2, created = 1_000L, close = 100_000L)
+        val book = PaperBook(PaperBookState(cashUsd = 99.2, fills = listOf(f)))
+        val stops = StopOrderManager(
+            book,
+            StopOrderManager.StopConfig(
+                stopLossDelayMs = Long.MAX_VALUE,
+                maxHoldMs = Long.MAX_VALUE,
+                settlementFallbackMs = 1_000L,
+                earlyLossTimeRemainingMs = 20_000L,
+                recoveryTrendLookback = 3,
+                recoveryTrendStep = 0.002,
+                recoveryTrendWindowMs = 60_000L
+            )
+        )
+        val first = PaperExitQuote(0.398, 2, 88_000L, "book", "r1")
+        val decline = PaperExitQuote(0.392, 2, 89_000L, "book", "r2")
+        val duplicate = PaperExitQuote(0.392, 2, 89_000L, "book", "r2-repeat")
+        val rebound = PaperExitQuote(0.395, 2, 90_000L, "book", "r3")
+        assertTrue(stops.checkAndExecute(mapOf(ticker to first), 88_000L).isEmpty())
+        assertTrue(stops.checkAndExecute(mapOf(ticker to decline), 89_000L).isEmpty())
+        assertTrue(stops.checkAndExecute(mapOf(ticker to duplicate), 89_000L).isEmpty())
+        assertTrue(stops.checkAndExecute(mapOf(ticker to rebound), 90_000L).isEmpty())
+        assertTrue(stops.getExecutions().isEmpty())
+    }
+
+    @Test
     fun `stop manager respects executable depth and records fees`() {
         val f = fill(entry = 0.40, contracts = 10, peak = 0.50, entryFee = 0.01)
         val book = PaperBook(PaperBookState(cashUsd = 95.99, fills = listOf(f)))

@@ -9,6 +9,7 @@ import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import kotlin.math.floor
 import kotlin.math.min
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -126,7 +127,12 @@ class PaperBook(
             val cur = _state.value
             val open = cur.fills.firstOrNull { it.id == fillId && !it.settled } ?: return null
             val peak = maxOf(open.peakPrice ?: open.limitPrice, px)
-            val history = (open.quoteHistory + PaperPriceObservation(px, atMs)).takeLast(12)
+            val observation = PaperPriceObservation(px, atMs)
+            val alreadyRecorded = open.quoteHistory.lastOrNull()?.let {
+                it.observedAtMs == observation.observedAtMs && abs(it.price - observation.price) <= 1e-9
+            } == true
+            val history = if (alreadyRecorded) open.quoteHistory else
+                (open.quoteHistory + observation).takeLast(12)
             val peakChanged = open.peakPrice == null || peak > open.peakPrice + 1e-9
             if (!peakChanged && history == open.quoteHistory) return open
             val updated = open.copy(

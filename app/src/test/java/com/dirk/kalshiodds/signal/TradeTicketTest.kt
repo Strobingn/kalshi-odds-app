@@ -615,6 +615,36 @@ class TicketBuilderGateTest {
     }
 
     @Test
+    fun strictExecutionDepthUsesTheComplementarySideForBothOutcomes() {
+        val m = market(passed = true, muted = false, ask = 0.04)
+        val yesBook = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+            no = listOf(0.96 to 40.0)
+        )
+        val noBook = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(
+            yes = listOf(0.96 to 12.0)
+        )
+        assertEquals(40.0, TicketBuilder.executableQuotedSize(m, "YES", yesBook)!!, 1e-9)
+        assertEquals(12.0, TicketBuilder.executableQuotedSize(m, "NO", noBook)!!, 1e-9)
+    }
+
+    @Test
+    fun strictAutomaticPaperTicketRejectsNoBookEvenWithLargeAnalyticsProxies() {
+        val now = 10_000L
+        val m = market(passed = true, muted = false, ask = 0.04).copy(
+            quoteObservedAtMs = now,
+            closeTimeEpochMs = now + 60_000L
+        )
+        val ctx = TicketBuilder.Context(
+            settings = SignalSettings(),
+            alertsPaused = false,
+            nowMs = now,
+            requireFreshQuotes = true
+        )
+        assertNull(TicketBuilder.proposeHunter(m, ctx))
+        assertNull(TicketBuilder.executableQuotedSize(m, "NO", null))
+    }
+
+    @Test
     fun longShotCannotClaimInvisibleContractsOrZeroTouchSize() {
         val m = market(passed = true, muted = false, ask = 0.04, volume = 5_000.0)
         val thin = com.dirk.kalshiodds.signal.engine.BookLevelSnapshot(no = listOf(0.96 to 15.0))
