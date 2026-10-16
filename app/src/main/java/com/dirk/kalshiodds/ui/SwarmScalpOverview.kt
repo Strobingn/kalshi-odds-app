@@ -100,6 +100,7 @@ internal fun SwarmScalpCurve(windows: List<ScalpModels.WindowRow>, v2: Boolean, 
         Text(t.algoLabel, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
         Text("${if (t.side == "YES") "UP" else "DOWN"} · ${t.remaining} ct · ${t.ticker}", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         Text("Entry ${ScalpTabCopy.cents(t.entryPrice)} → bid ${ScalpTabCopy.cents(bid)} · ${t.unrealizedUsd(bid)?.let { ScalpTabCopy.money(it) } ?: "—"} after exit fee", color = c.textPrimary)
+        if (com.dirk.kalshiodds.decision.ScalpV2.isV2(t.variantId)) Text(com.dirk.kalshiodds.decision.ScalpV2.riskLabel(t), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         Text(if (t.state == ScalpState.PENDING_EXIT) "Exiting · ${t.exitReason}" else if (t.state == ScalpState.PENDING_ENTRY) "Entry pending" else "Protective stop active", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
     }
 }

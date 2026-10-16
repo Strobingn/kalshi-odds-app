@@ -16,9 +16,10 @@ data class ScalpControls(
     val contracts: Int = 10, val maxStakeUsd: Double = 0.0, val maxHoldSeconds: Int = 0,
     val maxTradesPerHour: Int = 0, val maxDailyLossUsd: Double = 0.0, val maxOpen: Int = 0,
     val windowSeconds: Int = 30, val dipCents: Double = 0.0,
-    val disabledStrategies: Set<String> = emptySet()
+    val disabledStrategies: Set<String> = emptySet(),
+    val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20
 ) {
-    fun normalized() = copy(maxAskCents = maxAskCents.coerceIn(1, 99), stopCents = stopCents.coerceIn(1, 99),
+    fun normalized() = copy(peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 99), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,

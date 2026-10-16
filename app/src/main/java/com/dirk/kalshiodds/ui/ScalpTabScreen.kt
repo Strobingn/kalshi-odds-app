@@ -207,7 +207,8 @@ fun ScalpTabContent(
             item(key = "run-status") { Text(
                 (if (st.controls.enabled && !st.controls.killSwitch) "V2 entries on" else "V2 entries paused") +
                     (if (st.controls.maxTradesPerHour == 0) " · unlimited trades" else " · ${st.controls.maxTradesPerHour}/hour") +
-                    (if (st.controls.manual) " · manual parameters" else " · strategy parameters"), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
+                    (if (st.controls.manual) " · manual parameters" else " · strategy parameters") +
+                    (if (st.controls.peakTrailEnabled) " · ${st.controls.peakTrailCents}¢ peak trail / ${st.controls.stopLossPercent}% fill stop" else " · legacy exits"), color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
             item(key = "scope") { Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Pill("V2 strategies", v2Only) { v2Only = true }
                 Pill("Originals", !v2Only) { v2Only = false }

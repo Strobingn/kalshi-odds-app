@@ -14,7 +14,7 @@ class ScalpControlsTest {
     private val at = close - 300_000
     private fun q(now: Long, bid: Double = .39, ask: Double = .40) = ScalpRule.Quote(tk, now, close, now, bid, 100.0, ask, 100.0, 100_000.0, 100_000.0, 3e-5)
     private fun source(id: String = "source") = ScalpTrade(id, tk, "YES", ScalpState.PENDING_ENTRY, at, .4, .5, ruleVersion = "${ScalpRule.VERSION}|sf41|P")
-    private fun controls() = MemoryScalpControls(ScalpControls(manual = true, contracts = 3, stopCents = 6,
+    private fun controls() = MemoryScalpControls(ScalpControls(peakTrailEnabled = false, manual = true, contracts = 3, stopCents = 6,
         armCents = 8, maxStakeUsd = 1.0, disabledStrategies = ScalpModels.V2_MODELS.map { it.code }.filter { it != "v2-sf41" }.toSet()))
     @Test fun unlimitedMeansNoHourlyOrWindowQuota() {
         val store = MemoryScalpControls()
@@ -125,13 +125,16 @@ class SavedScalpControlsTest {
         val ctx = ApplicationProvider.getApplicationContext<Context>()
         ctx.getSharedPreferences("kashi_v2_controls", Context.MODE_PRIVATE).edit().clear().commit()
         val a = SavedScalpControls(ctx)
-        a.save(ScalpControls(manual = true, stopCents = 7, maxTradesPerHour = 0, disabledStrategies = setOf("v2-sf41")))
+        a.save(ScalpControls(manual = true, stopCents = 7, peakTrailCents = 4, stopLossPercent = 25, maxTradesPerHour = 0, disabledStrategies = setOf("v2-sf41")))
         a.recordEntry(10000)
         val trade = ScalpTrade("closed", "KXBTC15M-X", "YES", ScalpState.CLOSED, 0, .4, .5, contracts = 2, netUsd = .10, closedAtMs = 10000)
         a.recordOutcome("v2-sf42", trade)
         a.close()
         val b = SavedScalpControls(ctx)
         assertEquals(7, b.state.value.stopCents)
+        assertTrue(b.state.value.peakTrailEnabled)
+        assertEquals(4, b.state.value.peakTrailCents)
+        assertEquals(25, b.state.value.stopLossPercent)
         assertFalse(b.state.value.permits("v2-sf41"))
         assertEquals(1, b.entries(10000))
         b.recordOutcome("v2-sf42", trade)
