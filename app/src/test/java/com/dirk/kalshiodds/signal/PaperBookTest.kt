@@ -18,16 +18,16 @@ import org.junit.Test
 class PaperBookTest {
 
     @Test
-    fun startsAtOneHundredAndPapersFiveDollarAiFill() {
+    fun startsAtPaperStartAndPapersFiveDollarAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
-        assertEquals(100.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(com.dirk.kalshiodds.signal.config.SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         val fill = book.considerTicket(hunterTicket(), enabled = true)
         assertTrue(fill != null)
         assertEquals("YES", fill!!.side)
         assertEquals("AI hunter", fill.source)
         assertEquals(125, fill.contracts) // floor(5 / 0.04)
         assertEquals(5.0, fill.stakeUsd, 1e-9)
-        assertEquals(95.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(995.0, book.snapshot().cashUsd, 1e-9)
         assertEquals(5.0, book.snapshot().openStakeUsd, 1e-9)
         assertFalse(fill.settled)
     }
@@ -99,8 +99,8 @@ class PaperBookTest {
         assertEquals(false, loss.won)
         assertEquals(-5.0, loss.pnlUsd!!, 1e-9)
         assertEquals(115.0, snap.realizedPnlUsd, 1e-9)
-        // cash: 100 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 215
-        assertEquals(215.0, snap.cashUsd, 1e-9)
+        // cash: 1000 - 15 + 125 (win) + 0 (loss) + 5 (void refund) = 1115
+        assertEquals(1115.0, snap.cashUsd, 1e-9)
         book.reset()
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)
         assertTrue(book.snapshot().fills.isEmpty())
@@ -153,7 +153,7 @@ class PaperBookTest {
         val fill = book.considerTicket(ticket, enabled = true)
         assertEquals(20, fill!!.contracts)
         assertEquals(8.0, fill.stakeUsd, 1e-9)
-        assertEquals(92.0, book.snapshot().cashUsd, 1e-9)
+        assertEquals(992.0, book.snapshot().cashUsd, 1e-9)
         assertTrue(fill.note.contains("win-target"))
     }
 

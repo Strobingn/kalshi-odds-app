@@ -46,10 +46,11 @@ class AdaptiveStrategy(
         val maxDrawdown: Double,
         val currentStreak: Int,
         val bestAskRange: Pair<Double, Double>?,
-        val bestTimeRange: Pair<Long, Long>?
+        val bestTimeRange: Pair<Long, Long>?,
+        val minSamples: Int = 10
     ) {
         val isProfitable: Boolean get() = totalPnl > 0
-        val hasEnoughData: Boolean get() = totalTrades >= minSamplesForLearning
+        val hasEnoughData: Boolean get() = totalTrades >= minSamples
     }
 
     /**
@@ -70,7 +71,8 @@ class AdaptiveStrategy(
                 maxDrawdown = 0.0,
                 currentStreak = 0,
                 bestAskRange = null,
-                bestTimeRange = null
+                bestTimeRange = null,
+                minSamples = minSamplesForLearning
             )
         }
 
@@ -118,7 +120,8 @@ class AdaptiveStrategy(
             maxDrawdown = maxDrawdown,
             currentStreak = streak,
             bestAskRange = bestAskRange,
-            bestTimeRange = bestTimeRange
+            bestTimeRange = bestTimeRange,
+            minSamples = minSamplesForLearning
         )
     }
 
