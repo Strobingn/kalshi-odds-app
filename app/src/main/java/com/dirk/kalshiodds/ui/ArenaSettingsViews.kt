@@ -93,6 +93,51 @@ internal fun KnobSlider(
 
 private fun cents(v: Double): String = "${v.roundToInt()}¢"
 
+/** Slider ends that mean "no limit". */
+private const val SPREAD_ANY = 21.0
+private const val ORDERS_ANY = 21
+
+@Composable
+private fun SettingsGroup(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.SemiBold,
+        color = DipTheme.colors.accentBlue,
+        modifier = Modifier.padding(top = 8.dp)
+    )
+}
+
+/** Both sides, YES only or NO only. [onPick] gets null for both. */
+@Composable
+private fun SideChoice(current: String?, onPick: (String?) -> Unit) {
+    val colors = DipTheme.colors
+    Column(Modifier.testTag("KNOB_SIDE")) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Sides it buys", style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary, modifier = Modifier.weight(1f))
+            Text(
+                current?.let { "$it only" } ?: "both",
+                style = ArenaUi.mono(MaterialTheme.typography.bodyMedium),
+                fontWeight = FontWeight.SemiBold,
+                color = if (current != null) colors.accentBlue else colors.textPrimary
+            )
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            for ((label, value) in listOf("Both" to null, "YES only" to "YES", "NO only" to "NO")) {
+                val on = current == value
+                OutlinedButton(
+                    onClick = { onPick(value) },
+                    modifier = Modifier.weight(1f).height(40.dp).testTag("KNOB_SIDE_${value ?: "BOTH"}"),
+                    colors = androidx.compose.material3.ButtonDefaults.outlinedButtonColors(
+                        containerColor = if (on) colors.accentBlue.copy(alpha = 0.18f) else androidx.compose.ui.graphics.Color.Transparent,
+                        contentColor = if (on) colors.accentBlue else colors.textSecondary
+                    )
+                ) { Text(label, maxLines = 1) }
+            }
+        }
+    }
+}
+
 /**
  * Everything you can change on one strategy. Saved on the phone at once and
  * used from its next decision; a filled scalp keeps the take-profit it was
@@ -154,6 +199,69 @@ internal fun StrategySettingsCard(st: ScalpStrategy, tuning: ScalpTuning, modelT
         KnobSlider(
             "Looks every", t.cadenceSeconds.toDouble(), 1.0, 30.0, 1.0, "KNOB_CADENCE", k.cadenceSeconds != null, { "${it.roundToInt()} s" }
         ) { save(k.copy(cadenceSeconds = it.roundToInt().takeIf { n -> n != d.cadenceSeconds })) }
+        // ---- When and where it may trade ------------------------------------------------
+        SettingsGroup("When it trades")
+        // A strategy whose own trigger is already "from minute" / "until minute" keeps just that one.
+        val triggerMinute = ScalpTriggers.of(st)?.takeIf { it.unit == ScalpTriggers.Unit.MINUTE }?.label
+        if (triggerMinute != "From minute") {
+            KnobSlider(
+                "Opens orders from minute", t.fromSecond / 60.0, 0.0, 14.0, 1.0, "KNOB_FROM_MIN", k.fromMinute != null,
+                { if (it.roundToInt() == 0) "the open" else "minute ${it.roundToInt()}" }
+            ) { save(k.copy(fromMinute = it.roundToInt().takeIf { m -> m != 0 })) }
+        }
+        if (triggerMinute != "Until minute") {
+            KnobSlider(
+                "…and stops at minute", t.untilSecond / 60.0, 1.0, 15.0, 1.0, "KNOB_UNTIL_MIN", k.untilMinute != null,
+                { if (it.roundToInt() == 15) "the close" else "minute ${it.roundToInt()}" }
+            ) { save(k.copy(untilMinute = it.roundToInt().takeIf { m -> m != 15 })) }
+        }
+        if (t.noMinutes) Muted("No minutes left between those two: it opens nothing.")
+        SideChoice(t.onlySide) { save(k.copy(side = it)) }
+        KnobSlider(
+            "Widest spread it trades into", (t.maxSpread?.times(100) ?: SPREAD_ANY), 1.0, SPREAD_ANY, 1.0, "KNOB_SPREAD",
+            k.maxSpreadCents != null, { if (it >= SPREAD_ANY) "any" else cents(it) }
+        ) { save(k.copy(maxSpreadCents = it.takeIf { c -> c < SPREAD_ANY })) }
+
+        // ---- How much it does ------------------------------------------------------------
+        SettingsGroup("How often")
+        KnobSlider(
+            "Most orders a window", (t.maxOrdersPerWindow ?: ORDERS_ANY).toDouble(), 1.0, ORDERS_ANY.toDouble(), 1.0, "KNOB_MAX_ORDERS",
+            k.maxOrdersPerWindow != null, { if (it.roundToInt() >= ORDERS_ANY) "no limit" else "${it.roundToInt()}" }
+        ) { save(k.copy(maxOrdersPerWindow = it.roundToInt().takeIf { n -> n < ORDERS_ANY })) }
+        KnobSlider(
+            "Wait after an order", t.cooldownMs / 1000.0, 0.0, 300.0, 5.0, "KNOB_COOLDOWN", k.cooldownSeconds != null,
+            { if (it.roundToInt() == 0) "none" else "${it.roundToInt()} s" }
+        ) { save(k.copy(cooldownSeconds = it.roundToInt().takeIf { n -> n > 0 })) }
+        if (!st.taker) {
+            KnobSlider(
+                "A resting bid waits", t.entryWaitMs(com.dirk.kalshiodds.signal.scalper.ScalperEngine.Config().entryWaitMs) / 1000.0,
+                5.0, 120.0, 5.0, "KNOB_BID_WAIT", k.bidWaitSeconds != null, { "${it.roundToInt()} s" }
+            ) {
+                val def = (com.dirk.kalshiodds.signal.scalper.ScalperEngine.Config().entryWaitMs / 1000).toInt()
+                save(k.copy(bidWaitSeconds = it.roundToInt().takeIf { n -> n != def }))
+            }
+        }
+
+        // ---- Protection --------------------------------------------------------------------
+        SettingsGroup("Protection")
+        if (!st.hold) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Trailing stop", style = MaterialTheme.typography.bodyMedium, color = colors.textPrimary)
+                    Muted(if (t.trail) "The stop follows the best bid since the entry." else "The stop is fixed under the entry price.")
+                }
+                Switch(
+                    checked = t.trail,
+                    onCheckedChange = { on -> save(k.copy(trail = on.takeIf { v -> v != st.trail })) },
+                    modifier = Modifier.testTag("KNOB_TRAIL")
+                )
+            }
+        }
+        KnobSlider(
+            "Pause for the day after losing", t.dailyLossUsd ?: 0.0, 0.0, 200.0, 5.0, "KNOB_DAILY_LOSS", k.dailyLossUsd != null,
+            { if (it.roundToInt() == 0) "never" else "\$${it.roundToInt()}" }
+        ) { save(k.copy(dailyLossUsd = it.takeIf { v -> v > 0.0 })) }
+        Muted("Paper dollars lost today (UTC), counted since the app started.")
         if (!k.isDefault) {
             OutlinedButton(onClick = { save(ScalpKnobs()) }, modifier = Modifier.fillMaxWidth().height(48.dp).testTag("STRATEGY_DEFAULTS")) {
                 Text("Back to its defaults")
@@ -277,7 +385,7 @@ internal fun ArenaSettingsPage(
                         val t = Tuned(st, k, tuning.defaultContracts)
                         val exits = if (st.hold) {
                             if (t.stopDollars > 0) "hold · stop ${cents(t.stopDollars * 100)}" else "hold to the close"
-                        } else if (st.trail) {
+                        } else if (t.trail) {
                             "+${cents(t.targetDollars * 100)} / trail ${cents(t.stopDollars * 100)}"
                         } else {
                             "+${cents(t.targetDollars * 100)} / −${cents(t.stopDollars * 100)} / ${t.timeoutMs / 1000} s"

@@ -20,7 +20,25 @@ data class ScalpKnobs(
     val entryMaxCents: Double? = null,
     val cadenceSeconds: Int? = null,
     /** The strategy's main trigger ([ScalpTriggers.of]), in that trigger's own unit. */
-    val trigger: Double? = null
+    val trigger: Double? = null,
+    /** Opens new orders only from this minute of the window (0 = the open)… */
+    val fromMinute: Int? = null,
+    /** …and before this one (15 = the close). On top of the strategy's own timing. */
+    val untilMinute: Int? = null,
+    /** "YES" or "NO": trade that side only. Null = both. */
+    val side: String? = null,
+    /** Widest spread (ask − bid, cents) it will trade into. Null = any. */
+    val maxSpreadCents: Double? = null,
+    /** Most orders it opens in one 15-minute window (per market). Null = no limit. */
+    val maxOrdersPerWindow: Int? = null,
+    /** Seconds it waits after opening an order before it may open the next one. Null = none. */
+    val cooldownSeconds: Int? = null,
+    /** Pause it for the rest of the UTC day once its paper loss today reaches this many dollars. Null = never. */
+    val dailyLossUsd: Double? = null,
+    /** Trailing stop instead of a fixed one (scalps). Null = the strategy's own. */
+    val trail: Boolean? = null,
+    /** How long a resting entry bid waits to fill, in seconds. Null = the arena's 20 s. */
+    val bidWaitSeconds: Int? = null
 ) {
     val isDefault: Boolean get() = this == ScalpKnobs()
 }
@@ -43,6 +61,34 @@ class Tuned(val strategy: ScalpStrategy, val knobs: ScalpKnobs, defaultContracts
         strategy.entryMin != PrintGrid.MIN_PRICE || strategy.entryMax != PrintGrid.MAX_PRICE
     val entryMin: Double = knobs.entryMinCents?.div(100.0) ?: strategy.entryMin
     val entryMax: Double = knobs.entryMaxCents?.div(100.0) ?: strategy.entryMax
+
+    /** Second of the window it may open orders from, and the second it stops before. */
+    val fromSecond: Int = ((knobs.fromMinute ?: 0).coerceIn(0, 15)) * 60
+    val untilSecond: Int = ((knobs.untilMinute ?: 15).coerceIn(0, 15)) * 60
+
+    /** No minute left between [fromSecond] and [untilSecond]: it opens nothing. */
+    val noMinutes: Boolean get() = fromSecond >= untilSecond
+
+    fun inMinutes(second: Int): Boolean = second >= fromSecond && second < untilSecond
+
+    /** "YES" / "NO" when you limited it to one side, else null. */
+    val onlySide: String? = knobs.side?.uppercase()?.takeIf { it == "YES" || it == "NO" }
+
+    fun sideAllowed(side: String): Boolean = onlySide == null || onlySide.equals(side, ignoreCase = true)
+
+    /** Widest spread it trades into, in dollars; null = any. */
+    val maxSpread: Double? = knobs.maxSpreadCents?.takeIf { it > 0.0 }?.div(100.0)
+
+    val maxOrdersPerWindow: Int? = knobs.maxOrdersPerWindow?.takeIf { it > 0 }
+
+    val cooldownMs: Long = (knobs.cooldownSeconds ?: 0).coerceAtLeast(0) * 1000L
+
+    val dailyLossUsd: Double? = knobs.dailyLossUsd?.takeIf { it > 0.0 }
+
+    val trail: Boolean = knobs.trail ?: strategy.trail
+
+    /** How long its resting entry bid waits, given the arena's default. */
+    fun entryWaitMs(default: Long): Long = knobs.bidWaitSeconds?.takeIf { it > 0 }?.let { it * 1000L } ?: default
 
     private val spec = ScalpTriggers.of(strategy)
 

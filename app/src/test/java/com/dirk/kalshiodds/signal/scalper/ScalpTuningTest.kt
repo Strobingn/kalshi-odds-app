@@ -117,4 +117,117 @@ class ScalpTuningTest {
         assertEquals(0.04, tuned.triggerValue(0.02), 1e-12)
         assertFalse(tuned.enabled)
     }
+
+    // ---- the extra limits (1.12) ------------------------------------------------------
+
+    private fun lateFavWindow(tuning: ScalpTuning, closeOf: (String) -> Long? = { 900_000L }, fair: Double = 0.98) = PaperScalper(
+        model = null, ledger = ScalperLedger(), topOfBook = { null }, bookLevels = { null }, closeMs = closeOf,
+        engine = ScalperEngine(tuning = tuning), fairYes = { _, _ -> fair }
+    )
+
+    private fun runWindow(s: PaperScalper, ticker: String, openMs: Long) {
+        for (sec in 0..850) {
+            s.onTrade(ticker, "no", 0.90, 20.0, openMs + sec * 1000L + 100L)
+            s.onTrade(ticker, "yes", 0.92, 20.0, openMs + sec * 1000L + 200L)
+        }
+    }
+
+    @Test
+    fun untouchedLimitsChangeNothing() {
+        for (st in ScalpStrategy.values()) {
+            val d = Tuned(st, ScalpKnobs(), 10)
+            assertEquals(0, d.fromSecond)
+            assertEquals(900, d.untilSecond)
+            assertTrue(d.sideAllowed("YES") && d.sideAllowed("NO"))
+            assertEquals(null, d.maxSpread)
+            assertEquals(null, d.maxOrdersPerWindow)
+            assertEquals(0L, d.cooldownMs)
+            assertEquals(null, d.dailyLossUsd)
+            assertEquals(st.trail, d.trail)
+            assertEquals(20_000L, d.entryWaitMs(20_000L))
+            assertTrue(ArenaTable.limits(d).isEmpty())
+        }
+    }
+
+    @Test
+    fun oneSideOnlyAWindowAndASpreadLimitStopTheBuy() {
+        val st = ScalpStrategy.KASHI_FAV_BASE
+        fun run(knobs: ScalpKnobs): Int {
+            val tuning = ScalpTuning()
+            tuning.set(st, knobs)
+            val s = lateFavWindow(tuning)
+            runWindow(s, t, 0L)
+            return s.engine.workingFor(st, t, "YES")
+        }
+        assertEquals("untouched buys YES", 1, run(ScalpKnobs()))
+        assertEquals("NO only", 0, run(ScalpKnobs(side = "NO")))
+        assertEquals("YES only still buys", 1, run(ScalpKnobs(side = "YES")))
+        assertEquals("stops at minute 14: the late window never comes", 0, run(ScalpKnobs(untilMinute = 14)))
+        assertEquals("a 1¢ spread limit skips the 2¢ spread", 0, run(ScalpKnobs(maxSpreadCents = 1.0)))
+        assertEquals("a 2¢ spread limit lets it through", 1, run(ScalpKnobs(maxSpreadCents = 2.0)))
+    }
+
+    @Test
+    fun theDailyLossLimitPausesItUntilTheNextDay() {
+        val st = ScalpStrategy.KASHI_FAV_BASE
+        val t2 = "KXBTC15M-26OCT091230-30"
+        val t3 = "KXBTC15M-26OCT101215-15"
+        val day = 86_400_000L
+        val closes = mapOf(t to 900_000L, t2 to 1_800_000L, t3 to day + 900_000L)
+        val tuning = ScalpTuning()
+        tuning.set(st, ScalpKnobs(dailyLossUsd = 5.0))
+        val s = lateFavWindow(tuning, { closes[it] })
+        runWindow(s, t, 0L)
+        assertEquals(1, s.engine.workingFor(st, t, "YES"))
+        // YES at 92¢ loses: about −$9.2 on 10 contracts, past the $5 limit.
+        s.settle(t, "no", 900_500L)
+        assertTrue(s.todayPnl(st, 900_500L) < -5.0)
+        runWindow(s, t2, 900_000L)
+        assertEquals("paused for the rest of the day", 0, s.engine.workingFor(st, t2, "YES"))
+        runWindow(s, t3, day)
+        assertEquals("a new UTC day trades again", 1, s.engine.workingFor(st, t3, "YES"))
+    }
+
+    @Test
+    fun aTrailingStopAndALongerBidWaitCanBeSwitchedOn() {
+        val tuning = ScalpTuning()
+        tuning.set(ScalpStrategy.DIP_HUNTER, ScalpKnobs(trail = true, stopCents = 2.0, targetCents = 20.0))
+        tuning.set(ScalpStrategy.DIP_HUNTER_REST, ScalpKnobs(bidWaitSeconds = 60))
+        val e = ScalperEngine(tuning = tuning)
+        e.buyNow(ScalpStrategy.DIP_HUNTER, t, "YES", 0.50, noQueue, 0L)
+        assertTrue(e.onClock(t, 1_000L, 0.53, 0.46).isEmpty())
+        // 51¢ is 2¢ under the 53¢ best bid: a trailing stop, though still above the entry.
+        val c = e.onClock(t, 2_000L, 0.51, 0.48).filterIsInstance<ScalpEvent.Closed>().single().scalp
+        assertEquals(ExitKind.STOP, c.kind)
+        assertNotNull(e.post(ScalpStrategy.DIP_HUNTER_REST, t, "YES", 0.40, 100.0, 0.0, 0.0, 10_000L))
+        assertTrue("still resting at 30 s with your 60 s wait", e.onClock(t, 40_000L, 0.40, 0.59).none { it is ScalpEvent.Unfilled })
+        assertTrue(e.onClock(t, 71_000L, 0.40, 0.59).any { it is ScalpEvent.Unfilled })
+    }
+
+    @Test
+    fun theRulesListYourLimitsAndOldSavedSettingsStillLoad() {
+        val tuned = Tuned(
+            ScalpStrategy.BOUNCE,
+            ScalpKnobs(fromMinute = 2, untilMinute = 12, side = "YES", maxSpreadCents = 3.0, maxOrdersPerWindow = 2,
+                cooldownSeconds = 30, dailyLossUsd = 25.0),
+            10
+        )
+        assertEquals(
+            listOf(
+                "Opens orders only from minute 2 until minute 12.",
+                "Buys YES only.",
+                "Skips a spread wider than 3¢.",
+                "At most 2 orders a window.",
+                "Waits 30 s after an order before the next.",
+                "Pauses for the rest of the day (UTC) once it is down \$25 today."
+            ),
+            ArenaTable.limits(tuned)
+        )
+        assertTrue(Tuned(ScalpStrategy.BOUNCE, ScalpKnobs(fromMinute = 10, untilMinute = 5), 10).noMinutes)
+        // Settings saved before these fields existed.
+        val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val old = json.decodeFromString(serializer<Map<String, ScalpKnobs>>(), """{"BOUNCE":{"enabled":true,"contracts":4}}""")
+        assertEquals(4, old["BOUNCE"]!!.contracts)
+        assertEquals(null, old["BOUNCE"]!!.side)
+    }
 }

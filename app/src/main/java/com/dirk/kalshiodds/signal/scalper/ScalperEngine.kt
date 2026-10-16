@@ -626,7 +626,7 @@ class ScalperEngine(
             // The print's price in this order's own side.
             val sidePrice = if (yes) yesPrice else 1.0 - yesPrice
             if (w.resting) {
-                if (nowMs - o.postedAtMs > config.entryWaitMs) {
+                if (nowMs - o.postedAtMs > tuning.tuned(o.strategy).entryWaitMs(config.entryWaitMs)) {
                     it.remove()
                     events += ScalpEvent.Unfilled(o)
                     continue
@@ -676,7 +676,7 @@ class ScalperEngine(
             val o = w.order
             val filledAt = w.filledAtMs
             if (filledAt == null) {
-                if (nowMs - o.postedAtMs > config.entryWaitMs) {
+                if (nowMs - o.postedAtMs > tuning.tuned(o.strategy).entryWaitMs(config.entryWaitMs)) {
                     it.remove()
                     events += ScalpEvent.Unfilled(o)
                 }
@@ -687,8 +687,8 @@ class ScalperEngine(
             if (o.strategy.hold && t.stopDollars <= 0.0) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
-            if (o.strategy.trail && bid > w.peakBid) w.peakBid = bid
-            val stopFrom = if (o.strategy.trail) w.peakBid else o.price
+            if (t.trail && bid > w.peakBid) w.peakBid = bid
+            val stopFrom = if (t.trail) w.peakBid else o.price
             val stopped = t.stopDollars > 0.0 && bid <= stopFrom - t.stopDollars + EPS
             val timedOut = !o.strategy.hold && nowMs - filledAt >= t.timeoutMs
             if (stopped || timedOut) {

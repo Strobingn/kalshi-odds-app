@@ -362,6 +362,44 @@ class PaperScalper(
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
     /** Once-a-window strategies (the opening ride, late edge) that already bought on a ticker. */
     private val onceDone = HashMap<String, MutableSet<ScalpStrategy>>()
+    /** Orders each strategy opened on a ticker this window, and when it opened its last one (your limits). */
+    private val ordersThisWindow = HashMap<String, IntArray>()
+    private val lastOrderMs = HashMap<String, LongArray>()
+    /** Each strategy's closed paper P&L today (UTC day), for the daily loss pause. Since the app started. */
+    private var lossDay: Long = -1L
+    private val dayPnl = DoubleArray(ScalpStrategy.values().size)
+
+    private fun utcDay(ms: Long): Long = Math.floorDiv(ms, 86_400_000L)
+
+    /** Book [events] in the ledger, keeping today's per-strategy P&L. */
+    private fun book(events: List<ScalpEvent>, forcePersist: Boolean = false, nowMs: Long = System.currentTimeMillis()) {
+        val today = utcDay(nowMs)
+        if (today != lossDay) {
+            lossDay = today
+            dayPnl.fill(0.0)
+        }
+        for (e in events) if (e is ScalpEvent.Closed && utcDay(e.scalp.closedAtMs) == today) {
+            dayPnl[e.scalp.order.strategy.ordinal] += e.scalp.pnlUsd
+        }
+        ledger.apply(events, forcePersist)
+    }
+
+    /** True once [st] lost its daily limit today. */
+    private fun pausedForLoss(st: ScalpStrategy, limit: Double?, nowMs: Long): Boolean {
+        if (limit == null) return false
+        if (utcDay(nowMs) != lossDay) return false
+        return dayPnl[st.ordinal] <= -limit + 1e-9
+    }
+
+    private fun forgetWindow(ticker: String) {
+        ordersThisWindow.remove(ticker)
+        lastOrderMs.remove(ticker)
+    }
+
+    /** Today's closed paper P&L of [st] (UTC day, since the app started). */
+    @Synchronized
+    fun todayPnl(st: ScalpStrategy, nowMs: Long = System.currentTimeMillis()): Double =
+        if (utcDay(nowMs) == lossDay) dayPnl[st.ordinal] else 0.0
 
     /** A public trade print. [takerSide] is Kalshi's `taker_side`: "yes" = the taker bought YES at [yesPrice]. */
     @Synchronized
@@ -383,7 +421,7 @@ class PaperScalper(
         }
         grid.add(nowMs, takerYes, p, c)
         events += decide(ticker, grid, nowMs)
-        ledger.apply(events)
+        book(events, nowMs = nowMs)
     }
 
     /** Time passing with no trade: expire, stop out and time out. Cheap when nothing is working. */
@@ -391,7 +429,7 @@ class PaperScalper(
     fun onClock(ticker: String, nowMs: Long) {
         if (!engine.hasWork(ticker)) return
         val grid = grids[ticker] ?: return
-        ledger.apply(clock(ticker, grid, nowMs))
+        book(clock(ticker, grid, nowMs), nowMs = nowMs)
     }
 
     /** The window settled: open scalps pay $1 or $0 and the window's grid is dropped. */
@@ -401,7 +439,8 @@ class PaperScalper(
         grids.remove(ticker)
         lastDecision.remove(ticker)
         onceDone.remove(ticker)
-        ledger.apply(events, forcePersist = events.isNotEmpty())
+        forgetWindow(ticker)
+        book(events, forcePersist = events.isNotEmpty(), nowMs = nowMs)
     }
 
     @Synchronized
@@ -439,6 +478,9 @@ class PaperScalper(
         if (!runCatching { onReset() }.getOrDefault(false)) return false
         engine.clear()
         onceDone.clear()
+        ordersThisWindow.clear()
+        lastOrderMs.clear()
+        dayPnl.fill(0.0)
         ledger.reset()
         return true
     }
@@ -455,6 +497,7 @@ class PaperScalper(
             if (nowMs - e.value.openMs > PrintGrid.SECONDS * 1000L + GRID_KEEP_MS && !engine.hasWork(e.key)) {
                 onceDone.remove(e.key)
                 lastDecision.remove(e.key)
+                forgetWindow(e.key)
                 it.remove()
             }
         }
@@ -497,7 +540,8 @@ class PaperScalper(
         }
         val due0 = STRATEGIES.filter { st ->
             val t = tuning.tuned(st)
-            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st) && (done == null || st !in done)
+            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st) && t.inMinutes(s) &&
+                (done == null || st !in done) && !pausedForLoss(st, t.dailyLossUsd, nowMs)
         }
         if (due0.isEmpty()) return emptyList()
         for (st in due0) last[st.ordinal + 1] = s
@@ -557,8 +601,21 @@ class PaperScalper(
                 bid = bid, ask = ask, bidQty = queue, askQty = askQty,
                 move10 = d10.takeIf { !it.isNaN() }, move30 = d30.takeIf { !it.isNaN() }, features = x
             )
+            val opened = ordersThisWindow.getOrPut(ticker) { IntArray(STRATEGIES.size) }
+            val lastOpen = lastOrderMs.getOrPut(ticker) { LongArray(STRATEGIES.size) { Long.MIN_VALUE / 2 } }
             for (st in due) {
                 val tn = tuning.tuned(st)
+                // Your limits: one side only, the widest spread, orders per window, and a wait between orders.
+                if (!tn.sideAllowed(side)) continue
+                val widest = tn.maxSpread
+                if (widest != null && spread > widest + EPS) continue
+                val most = tn.maxOrdersPerWindow
+                if (most != null && opened[st.ordinal] >= most) continue
+                if (tn.cooldownMs > 0 && nowMs - lastOpen[st.ordinal] < tn.cooldownMs) continue
+                fun noteOrder() {
+                    opened[st.ordinal]++
+                    lastOpen[st.ordinal] = nowMs
+                }
                 // The strategy's main trigger: yours when you set one, else its default.
                 fun trig(default: Double) = tn.triggerValue(default)
                 val ownBand = tn.ownBand
@@ -692,7 +749,10 @@ class PaperScalper(
                     // The model's own cut, unless you set another (in cents, as the model speaks).
                     if (pred < tn.trigger(m.thetaCents)) continue
                     val expected = m.expectedCents(pred, queue ?: engine.config.unknownQueue)
-                    engine.post(st, ticker, side, bid, queue, pred, expected, nowMs, seen(x))?.let { events += it }
+                    engine.post(st, ticker, side, bid, queue, pred, expected, nowMs, seen(x))?.let {
+                        events += it
+                        noteOrder()
+                    }
                 } else if (fire) {
                     if (st.taker) {
                         val bought = engine.buyNow(
@@ -701,13 +761,17 @@ class PaperScalper(
                         if (bought.isNotEmpty() && (st.opening || st == ScalpStrategy.LATE_EDGE)) {
                             onceDone.getOrPut(ticker) { HashSet() }.add(st)
                         }
+                        if (bought.isNotEmpty()) noteOrder()
                         events += bought
                     } else {
                         // 1¢ better rests inside the spread, so nobody is ahead of it at its price.
                         val improve = st == ScalpStrategy.IMPROVE_1C
                         val px = if (improve) ScalperEngine.round4(bid + 0.01) else bid
                         val q = if (improve) 0.0 else queue
-                        engine.post(st, ticker, side, px, q, 0.0, 0.0, nowMs, seen(null))?.let { events += it }
+                        engine.post(st, ticker, side, px, q, 0.0, 0.0, nowMs, seen(null))?.let {
+                            events += it
+                            noteOrder()
+                        }
                     }
                 }
             }

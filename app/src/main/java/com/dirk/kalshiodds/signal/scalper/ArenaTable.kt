@@ -185,11 +185,11 @@ object ArenaTable {
     /** How it gets in and out, built from the strategy's settings (yours where you changed one). */
     fun rules(st: ScalpStrategy, t: Tuned = Tuned(st, ScalpKnobs(), ScalpTuning.DEFAULT_CONTRACTS)): List<String> {
         val entry = if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
-        else "Rests a bid and waits up to 20 s for sellers to reach it (no fee)."
+        else "Rests a bid and waits up to ${t.entryWaitMs(ScalperEngine.Config().entryWaitMs) / 1000} s for sellers to reach it (no fee)."
         val exit = if (st.hold) {
             "Holds to the settlement: $1 if its side wins, $0 if not" +
                 (if (t.stopDollars > 0.0) ", unless the bid falls ${c(t.stopDollars)} below the entry (sold, taker fee)." else ".")
-        } else if (st.trail) {
+        } else if (t.trail) {
             "Out at +${c(t.targetDollars)} (resting offer), or sold at the bid once it falls ${c(t.stopDollars)} under " +
                 "the best bid since the entry (a trailing stop, taker fee). Anything still open settles."
         } else {
@@ -205,7 +205,24 @@ object ArenaTable {
         val spec = ScalpTriggers.of(st)
         val trigger = t.knobs.trigger
         val signal = signal(st) + if (spec != null && trigger != null) " Your setting: ${spec.label.lowercase()} ${ScalpTriggers.text(spec, trigger)}." else ""
-        return listOf(signal, entry, exit, band, size) + if (!t.enabled) listOf("Switched off in its settings: it opens nothing new.") else emptyList()
+        return listOf(signal, entry, exit, band, size) + limits(t) +
+            if (!t.enabled) listOf("Switched off in its settings: it opens nothing new.") else emptyList()
+    }
+
+    /** Your extra limits, one line each; empty when none are set. */
+    fun limits(t: Tuned): List<String> = buildList {
+        val k = t.knobs
+        if (k.fromMinute != null || k.untilMinute != null) {
+            add(
+                if (t.noMinutes) "Your window has no minutes left: it opens nothing."
+                else "Opens orders only from minute ${t.fromSecond / 60} until minute ${t.untilSecond / 60}."
+            )
+        }
+        t.onlySide?.let { add("Buys $it only.") }
+        t.maxSpread?.let { add("Skips a spread wider than ${c(it)}.") }
+        t.maxOrdersPerWindow?.let { add("At most $it order${if (it == 1) "" else "s"} a window.") }
+        if (t.cooldownMs > 0) add("Waits ${t.cooldownMs / 1000} s after an order before the next.")
+        t.dailyLossUsd?.let { add(String.format(java.util.Locale.US, "Pauses for the rest of the day (UTC) once it is down \$%.0f today.", it)) }
     }
 
     /** Everything on the one-strategy page that is a number. */
