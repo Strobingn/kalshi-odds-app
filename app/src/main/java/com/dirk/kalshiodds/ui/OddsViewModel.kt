@@ -16,6 +16,7 @@ import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
 import com.dirk.kalshiodds.signal.service.LiveSignalsService
 import com.dirk.kalshiodds.signal.paper.PaperBookState
+import com.dirk.kalshiodds.signal.v3.V3ShadowState
 import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.ScalpSignal
@@ -65,6 +66,8 @@ data class OddsUiState(
     val mutedSummary: String? = null,
     val tickets: TicketUiState = TicketUiState(),
     val paper: PaperBookState = PaperBookState(),
+    /** V3 is a local, shadow-only scorecard and never an order route. */
+    val v3: V3ShadowState = V3ShadowState(),
     val positions: List<LivePosition> = emptyList(),
     val positionsNote: String? = null,
     /** Live Kalshi cash from GET /portfolio/balance, if the key can read it. */
@@ -86,6 +89,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = container.preferences
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
+    private val v3Book = container.v3.book
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -116,7 +120,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     init {
         ticketSession.onStart()
-        _state.update { it.copy(paper = paperBook.snapshot()) }
+        _state.update { it.copy(paper = paperBook.snapshot(), v3 = v3Book.snapshot()) }
         viewModelScope.launch {
             runCatching {
                 ticketSession.state.collect { tickets ->
@@ -152,6 +156,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             runCatching {
                 paperBook.state.collect { paper ->
                     _state.update { it.copy(paper = paper) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            runCatching {
+                v3Book.state.collect { v3 ->
+                    _state.update { it.copy(v3 = v3) }
                 }
             }
         }
@@ -461,6 +472,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 avgEdgeWhenWrong = overlaid.avgEdgeWhenWrong
             )
         }
+        // V3 receives the same post-score public snapshot as the UI. It is
+        // a shadow book only and has no dependency on TicketSession/Kalshi.
+        v3Book.observeAll(overlaid.allMarkets, container.clock.nowMs())
         publishSupportState()
         scheduleRebuildTickets()
         refreshPositions()
@@ -761,10 +775,14 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     private fun applyScoreOverlay(scores: Map<String, ScoringEngine.Score>) {
         runCatching {
+            var observed = emptyList<MarketUiModel>()
             _state.update { s ->
                 val snap = s.snapshot ?: return@update s
-                s.copy(snapshot = attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp())))
+                val overlaid = attachHistory(snap.overlayScores(scores, s.settings.effectiveEdgeThresholdPp()))
+                observed = overlaid.allMarkets
+                s.copy(snapshot = overlaid)
             }
+            v3Book.observeAll(observed, container.clock.nowMs())
             scheduleRebuildTickets()
             refreshPositionMarks()
         }
