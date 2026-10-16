@@ -93,9 +93,12 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         item(key = "hdr") {
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = c.textPrimary) }
-                Text(d.model?.label ?: "Algorithm", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = c.textPrimary)
+                Text(d.model?.label ?: "Algorithm", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = c.textPrimary, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
             Text("PAPER · individual strategy · live window & fills", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+        }
+        item(key = "strategy-hero") {
+            d.allTime?.let { row -> ArenaSummary(listOf(row), listOfNotNull(d.today), row.open) }
         }
         item(key = "live-chart") { ScalpWindowChart(d, onWindow, onLive) { selectedTrade = it } }
         item(key = "window-trades-h") { Text("This window · ${d.chart.trades.size} signals / trades", color = c.textPrimary, fontWeight = FontWeight.Bold) }
@@ -103,11 +106,25 @@ fun ScalpAlgoContent(d: ScalpAlgoDetail, onBack: () -> Unit = {}, paged: android
         items(d.chart.trades.sortedByDescending { it.signalAtMs }, key = { "window-${it.id}" }) { t ->
             ScalpWindowTrade(t, selectedTrade == t.id, d.chart.bid(t.side))
         }
-        item(key = "alltime") {
-            SwarmCard("Only this strategy · all time") {
-                Text(ScalpTabCopy.money(d.allTime?.netUsd ?: 0.0), style = MaterialTheme.typography.headlineMedium, color = c.textPrimary, fontWeight = FontWeight.Bold)
-                Text("${d.allTime?.roundTrips ?: 0} round trips · ${d.allTime?.wins ?: 0} W / ${d.allTime?.losses ?: 0} L · ${d.allTime?.open ?: 0} open", color = c.textSecondary)
-                Text("Today ${ScalpTabCopy.money(d.today?.netUsd ?: 0.0)} · fees ${ScalpTabCopy.money(d.allTime?.feesUsd ?: 0.0)}", color = c.textSecondary)
+        item(key = "profit") {
+            ArenaCard {
+                Text("Running profit · recent trades", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                val closed = d.trades.filter { it.state == ScalpState.CLOSED && it.netUsd != null }.sortedBy { it.closedAtMs }
+                var net = 0.0
+                val points = closed.map { t -> net += t.netUsd!!; KashiArenaData.Point(t.closedAtMs ?: t.signalAtMs, net) }
+                ArenaProfitChart(if (points.isEmpty()) emptyList() else listOf(KashiArenaData.Point(points.first().atMs - 1, 0.0)) + points)
+                Text("Starts at $0 for the latest recorded trades; all-time profit is above.", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+        item(key = "numbers") {
+            ArenaCard {
+                Text("Every number · all time", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                val r = d.allTime
+                KpiGrid(listOf(Kpi("Average win", r?.avgWinUsd?.let(ScalpTabCopy::money) ?: "—"),
+                    Kpi("Average loss", r?.avgLossUsd?.let(ScalpTabCopy::money) ?: "—"),
+                    Kpi("Fees", r?.feesUsd?.let { String.format(Locale.US, "$%.2f", it) } ?: "—"),
+                    Kpi("Best trade", r?.bestUsd?.let(ScalpTabCopy::money) ?: "—"),
+                    Kpi("Worst trade", r?.worstUsd?.let(ScalpTabCopy::money) ?: "—"), Kpi("No fills", "${r?.noFills ?: 0}")))
             }
         }
         item(key = "rules") {

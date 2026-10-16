@@ -1125,6 +1125,10 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
             arrayOf(scalperId, afterClosedAtMs.toString(), afterClosedAtMs.toString(), afterId ?: ""))
     }.getOrDefault(emptyList())
 
+    override fun windowPrimaryTrades(ticker: String, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> =
+        scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id IS NOT NULL AND scalper_id != '' ORDER BY signal_at_ms DESC LIMIT ${limit.coerceIn(1, 600)}", arrayOf(ticker.uppercase()))
+            .filter { it.isPrimary }.sortedBy { it.signalAtMs }
+
     override fun windowTrades(scalperId: String, ticker: String): List<com.dirk.kalshiodds.decision.ScalpTrade> =
         scalpRows("SELECT * FROM ${ST.TABLE} INDEXED BY idx_scalp_ticker WHERE ticker = ? AND scalper_id = ? ORDER BY signal_at_ms", arrayOf(ticker.uppercase(), scalperId))
 

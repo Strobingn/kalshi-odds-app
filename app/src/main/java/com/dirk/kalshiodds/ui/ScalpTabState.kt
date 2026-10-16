@@ -6,6 +6,7 @@ import com.dirk.kalshiodds.decision.ScalpModels
 /** 0.3.50 Scalp tab state (computed off the main thread by [OddsViewModel]). Paper only. */
 data class ScalpTabState(
     val coin: String? = null,
+    val arenaChart: ScalpWindowChartData = ScalpWindowChartData(),
     val controls: com.dirk.kalshiodds.decision.ScalpControls = com.dirk.kalshiodds.decision.ScalpControls(),
     val activeScalps: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
     val scalpBids: Map<String, Double> = emptyMap(),

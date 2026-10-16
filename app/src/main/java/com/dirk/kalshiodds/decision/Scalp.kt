@@ -1392,6 +1392,7 @@ class ScalpBook(
     fun pageTrades(scalperId: String, afterClosedAtMs: Long? = null, afterId: String? = null, limit: Int = 50) =
         store.pageTrades(scalperId, afterClosedAtMs, afterId, limit)
     fun windowTrades(scalperId: String, ticker: String) = store.windowTrades(scalperId, ticker)
+    fun windowPrimaryTrades(ticker: String) = store.windowPrimaryTrades(ticker)
     fun unsyncedClosed(limit: Int) = store.unsyncedClosed(limit)
     fun markSynced(ids: List<String>) = store.markSynced(ids)
     fun migrateStatsChunk(limit: Int = 500): Int = store.migrateStatsChunk(limit).also { if (it > 0) _stats.value = store.loadStats() }
