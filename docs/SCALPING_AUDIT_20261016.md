@@ -180,10 +180,14 @@ Evaluate candidate exits on identical entries and identical information:
 5. limit exit with explicit non-fill, timeout, and fallback outcomes.
 
 For each candidate, compare net proceeds after both fees, spread, slippage,
-and partial/non-fill outcomes. A useful decision quantity is the expected value
-of waiting versus selling now, conditioned on time remaining and the information
-available then—not a terminal-spot mark. Keep a maximum-loss and end-of-window
-policy so “forecast-aware” cannot silently become indefinite holding.
+and partial/non-fill outcomes. For the exit decision, the entry fee is sunk:
+compare the immediate executable bid after the future exit fee with the
+forecasted future liquidation proceeds after future exit fee, slippage, and
+non-fill risk. Full-trade P&L must still include the already-paid entry fee.
+A useful decision quantity is the expected value of waiting versus selling now,
+conditioned on time remaining and the information available then—not a
+terminal-spot mark. Keep a maximum-loss and end-of-window policy so
+“forecast-aware” cannot silently become indefinite holding.
 
 The current exit code has a specific risk worth measuring: entry spread is
 bounded, but stop/trail execution does not require the spread to remain under
@@ -227,18 +231,21 @@ pre-registered out-of-sample and forward-paper evidence.
 
 For a one-contract taker entry at 45c and taker exits at 47c and 48c, the
 fee-inclusive examples supplied for the current official fee model are
-approximately:
+approximately. They assume fee multiplier `M=1`, the non-direct member
+whole-cent balance rule, one complete fill on each leg, no slippage, and no
+queue/non-fill risk:
 
-| Entry → exit | 1 contract | 10 contracts | 100 contracts |
+| Entry to exit | 1 contract | 10 contracts | 100 contracts |
 |---|---:|---:|---:|
-| 45c → 47c | -$0.02 | -$0.16 | -$1.49 |
-| 45c → 48c | -$0.01 | -$0.06 | -$0.49 |
+| 45c to 47c | -$0.02 | -$0.16 | -$1.49 |
+| 45c to 48c | -$0.01 | -$0.06 | -$0.49 |
 
 With a zero-fee maker entry and taker exit at 48c, the corresponding examples
 are approximately +$0.01, +$0.12, and +$1.25 before adverse selection and
-non-fill risk. These are illustrations of fee sensitivity, not expected
-returns. The exact coefficient, precision, maker eligibility, and contract
-terms must be loaded for the series/event being tested.
+non-fill risk, under the same complete-fill/no-slippage assumptions. These are
+illustrations of fee sensitivity, not expected returns. The exact coefficient,
+precision, maker eligibility, and contract terms must be loaded for the
+series/event being tested.
 
 ## Reproducible research protocol
 
@@ -295,6 +302,50 @@ BUILD SUCCESSFUL in 16s
 The first attempt with the environment's JDK 25 was incompatible with this
 Gradle/Kotlin version; rerunning with JDK 21 completed successfully. The SDK
 XML-version warning is environmental and did not fail the tests.
+
+## Sources
+
+Official venue and contract references:
+
+- [Kalshi Fees](https://help.kalshi.com/en/articles/13823805-fees) and the
+  [July 2026 Fee Schedule](https://kalshi.com/docs/kalshi-fee-schedule.pdf):
+  taker/maker formulas, multiplier, whole-cent balance rounding, and the fact
+  that schedules can vary by series.
+- [Kalshi Limit Orders](https://help.kalshi.com/en/articles/13823811-limit-orders):
+  resting orders can remain unfilled; immediate matches and maker fills have
+  different fee treatment.
+- [Kalshi Crypto Markets](https://help.kalshi.com/en/articles/13823838-crypto-markets):
+  CF Benchmarks, 60-second averages, the 15-minute open/close comparison, and
+  the rule that market-specific contract terms control.
+- [KXBTC15M series metadata](https://external-api.kalshi.com/trade-api/v2/series/KXBTC15M):
+  current series fee type/multiplier, contract-terms URL, and settlement-source
+  metadata; metadata must be captured per test run because it can change.
+- [Kalshi Orderbook Responses](https://docs.kalshi.com/getting_started/orderbook_responses)
+  and [Get Market Orderbook](https://docs.kalshi.com/api-reference/market/get-market-orderbook):
+  bid-only binary-book representation, reciprocal implied asks, sizes, and
+  depth semantics.
+
+Primary microstructure references used for research proposals:
+
+- [Cont, Kukanov & Stoikov, “The Price Impact of Order Book Events”](https://arxiv.org/abs/1011.6402),
+  Journal of Financial Econometrics (2014): order-flow imbalance and depth are
+  testable predictors of short-horizon price impact, not a proven BTC/Kalshi
+  edge.
+- [Cont & Kukanov, “Optimal Order Placement in Limit Order Markets”](https://arxiv.org/abs/1210.1625):
+  order placement depends on queue size, order-flow conditions, and fees/rebates;
+  it supports queue-aware fill experiments rather than touch-fill assumptions.
+
+Repository evidence and exact historical report locations:
+
+- [`research/scalp-0340/REPORT.md`](https://github.com/Strobingn/kalshi-odds-app/blob/dot/scalping-research-20261016/research/scalp-0340/REPORT.md#L93-L100):
+  BTC V2 test result `-2.93` cents/contract, 95% CI `[-3.69, -2.16]`,
+  `n=1,177`, and the no-OOS-edge conclusion.
+- [`research/scalp-0340/REPORT.md` walk-forward section](https://github.com/Strobingn/kalshi-odds-app/blob/dot/scalping-research-20261016/research/scalp-0340/REPORT.md#L110-L175):
+  pooled OOS and strategy-level results, including the negative `-3.23`
+  cents/contract pooled fair-gap result and clustered confidence interval.
+- [`research/scalp/REPORT.md`](https://github.com/Strobingn/kalshi-odds-app/blob/dot/scalping-research-20261016/research/scalp/REPORT.md#L77-L84):
+  independent earlier report describing the fee/spread burden and negative or
+  non-significant OOS candidates.
 
 ## Limits and blockers
 
