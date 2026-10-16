@@ -1,11 +1,10 @@
 name: Kashi build APK
 
-# Builds the Kashi debug APK (artifact only, never a GitHub release) for
-# kashi-* work branches and PRs into kashi. Signed with the committed debug
-# key; assembleDebug fails if the cert SHA-256 drifts.
+# Builds signed APK artifacts for work branches and PRs. Successful pushes to
+# kashi also publish an updater-compatible release, after every build check.
 on:
   push:
-    branches: ["kashi-*"]
+    branches: [kashi, "kashi-*"]
   pull_request:
     branches: [kashi]
   workflow_dispatch:
@@ -36,6 +35,7 @@ jobs:
           python-version: "3.12"
       - name: ML trainer tests (no look-ahead, publish safety)
         run: |
+          python3 scripts/test_kashi_release.py
           python3 ml/test_train_edge.py
           python3 ml/test_publish_model.py
           python3 ml/test_train_edge_0337.py
@@ -65,3 +65,28 @@ jobs:
           name: scalping-ui-previews
           path: app/build/reports/paparazzi/debug/
           if-no-files-found: error
+
+  publish-update:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/kashi'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: KalshiTrader-kashi-apk
+          path: update-apk
+      - name: Publish the verified APK to the in-app update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^ *versionName = "\(.*\)"/\1/p' app/build.gradle.kts | head -n1)
+          mapfile -t apks < <(find update-apk -maxdepth 1 -name '*.apk' -type f)
+          [[ ${#apks[@]} == 1 ]] || { echo "Expected exactly one verified APK" >&2; exit 1; }
+          cp "${apks[0]}" DipHunter-debug.apk
+          scripts/kashi-release.sh "v${version}-debug" DipHunter-debug.apk "$GITHUB_SHA" "Kashi ${version}" "Kashi paper trading update ${version}. Built and signature-checked from ${GITHUB_SHA}."
