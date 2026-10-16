@@ -19,7 +19,8 @@ data class ScalpStrategySettings(
             cadenceSeconds = cadenceSeconds.coerceIn(0, 30), maxOpenPerSide = maxOpenPerSide.coerceIn(1, 20))
     }
     fun plan(base: ScalpV2.Plan): ScalpV2.Plan = base.copy(spec = base.spec.copy(
-        maxAsk = minOf(ScalpRule.ENTRY_HI, maxEntryCents?.div(100.0) ?: base.spec.maxAsk),
+        // A user-specified floor outranks an inherited learned ceiling; never buy below that floor.
+        maxAsk = minOf(ScalpRule.ENTRY_HI, maxOf(minEntryCents / 100.0, maxEntryCents?.div(100.0) ?: base.spec.maxAsk)),
         clip = contracts ?: base.spec.clip), stop = stopCents?.div(100.0) ?: base.stop)
     fun timeOk(now: Long, close: Long): Boolean = now >= close - 900_000 && now < close - 900_000 + untilMinute * 60_000L
 }

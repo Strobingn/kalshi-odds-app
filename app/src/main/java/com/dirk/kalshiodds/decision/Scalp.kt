@@ -1473,8 +1473,8 @@ class ScalpBook(
                     if (sp.walk) " depth-walk" else "", stop) +
                     String.format(Locale.US, " · v2ask=%.4f · v2trail=%.4f · v2arm=%.4f · %s", sp.maxAsk, sp.trail, plan.arm, plan.note + "; learned ${feedback.trades} closed; recent net/ct ${feedback.recentNetPerContract}") +
                     String.format(Locale.US, " · v2tp=%.4f · v2hold=%d · v2clip=%d", (knobs.takeProfitCents ?: if (cfg.manual) cfg.takeProfitCents else 0) / 100.0, knobs.maxHoldSeconds ?: cfg.maxHoldSeconds, sp.clip) +
-                    (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "")
-                    + " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",
+                    (if (cfg.peakTrailEnabled) " · v2peakrule=1 · v2stopPct=$stopPct · exit policy: $stopPct% below fill / ${Math.round(sp.trail * 100)}¢ below bid peak, active from entry" else "") +
+                    " · v2min=${knobs.minEntryCents / 100.0} · v2until=${knobs.untilMinute} · v2sidecap=${knobs.maxOpenPerSide} · v2cadence=${knobs.cadenceSeconds}",
                 ruleVersion = "${ScalpRule.VERSION}|${sp.id}|P"))
         }
     }
@@ -1492,6 +1492,9 @@ class ScalpBook(
             ScalpV2.isV2(t.variantId) && t.state == ScalpState.CLOSED && prev?.state != ScalpState.CLOSED &&
                 ScalpModels.dayEt(t.closedAtMs ?: 0) == day }.sumOf { it.first.netUsd ?: 0.0 }
         var openCount = _all.value.count { ScalpV2.isV2(it.variantId) && it.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT) }
+        val openByModelSide = _all.value.asSequence().filter {
+            it.ticker == key && ScalpV2.isV2(it.variantId) && it.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)
+        }.groupingBy { "${ScalpModels.modelOf(it)?.code ?: it.variantId}|${it.side}" }.eachCount().toMutableMap()
         for (t in _all.value) {
             if (t.ticker != key || !ScalpV2.isV2(t.variantId) || !isActive(t)) continue
             when (t.state) {
@@ -1506,10 +1509,8 @@ class ScalpBook(
                         out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; entry minute limit reached"); continue
                     }
                     val sideCap = ScalpV2.savedNumber(t.note, "v2sidecap", 1.0).toInt().coerceIn(1, 20)
-                    val activeSide = (_all.value + out).associateBy { it.id }.values.count {
-                        it.variantId == t.variantId && it.ticker == t.ticker && it.side == t.side && it.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)
-                    }
-                    if (activeSide >= sideCap) continue
+                    val sideKey = "$code|${t.side}"
+                    if ((openByModelSide[sideKey] ?: 0) >= sideCap) continue
                     if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
                     val cadenceMs = ScalpV2.savedNumber(t.note, "v2cadence", 0.0).coerceIn(0.0, 30.0).toLong() * 1000
                     val lastCheck = pendingEntryChecks[t.id]
@@ -1536,14 +1537,14 @@ class ScalpBook(
                         val (n, usd, fee) = cfg.walkBuy(q.askLadder(t.side).filter { it.first >= minAsk - 1e-9 }, sp.clip, sp.maxAsk)
                         if (n <= 0) continue
                         val avg = usd / n
-                        controls.recordEntry(q.nowMs); openCount++
+                        controls.recordEntry(q.nowMs); openCount++; openByModelSide[sideKey] = (openByModelSide[sideKey] ?: 0) + 1
                         out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = avg, entryFeeUsd = fee, entryAtMs = q.nowMs,
                             note = ScalpV2.entryRiskNote(String.format(Locale.US, "%s; walked book: filled %d/%d avg %.2f¢ (top %.0f¢) after %.1fs", t.note, n, sp.clip, avg * 100, ask * 100, age / 1000.0), q.bid(t.side)))
                         continue
                     }
                     val n = minOf(cfg.affordableContracts(ask, sp.clip), kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
                     if (n <= 0) continue
-                    controls.recordEntry(q.nowMs); openCount++
+                    controls.recordEntry(q.nowMs); openCount++; openByModelSide[sideKey] = (openByModelSide[sideKey] ?: 0) + 1
                     out += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                         note = ScalpV2.entryRiskNote(String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0), q.bid(t.side)))
                 }

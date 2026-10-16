@@ -56,6 +56,27 @@ class ScalpStrategySettingsTest {
         assertTrue(ScalpStrategySettings(untilMinute = 10).timeOk(close - 900_000, close))
         assertFalse(ScalpStrategySettings(untilMinute = 10).timeOk(close - 300_000, close))
     }
+    @Test fun learnedCeilingCannotInvertTheUsersPriceRange() {
+        val base = ScalpV2.plan("v2-sf41", emptyList(), at)
+        val learned = base.copy(spec = base.spec.copy(maxAsk = .48))
+        val plan = ScalpStrategySettings(minEntryCents = 50).plan(learned)
+        assertEquals(.50, plan.spec.maxAsk, 1e-9)
+        assertFalse(ScalpV2.entryOk(.51, plan.spec.maxAsk))
+    }
+    @Test fun bothLegsOfOneModelShareItsPerSideCapacity() {
+        for (cap in listOf(1, 2)) {
+            val controls = cfg(ScalpStrategySettings())
+            val book = ScalpBook(variants = emptyList(), liveExtras = true, controls = controls)
+            val pending = listOf("v2-sf20", "v2-sf20f").mapIndexed { i, code ->
+                source("pending-$i").copy(ruleVersion = "v|$code|P", note = "v2sidecap=$cap · v2peakrule=1 · v2stopPct=20 · v2trail=.03")
+            }
+            assertTrue(pending.all { ScalpModels.modelOf(it) == ScalpModels.Model.V2_SF20 })
+            controls.save(controls.state.value.copy(disabledStrategies = emptySet()))
+            book.importRestored(pending)
+            book.onQuote(q(at + 2000), false)
+            assertEquals(cap, book.snapshot().count { it.state == ScalpState.OPEN })
+        }
+    }
     @Test fun settingsRoundTripAndOldSettingsKeepDefaults() {
         val json = Json { ignoreUnknownKeys = true }
         val settings = ScalpControls(strategySettings = mapOf("v2-sf41" to ScalpStrategySettings(contracts = 7, maxEntryCents = 45, untilMinute = 8)))
