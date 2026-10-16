@@ -63,26 +63,26 @@ object ScalpCatalog {
      * fixed profit, stop out 5¢ under the entry.
      */
     val ALL: List<ScalpAlgo> = listOf(
-        dip("late_squeeze", "Open rise → 68", 0.0, 0.68, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 68¢."),
-        dip("all_in_cheap", "Open rise → 70", 0.0, 0.70, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 70¢."),
-        dip("all_in_under_50", "Open rise → 68 30%", 0.0, 0.68, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 68¢."),
-        dip("first_5", "Open rise → 70 20%", 0.0, 0.70, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 70¢."),
-        dip("no_cap", "Open rise → 65", 0.0, 0.65, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 65¢."),
-        dip("slow_trail", "Open rise → 72", 0.0, 0.72, 0.55, 0.25, "Buy the rising side near 50¢. Sell at 72¢."),
-        dip("tight_spread", "Open rise → 68 15%", 0.0, 0.68, 0.55, 0.15, "Buy the rising side near 50¢. 15%. Sell at 68¢."),
-        dip("tight_4c", "Open rise → 70 30%", 0.0, 0.70, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 70¢."),
-        dip("penny_press", "Open rise → 68 40", 0.0, 0.68, 0.40, 0.20, "Buy the rising side under 40¢. Sell at 68¢."),
-        dip("deep_value", "Open rise → 70 45", 0.0, 0.70, 0.45, 0.20, "Buy the rising side under 45¢. Sell at 70¢."),
-        dip("dip_buy", "Open rise → 68 15%b", 0.0, 0.68, 0.55, 0.15, "Buy the rising side near 50¢. 15%. Sell at 68¢."),
-        dip("wide_gap", "Open rise → 70 15%", 0.0, 0.70, 0.55, 0.15, "Buy the rising side near 50¢. 15%. Sell at 70¢."),
-        dip("burst", "Open rise → 68 30%b", 0.0, 0.68, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 68¢."),
-        dip("reclaim", "Open rise → 70 30%b", 0.0, 0.70, 0.55, 0.30, "Buy the rising side near 50¢. 30%. Sell at 70¢."),
-        dip("min_5_7", "Open rise → 68 35", 0.0, 0.68, 0.35, 0.20, "Buy the rising side under 35¢. Sell at 68¢."),
-        dip("dump_catch", "Open rise → 70 25%", 0.0, 0.70, 0.55, 0.25, "Buy the rising side near 50¢. 25%. Sell at 70¢."),
-        dip("fade_spike", "Open rise → 68 25%", 0.0, 0.68, 0.55, 0.25, "Buy the rising side near 50¢. 25%. Sell at 68¢."),
-        dip("gap_side", "Open rise → 70 20%b", 0.0, 0.70, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 70¢."),
-        dip("breakout_50", "Open rise → 68 20%", 0.0, 0.68, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 68¢."),
-        dip("momentum", "Open rise → 70 20%c", 0.0, 0.70, 0.55, 0.20, "Buy the rising side near 50¢. 20%. Sell at 70¢.")
+        dip("late_squeeze", "Trail 2¢", 0.0, 0.02, 0.50, 0.25, "Buy under 50¢. Sell 2¢ off the high."),
+        dip("all_in_cheap", "Trail 3¢", 0.0, 0.03, 0.50, 0.25, "Buy under 50¢. Sell 3¢ off the high."),
+        dip("all_in_under_50", "Trail 4¢", 0.0, 0.04, 0.50, 0.25, "Buy under 50¢. Sell 4¢ off the high."),
+        dip("first_5", "Trail 5¢", 0.0, 0.05, 0.50, 0.25, "Buy under 50¢. Sell 5¢ off the high."),
+        dip("no_cap", "Trail 6¢", 0.0, 0.06, 0.50, 0.25, "Buy under 50¢. Sell 6¢ off the high."),
+        dip("slow_trail", "Trail 7¢", 0.0, 0.07, 0.50, 0.25, "Buy under 50¢. Sell 7¢ off the high."),
+        dip("tight_spread", "Trail 8¢", 0.0, 0.08, 0.50, 0.25, "Buy under 50¢. Sell 8¢ off the high."),
+        dip("tight_4c", "Trail 5¢ 20%", 0.0, 0.05, 0.50, 0.20, "Buy under 50¢. 20%. Sell 5¢ off the high."),
+        dip("penny_press", "Trail 5¢ 30%", 0.0, 0.05, 0.50, 0.30, "Buy under 50¢. 30%. Sell 5¢ off the high."),
+        dip("deep_value", "Trail 4¢ 15%", 0.0, 0.04, 0.50, 0.15, "Buy under 50¢. 15%. Sell 4¢ off the high."),
+        dip("dip_buy", "Trail 3¢ 20%", 0.0, 0.03, 0.50, 0.20, "Buy under 50¢. 20%. Sell 3¢ off the high."),
+        dip("wide_gap", "Trail 6¢ 20%", 0.0, 0.06, 0.50, 0.20, "Buy under 50¢. 20%. Sell 6¢ off the high."),
+        dip("burst", "Trail 5¢ 15%", 0.0, 0.05, 0.50, 0.15, "Buy under 50¢. 15%. Sell 5¢ off the high."),
+        dip("reclaim", "Trail 4¢ 30%", 0.0, 0.04, 0.50, 0.30, "Buy under 50¢. 30%. Sell 4¢ off the high."),
+        dip("min_5_7", "Trail 2¢ 20%", 0.0, 0.02, 0.50, 0.20, "Buy under 50¢. 20%. Sell 2¢ off the high."),
+        dip("dump_catch", "Trail 7¢ 20%", 0.0, 0.07, 0.50, 0.20, "Buy under 50¢. 20%. Sell 7¢ off the high."),
+        dip("fade_spike", "Trail 8¢ 15%", 0.0, 0.08, 0.50, 0.15, "Buy under 50¢. 15%. Sell 8¢ off the high."),
+        dip("gap_side", "Trail 5¢ 25%", 0.0, 0.05, 0.50, 0.25, "Buy under 50¢. 25%. Sell 5¢ off the high."),
+        dip("breakout_50", "Trail 3¢ 25%", 0.0, 0.03, 0.50, 0.25, "Buy under 50¢. 25%. Sell 3¢ off the high."),
+        dip("momentum", "Trail 6¢ 25%", 0.0, 0.06, 0.50, 0.25, "Buy under 50¢. 25%. Sell 6¢ off the high.")
     )
 
     fun merge(saved: List<ScalpAccount>): List<ScalpAccount> {
@@ -177,8 +177,9 @@ object ScalpCatalog {
                 if (aPx <= 0.50) ScalpIntent.Buy(side, ScalpSettings.fraction) else ScalpIntent.Hold
             } else {
                 val b = bid(t, pos.side)
+                val trail = a.learnedExit.coerceIn(0.02, 0.08)
                 when {
-                    b + 1e-9 >= 0.68 -> ScalpIntent.Sell(force = true)
+                    pos.peakBid - b + 1e-9 >= trail -> ScalpIntent.Sell(force = true)
                     b + 1e-9 <= pos.entry - ScalpSettings.stopLoss -> ScalpIntent.Sell(force = true)
                     t.tteMs in 1..60_000L -> ScalpIntent.Sell(force = true)
                     else -> ScalpIntent.Hold
