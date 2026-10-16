@@ -23,6 +23,21 @@ data class ScalpWindowChartData(
             if (sales.isEmpty() && t.soldContracts > 0 && t.closedAtMs != null) add(Marker("${t.id}-avg", t.id, t.closedAtMs, t.proceedsUsd / t.soldContracts, t.soldContracts, Kind.LEGACY_EXIT))
         }
     }.filter { it.atMs in startMs..closeMs && it.price.isFinite() && it.price in 0.0..1.0 }.sortedBy { it.atMs }
+    /** Shared renderer; each strategy still supplies only its own ticker and trades. */
+    fun executionWindow(): ExecutionWindowData {
+        val fees = trades.associateBy { it.id }
+        val marks = listOf("YES", "NO").flatMap { side -> markers(side).map { m ->
+            val trade = fees[m.tradeId]
+            val fee = when (m.kind) {
+                Kind.BUY -> trade?.entryFeeUsd
+                Kind.SELL, Kind.SETTLEMENT -> trade?.let { ScalpFills.sales(it).getOrNull(m.id.substringAfterLast('-').toIntOrNull() ?: -1)?.fee }
+                else -> null
+            }
+            ExecutionWindowData.Execution(m.id, m.tradeId, side, m.atMs, m.price, m.qty,
+                ExecutionWindowData.Kind.valueOf(m.kind.name), m.recordedAtMs, fee)
+        } }
+        return ExecutionWindowData(ticker, closeMs, nowMs, bookAtMs, points, marks, error)
+    }
     fun bid(side: String): Double? = points.lastOrNull { (if (side == "YES") it.upBidCents else it.downBidCents) != null }
         ?.let { (if (side == "YES") it.upBidCents else it.downBidCents)?.toDouble()?.div(100) }
     fun windowNet() = trades.sumOf { it.netUsd ?: 0.0 }
@@ -37,3 +52,4 @@ data class ScalpWindowChartData(
     }
 
 }
+
