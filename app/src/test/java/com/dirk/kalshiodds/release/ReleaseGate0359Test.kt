@@ -21,14 +21,14 @@ class ReleaseGate0359Test {
         val book = ScalpBook(bankrollUsd = { Double.POSITIVE_INFINITY })
         val t = close - 40_000L; val tk = "KXBTC15M-26OCT122015-15"
         warm(book, "BTC", t, 100_400.0)
-        assertTrue(book.onShockFavQuote(q(tk, t, 100_400.0, 0.85, 0.83), true).isNotEmpty())
+        assertTrue(book.onShockFavQuote(q(tk, t, 100_400.0, 0.50, 0.48), true).isNotEmpty())
     }
 
     @Test fun ethSolNeverEnterButBtcDoes() {
         val book = ScalpBook(bankrollUsd = { Double.POSITIVE_INFINITY })
         val t = close - 40_000L
         warm(book, "ETH", t, 100_400.0)
-        assertTrue(book.onShockFavQuote(q("KXETH15M-26OCT122015-15", t, 100_400.0, 0.85, 0.83), true).isEmpty())
+        assertTrue(book.onShockFavQuote(q("KXETH15M-26OCT122015-15", t, 100_400.0, 0.50, 0.48), true).isEmpty())
     }
 
     @Test fun survivorsSortFirstAndLabels() {

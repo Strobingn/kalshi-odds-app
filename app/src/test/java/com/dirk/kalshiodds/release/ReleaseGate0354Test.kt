@@ -32,8 +32,8 @@ class ReleaseGate0354Test {
             assertEquals(LeadForecaster.predict(c, k.horizonS, x!!), LeadForecaster.predict(c, k.horizonS, x))
         }
         // full round trip + margin bar
-        assertFalse(ForecastScalp.wantsEntry(0.50, 0.01, 0.51, 0.05, 600.0, 0.02))
-        assertTrue(ForecastScalp.wantsEntry(0.50, 0.01, 0.51, 0.08, 600.0, 0.02))
+        assertFalse(ForecastScalp.wantsEntry(0.50, 0.01, 0.50, 0.05, 600.0, 0.02))
+        assertTrue(ForecastScalp.wantsEntry(0.50, 0.01, 0.50, 0.08, 600.0, 0.02))
     }
 
     @Test fun breakdownLabelsForecastTradesSeparately() {

@@ -59,14 +59,14 @@ class ReleaseGate0340MultiStrategyTest {
     @Test
     fun momentumSniperNeedsSpotConfirmation() {
         val t = close - 600_000L
-        val before = q(t, 0.40, 0.41, spot = spotFor(0.40, 600.0))
-        val confirmed = q(t + 30_000L, 0.52, 0.53, spot = spotFor(0.55, 570.0))
+        val before = q(t, 0.35, 0.36, spot = spotFor(0.35, 600.0))
+        val confirmed = q(t + 30_000L, 0.47, 0.48, spot = spotFor(0.50, 570.0))
         assertNotNull(ScalpRule.strategySignal(confirmed, seed(ScalpStrategy.MOMENTUM), listOf("YES"), listOf(snap(before))).first)
         // Same price rise but spot flat → no entry.
-        val unconfirmed = q(t + 30_000L, 0.52, 0.53, spot = spotFor(0.40, 570.0))
+        val unconfirmed = q(t + 30_000L, 0.47, 0.48, spot = spotFor(0.35, 570.0))
         assertNull(ScalpRule.strategySignal(unconfirmed, seed(ScalpStrategy.MOMENTUM), listOf("YES"), listOf(snap(before))).first)
         // A rise too small to beat spread + both fees is skipped with that reason.
-        val small = q(t + 30_000L, 0.47, 0.48, spot = spotFor(0.50, 570.0))
+        val small = q(t + 30_000L, 0.42, 0.43, spot = spotFor(0.45, 570.0))
         val (s2, why) = ScalpRule.strategySignal(small, seed(ScalpStrategy.MOMENTUM), listOf("YES"), listOf(snap(before)))
         assertNull(s2)
         assertTrue(why, why.contains("both fees"))

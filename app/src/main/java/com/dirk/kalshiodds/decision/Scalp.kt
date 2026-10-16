@@ -62,7 +62,10 @@ object ScalpRule {
     const val CHEAP_MIN = 0.02
     const val CHEAP_MAX = 0.15
     const val ENTRY_LO = 0.10
-    const val ENTRY_HI = 0.90
+    const val ENTRY_HI = 0.50
+
+    /** Hard ceiling for every scalping buy, independent of settings or saved strategy rules. */
+    fun buyPriceOk(price: Double?): Boolean = price != null && price.isFinite() && price > 0.0 && price <= ENTRY_HI + 1e-9
     const val SLIPPAGE = 0.01
     const val LATENCY_MS = 3_000L
     const val FRESH_BOOK_MS = 10_000L
@@ -221,7 +224,7 @@ object ScalpRule {
         val best = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
             val fair = q.fair(side) ?: return@mapNotNull null
-            if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
         }.maxByOrNull { it.gapAfterFee } ?: return null to "no spot fair value"
         if (best.gapAfterFee + 1e-9 < p.minGap) {
@@ -273,7 +276,7 @@ object ScalpRule {
             val fair = q.fair(side) ?: return@mapNotNull null
             val move: Double = when (p.strategy) {
                 ScalpStrategy.DIP_HUNTER -> {
-                    if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+                    if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
                     val ref = past.mapNotNull { it.ask(side) }.maxOrNull() ?: return@mapNotNull null
                     val drop = ref - ask
                     // Spot must not explain the drop: fair still at or above the ask.
@@ -281,7 +284,7 @@ object ScalpRule {
                     drop * 0.5 // half retrace
                 }
                 ScalpStrategy.MOMENTUM -> {
-                    if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+                    if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
                     val refBid = past.mapNotNull { it.bid(side) }.minOrNull() ?: return@mapNotNull null
                     val rise = bid - refBid
                     val fairThen = past.minByOrNull { it.atMs }?.fair(side) ?: return@mapNotNull null
@@ -324,7 +327,7 @@ object ScalpRule {
         if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
         val best = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
-            if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             val fair = q.cfFair(side) ?: return@mapNotNull null
             val entryFee = feePerContract(CONTRACTS, ask)
             Entry(side, ask, fair, fair - ask - entryFee)
@@ -390,7 +393,7 @@ object ScalpRule {
             " — each with one open scalp per market side, its own per-coin params and walk-forward tuning. " +
             "Total open scalp cost is capped by the paper bankroll. Fair-gap: enter when the ask is below spot-implied fair by the coin's gap threshold after " +
             "the entry fee AND the expected move beats spread + both fees, inside the coin's time window, spread ≤ 2¢, " +
-            "10 contracts, displayed depth only, fill on the next fresh book (≥ 3 s). Several round trips per window: " +
+            "Buy price ≤ 50¢ for every scalper. 10 contracts, displayed depth only, fill on the next fresh book (≥ 3 s). Several round trips per window: " +
             "one open scalp per strategy per market side, 15 s cooldown after an exit. Exit at the bid on the profit target, the stop, " +
             "gap close or turn-down, and always by 60 s left. Per-coin params come from the walk-forward tuner. " +
             "Taker fee on both legs. $BACKTEST_LABEL"
@@ -592,7 +595,7 @@ class ScalpBook(
                     else listOf("YES", "NO").filter { it !in openSides }
                 if (free.isEmpty()) continue
                 val (sig, _) = ScalpRule.strategySignal(q, p, free, recent)
-                if (sig != null) {
+                if (sig != null && ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask)) {
                     val role = if (p.id in primaryIds) "P" else "S"
                     if (role == "P") {
                         val cost = sig.ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, sig.ask)
@@ -706,6 +709,7 @@ class ScalpBook(
         return when (t.state) {
             ScalpState.PENDING_ENTRY -> {
                 val limit = t.restingLimit ?: t.signalAsk
+                if (!ScalpRule.buyPriceOk(limit)) return cappedEntry(t, q.nowMs)
                 if (q.nowMs - t.signalAtMs > ForecastScalp.ENTRY_LIMIT_TTL_MS || q.nowMs >= q.closeMs)
                     return t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled unfilled")
                 val n = com.dirk.kalshiodds.signal.paper.PaperLimitFill.touchFillQty(limit, q.ask(t.side), q.askSize(t.side), ScalpRule.CONTRACTS, buy = true)
@@ -871,8 +875,9 @@ class ScalpBook(
             if (pk?.kind == ShockFav.Kind.FADE_MAKER) {
                 // 0.3.59 maker: post at the side's bid 2 s after the signal; filled only when the ask trades THROUGH (≤ px − 1¢).
                 val px = t.restingLimit
+                if (px != null && !ScalpRule.buyPriceOk(px)) { changed += cappedEntry(t, q.nowMs); continue }
                 if (px == null) {
-                    val b = q.bid(t.side)?.takeIf { it in 0.05..0.95 }
+                    val b = q.bid(t.side)?.takeIf { it in 0.05..0.95 && ScalpRule.buyPriceOk(Math.round(it * 100) / 100.0) }
                     changed += if (b == null) t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no bid to join")
                         else t.copy(restingLimit = Math.round(b * 100) / 100.0, restingSinceMs = q.nowMs, note = String.format(Locale.US, "%s; resting bid %.0f¢", t.note, b * 100))
                 } else if (q.nowMs - (t.restingSinceMs ?: q.nowMs) > pk.ttlS * 1000L || q.tauS <= 60.0) {
@@ -888,7 +893,7 @@ class ScalpBook(
             val ask = q.ask(t.side) ?: continue
             val n = minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(t.side) ?: 0.0) + 1e-9).toInt())
             if (n <= 0) continue
-            if (ask > 0.99) { changed += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; ask ${"%.2f".format(ask)} too high at fill"); continue }
+            if (!ScalpRule.buyPriceOk(ask)) { changed += cappedEntry(t, q.nowMs); continue }
             changed += t.copy(state = ScalpState.OPEN, contracts = n, entryPrice = ask, entryFeeUsd = ScalpRule.orderFee(n, ask), entryAtMs = q.nowMs,
                 note = String.format(Locale.US, "%s; filled %d @ %.0f¢ after %.1fs", t.note, n, ask * 100, age / 1000.0))
         }
@@ -1019,6 +1024,8 @@ class ScalpBook(
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
+        // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
+        if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
         val cost = ask * n + ScalpRule.orderFee(n, ask)
@@ -1088,6 +1095,7 @@ class ScalpBook(
     }
 
     private fun fillMakerEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (!ScalpRule.buyPriceOk(t.restingLimit ?: t.signalAsk)) return cappedEntry(t, q.nowMs)
         if (q.bookAtMs <= t.signalAtMs) return null
         val limit = t.restingLimit ?: t.signalAsk
         if (q.nowMs - t.signalAtMs > ScalpRule.MAKER_ENTRY_TTL_MS || q.nowMs >= q.closeMs || !q.fresh()) {
@@ -1173,6 +1181,10 @@ class ScalpBook(
         }
     }
 
+    private fun cappedEntry(t: ScalpTrade, atMs: Long) = t.copy(
+        state = ScalpState.NO_FILL, closedAtMs = atMs, restingLimit = null,
+        note = "${t.note}; no fill: hard 50¢ buy-price ceiling")
+
     private fun stepInner(t: ScalpTrade, q: ScalpRule.Quote, p: ScalpParams): ScalpTrade? {
         return when (t.state) {
             ScalpState.PENDING_ENTRY -> when {
@@ -1210,6 +1222,7 @@ class ScalpBook(
         val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: $why") }
         if (!q.fresh() || q.nowMs >= q.closeMs) return miss("stale book")
         val ask = q.ask(t.side) ?: return miss("no ask")
+        if (!ScalpRule.buyPriceOk(ask)) return cappedEntry(t, q.nowMs)
         if (ask > t.signalAsk + ScalpRule.SLIPPAGE + 1e-9) return miss(String.format(Locale.US, "ask moved to %s", com.dirk.kalshiodds.domain.KalshiQuoteDisplay.formatPriceCents(ask)))
         val size = q.askSize(t.side) ?: 0.0
         if (size + 1e-9 < ScalpRule.CONTRACTS) return miss("displayed size ${size.toInt()} < ${ScalpRule.CONTRACTS}")
@@ -1228,6 +1241,7 @@ class ScalpBook(
      * unfilled after [ScalpRule.CF_LIMIT_TTL_MS]. Touch fills are slightly optimistic vs real queue priority.
      */
     private fun fillRestingLimitEntry(t: ScalpTrade, q: ScalpRule.Quote): ScalpTrade? {
+        if (!ScalpRule.buyPriceOk(t.signalAsk)) return cappedEntry(t, q.nowMs)
         if (q.bookAtMs <= t.signalAtMs) return null
         val miss = { why: String -> t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; limit cancelled: $why") }
         if (q.nowMs - t.signalAtMs > ScalpRule.CF_LIMIT_TTL_MS) return miss("unfilled after 1 s")
@@ -1477,7 +1491,7 @@ class ScalpBook(
                     if (q.tauS <= ScalpV2.EXIT_BY_S || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: final minute, expired signal, or no executable entry"); continue }
                     if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
                     val seed = ScalpV2.spec(t.variantId)
-                    val sp = seed.copy(maxAsk = ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk),
+                    val sp = seed.copy(maxAsk = minOf(ScalpRule.ENTRY_HI, ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk)),
                         clip = ScalpV2.savedNumber(t.note, "v2clip", seed.clip.toDouble()).toInt().coerceIn(1, 1000))
                     val ask = q.ask(t.side) ?: continue
                     if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue

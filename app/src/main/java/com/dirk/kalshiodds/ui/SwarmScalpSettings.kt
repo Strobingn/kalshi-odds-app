@@ -62,9 +62,10 @@ fun SwarmScalpSettingsContent(initial: ScalpControls, onBack: () -> Unit = {}, o
                 Text("Applies to new V2 trades. Existing trades keep saved rules. Optional profit targets, hold timers and the final-minute exit check still apply.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             } }
             item { SwarmCard("Entry and exit parameters") {
+                Text("All scalpers buy at 50¢ or less, including each depth-walk fill. Settings and learning cannot raise this ceiling.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
                 SwarmToggle("Use my parameters", draft.manual) { draft = draft.copy(manual = it) }
                 Text(if (draft.manual) "Your values override adaptive entry/target settings and legacy exits when peak mode is off." else "Strategy entries and learned adjustments are active. Peak-mode exits are controlled above.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-                SwarmNumber("Maximum entry price (¢)", draft.maxAskCents.toDouble(), 1.0..99.0, draft.manual, ::number) { draft = draft.copy(maxAskCents = it.toInt()) }
+                SwarmNumber("Maximum entry price (¢)", draft.maxAskCents.toDouble(), 1.0..50.0, draft.manual, ::number) { draft = draft.copy(maxAskCents = it.toInt()) }
                 SwarmNumber("Contracts per entry", draft.contracts.toDouble(), 1.0..1000.0, draft.manual, ::number) { draft = draft.copy(contracts = it.toInt()) }
                 SwarmNumber("Stop-loss distance (¢)", draft.stopCents.toDouble(), 1.0..99.0, draft.manual && !draft.peakTrailEnabled, ::number) { draft = draft.copy(stopCents = it.toInt()) }
                 SwarmNumber("Net take-profit (¢/contract; 0 = off)", draft.takeProfitCents.toDouble(), 0.0..99.0, draft.manual, ::number) { draft = draft.copy(takeProfitCents = it.toInt()) }

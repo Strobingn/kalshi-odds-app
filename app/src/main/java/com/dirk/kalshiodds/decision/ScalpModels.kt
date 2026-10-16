@@ -520,7 +520,7 @@ object ForecastScalp {
     /** Entry: band, spread, edge > spread + entry fee + exit fee (1-ct rounded) + 0.5¢. */
     /** 0.3.54: predicted move must beat the full round trip (spread + entry fee + exit fee) by [marginUsd]. */
     fun wantsEntry(mid: Double, spread: Double, ask: Double, move: Double, tauS: Double, marginUsd: Double = SAFETY): Boolean =
-        mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
+        ScalpRule.buyPriceOk(ask) && mid in BAND_LO..BAND_HI && spread <= MAX_SPREAD + 1e-9 && tauS >= MIN_TAU_ENTRY_S &&
             move > spread + 2 * ScalpRule.orderFee(1, ask) + marginUsd
 
     /** Exit when the forecast for the held side turns (below one exit fee), flips hard, TP, horizon reached, or close. */
