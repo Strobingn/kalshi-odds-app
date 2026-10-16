@@ -59,7 +59,8 @@ class ReleaseGate0355SyncTest {
         val paper = PaperFill(id = "p1", ticker = "KXBTC15M-26OCT121000-00", side = "YES", stakeUsd = 5.0, contracts = 10, limitPrice = 0.5, source = "ladder", createdAtMs = now, note = "", updatedAtMs = now)
         val scalp = ScalpTrade(id = "s1", ticker = "KXBTC15M-26OCT121000-00", side = "YES", state = ScalpState.CLOSED, signalAtMs = now, signalAsk = 0.5,
             fairAtSignal = 0.55, contracts = 10, entryPrice = 0.5, entryAtMs = now, soldContracts = 10, proceedsUsd = 5.4, closedAtMs = now + 60_000, netUsd = 0.2,
-            ruleVersion = "v|${ForecastScalp.variantId(true, 600)}|P")
+            ruleVersion = "v|${ForecastScalp.variantId(true, 600)}|P", entryFeeUsd = .10, exitFeeUsd = .10,
+            exitDecidedAtMs = now + 55_000, note = "context ".repeat(400) + " · scalpOrder=$now,0.49000000 · scalpFill=${now + 60_000},10,0.54000000,0.10000000,S")
         val shadow = ShadowTicket(id = "sh1", ticker = "KXBTC15M-26OCT121000-00", side = "YES", bookSide = "yes", count = 10, limitPrice = 0.5, yesLimitPrice = 0.5,
             clientOrderId = "c", createdAtMs = now - 3_600_000L, reason = "shadow", payloadJson = "{}")
         val fake = FakeSupabase()
@@ -76,6 +77,16 @@ class ReleaseGate0355SyncTest {
         val snap = fake.posted.first { it.first == "snapshot" }.second.getJSONObject(0).getJSONObject("payload")
         assertFalse(snap.has("note"))
         assertEquals("Forecast ride", fake.posted.first { it.first == "scalp" }.second.getJSONObject(0).getJSONObject("payload").getString("algo"))
+        val scalpPayload = fake.posted.first { it.first == "scalp" }.second.getJSONObject(0).getJSONObject("payload")
+        val restored = com.dirk.kalshiodds.data.supabase.SyncRows.scalp(scalpPayload)!!
+        assertEquals(scalp.signalAtMs, restored.signalAtMs)
+        assertEquals(scalp.entryFeeUsd, restored.entryFeeUsd, 1e-9)
+        assertEquals(scalp.exitFeeUsd, restored.exitFeeUsd, 1e-9)
+        assertEquals(scalp.exitDecidedAtMs, restored.exitDecidedAtMs)
+        assertEquals(1, com.dirk.kalshiodds.decision.ScalpFills.sales(restored).size)
+        assertEquals(now + 60_000, com.dirk.kalshiodds.decision.ScalpFills.sales(restored).single().atMs)
+        assertEquals(.54, com.dirk.kalshiodds.decision.ScalpFills.sales(restored).single().price, 1e-9)
+        assertEquals(.49, com.dirk.kalshiodds.decision.ScalpFills.orders(restored).single().price, 1e-9)
         // pull never fetches snapshots back
         assertEquals(SupabaseSync.PULL_KINDS.size, fake.getUrls.size)
         assertTrue(fake.getUrls.all { u -> SupabaseSync.PULL_KINDS.any { u.contains("kind=eq.$it") } && !u.contains("snapshot,") && !u.contains("eq.scalp") && !u.contains("eq.shadow") })

@@ -30,7 +30,8 @@ import kotlin.math.abs
 internal fun windowTime(at: Long): String = DateTimeFormatter.ofPattern("h:mm:ss a", Locale.US)
     .withZone(ZoneId.of("America/New_York")).format(Instant.ofEpochMilli(at))
 internal fun markerName(kind: ScalpWindowChartData.Kind): String = when (kind) {
-    ScalpWindowChartData.Kind.SIGNAL -> "Signal / order"
+    ScalpWindowChartData.Kind.SIGNAL -> "Signal observed"
+    ScalpWindowChartData.Kind.ORDER -> "BUY limit posted"
     ScalpWindowChartData.Kind.BUY -> "BUY fill"
     ScalpWindowChartData.Kind.SELL -> "SELL fill"
     ScalpWindowChartData.Kind.SETTLEMENT -> "Settlement"
@@ -116,7 +117,8 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 markers.forEach { m ->
                     val center = Offset(x(m.atMs), y(m.price)); val r = if (m.id == selected) 8.dp.toPx() else 5.dp.toPx()
                     when (m.kind) {
-                        ScalpWindowChartData.Kind.SIGNAL -> drawCircle(c.textSecondary, r, center, style = Stroke(1.5.dp.toPx()))
+                        ScalpWindowChartData.Kind.SIGNAL -> drawCircle(c.textSecondary, 2.dp.toPx(), center)
+                        ScalpWindowChartData.Kind.ORDER -> drawCircle(c.up, r, center, style = Stroke(1.5.dp.toPx()))
                         ScalpWindowChartData.Kind.BUY -> drawPath(Path().apply { moveTo(center.x, center.y - r); lineTo(center.x - r, center.y + r); lineTo(center.x + r, center.y + r); close() }, c.up)
                         ScalpWindowChartData.Kind.SELL -> drawRect(c.accentOrange, center - Offset(r, r), androidx.compose.ui.geometry.Size(2*r, 2*r))
                         else -> drawCircle(c.textSecondary, r, center)
@@ -128,7 +130,7 @@ internal fun ScalpWindowChart(d: ScalpAlgoDetail, onWindow: (String) -> Unit = {
                 Text(windowTime(data.startMs), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
                 Text(windowTime(data.closeMs) + " ET", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             }
-            Text("○ Signal/order   ▲ Buy fill   ■ Sell fill", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            Text("○ Buy order   ▲ Buy fill   ■ Sell fill   · Signal", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             Text("Dashed 50¢ buy ceiling · tap a marker for price and time", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
             if (data.points.none { (if (side == "YES") it.upBidCents else it.downBidCents) != null }) Text("No recorded bids for this side yet. Missing history is left blank.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
             selectedMarker?.let { m -> Text("${markerName(m.kind)} · ${m.qty.takeIf { it > 0 }?.let { "$it ct · " }.orEmpty()}${ScalpTabCopy.cents(m.price)} · ${windowTime(m.atMs)} ET", color = c.textPrimary, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.bodySmall) }

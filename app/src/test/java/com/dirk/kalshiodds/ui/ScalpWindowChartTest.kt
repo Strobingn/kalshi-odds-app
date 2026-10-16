@@ -46,6 +46,17 @@ class ScalpWindowChartTest {
         assertNull(data.copy(points = emptyList()).bid("YES"))
     }
 
+    @Test fun postedLimitUsesItsActualPriceAndTimeRatherThanTheSignalAsk() {
+        val pending = trade().copy(state = ScalpState.PENDING_ENTRY, entryAtMs = null, entryPrice = null,
+            signalAsk = .51, restingLimit = .49, restingSinceMs = start + 65_000)
+        val recorded = pending.copy(note = ScalpFills.orderNote(pending, pending.copy(restingLimit = null)))
+        val filled = recorded.copy(state = ScalpState.OPEN, entryAtMs = start + 70_000, entryPrice = .49, restingLimit = null)
+        val markers = ScalpWindowChartData(tk, close, close, trades = listOf(filled)).markers("YES")
+        assertTrue(markers.any { it.kind == ScalpWindowChartData.Kind.ORDER && it.atMs == start + 65_000 && it.price == .49 })
+        assertTrue(markers.any { it.kind == ScalpWindowChartData.Kind.SIGNAL && it.price == .51 })
+        assertEquals(recorded.note, ScalpFills.orderNote(recorded, recorded))
+    }
+
     @Test fun bookPartialExitRecordsSurvivePersistenceAndRestart() {
         val store = InMemoryScalpPersistence().also { it.seed(listOf(trade().copy(state = ScalpState.PENDING_EXIT, exitDecidedAtMs = start + 80_000, exitReason = "trail"))) }
         val book = ScalpBook(store, variants = emptyList(), liveExtras = true)

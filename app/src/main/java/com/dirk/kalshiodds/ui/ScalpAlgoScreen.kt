@@ -128,11 +128,16 @@ private fun ScalpWindowTrade(t: ScalpTrade, selected: Boolean, bid: Double?) {
     val c = DipTheme.colors
     FieldCard(accentColor = if (selected) c.accentOrange else if ((t.netUsd ?: 0.0) > 0) c.up else if ((t.netUsd ?: 0.0) < 0) c.down else null) {
         Text("${if (t.side == "YES") "UP / YES" else "DOWN / NO"} · ${ScalpAlgoCopy.state(t)} · ${t.remaining} ct left", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
-        Text("Signal / order ${ScalpTabCopy.cents(t.signalAsk)} · ${windowTime(t.signalAtMs)} ET", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        Text("Signal ${ScalpTabCopy.cents(t.signalAsk)} · ${ScalpAlgoCopy.time(t.signalAtMs)} ET", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        com.dirk.kalshiodds.decision.ScalpFills.orders(t).forEach { o -> Text("BUY limit posted ${ScalpTabCopy.cents(o.price)} · ${windowTime(o.atMs)} ET", color = c.textSecondary, style = MaterialTheme.typography.bodySmall) }
         t.entryPrice?.let { Text("BUY ${t.contracts} @ ${ScalpTabCopy.cents(it)} · ${t.entryAtMs?.let(::windowTime) ?: "—"} ET", color = c.up, style = MaterialTheme.typography.bodySmall) }
         val sales = com.dirk.kalshiodds.decision.ScalpFills.sales(t)
         sales.forEach { f -> Text("${if (f.settlement) "SETTLED" else "SELL"} ${f.contracts} @ ${ScalpTabCopy.cents(f.price)} · ${windowTime(f.atMs)} ET", color = c.accentOrange, style = MaterialTheme.typography.bodySmall) }
-        if (sales.isEmpty() && t.soldContracts > 0) Text("Historical average exit ${ScalpTabCopy.cents(ScalpAlgoCopy.exitPrice(t))} · exact partial-fill times unavailable", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        val earlierSold = t.soldContracts - sales.sumOf { it.contracts }
+        if (earlierSold > 0) {
+            val earlierPrice = (t.proceedsUsd - sales.sumOf { it.contracts * it.price }) / earlierSold
+            Text("$earlierSold earlier sold · historical average ${ScalpTabCopy.cents(earlierPrice)} · exact partial-fill times unavailable", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+        }
         Text(ScalpAlgoCopy.moneyLine(t) + (t.unrealizedUsd(bid)?.let { " · open ${ScalpTabCopy.money(it)}" } ?: ""), color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
         t.exitReason?.let { Text(it, color = c.textSecondary, style = MaterialTheme.typography.labelSmall) }
         if (com.dirk.kalshiodds.decision.ScalpV2.isV2(t.variantId) && t.state in listOf(ScalpState.OPEN, ScalpState.PENDING_EXIT)) Text(com.dirk.kalshiodds.decision.ScalpV2.riskLabel(t), color = c.textSecondary, style = MaterialTheme.typography.labelSmall)

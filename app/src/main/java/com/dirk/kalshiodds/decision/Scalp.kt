@@ -1415,7 +1415,7 @@ class ScalpBook(
     /** Appends entry / exit book snapshots, peak bid and stop level to the persisted note (once each). */
     private fun withDetail(t: ScalpTrade, prev: ScalpTrade?): ScalpTrade {
         val q = _marks.value[t.ticker.uppercase()]
-        var note = t.note
+        var note = ScalpFills.orderNote(t, prev)
         if (t.state == ScalpState.OPEN && prev?.state != ScalpState.OPEN && !note.contains("entryBook[")) {
             note += " · entryBook[" + bookStr(q, t.side) + "]"
             t.entryPrice?.let { peakBid[t.id] = if (ScalpV2.peakRule(t)) q?.bid(t.side)?.takeIf { b -> b.isFinite() && b > 0 } ?: 0.0 else q?.bid(t.side) ?: it }
