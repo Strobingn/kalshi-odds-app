@@ -44,6 +44,8 @@ jobs:
         run: ./gradlew testDebugUnitTest --stacktrace
       - name: Assemble debug APK + verify debug cert
         run: ./gradlew assembleDebug verifyDebugCert --stacktrace
+      - name: Record execution chart UI previews
+        run: ./gradlew recordPaparazziDebug --tests 'com.dirk.kalshiodds.ui.ExecutionWindowScreenshotTest' --tests 'com.dirk.kalshiodds.ui.ScalpWindowScreenshotTest' --stacktrace
       - name: Rename APK
         id: apk
         run: |
@@ -65,3 +67,4 @@ jobs:
           name: scalping-ui-previews
           path: app/build/reports/paparazzi/debug/
           if-no-files-found: error
+
