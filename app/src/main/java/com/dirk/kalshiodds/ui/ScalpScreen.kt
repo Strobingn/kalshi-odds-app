@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.scalp.ScalpAccount
 import com.dirk.kalshiodds.signal.scalp.ScalpLabState
 import com.dirk.kalshiodds.ui.theme.DipTheme
+import java.util.Locale
 import kotlin.math.abs
 
 /**
