@@ -12,7 +12,7 @@ on:
     inputs:
       minutes:
         description: "Minutes to record this run"
-        default: "330"
+        default: "300"
       chain:
         description: "Start the next run when this one ends"
         default: "true"
@@ -59,7 +59,7 @@ jobs:
         run: mkdir -p rec && ls -la rec | tail -n 20
 
       - name: Record
-        run: python3 tools/research/cloud_recorder.py --out rec --minutes "${{ inputs.minutes || '330' }}"
+        run: python3 tools/research/cloud_recorder.py --out rec --minutes "${{ inputs.minutes || '300' }}"
 
       - name: Save recordings
         if: always()
@@ -84,8 +84,18 @@ jobs:
             gh release upload "$tag" "${files[@]}" --clobber || echo "(release upload failed)"
           fi
 
+      # Chain before the analysis: the maker sims grow with the data, and on
+      # 2026-10-12 they ran past the job timeout, which cancelled this step and
+      # stopped recording for 4 days. The next run queues behind this one
+      # (concurrency group), so the two never record at the same time.
+      - name: Start the next run
+        if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' }}
+        run: gh workflow run record.yml --ref "$GITHUB_REF_NAME" -f minutes=300 -f chain=true
+
       - name: Lag study + maker sim
         if: always()
+        timeout-minutes: 30
+        continue-on-error: true
         run: |
           echo "===== LAG STUDY ====="
           python3 tools/research/lag_study.py rec || echo "(lag study failed)"
@@ -99,6 +109,3 @@ jobs:
             echo "===== END MAKER SIM $coin ====="
           done
 
-      - name: Start the next run
-        if: ${{ !cancelled() && (inputs.chain || 'true') == 'true' }}
-        run: gh workflow run record.yml --ref "$GITHUB_REF_NAME" -f minutes=330 -f chain=true
