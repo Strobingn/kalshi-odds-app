@@ -38,7 +38,7 @@ class ScalpEntryCeilingTest {
         for (variant in listOf(ScalpParams.CLASSIC.id, "v2-sf41", "v2-sf41t2")) {
             for (side in listOf("YES", "NO")) {
                 for (price in listOf(.55, .56)) {
-                    val book = book(pending(variant, side).copy(note = "v2ask=0.99"))
+                    val book = book(pending(variant, side, price = .55).copy(note = "v2ask=0.99"))
                     book.onQuote(q(at + 3_000, price, side), false)
                     val t = row(book)
                     if (price == .55) {
