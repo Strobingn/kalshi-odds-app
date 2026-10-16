@@ -134,8 +134,8 @@ private fun ScalpSettingsCard() {
     val prefs = remember { ctx.getSharedPreferences("scalp_settings", Context.MODE_PRIVATE) }
     val on = remember { mutableStateOf(prefs.getBoolean("on", ScalpSettings.enabled)) }
     val lastMin = remember { mutableStateOf(prefs.getInt("lastMin", ScalpSettings.lastMinutes).toDouble()) }
-    val lo = remember { mutableStateOf(prefs.getFloat("loAsk", ScalpSettings.minAsk.toFloat()).toDouble()) }
-    val hi = remember { mutableStateOf(prefs.getFloat("hiAsk", ScalpSettings.maxAsk.toFloat()).toDouble()) }
+    val lo = remember { mutableStateOf(prefs.getFloat("minPx", ScalpSettings.minAsk.toFloat()).toDouble()) }
+    val hi = remember { mutableStateOf(prefs.getFloat("maxPx", ScalpSettings.maxAsk.toFloat()).toDouble()) }
     val frac = remember { mutableStateOf(prefs.getFloat("frac2", ScalpSettings.fraction.toFloat()).toDouble()) }
     val stop = remember { mutableStateOf(prefs.getFloat("stop2", ScalpSettings.stopLoss.toFloat()).toDouble()) }
     val every = remember { mutableStateOf(prefs.getInt("cadence", (ScalpSettings.cadenceMs / 1000L).toInt()).toDouble()) }
@@ -150,8 +150,8 @@ private fun ScalpSettingsCard() {
         prefs.edit()
             .putBoolean("on", on.value)
             .putInt("lastMin", ScalpSettings.lastMinutes)
-            .putFloat("loAsk", lo.value.toFloat())
-            .putFloat("hiAsk", hi.value.toFloat())
+            .putFloat("minPx", lo.value.toFloat())
+            .putFloat("maxPx", hi.value.toFloat())
             .putFloat("frac2", frac.value.toFloat())
             .putFloat("stop2", stop.value.toFloat())
             .putInt("cadence", every.value.toInt())
@@ -210,8 +210,8 @@ private fun ScalpSettingsCard() {
 private fun loadScalpSettings(prefs: android.content.SharedPreferences) {
     ScalpSettings.enabled = prefs.getBoolean("on", ScalpSettings.enabled)
     ScalpSettings.lastMinutes = prefs.getInt("lastMin", ScalpSettings.lastMinutes).coerceIn(1, 14)
-    ScalpSettings.minAsk = prefs.getFloat("loAsk", ScalpSettings.minAsk.toFloat()).toDouble()
-    ScalpSettings.maxAsk = prefs.getFloat("hiAsk", ScalpSettings.maxAsk.toFloat()).toDouble()
+    ScalpSettings.minAsk = prefs.getFloat("minPx", ScalpSettings.minAsk.toFloat()).toDouble()
+    ScalpSettings.maxAsk = prefs.getFloat("maxPx", ScalpSettings.maxAsk.toFloat()).toDouble()
     ScalpSettings.fraction = prefs.getFloat("frac2", ScalpSettings.fraction.toFloat()).toDouble()
     ScalpSettings.stopLoss = prefs.getFloat("stop2", ScalpSettings.stopLoss.toFloat()).toDouble()
     ScalpSettings.cadenceMs = prefs.getInt("cadence", (ScalpSettings.cadenceMs / 1000L).toInt()).toLong() * 1000L

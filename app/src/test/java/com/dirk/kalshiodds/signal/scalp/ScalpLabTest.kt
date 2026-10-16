@@ -58,7 +58,7 @@ class ScalpLabTest {
         assertTrue(bought.position != null)
         assertEquals("YES", bought.position!!.side)
         assertTrue(bought.position!!.stakeUsd > 1_500.0)
-        lab.onQuote(busyTape(yesBid = 0.80, yesAsk = 0.81, yesBids = listOf(0.89, 0.86, 0.83, 0.80)))
+        lab.onQuote(busyTape(yesBid = 0.70, yesAsk = 0.71, yesBids = listOf(0.79, 0.76, 0.73, 0.70)))
         val sold = lab.snapshot().accounts.first { it.id == "all_in_under_50" }
         assertNull(sold.position)
         assertEquals(1, sold.trades)
@@ -111,7 +111,7 @@ class ScalpLabTest {
         lab.onQuote(busyTape())
         val bought = lab.snapshot().accounts.first { it.id == "first_5" }
         assertTrue(bought.position != null)
-        lab.onQuote(busyTape(yesBid = 0.87, yesAsk = 0.88))
+        lab.onQuote(busyTape(yesBid = 0.77, yesAsk = 0.78))
         val still = lab.snapshot().accounts.first { it.id == "first_5" }
         assertTrue(still.position != null)
     }
@@ -121,8 +121,8 @@ class ScalpLabTest {
         val lab = ScalpLab()
         lab.onQuote(
             tape(
-                yesAsk = 0.90,
-                yesBid = 0.89,
+                yesAsk = 0.80,
+                yesBid = 0.79,
                 noAsk = 0.12,
                 noBid = 0.10,
                 elapsedMs = 12L * 60L * 1000L,
@@ -132,8 +132,8 @@ class ScalpLabTest {
         assertNull(lab.snapshot().accounts.first { it.id == "late_squeeze" }.position)
         lab.onQuote(
             tape(
-                yesAsk = 0.90,
-                yesBid = 0.89,
+                yesAsk = 0.80,
+                yesBid = 0.79,
                 noAsk = 0.12,
                 noBid = 0.10,
                 elapsedMs = 14L * 60L * 1000L,
@@ -197,9 +197,9 @@ class ScalpLabTest {
     }
 
     private fun busyTape(
-        yesBid: Double = 0.89,
-        yesAsk: Double = 0.90,
-        yesBids: List<Double> = listOf(0.80, 0.84, 0.87, 0.89)
+        yesBid: Double = 0.79,
+        yesAsk: Double = 0.80,
+        yesBids: List<Double> = listOf(0.70, 0.74, 0.77, 0.79)
     ) = tape(
         yesAsk = yesAsk,
         yesBid = yesBid,

@@ -44,10 +44,10 @@ object ScalpSettings {
     var lastMinutes: Int = 2
 
     /** Lowest ask it will pay, in dollars. */
-    var minAsk: Double = 0.85
+    var minAsk: Double = 0.15
 
     /** Highest ask it will pay, in dollars. */
-    var maxAsk: Double = 0.99
+    var maxAsk: Double = 0.85
 
     /** Fraction of the book's cash (or the $20k start) per entry. */
     var fraction: Double = 0.25
