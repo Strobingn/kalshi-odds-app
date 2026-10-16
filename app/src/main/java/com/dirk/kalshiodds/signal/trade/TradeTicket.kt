@@ -1,37 +1,15 @@
 package com.dirk.kalshiodds.signal.trade
 
-enum class TicketKind {
-    /** Settings stake (default $5) \u2192 \u2265$100 max payout. */
-    CONFIGURED,
-    /** Automatic hunter: $1 stake \u2192 \u2265$25 max payout. */
-    HUNTER,
-    /** Long-shot hunter: ask \u2264 ~20\u00a2 and AI/fair beats implied after fees. */
-    HUNTER_VALUE,
-    /** User tapped Buy on a market card / hero. */
-    MANUAL,
-    /** Sell / reduce a held YES or NO position. IoC reduce-only at the bid. */
-    SELL,
-    /** Winning strategy: cheap sides in the right time window. */
-    WINNING_STRATEGY
-}
+enum class TicketKind { CONFIGURED, HUNTER, HUNTER_VALUE, MANUAL, SELL, WINNING_STRATEGY }
 
-/**
- * One proposed (or working) approve-gated limit ticket.
- * Never submitted unless [TicketSession.approve] is called with this [id].
- */
+/** One proposed (or working) approve-gated limit ticket. */
 data class TradeTicket(
     val id: String,
     val ticker: String,
-    /** Outcome side the user is buying: YES or NO. */
     val side: String,
-    /**
-     * V2 single-book side. `bid` = buy YES; `ask` = sell YES (= buy NO at 1\u2212p).
-     */
     val bookSide: String,
     val stakeUsd: Double,
-    /** Price paid per chosen-side contract (0.001\u20130.999, including sub-cent). */
     val limitPrice: Double,
-    /** YES-leg price sent to POST /portfolio/events/orders. */
     val yesLimitPrice: Double,
     val contracts: Int,
     val estimatedFillUsd: Double,
@@ -45,17 +23,30 @@ data class TradeTicket(
     val gateNote: String? = null,
     val createdAtMs: Long = System.currentTimeMillis(),
     val kind: TicketKind = TicketKind.CONFIGURED,
-    /**
-     * Non-null when the card is informational only (closed market or empty
-     * ask). Approve stays disabled and [TicketSession.approve] will not place.
-     */
     val blockedReason: String? = null,
     val reduceOnly: Boolean = false,
     val heldContracts: Int? = null,
+    val closeNote: String? = null,
     val paperOnly: Boolean = false,
-    val feeUsd: Double = 0.0,
-    val allInUsd: Double = 0.0
+    val impliedChance: Double? = null,
+    val modelChance: Double? = null,
+    val fairChance: Double? = null,
+    val modelEdge: Boolean = false,
+    val profitIfWinUsd: Double? = null,
+    val feeUsd: Double? = null,
+    val allInUsd: Double? = null,
+    val belowMinProfit: Boolean = false,
+    val minProfitIfWinUsd: Double? = null,
+    val winTargetUsd: Double? = null,
+    val winTargetCapped: Boolean = false,
+    val winTargetNote: String? = null,
+    val bankrollSource: String? = null,
+    val bankrollUsd: Double? = null,
+    val visibleContracts: Int? = null,
+    /** Market close time used by paper time/settlement safeguards. */
+    val closeTimeMs: Long? = null
 ) {
+    val displaySide: String get() = side.uppercase()
     val isSell: Boolean get() = kind == TicketKind.SELL
     val isBuy: Boolean get() = !isSell
     val isLive: Boolean get() = !paperOnly
@@ -63,20 +54,16 @@ data class TradeTicket(
     val isHunter: Boolean get() = kind == TicketKind.HUNTER
     val isHunterValue: Boolean get() = kind == TicketKind.HUNTER_VALUE
     val isWinningStrategy: Boolean get() = kind == TicketKind.WINNING_STRATEGY
+    val isManualOrSell: Boolean get() = isManual || isSell
 
-    /**
-     * True for a buy that would close an opposite position (sell YES to close
-     * NO, or sell NO to close YES).
-     */
     fun closesOpposite(): Boolean = isSell && heldContracts != null
-
-    /** Copy with a new kind (useful when converting paper to live). */
     fun withKind(newKind: TicketKind): TradeTicket = copy(kind = newKind)
+    fun asPaper(): TradeTicket = copy(paperOnly = true)
+    val potentialGainUsd: Double get() = (maxPayoutUsd - stakeUsd).coerceAtLeast(0.0)
+    val canApprove: Boolean get() = blockedReason.isNullOrBlank() && contracts > 0 && !paperOnly
+    val canPaper: Boolean get() = blockedReason.isNullOrBlank() && contracts > 0
+    fun matchesApproval(ticketId: String): Boolean = ticketId == id
 
-    /** Copy with paper-only flag. */
-    fun asPaper(): TradeTicket = copy(paperOnly = true, kind = kind)
-
-    /** Display label for the button / card header. */
     fun label(): String = when (kind) {
         TicketKind.MANUAL -> if (paperOnly) "Paper ${side.uppercase()}" else "LIVE ${side.uppercase()}"
         TicketKind.HUNTER -> "AI ${side.uppercase()}"
@@ -86,7 +73,6 @@ data class TradeTicket(
         TicketKind.WINNING_STRATEGY -> "Strategy ${side.uppercase()}"
     }
 
-    /** One-line description of the ticket source. */
     fun source(): String = when (kind) {
         TicketKind.MANUAL -> if (paperOnly) "Paper" else "Live"
         TicketKind.HUNTER -> "AI Hunter"
@@ -96,3 +82,42 @@ data class TradeTicket(
         TicketKind.WINNING_STRATEGY -> "Winning Strategy"
     }
 }
+
+sealed class TicketPhase {
+    data object Idle : TicketPhase()
+    data class Proposed(val tickets: List<TradeTicket>) : TicketPhase()
+    data class AwaitingApprove(
+        val ticket: TradeTicket,
+        val others: List<TradeTicket> = emptyList(),
+        val clientOrderId: String = ""
+    ) : TicketPhase()
+    data class Submitting(val ticket: TradeTicket, val clientOrderId: String) : TicketPhase()
+    data class Submitted(val order: PlacedOrder, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
+    data class Failed(val ticket: TradeTicket, val error: String, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
+    data class Cancelled(val order: PlacedOrder, val proposals: List<TradeTicket> = emptyList()) : TicketPhase()
+
+    val proposedTickets: List<TradeTicket>
+        get() = when (this) {
+            is Proposed -> tickets
+            is AwaitingApprove -> listOf(ticket) + others
+            is Submitted -> proposals
+            is Failed -> proposals
+            is Cancelled -> proposals
+            Idle, is Submitting -> emptyList()
+        }
+
+    val workingOrder: PlacedOrder?
+        get() = when (this) {
+            is Submitted -> order
+            is Cancelled -> order
+            else -> null
+        }
+}
+
+data class TicketUiState(
+    val phase: TicketPhase = TicketPhase.Idle,
+    val proposals: List<TradeTicket> = emptyList(),
+    val working: List<PlacedOrder> = emptyList(),
+    val lastError: String? = null,
+    val placementCount: Int = 0
+)

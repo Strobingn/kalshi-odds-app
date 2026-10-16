@@ -1,5 +1,6 @@
 package com.dirk.kalshiodds.signal.paper
 
+import com.dirk.kalshiodds.signal.config.SignalConstants
 import com.dirk.kalshiodds.signal.trade.TicketKind
 import com.dirk.kalshiodds.signal.trade.TradeTicket
 import org.junit.Assert.assertEquals
@@ -18,7 +19,7 @@ class PaperBuyTest {
         assertEquals(10, out.contracts)
         assertEquals(2.0, out.stakeUsd, 1e-9)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(10, 0.20)
-        assertEquals(100.0 - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - 2.0 - fees, book.snapshot().cashUsd, 1e-9)
         assertTrue(out.message.contains("PAPER"))
     }
 
@@ -53,7 +54,7 @@ class PaperBuyTest {
         assertTrue(out.ok)
         assertEquals(20, out.contracts)
         val fees = com.dirk.kalshiodds.signal.trade.KalshiFee.total(20, 0.20)
-        assertEquals(100.0 - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
+        assertEquals(SignalConstants.PAPER_START_USD - 4.0 - fees, book.snapshot().cashUsd, 1e-9)
     }
 
     @Test
@@ -66,20 +67,20 @@ class PaperBuyTest {
             ticket(
                 TicketKind.HUNTER_VALUE,
                 ticker = "KXBTC15M-CAP",
-                contracts = 400,
-                stake = 160.0,
+                contracts = 4_000,
+                stake = 1_600.0,
                 px = 0.40,
                 win = 50.0
             )
         )
         assertTrue(out.message, out.ok)
         assertTrue(out.capped)
-        val (maxQty, _) = PaperBuy.capContracts(400, 100.0, 0.40)
+        val (maxQty, _) = PaperBuy.capContracts(4_000, SignalConstants.PAPER_START_USD, 0.40)
         assertEquals(maxQty, out.contracts)
-        assertTrue(out.contracts in 1..249)
+        assertTrue(out.contracts in 1..2_499)
         assertEquals(out.contracts * 0.40, out.stakeUsd, 1e-9)
         assertTrue(book.snapshot().cashUsd + 1e-6 >= 0.0)
-        assertTrue(book.snapshot().cashUsd < 100.0 - out.stakeUsd + 1e-6)
+        assertTrue(book.snapshot().cashUsd < SignalConstants.PAPER_START_USD - out.stakeUsd + 1e-6)
     }
 
     @Test
@@ -105,11 +106,11 @@ class PaperBuyTest {
 
     @Test
     fun capContractsMath() {
-        val (qty, capped) = PaperBuy.capContracts(400, 100.0, 0.40)
+        val (qty, capped) = PaperBuy.capContracts(4_000, SignalConstants.PAPER_START_USD, 0.40)
         assertTrue(capped)
-        assertTrue(qty in 1..249)
-        assertTrue(PaperBuy.costUsd(qty, 0.40) <= 100.0 + 1e-9)
-        assertTrue(PaperBuy.costUsd(qty + 1, 0.40) > 100.0)
+        assertTrue(qty in 1..2_499)
+        assertTrue(PaperBuy.costUsd(qty, 0.40) <= SignalConstants.PAPER_START_USD + 1e-9)
+        assertTrue(PaperBuy.costUsd(qty + 1, 0.40) > SignalConstants.PAPER_START_USD)
         val (none, _) = PaperBuy.capContracts(10, 0.01, 0.50)
         assertEquals(0, none)
     }

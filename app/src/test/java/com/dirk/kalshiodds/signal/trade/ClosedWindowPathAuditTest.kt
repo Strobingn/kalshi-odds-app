@@ -30,7 +30,7 @@ class ClosedWindowPathAuditTest {
                         line.contains("\"Window closed\"") ||
                         line.contains("\"Market closed\"")
                     ) {
-                        val rel = file.relativeTo(srcRoot).path
+                val rel = file.relativeTo(srcRoot).path.replace(File.separatorChar, '/')
                         PathHit(rel, idx + 1, line.trim())
                     } else {
                         null

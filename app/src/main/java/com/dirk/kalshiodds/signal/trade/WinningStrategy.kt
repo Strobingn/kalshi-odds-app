@@ -36,7 +36,7 @@ object WinningStrategy {
     const val DEFAULT_MIN_TIME_TO_CLOSE_MS = 300_000L
 
     data class Config(
-        val enabled: Boolean = false,
+        val enabled: Boolean = true,
         val maxAskFilter: Double = DEFAULT_MAX_ASK_FILTER,
         val timeWindowMs: Long = DEFAULT_TIME_WINDOW_MS,
         val minTimeToCloseMs: Long = DEFAULT_MIN_TIME_TO_CLOSE_MS,
@@ -152,3 +152,10 @@ object WinningStrategy {
         return filterReason(this, config, nowMs)
     }
 }
+
+/** Public convenience extensions used by the strategy audit and UI tests. */
+fun MarketUiModel.passesWinningStrategy(config: WinningStrategy.Config, nowMs: Long): Boolean =
+    WinningStrategy.filterMarket(this, config, nowMs)
+
+fun MarketUiModel.winningStrategyReason(config: WinningStrategy.Config, nowMs: Long): String? =
+    WinningStrategy.filterReason(this, config, nowMs)

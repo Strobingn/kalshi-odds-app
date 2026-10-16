@@ -11,6 +11,7 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlGuard
 import com.dirk.kalshiodds.signal.feedback.Calibrator
 import com.dirk.kalshiodds.signal.engine.OverlayThrottle
 import com.dirk.kalshiodds.signal.engine.ScoringEngine
+import com.dirk.kalshiodds.signal.engine.BookLevelSnapshot
 import com.dirk.kalshiodds.signal.model.SignalAlert
 import com.dirk.kalshiodds.signal.model.SignalStatus
 import com.dirk.kalshiodds.signal.model.WsConnectionState
@@ -20,6 +21,9 @@ import com.dirk.kalshiodds.signal.trade.LivePosition
 import com.dirk.kalshiodds.signal.trade.PositionParser
 import com.dirk.kalshiodds.signal.trade.TicketBuilder
 import com.dirk.kalshiodds.signal.trade.TicketUiState
+import com.dirk.kalshiodds.signal.trade.AdaptiveStrategy
+import com.dirk.kalshiodds.signal.trade.PaperExitQuote
+import com.dirk.kalshiodds.signal.trade.getStopOrderManager
 import com.dirk.kalshiodds.chart.ChartWindowService
 import com.dirk.kalshiodds.chart.hasQuote
 import com.dirk.kalshiodds.chart.hasSpot
@@ -33,6 +37,7 @@ import com.dirk.kalshiodds.domain.MarketUiModel
 import com.dirk.kalshiodds.domain.withLiveQuote
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.floor
 import kotlin.random.Random
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -85,6 +90,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     private val prefs = container.preferences
     private val ticketSession = container.tickets
     private val paperBook = container.paper.book
+    private val paperStopManager = paperBook.getStopOrderManager()
 
     private val _state = MutableStateFlow(OddsUiState(isLoading = true))
     val state: StateFlow<OddsUiState> = _state.asStateFlow()
@@ -794,6 +800,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val live = MarketLifecycle.tradable(markets, now)
         val liveTickers = live.map { it.ticker }.toSet()
         val ctx = ticketContext(s, now)
+        val adaptive = AdaptiveStrategy(paperBook.snapshot())
+        val adaptiveConfig = adaptive.getAdaptiveConfig()
+        val adaptiveAllowed = live.isEmpty() || live.any { adaptive.shouldTrade(it) }
         val stale = s.tickets.proposals.map { it.ticker }.filter { it !in liveTickers }.toSet()
         if (stale.isNotEmpty()) ticketSession.voidTickers(stale)
         val tickets = TicketBuilder.proposeAll(live, ctx)
@@ -809,12 +818,47 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         if (s.settings.paperTradingEnabled) {
             val paperCtx = ctx.copy(
                 bankrollUsd = paperBook.snapshot().equityUsd,
-                bankrollSource = "paper"
+                bankrollSource = "paper",
+                adaptiveConfig = adaptiveConfig,
+                adaptiveTradingAllowed = adaptiveAllowed
             )
             val paperTickets = TicketBuilder.proposeAll(live, paperCtx)
             paperTickets.filter { it.canApprove }.forEach { paperBook.considerTicket(it, enabled = true) }
+            evaluatePaperStops(paperCtx, now)
         }
         refreshPositionMarks()
+    }
+
+    /** Evaluate paper exits only against the current held-side bid and touch depth. */
+    private fun evaluatePaperStops(ctx: TicketBuilder.Context, nowMs: Long) {
+        if (paperBook.snapshot().openCount <= 0) return
+        val markets = _state.value.snapshot?.allMarkets.orEmpty().associateBy { it.ticker }
+        val quotes = paperBook.snapshot().fills
+            .filter { !it.settled }
+            .mapNotNull { fill ->
+                val market = markets[fill.ticker] ?: return@mapNotNull null
+                val bid = TicketBuilder.freshBestBid(market, fill.side, ctx) ?: return@mapNotNull null
+                val book: BookLevelSnapshot? = ctx.books[fill.ticker]
+                val levels = if (fill.side.equals("NO", true)) book?.no else book?.yes
+                val touchDepth = levels
+                    ?.filter { kotlin.math.abs(it.first - bid) <= 1e-9 }
+                    ?.sumOf { it.second }
+                    ?.takeIf { it > 0.0 }
+                    ?.let { floor(it).toInt().coerceAtLeast(0) }
+                fill.ticker to PaperExitQuote(
+                    price = bid,
+                    availableContracts = touchDepth,
+                    observedAtMs = nowMs,
+                    source = if (touchDepth != null) "book" else "quote"
+                )
+            }
+            .toMap()
+        val executions = paperStopManager.checkAndExecute(quotes, nowMs)
+        if (executions.isNotEmpty()) {
+            _state.update {
+                it.copy(userMessage = "Paper stop: ${executions.sumOf { e -> e.contracts }} contracts exited at executable bid")
+            }
+        }
     }
 
     private fun captureTicketForward(
@@ -848,7 +892,12 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun ticketContext(s: OddsUiState, nowMs: Long): TicketBuilder.Context {
+    private fun ticketContext(
+        s: OddsUiState,
+        nowMs: Long,
+        adaptiveConfig: AdaptiveStrategy.AdaptiveConfig? = null,
+        adaptiveTradingAllowed: Boolean = true
+    ): TicketBuilder.Context {
         val markets = s.snapshot?.allMarkets.orEmpty()
         val books = markets.mapNotNull { m ->
             hub.scoring.book.snapshotBook(m.ticker)?.let { m.ticker to it }
@@ -864,7 +913,9 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
             positions = s.positions,
             nowMs = nowMs,
             bankrollUsd = s.liveCashUsd ?: s.settings.bankrollUsd,
-            bankrollSource = if (s.liveCashUsd != null) "live" else "settings"
+            bankrollSource = if (s.liveCashUsd != null) "live" else "settings",
+            adaptiveConfig = adaptiveConfig,
+            adaptiveTradingAllowed = adaptiveTradingAllowed
         )
     }
 
@@ -873,7 +924,13 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val s = _state.value
         val market = s.snapshot?.allMarkets.orEmpty().firstOrNull { it.ticker.equals(ticket.ticker, true) }
             ?: return ticket
-        val ctx = ticketContext(s, System.currentTimeMillis()).copy(
+        val adaptive = AdaptiveStrategy(paperBook.snapshot())
+        val ctx = ticketContext(
+            s,
+            System.currentTimeMillis(),
+            adaptiveConfig = adaptive.getAdaptiveConfig(),
+            adaptiveTradingAllowed = adaptive.shouldTrade(market)
+        ).copy(
             bankrollUsd = paperBook.snapshot().equityUsd,
             bankrollSource = "paper"
         )
