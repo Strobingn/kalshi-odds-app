@@ -89,6 +89,7 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
     val selected = trades.firstOrNull { it.id == selectedId }
     val point = scrubAt?.let { at -> window.points.minByOrNull { abs(it.tMs - at) } }
     val markers = remember(window, trades) { window.markers(trades) }
+    val focusedMarker = markers.filter { it.tradeId == selectedId }.minByOrNull { abs(it.fill.atMs - (scrubAt ?: it.fill.atMs)) }
     val currentMarkers by rememberUpdatedState(markers)
     val currentOnSelect by rememberUpdatedState(onSelect)
     ScalpLabCard {
@@ -178,7 +179,7 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
                     ScalpFillLog.Kind.SELL -> drawRect(ink, Offset(px - radius, py - radius), Size(radius * 2, radius * 2))
                     ScalpFillLog.Kind.SETTLE -> drawCircle(ink, radius, Offset(px, py), style = Stroke(2.dp.toPx()))
                 }
-                if (chosen) {
+                if (chosen && marker == focusedMarker) {
                     val label = "${fill.kind}${if (fill.aggregate) " AVG" else ""} ${ScalpChartCopy.cents(fill.price)}"
                     paint.color = ink.toArgb()
                     val tx = (px - paint.measureText(label) / 2).coerceIn(left, (right - paint.measureText(label)).coerceAtLeast(left))
