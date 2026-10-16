@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Train a small MLP Dip Hunter model on Kalshi KXBTC15M / KXWTI15M settled markets.
+Train a small MLP Dip Hunter model on Kalshi KXBTC15M settled markets.
 
 Exports:
   - app/src/main/assets/diphunter.tflite
@@ -30,7 +30,10 @@ REPO = Path(__file__).resolve().parents[1]
 ML_DIR = REPO / "ml"
 ASSETS = REPO / "app" / "src" / "main" / "assets"
 BASE = "https://api.elections.kalshi.com/trade-api/v2"
-SERIES = [("KXBTC15M", 0.0), ("KXWTI15M", 1.0)]
+# The app is Bitcoin-only. Mixing WTI labels into a small neural model made a
+# volatility representation that was neither a valid Bitcoin validation set
+# nor a useful cross-asset model.
+SERIES = [("KXBTC15M", 0.0)]
 HIST_CUTOFF = datetime(2026, 7, 25, tzinfo=timezone.utc)
 FEATURE_NAMES = [
     "mid_price",
@@ -261,9 +264,13 @@ def sample_market(market: dict, series: str, series_id: float, historical: bool)
     return rows
 
 
-def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict]:
+def collect_dataset() -> tuple[np.ndarray, np.ndarray, list[tuple[str, int]], dict]:
     X_list: list[np.ndarray] = []
     y_list: list[int] = []
+    # Every sampled minute from the same market must stay in one split.
+    # Store a market-close key so validation is chronological and cannot see
+    # a sibling snapshot of its own settlement window during training.
+    market_keys: list[tuple[str, int]] = []
     stats = {"markets_live": 0, "markets_hist": 0, "samples_by_series": {}, "yes": 0, "no": 0}
 
     for series, series_id in SERIES:
@@ -304,6 +311,8 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict]:
             for feats, label in rows:
                 X_list.append(feats)
                 y_list.append(label)
+                close_dt = parse_iso(m.get("close_time"))
+                market_keys.append((str(m.get("ticker") or ""), int(close_dt.timestamp()) if close_dt else 0))
                 stats["samples_by_series"][series] += 1
                 if label == 1:
                     stats["yes"] += 1
@@ -314,18 +323,17 @@ def collect_dataset() -> tuple[np.ndarray, np.ndarray, dict]:
         raise RuntimeError("No training samples collected from Kalshi API")
     X = np.stack(X_list).astype(np.float32)
     y = np.array(y_list, dtype=np.int32)
-    return X, y, stats
+    return X, y, market_keys, stats
 
 
-def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
+def train_and_export(
+    X: np.ndarray,
+    y: np.ndarray,
+    market_keys: list[tuple[str, int]],
+    data_stats: dict
+) -> dict:
     import tensorflow as tf
     from tensorflow import keras
-
-    # Standardize
-    mean = X.mean(axis=0)
-    std = X.std(axis=0)
-    std = np.where(std < 1e-6, 1.0, std)
-    Xz = (X - mean) / std
 
     # One-hot for [P(NO), P(YES)]
     y_oh = np.zeros((len(y), 2), dtype=np.float32)
@@ -334,15 +342,28 @@ def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
     # y_oh[i, y[i]] = 1 means label 0 → col0 (NO), label 1 → col1 (YES). Correct.
 
     n = len(X)
-    rng = np.random.default_rng(42)
-    idx = rng.permutation(n)
-    split = max(1, int(n * 0.85)) if n >= 20 else max(1, n - max(1, n // 5))
-    if n < 10:
-        train_idx, val_idx = idx, idx[: max(1, n // 5)]
-    else:
-        train_idx, val_idx = idx[:split], idx[split:]
-        if len(val_idx) == 0:
-            val_idx = idx[-max(1, n // 10) :]
+    if len(market_keys) != n:
+        raise ValueError("market key count must match feature rows")
+    ordered_markets = sorted(set(market_keys), key=lambda item: (item[1], item[0]))
+    split = max(1, int(len(ordered_markets) * 0.85)) if len(ordered_markets) >= 5 else max(1, len(ordered_markets) - 1)
+    train_markets = set(ordered_markets[:split])
+    validation_markets = set(ordered_markets[split:])
+    if not validation_markets:
+        validation_markets = {ordered_markets[-1]}
+        train_markets = set(ordered_markets[:-1]) or validation_markets
+    train_idx = np.array([i for i, key in enumerate(market_keys) if key in train_markets], dtype=np.int64)
+    val_idx = np.array([i for i, key in enumerate(market_keys) if key in validation_markets], dtype=np.int64)
+    if len(train_idx) == 0:
+        train_idx = np.arange(n, dtype=np.int64)
+    if len(val_idx) == 0:
+        val_idx = train_idx[-max(1, len(train_idx) // 5) :]
+
+    # Fit scaling only on past training markets.  Applying a whole-dataset
+    # scaler before the split was a subtle validation leak.
+    mean = X[train_idx].mean(axis=0)
+    std = X[train_idx].std(axis=0)
+    std = np.where(std < 1e-6, 1.0, std)
+    Xz = (X - mean) / std
 
     Xtr, ytr = Xz[train_idx], y_oh[train_idx]
     Xva, yva = Xz[val_idx], y_oh[val_idx]
@@ -444,6 +465,9 @@ def train_and_export(X: np.ndarray, y: np.ndarray, data_stats: dict) -> dict:
         "samples": int(n),
         "train_samples": int(len(train_idx)),
         "val_samples": int(len(val_idx)),
+        "train_markets": int(len(train_markets)),
+        "validation_markets": int(len(validation_markets)),
+        "split": "chronological_market_group",
         "accuracy": acc,
         "val_accuracy": val_acc,
         "auc": auc,
@@ -473,7 +497,7 @@ Fixed float32 input order (length 8). Android and training must match.
 | 3 | volatility | candle (high-low) or std of recent mids |
 | 4 | momentum | mid_now - mid_at_window_start |
 | 5 | mean_reversion | 0.5 - mid_price |
-| 6 | series_id | 0 = KXBTC15M, 1 = KXWTI15M |
+| 6 | series_id | 0 = KXBTC15M (retained for asset compatibility) |
 | 7 | oi_norm | log1p(open_interest) / log1p(1e6) |
 
 Standardization: `(x - mean) / std` using `feature_scaler.json`.
@@ -496,9 +520,9 @@ Standardization: `(x - mean) / std` using `feature_scaler.json`.
 
 def main() -> int:
     print("Collecting Kalshi training data...", flush=True)
-    X, y, stats = collect_dataset()
+    X, y, market_keys, stats = collect_dataset()
     print(f"Collected X={X.shape} yes={stats['yes']} no={stats['no']}", flush=True)
-    metrics = train_and_export(X, y, stats)
+    metrics = train_and_export(X, y, market_keys, stats)
     print(f"Done. samples={metrics['samples']} accuracy={metrics['accuracy']}", flush=True)
     return 0
 
