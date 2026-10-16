@@ -168,6 +168,17 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        // Kalshi pushed an account change (fill / order / position): reload
+        // positions and cash now, at most once a second.
+        viewModelScope.launch {
+            runCatching {
+                // collectLatest + delay: a burst of fills reloads once.
+                container.accountEvents.collectLatest {
+                    kotlinx.coroutines.delay(1_000L)
+                    refreshPositions()
+                }
+            }
+        }
         viewModelScope.launch {
             runCatching {
                 paperBook.state.collect { paper ->

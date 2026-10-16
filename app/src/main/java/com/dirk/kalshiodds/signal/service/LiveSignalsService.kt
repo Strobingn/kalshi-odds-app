@@ -259,6 +259,30 @@ class LiveSignalsService : Service() {
                         }
                     }
                 },
+                onFill = { fill ->
+                    runCatching { container.notifier.notifyFill(fill) }
+                    container.accountEvents.tryEmit(fill.ticker)
+                },
+                onUserOrder = { u ->
+                    runCatching {
+                        val updated = container.tickets.applyOrderUpdate(
+                            orderId = u.orderId,
+                            clientOrderId = u.clientOrderId,
+                            status = u.status,
+                            fillCount = u.fillCount,
+                            remainingCount = u.remainingCount
+                        )
+                        // Kalshi cancelled a buy the app did not cancel itself: give its unfilled part back to the cap.
+                        if (updated != null && !updated.ticket.isSell &&
+                            updated.error?.startsWith(com.dirk.kalshiodds.signal.trade.TicketSession.ORDER_CANCELLED_ON_KALSHI) == true
+                        ) {
+                            com.dirk.kalshiodds.signal.trade.LiveDailyCapStore.get(this@LiveSignalsService)
+                                .release(com.dirk.kalshiodds.signal.trade.LiveDailyCap.cancelledCostOf(updated))
+                        }
+                    }
+                    container.accountEvents.tryEmit(u.ticker ?: "")
+                },
+                onPosition = { p -> container.accountEvents.tryEmit(p.ticker) },
                 onLifecycle = { ticker, eventType ->
                     scope.launch {
                         runCatching {

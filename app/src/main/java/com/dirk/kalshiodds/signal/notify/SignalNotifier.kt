@@ -70,6 +70,38 @@ class SignalNotifier(private val context: Context) {
         return postedAt
     }
 
+    /**
+     * "Filled" notice for a real Kalshi fill reported by the account
+     * WebSocket. Opens the app on that market. Informational only.
+     */
+    fun notifyFill(fill: com.dirk.kalshiodds.signal.ws.KalshiWsMessages.Parsed.Fill) {
+        ensureChannels(context)
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_TICKER, fill.ticker)
+        }
+        val pending = PendingIntent.getActivity(
+            context,
+            (fill.orderId ?: fill.ticker).hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val notification = NotificationCompat.Builder(context, CHANNEL_ALERTS)
+            .setSmallIcon(R.drawable.ic_launcher_monochrome)
+            .setContentTitle(fillTitle(fill))
+            .setContentText(fill.ticker)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(true)
+            .setContentIntent(pending)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(ids.getAndIncrement(), notification)
+        } catch (_: SecurityException) {
+            // POST_NOTIFICATIONS denied: positions still refresh in the app
+        }
+    }
+
     fun foregroundNotification(text: String = context.getString(R.string.live_signals_fg_text)): Notification {
         ensureChannels(context)
         val open = PendingIntent.getActivity(
@@ -117,6 +149,14 @@ class SignalNotifier(private val context: Context) {
     }
 
     companion object {
+        /** `Filled 8 YES at 47¢` (count rounded down; price omitted when unknown). */
+        fun fillTitle(fill: com.dirk.kalshiodds.signal.ws.KalshiWsMessages.Parsed.Fill): String {
+            val n = kotlin.math.floor(fill.count + 1e-9).toLong()
+            val side = fill.outcomeSide?.uppercase() ?: ""
+            val px = fill.sidePrice?.let { " at ${kotlin.math.round(it * 100).toLong()}¢" } ?: ""
+            return "Filled $n $side$px".replace("  ", " ").trim()
+        }
+
         const val CHANNEL_ALERTS = "diphunter_signal_alerts"
         const val CHANNEL_FOREGROUND = LiveSignalsPolicy.CHANNEL_ONGOING
         const val FG_NOTIFICATION_ID = 1001

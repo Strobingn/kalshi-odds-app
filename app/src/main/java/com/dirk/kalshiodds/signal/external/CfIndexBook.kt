@@ -49,7 +49,8 @@ class CfIndexBook {
                 value = v.value,
                 updatedMs = nowMs,
                 sourceTsMs = v.sourceTsMs,
-                avg60 = v.avg60,
+                // The 5 Hz frames may not carry the averages: keep the last one.
+                avg60 = v.avg60 ?: prev?.avg60,
                 finalMinuteAvg = v.finalMinuteAvg ?: prev?.finalMinuteAvg,
                 finalMinuteTicks = if (v.finalMinuteAvg != null) v.finalMinuteTicks else prev?.finalMinuteTicks,
                 finalMinuteUpdatedMs = if (v.finalMinuteAvg != null) nowMs else prev?.finalMinuteUpdatedMs

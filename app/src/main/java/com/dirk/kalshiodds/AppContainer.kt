@@ -187,6 +187,16 @@ class AppContainer(context: Context) {
     val cfIndex = com.dirk.kalshiodds.signal.external.CfIndexBook().also { scoring.cfIndex = it }
 
     /**
+     * Account changes pushed by Kalshi's WebSocket (a fill, an order update,
+     * a position change). Screens listening refresh positions and cash from
+     * REST right away instead of waiting for the next poll.
+     */
+    val accountEvents = kotlinx.coroutines.flow.MutableSharedFlow<String>(
+        extraBufferCapacity = 16,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+
+    /**
      * Research recorder (spot / top of book / trades / settlements as daily
      * gzip CSV under filesDir/recordings). Started by LiveSignalsService.
      */

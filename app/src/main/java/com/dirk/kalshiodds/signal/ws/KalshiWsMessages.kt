@@ -78,7 +78,45 @@ object KalshiWsMessages {
             val eventType: String,
             val result: String? = null
         ) : Parsed()
-        data class Error(val code: Int?, val message: String) : Parsed()
+        /** [id] is the command id the error answers, when Kalshi sends it. */
+        data class Error(val code: Int?, val message: String, val id: Int? = null) : Parsed()
+
+        /**
+         * Private `fill`: one of the account's orders traded. [outcomeSide] is
+         * the side acquired ("yes"/"no"), [count] contracts at [yesPrice] (0–1).
+         */
+        data class Fill(
+            val orderId: String?,
+            val ticker: String,
+            val outcomeSide: String?,
+            val count: Double,
+            val yesPrice: Double?,
+            val isTaker: Boolean?,
+            val clientOrderId: String?,
+            val postPosition: Double?,
+            val tsMs: Long?
+        ) : Parsed() {
+            /** Price paid per contract for the side acquired, 0–1. */
+            val sidePrice: Double?
+                get() = yesPrice?.let { if (outcomeSide.equals("no", ignoreCase = true)) 1.0 - it else it }
+        }
+
+        /** Private `user_orders`: an order's status and counts changed. */
+        data class UserOrder(
+            val orderId: String,
+            val ticker: String?,
+            val status: String?,
+            val fillCount: Double?,
+            val remainingCount: Double?,
+            val clientOrderId: String?
+        ) : Parsed()
+
+        /** Private `market_positions`: the account's position in a market changed. */
+        data class Position(
+            val ticker: String,
+            val position: Double?,
+            val realizedPnlUsd: Double?
+        ) : Parsed()
         data class Other(val type: String?, val raw: String) : Parsed()
     }
 
@@ -102,6 +140,80 @@ object KalshiWsMessages {
     }
 
     const val INDEX_CHANNEL = "cfbenchmarks_value"
+
+    /**
+     * Up to 5 updates a second for BRTI / ETHUSD_RTI / SOLUSD_RTI (200 ms
+     * granularity). Subscribed next to [INDEX_CHANNEL], which carries the
+     * 60 s and final-minute averages.
+     */
+    const val INDEX_CHANNEL_5HZ = "cfbenchmarks_value_5hz"
+
+    /**
+     * Read-only account channels: the account's fills, order status changes,
+     * and position changes. Subscribing never places, changes or cancels
+     * anything. No market filter: they cover every market.
+     */
+    val PRIVATE_CHANNELS = listOf("fill", "user_orders", "market_positions")
+
+    fun subscribePrivate(id: Int, channels: List<String> = PRIVATE_CHANNELS): String {
+        val params = mapOf<String, JsonElement>(
+            "channels" to json.parseToJsonElement(json.encodeToString(channels))
+        )
+        return json.encodeToString(Command(id = id, cmd = "subscribe", params = params))
+    }
+
+    fun isPrivateChannel(channel: String?): Boolean =
+        channel != null && (channel in PRIVATE_CHANNELS || channel == "market_position" || channel == "user_order")
+
+    fun parseFill(msg: JsonObject?): Parsed.Fill? {
+        msg ?: return null
+        val ticker = msg.stringField("market_ticker", "ticker") ?: return null
+        val count = msg.rawDouble("count_fp", "count")?.takeIf { it.isFinite() && it > 0.0 } ?: return null
+        val bookSide = msg.stringField("book_side")?.lowercase()
+        val outcome = msg.stringField("outcome_side", "purchased_side", "side")?.lowercase()
+            ?: when (bookSide) {
+                "bid" -> "yes"
+                "ask" -> "no"
+                else -> null
+            }
+        val yes = msg.rawDouble("yes_price_dollars", "yes_price_fixed")
+            ?: msg.rawDouble("yes_price")?.let { if (it > 1.0) it / 100.0 else it }
+        return Parsed.Fill(
+            orderId = msg.stringField("order_id"),
+            ticker = ticker,
+            outcomeSide = outcome,
+            count = count,
+            yesPrice = yes?.takeIf { it.isFinite() && it in 0.0..1.0 },
+            isTaker = (msg["is_taker"] as? JsonPrimitive)?.contentOrNull?.toBooleanStrictOrNull(),
+            clientOrderId = msg.stringField("client_order_id"),
+            postPosition = msg.rawDouble("post_position_fp", "post_position"),
+            tsMs = msg.longField("ts_ms") ?: msg.longField("ts")?.let { if (it < 10_000_000_000L) it * 1000L else it }
+        )
+    }
+
+    fun parseUserOrder(msg: JsonObject?): Parsed.UserOrder? {
+        msg ?: return null
+        val orderId = msg.stringField("order_id") ?: return null
+        return Parsed.UserOrder(
+            orderId = orderId,
+            ticker = msg.stringField("ticker", "market_ticker"),
+            status = msg.stringField("status")?.lowercase(),
+            fillCount = msg.rawDouble("fill_count_fp", "fill_count"),
+            remainingCount = msg.rawDouble("remaining_count_fp", "remaining_count"),
+            clientOrderId = msg.stringField("client_order_id")
+        )
+    }
+
+    fun parsePosition(msg: JsonObject?): Parsed.Position? {
+        msg ?: return null
+        val ticker = msg.stringField("market_ticker", "ticker") ?: return null
+        return Parsed.Position(
+            ticker = ticker,
+            position = msg.rawDouble("position_fp", "position"),
+            realizedPnlUsd = msg.rawDouble("realized_pnl_dollars")
+                ?: msg.rawDouble("realized_pnl")?.let { it / 10_000.0 }
+        )
+    }
 
     fun parseIndex(msg: JsonObject?): Parsed.IndexValue? {
         msg ?: return null
@@ -182,7 +294,7 @@ object KalshiWsMessages {
                 raw,
                 env.msg?.stringField("channel")
             )
-            INDEX_CHANNEL, "cfbenchmarks_value_5hz" -> parseIndex(env.msg) ?: Parsed.Other(env.type, raw)
+            INDEX_CHANNEL, INDEX_CHANNEL_5HZ -> parseIndex(env.msg) ?: Parsed.Other(env.type, raw)
             "unsubscribed" -> Parsed.Unsubscribed(
                 sids = env.msg?.intList("sids").orEmpty().ifEmpty {
                     listOfNotNull(env.sid)
@@ -200,8 +312,12 @@ object KalshiWsMessages {
             }
             "error" -> Parsed.Error(
                 code = env.msg?.intField("code"),
-                message = env.msg?.stringField("msg") ?: env.msg?.stringField("message") ?: "WS error"
+                message = env.msg?.stringField("msg") ?: env.msg?.stringField("message") ?: "WS error",
+                id = env.id
             )
+            "fill" -> parseFill(env.msg) ?: Parsed.Other(env.type, raw)
+            "user_order", "user_orders" -> parseUserOrder(env.msg) ?: Parsed.Other(env.type, raw)
+            "market_position", "market_positions" -> parsePosition(env.msg) ?: Parsed.Other(env.type, raw)
             else -> Parsed.Other(env.type, raw)
         }
     }

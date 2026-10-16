@@ -27,6 +27,9 @@ class TicketSession(
 ) {
     private val mutex = Mutex()
     private val _state = MutableStateFlow(TicketUiState())
+
+    /** Orders this app is cancelling right now: their cancel result comes from the REST call, not the WebSocket. */
+    private val cancelling: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     val state: StateFlow<TicketUiState> = _state.asStateFlow()
 
     private val voidedAtMs = mutableMapOf<String, Long>()
@@ -330,7 +333,12 @@ class TicketSession(
     suspend fun cancelWorking(orderId: String): TicketUiState = mutex.withLock {
         val cur = _state.value
         val order = cur.working.firstOrNull { it.orderId == orderId } ?: return cur
-        val result = runCatching { cancelOrder(order) }.getOrElse { Result.failure(it) }
+        cancelling += orderId
+        val result = try {
+            runCatching { cancelOrder(order) }.getOrElse { Result.failure(it) }
+        } finally {
+            cancelling -= orderId
+        }
         result.fold(
             onSuccess = { updated ->
                 _state.update {
@@ -359,6 +367,56 @@ class TicketSession(
             }
         )
         return _state.value
+    }
+
+    /**
+     * Apply a `user_orders` update from Kalshi's WebSocket to the matching
+     * working order (by order id, else client order id): new fill and
+     * remaining counts, and an order Kalshi cancelled or that fully executed
+     * stops counting as resting. Sends nothing to Kalshi. Returns the updated
+     * order, or null when it is not one of this session's orders or nothing
+     * changed. An order already marked cancelled here is left alone.
+     */
+    fun applyOrderUpdate(
+        orderId: String,
+        clientOrderId: String?,
+        status: String?,
+        fillCount: Double?,
+        remainingCount: Double?
+    ): PlacedOrder? {
+        var updated: PlacedOrder? = null
+        _state.update { cur ->
+            val idx = cur.working.indexOfFirst {
+                it.orderId == orderId || (clientOrderId != null && it.clientOrderId == clientOrderId)
+            }
+            if (idx < 0) return@update cur
+            val order = cur.working[idx]
+            if (order.error?.startsWith("cancelled") == true) return@update cur
+            val st = status?.lowercase()
+            val cancelled = st == "canceled" || st == "cancelled"
+            // The app's own cancel is settled by its REST answer (and its cap release).
+            if (cancelled && order.orderId != null && order.orderId in cancelling) return@update cur
+            val closed = st == "canceled" || st == "cancelled" || st == "executed" || st == "filled"
+            val fills = fillCount?.takeIf { it.isFinite() && it >= 0.0 }?.coerceAtLeast(order.fillCount) ?: order.fillCount
+            val remaining = when {
+                closed -> 0.0
+                else -> remainingCount?.takeIf { it.isFinite() && it >= 0.0 } ?: order.remainingCount
+            }
+            // "(−N)" carries the unfilled contracts Kalshi cancelled, so the
+            // daily cap gives back exactly that share (LiveDailyCap.cancelledCostOf).
+            val unfilled = kotlin.math.floor(order.remainingCount + 1e-9).toInt().coerceAtLeast(0)
+            val error = if (cancelled) "$ORDER_CANCELLED_ON_KALSHI (−$unfilled)" else order.error
+            val next = order.copy(
+                orderId = order.orderId ?: orderId,
+                fillCount = fills,
+                remainingCount = remaining,
+                error = error
+            )
+            if (next == order) return@update cur
+            updated = next
+            cur.copy(working = cur.working.toMutableList().also { it[idx] = next })
+        }
+        return updated
     }
 
     private fun confirmPhase(
@@ -443,6 +501,9 @@ class TicketSession(
 
         /** Marks a working order Kalshi no longer has. Starts with "cancelled" so every resting list drops it. */
         const val ORDER_GONE = "cancelled or filled on Kalshi"
+
+        /** Kalshi reported the order cancelled. Starts with "cancelled" so resting lists drop it. */
+        const val ORDER_CANCELLED_ON_KALSHI = "cancelled on Kalshi"
 
         fun isOrderGone(message: String): Boolean {
             val m = message.lowercase()

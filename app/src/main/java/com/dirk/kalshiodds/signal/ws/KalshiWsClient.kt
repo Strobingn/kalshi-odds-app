@@ -20,9 +20,12 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 
 /**
- * Authenticated Kalshi Trade API WebSocket (public ticker / trade / orderbook).
+ * Authenticated Kalshi Trade API WebSocket: public ticker / trade / orderbook /
+ * lifecycle, the CF Benchmarks settlement index (1 Hz with averages + 5 Hz), the
+ * read-only account channels (fills, order status, positions) so live orders
+ * and holdings update the moment Kalshi changes them instead of on the next
+ * REST poll. Nothing here places, changes or cancels an order.
  * Auto-reconnects with exponential backoff and rotates primary ↔ elections host.
- * Analysis / alerts only — never subscribes to fills, portfolio, or order channels.
  */
 class KalshiWsClient(
     private val scope: CoroutineScope,
@@ -35,6 +38,11 @@ class KalshiWsClient(
     /** CF Benchmarks settlement index updates (authenticated channel). */
     private val onIndex: (KalshiWsMessages.Parsed.IndexValue) -> Unit = {},
     private val indexIds: List<String> = com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_IDS,
+    /** Account fills / order updates / position changes (read-only channels). */
+    private val onFill: (KalshiWsMessages.Parsed.Fill) -> Unit = {},
+    private val onUserOrder: (KalshiWsMessages.Parsed.UserOrder) -> Unit = {},
+    private val onPosition: (KalshiWsMessages.Parsed.Position) -> Unit = {},
+    private val privateChannels: List<String> = KalshiWsMessages.PRIVATE_CHANNELS,
     private val httpClient: OkHttpClient = defaultClient(),
     private val urls: List<String> = KalshiWsAuth.WS_URLS
 ) {
@@ -56,6 +64,9 @@ class KalshiWsClient(
     @Volatile private var channels: List<String> = listOf("ticker", "orderbook_delta")
     @Volatile private var marketTickers: List<String> = emptyList()
     private val subscribedSids = java.util.concurrent.CopyOnWriteArrayList<Int>()
+    /** Command ids of the 5 Hz index and account subscribes: errors answering them are ignored. */
+    @Volatile private var index5hzCmdId: Int? = null
+    @Volatile private var privateCmdId: Int? = null
 
     fun start(keyId: String, pem: String, channels: List<String>, marketTickers: List<String>) {
         this.keyId = keyId
@@ -133,9 +144,20 @@ class KalshiWsClient(
         ws.send(payload)
         onLog("subscribe id=$id channels=$channels tickers=${marketTickers.size}")
         if (indexIds.isNotEmpty()) {
-            val indexId = msgId.getAndIncrement()
-            ws.send(KalshiWsMessages.subscribeIndices(indexId, indexIds))
-            onLog("subscribe id=$indexId cfbenchmarks_value $indexIds")
+            // 1 Hz carries Kalshi's 60 s and final-minute averages; 5 Hz adds
+            // fresher prices in between. Both feed the same book.
+            val slowId = msgId.getAndIncrement()
+            ws.send(KalshiWsMessages.subscribeIndices(slowId, indexIds, KalshiWsMessages.INDEX_CHANNEL))
+            val fastId = msgId.getAndIncrement()
+            index5hzCmdId = fastId
+            ws.send(KalshiWsMessages.subscribeIndices(fastId, indexIds, KalshiWsMessages.INDEX_CHANNEL_5HZ))
+            onLog("subscribe id=$slowId/$fastId cfbenchmarks_value + 5hz $indexIds")
+        }
+        if (privateChannels.isNotEmpty()) {
+            val pid = msgId.getAndIncrement()
+            privateCmdId = pid
+            ws.send(KalshiWsMessages.subscribePrivate(pid, privateChannels))
+            onLog("subscribe id=$pid $privateChannels")
         }
     }
 
@@ -201,7 +223,10 @@ class KalshiWsClient(
                 is KalshiWsMessages.Parsed.Subscribed -> {
                     // The index subscription is kept out of the market sids so a
                     // ticker switch (which unsubscribes those) never drops it.
-                    if (parsed.channel?.startsWith("cfbenchmarks") != true) {
+                    // Neither index nor account subscriptions share the market sids.
+                    if (parsed.channel?.startsWith("cfbenchmarks") != true &&
+                        !KalshiWsMessages.isPrivateChannel(parsed.channel)
+                    ) {
                         parsed.sid?.let { subscribedSids += it }
                     }
                     onLog("subscribed sid=${parsed.sid}")
@@ -213,12 +238,25 @@ class KalshiWsClient(
                 is KalshiWsMessages.Parsed.IndexValue -> {
                     runCatching { onIndex(parsed) }
                 }
+                is KalshiWsMessages.Parsed.Fill -> {
+                    onLog("fill ${parsed.ticker} ${parsed.outcomeSide} ${parsed.count} @ ${parsed.yesPrice}")
+                    runCatching { onFill(parsed) }
+                }
+                is KalshiWsMessages.Parsed.UserOrder -> {
+                    runCatching { onUserOrder(parsed) }
+                }
+                is KalshiWsMessages.Parsed.Position -> {
+                    runCatching { onPosition(parsed) }
+                }
                 is KalshiWsMessages.Parsed.Lifecycle -> {
                     onLog("lifecycle ${parsed.eventType} ${parsed.ticker}")
                     runCatching { onLifecycle(parsed.ticker, parsed.eventType) }
                 }
                 is KalshiWsMessages.Parsed.Error -> {
-                    onLog("ws error ${parsed.code}: ${parsed.message}")
+                    onLog("ws error ${parsed.code}: ${parsed.message} (id=${parsed.id})")
+                    // A refused 5 Hz index (the 1 Hz one still runs) or account
+                    // subscription is not a broken connection.
+                    if (parsed.id != null && (parsed.id == index5hzCmdId || parsed.id == privateCmdId)) return
                     if (parsed.code == 9) {
                         onState(State(connected = false, reconnecting = false, host = null, detail = "auth required"))
                     }
