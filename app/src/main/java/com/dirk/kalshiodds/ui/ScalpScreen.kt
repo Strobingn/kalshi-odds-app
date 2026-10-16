@@ -155,14 +155,14 @@ private fun ScalpSettingsCard() {
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Text(
-            String.format(Locale.US, "Next buy: under %.0f¢ or %.0f–%.0f¢ with >%d min · size %.0f%% · TP %.0f¢ · SL %.0f¢",
-                maxAsk.value * 100, rangeLow.value * 100, rangeHigh.value * 100, rangeMin.value.toInt(), frac.value * 100, tp.value * 100, sl.value * 100),
+            String.format(Locale.US, "Last 2 min · favourite at %.0f¢+ · size %.0f%% · TP %.0f¢ · SL %.0f¢",
+                maxAsk.value * 100, frac.value * 100, tp.value * 100, sl.value * 100),
             style = MaterialTheme.typography.labelSmall,
             color = colors.accentBlue
         )
         SettingSlider("Take profit", tp.value, 0.02, 0.25) { tp.value = it; ScalpSettings.takeProfit = it; save() }
         SettingSlider("Stop loss", sl.value, 0.02, 0.15) { sl.value = it; ScalpSettings.stopLoss = it; save() }
-        SettingSlider("Max ask", maxAsk.value, 0.30, 0.70) { maxAsk.value = it; ScalpSettings.maxAsk = it; save() }
+        SettingSlider("Max ask", maxAsk.value, 0.50, 0.99) { maxAsk.value = it; ScalpSettings.maxAsk = it; save() }
         SettingSlider("Size", frac.value, 0.05, 0.50) { frac.value = it; ScalpSettings.fraction = it; save() }
         SettingSlider("Range minutes", rangeMin.value, 1.0, 15.0) { rangeMin.value = it; ScalpSettings.rangeMinutes = it.toInt(); save() }
         SettingSlider("Shift minutes", shiftMin.value, 1.0, 15.0) { shiftMin.value = it; ScalpSettings.shiftMinutes = it.toInt(); save() }
@@ -214,6 +214,7 @@ private fun LivePriceChart(tape: com.dirk.kalshiodds.signal.scalp.ScalpTape) {
             color = colors.textSecondary
         )
         Canvas(Modifier.fillMaxWidth().height(200.dp)) {
+            drawLine(colors.border, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1.dp.toPx())
             val yes = tape.yesBids.map { it.toFloat() }
             val no = tape.noBids.map { it.toFloat() }
             if (yes.size < 2) return@Canvas
@@ -231,8 +232,8 @@ private fun LivePriceChart(tape: com.dirk.kalshiodds.signal.scalp.ScalpTape) {
                 }
                 return p
             }
-            drawPath(path(yes), colors.up, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-            drawPath(path(no), colors.down, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path(yes), colors.up, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(path(no), colors.down, style = Stroke(3.dp.toPx(), cap = StrokeCap.Round))
         }
     }
 }
