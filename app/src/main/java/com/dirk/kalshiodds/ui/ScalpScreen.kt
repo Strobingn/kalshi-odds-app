@@ -57,97 +57,58 @@ fun ScalpScreen(
     val colors = DipTheme.colors
     val ranked = state.accounts.sortedByDescending { it.pnlUsd() }
     val total = state.accounts.sumOf { it.pnlUsd() }
-    val cash = state.accounts.sumOf { it.cashUsd }
-    val open = state.accounts.count { it.position != null }
-    val ahead = state.accounts.count { it.pnlUsd() >= 0.0 }
-    val trades = state.accounts.sumOf { it.trades }
-    val wins = state.accounts.sumOf { it.wins }
-    val winRate = if (trades > 0) 100.0 * wins / trades else 0.0
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(colors.bg)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
+    Column(
+        modifier = Modifier.fillMaxSize().background(colors.background).padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        item {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.surface, RoundedCornerShape(16.dp))
-                    .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-                    .padding(14.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column {
-                        Text(
-                            "Scalp lab",
-                            style = MaterialTheme.typography.titleMedium,
-                            color = colors.textPrimary,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            "20 books · Bitcoin 15-minute · paper only",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = colors.textSecondary
-                        )
-                    }
-                    Chip(
-                        text = if (total >= 0.0) "AHEAD" else "BEHIND",
-                        fg = if (total >= 0.0) colors.up else colors.down,
-                        bg = if (total >= 0.0) colors.upContainer else colors.downContainer
-                    )
-                }
-                Text(
-                    String.format(Locale.US, "%+.2f", total),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = if (total >= 0.0) colors.up else colors.down,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    String.format(Locale.US, "Combined cash $%,.0f", cash),
-                    style = MaterialTheme.typography.labelMedium,
-                    color = colors.textSecondary
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip(String.format(Locale.US, "%d open", open), colors.accentBlue, colors.surfaceAlt)
-                    Chip(String.format(Locale.US, "%d ahead", ahead), colors.up, colors.upContainer)
-                    Chip(String.format(Locale.US, "%d behind", state.accounts.size - ahead), colors.down, colors.downContainer)
-                }
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Chip(String.format(Locale.US, "%d trades", trades), colors.textPrimary, colors.surfaceAlt)
-                    Chip(
-                        String.format(Locale.US, "%.0f%% wins", winRate),
-                        if (winRate >= 50.0) colors.up else colors.textSecondary,
-                        colors.surfaceAlt
-                    )
-                }
-                Text(
-                    "Every book buys the cheap side, holds the rise, and sells the first real drop off the high. Nothing is held to settlement.",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = colors.textSecondary
-                )
-                ScalpCharts(state.accounts)
-                state.tape?.let { LivePriceChart(it) }
-                OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
-                    Text("Reset all 20 to \$20,000")
-                }
-                OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
-                    Text("Export CSV")
-                }
-                HourChart(state.accounts)
-                ScalpSettingsCard()
+        Text("Scalp", style = MaterialTheme.typography.headlineSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Text(
+            String.format(Locale.US, "%+.0f combined · %d books", total, state.accounts.size),
+            style = MaterialTheme.typography.labelMedium,
+            color = if (total >= 0.0) colors.up else colors.down
+        )
+        state.tape?.let { LivePriceChart(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onReset, modifier = Modifier.weight(1f)) { Text("Reset all") }
+            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f)) { Text("Export") }
+        }
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.weight(1f)) {
+            itemsIndexed(ranked, key = { _, a -> a.id }) { i, a ->
+                CompactRow(i + 1, a, { onResetOne(a.id) })
             }
         }
-        itemsIndexed(ranked, key = { _, account -> account.id }) { index, account ->
-            ScalpRow(rank = index + 1, account = account, onReset = { onResetOne(account.id) })
-        }
     }
+}
+
+@Composable
+private fun CompactRow(rank: Int, account: ScalpAccount, onReset: () -> Unit) {
+    val colors = DipTheme.colors
+    val pnl = account.pnlUsd()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(8.dp))
+            .padding(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(String.format("%d", rank), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, modifier = Modifier.width(20.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(account.name, style = MaterialTheme.typography.labelMedium, color = colors.textPrimary, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                String.format(Locale.US, "%d trades · %.0f%%", account.trades, if (account.trades > 0) 100.0 * account.wins / account.trades else 0.0),
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.textSecondary
+            )
+        }
+        Text(
+            String.format(Locale.US, "%+.0f", pnl),
+            style = MaterialTheme.typography.labelLarge,
+            color = if (pnl >= 0.0) colors.up else colors.down,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
 }
 
 @Composable

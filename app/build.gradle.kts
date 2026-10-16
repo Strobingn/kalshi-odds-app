@@ -16,8 +16,8 @@ android {
         applicationId = "com.dirk.kalshiodds.grokbitcoin"
         minSdk = 26
         targetSdk = 35
-        versionCode = 89
-        versionName = "1.53.0"
+        versionCode = 90
+        versionName = "1.54.0"
         // In-app update check (ui/AppUpdate.kt): the Build APK run that made
         // this APK. 0 / "local" when built outside GitHub Actions.
         buildConfigField(
