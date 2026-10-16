@@ -89,6 +89,8 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
     val selected = trades.firstOrNull { it.id == selectedId }
     val point = scrubAt?.let { at -> window.points.minByOrNull { abs(it.tMs - at) } }
     val markers = remember(window, trades) { window.markers(trades) }
+    val currentMarkers by rememberUpdatedState(markers)
+    val currentOnSelect by rememberUpdatedState(onSelect)
     ScalpLabCard {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -113,20 +115,20 @@ internal fun ScalpLiveWindow(window: ScalpWindow, trades: List<ScalpTrade>, sele
         val plotHeight = 250.dp
         Canvas(Modifier.fillMaxWidth().height(plotHeight).semantics {
             contentDescription = "15-minute UP and DOWN bids; ${markers.count { it.fill.kind == ScalpFillLog.Kind.BUY }} buy markers and ${markers.count { it.fill.kind != ScalpFillLog.Kind.BUY }} exit markers. Trade details follow the chart."
-        }.pointerInput(window.ticker, window.points, markers, selectedId) {
+        }.pointerInput(window.ticker) {
             fun choose(x: Float, y: Float?) {
                 val left = 30.dp.toPx(); val width = (size.width - left - 8.dp.toPx()).coerceAtLeast(1f)
                 val top = 16.dp.toPx(); val height = (size.height - top - 26.dp.toPx()).coerceAtLeast(1f)
                 val at = window.startMs + (((x - left) / width).coerceIn(0f, 1f) * 900_000).toLong()
-                val hit = if (y == null) null else markers.minByOrNull {
+                val hit = if (y == null) null else currentMarkers.minByOrNull {
                     hypot(left + width * (it.fill.atMs - window.startMs) / 900_000f - x,
                         top + height * (1 - it.fill.price.toFloat()) - y)
                 }?.takeIf { hypot(left + width * (it.fill.atMs - window.startMs) / 900_000f - x,
                     top + height * (1 - it.fill.price.toFloat()) - y) <= 24.dp.toPx() }
-                if (hit != null) { onSelect(hit.tradeId); scrubAt = hit.fill.atMs } else scrubAt = at
+                if (hit != null) { currentOnSelect(hit.tradeId); scrubAt = hit.fill.atMs } else scrubAt = at
             }
             detectTapGestures { choose(it.x, it.y) }
-        }.pointerInput(window.ticker, window.points) {
+        }.pointerInput(window.ticker) {
             detectHorizontalDragGestures(onDragStart = { scrubAt = window.startMs + (((it.x - 30.dp.toPx()) /
                 (size.width - 38.dp.toPx())).coerceIn(0f, 1f) * 900_000).toLong() }) { change, _ ->
                 scrubAt = window.startMs + (((change.position.x - 30.dp.toPx()) / (size.width - 38.dp.toPx())).coerceIn(0f, 1f) * 900_000).toLong()
