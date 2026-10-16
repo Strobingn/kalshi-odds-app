@@ -2,7 +2,7 @@ name: Build APK
 
 on:
   push:
-    branches: [Mis_bitcoin, Claude, main, claude/kalshi-odds-newest, claude/strategy-arena, claude/scalp-insights]
+    branches: [Mis_bitcoin, Claude, main, claude/kalshi-odds-newest, claude/strategy-arena, claude/scalp-insights, claude/scalper-model-refresh]
   workflow_dispatch:
 
 permissions:

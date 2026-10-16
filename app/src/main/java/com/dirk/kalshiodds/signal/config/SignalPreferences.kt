@@ -46,6 +46,8 @@ data class SignalSettings(
     val subscribeTrades: Boolean = true,
     /** Coinbase spot WebSocket; off → REST spot only (25 s cache). */
     val spotStreamEnabled: Boolean = SignalConstants.DEFAULT_SPOT_STREAM,
+    /** Spot from Kalshi's CF index stream only (no Coinbase / Binance). */
+    val kalshiPriceOnly: Boolean = SignalConstants.DEFAULT_KALSHI_PRICE_ONLY,
     /** Settings → "Late-favorite paper tracker". Paper only, never orders. */
     val lateFavoriteEnabled: Boolean = com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
     /**
@@ -200,6 +202,7 @@ class SignalPreferences(
     }
     suspend fun updateSubscribeTrades(value: Boolean) = edit { it[KEY_TRADES] = value }
     suspend fun updateSpotStream(value: Boolean) = edit { it[KEY_SPOT_STREAM] = value }
+    suspend fun updateKalshiPriceOnly(value: Boolean) = edit { it[KEY_KALSHI_PRICE_ONLY] = value }
     suspend fun updateLateFavorite(value: Boolean) = edit { it[KEY_LATE_FAVORITE] = value }
     suspend fun updateClearLead(value: Boolean) = edit { it[KEY_CLEAR_LEAD] = value }
     suspend fun updateScalper(value: Boolean) = edit { it[KEY_SCALPER] = value }
@@ -416,6 +419,7 @@ class SignalPreferences(
             liveSignalsEnabled = this[KEY_LIVE] ?: def.liveSignalsEnabled,
             subscribeTrades = this[KEY_TRADES] ?: def.subscribeTrades,
             spotStreamEnabled = this[KEY_SPOT_STREAM] ?: SignalConstants.DEFAULT_SPOT_STREAM,
+            kalshiPriceOnly = this[KEY_KALSHI_PRICE_ONLY] ?: SignalConstants.DEFAULT_KALSHI_PRICE_ONLY,
             lateFavoriteEnabled = this[KEY_LATE_FAVORITE]
                 ?: com.dirk.kalshiodds.signal.latefav.LateFavoriteRule.DEFAULT_ENABLED,
             clearLeadEnabled = this[KEY_CLEAR_LEAD] ?: true,
@@ -497,6 +501,7 @@ class SignalPreferences(
         private val KEY_LIVE = booleanPreferencesKey("live_signals_enabled")
         private val KEY_TRADES = booleanPreferencesKey("subscribe_trades")
         private val KEY_SPOT_STREAM = booleanPreferencesKey("spot_stream_enabled")
+        private val KEY_KALSHI_PRICE_ONLY = booleanPreferencesKey("kalshi_price_only")
         private val KEY_LATE_FAVORITE = booleanPreferencesKey("late_favorite_enabled")
         private val KEY_CLEAR_LEAD = booleanPreferencesKey("clear_lead_enabled")
         private val KEY_SCALPER = booleanPreferencesKey("paper_scalper_enabled")

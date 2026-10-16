@@ -99,7 +99,12 @@ class AppContainer(context: Context) {
         heavyStore = heavyStore,
         results = resultsWriter
     )
-    val external = ExternalMarketCache()
+    /** Spot features: from Kalshi's index stream when "Bitcoin price from Kalshi only" is on, else the exchange poll. */
+    val external = ExternalMarketCache(
+        kalshi = { now ->
+            if (hub.settings.kalshiPriceOnly) com.dirk.kalshiodds.signal.external.KalshiSpot.snapshot(cfIndex, now) else null
+        }
+    )
     /** Paper-only late-favorite tracker (edge_search H2). Never orders. */
     val lateFavorite = com.dirk.kalshiodds.signal.latefav.LateFavoriteStore(app)
     /** Paper-only flow-fade tracker (docs/flow-fade-2026-10-04.md). Never orders. */
@@ -118,8 +123,39 @@ class AppContainer(context: Context) {
         closeMs = { t ->
             scoring.book.closeTime(t) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(t)
         },
-        onReset = { scalperStore.log.archive() }
+        engine = com.dirk.kalshiodds.signal.scalper.ScalperEngine(tuning = scalperStore.tuning),
+        onReset = { scalperStore.log.archive() },
+        fairYes = { t, now -> scalperFairYes(t, now) }
     )
+
+    /**
+     * YES fair price for the arena's late favourites, from Kalshi only: the CF
+     * Benchmarks index Kalshi streams on its WebSocket (the index these markets
+     * settle on), its own 1-second volatility, the strike Kalshi publishes and,
+     * in the final minute, Kalshi's running settlement average. Null (no trade)
+     * while the index is stale: there is no Coinbase fallback.
+     */
+    private fun scalperFairYes(ticker: String, nowMs: Long): Double? {
+        val coin = com.dirk.kalshiodds.signal.scalper.ScalperState.coinOf(ticker)
+        val close = scoring.book.closeTime(ticker) ?: com.dirk.kalshiodds.signal.trade.TakerCost.closeEpochMs(ticker) ?: return null
+        val strike = scoring.book.strike(ticker) ?: com.dirk.kalshiodds.signal.engine.DirectionSanity.parseStrike(ticker)
+        val spot = cfIndex.fresh(coin, nowMs)?.value ?: return null
+        val observed = if (close - nowMs < 60_000L) {
+            cfIndex.finalMinuteAverage(coin, close, nowMs)?.takeIf { it > 0.0 }?.let { kotlin.math.ln(it) }
+                ?: cfIndex.meanLog(coin, close - 60_000L, nowMs)
+        } else {
+            null
+        }
+        return com.dirk.kalshiodds.signal.scalper.ScalpFair.fairYes(
+            spot = spot,
+            strike = strike,
+            tteSeconds = (close - nowMs) / 1000.0,
+            std1m = cfIndex.std1m(coin, nowMs),
+            coin = coin,
+            observedMeanLog = observed,
+            indexNoise = com.dirk.kalshiodds.signal.external.CfIndexBook.INDEX_NOISE_LOG
+        )
+    }
     /** Paper limit orders resting against the real book, filled by real trades. Never orders. */
     val paperLimits: com.dirk.kalshiodds.signal.limit.PaperLimitBook by lazy {
         com.dirk.kalshiodds.signal.limit.PaperLimitBook(

@@ -104,9 +104,12 @@ class KalshiOddsApp : Application() {
         appScope.launch {
             runCatching {
                 container.preferences.settings
-                    .map { it.spotStreamEnabled }
+                    .map { it.spotStreamEnabled && !it.kalshiPriceOnly }
                     .distinctUntilChanged()
-                    .collect { enabled -> container.spotStream.setEnabled(enabled) }
+                    .collect { enabled ->
+                        container.spotStream.setEnabled(enabled)
+                        if (enabled) container.spotBook.source = com.dirk.kalshiodds.signal.external.SpotMerge.SOURCE
+                    }
             }
         }
     }

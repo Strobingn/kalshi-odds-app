@@ -1,0 +1,308 @@
+package com.dirk.kalshiodds.ui
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.dirk.kalshiodds.signal.scalper.ArenaCharts
+import com.dirk.kalshiodds.signal.scalper.ArenaTable
+import com.dirk.kalshiodds.signal.scalper.ScalpTrade
+import com.dirk.kalshiodds.signal.scalper.ScalperResults
+import com.dirk.kalshiodds.ui.theme.DipTheme
+
+/**
+ * The Arena's building blocks, after the Swarm / Kashi scalp screens: one
+ * spacing scale, borderless cards, a hero number with a label-over-value
+ * grid, monospace figures, and two-line list rows with a P&L stripe.
+ */
+internal object ArenaUi {
+    val GUTTER = 16.dp
+    val GAP = 12.dp
+    val CARD_PAD = 16.dp
+    val CARD_SHAPE = RoundedCornerShape(20.dp)
+    val ROW_SHAPE = RoundedCornerShape(14.dp)
+
+    /** Figures line up in columns and read as numbers. */
+    @Composable
+    fun mono(base: TextStyle): TextStyle = base.copy(fontFamily = FontFamily.Monospace)
+}
+
+/** A borderless card; [accent] draws a 4 dp stripe down its left edge. */
+@Composable
+internal fun ArenaCard(
+    modifier: Modifier = Modifier,
+    accent: Color? = null,
+    content: @Composable () -> Unit
+) {
+    val colors = DipTheme.colors
+    Row(
+        modifier
+            .fillMaxWidth()
+            .clip(ArenaUi.CARD_SHAPE)
+            .background(colors.surface)
+            .height(IntrinsicSize.Min)
+    ) {
+        if (accent != null) Box(Modifier.width(4.dp).fillMaxHeight().background(accent))
+        Column(
+            Modifier.weight(1f).padding(ArenaUi.CARD_PAD),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) { content() }
+    }
+}
+
+/** A list heading with an optional text action on the right. */
+@Composable
+internal fun ArenaSectionHeader(title: String, action: String? = null, onAction: () -> Unit = {}) {
+    val colors = DipTheme.colors
+    Row(
+        Modifier.fillMaxWidth().padding(top = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = colors.textPrimary,
+            modifier = Modifier.weight(1f)
+        )
+        if (action != null) {
+            TextButton(onClick = onAction) { Text(action, color = colors.accentBlue) }
+        }
+    }
+}
+
+/** One label-over-value figure of a [KpiGrid]. */
+internal data class Kpi(val label: String, val value: String, val color: Color? = null)
+
+/** Figures three to a row, label above value. */
+@Composable
+internal fun KpiGrid(items: List<Kpi>, perRow: Int = 3) {
+    val colors = DipTheme.colors
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        items.chunked(perRow).forEach { row ->
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                row.forEach { k ->
+                    Column(Modifier.weight(1f)) {
+                        Text(k.label, style = MaterialTheme.typography.labelSmall, color = colors.textSecondary, maxLines = 1)
+                        Text(
+                            k.value,
+                            style = ArenaUi.mono(MaterialTheme.typography.titleMedium),
+                            fontWeight = FontWeight.SemiBold,
+                            color = k.color ?: colors.textPrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                repeat(perRow - row.size) { Box(Modifier.weight(1f)) }
+            }
+        }
+    }
+}
+
+/** The big number at the top of a page: a caption, the net after fees, one line under it, then [kpis]. */
+@Composable
+internal fun HeroCard(caption: String, netUsd: Double?, sub: String, kpis: List<Kpi>, tag: String = "ARENA_HERO") {
+    val colors = DipTheme.colors
+    ArenaCard(Modifier.testTag(tag)) {
+        Text(caption, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
+        Text(
+            netUsd?.let { ScalperResults.money(it) } ?: "–",
+            style = ArenaUi.mono(MaterialTheme.typography.headlineLarge).copy(fontSize = 34.sp),
+            fontWeight = FontWeight.Bold,
+            color = netUsd?.let { pnlColor(it) } ?: colors.textSecondary
+        )
+        Text(sub, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
+        if (kpis.isNotEmpty()) {
+            Box(Modifier.height(4.dp))
+            KpiGrid(kpis)
+        }
+    }
+}
+
+/** Equal-width pills: the page's few top-level choices. */
+@Composable
+internal fun <T> PillTabs(options: List<T>, selected: T, label: (T) -> String, tag: (T) -> String, onSelect: (T) -> Unit) {
+    val colors = DipTheme.colors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(50))
+            .background(colors.surface)
+            .padding(4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        options.forEach { o ->
+            val on = o == selected
+            Box(
+                Modifier
+                    .weight(1f)
+                    .heightIn(min = 40.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(if (on) colors.accentBlue.copy(alpha = 0.18f) else Color.Transparent)
+                    .clickable { onSelect(o) }
+                    .testTag(tag(o)),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    label(o),
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (on) colors.accentBlue else colors.textSecondary,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/** Small text pills that scroll sideways: a sub-choice inside a tab. */
+@Composable
+internal fun <T> ChipRow(options: List<T>, selected: T, label: (T) -> String, tag: (T) -> String, onSelect: (T) -> Unit) {
+    val colors = DipTheme.colors
+    Row(
+        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        options.forEach { o ->
+            val on = o == selected
+            Box(
+                Modifier
+                    .clip(RoundedCornerShape(50))
+                    .background(if (on) colors.textPrimary else colors.surface)
+                    .clickable { onSelect(o) }
+                    .padding(horizontal = 14.dp, vertical = 8.dp)
+                    .testTag(tag(o))
+            ) {
+                Text(
+                    label(o),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (on) colors.bg else colors.textSecondary,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+/** One strategy as a two-line row: name and a muted stats line, its curve, its net on the right. */
+@Composable
+internal fun StrategyListRow(row: ArenaTable.Row, curve: ArenaCharts.Curve?, extra: String?, onClick: () -> Unit) {
+    val colors = DipTheme.colors
+    val traded = row.trades > 0
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(ArenaUi.ROW_SHAPE)
+            .background(colors.surface)
+            .clickable(onClick = onClick)
+            .height(IntrinsicSize.Min)
+            .testTag("ARENA_ROW_${row.strategy.name}"),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            Modifier.width(4.dp).fillMaxHeight()
+                .background(if (!traded) colors.border else pnlColor(row.netUsd))
+        )
+        Column(Modifier.weight(1f).padding(start = 12.dp, top = 12.dp, bottom = 12.dp)) {
+            Text(
+                row.strategy.label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            val line = if (!traded) {
+                "waiting for its signal · ${ArenaTable.familyOf(row.strategy).label.lowercase()}"
+            } else {
+                "${row.trades} trades · ${ScalperResults.pct(row.winRate)} won" + (extra?.let { " · $it" } ?: "")
+            }
+            Text(line, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        if (traded) Sparkline(curve, Modifier.padding(horizontal = 8.dp))
+        Text(
+            if (traded) ScalperResults.money(row.netUsd) else "–",
+            style = ArenaUi.mono(MaterialTheme.typography.bodyLarge),
+            fontWeight = FontWeight.Bold,
+            color = if (traded) pnlColor(row.netUsd) else colors.textSecondary,
+            textAlign = TextAlign.End,
+            modifier = Modifier.padding(end = 16.dp).width(84.dp)
+        )
+    }
+}
+
+/** One closed trade: the strategy as a tinted pill, the side, the prices and why it closed; its net on the right. */
+@Composable
+internal fun TradeCard(t: ScalpTrade) {
+    val colors = DipTheme.colors
+    val net = pnlColor(t.pnlUsd)
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .clip(ArenaUi.ROW_SHAPE)
+            .background(colors.surface)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    ScalperResults.strategyLabel(t.strategy),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = colors.accentBlue,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f, fill = false)
+                        .clip(RoundedCornerShape(50))
+                        .background(colors.accentBlue.copy(alpha = 0.14f))
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+                Text(ScalperResults.sideLabel(t.side), style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = colors.textPrimary)
+            }
+            val exit = if (t.kind == "SETTLED") (if (t.exit >= 0.5) "$1" else "$0") else ScalperResults.cents(t.exit)
+            Text(
+                "${ScalperResults.cents(t.entry)} → $exit · ${t.contracts} ct · ${ScalperResults.kindLabel(t.kind)}",
+                style = ArenaUi.mono(MaterialTheme.typography.bodySmall),
+                color = colors.textPrimary
+            )
+            Text(ScalperResults.timeLabel(t.closedAtMs), style = MaterialTheme.typography.labelSmall, color = colors.textSecondary)
+        }
+        Text(
+            ScalperResults.money(t.pnlUsd),
+            style = ArenaUi.mono(MaterialTheme.typography.titleMedium),
+            fontWeight = FontWeight.Bold,
+            color = net
+        )
+    }
+}

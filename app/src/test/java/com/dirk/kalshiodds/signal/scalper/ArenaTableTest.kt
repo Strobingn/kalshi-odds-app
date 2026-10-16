@@ -29,7 +29,7 @@ class ArenaTableTest {
         assertEquals(ArenaTable.Family.HOLD, ArenaTable.familyOf(ScalpStrategy.FLOW_FADE))
         assertEquals(ArenaTable.Family.BUY_NOW, ArenaTable.familyOf(ScalpStrategy.BOUNCE))
         assertEquals(ArenaTable.Family.RESTING, ArenaTable.familyOf(ScalpStrategy.QUIET_MAKER))
-        assertEquals(15, rows.count { ArenaTable.matches(it, ArenaTable.Family.NEW) })
+        assertEquals("the 1.9.4 fifteen and Kashi's five", 20, rows.count { ArenaTable.matches(it, ArenaTable.Family.NEW) })
         assertEquals(0, rows.count { ArenaTable.matches(it, ArenaTable.Family.TRADED) })
         val byFamily = listOf(ArenaTable.Family.BUY_NOW, ArenaTable.Family.RESTING, ArenaTable.Family.HOLD)
             .sumOf { f -> rows.count { ArenaTable.matches(it, f) } }
@@ -70,7 +70,7 @@ class ArenaTableTest {
         val rows = ArenaTable.rows(s, emptyList())
         val net = ArenaTable.view(rows, ArenaTable.Family.ALL, ArenaTable.SortKey.NET)
         assertEquals(listOf(ScalpStrategy.BOUNCE, ScalpStrategy.LONG_SHOT, ScalpStrategy.DIP_HUNTER), net.take(3).map { it.strategy })
-        assertEquals("all 30 still listed, the idle ones after", 30, net.size)
+        assertEquals("all 35 still listed, the idle ones after", 35, net.size)
         val worst = ArenaTable.view(rows, ArenaTable.Family.TRADED, ArenaTable.SortKey.NET, bestFirst = false)
         assertEquals(listOf(ScalpStrategy.DIP_HUNTER, ScalpStrategy.LONG_SHOT, ScalpStrategy.BOUNCE), worst.map { it.strategy })
         val pf = ArenaTable.view(rows, ArenaTable.Family.TRADED, ArenaTable.SortKey.PROFIT_FACTOR)
@@ -114,6 +114,9 @@ class ArenaTableTest {
         assertEquals(3, d.sampled)
         val none = ArenaTable.detail(ScalpStrategy.LONG_SHOT, ScalperState.fresh(), trades)
         assertNull(none.best)
+        val winless = ArenaTable.detail(b, ScalperState.fresh(), listOf(trade(b, 1, -0.2), trade(b, 2, -0.5)))
+        assertEquals("the best of a winless record is its smallest loss", -0.2, winless.best!!.pnlUsd, 1e-12)
+        assertEquals(-0.5, winless.worst!!.pnlUsd, 1e-12)
         assertTrue(none.recent.isEmpty())
     }
 }

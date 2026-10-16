@@ -21,7 +21,7 @@ object ArenaTable {
         BUY_NOW("Buy now"),
         RESTING("Resting"),
         HOLD("Hold to close"),
-        NEW("New in 1.9.4"),
+        NEW("New"),
         TRADED("Has traded")
     }
 
@@ -164,24 +164,37 @@ object ArenaTable {
         ScalpStrategy.PENNY_SCALPER -> "A 1¢ spread with at most 200 contracts ahead on the bid (needs the live book)."
         ScalpStrategy.BOOK_IMBALANCE -> "The bid shows 3× the ask's size and 300+ contracts (needs the live book)."
         ScalpStrategy.LATE_COMEBACK -> "Minutes 10–13, an underdog at 20–40¢ up 4¢ or more in 30 seconds."
+        ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
+        ScalpStrategy.KASHI_FAV_LAST30, ScalpStrategy.KASHI_FAV_NIGHT -> {
+            val f = st.fav!!
+            "${f.tteMin}–${f.tteMax} s left, the live Bitcoin price makes the side at least ${c(f.fairMin)} to win, " +
+                "and its ask is ${c(f.gap)} or more under that" + (if (f.offUsHours) "; not 13:00–21:00 UTC." else ".")
+        }
     }
 
     private fun c(d: Double): String = "${Math.round(d * 100)}¢"
 
-    /** How it gets in and out, built from the strategy's own settings. */
-    fun rules(st: ScalpStrategy): List<String> {
+    /** How it gets in and out, built from the strategy's settings (yours where you changed one). */
+    fun rules(st: ScalpStrategy, t: Tuned = Tuned(st, ScalpKnobs(), ScalpTuning.DEFAULT_CONTRACTS)): List<String> {
         val entry = if (st.taker) "Buys at the ask the moment the signal fires (taker fee)."
         else "Rests a bid and waits up to 20 s for sellers to reach it (no fee)."
-        val exit = if (st.hold) "Holds to the settlement: $1 if its side wins, $0 if not."
-        else "Out at +${c(st.targetDollars)} (resting offer), or sold at the bid at −${c(st.stopDollars)} " +
-            "or after ${st.timeoutMs / 1000} s (taker fee)."
-        val band = if (st.entryMin != PrintGrid.MIN_PRICE || st.entryMax != PrintGrid.MAX_PRICE) {
-            "Trades only between ${c(st.entryMin)} and ${c(st.entryMax)}."
+        val exit = if (st.hold) {
+            "Holds to the settlement: $1 if its side wins, $0 if not" +
+                (if (t.stopDollars > 0.0) ", unless the bid falls ${c(t.stopDollars)} below the entry (sold, taker fee)." else ".")
+        } else {
+            "Out at +${c(t.targetDollars)} (resting offer), or sold at the bid at −${c(t.stopDollars)} " +
+                "or after ${t.timeoutMs / 1000} s (taker fee)."
+        }
+        val band = if (t.ownBand) {
+            "Trades only between ${c(t.entryMin)} and ${c(t.entryMax)}."
         } else {
             "Trades between ${c(PrintGrid.MIN_PRICE)} and ${c(PrintGrid.MAX_PRICE)}."
         }
-        val size = "10 contracts an order, up to ${st.maxPerSide} at once per side; looks every ${st.cadenceSeconds} s."
-        return listOf(signal(st), entry, exit, band, size)
+        val size = "${t.contracts} contracts an order, up to ${t.maxPerSide} at once per side; looks every ${t.cadenceSeconds} s."
+        val spec = ScalpTriggers.of(st)
+        val trigger = t.knobs.trigger
+        val signal = signal(st) + if (spec != null && trigger != null) " Your setting: ${spec.label.lowercase()} ${ScalpTriggers.text(spec, trigger)}." else ""
+        return listOf(signal, entry, exit, band, size) + if (!t.enabled) listOf("Switched off in its settings: it opens nothing new.") else emptyList()
     }
 
     /** Everything on the one-strategy page that is a number. */
@@ -204,8 +217,9 @@ object ArenaTable {
             row = row,
             stats = state.stats(st.name),
             streaks = (ps?.longestWinStreak ?: 0) to (ps?.longestLossStreak ?: 0),
-            best = mine.maxByOrNull { it.pnlUsd }?.takeIf { it.pnlUsd > 0 },
-            worst = mine.minByOrNull { it.pnlUsd }?.takeIf { it.pnlUsd < 0 },
+            // The real extremes even when every trade won (or lost): the best of a winless record is its smallest loss.
+            best = mine.maxByOrNull { it.pnlUsd },
+            worst = mine.minByOrNull { it.pnlUsd },
             recent = mine.sortedByDescending { it.closedAtMs }.take(recent),
             sampled = mine.size
         )

@@ -3,12 +3,13 @@
 4c stop, 120 s). Threshold = the VALID quantile with the highest VALID total P&L ("take everything the model
 expects to pay"), from top 100/85/70/50/30/20/10 %. Scored once on TEST."""
 import numpy as np, lightgbm as lgb, json, random
+from splits import split
 d=np.load('ml_data.npz',allow_pickle=True)
 allf=[str(f) for f in d['feats']]
 FEATS=["mid","spread","tte","dm5","dm10","dm20","dm30","dm60","vol60","nchg60","imb5","lvol5","imb10","lvol10","imb30","lvol30","imb60","lvol60","lcnt30","lmaxbuy30","lmaxsell30","stale_bid","stale_ask"]
 X=np.nan_to_num(d['X'][:,[allf.index(f) for f in FEATS]].astype(np.float32),nan=0.0)
 Y=d['Y'].astype(np.float64)*100.0; mkt=d['mkt'].astype(int); mday=d['mday']; day=mday[mkt]; days=sorted(set(mday))
-TR=set(days[:11]); VA=set(days[11:15]); TE=set(days[15:])
+TR,VA,TE=split(days)
 y=Y[:,4]; ok=~np.isnan(y)
 a=np.isin(day,list(TR))&ok; b=np.isin(day,list(VA))&ok; c=np.isin(day,list(TE))&ok
 P=dict(objective="regression",learning_rate=0.03,num_leaves=31,min_data_in_leaf=500,feature_fraction=0.7,bagging_fraction=0.7,bagging_freq=1,lambda_l2=10.0,verbose=-1,seed=7,num_threads=2,use_missing=False)

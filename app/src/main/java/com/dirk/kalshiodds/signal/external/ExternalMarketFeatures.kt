@@ -87,6 +87,40 @@ data class ExternalSnapshot(
 private const val VOL_BARS = 60
 private const val REST_BARS = VOL_BARS + 1
 
+/** The σ estimators both the REST poll and [KalshiSpot] use (parity with ml/train_edge.py). */
+internal object SpotVol {
+    const val BARS = VOL_BARS
+
+    /** The trainer's σ from 1-minute closes: the finished bars only, the last [BARS] of them. */
+    fun trainerVolOf(closes: List<Double>): Double? =
+        realizedVol((if (closes.size > VOL_BARS) closes.dropLast(1) else closes).takeLast(VOL_BARS))
+
+    /**
+     * EWMA sigma over 1-minute log returns (lambda = 0.86, up to ~64 bars).
+     * Sigma is the digital fair's only parameter; the 16-bar sample std was
+     * noisy enough to move the fair ~30% farther from the market in testing.
+     * Parity: ml/train_edge.py realized_vol_annual uses the same lambda and
+     * unbiased-start formula, so trainer and phone agree.
+     */
+    fun realizedVol(closes: List<Double>): Double? {
+        if (closes.size < 4) return null
+        val rets = closes.zipWithNext { a, b ->
+            if (a > 0.0 && b > 0.0) ln(b / a) else 0.0
+        }
+        if (rets.isEmpty()) return null
+        val mean = rets.average()
+        var var_ = rets.map { val d = it - mean; d * d }.average()
+        var wSum = 1.0
+        val lam = 0.86
+        for (r in rets) {
+            val d = r - mean
+            var_ = lam * var_ + (1.0 - lam) * d * d
+            wSum = lam * wSum + (1.0 - lam)
+        }
+        return sqrt((var_ / wSum).coerceAtLeast(0.0))
+    }
+}
+
 class ExternalMarketClient(
     private val http: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(SignalConstants.EXTERNAL_CONNECT_TIMEOUT_MS, TimeUnit.MILLISECONDS)
@@ -206,34 +240,9 @@ class ExternalMarketClient(
         return closes
     }
 
-    /** The trainer's σ from Coinbase closes: the finished bars only, the last VOL_BARS of them. */
-    private fun trainerVolOf(closes: List<Double>): Double? =
-        realizedVol((if (closes.size > VOL_BARS) closes.dropLast(1) else closes).takeLast(VOL_BARS))
+    private fun trainerVolOf(closes: List<Double>): Double? = SpotVol.trainerVolOf(closes)
 
-    /**
-     * EWMA sigma over 1-minute log returns (lambda = 0.86, up to ~64 bars).
-     * Sigma is the digital fair's only parameter; the 16-bar sample std was
-     * noisy enough to move the fair ~30% farther from the market in testing.
-     * Parity: ml/train_edge.py realized_vol_annual uses the same lambda and
-     * unbiased-start formula, so trainer and phone agree.
-     */
-    private fun realizedVol(closes: List<Double>): Double? {
-        if (closes.size < 4) return null
-        val rets = closes.zipWithNext { a, b ->
-            if (a > 0.0 && b > 0.0) ln(b / a) else 0.0
-        }
-        if (rets.isEmpty()) return null
-        val mean = rets.average()
-        var var_ = rets.map { val d = it - mean; d * d }.average()
-        var wSum = 1.0
-        val lam = 0.86
-        for (r in rets) {
-            val d = r - mean
-            var_ = lam * var_ + (1.0 - lam) * d * d
-            wSum = lam * wSum + (1.0 - lam)
-        }
-        return sqrt((var_ / wSum).coerceAtLeast(0.0))
-    }
+    private fun realizedVol(closes: List<Double>): Double? = SpotVol.realizedVol(closes)
 
     private fun getJsonObject(url: String): JSONObject? {
         val body = get(url) ?: return null
@@ -264,7 +273,9 @@ class ExternalMarketClient(
  */
 class ExternalMarketCache(
     private val client: ExternalMarketClient = ExternalMarketClient(),
-    private val ttlMs: Long = SignalConstants.EXTERNAL_CACHE_MS
+    private val ttlMs: Long = SignalConstants.EXTERNAL_CACHE_MS,
+    /** When it answers non-null, the snapshot comes from Kalshi ([KalshiSpot]) and no exchange is called. */
+    private val kalshi: ((Long) -> ExternalSnapshot?)? = null
 ) {
     @Volatile
     private var snapshot: ExternalSnapshot = ExternalSnapshot()
@@ -276,6 +287,13 @@ class ExternalMarketCache(
 
     @Synchronized
     fun refreshIfStale(nowMs: Long = System.currentTimeMillis()): ExternalSnapshot {
+        kalshi?.let { k ->
+            val fromKalshi = runCatching { k(nowMs) }.getOrNull()
+            if (fromKalshi != null) {
+                snapshot = fromKalshi
+                return snapshot
+            }
+        }
         if (nowMs - lastAttemptMs < ttlMs && snapshot.fetchedAtMs > 0L) return snapshot
         lastAttemptMs = nowMs
         val next = runCatching { client.fetchAll() }.getOrNull()

@@ -354,7 +354,9 @@ class PaperScalper(
     private val closeMs: (String) -> Long?,
     val engine: ScalperEngine = ScalperEngine(),
     /** Called first by [reset]: the store archives the trade files; false when that did not complete. */
-    private val onReset: () -> Boolean = { true }
+    private val onReset: () -> Boolean = { true },
+    /** YES fair price from the live spot ([ScalpFair]) for Kashi's late favourites; null when unknown. */
+    private val fairYes: (ticker: String, nowMs: Long) -> Double? = { _, _ -> null }
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
@@ -468,17 +470,26 @@ class PaperScalper(
      */
     private fun decide(ticker: String, grid: PrintGrid, nowMs: Long): List<ScalpEvent> {
         val s = grid.secondOf(nowMs) - 1
-        if (s < PrintGrid.MIN_DECISION_SECOND || s > PrintGrid.MAX_DECISION_SECOND) return emptyList()
+        // The late favourites trade inside the last minute; everything else stops at minute 13.
+        if (s < PrintGrid.MIN_DECISION_SECOND || s > LATE_LAST_SECOND) return emptyList()
         // Slot 0 is the last second looked at (dozens of prints share a second); then one slot per strategy.
         val last = lastDecision.getOrPut(ticker) { IntArray(STRATEGIES.size + 1) { -1_000 } }
         if (last[0] == s) return emptyList()
         last[0] = s
-        val due = STRATEGIES.filter { s - last[it.ordinal + 1] >= it.cadenceSeconds }
+        val tte = PrintGrid.SECONDS - s
+        val tuning = engine.tuning
+        val due = STRATEGIES.filter { st ->
+            val t = tuning.tuned(st)
+            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds &&
+                (st.fav?.let { tte in it.tteMin..it.tteMax } ?: (s <= PrintGrid.MAX_DECISION_SECOND))
+        }
         if (due.isEmpty()) return emptyList()
         for (st in due) last[st.ordinal + 1] = s
         if (!grid.warm(s)) return emptyList()
         val events = ArrayList<ScalpEvent>()
         val top = topOfBook(ticker)
+        val fairY = if (due.any { it.fav != null }) runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() } else null
+        val usHours = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneOffset.UTC).hour in 13..20
         for (side in SIDES) {
             val yes = side == "YES"
             val realBid = (if (yes) top?.yesBid else top?.noBid)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
@@ -508,7 +519,10 @@ class PaperScalper(
                 move10 = d10.takeIf { !it.isNaN() }, move30 = d30.takeIf { !it.isNaN() }, features = x
             )
             for (st in due) {
-                val ownBand = st.entryMin != PrintGrid.MIN_PRICE || st.entryMax != PrintGrid.MAX_PRICE
+                val tn = tuning.tuned(st)
+                // The strategy's main trigger: yours when you set one, else its default.
+                fun trig(default: Double) = tn.triggerValue(default)
+                val ownBand = tn.ownBand
                 // Own-band strategies may trade outside the grid's 10–90¢ quotable band, but still need a
                 // current grid quote: the cached book has no age, and a stalled book would price stale.
                 val printsLive = !grid.bid(side, s).isNaN() && !grid.ask(side, s).isNaN()
@@ -516,109 +530,119 @@ class PaperScalper(
                 val fire = when (st) {
                     ScalpStrategy.ML_REST -> null
                     ScalpStrategy.DIP_HUNTER, ScalpStrategy.DIP_HUNTER_REST ->
-                        !d10.isNaN() && d10 <= -ScalpStrategy.FAST_MOVE_DOLLARS + EPS
+                        !d10.isNaN() && d10 <= -trig(ScalpStrategy.FAST_MOVE_DOLLARS) + EPS
                     ScalpStrategy.MOMENTUM_SNIPER, ScalpStrategy.MOMENTUM_SNIPER_REST ->
-                        !d10.isNaN() && d10 >= ScalpStrategy.FAST_MOVE_DOLLARS - EPS
+                        !d10.isNaN() && d10 >= trig(ScalpStrategy.FAST_MOVE_DOLLARS) - EPS
                     ScalpStrategy.EXTREME_REVERSION, ScalpStrategy.EXTREME_REVERSION_REST ->
-                        !d30.isNaN() && d30 <= -ScalpStrategy.EXTREME_MOVE_DOLLARS + EPS
+                        !d30.isNaN() && d30 <= -trig(ScalpStrategy.EXTREME_MOVE_DOLLARS) + EPS
                     ScalpStrategy.BOUNCE -> {
                         // A fall of 5¢ from the minute's high to a low in the last 20 s (high first, then low),
                         // and the first 1–3¢ back up.
                         // The rebound is read on the same print grid as the low.
                         val hl = grid.highThenLow(side, s, 60, 20)
                         spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && hl != null && !gridMid.isNaN() &&
-                            hl.first - hl.second >= ScalpStrategy.BOUNCE_DROP_DOLLARS - EPS &&
+                            hl.first - hl.second >= trig(ScalpStrategy.BOUNCE_DROP_DOLLARS) - EPS &&
                             gridMid - hl.second >= ScalpStrategy.BOUNCE_REBOUND_DOLLARS - EPS && gridMid - hl.second <= 0.03 + EPS
                     }
                     ScalpStrategy.BREAKOUT_50 -> {
                         // Both ends from the print grid: the book mid now against a grid mid 10 s ago is not a crossing.
                         val now = gridMid
+                        val level = trig(0.50)
                         spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d10.isNaN() && !now.isNaN() &&
-                            now >= 0.50 - EPS && now - d10 < 0.50 - EPS
+                            now >= level - EPS && now - d10 < level - EPS
                     }
                     ScalpStrategy.IMPROVE_1C ->
-                        s >= 180 && spread >= ScalpStrategy.TIGHT_SPREAD_DOLLARS - EPS
+                        s >= 180 && spread >= trig(ScalpStrategy.TIGHT_SPREAD_DOLLARS) - EPS
                     ScalpStrategy.FLOW_FADE -> {
                         val other = grid.takerBought(if (yes) "NO" else "YES", s, 30)
                         val mine = grid.takerBought(side, s, 30)
-                        other >= ScalpStrategy.FLOW_MIN_CONTRACTS && other >= ScalpStrategy.FLOW_RATIO * mine
+                        other >= trig(ScalpStrategy.FLOW_MIN_CONTRACTS) && other >= ScalpStrategy.FLOW_RATIO * mine
                     }
-                    ScalpStrategy.LATE_FAVORITE -> s >= 600
-                    ScalpStrategy.EARLY_FAVORITE -> s in 180 until 600
+                    ScalpStrategy.LATE_FAVORITE -> s >= (trig(10.0) * 60).toInt()
+                    ScalpStrategy.EARLY_FAVORITE -> s in 180 until (trig(10.0) * 60).toInt()
                     ScalpStrategy.MOMENTUM_HOLD ->
-                        s >= 300 && !d30.isNaN() && d30 >= ScalpStrategy.RIDE_MOVE_DOLLARS - EPS
-                    ScalpStrategy.LONG_SHOT -> s >= 300
+                        s >= 300 && !d30.isNaN() && d30 >= trig(ScalpStrategy.RIDE_MOVE_DOLLARS) - EPS
+                    ScalpStrategy.LONG_SHOT -> s >= (trig(5.0) * 60).toInt()
                     ScalpStrategy.STRETCH_FADE -> {
                         val avg = grid.avgMid(side, s, 60)
                         spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !avg.isNaN() && !gridMid.isNaN() &&
-                            avg - gridMid >= ScalpStrategy.STRETCH_DOLLARS - EPS
+                            avg - gridMid >= trig(ScalpStrategy.STRETCH_DOLLARS) - EPS
                     }
                     ScalpStrategy.SQUEEZE_BREAKOUT -> {
-                        // The range is the two minutes before the last 5 s, so the break itself is not inside it.
+                        // The range is the two minutes before the last 5 s, so the break itself is not inside it,
+                        // and it must have been quoted through both of its minutes: a few prints are no squeeze.
                         val hi = grid.highMid(side, s - 5, 120)
                         val lo = grid.lowMid(side, s - 5, 120)
-                        s >= 125 && spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS &&
+                        s >= 125 && spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && grid.coveredBothHalves(side, s - 5, 120) &&
                             !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
-                            hi - lo <= ScalpStrategy.SQUEEZE_RANGE_DOLLARS + EPS &&
+                            hi - lo <= trig(ScalpStrategy.SQUEEZE_RANGE_DOLLARS) + EPS &&
                             gridMid - hi >= ScalpStrategy.SQUEEZE_BREAK_DOLLARS - EPS
                     }
                     ScalpStrategy.RANGE_FLOOR -> {
                         val hi = grid.highMid(side, s, 120)
                         val lo = grid.lowMid(side, s, 120)
-                        s >= 120 && !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
-                            hi - lo >= ScalpStrategy.FLOOR_MIN_RANGE_DOLLARS - EPS &&
+                        s >= 120 && grid.coveredBothHalves(side, s, 120) && !hi.isNaN() && !lo.isNaN() && !gridMid.isNaN() &&
+                            hi - lo >= trig(ScalpStrategy.FLOOR_MIN_RANGE_DOLLARS) - EPS &&
                             hi - lo <= ScalpStrategy.FLOOR_MAX_RANGE_DOLLARS + EPS &&
                             gridMid <= lo + 0.005 + EPS
                     }
                     ScalpStrategy.TREND_PULLBACK -> {
                         val d120 = grid.move(side, s, 120)
                         spread <= ScalpStrategy.TIGHT_SPREAD_DOLLARS + EPS && !d120.isNaN() && !d10.isNaN() &&
-                            d120 >= ScalpStrategy.PULLBACK_TREND_DOLLARS - EPS && d10 <= -ScalpStrategy.PULLBACK_DIP_DOLLARS + EPS
+                            d120 >= trig(ScalpStrategy.PULLBACK_TREND_DOLLARS) - EPS && d10 <= -ScalpStrategy.PULLBACK_DIP_DOLLARS + EPS
                     }
                     ScalpStrategy.FLOW_FOLLOW -> {
                         val mine = grid.takerBought(side, s, 30)
                         val other = grid.takerBought(if (yes) "NO" else "YES", s, 30)
-                        mine >= ScalpStrategy.FLOW_MIN_CONTRACTS && mine >= ScalpStrategy.FLOW_RATIO * other
+                        mine >= trig(ScalpStrategy.FLOW_MIN_CONTRACTS) && mine >= ScalpStrategy.FLOW_RATIO * other
                     }
                     ScalpStrategy.WHALE_FOLLOW ->
-                        grid.biggestTakerBuy(side, s, 5) >= ScalpStrategy.WHALE_CONTRACTS - EPS
+                        grid.biggestTakerBuy(side, s, 5) >= trig(ScalpStrategy.WHALE_CONTRACTS) - EPS
                     ScalpStrategy.QUIET_MAKER -> {
                         // Flat: the highest and lowest mid of the last 30 s are the same, with at least half of them quoted.
-                        val hi = grid.highMid(side, s, 30)
-                        val lo = grid.lowMid(side, s, 30)
-                        s >= 90 && !hi.isNaN() && !lo.isNaN() && hi - lo <= EPS && !grid.avgMid(side, s, 30).isNaN()
+                        val w = trig(30.0).toInt().coerceIn(5, 300)
+                        val hi = grid.highMid(side, s, w)
+                        val lo = grid.lowMid(side, s, w)
+                        s >= 60 + w && !hi.isNaN() && !lo.isNaN() && hi - lo <= EPS && !grid.avgMid(side, s, w).isNaN()
                     }
                     ScalpStrategy.OPENING_DRIVE -> {
                         val since = if (s in 120..240) grid.move(side, s, s - 60) else Double.NaN
-                        !since.isNaN() && since >= ScalpStrategy.DRIVE_DOLLARS - EPS
+                        !since.isNaN() && since >= trig(ScalpStrategy.DRIVE_DOLLARS) - EPS
                     }
                     ScalpStrategy.LATE_TIEBREAK -> {
                         val d60 = grid.move(side, s, 60)
-                        s >= 720 && !d60.isNaN() && d60 >= ScalpStrategy.TIEBREAK_MOVE_DOLLARS - EPS
+                        s >= 720 && !d60.isNaN() && d60 >= trig(ScalpStrategy.TIEBREAK_MOVE_DOLLARS) - EPS
                     }
-                    ScalpStrategy.HEAVY_FAVORITE -> s >= 720
+                    ScalpStrategy.HEAVY_FAVORITE -> s >= (trig(12.0) * 60).toInt()
                     ScalpStrategy.PANIC_FADE ->
-                        !d10.isNaN() && d10 <= -ScalpStrategy.PANIC_DROP_DOLLARS + EPS &&
+                        !d10.isNaN() && d10 <= -trig(ScalpStrategy.PANIC_DROP_DOLLARS) + EPS &&
                             grid.takerBought(if (yes) "NO" else "YES", s, 10) >= ScalpStrategy.PANIC_CONTRACTS
                     ScalpStrategy.STEADY_CLIMB -> {
                         val d60 = grid.move(side, s, 60)
                         !d10.isNaN() && !d30.isNaN() && !d60.isNaN() &&
-                            d10 >= 0.01 - EPS && d30 >= 0.03 - EPS && d60 >= 0.04 - EPS
+                            d10 >= 0.01 - EPS && d30 >= 0.03 - EPS && d60 >= trig(0.04) - EPS
                     }
                     // The two book strategies need the live book (the prints show no sizes).
                     ScalpStrategy.PENNY_SCALPER ->
-                        queue != null && spread <= 0.01 + EPS && queue <= ScalpStrategy.PENNY_MAX_QUEUE + EPS
+                        queue != null && spread <= 0.01 + EPS && queue <= trig(ScalpStrategy.PENNY_MAX_QUEUE) + EPS
                     ScalpStrategy.BOOK_IMBALANCE ->
                         queue != null && askQty != null && askQty > 0.0 &&
-                            queue >= ScalpStrategy.IMBALANCE_MIN_CONTRACTS && queue >= ScalpStrategy.IMBALANCE_RATIO * askQty
+                            queue >= ScalpStrategy.IMBALANCE_MIN_CONTRACTS && queue >= trig(ScalpStrategy.IMBALANCE_RATIO) * askQty
                     ScalpStrategy.LATE_COMEBACK ->
-                        s >= 600 && !d30.isNaN() && d30 >= ScalpStrategy.COMEBACK_MOVE_DOLLARS - EPS
+                        s >= 600 && !d30.isNaN() && d30 >= trig(ScalpStrategy.COMEBACK_MOVE_DOLLARS) - EPS
+                    ScalpStrategy.KASHI_FAV_BASE, ScalpStrategy.KASHI_FAV_STRICT, ScalpStrategy.KASHI_FAV_97,
+                    ScalpStrategy.KASHI_FAV_LAST30, ScalpStrategy.KASHI_FAV_NIGHT -> {
+                        val f = st.fav!!
+                        val fair = fairY?.let { if (yes) it else 1.0 - it }
+                        fair != null && fair >= trig(f.fairMin) - EPS && fair - ask >= f.gap - EPS && !(f.offUsHours && usHours)
+                    }
                 }
                 if (fire == null) {
                     val m = model ?: continue
                     val x = grid.features(side, s) ?: continue
                     val pred = m.predict(x)
-                    if (pred < m.thetaCents) continue
+                    // The model's own cut, unless you set another (in cents, as the model speaks).
+                    if (pred < tn.trigger(m.thetaCents)) continue
                     val expected = m.expectedCents(pred, queue ?: engine.config.unknownQueue)
                     engine.post(st, ticker, side, bid, queue, pred, expected, nowMs, seen(x))?.let { events += it }
                 } else if (fire) {
@@ -656,6 +680,9 @@ class PaperScalper(
         private val STRATEGIES = ScalpStrategy.values().toList()
         private const val EPS = 1e-9
 
+        /** Last decision second: 10 s before the close, the end of Kashi's late-favourite window. */
+        const val LATE_LAST_SECOND = PrintGrid.SECONDS - 10
+
         /** Farthest the cached book's mid may sit from the live print mid before the book is ignored. */
         const val BOOK_GRID_TOLERANCE = 0.03
         private const val GRID_KEEP_MS = 120_000L
@@ -691,6 +718,14 @@ class ScalperStore(context: Context) {
         run = log.run
     )
 
+    /** Your per-strategy settings, kept with the record ([ScalpTuning]). */
+    val tuning: ScalpTuning = ScalpTuning(
+        initial = runCatching {
+            prefs.getString(KNOBS_KEY, null)?.let { json.decodeFromString(knobsSerializer, it) }
+        }.getOrNull().orEmpty(),
+        persist = { map -> runCatching { prefs.edit().putString(KNOBS_KEY, json.encodeToString(knobsSerializer, map)).apply() } }
+    )
+
     /** The trained model from assets, or null when it cannot be read (the fast strategies still run). */
     val model: ScalperModel? = runCatching {
         context.assets.open(ScalperModel.ASSET_NAME).bufferedReader().use { ScalperModel.parse(it.readText()) }
@@ -711,6 +746,8 @@ class ScalperStore(context: Context) {
     private companion object {
         const val PREFS = "bitcoin_claude_scalper"
         const val KEY = "state_json"
+        const val KNOBS_KEY = "strategy_settings_json"
+        val knobsSerializer = kotlinx.serialization.serializer<Map<String, ScalpKnobs>>()
     }
 }
 
@@ -726,16 +763,16 @@ data class ScalperSummary(
     val note: String
 ) {
     companion object {
-        const val TITLE = "Strategy arena · 30 at once · PAPER ONLY"
+        val TITLE = "Strategy arena · ${ScalpStrategy.values().size} at once · PAPER ONLY"
 
         /** The queue-aware subset on the recorded order books: a short queue was a level about to break. */
         const val QUEUE_AWARE_HISTORY = "−1.73¢"
         const val NOTE =
-            "Thirty strategies at once on the same live Bitcoin window and the same real trade prints, " +
+            "Every strategy at once on the same live Bitcoin window and the same real trade prints, " +
                 "10 contracts an order, no caps; the best P&L is on top. Resting orders fill only after the " +
                 "queue ahead has traded; buy-now entries and stop / time-out exits pay the taker fee; " +
                 "\"hold\" strategies ride to the settlement. In brackets: what a filled scalp of that kind made " +
-                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or 1.9.4, " +
+                "per contract on 7 days of recorded order books, real queue counted (\"new\" = added in 1.9.0 or later, " +
                 "no history yet). Needs Live signals on. Never sends an order."
 
         fun of(state: ScalperState, working: Pair<Int, Int> = 0 to 0): ScalperSummary {

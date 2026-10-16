@@ -38,8 +38,8 @@ class ArenaMoreStrategiesTest {
 
     @Test
     fun fifteenMoreMakeThirtyEachNewAndOnItsOwnRow() {
-        assertEquals(30, ScalpStrategy.values().size)
-        assertEquals("added at the end, so the first fifteen keep their places", added, ScalpStrategy.values().drop(15))
+        assertEquals(35, ScalpStrategy.values().size)
+        assertEquals("added after the first fifteen, so those keep their places", added, ScalpStrategy.values().drop(15).take(15))
         assertTrue(added.all { it.historyCents == null && it.origin == "Claude 1.9.4" })
         val lines = ScalperSummary.of(ScalperState.fresh()).strategyLines
         assertTrue(lines.contains("Whale follow · buy now: no scalps yet [new · Claude 1.9.4]"))
@@ -70,6 +70,16 @@ class ArenaMoreStrategiesTest {
         for (sec in 130..134) second(s, sec, 0.52, 0.53)
         assertEquals(1, s.engine.workingFor(ScalpStrategy.SQUEEZE_BREAKOUT, t, "YES"))
         assertEquals("the NO side broke down, not up", 0, s.engine.workingFor(ScalpStrategy.SQUEEZE_BREAKOUT, t, "NO"))
+    }
+
+    @Test
+    fun aFewPrintsAreNoSqueeze() {
+        // Prints for the first 20 s, then nothing until a jump: the two "quiet" minutes were never quoted.
+        val s = runner()
+        for (sec in 0..20) second(s, sec, 0.50, 0.51)
+        for (sec in 125..134) second(s, sec, 0.52, 0.53)
+        assertEquals(0, posted(s, ScalpStrategy.SQUEEZE_BREAKOUT))
+        assertEquals(0, posted(s, ScalpStrategy.RANGE_FLOOR))
     }
 
     @Test

@@ -164,6 +164,15 @@ class PrintGrid(val openMs: Long) {
         return if (n * 2 < w || n == 0) Double.NaN else sum / n
     }
 
+    /**
+     * True when each half of the [w] seconds ending at [s] had a fresh quote in at least half its seconds:
+     * a range read off that window then spans the whole window, not a few prints at one end of it.
+     */
+    fun coveredBothHalves(side: String, s: Int, w: Int): Boolean {
+        val half = w / 2
+        return !avgMid(side, s - half, half).isNaN() && !avgMid(side, s, half).isNaN()
+    }
+
     /** The biggest single taker buy of [side] (contracts) in the [w] seconds ending at [s]; 0 when none. */
     fun biggestTakerBuy(side: String, s: Int, w: Int): Double {
         if (s < 0) return 0.0

@@ -164,6 +164,22 @@ class ArenaExecTest {
     }
 
     @Test
+    fun aPartialOldestDayIsLeftOutOfTheRace() {
+        val zone = ZoneOffset.UTC
+        val today = LocalDate.of(2026, 10, 10)
+        fun at(day: LocalDate, hour: Int) = day.atStartOfDay(zone).toInstant().toEpochMilli() + hour * 3_600_000L
+        val a = ScalpStrategy.BOUNCE
+        val b = ScalpStrategy.DIP_HUNTER
+        // The slice starts late on Oct 9 with a big win for a; from Oct 10 b does better.
+        val trades = listOf(trade(a, at(today.minusDays(1), 22), 5.0), trade(a, at(today, 1), 0.5), trade(b, at(today, 2), 1.0))
+        val whole = ArenaExec.rankRace(trades, today, days = 2, zone = zone)
+        assertEquals("counted whole, a leads both days", listOf(1, 1), whole.lines.first { it.strategy == a }.ranks)
+        val cut = ArenaExec.rankRace(trades, today, days = 2, zone = zone, partialOldestDay = true)
+        assertEquals("a's half-day lead is not counted", listOf(null, 2), cut.lines.first { it.strategy == a }.ranks)
+        assertEquals(listOf(null, 1), cut.lines.first { it.strategy == b }.ranks)
+    }
+
+    @Test
     fun rankRaceTiesKeepTheEnumOrder() {
         val zone = ZoneOffset.UTC
         val today = LocalDate.of(2026, 10, 10)

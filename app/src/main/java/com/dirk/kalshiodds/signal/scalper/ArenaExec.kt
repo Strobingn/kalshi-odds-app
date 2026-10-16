@@ -182,11 +182,24 @@ object ArenaExec {
      * (the phone's clock), ranked. Trades before the first day still count
      * toward the running net. Ties keep the enum order.
      */
-    fun rankRace(trades: List<ScalpTrade>, today: LocalDate, days: Int = 14, zone: ZoneId = ZoneId.systemDefault()): RankRace {
+    fun rankRace(
+        trades: List<ScalpTrade>,
+        today: LocalDate,
+        days: Int = 14,
+        zone: ZoneId = ZoneId.systemDefault(),
+        /** The trades are only the newest slice of the file: its oldest day is partial, so it is left out. */
+        partialOldestDay: Boolean = false
+    ): RankRace {
         val first = today.minusDays((days - 1).toLong())
         val labels = (0 until days).map { DAY.format(first.plusDays(it.toLong())) }
         val endOf = (0 until days).map { first.plusDays(it + 1L).atStartOfDay(zone).toInstant().toEpochMilli() }
-        val rows = trades.filter { byName[it.strategy] != null }.sortedBy { it.closedAtMs }
+        var rows = trades.filter { byName[it.strategy] != null }.sortedBy { it.closedAtMs }
+        if (partialOldestDay && rows.isNotEmpty()) {
+            // Running nets then start from $0 on the first whole day, instead of part-way through one.
+            val oldest = java.time.Instant.ofEpochMilli(rows.first().closedAtMs).atZone(zone).toLocalDate()
+            val from = oldest.plusDays(1).atStartOfDay(zone).toInstant().toEpochMilli()
+            rows = rows.filter { it.closedAtMs >= from }
+        }
         val run = LinkedHashMap<ScalpStrategy, Double>()
         val ranks = HashMap<ScalpStrategy, MutableList<Int?>>()
         val nets = HashMap<ScalpStrategy, MutableList<Double?>>()

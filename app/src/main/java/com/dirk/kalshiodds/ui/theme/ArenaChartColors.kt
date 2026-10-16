@@ -13,7 +13,8 @@ import androidx.compose.ui.graphics.luminance
  *   colour-blind ΔE ≥ 8.4, normal-vision ΔE ≥ 19.8. Light aqua and yellow are
  *   under 3:1 on white, so every chart that uses them carries a legend and
  *   labels.
- * - [Set.gain] / [Set.loss]: the blue ↔ red diverging pair for profit / loss.
+ * - [Set.gain] / [Set.loss]: the theme's own up / down colours, so profit is the same green and loss
+ *   the same red in every chart and every number on the Arena (1.9.7).
  * - [Set.shadeLight] / [Set.shadeDark]: two steps of one blue (before / after).
  */
 object ArenaColors {
@@ -38,8 +39,8 @@ object ArenaColors {
         return if (dark) {
             Set(
                 series = listOf(Color(0xFF3987E5), Color(0xFFD95926), Color(0xFF199E70), Color(0xFFC98500)),
-                gain = Color(0xFF3987E5),
-                loss = Color(0xFFE66767),
+                gain = c.up,
+                loss = c.down,
                 muted = Color(0xFF898781),
                 grid = Color(0xFF2C2C2A),
                 baseline = Color(0xFF5A5A55),
@@ -51,8 +52,8 @@ object ArenaColors {
         } else {
             Set(
                 series = listOf(Color(0xFF2A78D6), Color(0xFFEB6834), Color(0xFF1BAF7A), Color(0xFFEDA100)),
-                gain = Color(0xFF2A78D6),
-                loss = Color(0xFFE34948),
+                gain = c.up,
+                loss = c.down,
                 muted = Color(0xFF898781),
                 grid = Color(0xFFE1E0D9),
                 baseline = Color(0xFFC3C2B7),

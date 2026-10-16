@@ -2,7 +2,7 @@ name: Unit tests
 
 on:
   push:
-    branches: [Claude, claude/kalshi-odds-newest, claude/strategy-arena, claude/scalp-insights]
+    branches: [Claude, claude/kalshi-odds-newest, claude/strategy-arena, claude/scalp-insights, claude/scalper-model-refresh]
   workflow_dispatch:
 
 permissions:
@@ -47,6 +47,7 @@ jobs:
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_scalp_b.py
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_rec_sim.py
           PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_depth_sim.py
+          PYTHONPATH=tools/research/scalp python3 tools/research/scalp/test_gate_scalper.py
 
       - name: Kotlin unit tests
         run: ./gradlew :app:testDebugUnitTest --no-daemon --continue

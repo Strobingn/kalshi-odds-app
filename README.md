@@ -19,7 +19,65 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
-## 1.9.6 (Claude branch): every call uses Kalshi data only
+## 1.10.0 (claude/scalper-model-refresh): Bitcoin prices from Kalshi only, everywhere
+
+- New setting **Bitcoin price from Kalshi only** (Settings → Trade feed, on by default). The CF Benchmarks
+  index Kalshi streams to your API key (the index the 15-minute markets settle on) becomes the app's spot:
+  it feeds the live spot book that re-scores markets (replacing the Coinbase WebSocket) and the spot
+  features the signals and models read (replacing the Binance / Coinbase REST poll): 1- and 5-minute
+  returns and the trainer's EWMA σ, from 1-minute bars of the index (`KalshiSpot`, `CfIndexBook` keeps an
+  hour of it). No funding rate (Kalshi has none). Needs Live signals; the model's 60-bar σ is ready about
+  an hour after the stream starts. Off: the Coinbase / Binance feeds as before.
+- Still from Coinbase: the optional history backfill on the Data screen (Kalshi has no past spot prices).
+
+## 1.9.9 (claude/scalper-model-refresh): the arena runs on Kalshi data only
+
+- Every number the arena trades on now comes from Kalshi through your API key's WebSocket: the trade prints
+  and the order book (as before), and for the late favourites the CF Benchmarks index Kalshi streams (the
+  index these markets settle on), Kalshi's strike and, in the final minute, Kalshi's running settlement
+  average. The index's volatility is now worked out from that same stream (1-second changes over the last
+  15 minutes, `CfIndexBook.std1m`) instead of Coinbase, and there is no Coinbase fallback: while Kalshi's
+  index is stale, the late favourites do not trade.
+
+## 1.9.8 (claude/scalper-model-refresh): change every strategy's settings, reset the paper record
+
+- **Per-strategy settings** (after grok-bitcoin's scalp sliders, but one set per strategy): open a strategy
+  in the arena and its Settings card has an on / off switch and sliders for its main trigger (the dip size,
+  the flow size, the favourite's fair-price floor, the ML scalper's cut, …), contracts an order, take profit,
+  stop loss (holds can be given one), time-out, positions open at once, the price band and how often it
+  looks; "Back to its defaults" undoes them. Saved on the phone (`ScalpTuning`); an untouched strategy runs
+  exactly as shipped, and the rules text on its page shows your values.
+- **Arena settings** (the sliders icon at the top of the arena): every strategy's on / off switch with its
+  size and exits, "Put every strategy back to its defaults", and **Reset the paper record**, which archives
+  the trade files and starts every strategy again from $0 (your settings stay).
+
+## 1.9.7 (claude/scalper-model-refresh): Kashi's late favourites, and a cleaner arena
+
+- **Five strategies copied from Kashi V2** (`ShockFav.kt` sf16 / sf19 / sf21 / sf23 / sf31), the only family
+  there with an out-of-sample result above zero after fees (BTC, 2 s entry delay, 2026-10-05 → 10-10: sf19,
+  sf21 and sf31 about +$1.40 a 10-contract trade, sf23 +$1.79; 10–16 trades each, so small). In the last
+  minute they buy the side the live Bitcoin price makes a 90–97% favourite while its ask is still 3–5¢ under
+  that, and hold it to the settlement; Kashi's stops (10–25¢ at the bid) are the only exit. The fair price
+  comes from the CF Benchmarks index (Coinbase when it is stale), the stream's 1-minute volatility and, in
+  the final minute, the settlement average so far (`ScalpFair`). 35 strategies now run at once.
+- **The arena screen, rebuilt after the Swarm / Kashi scalp screens.** Four tabs (Overview, Strategies,
+  Analysis, Trades) instead of seven chips; a hero card with the net after fees and a figure grid; one large
+  bankroll chart; strategies as two-line rows with a P&L stripe, sparkline and net; trades with the strategy
+  as a pill and monospace prices. The deeper charts sit under Analysis (Race, Breakdown, Edge, Execution,
+  Timing) and behind "More charts" on a strategy's page; every chart's explanation opens from its ⓘ. Profit
+  is the same green and loss the same red everywhere.
+- Research: `docs/scalper-smart-exit.md` (selling scalps early does not help; wider stops did better).
+
+## 1.9.6 (claude/scalper-model-refresh): review fixes for the 30-strategy arena
+
+- *Skill or luck?* now resamples whole market windows, not single trades: trades in one window share its
+  outcome, so the fan is honest about how wide the future is (as the leaderboard's luck test already was).
+- Squeeze breakout and range floor fire only when both minutes of their two-minute range were actually quoted.
+- Following a strategy now scopes the stats table and the price, day and minute heatmaps to it.
+- Drawdown (strategy page and Overview) is read from every close, not the chart's sampled points.
+- Rank by day starts from the first whole day when the chart's 3,000-trade slice cuts into the oldest one.
+- A strategy page opens at its top; best / worst trade show the real extremes of a one-sided record.
+## 1.9.6b (Claude branch): every call uses Kalshi data only
 
 - **Card call (BET / NO BET).** Only the clear-lead rule can say BET now. The AI model's chance comes from an
   outside Bitcoin feed (Coinbase / CF Benchmarks), so it no longer makes calls, and its alerts are no longer sent.

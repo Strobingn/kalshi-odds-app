@@ -6,11 +6,16 @@ TEST days only. Selection = the R_SCALP_AT model's rule, fixed on VALID before T
 import json, os, numpy as np, random, sys
 TAPE=sys.argv[1] if len(sys.argv)>1 else 'tape'
 import scalp_b as B
+from splits import split
 d=np.load('ml_data.npz',allow_pickle=True); feats=[str(f) for f in d['feats']]
 Y=d['Y']; mkt=d['mkt'].astype(int); sec=d['sec'].astype(int); frame=d['frame'].astype(int); mday=d['mday']; tick=d['tickers']
-days=sorted(set(mday)); TE=set(days[15:]); day=mday[mkt]
+days=sorted(set(mday)); _,_,TE=split(days); day=mday[mkt]
 ok=~np.isnan(Y[:,4]); c=np.isin(day,list(TE))&ok
-pt=np.load('ml_pred_R_SCALP_AT.npy')[:,0]; theta=json.load(open('ml_results.json'))['R_SCALP_AT']['theta']
+if os.environ.get("SCALP_QUEUE_FROM")=="compact":
+    # The retrain: select with the compact model train_compact.py just fitted (same TEST rows, same order).
+    pt=np.load('compact_pred_test.npy')[:,0]; theta=json.load(open('compact_meta.json'))['theta']
+else:
+    pt=np.load('ml_pred_R_SCALP_AT.npy')[:,0]; theta=json.load(open('ml_results.json'))['R_SCALP_AT']['theta']
 bid=d['X'][:,feats.index('bid')].astype(np.float64)
 rows=np.where(c)[0]; assert len(rows)==len(pt)
 QS=(0,100,250,500,1000,2000,5000)

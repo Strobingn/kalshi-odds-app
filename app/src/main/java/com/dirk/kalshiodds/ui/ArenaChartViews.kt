@@ -17,6 +17,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -26,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -59,22 +63,36 @@ import kotlin.math.max
  * dark and light surfaces. Text always wears the theme's text colours; a
  * coloured mark beside it carries identity.
  */
-/** A titled card. [subtitle] says what the chart answers. */
+/** A titled card. [subtitle] says what the chart answers; it opens from the ⓘ beside the title. */
 @Composable
 internal fun ChartCard(title: String, subtitle: String, tag: String, content: @Composable () -> Unit) {
     val colors = DipTheme.colors
+    var info by remember(tag) { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, colors.border, RoundedCornerShape(16.dp))
-            .background(colors.surface, RoundedCornerShape(16.dp))
-            .padding(14.dp)
+            .clip(ArenaUi.CARD_SHAPE)
+            .background(colors.surface)
+            .padding(ArenaUi.CARD_PAD)
             .testTag(tag),
-        verticalArrangement = Arrangement.spacedBy(6.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
-        Text(subtitle, style = MaterialTheme.typography.labelMedium, color = colors.textSecondary)
-        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = colors.textPrimary,
+                modifier = Modifier.weight(1f)
+            )
+            Icon(
+                Icons.Outlined.Info,
+                contentDescription = "About $title",
+                tint = if (info) colors.accentBlue else colors.textSecondary,
+                modifier = Modifier.size(20.dp).clickable { info = !info }.testTag("${tag}_INFO")
+            )
+        }
+        if (info) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = colors.textSecondary)
         content()
     }
 }
@@ -298,7 +316,12 @@ internal fun DrawScope.drawCurve(
 
 /** One series over time with a 10 % wash under it and a drag readout. [baseline] is drawn as the zero line. */
 @Composable
-internal fun ScrubLineChart(points: List<CurvePoint>, baseline: Double, valueLabel: (Double) -> String) {
+internal fun ScrubLineChart(
+    points: List<CurvePoint>,
+    baseline: Double,
+    height: androidx.compose.ui.unit.Dp = 170.dp,
+    valueLabel: (Double) -> String
+) {
     val colors = DipTheme.colors
     val ac = ArenaColors.current()
     if (points.size < 2) return
@@ -324,11 +347,11 @@ internal fun ScrubLineChart(points: List<CurvePoint>, baseline: Double, valueLab
         } else {
             Readout(valueLabel(points[i].pnlUsd), ScalperResults.timeLabel(points[i].tMs))
         }
-        Box(Modifier.fillMaxWidth().height(170.dp)) {
+        Box(Modifier.fillMaxWidth().height(height)) {
             Canvas(
                 Modifier
                     .fillMaxWidth()
-                    .height(170.dp)
+                    .height(height)
                     .testTag("BANKROLL_CHART")
                     .pointerInput(points) { detectTapGestures { o -> scrub = nearest(o.x / size.width) } }
                     .pointerInput(points) {

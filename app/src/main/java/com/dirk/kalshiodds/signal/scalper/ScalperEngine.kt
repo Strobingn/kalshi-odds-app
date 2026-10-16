@@ -61,7 +61,9 @@ enum class ScalpStrategy(
     val hold: Boolean = false,
     val entryMin: Double = PrintGrid.MIN_PRICE,
     val entryMax: Double = PrintGrid.MAX_PRICE,
-    val origin: String = "Claude"
+    val origin: String = "Claude",
+    /** Kashi's late-favourite rule; null for every other strategy. */
+    val fav: FavSpec? = null
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -209,7 +211,53 @@ enum class ScalpStrategy(
     LATE_COMEBACK(
         "Late comeback · buy, hold", true, 0.0, 0.0, 0L, 5, 1, null,
         hold = true, entryMin = 0.20, entryMax = 0.40, origin = "Claude 1.9.4"
+    ),
+
+    /**
+     * Kashi's late favourites (`ShockFav.kt` sf16 / sf19 / sf21 / sf23 / sf31,
+     * 0.3.70): in the last minute, the side the live Bitcoin price makes a
+     * heavy favourite ([FavSpec.fairMin], from [ScalpFair]) while its ask is
+     * still at least [FavSpec.gap] under that fair price. Buy now, hold to the
+     * settlement; the only exit is Kashi's stop at the bid. On Kashi's
+     * out-of-sample test (BTC, 2 s entry delay, 2026-10-05 → 10-10, before its
+     * stops were added) sf19 / sf21 / sf31 made about +$1.40 a 10-contract
+     * trade and sf23 +$1.79, intervals above zero but on 10–16 trades each;
+     * sf16's interval crossed zero.
+     */
+    KASHI_FAV_BASE(
+        "Kashi late fav · base", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf16", fav = FavSpec(20, 60, 0.90, 0.05)
+    ),
+    KASHI_FAV_STRICT(
+        "Kashi late fav · strict", true, 0.0, 0.15, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf19", fav = FavSpec(20, 60, 0.95, 0.05)
+    ),
+    KASHI_FAV_97(
+        "Kashi late fav · 97%", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.97, origin = "kashi sf21", fav = FavSpec(20, 60, 0.97, 0.03)
+    ),
+    KASHI_FAV_LAST30(
+        "Kashi late fav · last 30 s", true, 0.0, 0.10, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf23", fav = FavSpec(10, 30, 0.95, 0.05)
+    ),
+    KASHI_FAV_NIGHT(
+        "Kashi late fav · off US hours", true, 0.0, 0.25, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf31",
+        fav = FavSpec(20, 60, 0.95, 0.05, offUsHours = true)
     );
+
+    /**
+     * Kashi's late-favourite entry: [tteMin]–[tteMax] seconds left, the side's
+     * fair price at least [fairMin] and at least [gap] above its ask;
+     * [offUsHours] skips 13:00–20:59 UTC.
+     */
+    data class FavSpec(
+        val tteMin: Int,
+        val tteMax: Int,
+        val fairMin: Double,
+        val gap: Double,
+        val offUsHours: Boolean = false
+    )
 
     companion object {
         /** Price move over 10 s that the dip-hunter and the momentum-sniper react to. */
@@ -361,7 +409,14 @@ sealed class ScalpEvent {
  * the ledger splits the results by strategy and by queue instead. Pure and deterministic; not thread-safe (the
  * [PaperScalper] holds the lock). There is no path from here to an order.
  */
-class ScalperEngine(val config: Config = Config()) {
+class ScalperEngine(
+    val config: Config = Config(),
+    /** Your per-strategy settings (sizes, exits, bands); untouched strategies run on their defaults. */
+    val tuning: ScalpTuning = ScalpTuning()
+) {
+    init {
+        tuning.defaultContracts = config.contracts
+    }
 
     data class Config(
         val contracts: Int = 10,
@@ -436,9 +491,10 @@ class ScalperEngine(val config: Config = Config()) {
         context: ScalpContext? = null
     ): ScalpEvent.Posted? {
         require(!strategy.taker) { "${strategy.name} buys at the ask: use buyNow" }
-        if (!inBand(strategy, price)) return null
+        val t = tuning.tuned(strategy)
+        if (!inBand(t, price)) return null
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
-        if (workingFor(strategy, ticker, want) >= strategy.maxPerSide) return null
+        if (workingFor(strategy, ticker, want) >= t.maxPerSide) return null
         val known = queueAhead != null && queueAhead.isFinite() && queueAhead >= 0.0
         val order = ScalpOrder(
             id = nextId++,
@@ -446,7 +502,7 @@ class ScalperEngine(val config: Config = Config()) {
             ticker = ticker,
             side = want,
             price = round4(price),
-            contracts = config.contracts,
+            contracts = t.contracts,
             queueAhead = if (known) queueAhead!! else config.unknownQueue,
             queueKnown = known,
             postedAtMs = nowMs,
@@ -474,9 +530,10 @@ class ScalperEngine(val config: Config = Config()) {
         context: ScalpContext? = null
     ): List<ScalpEvent> {
         require(strategy.taker) { "${strategy.name} rests a bid: use post" }
-        if (!inBand(strategy, askPrice)) return emptyList()
+        val t = tuning.tuned(strategy)
+        if (!inBand(t, askPrice)) return emptyList()
         val want = if (PrintGrid.isYes(side)) "YES" else "NO"
-        if (workingFor(strategy, ticker, want) >= strategy.maxPerSide) return emptyList()
+        if (workingFor(strategy, ticker, want) >= t.maxPerSide) return emptyList()
         val price = round4(askPrice)
         val order = ScalpOrder(
             id = nextId++,
@@ -484,8 +541,8 @@ class ScalperEngine(val config: Config = Config()) {
             ticker = ticker,
             side = want,
             price = price,
-            contracts = config.contracts,
-            entryFeeUsd = KalshiFee.total(config.contracts, price, config.feeRate),
+            contracts = t.contracts,
+            entryFeeUsd = KalshiFee.total(t.contracts, price, config.feeRate),
             queueAhead = 0.0,
             queueKnown = true,
             postedAtMs = nowMs,
@@ -495,7 +552,7 @@ class ScalperEngine(val config: Config = Config()) {
         )
         val w = Working(order)
         w.filledAtMs = nowMs
-        w.exitPrice = round4(price + strategy.targetDollars)
+        w.exitPrice = round4(price + t.targetDollars)
         w.exitQueue = offerQueue(want, w.exitPrice)?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
         byTicker.getOrPut(ticker) { ArrayList() }.add(w)
         return listOf(ScalpEvent.Posted(order), ScalpEvent.Filled(order, nowMs))
@@ -537,7 +594,7 @@ class ScalperEngine(val config: Config = Config()) {
                 if (abs(sidePrice - o.price) <= TICK_EPS) w.traded += contracts
                 if (through || w.traded >= o.queueAhead + o.contracts) {
                     w.filledAtMs = nowMs
-                    w.exitPrice = round4(o.price + o.strategy.targetDollars)
+                    w.exitPrice = round4(o.price + tuning.tuned(o.strategy).targetDollars)
                     val shown = if (o.queueKnown) exitQueue(o.side, w.exitPrice) else null
                     w.exitQueue = shown?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
                     events += ScalpEvent.Filled(o, nowMs)
@@ -579,11 +636,13 @@ class ScalperEngine(val config: Config = Config()) {
                 }
                 continue
             }
-            if (o.strategy.hold) continue
+            // A hold has no time-out; it stops out only when it has a stop (Kashi's late favourites, or one you set).
+            val t = tuning.tuned(o.strategy)
+            if (o.strategy.hold && t.stopDollars <= 0.0) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
-            val stopped = bid <= o.price - o.strategy.stopDollars + EPS
-            val timedOut = nowMs - filledAt >= o.strategy.timeoutMs
+            val stopped = t.stopDollars > 0.0 && bid <= o.price - t.stopDollars + EPS
+            val timedOut = !o.strategy.hold && nowMs - filledAt >= t.timeoutMs
             if (stopped || timedOut) {
                 it.remove()
                 val fee = if (bid > 0.0) KalshiFee.total(o.contracts, bid, config.feeRate) else 0.0
@@ -634,11 +693,10 @@ class ScalperEngine(val config: Config = Config()) {
      * a strategy with its own band ([ScalpStrategy.entryMin] /
      * [ScalpStrategy.entryMax]) trades inside that band only.
      */
-    private fun inBand(strategy: ScalpStrategy, price: Double): Boolean {
+    private fun inBand(t: Tuned, price: Double): Boolean {
         if (!price.isFinite()) return false
-        val ownBand = strategy.entryMin != PrintGrid.MIN_PRICE || strategy.entryMax != PrintGrid.MAX_PRICE
-        val lo = if (ownBand) strategy.entryMin else config.minPrice
-        val hi = if (ownBand) strategy.entryMax else config.maxPrice
+        val lo = if (t.ownBand) t.entryMin else config.minPrice
+        val hi = if (t.ownBand) t.entryMax else config.maxPrice
         return price >= lo - EPS && price <= hi + EPS
     }
 
