@@ -849,10 +849,18 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                     ?.sumOf { it.second }
                     ?.takeIf { it > 0.0 }
                     ?.let { floor(it).toInt().coerceAtLeast(0) }
+                // Keep the source observation clock separate from [nowMs],
+                // which is only the evaluation/deadline clock. A cached
+                // snapshot reread must not become a fresh trend observation.
+                val observedAtMs = when {
+                    book != null -> book.updatedAtMs
+                    ctx.ticks[fill.ticker] != null -> ctx.ticks[fill.ticker]?.observedAtMs ?: 0L
+                    else -> market.quoteObservedAtMs
+                }
                 fill.ticker to PaperExitQuote(
                     price = bid,
                     availableContracts = touchDepth,
-                    observedAtMs = nowMs,
+                    observedAtMs = observedAtMs,
                     source = if (touchDepth != null) "book" else "quote",
                     sourceSnapshotId = book?.let { "${it.updatedAtMs}:${it.revision}" }
                 )

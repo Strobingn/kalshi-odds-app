@@ -104,7 +104,7 @@ class TrailingStop(
             if (quote.observedAtMs <= 0L || nowMs - quote.observedAtMs > maxQuoteAgeMs) return@forEach
             val current = quote.price
             if (!current.isFinite()) return@forEach
-            val state = calculatePositionState(fill, current, nowMs)
+            val state = calculatePositionState(fill, current, nowMs, quote.observedAtMs)
             if (!state.stopHit) return@forEach
             // PositionState.stopType is the authoritative trigger. Re-testing
             // raw price thresholds here can relabel a trend-risk exit as a
@@ -145,7 +145,12 @@ class TrailingStop(
     fun calculatePositionState(fill: PaperFill, currentPrice: Double): PositionState =
         calculatePositionState(fill, currentPrice, System.currentTimeMillis())
 
-    fun calculatePositionState(fill: PaperFill, currentPrice: Double, nowMs: Long): PositionState {
+    fun calculatePositionState(
+        fill: PaperFill,
+        currentPrice: Double,
+        nowMs: Long,
+        observationAtMs: Long = nowMs
+    ): PositionState {
         val entryPrice = fill.limitPrice
         val pnl = (currentPrice - entryPrice) * fill.contracts
         val pnlPct = if (fill.stakeUsd > 0.0) (pnl / fill.stakeUsd) * 100.0 else 0.0
@@ -174,7 +179,7 @@ class TrailingStop(
         val earlyLossHit = currentPrice < entryPrice - 1e-9 &&
             closeRemainingMs != null &&
             closeRemainingMs in 0L..earlyLossTimeRemainingMs &&
-            sustainedDecline(fill, currentPrice, nowMs)
+            sustainedDecline(fill, currentPrice, observationAtMs)
         val stopHit = timeFallback || stopLossHit || trailingHit || earlyLossHit
         val stopType = when {
             timeFallback -> "TIME FALLBACK"
@@ -206,13 +211,17 @@ class TrailingStop(
      * Deterministic recovery proxy: only a short, monotonic sequence of fresh
      * executable bids qualifies. This is not a probability of recovery.
      */
-    private fun sustainedDecline(fill: PaperFill, currentPrice: Double, nowMs: Long): Boolean {
-        val current = com.dirk.kalshiodds.signal.paper.PaperPriceObservation(currentPrice, nowMs)
-        val alreadyRecorded = fill.quoteHistory.lastOrNull()?.let {
+    private fun sustainedDecline(fill: PaperFill, currentPrice: Double, observationAtMs: Long): Boolean {
+        val current = com.dirk.kalshiodds.signal.paper.PaperPriceObservation(currentPrice, observationAtMs)
+        // StopOrderManager records the source observation before evaluating.
+        // The fallback append keeps direct deterministic callers compatible,
+        // but the runtime path consumes the already-recorded source history
+        // instead of appending once per polling clock.
+        val alreadyRecorded = fill.quoteHistory.any {
             it.observedAtMs == current.observedAtMs && kotlin.math.abs(it.price - current.price) <= 1e-9
-        } == true
+        }
         val points = (if (alreadyRecorded) fill.quoteHistory else fill.quoteHistory + current)
-            .filter { it.observedAtMs in (nowMs - recoveryTrendWindowMs)..nowMs }
+            .filter { it.observedAtMs in (observationAtMs - recoveryTrendWindowMs)..observationAtMs }
             .distinctBy { it.observedAtMs to it.price }
             .takeLast(recoveryTrendLookback)
         if (points.size < recoveryTrendLookback) return false
