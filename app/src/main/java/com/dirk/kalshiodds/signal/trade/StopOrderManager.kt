@@ -19,6 +19,10 @@ class StopOrderManager(
         val stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
         val maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
         val settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+        val earlyLossTimeRemainingMs: Long = SignalConstants.DEFAULT_EARLY_LOSS_TIME_REMAINING_MS,
+        val recoveryTrendLookback: Int = SignalConstants.DEFAULT_RECOVERY_TREND_LOOKBACK,
+        val recoveryTrendStep: Double = SignalConstants.DEFAULT_RECOVERY_TREND_STEP,
+        val recoveryTrendWindowMs: Long = SignalConstants.DEFAULT_RECOVERY_TREND_WINDOW_MS,
         val maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
         val autoExecute: Boolean = true,
         val enabled: Boolean = true
@@ -62,6 +66,10 @@ class StopOrderManager(
             stopLossDelayMs = config.stopLossDelayMs,
             maxHoldMs = config.maxHoldMs,
             settlementFallbackMs = config.settlementFallbackMs,
+            earlyLossTimeRemainingMs = config.earlyLossTimeRemainingMs,
+            recoveryTrendLookback = config.recoveryTrendLookback,
+            recoveryTrendStep = config.recoveryTrendStep,
+            recoveryTrendWindowMs = config.recoveryTrendWindowMs,
             maxQuoteAgeMs = config.maxQuoteAgeMs,
             enabled = config.enabled
         )
@@ -72,7 +80,10 @@ class StopOrderManager(
             val held = current.fills.firstOrNull { it.id == order.fillId && !it.settled } ?: return@forEach
             val depth = order.availableContracts?.coerceAtLeast(0) ?: return@forEach
             val snapshotId = quote.sourceSnapshotId ?: return@forEach
-            val consumedKey = "${order.fillId}|$snapshotId"
+            // Liquidity belongs to the market-side observation, not to a
+            // position. Reopening after a full exit must not reuse the same
+            // unchanged displayed depth.
+            val consumedKey = "${order.ticker.uppercase()}|${order.side.uppercase()}|$snapshotId"
             val alreadyConsumed = consumedDepthBySnapshot[consumedKey] ?: 0
             val remainingDepth = (depth - alreadyConsumed).coerceAtLeast(0)
             val qty = minOf(held.contracts, remainingDepth)
@@ -118,6 +129,10 @@ class StopOrderManager(
             stopLossDelayMs = config.stopLossDelayMs,
             maxHoldMs = config.maxHoldMs,
             settlementFallbackMs = config.settlementFallbackMs,
+            earlyLossTimeRemainingMs = config.earlyLossTimeRemainingMs,
+            recoveryTrendLookback = config.recoveryTrendLookback,
+            recoveryTrendStep = config.recoveryTrendStep,
+            recoveryTrendWindowMs = config.recoveryTrendWindowMs,
             maxQuoteAgeMs = config.maxQuoteAgeMs,
             enabled = config.enabled
         ).getPositionsWithStops(currentPrices)
@@ -146,6 +161,10 @@ fun PaperBook.getStopOrderManager(
     stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
     maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
     settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+    earlyLossTimeRemainingMs: Long = SignalConstants.DEFAULT_EARLY_LOSS_TIME_REMAINING_MS,
+    recoveryTrendLookback: Int = SignalConstants.DEFAULT_RECOVERY_TREND_LOOKBACK,
+    recoveryTrendStep: Double = SignalConstants.DEFAULT_RECOVERY_TREND_STEP,
+    recoveryTrendWindowMs: Long = SignalConstants.DEFAULT_RECOVERY_TREND_WINDOW_MS,
     maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
     autoExecute: Boolean = true,
     enabled: Boolean = true
@@ -158,6 +177,10 @@ fun PaperBook.getStopOrderManager(
         stopLossDelayMs = stopLossDelayMs,
         maxHoldMs = maxHoldMs,
         settlementFallbackMs = settlementFallbackMs,
+        earlyLossTimeRemainingMs = earlyLossTimeRemainingMs,
+        recoveryTrendLookback = recoveryTrendLookback,
+        recoveryTrendStep = recoveryTrendStep,
+        recoveryTrendWindowMs = recoveryTrendWindowMs,
         maxQuoteAgeMs = maxQuoteAgeMs,
         enabled = enabled,
         autoExecute = autoExecute

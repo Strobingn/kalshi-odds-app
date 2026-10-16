@@ -64,6 +64,22 @@ class PaperBookTest {
     }
 
     @Test
+    fun reopenedPositionCannotReuseUnchangedDepthSnapshot() {
+        val ticker = "KXBTC15M-REOPEN"
+        val book = PaperBook(idFactory = { java.util.UUID.randomUUID().toString() }, nowMs = { 1_000L })
+        book.forceFill(ticker, "YES", 0.40, 2, "test", "open")
+        val manager = book.getStopOrderManager(stopLossDelayMs = Long.MAX_VALUE, maxHoldMs = Long.MAX_VALUE)
+        val peak = com.dirk.kalshiodds.signal.trade.PaperExitQuote(0.50, 2, 2_000L, "book", "same")
+        val hit = com.dirk.kalshiodds.signal.trade.PaperExitQuote(0.49, 2, 2_000L, "book", "same")
+        manager.checkAndExecute(mapOf(ticker to peak), 2_000L)
+        assertEquals(2, manager.checkAndExecute(mapOf(ticker to hit), 2_000L).single().contracts)
+        book.forceFill(ticker, "YES", 0.40, 2, "test", "reopen")
+        manager.checkAndExecute(mapOf(ticker to peak), 2_000L)
+        assertTrue(manager.checkAndExecute(mapOf(ticker to hit), 2_000L).isEmpty())
+        assertEquals(2, book.snapshot().fills.filter { !it.settled && it.ticker == ticker }.sumOf { it.contracts })
+    }
+
+    @Test
     fun startsAtOneHundredAndPapersFiveDollarAiFill() {
         val book = PaperBook(idFactory = { "p1" }, nowMs = { 10L })
         assertEquals(SignalConstants.PAPER_START_USD, book.snapshot().cashUsd, 1e-9)

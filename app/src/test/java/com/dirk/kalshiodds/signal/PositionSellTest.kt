@@ -337,6 +337,21 @@ class SellTicketTest {
     }
 
     @Test
+    fun strictPaperExitRejectsStaleBookButAcceptsFreshObservation() {
+        val market = openMarket(ask = 0.40, bid = 0.39)
+        val stale = TicketBuilder.Context(
+            settings = SignalSettings(ticketsEnabled = true),
+            alertsPaused = false,
+            books = mapOf(market.ticker to BookLevelSnapshot(yes = listOf(0.39 to 10.0), updatedAtMs = 1_000L, revision = 1L)),
+            nowMs = 10_000L,
+            requireFreshQuotes = true
+        )
+        assertNull(TicketBuilder.freshBestBid(market, "YES", stale))
+        val fresh = stale.copy(books = mapOf(market.ticker to BookLevelSnapshot(yes = listOf(0.39 to 10.0), updatedAtMs = 9_000L, revision = 2L)))
+        assertEquals(0.39, TicketBuilder.freshBestBid(market, "YES", fresh)!!, 1e-9)
+    }
+
+    @Test
     fun confirmReusesOneClientOrderIdOnDoubleTap() = runBlocking {
         val ids = mutableListOf<String>()
         val session = TicketSession(

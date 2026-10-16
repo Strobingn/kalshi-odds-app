@@ -162,7 +162,10 @@ fun MarketUiModel.withLiveQuote(tick: com.dirk.kalshiodds.signal.model.MarketTic
     )
 }
 
-fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
+fun MarketDto.toUiModel(
+    series: SeriesKind,
+    quoteObservedAtMs: Long = 0L
+): MarketUiModel {
     val yesBid = KalshiPrice.parseDollars(yesBidDollars)
     val yesAsk = KalshiPrice.parseDollars(yesAskDollars)
     val noBid = KalshiPrice.parseDollars(noBidDollars)
@@ -188,7 +191,7 @@ fun MarketDto.toUiModel(series: SeriesKind): MarketUiModel {
         yesAsk = yesAsk,
         noBid = noBid,
         noAsk = noAsk,
-        quoteObservedAtMs = System.currentTimeMillis(),
+        quoteObservedAtMs = quoteObservedAtMs,
         yesAskSize = KalshiPrice.parseCount(yesAskSizeFp),
         lastPrice = last,
         yesProbabilityPercent = yesImplied?.times(100.0),

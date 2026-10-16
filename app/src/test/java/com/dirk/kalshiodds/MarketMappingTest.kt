@@ -40,6 +40,13 @@ class MarketMappingTest {
         assertEquals(33.0, ui.yesProbabilityPercent!!, 0.001)
         assertEquals(67.0, ui.noProbabilityPercent!!, 0.001)
     }
+
+    @Test
+    fun unmappedDtoDoesNotAcquireFreshTimestampOnRead() {
+        val dto = MarketDto(ticker = "KXBTC15M-CACHE", yesBidDollars = "0.40", yesAskDollars = "0.41")
+        assertEquals(0L, dto.toUiModel(SeriesKind.BTC).quoteObservedAtMs)
+        assertEquals(1_000L, dto.toUiModel(SeriesKind.BTC, 1_000L).quoteObservedAtMs)
+    }
 }
 
 class CryptoMarketsTest {

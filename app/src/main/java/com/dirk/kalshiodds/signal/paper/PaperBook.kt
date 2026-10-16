@@ -14,6 +14,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.Serializable
 
+@Serializable
+data class PaperPriceObservation(
+    val price: Double,
+    val observedAtMs: Long
+)
+
 /**
  * Isolated paper book. Never calls Kalshi. $100 start / $5 per AI fill.
  */
@@ -39,7 +45,9 @@ data class PaperFill(
     val peakPrice: Double? = null,
     val peakUpdatedAtMs: Long? = null,
     /** Optional market close time used by the paper risk fallback. */
-    val closeTimeMs: Long? = null
+    val closeTimeMs: Long? = null,
+    /** Fresh held-side executable bids retained for the bounded trend check. */
+    val quoteHistory: List<PaperPriceObservation> = emptyList()
 ) {
     val displaySide: String get() = side.uppercase()
 }
@@ -118,8 +126,14 @@ class PaperBook(
             val cur = _state.value
             val open = cur.fills.firstOrNull { it.id == fillId && !it.settled } ?: return null
             val peak = maxOf(open.peakPrice ?: open.limitPrice, px)
-            if (open.peakPrice != null && peak <= open.peakPrice + 1e-9) return open
-            val updated = open.copy(peakPrice = peak, peakUpdatedAtMs = atMs)
+            val history = (open.quoteHistory + PaperPriceObservation(px, atMs)).takeLast(12)
+            val peakChanged = open.peakPrice == null || peak > open.peakPrice + 1e-9
+            if (!peakChanged && history == open.quoteHistory) return open
+            val updated = open.copy(
+                peakPrice = peak,
+                peakUpdatedAtMs = if (peakChanged) atMs else open.peakUpdatedAtMs,
+                quoteHistory = history
+            )
             publish(cur.copy(fills = cur.fills.map {
                 if (it.id == fillId && !it.settled) updated else it
             }))
@@ -158,7 +172,9 @@ class PaperBook(
         alert: SignalAlert,
         ask: Double?,
         enabled: Boolean,
-        closeTimeMs: Long? = null
+        closeTimeMs: Long? = null,
+        contracts: Int? = null,
+        stakeUsd: Double? = null
     ): PaperFill? {
         if (!enabled) return null
         if (SignalStance.isNoBetSide(alert.predictedSide)) return null
@@ -170,6 +186,8 @@ class PaperBook(
             limitPrice = px,
             source = "AI signal",
             note = alert.reason.ifBlank { "LiveCall / Dip Hunter signal" },
+            contracts = contracts,
+            stakeUsd = stakeUsd,
             closeTimeMs = closeTimeMs
         )
     }

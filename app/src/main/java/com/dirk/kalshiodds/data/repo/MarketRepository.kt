@@ -116,7 +116,7 @@ class MarketRepository(
         }
         return resp.markets
             .filter { CryptoMarkets.isCryptoTicker(it.ticker) }
-            .map { it.toUiModel(kind) }
+            .map { it.toUiModel(kind, System.currentTimeMillis()) }
     }
 
     suspend fun scoreSettlementsNow(nowMs: Long = System.currentTimeMillis()) {
@@ -169,11 +169,11 @@ class MarketRepository(
                 .filter { it.ticker !in seen }
             val now = System.currentTimeMillis()
             cache.write(btcMarkets, ethMarkets, solMarkets, extraMarkets, now)
-            val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC) }, now, edgeThresholdPp)
-            val ethUi = model.annotate(ethMarkets.map { it.toUiModel(SeriesKind.ETH) }, now, edgeThresholdPp)
-            val solUi = model.annotate(solMarkets.map { it.toUiModel(SeriesKind.SOL) }, now, edgeThresholdPp)
+            val btcUi = model.annotate(btcMarkets.map { it.toUiModel(SeriesKind.BTC, now) }, now, edgeThresholdPp)
+            val ethUi = model.annotate(ethMarkets.map { it.toUiModel(SeriesKind.ETH, now) }, now, edgeThresholdPp)
+            val solUi = model.annotate(solMarkets.map { it.toUiModel(SeriesKind.SOL, now) }, now, edgeThresholdPp)
             val extraUi = model.annotate(
-                extraMarkets.map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
+                extraMarkets.map { it.toUiModel(CryptoMarkets.kindFor(it.ticker), now) },
                 now,
                 edgeThresholdPp
             )
@@ -318,12 +318,12 @@ class MarketRepository(
     ): MarketsSnapshot {
         val now = System.currentTimeMillis()
         return MarketsSnapshot(
-            btc = model.annotate(btc.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.BTC) }, now),
-            eth = model.annotate(eth.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.ETH) }, now),
-            sol = model.annotate(sol.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.SOL) }, now),
+            btc = model.annotate(btc.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.BTC, fetchedAtEpochMs) }, now),
+            eth = model.annotate(eth.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.ETH, fetchedAtEpochMs) }, now),
+            sol = model.annotate(sol.filter { CryptoMarkets.isCryptoTicker(it.ticker) }.map { it.toUiModel(SeriesKind.SOL, fetchedAtEpochMs) }, now),
             extra = model.annotate(
                 extra.filter { CryptoMarkets.isCryptoTicker(it.ticker) }
-                    .map { it.toUiModel(CryptoMarkets.kindFor(it.ticker)) },
+                    .map { it.toUiModel(CryptoMarkets.kindFor(it.ticker), fetchedAtEpochMs) },
                 now
             ),
             fetchedAtEpochMs = fetchedAtEpochMs,

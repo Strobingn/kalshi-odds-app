@@ -52,6 +52,14 @@ object SignalConstants {
     const val DEFAULT_STOP_LOSS_DELAY_MS = 30_000L
     const val DEFAULT_MAX_PAPER_HOLD_MS = 12 * 60_000L
     const val DEFAULT_SETTLEMENT_FALLBACK_MS = 30_000L
+    /** Early below-entry risk check only when the close is near. */
+    const val DEFAULT_EARLY_LOSS_TIME_REMAINING_MS = 120_000L
+    /** Number of fresh executable observations required for trend evidence. */
+    const val DEFAULT_RECOVERY_TREND_LOOKBACK = 3
+    /** Minimum decline between adjacent observations, in dollars (0.2 cents). */
+    const val DEFAULT_RECOVERY_TREND_STEP = 0.002
+    /** Retained fresh quote history window for the deterministic risk heuristic. */
+    const val DEFAULT_RECOVERY_TREND_WINDOW_MS = 60_000L
     const val DEFAULT_MAX_EXIT_QUOTE_AGE_MS = 5_000L
     const val MAX_PAPER_ENTRY_ASK = 0.50
 

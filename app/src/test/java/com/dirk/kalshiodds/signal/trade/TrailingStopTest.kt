@@ -3,6 +3,7 @@ package com.dirk.kalshiodds.signal.trade
 import com.dirk.kalshiodds.signal.paper.PaperBook
 import com.dirk.kalshiodds.signal.paper.PaperBookState
 import com.dirk.kalshiodds.signal.paper.PaperFill
+import com.dirk.kalshiodds.signal.paper.PaperPriceObservation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -19,7 +20,8 @@ class TrailingStopTest {
         created: Long = 1_000L,
         peak: Double? = null,
         close: Long? = null,
-        entryFee: Double = 0.0
+        entryFee: Double = 0.0,
+        history: List<PaperPriceObservation> = emptyList()
     ) = PaperFill(
         id = "fill-1",
         ticker = ticker,
@@ -32,7 +34,8 @@ class TrailingStopTest {
         note = "test",
         entryFeeUsd = entryFee,
         peakPrice = peak,
-        closeTimeMs = close
+        closeTimeMs = close,
+        quoteHistory = history
     )
 
     private fun manager(
@@ -136,6 +139,47 @@ class TrailingStopTest {
         assertTrue(state.timeFallback)
         assertTrue(state.stopHit)
         assertEquals("TIME FALLBACK", state.stopType)
+    }
+
+    @Test
+    fun `transient below-entry dip with rebound does not trigger early risk exit`() {
+        val f = fill(
+            entry = 0.40,
+            close = 100_000L,
+            history = listOf(
+                PaperPriceObservation(0.390, 7_000L),
+                PaperPriceObservation(0.395, 8_000L)
+            )
+        )
+        val state = manager(
+            PaperBookState(fills = listOf(f)),
+            maxHold = Long.MAX_VALUE,
+            settlementFallback = 30_000L
+        ).calculatePositionState(f, 0.394, 9_000L)
+        assertFalse(state.timeFallback)
+        assertFalse(state.earlyLossHit)
+        assertFalse(state.stopHit)
+    }
+
+    @Test
+    fun `sustained decline near close permits bounded early risk exit`() {
+        val f = fill(
+            entry = 0.40,
+            close = 100_000L,
+            history = listOf(
+                PaperPriceObservation(0.398, 7_000L),
+                PaperPriceObservation(0.392, 8_000L)
+            )
+        )
+        val state = manager(
+            PaperBookState(fills = listOf(f)),
+            maxHold = Long.MAX_VALUE,
+            settlementFallback = 30_000L
+        ).calculatePositionState(f, 0.386, 9_000L)
+        assertFalse(state.timeFallback)
+        assertTrue(state.earlyLossHit)
+        assertTrue(state.stopHit)
+        assertEquals("TREND RISK EXIT", state.stopType)
     }
 
     @Test

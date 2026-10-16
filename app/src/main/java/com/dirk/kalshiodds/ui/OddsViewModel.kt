@@ -1058,22 +1058,40 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         val now = System.currentTimeMillis()
         val adaptive = AdaptiveStrategy(paperBook.snapshot())
         val adaptiveConfig = adaptive.getAdaptiveConfig()
+        val state = _state.value
+        val paperCtx = ticketContext(state, now).copy(
+            bankrollUsd = paperBook.snapshot().equityUsd,
+            bankrollSource = "paper",
+            adaptiveConfig = adaptiveConfig,
+            adaptiveTradingAllowed = true,
+            requireFreshQuotes = true
+        )
         alerts.forEach { alert ->
             if (!com.dirk.kalshiodds.domain.CryptoMarkets.isLiveTicker(alert.ticker)) return@forEach
-            val market = markets[alert.ticker]
-            if (market != null && !MarketLifecycle.isTradable(market, now)) return@forEach
-            if (!adaptive.shouldTrade(market ?: return@forEach)) return@forEach
-            val ask = market?.let {
-                TicketBuilder.bestAsk(it, alert.predictedSide, ticketContext(s = _state.value, nowMs = now))
-            }
+            val market = markets[alert.ticker] ?: return@forEach
+            if (!MarketLifecycle.isTradable(market, now)) return@forEach
+            if (!adaptive.shouldTrade(market)) return@forEach
+            val ask = TicketBuilder.bestAsk(market, alert.predictedSide, paperCtx)
             if (ask == null || ask > SignalConstants.MAX_PAPER_ENTRY_ASK + 1e-9 ||
                 ask > adaptiveConfig.maxAskFilter + 1e-9
             ) return@forEach
+            val visible = floor(
+                TicketBuilder.quotedSize(market, alert.predictedSide, paperCtx.books[market.ticker]) ?: 0.0
+            ).toInt().coerceAtLeast(0)
+            val clip = com.dirk.kalshiodds.signal.trade.LiveOrderSizer.sizeWithinDepth(
+                price = ask,
+                visibleContracts = visible,
+                capUsd = adaptiveConfig.stakeUsd,
+                feeRate = state.settings.feeRate
+            )
+            if (!clip.ok) return@forEach
             paperBook.considerAlert(
                 alert,
                 ask,
                 enabled = true,
-                closeTimeMs = market?.closeTimeEpochMs
+                closeTimeMs = market.closeTimeEpochMs,
+                contracts = clip.count,
+                stakeUsd = clip.allInUsd
             )
         }
     }

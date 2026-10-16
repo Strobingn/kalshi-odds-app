@@ -31,6 +31,10 @@ class TrailingStop(
     private val stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
     private val maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
     private val settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+    private val earlyLossTimeRemainingMs: Long = SignalConstants.DEFAULT_EARLY_LOSS_TIME_REMAINING_MS,
+    private val recoveryTrendLookback: Int = SignalConstants.DEFAULT_RECOVERY_TREND_LOOKBACK,
+    private val recoveryTrendStep: Double = SignalConstants.DEFAULT_RECOVERY_TREND_STEP,
+    private val recoveryTrendWindowMs: Long = SignalConstants.DEFAULT_RECOVERY_TREND_WINDOW_MS,
     private val maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
     private val enabledFlag: Boolean = true
 ) {
@@ -42,6 +46,10 @@ class TrailingStop(
         val stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
         val maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
         val settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+        val earlyLossTimeRemainingMs: Long = SignalConstants.DEFAULT_EARLY_LOSS_TIME_REMAINING_MS,
+        val recoveryTrendLookback: Int = SignalConstants.DEFAULT_RECOVERY_TREND_LOOKBACK,
+        val recoveryTrendStep: Double = SignalConstants.DEFAULT_RECOVERY_TREND_STEP,
+        val recoveryTrendWindowMs: Long = SignalConstants.DEFAULT_RECOVERY_TREND_WINDOW_MS,
         val maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
         val enabled: Boolean = true,
         /** Source compatibility for explicit legacy fixed-cent callers. */
@@ -78,7 +86,8 @@ class TrailingStop(
         val trailingDistanceCents: Double?,
         val trailingDistancePct: Double,
         val trailActivated: Boolean,
-        val timeFallback: Boolean
+        val timeFallback: Boolean,
+        val earlyLossHit: Boolean = false
     )
 
     fun checkPositions(currentPrices: Map<String, Double>): List<StopOrder> =
@@ -100,6 +109,7 @@ class TrailingStop(
             val timeFallback = state.timeFallback
             val stopLoss = state.stopLossPrice != null && current <= state.stopLossPrice
             val trailing = state.trailingStopPrice != null && current <= state.trailingStopPrice
+            val earlyLoss = state.earlyLossHit
             val stopPrice = when {
                 timeFallback -> current
                 stopLoss -> state.stopLossPrice!!
@@ -122,6 +132,7 @@ class TrailingStop(
                     timeFallback -> "time fallback"
                     stopLoss -> "stop loss"
                     trailing -> "trailing stop"
+                    earlyLoss -> "trend risk exit"
                     else -> "risk fallback"
                 }
             )
@@ -157,11 +168,17 @@ class TrailingStop(
         val trailingHit = trailActivated && peak > entryPrice + 1e-9 &&
             currentPrice >= entryPrice - 1e-9 &&
             trailingStopPrice != null && currentPrice <= trailingStopPrice
-        val stopHit = timeFallback || stopLossHit || trailingHit
+        val closeRemainingMs = fill.closeTimeMs?.minus(nowMs)
+        val earlyLossHit = currentPrice < entryPrice - 1e-9 &&
+            closeRemainingMs != null &&
+            closeRemainingMs in 0L..earlyLossTimeRemainingMs &&
+            sustainedDecline(fill, currentPrice, nowMs)
+        val stopHit = timeFallback || stopLossHit || trailingHit || earlyLossHit
         val stopType = when {
             timeFallback -> "TIME FALLBACK"
             stopLossHit -> "STOP LOSS"
             trailingHit -> "TRAILING STOP"
+            earlyLossHit -> "TREND RISK EXIT"
             else -> null
         }
         return PositionState(
@@ -178,8 +195,21 @@ class TrailingStop(
             trailingDistanceCents = distance * 100.0,
             trailingDistancePct = trailingStopPct,
             trailActivated = trailActivated,
-            timeFallback = timeFallback
+            timeFallback = timeFallback,
+            earlyLossHit = earlyLossHit
         )
+    }
+
+    /**
+     * Deterministic recovery proxy: only a short, monotonic sequence of fresh
+     * executable bids qualifies. This is not a probability of recovery.
+     */
+    private fun sustainedDecline(fill: PaperFill, currentPrice: Double, nowMs: Long): Boolean {
+        val points = (fill.quoteHistory + com.dirk.kalshiodds.signal.paper.PaperPriceObservation(currentPrice, nowMs))
+            .filter { it.observedAtMs in (nowMs - recoveryTrendWindowMs)..nowMs }
+            .takeLast(recoveryTrendLookback)
+        if (points.size < recoveryTrendLookback) return false
+        return points.zipWithNext().all { (a, b) -> a.price - b.price >= recoveryTrendStep }
     }
 
     private fun effectiveDistance(entryPrice: Double): Double =
@@ -209,6 +239,10 @@ class TrailingStop(
         stopLossDelayMs = stopLossDelayMs,
         maxHoldMs = maxHoldMs,
         settlementFallbackMs = settlementFallbackMs,
+        earlyLossTimeRemainingMs = earlyLossTimeRemainingMs,
+        recoveryTrendLookback = recoveryTrendLookback,
+        recoveryTrendStep = recoveryTrendStep,
+        recoveryTrendWindowMs = recoveryTrendWindowMs,
         maxQuoteAgeMs = maxQuoteAgeMs,
         enabled = enabledFlag,
         trailingStopCents = trailingStopCents,
@@ -225,6 +259,10 @@ class TrailingStop(
         stopLossDelayMs = config.stopLossDelayMs,
         maxHoldMs = config.maxHoldMs,
         settlementFallbackMs = config.settlementFallbackMs,
+        earlyLossTimeRemainingMs = config.earlyLossTimeRemainingMs,
+        recoveryTrendLookback = config.recoveryTrendLookback,
+        recoveryTrendStep = config.recoveryTrendStep,
+        recoveryTrendWindowMs = config.recoveryTrendWindowMs,
         maxQuoteAgeMs = config.maxQuoteAgeMs,
         enabledFlag = config.enabled
     )
@@ -239,6 +277,10 @@ fun PaperBookState.getTrailingStopManager(
     stopLossDelayMs: Long = SignalConstants.DEFAULT_STOP_LOSS_DELAY_MS,
     maxHoldMs: Long = SignalConstants.DEFAULT_MAX_PAPER_HOLD_MS,
     settlementFallbackMs: Long = SignalConstants.DEFAULT_SETTLEMENT_FALLBACK_MS,
+    earlyLossTimeRemainingMs: Long = SignalConstants.DEFAULT_EARLY_LOSS_TIME_REMAINING_MS,
+    recoveryTrendLookback: Int = SignalConstants.DEFAULT_RECOVERY_TREND_LOOKBACK,
+    recoveryTrendStep: Double = SignalConstants.DEFAULT_RECOVERY_TREND_STEP,
+    recoveryTrendWindowMs: Long = SignalConstants.DEFAULT_RECOVERY_TREND_WINDOW_MS,
     maxQuoteAgeMs: Long = SignalConstants.DEFAULT_MAX_EXIT_QUOTE_AGE_MS,
     enabled: Boolean = true
 ): TrailingStop = TrailingStop(
@@ -251,6 +293,10 @@ fun PaperBookState.getTrailingStopManager(
     stopLossDelayMs = stopLossDelayMs,
     maxHoldMs = maxHoldMs,
     settlementFallbackMs = settlementFallbackMs,
+    earlyLossTimeRemainingMs = earlyLossTimeRemainingMs,
+    recoveryTrendLookback = recoveryTrendLookback,
+    recoveryTrendStep = recoveryTrendStep,
+    recoveryTrendWindowMs = recoveryTrendWindowMs,
     maxQuoteAgeMs = maxQuoteAgeMs,
     enabledFlag = enabled
 )

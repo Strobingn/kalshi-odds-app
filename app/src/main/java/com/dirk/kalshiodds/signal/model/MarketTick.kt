@@ -61,7 +61,7 @@ data class MarketTick(
                 closeTimeEpochMs = model.closeTimeEpochMs,
                 source = source,
                 receiveElapsedNanos = receiveElapsedNanos,
-                observedAtMs = System.currentTimeMillis(),
+                observedAtMs = model.quoteObservedAtMs,
                 floorStrike = model.floorStrike,
                 noBid = model.noBid,
                 noAsk = model.noAsk
