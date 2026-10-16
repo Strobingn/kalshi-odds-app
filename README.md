@@ -19,6 +19,32 @@ Android app for **Dirk Diggler** that shows live Kalshi **crypto** prediction-ma
 
 Package: `com.dirk.kalshiodds` · version **0.3.15**
 
+## 1.10.1 (claude/scalper-model-refresh): opening ride, late edge, contract checks
+
+Two new arena strategies and a check of the two contract facts the edge report
+(`reports/`, not in the repo) could not confirm. Paper only.
+
+- **Opening ride · buy, +10¢ / trail 3¢.** In the window's first minute it buys
+  the side the live Bitcoin price leans to (fair price from Kalshi's CF index
+  51% or more; the market's own favourite, mid 52¢+, while the index is not in),
+  at whatever it costs inside 40–65¢. Out at +10¢ on a resting offer, or sold
+  at the bid once the bid falls 3¢ under its best bid since the entry (a
+  trailing stop). Once a window; anything still open settles. The lean, target,
+  stop, size and band are all in its settings.
+- **Late edge · settle average, buy, hold** (report rank 1). With 5–45 s left,
+  most of the settlement average is fixed. It buys any side whose fair price
+  (prints fixed so far plus the live index) is 80%+ and beats the ask by the
+  taker fee (rounded per order) plus 2¢, and holds to the settlement. Once a
+  window.
+- **Contract checks** (Arena → settings). Every 6 h the app reads
+  `GET /series/KXBTC15M` for `fee_type`; if Kalshi ever lists maker fees, the
+  arena charges 0.0175·C·P·(1−P) on every resting fill. Every 5 min it compares
+  each settled window's `floor_strike` with the index average of the minute
+  before the open, the minute after it and the price at the open, and
+  `expiration_value` with the last minute's average, while Live signals was on.
+- The arena now decides from the 2nd second (opening ride only) to 5 s before
+  the close (late edge only); 37 strategies.
+
 ## 1.10.0 (claude/scalper-model-refresh): Bitcoin prices from Kalshi only, everywhere
 
 - New setting **Bitcoin price from Kalshi only** (Settings → Trade feed, on by default). The CF Benchmarks

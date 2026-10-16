@@ -63,7 +63,11 @@ enum class ScalpStrategy(
     val entryMax: Double = PrintGrid.MAX_PRICE,
     val origin: String = "Claude",
     /** Kashi's late-favourite rule; null for every other strategy. */
-    val fav: FavSpec? = null
+    val fav: FavSpec? = null,
+    /** The stop follows the best bid since the entry up ([stopDollars] under it) instead of staying put. */
+    val trail: Boolean = false,
+    /** Trades only in the first minute of the window (the opening ride). */
+    val opening: Boolean = false
 ) {
     /** The trained model picks calm moments. Rest in, +1¢ out. */
     ML_REST("ML scalper · resting", false, 0.01, 0.04, 120_000L, 5, 12, -2.01),
@@ -244,6 +248,33 @@ enum class ScalpStrategy(
         "Kashi late fav · off US hours", true, 0.0, 0.25, 0L, 1, 1, null,
         hold = true, entryMin = 0.50, entryMax = 0.95, origin = "kashi sf31",
         fav = FavSpec(20, 60, 0.95, 0.05, offUsHours = true)
+    ),
+
+    /**
+     * Opening ride (asked for 2026-10-16): in the window's first minute, buy
+     * the side the live Bitcoin price leans to (its fair price from
+     * [ScalpFair] above 50%; the market's own favourite while the index is
+     * not in), at whatever it costs inside 40–65¢. Out at +10¢ on a resting
+     * offer, or sold at the bid once it falls 3¢ under the best bid since the
+     * entry (a trailing stop). Anything still open settles. Once a window.
+     */
+    OPENING_RIDE(
+        "Opening ride · buy, +10¢ / trail 3¢", true, 0.10, 0.03, 900_000L, 1, 1, null,
+        entryMin = 0.40, entryMax = 0.65, origin = "you", trail = true, opening = true
+    ),
+
+    /**
+     * Late edge (report "Kalshi Bitcoin 15 minute edge", rank 1): the
+     * settlement is the average of the last 60 index prints, so with
+     * [FavSpec.tteMin]–[FavSpec.tteMax] seconds left most of it is already
+     * fixed. [ScalpFair] prices the side from the prints fixed so far plus
+     * the live index; buy any side whose fair price is at least
+     * [FavSpec.fairMin] and beats its ask by the taker fee plus
+     * [FavSpec.gap]. Hold to the settlement, no stop. Once a window.
+     */
+    LATE_EDGE(
+        "Late edge · settle average, buy, hold", true, 0.0, 0.0, 0L, 1, 1, null,
+        hold = true, entryMin = 0.50, entryMax = 0.98, origin = "edge report", fav = FavSpec(5, 45, 0.80, 0.02)
     );
 
     /**
@@ -418,6 +449,14 @@ class ScalperEngine(
         tuning.defaultContracts = config.contracts
     }
 
+    /**
+     * Fee rate on resting fills (entry bids and target offers). 0 while Kalshi
+     * lists the series as `quadratic`; the contract check sets
+     * [KalshiFee.MAKER_COEFFICIENT] × the multiplier if it ever lists maker fees.
+     */
+    @Volatile
+    var makerFeeRate: Double = 0.0
+
     data class Config(
         val contracts: Int = 10,
         val entryWaitMs: Long = 20_000L,
@@ -429,6 +468,10 @@ class ScalperEngine(
     )
 
     private class Working(val order: ScalpOrder) {
+        /** Best bid seen since the fill: where a trailing stop hangs from. */
+        var peakBid = order.price
+        /** Maker fee charged when a resting entry bid filled (0 while makers are free). */
+        var makerEntryFee = 0.0
         var traded = 0.0
         var filledAtMs: Long? = null
         var exitPrice = 0.0
@@ -594,6 +637,7 @@ class ScalperEngine(
                 if (abs(sidePrice - o.price) <= TICK_EPS) w.traded += contracts
                 if (through || w.traded >= o.queueAhead + o.contracts) {
                     w.filledAtMs = nowMs
+                    w.makerEntryFee = makerFee(o.contracts, o.price)
                     w.exitPrice = round4(o.price + tuning.tuned(o.strategy).targetDollars)
                     val shown = if (o.queueKnown) exitQueue(o.side, w.exitPrice) else null
                     w.exitQueue = shown?.takeIf { q -> q.isFinite() && q >= 0.0 } ?: config.unknownQueue
@@ -608,7 +652,9 @@ class ScalperEngine(
                 if (abs(sidePrice - w.exitPrice) <= TICK_EPS) w.exitTraded += contracts
                 if (through || w.exitTraded >= w.exitQueue + o.contracts) {
                     it.remove()
-                    events += ScalpEvent.Closed(close(w, w.exitPrice, ExitKind.TARGET, feeUsd = 0.0, nowMs = nowMs))
+                    events += ScalpEvent.Closed(
+                        close(w, w.exitPrice, ExitKind.TARGET, feeUsd = makerFee(o.contracts, w.exitPrice), nowMs = nowMs)
+                    )
                 }
             }
         }
@@ -641,7 +687,9 @@ class ScalperEngine(
             if (o.strategy.hold && t.stopDollars <= 0.0) continue
             val bid = (if (o.side == "YES") bidYes else bidNo)?.takeIf { b -> b.isFinite() && b >= 0.0 && b < 1.0 }
                 ?: continue
-            val stopped = t.stopDollars > 0.0 && bid <= o.price - t.stopDollars + EPS
+            if (o.strategy.trail && bid > w.peakBid) w.peakBid = bid
+            val stopFrom = if (o.strategy.trail) w.peakBid else o.price
+            val stopped = t.stopDollars > 0.0 && bid <= stopFrom - t.stopDollars + EPS
             val timedOut = !o.strategy.hold && nowMs - filledAt >= t.timeoutMs
             if (stopped || timedOut) {
                 it.remove()
@@ -700,14 +748,21 @@ class ScalperEngine(
         return price >= lo - EPS && price <= hi + EPS
     }
 
+    private fun makerFee(contracts: Int, price: Double): Double {
+        val rate = makerFeeRate
+        return if (rate > 0.0 && price > 0.0 && price < 1.0) KalshiFee.total(contracts, price, rate) else 0.0
+    }
+
+    /** [feeUsd] is the exit's fee; a resting entry's maker fee is added to it. */
     private fun close(w: Working, exitPrice: Double, kind: ExitKind, feeUsd: Double, nowMs: Long): ClosedScalp {
         val o = w.order
+        val fees = feeUsd + w.makerEntryFee
         return ClosedScalp(
             order = o,
             exitPrice = exitPrice,
             kind = kind,
-            feeUsd = feeUsd,
-            pnlUsd = (exitPrice - o.price) * o.contracts - o.entryFeeUsd - feeUsd,
+            feeUsd = fees,
+            pnlUsd = (exitPrice - o.price) * o.contracts - o.entryFeeUsd - fees,
             filledAtMs = w.filledAtMs ?: nowMs,
             closedAtMs = nowMs
         )

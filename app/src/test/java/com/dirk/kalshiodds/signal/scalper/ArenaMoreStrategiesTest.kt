@@ -38,7 +38,7 @@ class ArenaMoreStrategiesTest {
 
     @Test
     fun fifteenMoreMakeThirtyEachNewAndOnItsOwnRow() {
-        assertEquals(35, ScalpStrategy.values().size)
+        assertEquals(37, ScalpStrategy.values().size)
         assertEquals("added after the first fifteen, so those keep their places", added, ScalpStrategy.values().drop(15).take(15))
         assertTrue(added.all { it.historyCents == null && it.origin == "Claude 1.9.4" })
         val lines = ScalperSummary.of(ScalperState.fresh()).strategyLines

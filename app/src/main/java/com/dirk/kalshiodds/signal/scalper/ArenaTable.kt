@@ -170,6 +170,14 @@ object ArenaTable {
             "${f.tteMin}–${f.tteMax} s left, the live Bitcoin price makes the side at least ${c(f.fairMin)} to win, " +
                 "and its ask is ${c(f.gap)} or more under that" + (if (f.offUsHours) "; not 13:00–21:00 UTC." else ".")
         }
+        ScalpStrategy.OPENING_RIDE ->
+            "First minute of the window: the side the live Bitcoin price leans to (fair price 51% or more; " +
+                "the market's favourite while the index is not in), once a window."
+        ScalpStrategy.LATE_EDGE -> {
+            val f = st.fav!!
+            "${f.tteMin}–${f.tteMax} s left, the settlement average so far plus the live Bitcoin price make the side at least " +
+                "${c(f.fairMin)} to win, and its ask is under that by the taker fee plus ${c(f.gap)}; once a window."
+        }
     }
 
     private fun c(d: Double): String = "${Math.round(d * 100)}¢"
@@ -181,6 +189,9 @@ object ArenaTable {
         val exit = if (st.hold) {
             "Holds to the settlement: $1 if its side wins, $0 if not" +
                 (if (t.stopDollars > 0.0) ", unless the bid falls ${c(t.stopDollars)} below the entry (sold, taker fee)." else ".")
+        } else if (st.trail) {
+            "Out at +${c(t.targetDollars)} (resting offer), or sold at the bid once it falls ${c(t.stopDollars)} under " +
+                "the best bid since the entry (a trailing stop, taker fee). Anything still open settles."
         } else {
             "Out at +${c(t.targetDollars)} (resting offer), or sold at the bid at −${c(t.stopDollars)} " +
                 "or after ${t.timeoutMs / 1000} s (taker fee)."

@@ -138,6 +138,27 @@ class CfIndexBook {
         if (n == 0) null else sum / n
     }
 
+    /** Plain mean of the index over the seconds [fromMs, toMs] and how many seconds had a value; null with none. */
+    fun mean(asset: String, fromMs: Long, toMs: Long): Pair<Double, Int>? = synchronized(lock) {
+        val ring = history[asset.uppercase()] ?: return null
+        val a = fromMs / 1000L
+        val b = toMs / 1000L
+        var n = 0
+        var sum = 0.0
+        for (p in ring) if (p.first in a..b) {
+            sum += p.second
+            n++
+        }
+        if (n == 0) null else (sum / n) to n
+    }
+
+    /** The index's last value at or before the second of [atMs], or null. */
+    fun valueAt(asset: String, atMs: Long): Double? = synchronized(lock) {
+        val ring = history[asset.uppercase()] ?: return null
+        val sec = atMs / 1000L
+        ring.lastOrNull { it.first <= sec }?.takeIf { sec - it.first <= 5L }?.second
+    }
+
     fun clear() = synchronized(lock) {
         latest.clear()
         history.clear()

@@ -360,6 +360,8 @@ class PaperScalper(
 ) {
     private val grids = HashMap<String, PrintGrid>()
     private val lastDecision = HashMap<String, IntArray>()   // ticker -> last decision second per cadence slot
+    /** Once-a-window strategies (the opening ride, late edge) that already bought on a ticker. */
+    private val onceDone = HashMap<String, MutableSet<ScalpStrategy>>()
 
     /** A public trade print. [takerSide] is Kalshi's `taker_side`: "yes" = the taker bought YES at [yesPrice]. */
     @Synchronized
@@ -398,6 +400,7 @@ class PaperScalper(
         val events = engine.settle(ticker, result, nowMs)
         grids.remove(ticker)
         lastDecision.remove(ticker)
+        onceDone.remove(ticker)
         ledger.apply(events, forcePersist = events.isNotEmpty())
     }
 
@@ -435,6 +438,7 @@ class PaperScalper(
     fun reset(): Boolean {
         if (!runCatching { onReset() }.getOrDefault(false)) return false
         engine.clear()
+        onceDone.clear()
         ledger.reset()
         return true
     }
@@ -448,7 +452,11 @@ class PaperScalper(
         val it = grids.entries.iterator()
         while (it.hasNext()) {
             val e = it.next()
-            if (nowMs - e.value.openMs > PrintGrid.SECONDS * 1000L + GRID_KEEP_MS && !engine.hasWork(e.key)) it.remove()
+            if (nowMs - e.value.openMs > PrintGrid.SECONDS * 1000L + GRID_KEEP_MS && !engine.hasWork(e.key)) {
+                onceDone.remove(e.key)
+                lastDecision.remove(e.key)
+                it.remove()
+            }
         }
         return PrintGrid(open).also { grids[ticker] = it }
     }
@@ -470,26 +478,57 @@ class PaperScalper(
      */
     private fun decide(ticker: String, grid: PrintGrid, nowMs: Long): List<ScalpEvent> {
         val s = grid.secondOf(nowMs) - 1
-        // The late favourites trade inside the last minute; everything else stops at minute 13.
-        if (s < PrintGrid.MIN_DECISION_SECOND || s > LATE_LAST_SECOND) return emptyList()
+        // The opening ride trades in the first minute, the late favourites inside the last one;
+        // everything else between minute 1 and minute 13.
+        if (s < OPEN_FIRST_SECOND || s > LATE_LAST_SECOND) return emptyList()
         // Slot 0 is the last second looked at (dozens of prints share a second); then one slot per strategy.
         val last = lastDecision.getOrPut(ticker) { IntArray(STRATEGIES.size + 1) { -1_000 } }
         if (last[0] == s) return emptyList()
         last[0] = s
         val tte = PrintGrid.SECONDS - s
         val tuning = engine.tuning
-        val due = STRATEGIES.filter { st ->
-            val t = tuning.tuned(st)
-            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds &&
-                (st.fav?.let { tte in it.tteMin..it.tteMax } ?: (s <= PrintGrid.MAX_DECISION_SECOND))
+        val done = onceDone[ticker]
+        val inWindow = { st: ScalpStrategy ->
+            when {
+                st.opening -> s <= OPEN_LAST_SECOND
+                st.fav != null -> tte in st.fav.tteMin..st.fav.tteMax
+                else -> s in PrintGrid.MIN_DECISION_SECOND..PrintGrid.MAX_DECISION_SECOND
+            }
         }
+        val due0 = STRATEGIES.filter { st ->
+            val t = tuning.tuned(st)
+            t.enabled && s - last[st.ordinal + 1] >= t.cadenceSeconds && inWindow(st) && (done == null || st !in done)
+        }
+        if (due0.isEmpty()) return emptyList()
+        for (st in due0) last[st.ordinal + 1] = s
+        // The opening ride cannot wait for a minute of prints; everything else needs one.
+        val warm = grid.warm(s)
+        val due = if (warm) due0 else due0.filter { it.opening }
         if (due.isEmpty()) return emptyList()
-        for (st in due) last[st.ordinal + 1] = s
-        if (!grid.warm(s)) return emptyList()
         val events = ArrayList<ScalpEvent>()
         val top = topOfBook(ticker)
-        val fairY = if (due.any { it.fav != null }) runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() } else null
+        val fairY = if (due.any { it.fav != null || it.opening }) {
+            runCatching { fairYes(ticker, nowMs) }.getOrNull()?.takeIf { it.isFinite() }
+        } else {
+            null
+        }
         val usHours = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneOffset.UTC).hour in 13..20
+        // The opening ride's side: where the live Bitcoin price leans, else the market's own favourite.
+        val rideYes: Boolean? = if (ScalpStrategy.OPENING_RIDE in due) {
+            val lean = tuning.tuned(ScalpStrategy.OPENING_RIDE).triggerValue(OPEN_LEAN)
+            val yesMid = top?.let { t ->
+                val b = t.yesBid
+                val a = t.yesAsk
+                if (b != null && a != null && b.isFinite() && a.isFinite() && b < a) (b + a) / 2.0 else null
+            } ?: grid.mid("YES", s).takeIf { !it.isNaN() }
+            when {
+                fairY != null -> if (fairY >= lean - EPS) true else if (1.0 - fairY >= lean - EPS) false else null
+                yesMid != null -> if (yesMid > 0.5 + MARKET_LEAN - EPS) true else if (yesMid < 0.5 - MARKET_LEAN + EPS) false else null
+                else -> null
+            }
+        } else {
+            null
+        }
         for (side in SIDES) {
             val yes = side == "YES"
             val realBid = (if (yes) top?.yesBid else top?.noBid)?.takeIf { it.isFinite() && it > 0.0 && it < 1.0 }
@@ -636,6 +675,15 @@ class PaperScalper(
                         val fair = fairY?.let { if (yes) it else 1.0 - it }
                         fair != null && fair >= trig(f.fairMin) - EPS && fair - ask >= f.gap - EPS && !(f.offUsHours && usHours)
                     }
+                    ScalpStrategy.OPENING_RIDE -> rideYes == yes
+                    ScalpStrategy.LATE_EDGE -> {
+                        val f = st.fav!!
+                        val fair = fairY?.let { if (yes) it else 1.0 - it }
+                        // The taker fee per contract on this order, rounded up per order as Kalshi charges it.
+                        val feePer = com.dirk.kalshiodds.signal.trade.KalshiFee.total(tn.contracts, ask, engine.config.feeRate) /
+                            tn.contracts
+                        fair != null && fair >= f.fairMin - EPS && fair - ask >= feePer + trig(f.gap) - EPS
+                    }
                 }
                 if (fire == null) {
                     val m = model ?: continue
@@ -647,9 +695,13 @@ class PaperScalper(
                     engine.post(st, ticker, side, bid, queue, pred, expected, nowMs, seen(x))?.let { events += it }
                 } else if (fire) {
                     if (st.taker) {
-                        events += engine.buyNow(
+                        val bought = engine.buyNow(
                             st, ticker, side, ask, { sd, px -> offerQueue(ticker, sd, px) }, nowMs, seen(null)
                         )
+                        if (bought.isNotEmpty() && (st.opening || st == ScalpStrategy.LATE_EDGE)) {
+                            onceDone.getOrPut(ticker) { HashSet() }.add(st)
+                        }
+                        events += bought
                     } else {
                         // 1¢ better rests inside the spread, so nobody is ahead of it at its price.
                         val improve = st == ScalpStrategy.IMPROVE_1C
@@ -680,8 +732,16 @@ class PaperScalper(
         private val STRATEGIES = ScalpStrategy.values().toList()
         private const val EPS = 1e-9
 
-        /** Last decision second: 10 s before the close, the end of Kashi's late-favourite window. */
-        const val LATE_LAST_SECOND = PrintGrid.SECONDS - 10
+        /** Last decision second: 5 s before the close, the end of the late-edge window. */
+        const val LATE_LAST_SECOND = PrintGrid.SECONDS - 5
+
+        /** The opening ride looks from the 2nd second to the end of the first minute. */
+        const val OPEN_FIRST_SECOND = 2
+        const val OPEN_LAST_SECOND = 60
+
+        /** Fair price the opening ride needs on a side before it buys it, and the market lean it falls back on. */
+        const val OPEN_LEAN = 0.51
+        const val MARKET_LEAN = 0.02
 
         /** Farthest the cached book's mid may sit from the live print mid before the book is ignored. */
         const val BOOK_GRID_TOLERANCE = 0.03
@@ -726,6 +786,14 @@ class ScalperStore(context: Context) {
         persist = { map -> runCatching { prefs.edit().putString(KNOBS_KEY, json.encodeToString(knobsSerializer, map)).apply() } }
     )
 
+    /** The maker-fee, strike and settlement checks against Kalshi ([ContractChecks]). */
+    val checks: ContractCheckBook = ContractCheckBook(
+        initial = runCatching {
+            prefs.getString(CHECKS_KEY, null)?.let { json.decodeFromString(ContractCheckState.serializer(), it) }
+        }.getOrNull() ?: ContractCheckState(),
+        persist = { st -> runCatching { prefs.edit().putString(CHECKS_KEY, json.encodeToString(ContractCheckState.serializer(), st)).apply() } }
+    )
+
     /** The trained model from assets, or null when it cannot be read (the fast strategies still run). */
     val model: ScalperModel? = runCatching {
         context.assets.open(ScalperModel.ASSET_NAME).bufferedReader().use { ScalperModel.parse(it.readText()) }
@@ -747,6 +815,7 @@ class ScalperStore(context: Context) {
         const val PREFS = "bitcoin_claude_scalper"
         const val KEY = "state_json"
         const val KNOBS_KEY = "strategy_settings_json"
+        const val CHECKS_KEY = "contract_checks_json"
         val knobsSerializer = kotlinx.serialization.serializer<Map<String, ScalpKnobs>>()
     }
 }

@@ -301,7 +301,16 @@ class AppContainer(context: Context) {
         }
     )
 
+    /** Maker fee, strike and settlement checked against Kalshi; read-only calls, never an order. */
+    val contractChecks = com.dirk.kalshiodds.signal.scalper.ContractCheckRunner(
+        book = scalperStore.checks,
+        cf = cfIndex,
+        api = { NetworkModule.publicApi(hub.settings.kalshiDemoEnabled) },
+        onMakerFeeRate = { rate -> scalper.engine.makerFeeRate = rate }
+    )
+
     init {
+        contractChecks.start(ledgerScope)
         // Backfill: settled calls already in the 400-entry prediction log.
         syncLedger()
         runCatching {

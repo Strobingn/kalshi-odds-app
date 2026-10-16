@@ -29,6 +29,18 @@ data class MarketsResponse(
     val markets: List<MarketDto> = emptyList()
 )
 
+/** `GET /series/{series_ticker}`: only the fields the contract checks read. */
+@Serializable
+data class SeriesResponse(val series: SeriesDto? = null)
+
+@Serializable
+data class SeriesDto(
+    val ticker: String? = null,
+    /** `quadratic` (takers pay, makers free) or `quadratic_with_maker_fees` (resting fills pay too). */
+    @SerialName("fee_type") val feeType: String? = null,
+    @SerialName("fee_multiplier") val feeMultiplier: Double? = null
+)
+
 @Serializable
 data class PriceRangeDto(
     val start: String,
@@ -71,6 +83,9 @@ data class MarketDto(
     /** Determined/settled: `yes`, `no`, or `scalar` (docs.kalshi.com/getting_started/market_lifecycle). */
     val result: String? = null,
     @SerialName("floor_strike") val floorStrike: Double? = null,
+    /** The settlement value Kalshi computed (for KXBTC15M: the last minute's average of the index). */
+    @Serializable(with = FixedPointDollarsSerializer::class)
+    @SerialName("expiration_value") val expirationValue: String? = null,
     @SerialName("event_ticker") val eventTicker: String? = null,
     /** Human-readable grid label. Do not key tick logic off this name. */
     @SerialName("price_level_structure") val priceLevelStructure: String? = null,
