@@ -131,6 +131,10 @@ class InMemoryResultsStore(
             chartTickRows.removeAll { it.ticker == row.ticker && it.tMs == row.tMs }
             chartTickRows.addLast(row)
         }
+        if (chartTickRows.size > maxChartTicks) {
+            val compact = chartTickRows.groupBy { it.ticker to it.tMs / 1000 }.values.map { it.maxBy { row -> row.tMs } }.sortedBy { it.tMs }
+            chartTickRows.clear(); chartTickRows.addAll(compact)
+        }
         while (chartTickRows.size > maxChartTicks) chartTickRows.removeFirst()
     }
 
@@ -144,6 +148,11 @@ class InMemoryResultsStore(
         chartTickRows.filter { it.ticker == ticker && it.tMs in startMs..endMs }
             .sortedBy { it.tMs }
             .takeLast(limit.coerceIn(1, 2_000))
+
+    @Synchronized
+    override fun chartSeconds(ticker: String, startMs: Long, endMs: Long): List<com.dirk.kalshiodds.chart.BidPoint> =
+        chartTickRows.filter { it.ticker.equals(ticker, true) && it.tMs in startMs..endMs }
+            .groupBy { it.tMs / 1000 }.values.map { it.maxBy { row -> row.tMs }.toBidPoint() }.sortedBy { it.tMs }.take(901)
 
     @Synchronized
     override fun trimChartTicks(keepTickers: Set<String>, olderThanMs: Long) {
@@ -296,3 +305,4 @@ class InMemoryResultsStore(
         pendingOrders.remove(key)
     }
 }
+

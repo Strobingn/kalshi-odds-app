@@ -477,6 +477,7 @@ class ScalpBook(
     /** 0.3.65 app-only extras: v2 copies + entry/exit detail notes (off in legacy unit-test books). */
     private val liveExtras: Boolean = false,
     val controls: ScalpControls = ScalpControls(),
+    private val executionLimits: ScalpExecutionLimits? = null,
     private val idFactory: () -> String = { UUID.randomUUID().toString() }
 ) {
     private val lock = Any()
@@ -551,6 +552,7 @@ class ScalpBook(
             if (m.size <= ScalpMemory.MAX_TICKERS) m else m.filterValues { it.closeMs > q.nowMs - 60_000L || it.ticker.equals(q.ticker, true) }
         }
         val changed = ArrayList<ScalpTrade>()
+        changed += enforceExecutionLimits(q)
         val coin = ScalpParams.coinOf(q.ticker)
         val primary = paramsFor(coin)
         // 0.3.50: six paper models = five strategy primaries + maker-first dip (buy the dip at the bid, sell the rebound at the ask).
@@ -570,11 +572,11 @@ class ScalpBook(
         // 0.3.65: peak bid for every open trade (stored on close) + v2 lane.
         mineAll.forEach { t -> if ((!ScalpV2.isV2(t.variantId) || ScalpV2.fresh(q)) && (t.state == ScalpState.OPEN || t.state == ScalpState.PENDING_EXIT)) q.bid(t.side)?.takeIf { it > 0.0 }?.let { b -> peakBid[t.id] = maxOf(peakBid[t.id] ?: b, b) } }
         // Manual settings use their frozen entry/exit policy independently of the original family.
-        mineAll.filter { isActive(it) && ScalpControlSpec.frozen(it) != null }.forEach { t ->
+        mineAll.filter { isActive(it) && !ScalpExecutionLimits.owns(it) && ScalpControlSpec.frozen(it) != null }.forEach { t ->
             ScalpManual.step(t, q)?.let { changed += it }
         }
         changed += stepV2(q)
-        mineAll.filter { isActive(it) && ScalpControlSpec.frozen(it) == null && !ShockFav.isShockFav(it.variantId) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
+        mineAll.filter { isActive(it) && !ScalpExecutionLimits.owns(it) && ScalpControlSpec.frozen(it) == null && !ShockFav.isShockFav(it.variantId) && !ForecastScalp.isForecast(it) && !ScalpV2.isV2(it.variantId) }.forEach { t ->
             val p = ScalpParams.byId(t.variantId) ?: primary
             step(t, q, p)?.let { changed += it }
         }
@@ -646,9 +648,10 @@ class ScalpBook(
      */
     fun onForecastQuote(q: ScalpRule.Quote, top3Yes: Double, top3No: Double, enabled: Boolean, nowHorizonS: Int? = null): List<ScalpTrade> = synchronized(lock) {
         _marks.value = _marks.value + (q.ticker.uppercase() to q)
-        val yb = q.yesBid ?: return@synchronized emptyList()
-        val ya = q.yesAsk ?: return@synchronized emptyList()
-        if (ya <= yb) return@synchronized emptyList()
+        val limited = enforceExecutionLimits(q)
+        val yb = q.yesBid ?: return@synchronized limited
+        val ya = q.yesAsk ?: return@synchronized limited
+        if (ya <= yb) return@synchronized limited
         val key = q.ticker.uppercase()
         val coin = ScalpParams.coinOf(q.ticker)
         val horizon = nowHorizonS ?: ShortHorizonForecaster.horizonFor(coin)
@@ -705,11 +708,11 @@ class ScalpBook(
             )
         }
         changed.forEach { save(it) }
-        changed.mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
+        (limited + changed).mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
     }
 
     private fun fcStep(t: ScalpTrade, q: ScalpRule.Quote, f: Double, horizon: Int): ScalpTrade? {
-        if (ScalpControlSpec.frozen(t) != null) return null
+        if (ScalpControlSpec.frozen(t) != null || ScalpExecutionLimits.owns(t)) return null
         val sideF = if (t.side == "YES") f else -f
         return when (t.state) {
             ScalpState.PENDING_ENTRY -> {
@@ -822,9 +825,10 @@ class ScalpBook(
 
     fun onShockFavQuote(q: ScalpRule.Quote, enabled: Boolean): List<ScalpTrade> = synchronized(lock) {
         _marks.value = _marks.value + (q.ticker.uppercase() to q)
-        val yb = q.yesBid ?: return@synchronized emptyList()
-        val ya = q.yesAsk ?: return@synchronized emptyList()
-        if (ya <= yb) return@synchronized emptyList()
+        val limited = enforceExecutionLimits(q)
+        val yb = q.yesBid ?: return@synchronized limited
+        val ya = q.yesAsk ?: return@synchronized limited
+        if (ya <= yb) return@synchronized limited
         val key = q.ticker.uppercase()
         val coin = ScalpParams.coinOf(q.ticker)
         val sec = q.nowMs / 1000L
@@ -843,9 +847,9 @@ class ScalpBook(
         val ring = sfSpot.getOrPut(coin) { ShockFav.SpotRing() }
         q.spot?.takeIf { it > 0.0 && it.isFinite() }?.let { ring.put(sec, it) }
         // 0.3.58: same fair as bt58 — 900 s 1 s-return σ from the ring, open basis to strike, raw τ.
-        val strike = q.strike?.takeIf { it > 0.0 && it.isFinite() } ?: return@synchronized emptyList()
-        val sNow = ring.at(sec) ?: return@synchronized emptyList()
-        val sig = ring.sigma900(sec) ?: return@synchronized emptyList()
+        val strike = q.strike?.takeIf { it > 0.0 && it.isFinite() } ?: return@synchronized limited
+        val sNow = ring.at(sec) ?: return@synchronized limited
+        val sig = ring.sigma900(sec) ?: return@synchronized limited
         val basis = sfBasis.getOrPut(key) {
             val osec = (q.closeMs - 900_000L) / 1000L
             ring.at(osec)?.let { kotlin.math.ln(it / strike) } ?: 0.0
@@ -909,7 +913,7 @@ class ScalpBook(
         }
         // exits first (shock legs; fav legs hold to settlement)
         for (t in mine) {
-            if ((t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) || ScalpControlSpec.frozen(t) != null) continue
+            if ((t.state != ScalpState.OPEN && t.state != ScalpState.PENDING_EXIT) || ScalpControlSpec.frozen(t) != null || ScalpExecutionLimits.owns(t)) continue
             if (!live) continue
             val p = ShockFav.byVariantId(t.variantId) ?: continue
             val bid = q.bid(t.side)?.takeIf { it > 0.0 } ?: continue
@@ -1029,7 +1033,7 @@ class ScalpBook(
             }
         }
         changed.forEach { save(it) }
-        changed.mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
+        (limited + changed).mapNotNull { candidate -> _all.value.firstOrNull { it.id == candidate.id } }
     }
 
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
@@ -1328,9 +1332,24 @@ class ScalpBook(
         add.size
     }
 
+    private fun enforceExecutionLimits(q: ScalpRule.Quote): List<ScalpTrade> {
+        val limits = executionLimits ?: return emptyList()
+        val changed = _all.value.filter { it.ticker.equals(q.ticker, true) && isActive(it) }.mapNotNull { limits.step(it, q) }
+        changed.forEach { save(it) }
+        return changed
+    }
+
     private fun save(t0: ScalpTrade) {
         val prev = _all.value.firstOrNull { it.id == t0.id }
         var prepared = t0
+        if (executionLimits != null) {
+            if (prev == null && t0.state == ScalpState.PENDING_ENTRY && !executionLimits.buyAllowed(t0.restingLimit ?: t0.signalAsk)) return
+            if (t0.entryAtMs != null && t0.state != ScalpState.CLOSED && prev?.entryAtMs == null && !executionLimits.buyAllowed(t0.entryPrice)) {
+                if (prev == null) return
+                prepared = prev.copy(state = ScalpState.NO_FILL, closedAtMs = _marks.value[t0.ticker.uppercase()]?.nowMs ?: t0.entryAtMs,
+                    note = "${prev.note}; no fill: 50c maximum buy")
+            }
+        }
         if (prev == null && t0.isPrimary && t0.state == ScalpState.PENDING_ENTRY && ScalpControlSpec.frozen(t0) == null) {
             controls.get(ScalpControlSpec.code(t0))?.let { cfg ->
                 if (!cfg.enabled) return
@@ -1346,6 +1365,7 @@ class ScalpBook(
                     restingLimit = if (maker) t0.restingLimit ?: quote.bid(t0.side) else t0.restingLimit)
             }
         }
+        if (liveExtras || executionLimits != null) prepared = ScalpFillLog.capture(prepared, prev, _marks.value[t0.ticker.uppercase()]?.nowMs ?: t0.closedAtMs ?: t0.signalAtMs)
         val t = if (liveExtras) withDetail(prepared, prev) else prepared
         // 0.3.67: enqueue DB+stats off the quote lock; flushBatches drains on a worker.
         writeQ.merge(t.id, t to prev) { old, neu -> neu.first to (old.second ?: neu.second) }
@@ -1390,6 +1410,7 @@ class ScalpBook(
 
     fun reloadStats() { _stats.value = store.loadStats() }
     /** 0.3.68 aggregate reads (≈ hundreds of rows, indexed). Call off Main. */
+    fun windowTrades(ticker: String, limit: Int = 2000) = store.windowTrades(ticker, limit)
     fun loadExits() = store.loadExits()
     fun loadWindows(limitWindows: Int = 48) = store.loadWindows(limitWindows)
     fun loadDaily(dayEt: String) = store.loadDaily(dayEt)
@@ -1460,14 +1481,14 @@ class ScalpBook(
         val key = q.ticker.uppercase()
         val out = ArrayList<ScalpTrade>()
         for (t in _all.value) {
-            if (t.ticker != key || !ScalpV2.isV2(t.variantId) || !isActive(t) || ScalpControlSpec.frozen(t) != null) continue
+            if (t.ticker != key || !ScalpV2.isV2(t.variantId) || !isActive(t) || ScalpControlSpec.frozen(t) != null || ScalpExecutionLimits.owns(t)) continue
             when (t.state) {
                 ScalpState.PENDING_ENTRY -> {
                     val age = q.nowMs - t.signalAtMs
                     if (q.tauS <= ScalpV2.EXIT_BY_S || age > ScalpV2.GIVE_UP_MS) { out += t.copy(state = ScalpState.NO_FILL, closedAtMs = q.nowMs, note = "${t.note}; no fill: final minute, expired signal, or no executable entry"); continue }
                     if (age < ScalpV2.ENTRY_DELAY_MS || !ScalpV2.fresh(q) || q.bookAtMs <= t.signalAtMs) continue
                     val seed = ScalpV2.spec(t.variantId)
-                    val sp = seed.copy(maxAsk = minOf(ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk), t.signalAsk + ScalpRule.SLIPPAGE))
+                    val sp = seed.copy(maxAsk = minOf(ScalpV2.savedNumber(t.note, "v2ask", seed.maxAsk), t.signalAsk + ScalpRule.SLIPPAGE, if (executionLimits != null) ScalpExecutionLimits.MAX_BUY else 1.0))
                     val ask = q.ask(t.side)
                     if (!ScalpV2.entryOk(ask, sp.maxAsk)) continue
                     if (sp.walk) {

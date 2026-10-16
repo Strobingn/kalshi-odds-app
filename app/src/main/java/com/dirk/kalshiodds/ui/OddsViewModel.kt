@@ -212,6 +212,37 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
     @Volatile private var scalpTabBoardsCoin: String? = null
     @Volatile private var scalpTabBoardsWkey: String? = null
     private var scalpTabJob: kotlinx.coroutines.Job? = null
+    private var scalpWindowReadAt = 0L
+    private var scalpWindowStored = emptyList<com.dirk.kalshiodds.chart.BidPoint>()
+    private var scalpWindowTrades = emptyList<com.dirk.kalshiodds.decision.ScalpTrade>()
+    private var scalpWindowTicker: String? = null
+    private var scalpWindowPersistedAt = 0L
+
+    private fun scalpWindow(ticker: String, closeMs: Long, now: Long): com.dirk.kalshiodds.chart.ScalpWindow {
+        val start = closeMs - 900_000L
+        var error: String? = null
+        if (scalpWindowTicker != ticker || now - scalpWindowReadAt >= 1000L) {
+            if (scalpWindowTicker != ticker) { scalpWindowStored = emptyList(); scalpWindowTrades = emptyList(); scalpWindowPersistedAt = 0L }
+            runCatching {
+                val observed = hub.scoring.book.bidHistory(ticker).filter { it.tMs > scalpWindowPersistedAt && it.tMs in start..minOf(now, closeMs) }
+                if (observed.isNotEmpty()) {
+                    container.archive.insertChartTicks(observed.map { com.dirk.kalshiodds.data.local.archive.ChartTickRow.fromBidPoint(ticker, it) })
+                    scalpWindowPersistedAt = observed.maxOf { it.tMs }
+                }
+                scalpWindowStored = container.archive.chartSeconds(ticker, start, minOf(now, closeMs))
+                scalpWindowTrades = container.scalp.windowTrades(ticker)
+            }.onFailure { error = "History refresh failed; showing available live data" }
+            scalpWindowTicker = ticker; scalpWindowReadAt = now
+        }
+        val quote = container.scalp.marks.value[ticker.uppercase()]
+        val live = hub.scoring.book.bidHistory(ticker) + listOfNotNull(quote?.let { q ->
+            com.dirk.kalshiodds.chart.BidPoint(q.bookAtMs, q.yesBid?.times(100)?.toFloat(), q.bid("NO")?.times(100)?.toFloat(), q.spot)
+        })
+        val trades = (scalpWindowTrades + container.scalp.snapshot()).filter { it.isPrimary && it.ticker.equals(ticker, true) }
+            .associateBy { it.id }.values.sortedByDescending { it.signalAtMs }
+        return com.dirk.kalshiodds.chart.ScalpWindow(ticker, start, closeMs, now,
+            com.dirk.kalshiodds.chart.ScalpWindow.points(scalpWindowStored, live, start, closeMs, now), trades, quote, error)
+    }
 
     fun setScalpTabVisible(visible: Boolean) {
         scalpTabVisible = visible
@@ -311,9 +342,11 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
                 heldContracts = runCatching { paperBook.openContracts(sel, side) }.getOrDefault(0),
                 heldEntry = fill?.limitPrice,
                 bookAgeMs = hub.scoring.book.bookAgeMs(sel, now),
-                secondsLeft = close?.let { ((it - now) / 1000L).coerceAtLeast(0L) }
+                secondsLeft = close?.let { ((it - now) / 1000L).coerceAtLeast(0L) },
+                window = close?.let { scalpWindow(sel, it, now) } ?: com.dirk.kalshiodds.chart.ScalpWindow()
             )
         }
+        if (sel == null) next = next.copy(window = com.dirk.kalshiodds.chart.ScalpWindow())
         _scalpTab.value = next
     }
 
@@ -360,6 +393,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     /** Tap a ladder row: paper limit at exactly that price (fills on touch, depth-capped, auto-cancels at close). */
     fun ladderPlace(cents: Int, buy: Boolean, qty: Int) {
+        if (buy && cents > 50) { _state.update { it.copy(userMessage = "Paper: buys are capped at 50¢") }; return }
         val st = _scalpTab.value
         val t = st.selectedTicker ?: return
         submitPaperOrder(t, st.side, if (buy) "BUY" else "SELL", cents.toDouble(), qty, market = false)
@@ -368,7 +402,7 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
 
     fun ladderCancel(id: String) { cancelPaperOrder(id); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
 
-    fun ladderReprice(id: String, cents: Int) { editPaperOrder(id, cents.toDouble(), null); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
+    fun ladderReprice(id: String, cents: Int) { if (cents > 50 && container.paperOrders.open().any { it.id == id && it.isBuy }) return; editPaperOrder(id, cents.toDouble(), null); vmScope.launch(paperLane) { runCatching { refreshScalpTab() } } }
 
     /** One tap: sell everything held on the selected side at entry + [plusCents]. */
     fun sellOwnedAt(plusCents: Int) {
@@ -2141,3 +2175,4 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         const val SCALP_TAB_CI_MS = 60_000L
     }
 }
+

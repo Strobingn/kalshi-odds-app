@@ -8,8 +8,8 @@ class ScalpControlsTest {
     private val ticker = "KXBTC15M-26OCT122015-15"
     private val close = ScalpTicker.closeMs(ticker)!!
     private val now = close - 400_000L
-    private fun config() = ScalpControlSpec.defaults("sf41").set(K.MIN_ASK, 1.0).set(K.MAX_ASK, 60.0)
-        .set(K.TARGET, 0.0).set(K.TURN, 0.0).set(K.TRAIL, 0.0).set(K.STOP, 10.0)
+    private fun config() = ScalpControlSpec.defaults("sf41").set(K.MIN_ASK, 1.0).set(K.MAX_ASK, 50.0)
+        .set(K.TARGET, 0.0).set(K.TURN, 0.0).set(K.TRAIL, 0.0).set(K.STOP, 2.0)
         .set(K.ARM, 4.0).set(K.CLIP, 5.0).set(K.DELAY, 2000.0).set(K.HOLD, 0.0)
     private fun q(at: Long, bid: Double = .40, size: Double = 10.0) = ScalpRule.Quote(ticker, at, close, at,
         bid, size, bid + .01, size, 100_000.0, 100_000.0, 3e-5)
@@ -55,7 +55,7 @@ class ScalpControlsTest {
         controls.apply("sf41", config())
         assertEquals(config(), ScalpControls(store).get("sf41"))
         assertNull(controls.get("sf42"))
-        try { controls.apply("sf41", config().set(K.MIN_ASK, 80.0)); fail("bad range accepted") } catch (_: IllegalArgumentException) { }
+        try { controls.apply("sf41", config().set(K.MIN_ASK, 50.0).set(K.MAX_ASK, 40.0)); fail("bad range accepted") } catch (_: IllegalArgumentException) { }
         assertEquals(config(), controls.get("sf41"))
         assertNull(ScalpControlSpec.decode("1:NaN,Infinity"))
         controls.reset("sf41"); assertNull(ScalpControls(store).get("sf41"))

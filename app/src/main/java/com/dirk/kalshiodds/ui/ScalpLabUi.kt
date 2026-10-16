@@ -28,7 +28,7 @@ import kotlin.math.abs
 /** Presentation only: ranking uses realized P&L after fees, never an invented equity curve. */
 object ScalpLabUi {
     enum class Filter(val label: String) { ALL("All"), OPEN("Open"), AHEAD("Ahead"), BEHIND("Behind"), V2("V2") }
-    enum class Page(val label: String) { MODELS("Models"), COMPARE("Compare"), LADDER("Ladder") }
+    enum class Page(val label: String) { LIVE("Live"), MODELS("Models"), COMPARE("Compare"), LADDER("Ladder") }
 
     fun ranked(rows: Map<ScalpModels.Model, ScalpModels.Row>, live: Map<ScalpModels.Model, ScalpModels.Row>,
         filter: Filter = Filter.ALL, query: String = ""): List<ScalpModels.Model> {

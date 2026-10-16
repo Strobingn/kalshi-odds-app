@@ -26,7 +26,7 @@ class ScalpLabScreenshotTest {
     private fun lab(dark: Boolean, empty: Boolean = false) {
         paparazzi.snapshot {
             KalshiOddsTheme(darkTheme = dark) {
-                ScalpTabContent(if (empty) ScalpTabState() else ScalpTabFixtures.state(10))
+                ScalpTabContent(if (empty) ScalpTabState() else ScalpTabFixtures.state(10), initialPage = ScalpLabUi.Page.MODELS)
             }
         }
     }

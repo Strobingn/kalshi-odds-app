@@ -481,6 +481,10 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                     SQLiteDatabase.CONFLICT_REPLACE
                 )
             }
+            if (android.database.DatabaseUtils.queryNumEntries(w, TABLE_CHART) > MAX_CHART) {
+                // Preserve window coverage under high tick rates before enforcing the bounded row budget.
+                w.execSQL("DELETE FROM $TABLE_CHART WHERE id NOT IN (SELECT id FROM $TABLE_CHART GROUP BY ticker, t_ms / 1000 HAVING MAX(t_ms))")
+            }
             w.execSQL(
                 "DELETE FROM $TABLE_CHART WHERE id NOT IN (SELECT id FROM $TABLE_CHART ORDER BY t_ms DESC LIMIT $MAX_CHART)"
             )
@@ -521,6 +525,18 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
                     )
                 )
             }
+        }
+        return out
+    }
+
+    override fun chartSeconds(ticker: String, startMs: Long, endMs: Long): List<com.dirk.kalshiodds.chart.BidPoint> {
+        val out = ArrayList<com.dirk.kalshiodds.chart.BidPoint>(901)
+        // SQLite's single MAX aggregate supplies all bare columns from that same actual print.
+        db.readableDatabase.rawQuery("SELECT MAX(t_ms) AS t_ms, yes_bid, no_bid, spot_usd FROM $TABLE_CHART WHERE ticker = ? AND t_ms >= ? AND t_ms <= ? GROUP BY t_ms / 1000 ORDER BY t_ms LIMIT 901",
+            arrayOf(ticker.uppercase(), startMs.toString(), endMs.toString())).use { c ->
+            while (c.moveToNext()) out += com.dirk.kalshiodds.chart.BidPoint(c.getLong(0),
+                if (c.isNull(1)) null else (c.getDouble(1) * 100).toFloat(),
+                if (c.isNull(2)) null else (c.getDouble(2) * 100).toFloat(), if (c.isNull(3)) null else c.getDouble(3))
         }
         return out
     }
@@ -1109,6 +1125,9 @@ class SqliteResultsStore(context: Context) : ResultsDatabase, com.dirk.kalshiodd
         scalpRows("SELECT * FROM ${ST.TABLE} WHERE state NOT IN ('CLOSED','NO_FILL') OR closed_at_ms >= ? ORDER BY signal_at_ms DESC LIMIT 5000", arrayOf(since.toString()))
     }.getOrDefault(emptyList())
 
+    override fun windowTrades(ticker: String, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> =
+        scalpRows("SELECT * FROM ${ST.TABLE} WHERE ticker = ? ORDER BY signal_at_ms DESC LIMIT ${limit.coerceIn(1, 5000)}", arrayOf(ticker.uppercase())).filter { it.isPrimary }
+
     /** Keyset paging, newest first, index (scalper_id, closed_at_ms DESC). */
     override fun pageTrades(scalperId: String, afterClosedAtMs: Long?, afterId: String?, limit: Int): List<com.dirk.kalshiodds.decision.ScalpTrade> = runCatching {
         if (afterClosedAtMs == null) scalpRows("SELECT * FROM ${ST.TABLE} WHERE scalper_id = ? AND state = 'CLOSED' ORDER BY closed_at_ms DESC, id DESC LIMIT $limit", arrayOf(scalperId))
@@ -1655,3 +1674,4 @@ private fun Cursor.intOrNull(col: String): Int? {
     if (i < 0 || isNull(i)) return null
     return getInt(i)
 }
+

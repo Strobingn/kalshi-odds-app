@@ -80,6 +80,9 @@ interface DataArchive {
     fun insertBidSnapshots(rows: List<OddsMidRow>)
     fun insertChartTicks(rows: List<ChartTickRow>)
     fun chartTicks(ticker: String, startMs: Long, endMs: Long, limit: Int = 240): List<ChartTickRow>
+    /** At most one actual print per second, covering the whole selected window. */
+    fun chartSeconds(ticker: String, startMs: Long, endMs: Long): List<BidPoint> =
+        chartTicks(ticker, startMs, endMs, 2000).groupBy { it.tMs / 1000 }.values.map { rows -> rows.maxBy { it.tMs }.toBidPoint() }.sortedBy { it.tMs }
     fun trimChartTicks(keepTickers: Set<String>, olderThanMs: Long)
     fun bidHistory(ticker: String, sinceMs: Long, limit: Int = 400): List<BidPoint>
     fun pricePath(ticker: String, limit: Int = 180): List<PricePathRow>
@@ -106,3 +109,4 @@ object ArchiveJobs {
     const val SPOT = "coinbase-spot"
     const val SUPABASE = "supabase-restore"
 }
+

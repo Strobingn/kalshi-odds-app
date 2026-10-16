@@ -30,6 +30,7 @@ data class ScalpTabState(
     val bookAgeMs: Long? = null,
     val secondsLeft: Long? = null,
     val updatedAtMs: Long = 0L,
+    val window: com.dirk.kalshiodds.chart.ScalpWindow = com.dirk.kalshiodds.chart.ScalpWindow(),
     /** 0.3.67: background history index progress (null when idle). */
     val migrateNote: String? = null,
     /** 0.3.67 debug: last stats read. */
@@ -47,3 +48,4 @@ data class ScalpAlgoDetail(
     val trades: List<com.dirk.kalshiodds.decision.ScalpTrade> = emptyList(),
     val equity: List<Double> = emptyList()
 )
+

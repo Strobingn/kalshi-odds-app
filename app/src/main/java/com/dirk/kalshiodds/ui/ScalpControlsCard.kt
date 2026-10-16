@@ -19,8 +19,9 @@ fun ScalpControlsCard(code: String, saved: ScalpControlSpec.Config?, onApply: (S
     val error = draft.error()
     val changed = draft != (saved ?: ScalpControlSpec.defaults(code))
     FieldCard {
-        Text("Algorithm settings", style = MaterialTheme.typography.titleMedium)
+        Text("Algorithm settings · $code", style = MaterialTheme.typography.titleMedium)
         Text(if (saved == null) "Model defaults" else "Manual settings ${saved.revision}", style = MaterialTheme.typography.labelMedium)
+        Text("Global limits: buy ≤50¢, stop ≤2¢ on every scalper (including existing positions).", style = MaterialTheme.typography.bodySmall)
         Text("Save applies to new trades only. Open trades keep their entry settings. Manual exits use the stop, net target, trail and timing below; they replace the model's exit rules.", style = MaterialTheme.typography.bodySmall)
         if (code.startsWith("v2-")) Text("V2 follows its original algorithm's signals. Adjust the original's signal controls to change those signals.", style = MaterialTheme.typography.bodySmall)
         else Text("Entry filters apply to candidates produced by this model's signal rules.", style = MaterialTheme.typography.bodySmall)

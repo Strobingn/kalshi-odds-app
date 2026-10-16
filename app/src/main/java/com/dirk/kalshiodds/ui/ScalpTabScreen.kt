@@ -134,6 +134,8 @@ fun ScalpTabScreen(viewModel: OddsViewModel, onOpenScalpData: () -> Unit, onOpen
     ScalpTabContent(
         st = st,
         controlConfigs = controls,
+        onApplyControl = { code, config -> book.applyControls(code, config) },
+        onResetControl = book::resetControls,
         onOpenScalpData = onOpenScalpData,
         onOpenScalpRules = onOpenScalpRules,
         onSelectMarket = viewModel::selectScalpMarket,
@@ -161,13 +163,16 @@ fun ScalpTabContent(
     onOpenAlgo: (ScalpModels.Model) -> Unit = {},
     /** Previews only: hide the coin cards to render the ladder card in view. */
     showCoinCards: Boolean = true,
-    controlConfigs: Map<String, com.dirk.kalshiodds.decision.ScalpControlSpec.Config> = emptyMap()
+    controlConfigs: Map<String, com.dirk.kalshiodds.decision.ScalpControlSpec.Config> = emptyMap(),
+    onApplyControl: (String, com.dirk.kalshiodds.decision.ScalpControlSpec.Config) -> Unit = { _, _ -> },
+    onResetControl: (String) -> Unit = {},
+    initialPage: ScalpLabUi.Page? = null
 ) {
     var qty by remember { mutableIntStateOf(PriceLadder.PRESET_SIZES[1]) }
     var buyMode by remember { mutableStateOf(true) }
     var info by remember { mutableStateOf(false) }
     val c = DipTheme.colors
-    var pageName by rememberSaveable(showCoinCards) { mutableStateOf(if (showCoinCards) "MODELS" else "LADDER") }
+    var pageName by rememberSaveable(showCoinCards) { mutableStateOf(initialPage?.name ?: if (showCoinCards) "LIVE" else "LADDER") }
     var filterName by rememberSaveable { mutableStateOf("ALL") }
     var todayOnly by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -176,6 +181,15 @@ fun ScalpTabContent(
     val page = ScalpLabUi.Page.valueOf(pageName)
     val filter = ScalpLabUi.Filter.valueOf(filterName)
     val rows = if (todayOnly) st.algoToday else st.algoAllTime
+    var liveModel by rememberSaveable { mutableStateOf("*") }
+    var chartSide by rememberSaveable { mutableStateOf("BOTH") }
+    var slidersOpen by rememberSaveable { mutableStateOf(false) }
+    var selectedTradeId by rememberSaveable { mutableStateOf<String?>(null) }
+    LaunchedEffect(st.window.ticker) { selectedTradeId = null }
+    val liveTrades = remember(st.window.trades, liveModel, chartSide) {
+        st.window.trades.filter { (liveModel == "*" || com.dirk.kalshiodds.decision.ScalpControlSpec.code(it) == liveModel) &&
+            (chartSide == "BOTH" || it.side == chartSide) }
+    }
     val models = remember(rows, st.algoAllTime, filter, query) { ScalpLabUi.ranked(rows, st.algoAllTime, filter, query) }
 
     if (info) {
@@ -209,14 +223,14 @@ fun ScalpTabContent(
             }
         }
         item(key = "pages") {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ScalpLabUi.Page.entries.forEach { tab ->
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(ScalpLabUi.Page.entries.toList(), key = { it.name }) { tab ->
                     FilterChip(selected = page == tab, onClick = { pageName = tab.name },
-                        label = { Text(tab.label) }, modifier = Modifier.weight(1f))
+                        label = { Text(tab.label) })
                 }
             }
         }
-        if (page != ScalpLabUi.Page.LADDER) {
+        if (page == ScalpLabUi.Page.MODELS || page == ScalpLabUi.Page.COMPARE) {
             item(key = "period") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilterChip(selected = !todayOnly, onClick = { todayOnly = false }, label = { Text("All-time") })
@@ -224,6 +238,48 @@ fun ScalpTabContent(
                 }
             }
             item(key = "overview") { ScalpLabOverview(rows, st.algoAllTime, todayOnly) }
+        }
+        if (page == ScalpLabUi.Page.LIVE) {
+            item(key = "algorithm-picker") {
+                ScalpAlgorithmPicker(liveModel, onSelect = { liveModel = it; selectedTradeId = null }, onSliders = { slidersOpen = !slidersOpen })
+                Text("All scalpers: 2¢ stop enabled · buy price ≤50¢", style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold, color = c.accentBlue)
+            }
+            if (slidersOpen && liveModel != "*") item(key = "live-sliders-$liveModel") {
+                TextButton(onClick = { slidersOpen = false }) { Text("Hide sliders · return to chart") }
+                ScalpControlsCard(liveModel, controlConfigs[liveModel], { onApplyControl(liveModel, it) }, { onResetControl(liveModel) })
+                ScalpModels.modelByCode(liveModel)?.let { m -> ScalpModels.originalOf(m)?.let { original ->
+                    TextButton(onClick = { liveModel = original.code }) { Text("Edit original signal settings: ${original.label}") }
+                } }
+            }
+            item(key = "live-markets") {
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(st.markets, key = { it.ticker }) { m -> Pill(m.label, st.selectedTicker == m.ticker) { onSelectMarket(m.ticker) } }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("BOTH" to "Both sides", "YES" to "UP", "NO" to "DOWN").forEach { (side, label) ->
+                        FilterChip(selected = chartSide == side, onClick = { chartSide = side; selectedTradeId = null }, label = { Text(label) })
+                    }
+                }
+            }
+            item(key = "live-chart") { ScalpLiveWindow(st.window, liveTrades, selectedTradeId) { selectedTradeId = it } }
+            item(key = "live-rules") {
+                Text("A 2¢ stop triggers a sale at available bids. Fees, gaps and limited depth can make the final loss larger than 2¢ per contract.",
+                    style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+            }
+            liveTrades.firstOrNull { it.id == selectedTradeId }?.let { t ->
+                item(key = "selected-execution") { ScalpWindowTradeCard(t, true, st.window.quote) { selectedTradeId = null } }
+            }
+            item(key = "live-activity") {
+                Text("Window activity · ${liveTrades.size} trades", style = MaterialTheme.typography.titleMedium, color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                Text("${liveTrades.count { it.entryAtMs != null }} filled · ${liveTrades.count { it.state == com.dirk.kalshiodds.decision.ScalpState.CLOSED }} closed · ${liveTrades.count { it.state == com.dirk.kalshiodds.decision.ScalpState.NO_FILL }} no-fill",
+                    style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+                if (liveTrades.isEmpty()) Text("No trades for this selection yet. Choose All algorithms or another model to inspect its activity.", style = MaterialTheme.typography.bodySmall, color = c.textSecondary)
+                if (liveTrades.size > 80) Text("Latest 80 trades shown below. Filter by algorithm to inspect more.", style = MaterialTheme.typography.labelSmall, color = c.textSecondary)
+            }
+            items(liveTrades.filter { it.id != selectedTradeId }.take(80), key = { "window-trade-" + it.id }) { t ->
+                ScalpWindowTradeCard(t, false, st.window.quote) { selectedTradeId = t.id }
+            }
         }
         if (page == ScalpLabUi.Page.MODELS) {
             item(key = "find-model") {
@@ -270,7 +326,7 @@ fun ScalpTabContent(
         if (page == ScalpLabUi.Page.LADDER) {
             item(key = "ladder-card") {
                 ScalpLabCard {
-                    Text("Trade the ladder", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
+                    Text("Trade the ladder · buys ≤50¢", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = c.textPrimary)
                     Spacer(Modifier.height(8.dp))
                     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         items(st.markets, key = { it.ticker }) { m ->
@@ -561,7 +617,7 @@ private fun Ladder(
             }
             Row(
                 Modifier.fillMaxWidth().height(ROW_DP.dp).background(bg)
-                    .clickable { if (mine) row.myOrderIds.forEach(onCancel) else onPlace(row.cents, buyMode, qty) }
+                    .clickable(enabled = mine || !buyMode || row.cents <= 50) { if (mine) row.myOrderIds.forEach(onCancel) else onPlace(row.cents, buyMode, qty) }
                     .pointerInput(row.cents, mine) {
                         if (!mine) return@pointerInput
                         detectVerticalDragGestures(

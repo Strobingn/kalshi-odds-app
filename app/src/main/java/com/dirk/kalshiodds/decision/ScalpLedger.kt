@@ -82,6 +82,7 @@ interface ScalpPersistence {
     fun upsertScalp(trade: ScalpTrade)
     fun loadActiveScalps(): List<ScalpTrade> = loadScalps().filter { it.state != ScalpState.CLOSED && it.state != ScalpState.NO_FILL }
     fun upsertScalpAndStats(trade: ScalpTrade, prev: ScalpTrade?) { upsertScalp(trade) }
+    fun windowTrades(ticker: String, limit: Int = 2000): List<ScalpTrade> = loadScalps().filter { it.ticker.equals(ticker, true) && it.isPrimary }.sortedByDescending { it.signalAtMs }.take(limit.coerceIn(1, 5000))
     fun loadStats(): List<ScalpStat> = emptyList()
     fun loadDaily(dayEt: String): List<ScalpDaily> = emptyList()
     fun loadExits(): List<ScalpExitAgg> = emptyList()
@@ -170,3 +171,4 @@ object ScalpAggMath {
         costSum = x.costSum + d.cost, best = maxOf(x.best ?: d.net, d.net), worst = minOf(x.worst ?: d.net, d.net)
     )
 }
+
