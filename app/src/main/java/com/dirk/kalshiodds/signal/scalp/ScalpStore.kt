@@ -39,6 +39,6 @@ class ScalpStore(context: Context) {
         private const val KEY = "state_json"
         private const val VER = "bankroll_ver"
         /** $20,000 start, and a paper book may go negative. */
-        private const val BANKROLL_VER = 2
+        private const val BANKROLL_VER = 3
     }
 }
