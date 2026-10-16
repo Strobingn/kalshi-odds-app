@@ -303,6 +303,102 @@ The first attempt with the environment's JDK 25 was incompatible with this
 Gradle/Kotlin version; rerunning with JDK 21 completed successfully. The SDK
 XML-version warning is environmental and did not fail the tests.
 
+The dedicated GitHub Actions APK build also passed for the exact pre-manifest
+commit used for the audit:
+
+- [Run 38844708691](https://github.com/Strobingn/kalshi-odds-app/actions/runs/38844708691)
+  completed successfully on SHA
+  `3676ca13feb9d8b98d8cc903e9aae5903c500473`.
+- [Downloadable APK artifact 12022992289](https://github.com/Strobingn/kalshi-odds-app/actions/runs/38844708691/artifacts/12022992289)
+  contains `KalshiTrader-kashi-v0.3.74-3676ca1.apk`.
+- Downloaded-artifact SHA-256:
+  `0D008C61C6D65D27C334729057870DEDE7BF21F26780643699BBEC12B0448B0E`.
+
+This green build verifies the app and paper-only test gates; it is not evidence
+that any scalping strategy is profitable.
+
+## Historical empirical/data availability audit
+
+The read-only branch/artifact scan excluded Claude-named branches and runs. It
+included Kashi, Kashi scalping variants, `grok-bitcoin`, `chat-GTP`,
+`KIMI-Bitcoin`, `bitcoin-swarm`, `codex/paper-lab-1000`, and
+`cursor/diphunter-backtest`. Findings are separated by provenance:
+
+### Derived repository summaries
+
+The Kashi branch contains small derived outputs, not the underlying order-book
+or trade stream:
+
+- [`research/scalp-0340/oos40.csv`](https://github.com/Strobingn/kalshi-odds-app/blob/kashi/research/scalp-0340/oos40.csv)
+  reports BTC test mean `-2.926968` cents/contract, `n=1,177`, CI
+  `[-3.685681, -2.155773]`.
+- [`research/scalp-0340/wf40_weeks.csv`](https://github.com/Strobingn/kalshi-odds-app/blob/kashi/research/scalp-0340/wf40_weeks.csv)
+  and the multi-strategy weekly CSVs show the long walk-forward outcomes.
+- [`research/scalp/oos_summary.csv`](https://github.com/Strobingn/kalshi-odds-app/blob/kashi/research/scalp/oos_summary.csv)
+  reports test results for dip-buy (`-3.81` cents/contract, 3,073 trades),
+  momentum (`-3.72`, 5,200), derived fair-gap (`-0.40`, CI
+  `[-2.04,+1.22]`, 1,068), and queue-aware maker (`-1.50`, 2,504).
+- [`docs/sf59/report60_btc.json`](https://github.com/Strobingn/kalshi-odds-app/blob/kashi/docs/sf59/report60_btc.json)
+  covers train 2026-09-25 through 2026-10-04 and test 2026-10-05 through
+  2026-10-10. It contains selected small-sample positives, including strict
+  late-favorite BTC `+$22.90` over 16 OOS trades, but also book imbalance
+  `-$944.98` over 2,639 and maker overshoot `-$14.17` over 27. The positive
+  variant is selection-sensitive and too small to establish an edge.
+- [`docs/sf57/report63_btc.json`](https://github.com/Strobingn/kalshi-odds-app/blob/kashi/docs/sf57/report63_btc.json)
+  contains four negative BTC test variants. These files are useful audit
+  evidence, not newly reproduced results.
+
+These summaries support the audit's negative-control conclusion but cannot
+calibrate rebound probabilities, passive-fill probabilities, or intrabar exit
+ordering by themselves.
+
+### Actions artifacts and fixture provenance
+
+- [Non-Claude paper-lab run 37170187985 artifact 11582684319](https://github.com/Strobingn/kalshi-odds-app/actions/runs/37170187985/artifacts/11582684319)
+  (`codex/paper-lab-1000`, SHA
+  `171c72d167873fa3247e8fa895ae606c4b48dd13`) was downloaded and inspected.
+  It contains `paperlab.sqlite`, `results.json`, and `session.log`: 120
+  observations (60 feed, 40 errors, 20 skips), zero trades, and zero P&L.
+  The repeated error was `unsupported contract payoff; need a single
+  greater-than strike`, while a captured KXBTC15M market had
+  `strike_type: greater_or_equal`. This is a historical pipeline negative
+  control, not evidence that the current Kashi code has the same bug.
+- [Non-Claude chat-GTP model artifact 11575825024](https://github.com/Strobingn/kalshi-odds-app/actions/runs/37833530908/artifacts/11575825024)
+  contained model/manifest outputs rather than raw market data; its recorded
+  holdout simulation was 190 cases and `-$152.41`, with `beats_market=false`.
+  It is not a fill or order-book dataset.
+- Recording-looking gzip fixtures on `grok-bitcoin`/`Mis_bitcoin` are explicitly
+  labeled synthetic/deterministic fixtures. They are useful parser tests, not
+  market history. Small `ml/fixtures` JSON files likewise cannot support a
+  BTC rebound estimate.
+- References in code/docs to `/workspace/diphunter-recorder/data/*.jsonl.gz`,
+  `/workspace/kalshi-history/kalshi15m.sqlite`, and
+  `/workspace/forecast53/*.pkl` were not present in the inspected repository
+  trees. They are not treated as available evidence.
+
+### Bounded public API probe
+
+Using only unauthenticated read-only requests (no credentials were printed,
+created, or transmitted), the public markets endpoint returned 10 finalized
+KXBTC15M markets and a pagination cursor; one sample was
+`KXBTC15M-26OCT152315-15`, closed at `2026-10-16T03:15:00Z`, result `yes`.
+The public historical cutoff endpoint returned:
+
+```text
+market_settled_ts:  2026-08-16T00:00:00Z
+trades_created_ts:  2026-08-16T00:00:00Z
+orders_updated_ts:  2026-10-01T00:00:00Z
+```
+
+Subsequent bounded historical-market and candlestick requests received HTTP
+429 rate limits in this environment, so no new historical candle sample is
+claimed here. The official historical API documents show that 1-minute bars
+include YES bid/ask OHLC, trade-price OHLC, volume, and open interest; those
+bars can support bounded markout analysis but cannot prove within-minute order
+arrival, depth, queue position, or fill ordering. The documented historical
+cutoff must be applied, and regular trades must be deduplicated by trade ID
+when combining historical and recent endpoints.
+
 ## Sources
 
 Official venue and contract references:
@@ -324,6 +420,12 @@ Official venue and contract references:
   and [Get Market Orderbook](https://docs.kalshi.com/api-reference/market/get-market-orderbook):
   bid-only binary-book representation, reciprocal implied asks, sizes, and
   depth semantics.
+- [Kalshi Historical Data](https://docs.kalshi.com/getting_started/historical_data),
+  [Historical Markets](https://docs.kalshi.com/api-reference/historical/get-historical-markets),
+  [Historical Market Candlesticks](https://docs.kalshi.com/api-reference/historical/get-historical-market-candlesticks),
+  and [Historical Trades](https://docs.kalshi.com/api-reference/historical/get-historical-trades):
+  cutoff timestamps, pagination, 1-minute bid/ask/trade OHLC, and trade
+  deduplication boundaries.
 
 Primary microstructure references used for research proposals:
 
