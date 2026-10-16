@@ -3,7 +3,7 @@
 Dip Hunter 0.3.0 teacher → student export.
 
 Trains a richer offline teacher (tabular GBM-style stumps + sequence
-summaries) on settled BTC/ETH/SOL history and writes a compact student
+summaries) on settled BTC history and writes a compact student
 JSON the phone can load from assets.
 
   python3 ml/train_heavy.py --csv history.csv
@@ -52,6 +52,8 @@ def load_csv(path: Path) -> tuple[np.ndarray, np.ndarray, list[str], list[str]]:
     with path.open() as f:
         reader = csv.DictReader(f)
         for rec in reader:
+            if rec.get("series", "KXBTC15M").upper() != "KXBTC15M":
+                continue
             try:
                 y = float(rec["y_yes"])
                 x = [float(rec.get(k, 0.0) or 0.0) for k in TABULAR]
@@ -77,7 +79,11 @@ def fit_stumps(x: np.ndarray, y: np.ndarray, n_trees: int = 8) -> list[dict]:
             vals = np.unique(np.round(x[:, feat], 3))
             if vals.size < 2:
                 continue
-            for thr in vals[1:-1][:12]:
+            # The old `[:12]` only tried the lower tail.  Sample quantiles
+            # across the observed feature distribution instead.
+            interior = vals[1:-1]
+            indexes = sorted({int(i * (len(interior) - 1) / 13) for i in range(1, 13)})
+            for thr in (interior[i] for i in indexes):
                 left = residual[x[:, feat] <= thr]
                 right = residual[x[:, feat] > thr]
                 if left.size < 4 or right.size < 4:
@@ -145,7 +151,7 @@ def main() -> None:
         "note": "Student snapshot. Phone loads this if present; else Kotlin defaults.",
         "stack": {"mlp": 0.55, "cnn": 0.20, "lstm": 0.10, "gbm": 0.15, "sampleCount": 0},
         "gbm": {"learningRate": 0.35, "baseScore": base, "trees": trees},
-        "series": ["KXBTC15M", "KXETH15M", "KXSOL15M"],
+        "series": ["KXBTC15M"],
     }
     out = ML_DIR / "heavy_ml_student.json"
     out.write_text(json.dumps(bundle, indent=2))
