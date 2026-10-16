@@ -59,8 +59,13 @@ Important implementation locations (line numbers refer to this baseline):
 
 The current rule is `price <= 0.50` (inclusive), and V2 also caps every depth
 level rather than allowing a cheap VWAP to hide a level above the ceiling.
-That is a correctness improvement worth retaining. It is not a prediction or
-profitability rule. A future report should always distinguish:
+The 50c value is a maximum, not a target: a trade may enter below 50c. For
+each completed or partial trade, performance analysis should calculate the
+realized volume-weighted filled entry from its actual fills and quantities,
+then separately report the highest level purchased, displayed depth, and
+unfilled quantity. That is a correctness improvement worth retaining. It is
+not a prediction or profitability rule. A future report should always
+distinguish:
 
 - entry budget/cap: no newly purchased level above 50c;
 - executable price: the ask for entry and bid for exit;
@@ -84,8 +89,9 @@ Recommended implementation/testing sequence:
 1. Resolve the series/event fee coefficient and member precision from the actual
    contract metadata; do not hard-code a universal maker exemption.
 2. Represent one logical order with fills, raw fee precision, fee rounding, and
-   any rebate/accumulator state. Preserve every fill; do not replace nonlinear
-   fee calculation with a VWAP shortcut.
+   any rebate/accumulator state. Preserve every fill; report VWAP for realized
+   entry analytics, but do not replace nonlinear fee calculation with a VWAP
+   shortcut.
 3. Add tests for 1, 10, and 100 contracts, single-level and multi-level depth,
    partial fills, cancellation, and settlement/void paths.
 4. Re-run all historical comparisons with the same fee engine and publish the
