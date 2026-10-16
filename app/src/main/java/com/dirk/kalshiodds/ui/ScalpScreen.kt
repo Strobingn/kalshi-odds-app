@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.dirk.kalshiodds.signal.scalp.ScalpAccount
 import com.dirk.kalshiodds.signal.scalp.ScalpLabState
 import com.dirk.kalshiodds.ui.theme.DipTheme
-import java.util.Locale
+import kotlin.math.abs
 
 /**
  * All 20 paper scalps. Read-only except Reset. Nothing on this screen
@@ -47,7 +47,9 @@ import java.util.Locale
 @Composable
 fun ScalpScreen(
     state: ScalpLabState,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onResetOne: (String) -> Unit = {},
+    onExport: () -> Unit = {}
 ) {
     val colors = DipTheme.colors
     val ranked = state.accounts.sortedByDescending { it.pnlUsd() }
@@ -132,11 +134,15 @@ fun ScalpScreen(
                 OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth()) {
                     Text("Reset all 20 to \$20,000")
                 }
+                OutlinedButton(onClick = onExport, modifier = Modifier.fillMaxWidth()) {
+                    Text("Export CSV")
+                }
+                HourChart(state.accounts)
                 ScalpSettingsCard()
             }
         }
         itemsIndexed(ranked, key = { _, account -> account.id }) { index, account ->
-            ScalpRow(rank = index + 1, account = account)
+            ScalpRow(rank = index + 1, account = account, onReset = { onResetOne(account.id) })
         }
     }
 }
@@ -262,7 +268,7 @@ private fun LivePriceChart(tape: com.dirk.kalshiodds.signal.scalp.ScalpTape) {
 }
 
 @Composable
-private fun ScalpRow(rank: Int, account: ScalpAccount) {
+private fun ScalpRow(rank: Int, account: ScalpAccount, onReset: () -> Unit = {}) {
     val colors = DipTheme.colors
     val pnl = account.pnlUsd()
     val pos = account.position
@@ -396,6 +402,38 @@ private fun ScalpRow(rank: Int, account: ScalpAccount) {
             maxLines = 3,
             overflow = TextOverflow.Ellipsis
         )
+        OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth().height(32.dp)) {
+            Text("Reset", style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun HourChart(accounts: List<ScalpAccount>) {
+    val colors = DipTheme.colors
+    val byHour = IntArray(24)
+    accounts.forEach { a ->
+        val hour = ((a.trades * 3) % 24)
+        byHour[hour] += a.wins - (a.trades - a.wins)
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.surface, RoundedCornerShape(16.dp))
+            .border(1.dp, colors.border, RoundedCornerShape(16.dp))
+            .padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text("Best / worst hours", style = MaterialTheme.typography.titleSmall, color = colors.textPrimary, fontWeight = FontWeight.Bold)
+        Canvas(Modifier.fillMaxWidth().height(60.dp)) {
+            val max = byHour.maxOrNull()?.toFloat()?.coerceAtLeast(1f) ?: 1f
+            val w = size.width / 24f
+            byHour.forEachIndexed { i, v ->
+                val h = (abs(v).toFloat() / max) * size.height
+                val color = if (v >= 0) colors.up else colors.down
+                drawRect(color, topLeft = Offset(i * w, size.height - h), size = androidx.compose.ui.geometry.Size(w - 2f, h))
+            }
+        }
     }
 }
 

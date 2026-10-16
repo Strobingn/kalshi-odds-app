@@ -696,6 +696,15 @@ class OddsViewModel(application: Application) : AndroidViewModel(application) {
         container.scalp.lab.reset()
     }
 
+    fun resetScalpOne(id: String) {
+        container.scalp.lab.resetOne(id)
+    }
+
+    fun exportScalp() {
+        val csv = container.scalp.lab.csv()
+        _state.update { it.copy(userMessage = "Exported ${csv.lines().size - 1} books") }
+    }
+
     fun resetPaperBook() {
         val before = paperBook.snapshot().cashUsd
         val snap = _state.value.settings

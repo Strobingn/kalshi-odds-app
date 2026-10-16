@@ -97,6 +97,24 @@ class ScalpLab(
         _state.value.accounts.mapNotNull { it.position?.ticker?.uppercase() }.toSet()
     }
 
+    fun resetOne(id: String) {
+        synchronized(lock) {
+            val next = _state.value.accounts.map { a ->
+                if (a.id == id) ScalpAccount(id = a.id, name = a.name, rule = a.rule) else a
+            }
+            publish(_state.value.copy(accounts = next))
+        }
+    }
+
+    fun csv(): String {
+        val sb = StringBuilder("id,name,cash,pnl,trades,wins,winPct,size\n")
+        for (a in _state.value.accounts) {
+            val wr = if (a.trades > 0) 100.0 * a.wins / a.trades else 0.0
+            sb.append("${a.id},${a.name},${a.cashUsd},${a.pnlUsd()},${a.trades},${a.wins},${wr},${a.sizeScale}\n")
+        }
+        return sb.toString()
+    }
+
     fun reset() {
         synchronized(lock) {
             clearTape()

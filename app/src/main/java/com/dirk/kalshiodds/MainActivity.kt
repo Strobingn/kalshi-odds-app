@@ -161,7 +161,9 @@ class MainActivity : ComponentActivity() {
                         scalp = {
                             com.dirk.kalshiodds.ui.ScalpScreen(
                                 state = oddsState.scalp,
-                                onReset = { oddsViewModel.resetScalpLab() }
+                                onReset = { oddsViewModel.resetScalpLab() },
+                                onResetOne = { oddsViewModel.resetScalpOne(it) },
+                                onExport = { oddsViewModel.exportScalp() }
                             )
                         },
                         chart = {
