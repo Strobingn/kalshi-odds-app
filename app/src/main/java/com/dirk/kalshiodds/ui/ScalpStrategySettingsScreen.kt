@@ -42,6 +42,7 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
     onChange: (ScalpStrategySettings) -> Unit = {}, onEnabled: (Boolean) -> Unit = {}) {
     val c = DipTheme.colors
     val settings = controls.settings(model.code)
+    fun set(next: ScalpStrategySettings) = onChange(next.manual())
     val spec = ScalpV2.spec(model.code)
     val enabled = model.code !in controls.disabledStrategies
     val inheritedHigh = if (controls.manual) controls.maxAskCents else (spec.maxAsk * 100).roundToInt()
@@ -64,22 +65,50 @@ internal fun ScalpStrategySettingsContent(model: ScalpModels.Model, controls: Sc
                 Switch(checked = enabled, onCheckedChange = onEnabled, modifier = Modifier.testTag("STRATEGY_ENABLED"))
             }
             if (!controls.enabled || controls.killSwitch) Text("Global entries are paused. Existing protective exits keep running.", color = c.spot, style = MaterialTheme.typography.bodySmall)
-            StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { onChange(settings.copy(untilMinute = it)) }
-            StrategyKnob("Contracts an order", settings.contracts ?: if (controls.manual) controls.contracts else spec.clip, 1..1000, "KNOB_CONTRACTS") { onChange(settings.copy(contracts = it)) }
-            if (controls.peakTrailEnabled) {
-                StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: controls.stopLossPercent, 1..99, "KNOB_STOP", { "$it%" }) { onChange(settings.copy(stopLossPercent = it)) }
-            } else {
-                StrategyKnob("Stop loss", settings.stopCents ?: if (controls.manual) controls.stopCents else ((spec.stop ?: ScalpV2.stopFor(spec.base)) * 100).roundToInt(), 1..99, "KNOB_STOP", { "$it¢" }) { onChange(settings.copy(stopCents = it)) }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("AI learns", color = c.textPrimary, fontWeight = FontWeight.SemiBold)
+                    Text(if (settings.aiLearns) "Gently moves one slider from this strategy's own paper trades (every 3 closes, 1¢ at a time, bounded). Your changes always win." else "Off · sliders stay exactly where you set them", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                Switch(checked = settings.aiLearns, onCheckedChange = { onChange(settings.copy(aiLearns = it).manual()) }, modifier = Modifier.testTag("STRATEGY_AI_LEARNS"))
             }
-            StrategyKnob("Trailing stop", settings.trailCents ?: if (controls.peakTrailEnabled) controls.peakTrailCents else if (controls.manual) controls.trailCents else (spec.trail * 100).roundToInt(), 1..20, "KNOB_TRAIL", { "$it¢" }) { onChange(settings.copy(trailCents = it)) }
-            StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 1..20, "KNOB_MAXOPEN") { onChange(settings.copy(maxOpenPerSide = it)) }
-            StrategyKnob("Lowest price it buys", low, 1..high, "KNOB_MIN", { "$it¢" }) { onChange(settings.copy(minEntryCents = it)) }
-            StrategyKnob("Highest price it buys", high, low..50, "KNOB_MAX", { "$it¢" }) { onChange(settings.copy(maxEntryCents = it)) }
-            StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { onChange(settings.copy(cadenceSeconds = it)) }
-            StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { onChange(settings.copy(takeProfitCents = it)) }
-            StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { onChange(settings.copy(maxHoldSeconds = it)) }
-            Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
-            Text("50¢ buy ceiling · stop loss always active · total trade count stays unlimited unless you set a global limit. Until minute limits new entries; the final-minute exit policy still applies. Open-position limits do not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+            if (settings.aiNote.isNotBlank()) Text("Last adjusted: ${settings.aiNote}", color = c.textSecondary, style = MaterialTheme.typography.labelSmall)
+            when {
+                ScalpModels.isResearch(model) -> {
+                    StrategyKnob("Edge needed after fees", settings.edgeCents ?: Research.defaultEdge(model.code), 0..30, "KNOB_EDGE", { "$it¢" }) { set(settings.copy(edgeCents = it)) }
+                    StrategyKnob("Contracts an order", settings.contracts ?: controls.research.clip, 1..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
+                    StrategyKnob("Lowest price it buys", settings.minEntryCents, 1..99, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", settings.maxEntryCents ?: 99, settings.minEntryCents..99, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    Text("Research strategy: not bound by the 3¢ trail, window-start or >95% hold rules. Shared research limits (window exposure cap, Kelly, maker edge, late window) are in Global controls.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                ScalpModels.isV2(model) -> {
+                    StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
+                    StrategyKnob("Contracts an order", settings.contracts ?: if (controls.manual) controls.contracts else spec.clip, 1..1000, "KNOB_CONTRACTS") { set(settings.copy(contracts = it)) }
+                    if (controls.peakTrailEnabled) {
+                        StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: controls.stopLossPercent, 1..99, "KNOB_STOP", { "$it%" }) { set(settings.copy(stopLossPercent = it)) }
+                    } else {
+                        StrategyKnob("Stop loss", settings.stopCents ?: if (controls.manual) controls.stopCents else ((spec.stop ?: ScalpV2.stopFor(spec.base)) * 100).roundToInt(), 1..99, "KNOB_STOP", { "$it¢" }) { set(settings.copy(stopCents = it)) }
+                    }
+                    StrategyKnob("Trailing stop", settings.trailCents ?: if (controls.peakTrailEnabled) controls.peakTrailCents else if (controls.manual) controls.trailCents else (spec.trail * 100).roundToInt(), 1..20, "KNOB_TRAIL", { "$it¢" }) { set(settings.copy(trailCents = it)) }
+                    StrategyKnob("Open at once, per side", settings.maxOpenPerSide, 1..20, "KNOB_MAXOPEN") { set(settings.copy(maxOpenPerSide = it)) }
+                    StrategyKnob("Lowest price it buys", low, 1..high, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", high, low..55, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    StrategyKnob("Entry checks every", settings.cadenceSeconds, 0..30, "KNOB_CADENCE", { if (it == 0) "Live" else "$it s" }) { set(settings.copy(cadenceSeconds = it)) }
+                    StrategyKnob("Take profit after fees", settings.takeProfitCents ?: if (controls.manual) controls.takeProfitCents else 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
+                    StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: controls.maxHoldSeconds, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
+                    Text("Applies only to this V2 strategy. Overrides take priority over global and learned defaults; a chosen price floor also keeps the inherited ceiling from falling below it. Filled positions keep their saved stops. Entry checks never slow protective exits.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                    Text("55¢ buy ceiling · stop loss always active · total trade count stays unlimited unless you set a global limit. Until minute limits new entries; the final-minute exit policy still applies. Open-position limits do not create extra entry signals.", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+                else -> {
+                    StrategyKnob("Until minute", settings.untilMinute, 1..14, "KNOB_UNTIL", { "minute $it" }) { set(settings.copy(untilMinute = it)) }
+                    StrategyKnob("Lowest price it buys", settings.minEntryCents, 1..55, "KNOB_MIN", { "$it¢" }) { set(settings.copy(minEntryCents = it)) }
+                    StrategyKnob("Highest price it buys", settings.maxEntryCents ?: 55, settings.minEntryCents..55, "KNOB_MAX", { "$it¢" }) { set(settings.copy(maxEntryCents = it)) }
+                    StrategyKnob("Stop loss below fill", settings.stopLossPercent ?: 0, 0..99, "KNOB_STOP", { if (it == 0) "Strategy default" else "$it%" }) { set(settings.copy(stopLossPercent = it.takeIf { v -> v > 0 })) }
+                    StrategyKnob("Take profit after fees", settings.takeProfitCents ?: 0, 0..99, "KNOB_TARGET", { if (it == 0) "Off" else "$it¢ / ct" }) { set(settings.copy(takeProfitCents = it)) }
+                    StrategyKnob("Maximum hold", settings.maxHoldSeconds ?: 0, 0..3600, "KNOB_HOLD", { if (it == 0) "No timer" else "$it s" }) { set(settings.copy(maxHoldSeconds = it)) }
+                    Text("Original strategy: these add to its built-in rules (3¢ trail, window-start entries, >95% hold rule stay on).", color = c.textSecondary, style = MaterialTheme.typography.bodySmall)
+                }
+            }
             OutlinedButton(onClick = { onChange(ScalpStrategySettings()) }, modifier = Modifier.fillMaxWidth()) { Text("Back to its defaults") }
         } }
     }

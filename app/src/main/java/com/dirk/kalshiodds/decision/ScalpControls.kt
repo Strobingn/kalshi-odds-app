@@ -20,10 +20,12 @@ data class ScalpControls(
     val peakTrailEnabled: Boolean = true, val peakTrailCents: Int = 3, val stopLossPercent: Int = 20,
     val strategySettings: Map<String, ScalpStrategySettings> = emptyMap(),
     /** Kalshi Scalper: contracts a net-positive scalper buys, filled by walking real book depth. */
-    val greenContracts: Int = 25
+    val greenContracts: Int = 25,
+    /** Research strategies: shared parameters (window exposure cap, Kelly, maker edge, late window). */
+    val research: Research.Params = Research.Params()
 ) {
     fun settings(code: String): ScalpStrategySettings = strategySettings[code]?.normalized() ?: ScalpStrategySettings()
-    fun normalized() = copy(strategySettings = strategySettings.filterKeys { it.startsWith("v2-") }.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
+    fun normalized() = copy(strategySettings = strategySettings.mapValues { it.value.normalized() }, peakTrailCents = peakTrailCents.coerceIn(1, 20), stopLossPercent = stopLossPercent.coerceIn(1, 99), maxAskCents = maxAskCents.coerceIn(1, 55), greenContracts = greenContracts.coerceIn(1, 500), stopCents = stopCents.coerceIn(1, 99),
         takeProfitCents = takeProfitCents.coerceIn(0, 99), trailCents = trailCents.coerceIn(1, 20),
         armCents = armCents.coerceIn(1, 99), contracts = contracts.coerceIn(1, 1000),
         maxStakeUsd = maxStakeUsd.takeIf { it.isFinite() }?.coerceIn(0.0, 100_000.0) ?: 0.0,
