@@ -1,7 +1,9 @@
 package com.dirk.kalshiodds.data.api
 
 import com.dirk.kalshiodds.data.dto.MarketsResponse
+import com.dirk.kalshiodds.data.dto.SeriesResponse
 import retrofit2.http.GET
+import retrofit2.http.Path
 import retrofit2.http.Query
 
 /**
@@ -18,6 +20,10 @@ interface KalshiApi {
         @Query("cursor") cursor: String? = null,
         @Query("ticker") ticker: String? = null
     ): MarketsResponse
+
+    /** One series: its fee type and multiplier (https://docs.kalshi.com/api-reference/market/get-series). */
+    @GET("series/{series_ticker}")
+    suspend fun getSeries(@Path("series_ticker") seriesTicker: String): SeriesResponse
 
     companion object {
         /** Public market-data host (also listed as a shared Trade API server). */

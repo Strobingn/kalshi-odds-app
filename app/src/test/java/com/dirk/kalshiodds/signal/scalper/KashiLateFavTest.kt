@@ -37,7 +37,7 @@ class KashiLateFavTest {
 
     @Test
     fun theFiveAreKashisRulesHeldToTheCloseWithAStop() {
-        assertEquals(favs, ScalpStrategy.values().filter { it.fav != null })
+        assertEquals(favs, ScalpStrategy.values().filter { it.fav != null && it.name.startsWith("KASHI_") })
         for (st in favs) {
             assertTrue(st.name, st.hold && st.taker && st.stopDollars > 0.0 && st.targetDollars == 0.0 && st.timeoutMs == 0L)
             assertTrue(st.name, st.origin.startsWith("kashi sf"))

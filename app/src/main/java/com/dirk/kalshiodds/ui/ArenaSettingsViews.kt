@@ -172,6 +172,7 @@ internal fun ArenaSettingsPage(
     tuning: ScalpTuning,
     message: String?,
     onResetPaper: (() -> Unit)?,
+    checks: List<String>? = null,
     onOpenStrategy: (ScalpStrategy) -> Unit,
     onBack: () -> Unit
 ) {
@@ -221,6 +222,27 @@ internal fun ArenaSettingsPage(
                     message?.let { Muted(it) }
                 }
             }
+            if (checks != null) {
+                item(key = "checks") {
+                    ArenaCard {
+                        Text("Contract checks", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
+                        Text(
+                            "Checked against Kalshi itself: the series' fee type, and every settled window's strike and " +
+                                "settlement value against Kalshi's Bitcoin index while Live signals was on.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = colors.textSecondary
+                        )
+                        for ((i, line) in checks.withIndex()) {
+                            Text(
+                                line,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = colors.textPrimary,
+                                modifier = Modifier.testTag("ARENA_CHECK_$i")
+                            )
+                        }
+                    }
+                }
+            }
             item(key = "settings") {
                 ArenaCard {
                     Text("Strategy settings", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = colors.textPrimary)
@@ -255,6 +277,8 @@ internal fun ArenaSettingsPage(
                         val t = Tuned(st, k, tuning.defaultContracts)
                         val exits = if (st.hold) {
                             if (t.stopDollars > 0) "hold · stop ${cents(t.stopDollars * 100)}" else "hold to the close"
+                        } else if (st.trail) {
+                            "+${cents(t.targetDollars * 100)} / trail ${cents(t.stopDollars * 100)}"
                         } else {
                             "+${cents(t.targetDollars * 100)} / −${cents(t.stopDollars * 100)} / ${t.timeoutMs / 1000} s"
                         }

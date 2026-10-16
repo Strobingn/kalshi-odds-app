@@ -114,6 +114,10 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
     )
     var limit by rememberSaveable { mutableIntStateOf(PAGE) }
     var message by remember { mutableStateOf<String?>(null) }
+    val checks by produceState<List<String>?>(null, store) {
+        val s = store ?: return@produceState
+        s.checks.state.collect { value = com.dirk.kalshiodds.signal.scalper.ContractChecks.lines(it) }
+    }
     // The record changes many times a second while scalps close: read it once a second.
     val state by produceState(store?.ledger?.snapshot() ?: ScalperState.fresh(), store) {
         val s = store ?: return@produceState
@@ -172,6 +176,7 @@ fun ScalperResultsRoute(onBack: (() -> Unit)?, onOpenSettings: () -> Unit = {}) 
         live = live,
         tuning = container?.scalper?.engine?.tuning,
         modelTheta = store?.model?.thetaCents,
+        checks = checks,
         onResetPaper = container?.scalper?.let { sc ->
             {
                 scope.launch {
@@ -272,7 +277,9 @@ fun ScalperResultsScreen(
     /** The ML scalper's own cut, shown as its trigger's default. */
     modelTheta: Double? = null,
     /** Clears the paper record (after a confirm); null hides the button. */
-    onResetPaper: (() -> Unit)? = null
+    onResetPaper: (() -> Unit)? = null,
+    /** The contract checks' lines ([com.dirk.kalshiodds.signal.scalper.ContractChecks.lines]); null hides the card. */
+    checks: List<String>? = null
 ) {
     var openName by rememberSaveable { mutableStateOf(initialOpen?.name) }
     var settingsOpen by rememberSaveable { mutableStateOf(false) }
@@ -292,6 +299,7 @@ fun ScalperResultsScreen(
             tuning = tuning,
             message = message,
             onResetPaper = onResetPaper,
+            checks = checks,
             onOpenStrategy = { st -> openName = st.name },
             onBack = { settingsOpen = false }
         )
