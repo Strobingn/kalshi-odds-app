@@ -224,7 +224,7 @@ object ScalpRule {
         val best = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
             val fair = q.fair(side) ?: return@mapNotNull null
-            if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             Entry(side, ask, fair, fair - ask - feePerContract(CONTRACTS, ask))
         }.maxByOrNull { it.gapAfterFee } ?: return null to "no spot fair value"
         if (best.gapAfterFee + 1e-9 < p.minGap) {
@@ -276,7 +276,7 @@ object ScalpRule {
             val fair = q.fair(side) ?: return@mapNotNull null
             val move: Double = when (p.strategy) {
                 ScalpStrategy.DIP_HUNTER -> {
-                    if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+                    if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
                     val ref = past.mapNotNull { it.ask(side) }.maxOrNull() ?: return@mapNotNull null
                     val drop = ref - ask
                     // Spot must not explain the drop: fair still at or above the ask.
@@ -284,7 +284,7 @@ object ScalpRule {
                     drop * 0.5 // half retrace
                 }
                 ScalpStrategy.MOMENTUM -> {
-                    if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+                    if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
                     val refBid = past.mapNotNull { it.bid(side) }.minOrNull() ?: return@mapNotNull null
                     val rise = bid - refBid
                     val fairThen = past.minByOrNull { it.atMs }?.fair(side) ?: return@mapNotNull null
@@ -327,7 +327,7 @@ object ScalpRule {
         if (spread > MAX_SPREAD + 1e-9) return null to "spread over 2¢"
         val best = sides.mapNotNull { side ->
             val ask = q.ask(side) ?: return@mapNotNull null
-            if (ask < ENTRY_LO - 1e-9 || ask > ENTRY_HI + 1e-9) return@mapNotNull null
+            if (ask < ENTRY_LO - 1e-9 || !buyPriceOk(if (p.maker) q.bid(side) else ask)) return@mapNotNull null
             val fair = q.cfFair(side) ?: return@mapNotNull null
             val entryFee = feePerContract(CONTRACTS, ask)
             Entry(side, ask, fair, fair - ask - entryFee)
@@ -595,7 +595,7 @@ class ScalpBook(
                     else listOf("YES", "NO").filter { it !in openSides }
                 if (free.isEmpty()) continue
                 val (sig, _) = ScalpRule.strategySignal(q, p, free, recent)
-                if (sig != null && ScalpRule.buyPriceOk(sig.ask)) {
+                if (sig != null && ScalpRule.buyPriceOk(if (p.maker) q.bid(sig.side) else sig.ask)) {
                     val role = if (p.id in primaryIds) "P" else "S"
                     if (role == "P") {
                         val cost = sig.ask * ScalpRule.CONTRACTS + ScalpRule.orderFee(ScalpRule.CONTRACTS, sig.ask)
@@ -1024,7 +1024,8 @@ class ScalpBook(
     /** Taker paper entry at the displayed ask, capped at displayed size; skipped when shared free cash can't cover it. */
     private fun sfEnter(q: ScalpRule.Quote, p: ShockFav.Params, vid: String, side: String, ask: Double, fair: Double,
                         openCost: Double, bankroll: Double, what: String): ScalpTrade? {
-        if (!ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
+        // Fade makers choose their purchase bid after the delay; the post/fill paths enforce the ceiling.
+        if (p.kind != ShockFav.Kind.FADE_MAKER && !ScalpRule.buyPriceOk(if (p.o50 == ShockFav.O50.MAKER) ShockFav.O50_MAKER_PX else ask)) return null
         val n = if (p.kind == ShockFav.Kind.FADE_MAKER) ShockFav.CLIP else minOf(ShockFav.CLIP, kotlin.math.floor((q.askSize(side) ?: 0.0) + 1e-9).toInt())
         if (n <= 0) return null
         val cost = ask * n + ScalpRule.orderFee(n, ask)

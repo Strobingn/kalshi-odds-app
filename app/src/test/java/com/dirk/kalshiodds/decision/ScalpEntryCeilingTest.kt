@@ -79,6 +79,26 @@ class ScalpEntryCeilingTest {
         assertEquals(ScalpState.NO_FILL, row(book).state)
     }
 
+    @Test fun makerSignalsCanUseAnEligibleBidWhenTheAskIsAboveFifty() {
+        val maker = ScalpParams.MAKER_VARIANTS.first { it.strategy == ScalpStrategy.FAIR_GAP }
+        val quote = q(at, .51).copy(yesBid = .49, spot = 100_300.0)
+        assertNotNull(ScalpRule.entrySignal(quote, maker, listOf("YES")).first)
+        assertNull(ScalpRule.entrySignal(quote, maker.copy(maker = false), listOf("YES")).first)
+
+        val book = ScalpBook(variants = emptyList())
+        for (sec in -300..0) book.tickSpot("BTC", 100_000.0, at + sec * 1000L)
+        // Downward spot shock creates a YES fade-maker signal. Ask 51¢, bid 49¢.
+        book.onShockFavQuote(quote.copy(nowMs = at + 5_000, bookAtMs = at + 5_000, spot = 99_900.0), true)
+        val signal = book.snapshot().first { it.variantId == "sf28" }
+        assertEquals("YES", signal.side)
+        book.onShockFavQuote(quote.copy(nowMs = at + 7_000, bookAtMs = at + 7_000, spot = 99_900.0), false)
+        assertEquals(.49, book.snapshot().first { it.id == signal.id }.restingLimit!!, 1e-9)
+        book.onShockFavQuote(q(at + 8_000, .48).copy(spot = 99_900.0), false)
+        val filled = book.snapshot().first { it.id == signal.id }
+        assertEquals(ScalpState.OPEN, filled.state)
+        assertEquals(.49, filled.entryPrice!!, 1e-9)
+    }
+
     @Test fun depthWalkingExcludesExpensiveTailEvenIfAverageWouldBeCheap() {
         val levels = listOf(.10 to 9.0, .50 to 1.0, .51 to 90.0)
         val (n, usd, _) = ScalpControls().walkBuy(levels, 20, .99)
