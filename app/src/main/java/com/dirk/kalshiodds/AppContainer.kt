@@ -26,6 +26,7 @@ import com.dirk.kalshiodds.signal.ml.HeavyMlStore
 import com.dirk.kalshiodds.signal.ml.NewsPulseCache
 import com.dirk.kalshiodds.signal.notify.SignalNotifier
 import com.dirk.kalshiodds.signal.paper.PaperBookStore
+import com.dirk.kalshiodds.signal.v3.V3ShadowStore
 import com.dirk.kalshiodds.domain.Clock
 import com.dirk.kalshiodds.domain.CryptoMarkets
 import com.dirk.kalshiodds.signal.market.MarketRollover
@@ -77,6 +78,8 @@ class AppContainer(context: Context) {
     )
     val lastOrderError = com.dirk.kalshiodds.signal.trade.LastOrderErrorStore(app)
     val paper = PaperBookStore(app)
+    /** Separate, local-only scorecard for the V3 market-offset experiment. */
+    val v3 = V3ShadowStore(app)
     val tradeClient = KalshiTradeClient(
         primary = NetworkModule.tradeApi(
             { tradingCredentials() },
@@ -119,7 +122,10 @@ class AppContainer(context: Context) {
         model = model,
         logStore = logStore,
         extraOpenTickers = { paper.book.openTickers() },
-        onMarketSettled = { ticker, result -> paper.book.settle(ticker, result) },
+        onMarketSettled = { ticker, result ->
+            paper.book.settle(ticker, result)
+            v3.book.settle(ticker, result)
+        },
         onCalibration = { hub.applyCalibration(it) },
         onAfterScore = {
             support.refreshFromSettlements(hub.settings)
